@@ -82,6 +82,11 @@ describe('computeCoverageLedger — totals + %', () => {
     expect(ledger.coveragePct).toBe(0)
     expect(ledger.mappedPct).toBe(0)
   })
+
+  it('empty requirement set with proven axis enabled yields provenPct 0 (no divide-by-zero)', () => {
+    const ledger = computeCoverageLedger({ feature: 'f', requirements: [], tests: [], provenRunId: 'r9' })
+    expect(ledger.provenPct).toBe(0)
+  })
 })
 
 describe('computeCoverageLedger — tests + orphans', () => {
@@ -369,6 +374,31 @@ describe('computeCoverageLedger — proven axis (latest-run join)', () => {
     expect(cells.find((c) => c.variant === 'email')?.proven).toBe(true)
     expect(cells.find((c) => c.variant === 'sms')?.proven).toBe(false)
     expect(r.proven).toBe(false) // one applicable cell unproven
+  })
+
+  it('a non-covered requirement is proven=false without inspecting paths/cells (gapType !== covered branch)', () => {
+    const requirements = [req('R1', ['happy', 'sad'])]
+    const tests: CoverageTestInput[] = [
+      { name: 'happy only', requirements: ['R1'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: true } },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    const r = ledger.requirements[0]
+    expect(r.gapType).toBe('path-incomplete')
+    expect(r.proven).toBe(false)
+  })
+
+  it('when every variant is N/A, proven falls back to the path model (pathCoverage.every(proven) branch)', () => {
+    const requirements = [req('R6', ['happy'], {
+      variants: ['email', 'whatsapp'],
+      variantsNA: [{ variant: 'email', reason: 'x' }, { variant: 'whatsapp', reason: 'y' }],
+    })]
+    const tests: CoverageTestInput[] = [
+      { name: 't', requirements: ['R6'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: true } },
+    ]
+    const ledger = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    const r = ledger.requirements[0]
+    expect(r.gapType).toBe('covered') // happy path claimed; no applicable variant cells
+    expect(r.proven).toBe(true) // falls back to pathCoverage.every(p => p.proven), which is true
   })
 
   it('an unproven requirement never counts toward totals.proven even when covered', () => {

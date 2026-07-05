@@ -210,10 +210,11 @@ describe('createServer + RunOrchestrator.runFullCycle integration', () => {
     void lastOrch
     expect(runDirCaptured).toBeTruthy()
 
-    // The orchestrator created the per-failure MCP capture dir as part of the
-    // heal cycle — verify it landed under the run dir.
-    const failedDir = path.join(runDir, 'failed', 'test-case-broken', 'playwright-mcp')
-    expect(fs.existsSync(failedDir)).toBe(true)
+    // The orchestrator created the run-level MCP capture dir as part of the
+    // heal cycle (resolveMcpOutputDir always scopes to the run, not the
+    // per-failure slug — see playwright-mcp-artifacts.ts).
+    const mcpDir = path.join(runDir, 'playwright-mcp')
+    expect(fs.existsSync(mcpDir)).toBe(true)
 
     // Manifest reflects failed status.
     const manifest = JSON.parse(fs.readFileSync(path.join(runDir, 'manifest.json'), 'utf-8'))

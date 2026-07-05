@@ -111,6 +111,12 @@ import {
   cleanupPortify,
   getVersionStatus,
   startVersionUpdate,
+  listFlights,
+  getFlight,
+  respondFlightCheckpoint,
+  resumeFlight,
+  abortFlight,
+  getFlightAgentSession,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -1523,5 +1529,77 @@ describe('api client', () => {
     const result = await cleanupPortify({ baseUrl: 'http://x', fetchImpl })
     expect(result).toEqual(listing)
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/cleanup/portify', { method: 'GET' })
+  })
+
+  it('listFlights GETs the flights index and unwraps the flights array', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ flights: [{ id: 'fl_1' }] }))
+    const result = await listFlights({ baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual([{ id: 'fl_1' }])
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/flights', { method: 'GET' })
+  })
+
+  it('getFlight GETs the flight manifest by id', async () => {
+    const manifest = { id: 'fl_1', status: 'running' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    const result = await getFlight('fl_1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/flights/fl_1', { method: 'GET' })
+  })
+
+  it('respondFlightCheckpoint POSTs the checkpoint response and returns the updated manifest', async () => {
+    const manifest = { id: 'fl_1', status: 'running' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    const result = await respondFlightCheckpoint('fl_1', { approved: true }, { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/flights/fl_1/respond')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ response: { approved: true } })
+  })
+
+  it('resumeFlight POSTs to the resume endpoint and returns the updated manifest', async () => {
+    const manifest = { id: 'fl_1', status: 'running' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    const result = await resumeFlight('fl_1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/resume',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    )
+  })
+
+  it('abortFlight POSTs to the abort endpoint and returns the updated manifest', async () => {
+    const manifest = { id: 'fl_1', status: 'aborted' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    const result = await abortFlight('fl_1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/abort',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    )
+  })
+
+  it('getFlightAgentSession returns the session on 200', async () => {
+    const session = { sessionId: 's1', entries: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(session))
+    const result = await getFlightAgentSession('fl_1', 'scout', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(session)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/agent-session?stage=scout',
+      { method: 'GET' },
+    )
+  })
+
+  it('getFlightAgentSession returns null on 404 (no agent ran)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found' }))
+    await expect(getFlightAgentSession('fl_1', 'scout', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+  })
+
+  it('getFlightAgentSession rethrows non-404 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
+    await expect(getFlightAgentSession('fl_1', 'scout', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+    })
   })
 })

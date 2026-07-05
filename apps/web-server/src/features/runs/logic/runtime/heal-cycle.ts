@@ -109,7 +109,9 @@ export class HealCycleState {
   // keys off this instead of set identity so a flaky sibling can't mask a
   // genuinely stuck test.
   stuckSlugs(threshold: number): string[] {
-    return this.lastFailingSlugs.filter((slug) => (this.slugStreaks.get(slug) ?? 0) >= threshold)
+    // Every slug in lastFailingSlugs was just written into slugStreaks by the
+    // same observeFailures call, so the lookup is always defined.
+    return this.lastFailingSlugs.filter((slug) => this.slugStreaks.get(slug)! >= threshold)
   }
 
   // Caller invokes this right before spawning the heal agent so the state
@@ -139,7 +141,8 @@ export class HealCycleState {
   snapshot(): HealCycleSnapshot {
     let maxSlugStreak = 0
     for (const slug of this.lastFailingSlugs) {
-      const streak = this.slugStreaks.get(slug) ?? 0
+      // Same invariant as stuckSlugs: always written in the same call.
+      const streak = this.slugStreaks.get(slug)!
       if (streak > maxSlugStreak) maxSlugStreak = streak
     }
     return {

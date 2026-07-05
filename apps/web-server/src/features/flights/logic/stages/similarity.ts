@@ -33,8 +33,9 @@ function findMatch(deps: FlightStageDeps, repoPaths: string[], log: (m: string) 
     features = loadFeatures(deps.featuresDir)
   } catch (err) {
     // A broken unrelated feature config must not ground the flight — scan what
-    // loads and say so.
-    log(`[similarity] feature scan degraded: ${err instanceof Error ? err.message : String(err)}\n`)
+    // loads and say so. loadFeatures only re-throws real Error instances
+    // (its own healthCheck-validation guard); everything else it swallows.
+    log(`[similarity] feature scan degraded: ${(err as Error).message}\n`)
   }
   for (const feature of features) {
     for (const repo of feature.repos ?? []) {

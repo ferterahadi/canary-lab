@@ -41,7 +41,9 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
         { what: `evaluation export ${taskId}`, timeoutMs: EXPORT_TIMEOUT_MS },
       )
       if (!task?.downloadReady) {
-        return { kind: 'failed', error: `evaluation export failed: ${task?.error ?? task?.status ?? 'unknown'}` }
+        // pollUntil only settles here when downloadReady is false AND (error is
+        // set OR status is 'failed') — so error/status are never both absent.
+        return { kind: 'failed', error: `evaluation export failed: ${task?.error ?? task?.status}` }
       }
 
       const evaluationZip = path.join(deps.logsDir, 'evaluation-exports', taskId, 'export.zip')

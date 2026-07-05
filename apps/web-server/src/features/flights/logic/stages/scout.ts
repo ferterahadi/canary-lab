@@ -38,7 +38,8 @@ function validateDraft(draft: ScoutDraft): string | null {
   try {
     readFeatureConfig(draft.configSource)
   } catch (err) {
-    return `draft feature.config.cjs does not parse: ${err instanceof Error ? err.message : String(err)}`
+    // readFeatureConfig only ever throws real Error/SyntaxError instances.
+    return `draft feature.config.cjs does not parse: ${(err as Error).message}`
   }
   return null
 }

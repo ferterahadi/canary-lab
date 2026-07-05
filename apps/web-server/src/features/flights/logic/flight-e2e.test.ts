@@ -70,14 +70,26 @@ function specsAnswer(): string {
 }
 
 function buildDeps(feature: string): { deps: FlightConductorDeps; spawnAgent: ReturnType<typeof vi.fn> } {
+  const featureDirOf = (name: string): string => path.join(featuresDir, name)
+  // The scaffold stage may re-point the flight's feature (name collision), so
+  // spawnAgent and the portify/export stubs all read the CURRENT name off the store.
+  const flightFeature = (): string => store.list()[0]?.feature ?? feature
+
   const spawnAgent = vi.fn(async ({ prompt }: { prompt: string }) => {
     if (prompt.includes('onboarding product repo')) return { text: scoutAnswer(feature, repoDir) }
-    if (prompt.includes('authoring Playwright E2E specs')) return { text: specsAnswer() }
+    if (prompt.includes('authoring Playwright E2E specs')) {
+      // The real agent writes e2e/*.spec.ts to disk itself (agentic
+      // edit-in-place) — the stage only re-reads what landed, it no longer
+      // parses the agent's text as a JSON file proposal.
+      const e2eDir = path.join(featureDirOf(flightFeature()), 'e2e')
+      fs.mkdirSync(e2eDir, { recursive: true })
+      fs.writeFileSync(path.join(e2eDir, 'todos.spec.ts'), SPEC)
+      return { text: specsAnswer() }
+    }
     throw new Error(`unexpected agent prompt: ${prompt.slice(0, 80)}`)
   })
 
   let coveragePcts = [0, 100]
-  const featureDirOf = (name: string): string => path.join(featuresDir, name)
 
   const stageDeps: FlightStageDeps = {
     featuresDir,
@@ -146,10 +158,6 @@ function buildDeps(feature: string): { deps: FlightConductorDeps; spawnAgent: Re
       return { statusCode: 500, json: () => ({ error: `unstubbed ${method} ${url}` }) }
     },
   }
-
-  // The scaffold stage may re-point the flight's feature (name collision), so
-  // the portify/export stubs read the CURRENT name off the store.
-  const flightFeature = (): string => store.list()[0]?.feature ?? feature
 
   const deps: FlightConductorDeps = { store, adapters: buildFlightStageAdapters(stageDeps) }
   return { deps, spawnAgent }

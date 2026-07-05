@@ -56,6 +56,39 @@ describe('readLatestRunOutcomes', () => {
     expect(outcomes?.runId).toBe('r-old')
     expect(outcomes?.passed.has('test-case-a')).toBe(true)
   })
+
+  it('sorts three runs newest-first regardless of input order', () => {
+    // A three-entry index forces the sort comparator to exercise both the
+    // "a is older than b" and "a is newer than/equal to b" comparisons,
+    // rather than relying on a single pairwise call.
+    seedIndex([
+      { runId: 'r-mid', feature: 'demo', startedAt: '2026-01-02T00:00:00Z' },
+      { runId: 'r-oldest', feature: 'demo', startedAt: '2026-01-01T00:00:00Z' },
+      { runId: 'r-newest', feature: 'demo', startedAt: '2026-01-03T00:00:00Z' },
+    ])
+    seedSummary('r-newest', { passedNames: ['test-case-a'], failed: [] })
+    const outcomes = readLatestRunOutcomes(logsDir, 'demo')
+    expect(outcomes?.runId).toBe('r-newest')
+  })
+
+  it('treats a non-array passedNames/failed as empty rather than throwing', () => {
+    seedIndex([{ runId: 'r1', feature: 'demo', startedAt: '2026-01-01T00:00:00Z' }])
+    seedSummary('r1', { passedNames: 'not-an-array', failed: 'also-not-an-array' })
+    const outcomes = readLatestRunOutcomes(logsDir, 'demo')
+    expect(outcomes?.passed.size).toBe(0)
+    expect(outcomes?.failed.size).toBe(0)
+  })
+
+  it('ignores malformed failed entries (non-object, or object without a string name)', () => {
+    seedIndex([{ runId: 'r1', feature: 'demo', startedAt: '2026-01-01T00:00:00Z' }])
+    seedSummary('r1', {
+      passedNames: [],
+      failed: [null, 'a-string-not-an-object', { name: 42 }, {}, { name: 'test-case-real' }],
+    })
+    const outcomes = readLatestRunOutcomes(logsDir, 'demo')
+    expect(outcomes?.failed.size).toBe(1)
+    expect(outcomes?.failed.has('test-case-real')).toBe(true)
+  })
 })
 
 describe('lastRunOutcomeForTitle', () => {

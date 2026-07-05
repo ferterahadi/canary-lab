@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { FlightRunStore } from './store'
+import { FlightRunStore, type FlightStore } from './store'
 import {
   startFlight,
   resumeFlight,
@@ -176,6 +176,22 @@ describe('checkpoints', () => {
       /not waiting for approval/,
     )
   })
+
+  it('refuses a response for an unknown flight id', () => {
+    expect(() => respondToFlightCheckpoint('nope', { choice: 'x' }, deps(allDone()))).toThrow(
+      /flight not found: nope/,
+    )
+  })
+
+  it('refuses a response when the manifest is waiting-for-approval but no stage is (corrupt state)', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const current = store.get(manifest.flightId)!
+    store.save({ ...current, status: 'waiting-for-approval' })
+    expect(() => respondToFlightCheckpoint(manifest.flightId, { choice: 'x' }, deps(allDone()))).toThrow(
+      /has no stage waiting for approval/,
+    )
+  })
 })
 
 describe('failure + resume', () => {
@@ -226,7 +242,144 @@ describe('failure + resume', () => {
   })
 })
 
+describe('skipped outcome', () => {
+  it('marks a stage skipped and continues to the next stage', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    adapters.docs = { run: async () => ({ kind: 'skipped', reason: 'no docs requested' }) }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('done')
+    const docs = final.stages.find((s) => s.key === 'docs')!
+    expect(docs.status).toBe('skipped')
+    expect(docs.skipReason).toBe('no docs requested')
+    expect(docs.checkpoint).toBeUndefined()
+    expect(calls).toContain('prd-summary')
+  })
+})
+
+describe('adapter throws', () => {
+  it('treats a thrown/rejected adapter as a failed outcome and pauses the flight', async () => {
+    const adapters = allDone()
+    adapters.scaffold = {
+      run: async () => {
+        throw new Error('adapter blew up')
+      },
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('paused')
+    expect(final.error).toBe('adapter blew up')
+    expect(final.stages.find((s) => s.key === 'scaffold')!.status).toBe('failed')
+  })
+
+  it('stringifies a non-Error throw from an adapter', async () => {
+    const adapters = allDone()
+    adapters.scaffold = {
+      run: async () => {
+        throw 'plain string boom'
+      },
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.error).toBe('plain string boom')
+  })
+})
+
+describe('machine bug (outer catch)', () => {
+  it('fails the flight hard when the manifest disappears mid-drive', async () => {
+    const adapters = allDone()
+    adapters.scaffold = {
+      run: async () => {
+        store.remove('fl-1')
+        return { kind: 'done' }
+      },
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    expect(store.get(manifest.flightId)).toBeNull()
+  })
+
+  it('records a non-Error thrown by the machine itself as a string', async () => {
+    let throwOnce = true
+    const badStore: FlightStore = {
+      list: (...a) => store.list(...a),
+      get: (id: string) => {
+        const m = store.get(id)
+        if (throwOnce && m && m.status === 'running' && m.currentStage === 'scaffold') {
+          throwOnce = false
+          throw 'machine bug string'
+        }
+        return m
+      },
+      activeForRepos: (...a) => store.activeForRepos(...a),
+      latestForRepos: (...a) => store.latestForRepos(...a),
+      save: (...a) => store.save(...a),
+      remove: (...a) => store.remove(...a),
+      flightDir: (...a) => store.flightDir(...a),
+      reconcileInterrupted: (...a) => store.reconcileInterrupted(...a),
+      onEvent: (...a) => store.onEvent(...a),
+      offEvent: (...a) => store.offEvent(...a),
+    }
+    const adapters = allDone()
+    const { manifest, completion } = startFlight(args(), { store: badStore, adapters, now, newFlightId: ids })
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('failed')
+    expect(final.error).toBe('machine bug string')
+  })
+
+  it('records a real Error thrown by the machine itself via its message', async () => {
+    let throwOnce = true
+    const badStore: FlightStore = {
+      list: (...a) => store.list(...a),
+      get: (id: string) => {
+        const m = store.get(id)
+        if (throwOnce && m && m.status === 'running' && m.currentStage === 'scaffold') {
+          throwOnce = false
+          throw new Error('machine bug object')
+        }
+        return m
+      },
+      activeForRepos: (...a) => store.activeForRepos(...a),
+      latestForRepos: (...a) => store.latestForRepos(...a),
+      save: (...a) => store.save(...a),
+      remove: (...a) => store.remove(...a),
+      flightDir: (...a) => store.flightDir(...a),
+      reconcileInterrupted: (...a) => store.reconcileInterrupted(...a),
+      onEvent: (...a) => store.onEvent(...a),
+      offEvent: (...a) => store.offEvent(...a),
+    }
+    const adapters = allDone()
+    const { manifest, completion } = startFlight(args(), { store: badStore, adapters, now, newFlightId: ids })
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('failed')
+    expect(final.error).toBe('machine bug object')
+  })
+})
+
 describe('jump', () => {
+  it('jumps forward without evidence (no evidence field is written)', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    adapters.similarity = {
+      run: async () => {
+        calls.push('similarity')
+        return { kind: 'jump', to: 'run', skipReason: 'no evidence to report' }
+      },
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    const similarity = final.stages.find((s) => s.key === 'similarity')!
+    expect(similarity.status).toBe('done')
+    expect(similarity.evidence).toBeUndefined()
+  })
+
   it('skips the stages between a jump and its target (similarity rerun → run)', async () => {
     const calls: FlightStageKey[] = []
     const adapters = allDone(calls)
@@ -259,6 +412,12 @@ describe('jump', () => {
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('paused')
     expect(final.stages.find((s) => s.key === 'docs')!.error).toMatch(/illegal jump/)
+  })
+})
+
+describe('abortFlight', () => {
+  it('refuses to abort an unknown flight id', () => {
+    expect(() => abortFlight('nope', deps(allDone()))).toThrow(/flight not found: nope/)
   })
 })
 
@@ -334,5 +493,84 @@ describe('store events', () => {
     await completion
     expect(events.length).toBeGreaterThan(FLIGHT_STAGE_KEYS.length) // start + per-stage transitions + settle
     expect(new Set(events)).toEqual(new Set(['changed']))
+  })
+
+  it('offEvent stops a listener from receiving further events', async () => {
+    const events: string[] = []
+    const listener = (e: { kind: string }) => events.push(e.kind)
+    store.onEvent(listener)
+    const { completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const countAfterFirst = events.length
+    expect(countAfterFirst).toBeGreaterThan(0)
+
+    store.offEvent(listener)
+    const second = startFlight(args('/repo/other'), deps(allDone()))
+    await second.completion
+    expect(events.length).toBe(countAfterFirst)
+  })
+})
+
+describe('FlightRunStore.remove', () => {
+  it('removes a flight and emits a removed event', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const events: { kind: string; flightId?: string }[] = []
+    store.onEvent((e) => events.push(e))
+
+    store.remove(manifest.flightId)
+
+    expect(store.get(manifest.flightId)).toBeNull()
+    expect(store.list().find((e) => e.flightId === manifest.flightId)).toBeUndefined()
+    expect(events).toContainEqual({ kind: 'removed', flightId: manifest.flightId })
+  })
+})
+
+describe('FlightRunStore repo lookups', () => {
+  it('activeForRepos skips an active flight whose repo set does not intersect', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
+    }
+    const { manifest, completion } = startFlight(args('/repo/a'), deps(adapters))
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+
+    // Active, but a disjoint repo set — isActiveFlightStatus true, intersect false.
+    expect(store.activeForRepos(['/repo/unrelated'])).toBeNull()
+  })
+
+  it('activeForRepos ignores an intersecting flight that is not active (done)', async () => {
+    const { manifest, completion } = startFlight(args('/repo/a'), deps(allDone()))
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+
+    // Intersecting repo, but terminal status — isActiveFlightStatus false.
+    expect(store.activeForRepos(['/repo/a'])).toBeNull()
+  })
+
+  it('latestForRepos returns null when no flight intersects the repo set', async () => {
+    const { completion } = startFlight(args('/repo/a'), deps(allDone()))
+    await completion
+    expect(store.latestForRepos(['/repo/nonexistent'])).toBeNull()
+  })
+
+  it('tolerates a legacy index entry with no repoPaths field', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
+    }
+    const { manifest, completion } = startFlight(args('/repo/a'), deps(adapters))
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval') // still active
+    // Simulate a pre-repoPaths on-disk record (schema predates the field) —
+    // the store reads its index back with a blind `as FlightIndexEntry[]`
+    // cast, so a legacy/malformed record isn't caught by the type system.
+    const legacy = { ...store.get(manifest.flightId)! } as Record<string, unknown>
+    delete legacy.repoPaths
+    store.save(legacy as unknown as Parameters<typeof store.save>[0])
+
+    expect(store.activeForRepos(['/repo/a'])).toBeNull()
+    expect(store.latestForRepos(['/repo/a'])).toBeNull()
   })
 })

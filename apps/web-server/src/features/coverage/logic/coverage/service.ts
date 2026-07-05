@@ -320,7 +320,7 @@ export async function runCoverageEngine(
   // not an instant no-op when specs already carry tags). Tag-writes are
   // idempotent + additive (tag-writer.ts), so a re-confirmed mapping doesn't
   // churn the spec; only new/changed linkages produce a diff.
-  const engineInputs: AnnotateTestInput[] = collected.map((c) => ({
+  const engineInputs = collected.map((c) => ({
     name: c.input.name,
     file: c.input.file,
     bodySource: c.bodySource,
@@ -355,7 +355,7 @@ export async function runCoverageEngine(
   // without this the entire agentic mapping path is a no-op at tag-writing.
   const fileByTestName = new Map(engineInputs.map((t) => [t.name, t.file]))
   const sourceByTestName = new Map<string, MappingTestSource>(
-    engineInputs.map((t) => [t.name, { assertions: t.assertions ?? [], bodySource: t.bodySource ?? '' }]),
+    engineInputs.map((t) => [t.name, { assertions: t.assertions, bodySource: t.bodySource ?? '' }]),
   )
   const applied: ProposedMapping[] = []
   for (const m of proposals) {
