@@ -69,7 +69,6 @@ export class FlightRunStore implements FlightStore {
       dirName: 'flights',
       recordFile: 'flight.json',
       idOf: (m) => m.flightId,
-      statusOf: (m) => m.status,
       indexEntryOf: indexEntryFromManifest,
       sortNewestFirst: true,
       reconcile: {

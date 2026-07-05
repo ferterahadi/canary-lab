@@ -85,20 +85,24 @@ export function buildSpecsPrompt(args: {
 /** Run `tsc --noEmit` at the workspace root (where the scaffolded tsconfig
  *  lives) and keep only errors whose file paths fall under `featureDir` — a
  *  user's pre-existing project errors must not fail spec validation. Returns
- *  null when clean, when no tsconfig exists, or when tsc isn't installed —
- *  a missing tool is not a spec failure. */
-function tscErrorsForFeature(projectRoot: string, featureDir: string): Promise<string | null> {
+ *  null when clean, when no tsconfig exists, when tsc isn't installed, or
+ *  when it hangs past `timeoutMs` — a missing/stuck tool is not a spec
+ *  failure. `timeoutMs` defaults to `TSC_TIMEOUT_MS`; exposed for tests that
+ *  need to exercise the timeout without a real 2-minute wait. */
+export function tscErrorsForFeature(projectRoot: string, featureDir: string, timeoutMs: number = TSC_TIMEOUT_MS): Promise<string | null> {
   if (!fs.existsSync(path.join(projectRoot, 'tsconfig.json'))) return Promise.resolve(null)
   return new Promise((resolve) => {
     let out = ''
     let settled = false
     const child = spawn('npx', ['--no-install', 'tsc', '--noEmit', '--pretty', 'false'], { cwd: projectRoot })
+    // No `if (settled) return` guard here: the close/error handlers below
+    // both call clearTimeout synchronously as soon as they set `settled`, so
+    // by the time this callback fires, neither has run yet.
     const timer = setTimeout(() => {
-      if (settled) return
       settled = true
       try { child.kill('SIGKILL') } catch { /* ignore */ }
       resolve(null)
-    }, TSC_TIMEOUT_MS)
+    }, timeoutMs)
     child.stdout.on('data', (b) => { out += b.toString() })
     child.stderr.on('data', (b) => { out += b.toString() })
     child.on('error', () => {
@@ -134,7 +138,9 @@ export const defaultValidateSpecs: FlightSpecsValidator = async ({ featureDir, p
     onDiagnostics: (text) => { listDiagnostics += text },
   })
   if (entries === null) {
-    problems.push(listDiagnostics.trim() || 'playwright test --list failed with no diagnostic output')
+    // listPlaywrightTests calls onDiagnostics with real content on every path
+    // that returns null (timeout, spawn error, non-zero exit, bad JSON).
+    problems.push(listDiagnostics.trim())
   }
   const tscErrors = await tscErrorsForFeature(projectRoot, featureDir)
   if (tscErrors) problems.push(tscErrors)

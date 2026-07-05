@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { buildHealAddendum, type HealMode } from './heal-prompt-builder'
+import { AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
 import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
@@ -263,6 +264,9 @@ export interface OrchestratorAutoHealFactoryOptions {
   personalWikiPath?: string | null
   /** Override prompt template path resolution (tests). */
   promptPath?: string
+  /** Cycle budget shown to the agent ("Cycle N of M"). Defaults to
+   *  AUTO_HEAL_MAX_CYCLES — must match the orchestrator's actual cap. */
+  maxCycles?: number
 }
 
 export interface BuildHealCyclePromptArgs {
@@ -487,6 +491,7 @@ export function buildOrchestratorHealPrompt(
       stuckSlugs,
       maxSlugStreak,
       failedDir: paths.failedDir,
+      maxCycles: opts.maxCycles ?? AUTO_HEAL_MAX_CYCLES,
     })
     const guidance = userGuidance?.trim()
       ? `User guidance for this restarted heal cycle:\n\n${userGuidance.trim()}`

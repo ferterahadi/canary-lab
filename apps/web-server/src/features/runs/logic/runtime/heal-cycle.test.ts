@@ -117,6 +117,21 @@ describe('HealCycleState.observeFailures', () => {
     s.observeFailures([]) // empty: early return, no update
     expect(s.snapshot().lastFailingSlugs).toEqual(['a', 'b'])
   })
+
+  it('stuckSlugs excludes a currently-failing slug whose streak is below threshold', () => {
+    const s = new HealCycleState({ maxCycles: 100 })
+    s.observeFailures(['a', 'b'])
+    s.observeFailures(['a', 'b', 'fresh']) // fresh has streak 1, a/b have streak 2
+    expect(s.stuckSlugs(2)).toEqual(['a', 'b'])
+  })
+
+  it('snapshot maxSlugStreak keeps the running max when a later slug streak is smaller', () => {
+    const s = new HealCycleState({ maxCycles: 100 })
+    s.observeFailures(['a', 'b'])
+    s.observeFailures(['a', 'b'])
+    s.observeFailures(['a', 'b', 'fresh']) // a/b streak 3, fresh streak 1 — max stays 3
+    expect(s.snapshot().maxSlugStreak).toBe(3)
+  })
 })
 
 describe('HealCycleState.actionForSignal', () => {

@@ -362,6 +362,98 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
   })
 })
 
+describe('runCoverageEngine — engineInputs null-guard fallbacks (service.ts line 358)', () => {
+  it('defaults bodySource/assertions to empty when the extractor omits them', async () => {
+    // The real extractor always sets bodySource (required string) and assertions
+    // defaults to []; only a non-standard extractor result can hit the `?? []` /
+    // `?? ''` fallbacks in engineInputs. Mock extractTestsFromSource to omit both.
+    const dir = writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    vi.mocked(extractTestsFromSource).mockReturnValueOnce({
+      file: path.join(dir, 'e2e', 'a.spec.ts'),
+      tests: [{
+        name: 'shared',
+        line: 1,
+        // bodySource/assertions intentionally omitted from the extractor result.
+      } as unknown as ReturnType<typeof extractTestsFromSource>['tests'][number]],
+    })
+
+    const result = await runCoverageEngine({ featuresDir, feature: 'checkout', logsDir, now: '2026-01-01T00:00:00Z' })
+    // No throw despite the missing fields — the ?? [] / ?? '' fallbacks kicked in.
+    expect(result.feature).toBe('checkout')
+  })
+})
+
+describe('computeFeatureCoverage — proven axis (readLatestRunOutcomes join)', () => {
+  it('leaves tests unjoined when the feature has no recorded run (outcomes null branch)', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    // No runs/index.json written at all → readLatestRunOutcomes returns null.
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    expect(ledger.provenRunId).toBeUndefined()
+    expect(ledger.requirements[0].proven).toBeUndefined()
+  })
+
+  it('joins a matching run outcome onto its test (lastRun found branch) and threads provenRunId', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    fs.mkdirSync(path.join(logsDir, 'runs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'index.json'),
+      JSON.stringify([{ runId: 'r1', feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }]),
+    )
+    fs.mkdirSync(path.join(logsDir, 'runs', 'r1'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'r1', 'e2e-summary.json'),
+      JSON.stringify({ passedNames: ['test-case-shared'], failed: [] }),
+    )
+
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    expect(ledger.provenRunId).toBe('r1')
+    const t = ledger.tests.find((t) => t.name === 'shared')
+    expect(t?.lastRun).toEqual({ runId: 'r1', passed: true })
+    expect(ledger.requirements[0].proven).toBe(true)
+  })
+
+  it('leaves lastRun unset for a test the run never touched (lastRun undefined branch)', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    // A run exists for the feature, but its summary never mentions this test
+    // (renamed/skipped) → lastRunOutcomeForTitle returns undefined → t.lastRun untouched.
+    fs.mkdirSync(path.join(logsDir, 'runs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'index.json'),
+      JSON.stringify([{ runId: 'r1', feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }]),
+    )
+    fs.mkdirSync(path.join(logsDir, 'runs', 'r1'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'r1', 'e2e-summary.json'),
+      JSON.stringify({ passedNames: [], failed: [] }),
+    )
+
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    expect(ledger.provenRunId).toBe('r1')
+    const t = ledger.tests.find((t) => t.name === 'shared')
+    expect(t?.lastRun).toBeUndefined()
+    expect(ledger.requirements[0].proven).toBe(false)
+  })
+})
+
 describe('applyExternalSummary — !found.featureDir branch (service.ts line 515)', () => {
   it('throws FeatureNotFoundError when feature exists but has empty featureDir', () => {
     // Write a feature config where featureDir is '' (empty string, falsy).

@@ -250,6 +250,16 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(state.flight).toBe('fl_abc123')
   })
 
+  it('drops a flight param found in the URL when the view is not flights (line 76 false branch)', () => {
+    window.history.replaceState(null, '', '/?view=coverage&feature=checkout&flight=fl_stale')
+    expect(readPersistedView()).toEqual(view({ view: 'coverage', feature: 'checkout' }))
+  })
+
+  it('returns null flight when view=flights but the URL has no flight param (line 76 || fallback)', () => {
+    window.history.replaceState(null, '', '/?view=flights')
+    expect(readPersistedView()).toEqual(view({ view: 'flights' }))
+  })
+
   it('drops the flight param outside the flights view and keeps it out of localStorage', () => {
     persistView(view({ view: 'flights', flight: 'fl_abc123' }))
     persistView(view({ view: 'workspace', feature: 'checkout', flight: 'fl_abc123' }))

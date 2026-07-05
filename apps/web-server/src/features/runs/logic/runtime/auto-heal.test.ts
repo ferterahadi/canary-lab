@@ -499,6 +499,21 @@ describe('buildHealPromptMap', () => {
     expect(JSON.stringify(healPrompt)).not.toContain('null')
   })
 
+  it('prefers the run-level playwright-mcp dir over a per-failure one', () => {
+    writeRunManifest(runDir, { repoPaths: [] })
+    fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), '{}\n')
+    fs.mkdirSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp', 'snapshot.png'), 'png')
+    const mcpDir = path.join(runDir, 'playwright-mcp')
+    fs.mkdirSync(mcpDir, { recursive: true })
+    fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'png')
+
+    const healPrompt = buildHealPromptMap({ projectRoot, runDir })
+
+    const entry = healPrompt.resources.find((r) => r.id === 'playwright-mcp')
+    expect(entry?.path).toBe(`${mcpDir}/`)
+  })
+
   it('falls back to summary and test-mode boundaries when heal-index is unavailable', () => {
     writeRunManifest(runDir, { repoPaths: [] })
     fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), '{}\n')
@@ -565,6 +580,15 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(promptBody).not.toContain('{{')
     // Returned prompt is the same content the orchestrator pty.write()s.
     expect(prompt).toBe(promptBody)
+  })
+
+  it('shows the cycle budget ("of N") — default AUTO_HEAL_MAX_CYCLES, overridable', () => {
+    // Regression: maxCycles was never threaded from the factory into the
+    // addendum, so the PTY agent saw "Cycle N." with no budget to pace against.
+    const dflt = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    expect(dflt({ cycle: 1, outputDir: path.join(runDir, 'out') })).toContain('Cycle 2 of 10.')
+    const capped = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir, maxCycles: 4 })
+    expect(capped({ cycle: 1, outputDir: path.join(runDir, 'out') })).toContain('Cycle 2 of 4.')
   })
 
   it('renders service-mode copy when manifest.repoPaths is non-empty', () => {

@@ -67,7 +67,8 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
       try {
         readFeatureConfig(finalConfig)
       } catch (err) {
-        return { kind: 'failed', error: `scaffolded config does not parse: ${err instanceof Error ? err.message : String(err)}` }
+        // readFeatureConfig only ever throws real Error/SyntaxError instances.
+        return { kind: 'failed', error: `scaffolded config does not parse: ${(err as Error).message}` }
       }
 
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-created', feature })

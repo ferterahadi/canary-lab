@@ -291,6 +291,40 @@ describe('buildHealAddendum', () => {
       expect(addendum).toContain('changed `e2e/helpers/` in cycle 6')
     })
 
+    it('uses stuckSlugs (flake-tolerant trigger) instead of the set-identity streak when provided', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({
+        cycle: 3,
+        consecutiveSameFailures: 0, // set-identity streak says "not stuck"...
+        stuckSlugs: ['test-a'], // ...but the flake-tolerant per-test streak says test-a is.
+        failedDir: '/run/failed',
+      })
+      expect(addendum).toContain('Escalation:')
+      expect(addendum).toContain('now failed 3 times in a row despite 2 fix attempts: test-a.')
+    })
+
+    it('filters stuckSlugs down to slugs still in the current failing set', () => {
+      seedFailingSummary() // failing set is test-a, test-b
+      const addendum = buildHealAddendum({
+        cycle: 3,
+        stuckSlugs: ['test-a', 'stale-slug-no-longer-failing'],
+        failedDir: '/run/failed',
+      })
+      expect(addendum).toContain('Escalation:')
+      expect(addendum).toContain('test-a')
+      expect(addendum).not.toContain('stale-slug-no-longer-failing')
+    })
+
+    it('falls back to ESCALATION_THRESHOLD observations when neither maxSlugStreak nor consecutiveSameFailures is supplied alongside stuckSlugs', () => {
+      seedFailingSummary()
+      const addendum = buildHealAddendum({
+        cycle: 3,
+        stuckSlugs: ['test-a', 'test-b'],
+        failedDir: '/run/failed',
+      })
+      expect(addendum).toContain('Escalation: cycle 3 — these tests have now failed 3 times in a row')
+    })
+
     it('coexists with the prior-iterations cue (escalation precedes journal cue in the output)', () => {
       seedFailingSummary()
       fs.writeFileSync(journalPath, '# Diagnosis Journal\n')

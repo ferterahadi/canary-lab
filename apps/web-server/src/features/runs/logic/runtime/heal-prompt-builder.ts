@@ -182,13 +182,15 @@ function renderEscalationBlock(input: {
   failedDir?: string
 }): string {
   const slugList = input.stuckSlugs.join(', ')
-  const attempts = Math.max(1, input.observations - 1)
+  // The only caller floors observations at ESCALATION_THRESHOLD (3), so
+  // attempts = observations - 1 is always >= 2 — always plural.
+  const attempts = input.observations - 1
   // Shared with the external/MCP escalation so the two surfaces point at the
   // same trace files. The prose below is PTY-specific (cycle-relative phrasing,
   // .rerun signal file); buildHealEscalation carries the structured analog.
   const { snapshotPath, networkPath } = escalationTracePaths(input.failedDir)
   return [
-    `Escalation: cycle ${input.cycle} — these tests have now failed ${input.observations} times in a row despite ${attempts} fix attempt${attempts === 1 ? '' : 's'}: ${slugList}. Treat this as a signal to change tactic, not double down:`,
+    `Escalation: cycle ${input.cycle} — these tests have now failed ${input.observations} times in a row despite ${attempts} fix attempts: ${slugList}. Treat this as a signal to change tactic, not double down:`,
     `- Re-read \`${snapshotPath}\` and \`${networkPath}\` for the FIRST failing test before editing — the trace usually shows the real failure mode (DNS, missing element, race) more clearly than the error message.`,
     `- If you already changed \`e2e/helpers/\` in cycle ${input.cycle - 1} and the same tests are still failing, your last edit didn't help. Read the diff in \`${input.journalPath}\` for the prior iteration, and either revert it or build on it — don't replace it with a fresh unrelated hypothesis.`,
     '- If the failure looks infra-flaky (DNS resolution, third-party scripts, timing), the right fix may be retry/wait logic in `e2e/helpers/`, not selector tweaks.',
