@@ -210,7 +210,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // show as live forever.
   const coverageJobStore = new CoverageJobRunStore(logsDir)
   coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
-  // First Flight background jobs: a flight left 'running' belongs to a dead
+  // Flight background jobs: a flight left 'running' belongs to a dead
   // process — flip it to 'paused' (flights are resumable by design: the stage
   // array records where to pick up) so it neither holds the repo-keyed
   // single-flight lock nor shows as live forever.
@@ -1322,7 +1322,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     workspaceEvents,
     dirtySpecStore,
-    // First Flight over MCP: reuse the flights REST routes so the MCP surface
+    // Flight over MCP: reuse the flights REST routes so the MCP surface
     // shares the store + conductor (and single-flight guard) with the UI/CLI.
     flightsRequest: async (o) => {
       const resp = await app.inject({

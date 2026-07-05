@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import type { FlightStore } from './store'
 import {
   FLIGHT_STAGE_KEYS,
+  isActiveFlightStatus,
   type FlightCheckpoint,
   type FlightCheckpointResponse,
   type FlightManifest,
@@ -11,7 +12,7 @@ import {
 } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
-// The First Flight conductor — a deterministic, server-owned stage machine
+// The Flight conductor — a deterministic, server-owned stage machine
 // (NOT one giant agent prompt). It advances the stage array sequentially,
 // persists the manifest after every transition, pauses on typed checkpoints,
 // and computes every stage verdict itself: adapters may spawn agents for
@@ -27,6 +28,39 @@ export class FlightConflictError extends Error {
   constructor(public readonly repoPaths: string[], public readonly existingFlightId: string) {
     super(`a flight is already active for ${repoPaths.join(', ')} (${existingFlightId})`)
     this.name = 'FlightConflictError'
+  }
+}
+
+/** A feature has at most ONE flight record. Re-invoking `flight` on a feature
+ *  that already has one must say what to do with it — continue (resume from
+ *  the first open stage), redo (restart from stage 1, discarding the record's
+ *  stage evidence), or jump (start at a chosen stage, prerequisites checked).
+ *  Thrown when no mode was given so every surface (CLI prompt, REST 409, MCP
+ *  next-text) presents the same three-way choice instead of silently creating
+ *  a second record. */
+export class FlightExistsError extends Error {
+  readonly statusCode = 409
+  readonly options = ['continue', 'redo', 'jump'] as const
+  constructor(
+    public readonly feature: string,
+    public readonly existingFlightId: string,
+    public readonly existingStatus: FlightManifest['status'],
+  ) {
+    super(
+      `feature "${feature}" already has a flight record (${existingFlightId}, ${existingStatus}) — ` +
+        `choose continue (resume where it left off), redo (restart from stage 1), or jump (start at a chosen stage)`,
+    )
+    this.name = 'FlightExistsError'
+  }
+}
+
+/** A `--from-stage` entry whose prerequisites are not satisfied. The message
+ *  names the missing prerequisite so the caller can fix it, not guess. */
+export class FlightStageEntryError extends Error {
+  readonly statusCode = 400
+  constructor(message: string) {
+    super(message)
+    this.name = 'FlightStageEntryError'
   }
 }
 
@@ -61,12 +95,21 @@ export interface StageAdapter {
 
 export type StageAdapters = Partial<Record<FlightStageKey, StageAdapter>>
 
+export type FlightEntryMode = 'continue' | 'redo' | 'jump'
+
 export interface StartFlightArgs {
   feature: string
   /** Resolved realpaths of the target product repos. */
   repoPaths: string[]
   description: string
   opts: FlightOptions
+  /** Stage to start at instead of stage 1 (jump / fresh stage entry). Stages
+   *  before it are marked `skipped` (skipReason `stage-entry`); prerequisites
+   *  are checked via deps.validateStageEntry first. */
+  fromStage?: FlightStageKey
+  /** What to do when the feature already has a flight record. Absent + record
+   *  present → FlightExistsError (the caller shows the three-way choice). */
+  mode?: FlightEntryMode
 }
 
 export interface FlightConductorDeps {
@@ -75,6 +118,17 @@ export interface FlightConductorDeps {
   now?: () => string
   newFlightId?: () => string
   workspaceEvents?: WorkspaceEventPublisher
+  /** Harness-side prerequisite check for a `fromStage` entry: return an error
+   *  string naming the missing prerequisite (rejects the start), or null when
+   *  the jump is satisfiable. Absent → fromStage entries are rejected. */
+  validateStageEntry?: (args: {
+    feature: string
+    repoPaths: string[]
+    fromStage: FlightStageKey
+    env: string
+    /** Existing flight record for the feature, when jumping on one. */
+    existing?: FlightManifest | null
+  }) => string | null
 }
 
 export interface StartFlightResult {
@@ -88,12 +142,49 @@ function defaultFlightId(): string {
   return `fl_${crypto.randomBytes(6).toString('hex')}`
 }
 
-function freshStages(): FlightStage[] {
-  return FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const }))
+/** Fresh stage array; with `fromStage`, everything before it is pre-skipped
+ *  (the stage-entry path — prerequisites were validated by the caller). */
+function freshStages(fromStage?: FlightStageKey, now?: () => string): FlightStage[] {
+  const startIdx = fromStage ? FLIGHT_STAGE_KEYS.indexOf(fromStage) : 0
+  return FLIGHT_STAGE_KEYS.map((key, i) =>
+    i < startIdx
+      ? {
+          key,
+          status: 'skipped' as const,
+          skipReason: 'stage-entry',
+          ...(now ? { endedAt: now() } : {}),
+        }
+      : { key, status: 'pending' as const },
+  )
 }
 
 function firstOpenStageIndex(m: FlightManifest): number {
   return m.stages.findIndex((s) => s.status !== 'done' && s.status !== 'skipped')
+}
+
+/** Check a fromStage entry through the injected harness validator. */
+function checkStageEntry(
+  args: StartFlightArgs,
+  deps: FlightConductorDeps,
+  existing: FlightManifest | null,
+): void {
+  const fromStage = args.fromStage
+  if (!fromStage) return
+  if (!FLIGHT_STAGE_KEYS.includes(fromStage)) {
+    throw new FlightStageEntryError(`unknown stage: ${String(fromStage)}`)
+  }
+  if (fromStage === 'similarity') return // stage 1 — a plain start
+  if (!deps.validateStageEntry) {
+    throw new FlightStageEntryError('stage entry is not supported on this surface')
+  }
+  const reason = deps.validateStageEntry({
+    feature: args.feature,
+    repoPaths: args.repoPaths,
+    fromStage,
+    env: args.opts.env,
+    existing,
+  })
+  if (reason) throw new FlightStageEntryError(reason)
 }
 
 export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): StartFlightResult {
@@ -102,9 +193,51 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
 
   // Single-flight: two flights must never conduct the same product repo. The
   // guard is server-side and keyed on the repo realpath set — UI disabling is
-  // cosmetic, and a second `fly` from another terminal hits the same index.
+  // cosmetic, and a second `flight` from another terminal hits the same index.
   const active = store.activeForRepos(args.repoPaths)
   if (active) throw new FlightConflictError(args.repoPaths, active.flightId)
+
+  // One flight record per feature: re-invoking on a feature that already has
+  // one never mints a second manifest — it continues, redoes, or jumps the
+  // existing record (FlightExistsError when the caller didn't say which).
+  const existingEntry = store.latestForFeature(args.feature)
+  const existing = existingEntry ? store.get(existingEntry.flightId) : null
+  if (existing) {
+    if (isActiveFlightStatus(existing.status)) {
+      throw new FlightConflictError(existing.repoPaths, existing.flightId)
+    }
+    const mode: FlightEntryMode | undefined = args.mode ?? (args.fromStage ? 'jump' : undefined)
+    if (!mode) throw new FlightExistsError(args.feature, existing.flightId, existing.status)
+    if (mode === 'continue') {
+      if (existing.status === 'paused') return resumeFlight(existing.flightId, deps)
+      throw new FlightExistsError(args.feature, existing.flightId, existing.status)
+    }
+    // redo / jump: reset the SAME record — prior stage evidence is discarded
+    // explicitly, never silently forked into a second flight.
+    if (mode === 'jump' && !args.fromStage) {
+      throw new FlightStageEntryError('jump requires fromStage')
+    }
+    checkStageEntry(args, deps, existing)
+    const manifest: FlightManifest = {
+      ...existing,
+      repoPaths: args.repoPaths,
+      description: args.description,
+      opts: args.opts,
+      status: 'running',
+      currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
+      stages: freshStages(mode === 'jump' ? args.fromStage : undefined, now),
+      updatedAt: now(),
+      endedAt: undefined,
+      error: undefined,
+      runVerdict: undefined,
+      links: undefined,
+    }
+    store.save(manifest)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+    return { manifest, completion: drive(manifest.flightId, deps) }
+  }
+
+  checkStageEntry(args, deps, null)
 
   const flightId = (deps.newFlightId ?? defaultFlightId)()
   const manifest: FlightManifest = {
@@ -114,8 +247,8 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     description: args.description,
     opts: args.opts,
     status: 'running',
-    currentStage: FLIGHT_STAGE_KEYS[0],
-    stages: freshStages(),
+    currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
+    stages: freshStages(args.fromStage, now),
     createdAt: now(),
     updatedAt: now(),
   }

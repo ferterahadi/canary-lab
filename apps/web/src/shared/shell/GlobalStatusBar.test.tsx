@@ -31,13 +31,6 @@ vi.mock('../../features/benchmark/state/BenchmarkContext', () => ({
   useBenchmarks: () => ({ benchmarks: [], connection: 'live', startBenchmark: vi.fn(), abortBenchmark: vi.fn(), loadBenchmark: vi.fn() }),
 }))
 
-const mockActivePortify = { value: undefined as undefined | { workflowId: string; feature: string; status: string; startedAt: string } }
-const mockPortifyWorkflows = { value: [] as Array<{ workflowId: string; feature: string; status: string; startedAt: string }> }
-vi.mock('../../features/portify/state/PortifyContext', () => ({
-  useActivePortify: () => mockActivePortify.value,
-  usePortify: () => ({ workflows: mockPortifyWorkflows.value }),
-}))
-
 vi.mock('../../features/benchmark/components/BenchmarkWindow', () => ({
   BenchmarkWindow: () => null,
 }))
@@ -82,14 +75,8 @@ afterEach(() => {
   })
   container.remove()
   vi.clearAllMocks()
-  mockActivePortify.value = undefined
   window.history.replaceState(null, '', '/')
 })
-
-function portifyLauncherButton(): HTMLButtonElement | undefined {
-  return [...container.querySelectorAll('button')]
-    .find((button) => button.getAttribute('aria-label') === 'Open Portify feature picker') as HTMLButtonElement | undefined
-}
 
 function runsButton(): HTMLButtonElement | undefined {
   return [...container.querySelectorAll('button')]
@@ -127,37 +114,8 @@ describe('GlobalStatusBar', () => {
     expect(button?.textContent).toContain('2')
   })
 
-  it('keeps the Portify launcher idle (🔌, no "ready") when nothing is active', async () => {
-    mockActiveRuns.value = { runs: [], count: 0 }
-    mockActivePortify.value = undefined
-    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
-    const button = portifyLauncherButton()
-    expect(button).toBeTruthy()
-    expect(button?.textContent).toContain('🔌')
-    expect(button?.textContent).not.toContain('ready')
-    expect(button?.getAttribute('title')).toContain('make a feature')
-  })
-
-  it('surfaces the in-flight feature on the Portify launcher while active', async () => {
-    mockActiveRuns.value = { runs: [], count: 0 }
-    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'verifying', startedAt: 't' }
-    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
-    const button = portifyLauncherButton()
-    expect(button).toBeTruthy()
-    // The 🔌 gives way to a live dot; the feature name moves into the tooltip.
-    expect(button?.textContent).not.toContain('🔌')
-    expect(button?.getAttribute('title')).toContain('cns')
-  })
-
-  it('labels the Portify launcher "ready" when the workflow awaits save', async () => {
-    mockActiveRuns.value = { runs: [], count: 0 }
-    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'ready-to-save', startedAt: 't' }
-    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
-    expect(portifyLauncherButton()?.textContent).toContain('ready')
-  })
-
-  it('surfaces booted services in the Services pill, separate from the Runs button', async () => {
-    // A boot-only run is active: it must show in Services, never the Runs count.
+  it('surfaces booted services as a status chip, separate from the Runs button', async () => {
+    // A boot-only run is active: it must show in the boots chip, never the Runs count.
     mockBootSessions.value = { sessions: [{}], count: 1 }
     mockActiveRuns.value = { runs: [{ executionType: 'boot' }], count: 1 }
     await act(async () => {
@@ -166,75 +124,21 @@ describe('GlobalStatusBar', () => {
     const svc = servicesButton()
     expect(svc).toBeTruthy()
     expect(svc?.getAttribute('aria-label')).toBe('Show booted services (1 up)')
-    expect(svc?.textContent).toContain('Services')
-    expect(svc?.textContent).toContain('1')
+    expect(svc?.textContent).toContain('1 booted')
     expect(runsButton()).toBeUndefined()
   })
 
-  it('always shows the Portify launcher pill (even with no active workflow)', async () => {
-    mockActivePortify.value = undefined
-    await act(async () => { root.render(<GlobalStatusBar activeRunDetail={null} />) })
-    const launcher = portifyLauncherButton()
-    expect(launcher).toBeTruthy()
-    expect(launcher?.textContent).toContain('Portify')
-  })
-
-  it('launcher opens a feature picker; picking a feature starts port-ification', async () => {
-    const onStartPortify = vi.fn()
-    const features = [
-      { name: 'cns', repos: [], envs: [], portified: false },
-      { name: 'oms', repos: [], envs: [], portified: true },
-    ]
+  it('R6 consolidation: no Coverage/Portify/Services pills — the Flights pill is the per-feature entry point', async () => {
     await act(async () => {
-      root.render(<GlobalStatusBar activeRunDetail={null} features={features} onStartPortify={onStartPortify} />)
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
     })
-    await act(async () => portifyLauncherButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-
-    const picker = document.body.querySelector('[aria-label="Portify a feature"]')
-    expect(picker).toBeTruthy()
-    expect(picker?.textContent).toContain('cns')
-    expect(picker?.textContent).toContain('oms')
-    expect(picker?.textContent).toContain('portified') // the already-portified badge
-
-    const cnsRow = [...document.body.querySelectorAll('button')]
-      .find((b) => b.getAttribute('title') === 'Portify cns')
-    expect(cnsRow).toBeTruthy()
-    await act(async () => cnsRow!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(onStartPortify).toHaveBeenCalledWith('cns')
-    // Picker closes after selection.
-    expect(document.body.querySelector('[aria-label="Portify a feature"]')).toBeNull()
-  })
-
-  it('picker shows the in-flight feature with a live status and reopens it on click', async () => {
-    mockActivePortify.value = { workflowId: 'portify-1', feature: 'cns', status: 'verifying', startedAt: 't' }
-    const onStartPortify = vi.fn()
-    const onOpenPortify = vi.fn()
-    const features = [
-      { name: 'cns', repos: [], envs: [], portified: false },
-      { name: 'oms', repos: [], envs: [], portified: false },
-    ]
-    await act(async () => {
-      root.render(
-        <GlobalStatusBar
-          activeRunDetail={null}
-          features={features}
-          onStartPortify={onStartPortify}
-          onOpenPortify={onOpenPortify}
-        />,
-      )
-    })
-    await act(async () => portifyLauncherButton()!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-
-    const picker = document.body.querySelector('[aria-label="Portify a feature"]')
-    expect(picker?.textContent).toContain('verifying') // live phase on the active row
-
-    // The active row reopens the workflow instead of starting a new one.
-    const cnsRow = [...document.body.querySelectorAll('button')]
-      .find((b) => b.getAttribute('title') === 'View port-ification of cns')
-    expect(cnsRow).toBeTruthy()
-    await act(async () => cnsRow!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(onOpenPortify).toHaveBeenCalledWith('portify-1')
-    expect(onStartPortify).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="flights-pill"]')).toBeTruthy()
+    const labels = [...container.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') ?? '')
+    expect(labels).not.toContain('Open Portify feature picker')
+    expect(container.textContent).not.toContain('Portify')
+    expect(container.textContent).not.toContain('Coverage')
+    // No boots held -> no services chip either.
+    expect(servicesButton()).toBeUndefined()
   })
 
   it('hides the Benchmark pill by default', async () => {

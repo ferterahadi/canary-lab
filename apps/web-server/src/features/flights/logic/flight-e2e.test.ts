@@ -202,7 +202,7 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
     expect(spawnAgent).toHaveBeenCalledTimes(2) // scout + one specs round
   })
 
-  it('a second fly on the same repo hits the similarity checkpoint; rerun reaches the export without re-authoring', async () => {
+  it('a second flight on the same repo hits the similarity checkpoint; rerun reaches the export without re-authoring', async () => {
     const first = buildDeps('first-flight-app')
     await startFlight(
       { feature: 'first-flight-app', repoPaths: [repoDir], description: 'todo flow', opts: OPTS_YOLO },

@@ -256,7 +256,7 @@ export interface CanaryLabMcpDeps {
    *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
    *  the MCP surface never approves or gates on it (awareness, not enforcement). */
   dirtySpecStore?: DirtySpecStore
-  /** First Flight (`canary-lab fly` pipeline) driven over MCP. Reuses the
+  /** Flight (`canary-lab flight` pipeline) driven over MCP. Reuses the
    *  flights REST routes via app.inject — same store + conductor as UI/CLI, so
    *  a flight started here shows live in the web UI and vice versa. */
   flightsRequest?: (opts: {
@@ -285,15 +285,16 @@ const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 // working — they just get a `still_waiting` to loop on sooner.
 const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
 
-export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'portify', 'lifecycle', 'full'] as const
+export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'coverage', 'export', 'flight', 'portify', 'lifecycle', 'full'] as const
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
 // The default profile when a client connects without an explicit one (bare
 // `canary-lab mcp`, the registered Desktop/CLI invocation, a profile-less
 // /mcp request). `lifecycle` is the everyday end-to-end surface (repair +
-// author + verify + export) MINUS portify — the specialized, infrequent
-// port-injection workflow. Portify clients opt in with `--profile portify`
-// (or `full`), keeping the common surface leaner in tools + instructions.
+// verify + author + coverage + export + flight) MINUS portify — the
+// specialized, infrequent port-injection workflow. Portify clients opt in
+// with `--profile portify` (or `full`), keeping the common surface leaner in
+// tools + instructions.
 export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'lifecycle'
 
 export type CanaryLabMcpToolName =
@@ -389,39 +390,64 @@ const VERIFY_TOOLS = [
   'get_verification_result',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
+// Author = create/extend a feature, write specs, capture envsets, manage the
+// feature's repos. Docs/PRD/coverage live in `coverage`, evaluation archives in
+// `export`, and the conducted pipeline in `flight` — all four used to be one
+// array; the split keeps each skill/client surface lean while `lifecycle`/`full`
+// stay the same computed unions.
 const AUTHOR_TOOLS = [
   'list_features',
   'list_runs',
   'get_run',
   'get_run_snapshot',
   'create_feature',
-  'write_feature_doc',
-  'delete_feature_doc',
-  'get_feature_coverage',
-  'list_feature_docs',
-  'clear_prd_summary',
-  'start_external_summary',
-  'submit_external_summary',
-  'start_external_coverage',
-  'submit_external_coverage',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
   'delete_feature',
   'get_feature_repo_status',
   'checkout_feature_repo_branch',
+  'start_external_draft',
+  'update_external_draft_stage',
+  'apply_external_draft',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Coverage = feature docs → PRD summary → semantic coverage ledger (carved out
+// of the old author array; the tools are unchanged).
+const COVERAGE_TOOLS = [
+  'list_features',
+  'write_feature_doc',
+  'delete_feature_doc',
+  'list_feature_docs',
+  'clear_prd_summary',
+  'start_external_summary',
+  'submit_external_summary',
+  'start_external_coverage',
+  'submit_external_coverage',
+  'get_feature_coverage',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Export = evaluation archives for a terminal run (carved out of the old
+// author array). list_runs/get_run ride along to pick the run to export.
+const EXPORT_TOOLS = [
+  'list_features',
+  'list_runs',
+  'get_run',
   'start_external_evaluation_export',
   'submit_external_evaluation_export',
   'list_evaluation_exports',
   'get_evaluation_export',
   'download_evaluation_export',
   'delete_evaluation_export',
-  'start_external_draft',
-  'update_external_draft_stage',
-  'apply_external_draft',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Flight = the conducted end-to-end pipeline. write_feature_doc rides along so
+// the client can distill conversation docs at the prd-source checkpoint.
+const FLIGHT_TOOLS = [
   'start_flight',
   'get_flight',
   'respond_flight_checkpoint',
+  'write_feature_doc',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Portify is a specialized, infrequent operation (make a feature's ports
@@ -457,6 +483,9 @@ const LIFECYCLE_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
     ...REPAIR_TOOLS,
     ...VERIFY_TOOLS,
     ...AUTHOR_TOOLS,
+    ...COVERAGE_TOOLS,
+    ...EXPORT_TOOLS,
+    ...FLIGHT_TOOLS,
     ...FULL_ONLY_TOOLS,
   ]),
 )
@@ -472,6 +501,9 @@ const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolNam
   repair: REPAIR_TOOLS,
   verify: VERIFY_TOOLS,
   author: AUTHOR_TOOLS,
+  coverage: COVERAGE_TOOLS,
+  export: EXPORT_TOOLS,
+  flight: FLIGHT_TOOLS,
   portify: PORTIFY_TOOLS,
   lifecycle: LIFECYCLE_TOOLS,
   full: FULL_TOOLS,
@@ -572,12 +604,18 @@ export function registerCanaryLabTools(
   }, async ({ runId, includeRaw }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    if (includeRaw) return asJsonResult(detail)
+    // Eval-review-first: a terminal run's next stop is the evaluation export —
+    // reviewing it (per-test reasoning + playback) IS the core canary loop.
+    const next = isTerminalRunStatus(detail.manifest.status)
+      ? { next: `Run is terminal (${detail.manifest.status}) — the next step is the evaluation export: start_external_evaluation_export(runId) to produce it (status preserved, even for a failed run), then get_evaluation_export / download_evaluation_export and point the user at reviewing evaluation.html.` }
+      : {}
+    if (includeRaw) return asJsonResult({ ...detail, ...next })
     const { lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents, ...core } = detail
     return asJsonResult({
       ...core,
       artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
       raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'], hint: 'call get_run with includeRaw:true to inline them' },
+      ...next,
     })
   })
 
@@ -1398,7 +1436,7 @@ export function registerCanaryLabTools(
     })
   })
 
-  // ── First Flight (`canary-lab fly` — conducted onboarding pipeline) ──────
+  // ── Flight (`canary-lab flight` — conducted onboarding pipeline) ──────
   const FLIGHT_DATA_INLINE_BUDGET = 8 * 1024 // ≈2K tokens — past this, review in the web UI
   const flightView = (raw: unknown): Record<string, unknown> => {
     const m = raw as {
@@ -1439,13 +1477,13 @@ export function registerCanaryLabTools(
     }
     if (view.status === 'running') return 'Flight is running — re-call get_flight to follow it; it parks on checkpoints and settles to done/paused/failed.'
     if (view.status === 'paused') return 'Flight is paused (a stage failed or the server restarted). Fix the cause if needed, then start_flight on the same repos resumes it from the failed stage.'
-    if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive.'
+    if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive. Point the user at reviewing it now: unzip and open evaluation.html (per-test reasoning + verdicts; video playback where the tests drive a browser). Reviewing the evaluation IS the core loop, not an optional extra.'
     return ''
   }
   const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
 
   registerTool('start_flight', {
-    description: 'Start (or resume) a First Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed conversation-distilled docs via write_feature_doc. A paused flight for the same repos is resumed instead of duplicated; an ACTIVE one returns its id to follow.',
+    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed conversation-distilled docs via write_feature_doc. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named).',
     inputSchema: {
       repoPaths: z.array(z.string()).min(1).describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them.'),
       description: z.string().describe('What to test, e.g. "checkout flow".'),
@@ -1455,19 +1493,21 @@ export function registerCanaryLabTools(
       base: z.string().optional().describe('Base branch for diff-inferred requirements (auto-detected when omitted).'),
       yolo: z.boolean().optional().describe('Skip every checkpoint except missing env secrets.'),
       fresh: z.boolean().optional().describe('Do not resume a paused flight — start over.'),
+      redo: z.boolean().optional().describe('Restart the feature\'s existing flight from stage 1, discarding its stage evidence.'),
+      from_stage: z.string().optional().describe('Start at this stage instead of stage 1 (e.g. "specs-coverage", "run"). Prerequisite artifacts are checked; rejected with the missing one named.'),
     },
-  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, fresh }) => {
+  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, fresh, redo, from_stage }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
     const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
     const flights = ((list.body as { flights?: Array<{ flightId: string; status: string; repoPaths?: string[] }> }).flights ?? [])
     const targets = new Set(repoPaths.map((p) => path.resolve(p)))
     const latest = flights.find((f) => (f.repoPaths ?? []).some((p) => targets.has(path.resolve(p))))
-    if (latest && (latest.status === 'running' || latest.status === 'waiting-for-approval')) {
+    if (latest && (latest.status === 'running' || latest.status === 'waiting-for-approval') && !redo && !from_stage) {
       const current = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(latest.flightId)}` })
       const view = flightView(current.body)
       return asJsonResult({ ...view, note: 'a flight is already active for these repos — following it', next: flightNext(view) })
     }
-    if (latest && latest.status === 'paused' && !fresh) {
+    if (latest && latest.status === 'paused' && !fresh && !redo && !from_stage) {
       const resumed = await deps.flightsRequest({ method: 'POST', url: `/api/flights/${encodeURIComponent(latest.flightId)}/resume` })
       if (resumed.statusCode !== 200) return errorResult(`resume failed (${resumed.statusCode}): ${String((resumed.body as { error?: string }).error ?? '')}`)
       const view = flightView(resumed.body)
@@ -1484,10 +1524,23 @@ export function registerCanaryLabTools(
         ...(coverage_target !== undefined ? { coverageTarget: coverage_target } : {}),
         ...(base ? { base } : {}),
         ...(yolo ? { yolo } : {}),
+        ...(redo ? { mode: 'redo' } : from_stage ? { mode: 'jump' } : {}),
+        ...(from_stage ? { fromStage: from_stage } : {}),
       },
     })
+    const startedBody = started.body as { error?: string; type?: string; options?: string[]; existingFlightId?: string; existingStatus?: string }
+    if (started.statusCode === 409 && startedBody.type === 'flight_exists_requires_choice') {
+      return asJsonResult({
+        type: 'flight_exists_requires_choice',
+        feature: feature ?? null,
+        existingFlightId: startedBody.existingFlightId,
+        existingStatus: startedBody.existingStatus,
+        options: startedBody.options,
+        next: 'This feature already has a flight record. Re-call start_flight with redo:true to restart from stage 1, or from_stage:"<stage>" to jump (prerequisites checked). A paused record resumes automatically without either flag.',
+      })
+    }
     if (started.statusCode !== 201) {
-      return errorResult(`start_flight failed (${started.statusCode}): ${String((started.body as { error?: string }).error ?? '')}`)
+      return errorResult(`start_flight failed (${started.statusCode}): ${String(startedBody.error ?? '')}`)
     }
     const view = flightView(started.body)
     return asJsonResult({ ...view, next: flightNext(view) })

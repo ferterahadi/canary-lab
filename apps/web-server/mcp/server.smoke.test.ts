@@ -64,35 +64,49 @@ const VERIFY_TOOLS = uniqueSorted([
 const AUTHOR_TOOLS = uniqueSorted([
   'apply_external_draft',
   'capture_feature_env_files',
-  'start_flight',
-  'get_flight',
-  'respond_flight_checkpoint',
   'checkout_feature_repo_branch',
   'create_feature',
-  'delete_evaluation_export',
   'delete_feature',
-  'delete_feature_doc',
-  'download_evaluation_export',
-  'clear_prd_summary',
-  'get_evaluation_export',
-  'get_feature_coverage',
   'get_feature_envset_summary',
   'get_feature_repo_status',
-  'list_feature_docs',
-  'start_external_summary',
-  'submit_external_summary',
-  'start_external_coverage',
-  'submit_external_coverage',
   'get_run',
   'get_run_snapshot',
-  'list_evaluation_exports',
   'list_features',
   'list_runs',
   'start_external_draft',
-  'start_external_evaluation_export',
-  'submit_external_evaluation_export',
   'update_external_draft_stage',
   'write_envset',
+])
+
+const COVERAGE_TOOLS = uniqueSorted([
+  'clear_prd_summary',
+  'delete_feature_doc',
+  'get_feature_coverage',
+  'list_feature_docs',
+  'list_features',
+  'start_external_coverage',
+  'start_external_summary',
+  'submit_external_coverage',
+  'submit_external_summary',
+  'write_feature_doc',
+])
+
+const EXPORT_TOOLS = uniqueSorted([
+  'delete_evaluation_export',
+  'download_evaluation_export',
+  'get_evaluation_export',
+  'get_run',
+  'list_evaluation_exports',
+  'list_features',
+  'list_runs',
+  'start_external_evaluation_export',
+  'submit_external_evaluation_export',
+])
+
+const FLIGHT_TOOLS = uniqueSorted([
+  'get_flight',
+  'respond_flight_checkpoint',
+  'start_flight',
   'write_feature_doc',
 ])
 
@@ -136,7 +150,13 @@ const FULL_ONLY_TOOLS = [
 ]
 
 // lifecycle = everything except portify; full = lifecycle + portify.
-const LIFECYCLE_TOOLS = uniqueSorted([...AUTHOR_TOOLS, ...FULL_ONLY_TOOLS])
+const LIFECYCLE_TOOLS = uniqueSorted([
+  ...AUTHOR_TOOLS,
+  ...COVERAGE_TOOLS,
+  ...EXPORT_TOOLS,
+  ...FLIGHT_TOOLS,
+  ...FULL_ONLY_TOOLS,
+])
 
 const FULL_TOOLS = uniqueSorted([...LIFECYCLE_TOOLS, ...PORTIFY_TOOLS])
 
@@ -241,6 +261,30 @@ describe('MCP HTTP server (smoke)', () => {
       const portify = await app.inject({ method: 'GET', url: '/mcp/health?profile=portify' })
       expect(portify.statusCode).toBe(200)
       expect([...(portify.json() as { tools: string[] }).tools].sort()).toEqual(PORTIFY_TOOLS)
+
+      const coverage = await app.inject({ method: 'GET', url: '/mcp/health?profile=coverage' })
+      expect(coverage.statusCode).toBe(200)
+      expect([...(coverage.json() as { tools: string[] }).tools].sort()).toEqual(COVERAGE_TOOLS)
+
+      const exportProfile = await app.inject({ method: 'GET', url: '/mcp/health?profile=export' })
+      expect(exportProfile.statusCode).toBe(200)
+      expect([...(exportProfile.json() as { tools: string[] }).tools].sort()).toEqual(EXPORT_TOOLS)
+
+      const flight = await app.inject({ method: 'GET', url: '/mcp/health?profile=flight' })
+      expect(flight.statusCode).toBe(200)
+      expect([...(flight.json() as { tools: string[] }).tools].sort()).toEqual(FLIGHT_TOOLS)
+
+      // The repartition must not change what lifecycle/full expose: the new
+      // leaf profiles are carve-outs of the old author array, so lifecycle
+      // stays a superset of every non-portify leaf and full adds portify.
+      const lifecycleSet = new Set(LIFECYCLE_TOOLS)
+      for (const tool of [...AUTHOR_TOOLS, ...COVERAGE_TOOLS, ...EXPORT_TOOLS, ...FLIGHT_TOOLS]) {
+        expect(lifecycleSet.has(tool)).toBe(true)
+      }
+      const fullSet = new Set(FULL_TOOLS)
+      for (const tool of [...LIFECYCLE_TOOLS, ...PORTIFY_TOOLS]) {
+        expect(fullSet.has(tool)).toBe(true)
+      }
     } finally {
       await app.close()
     }
@@ -396,7 +440,9 @@ describe('MCP HTTP server (smoke)', () => {
     let client: Client | null = null
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
-      client = await connectClient(address, '/mcp?profile=author&client_kind=codex')
+      // The flow spans authoring + coverage + export tools, which live in three
+      // leaf profiles since the repartition — lifecycle is their union.
+      client = await connectClient(address, '/mcp?profile=lifecycle&client_kind=codex')
 
       const created = await client.callTool({
         name: 'create_feature',

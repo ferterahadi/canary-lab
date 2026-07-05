@@ -171,7 +171,7 @@ export async function agentSessionStreamRoutes(
     },
   )
 
-  // First Flight stage agent session — same ref-file convention as portify,
+  // Flight stage agent session — same ref-file convention as portify,
   // under the flight's per-stage sidecar dir (logs/flights/<id>/<stage>/):
   // `stage` is the sidecar dir name (scout, prd-summary, specs-1, coverage-1).
   app.get<{ Params: { flightId: string }; Querystring: { stage?: string } }>(

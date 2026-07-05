@@ -4,7 +4,7 @@ import type { FlightIndexEntry, FlightStageStatus, FlightStatus } from '../../..
 import { StatusDot } from '../../config/components/atoms'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 
-// Flights pill — an always-visible launcher for First Flight (`canary-lab fly`)
+// Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress. Idle it's a neutral launcher; while a flight runs it takes the
 // in-flight treatment (pulsing dot + count); a flight parked on a checkpoint
 // takes the amber "approval needed" treatment (that's the state that needs the
@@ -62,7 +62,7 @@ export function FlightsPill({
         aria-label="Flights"
         title={active.length
           ? active.map((f) => `${f.feature}: ${f.currentStage ?? '?'} (${flightStatusLabel(f.status)})`).join('\n')
-          : 'First Flight — one command from bare repo to evaluated run'}
+          : 'Flight — one command from bare repo to evaluated run'}
         className="cl-button flex items-center gap-1.5 px-2.5 py-1"
         style={tone ? { color: tone, borderColor: `color-mix(in srgb, ${tone} 45%, var(--border-default))` } : undefined}
       >
@@ -155,7 +155,7 @@ function FlightsPickerDialog({
       >
         <header className="cl-dialog-header">
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">🕊️ First Flights</h2>
+            <h2 className="text-sm font-semibold">🕊️ Flights</h2>
             <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
               One command from a bare repo to a green, covered, evaluated run. Pick a flight to follow its stages and answer checkpoints.
             </p>
@@ -169,7 +169,7 @@ function FlightsPickerDialog({
           <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
             No flights yet. Start one from a terminal:
             <div className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-base)', border: '1px solid var(--border-default)' }}>
-              npx canary-lab fly ../your-repo "what to test"
+              npx canary-lab flight ../your-repo "what to test"
             </div>
           </div>
         ) : (

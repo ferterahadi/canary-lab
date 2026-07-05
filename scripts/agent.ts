@@ -168,21 +168,41 @@ export function refreshAgentIntegrationsQuietly(
   }
 }
 
+/** The packaged skill dirs for one client — enumerated, not hardcoded, so the
+ *  split skill set (canary-lab, canary-lab-run, …) installs as one op each and
+ *  a future skill ships with no installer edit. */
+function packagedSkillNames(assets: string, client: 'codex' | 'claude'): string[] {
+  const skillsDir = path.join(assets, client, 'skills')
+  try {
+    return fs
+      .readdirSync(skillsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+  } catch {
+    return []
+  }
+}
+
 function buildOperations(target: Target, home: string, assets: string): AgentOperation[] {
   const operations: AgentOperation[] = []
   if (target === 'codex' || target === 'all') {
-    operations.push({
-      label: 'Codex skill',
-      from: path.join(assets, 'codex', 'skills', 'canary-lab'),
-      to: path.join(home, '.codex', 'skills', 'canary-lab'),
-    })
+    for (const skill of packagedSkillNames(assets, 'codex')) {
+      operations.push({
+        label: `Codex skill (${skill})`,
+        from: path.join(assets, 'codex', 'skills', skill),
+        to: path.join(home, '.codex', 'skills', skill),
+      })
+    }
   }
   if (target === 'claude' || target === 'all') {
-    operations.push({
-      label: 'Claude skill',
-      from: path.join(assets, 'claude', 'skills', 'canary-lab'),
-      to: path.join(home, '.claude', 'skills', 'canary-lab'),
-    })
+    for (const skill of packagedSkillNames(assets, 'claude')) {
+      operations.push({
+        label: `Claude skill (${skill})`,
+        from: path.join(assets, 'claude', 'skills', skill),
+        to: path.join(home, '.claude', 'skills', skill),
+      })
+    }
   }
   operations.push({
     label: 'Canary Lab plugin bundle',

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import type { Feature, RunDetail } from '../api/types'
 import { useActiveBootSessions, useActiveRuns, useRuns } from '../../features/runs/state/RunsContext'
 import { useBenchmarks } from '../../features/benchmark/state/BenchmarkContext'
-import { useActivePortify } from '../../features/portify/state/PortifyContext'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { EvaluationExportTaskStatus } from '../../features/evaluation/components/EvaluationExportTaskToast'
 import { WizardTaskStatus } from '../../features/wizard/components/WizardTaskStatus'
@@ -12,33 +11,21 @@ import { BenchmarkWindow } from '../../features/benchmark/components/BenchmarkWi
 import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
-import { ServicesPill } from '../../features/runs/components/ServicesPill'
 import { RunsPill } from '../../features/runs/components/RunsPill'
 import { DirtyTestsPill } from '../../features/runs/components/DirtyTestsPill'
 import { DirtyReviewDialog } from '../../features/runs/components/DirtyReviewDialog'
-import { PortifyLauncherPill } from '../../features/portify/components/PortifyLauncherPill'
-import { PortifyPickerDialog } from '../../features/portify/components/PortifyPickerDialog'
 import { BenchmarkPill } from '../../features/benchmark/components/BenchmarkPill'
 import { CleanupPill } from '../../features/logs/components/CleanupPill'
-import { CoveragePill } from '../../features/coverage/components/CoveragePill'
 import { FlightsPill } from '../../features/flights/components/FlightsPill'
-import * as api from '../api/client'
-import type { CoverageJobIndexEntry } from '../api/types'
 import type { FlightIndexEntry } from '../api/client'
 
 interface Props {
   activeRunDetail: RunDetail | null
-  /** Every feature — feeds the always-on Portify launcher's picker. */
+  /** Every feature — feeds the dirty-tests review panel. */
   features?: Feature[]
   onNavigateToRun?: (feature: string, runId: string) => void
   onOpenCleanup?: () => void
-  /** Open the Requirement Coverage Ledger for a feature (from the pill task menu). */
-  onOpenCoverage?: (feature: string) => void
-  /** Start port-ification for a feature (opens the wizard's Plan screen). */
-  onStartPortify?: (feature: string) => void
-  /** Reopen the in-flight port-ification workflow (by id) in the wizard. */
-  onOpenPortify?: (workflowId: string) => void
-  /** First Flight index (App owns it, WS-driven) — feeds the Flights pill. */
+  /** Flight index (App owns it, WS-driven) — feeds the Flights pill. */
   flights?: FlightIndexEntry[]
   /** Open the routed flight detail view (null = the flights landing list). */
   onOpenFlight?: (flightId: string | null) => void
@@ -55,27 +42,18 @@ interface Props {
 // they're looking at may be stale until the socket reconnects.
 //
 // This component is the orchestrator: it owns the cross-feature state and
-// dialog wiring, and composes presentational pills (ServicesPill, RunsPill,
-// PortifyLauncherPill, BenchmarkPill, CleanupPill) and badges (ConnectionBadge,
-// McpHealthBadge, StatusChip) that each live in their own file.
-export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, onOpenCoverage, onStartPortify, onOpenPortify, flights = [], onOpenFlight }: Props) {
+// dialog wiring, and composes presentational pills (RunsPill, FlightsPill,
+// BenchmarkPill, CleanupPill) and badges (ConnectionBadge, McpHealthBadge,
+// StatusChip) that each live in their own file. Since the R6 consolidation the
+// Flight pill is the single per-feature entry point — coverage, portify, and
+// run surfaces are reached through a flight's per-stage drill-throughs (or the
+// features column / config editor).
+export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, flights = [], onOpenFlight }: Props) {
   const { connection } = useRuns()
-  // Poll coverage background jobs so the pill can show only while one is running
-  // (R7). Lightweight (an index read); 2s cadence matches the dialog's poll.
-  const [coverageJobs, setCoverageJobs] = useState<CoverageJobIndexEntry[]>([])
-  useEffect(() => {
-    let alive = true
-    const tick = () => { api.listAllCoverageJobs().then((j) => { if (alive) setCoverageJobs(j) }).catch(() => {}) }
-    tick()
-    const id = setInterval(tick, 2000)
-    return () => { alive = false; clearInterval(id) }
-  }, [])
-  const activePortify = useActivePortify()
-  const [portifyPickerOpen, setPortifyPickerOpen] = useState(false)
   const { runs: activeRuns } = useActiveRuns()
   const { count: bootCount } = useActiveBootSessions()
-  // Boots are NOT runs: the Runs button counts only test/verify runs; boot
-  // sessions are surfaced in the separate Services pill.
+  // Boots are NOT runs: the Runs button counts only test/verify runs; held
+  // boot sessions surface as a chip that opens the Services dialog.
   const runsCount = activeRuns.filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark').length
   const [runsOpen, setRunsOpen] = useState(false)
   const [servicesOpen, setServicesOpen] = useState(false)
@@ -105,9 +83,10 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
   // 1.0.0) — hidden unless explicitly requested via ?showBenchmark=true.
   const showBenchmark = new URLSearchParams(window.location.search).get('showBenchmark') === 'true'
   // Aggregate "something's happening" count shown on the toggle when collapsed,
-  // so an active benchmark / run / boot is never hidden behind the chevron.
+  // so an active benchmark / run / flight is never hidden behind the chevron.
+  const activeFlightCount = flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').length
   const actionsActiveCount =
-    (showBenchmark && activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (bootCount > 0 ? 1 : 0) + (activePortify ? 1 : 0)
+    (showBenchmark && activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (activeFlightCount > 0 ? 1 : 0)
   const status = activeRunDetail?.manifest.status
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
@@ -148,6 +127,21 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           </div>
         </>
       )}
+      {bootCount > 0 && (
+        <>
+          <span className="cl-divider shrink-0">·</span>
+          <button
+            type="button"
+            data-testid="boot-services-chip"
+            onClick={() => setServicesOpen(true)}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+            title="Show booted services"
+            aria-label={`Show booted services (${bootCount} up)`}
+          >
+            {bootCount} booted
+          </button>
+        </>
+      )}
       {dirtyFeatureCount > 0 && (
         <>
           <span className="cl-divider shrink-0">·</span>
@@ -176,13 +170,14 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
               'max-width 300ms cubic-bezier(0.22,1,0.36,1), opacity 200ms ease, transform 260ms cubic-bezier(0.22,1,0.36,1), margin-right 300ms cubic-bezier(0.22,1,0.36,1)',
           }}
         >
-          <ServicesPill count={bootCount} onOpen={() => setServicesOpen(true)} />
+          {/* R6 consolidation: the Flight pill is the single per-feature entry
+              point — Coverage/Portify/Services pills are absorbed into the
+              flight detail's per-stage drill-throughs (coverage ledger, portify
+              workflow, run detail). Cleanup stays: it's workspace-level. */}
           <RunsPill count={runsCount} onOpen={() => setRunsOpen(true)} />
           <WizardTaskStatus />
           <EvaluationExportTaskStatus />
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
-          <PortifyLauncherPill activePortify={activePortify} onOpen={() => setPortifyPickerOpen(true)} />
-          <CoveragePill jobs={coverageJobs} features={features} onOpenFeature={(f) => onOpenCoverage?.(f)} />
           <FlightsPill flights={flights} onOpenFlight={(flightId) => onOpenFlight?.(flightId)} />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
@@ -235,15 +230,6 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
       {dirtyReviewOpen && <DirtyReviewDialog features={features} onClose={() => setDirtyReviewOpen(false)} />}
       {benchmarkOpen && <BenchmarkWindow onClose={() => setBenchmarkOpen(false)} />}
-      {portifyPickerOpen && (
-        <PortifyPickerDialog
-          features={features}
-          activePortify={activePortify}
-          onPick={(feature) => onStartPortify?.(feature)}
-          onOpenWorkflow={(workflowId) => onOpenPortify?.(workflowId)}
-          onClose={() => setPortifyPickerOpen(false)}
-        />
-      )}
     </div>
   )
 }

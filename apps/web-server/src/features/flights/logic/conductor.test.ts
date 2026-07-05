@@ -9,6 +9,8 @@ import {
   respondToFlightCheckpoint,
   abortFlight,
   FlightConflictError,
+  FlightExistsError,
+  FlightStageEntryError,
   type FlightConductorDeps,
   type StageAdapter,
   type StageAdapters,
@@ -97,22 +99,93 @@ describe('startFlight', () => {
     expect((err as FlightConflictError).statusCode).toBe(409)
     expect((err as FlightConflictError).existingFlightId).toBe(first.manifest.flightId)
 
-    // A disjoint repo set is not blocked.
-    const other = startFlight(args('/repo/b'), deps(allDone()))
+    // A disjoint repo set (and a different feature) is not blocked.
+    const other = startFlight({ ...args('/repo/b'), feature: 'unrelated' }, deps(allDone()))
     await other.completion
     expect(store.get(other.manifest.flightId)!.status).toBe('done')
   })
 
-  it('does not block a new flight once the prior one is paused (resume is a choice, not a lock)', async () => {
+  it('a paused feature re-invoked without a mode gets the continue/redo/jump choice (409), and continue resumes the SAME record', async () => {
     const adapters = allDone()
     adapters.scaffold = { run: async () => ({ kind: 'failed', error: 'boom' }) }
     const first = startFlight(args(), deps(adapters))
     await first.completion
     expect(store.get(first.manifest.flightId)!.status).toBe('paused')
 
-    const second = startFlight(args(), deps(allDone()))
+    let err: unknown
+    try {
+      startFlight(args(), deps(allDone()))
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(FlightExistsError)
+    expect((err as FlightExistsError).statusCode).toBe(409)
+    expect((err as FlightExistsError).options).toEqual(['continue', 'redo', 'jump'])
+    expect((err as FlightExistsError).existingFlightId).toBe(first.manifest.flightId)
+
+    const second = startFlight({ ...args(), mode: 'continue' as const }, deps(allDone()))
     await second.completion
-    expect(store.get(second.manifest.flightId)!.status).toBe('done')
+    // Same record resumed — never a second manifest for the feature.
+    expect(second.manifest.flightId).toBe(first.manifest.flightId)
+    expect(store.list().filter((e) => e.feature === args().feature)).toHaveLength(1)
+    expect(store.get(first.manifest.flightId)!.status).toBe('done')
+  })
+
+  it('redo restarts the SAME record from stage 1 and discards prior stage evidence', async () => {
+    const adapters = allDone()
+    adapters.similarity = { run: async () => ({ kind: 'done', evidence: { scanned: 3 } }) }
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+    expect(store.get(first.manifest.flightId)!.status).toBe('done')
+    expect(store.get(first.manifest.flightId)!.stages[0].evidence).toEqual({ scanned: 3 })
+
+    const redone = startFlight({ ...args(), mode: 'redo' as const }, deps(allDone()))
+    await redone.completion
+    expect(redone.manifest.flightId).toBe(first.manifest.flightId)
+    const final = store.get(first.manifest.flightId)!
+    expect(final.status).toBe('done')
+    expect(final.stages[0].evidence).toBeUndefined()
+    expect(store.list().filter((e) => e.feature === args().feature)).toHaveLength(1)
+  })
+
+  it('jump starts at fromStage with earlier stages skipped, gated by validateStageEntry', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    // Rejecting validator blocks the jump with the named prerequisite.
+    let err: unknown
+    try {
+      startFlight({ ...args(), fromStage: 'run' as const }, {
+        ...deps(adapters),
+        validateStageEntry: () => 'no specs authored yet',
+      })
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(FlightStageEntryError)
+    expect((err as FlightStageEntryError).statusCode).toBe(400)
+    expect((err as FlightStageEntryError).message).toBe('no specs authored yet')
+
+    // Accepting validator: earlier stages are pre-skipped, run starts at fromStage.
+    const { manifest, completion } = startFlight({ ...args(), fromStage: 'run' as const }, {
+      ...deps(adapters),
+      validateStageEntry: () => null,
+    })
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('done')
+    for (const s of final.stages) {
+      if (FLIGHT_STAGE_KEYS.indexOf(s.key) < FLIGHT_STAGE_KEYS.indexOf('run')) {
+        expect(s.status).toBe('skipped')
+        expect(s.skipReason).toBe('stage-entry')
+      }
+    }
+    expect(calls).toEqual(['run', 'heal', 'evaluation-export'])
+  })
+
+  it('rejects fromStage when no validator is wired (stage entry unsupported)', () => {
+    expect(() =>
+      startFlight({ ...args(), fromStage: 'docs' as const }, deps(allDone())),
+    ).toThrow(/stage entry is not supported/)
   })
 })
 
@@ -317,6 +390,7 @@ describe('machine bug (outer catch)', () => {
       },
       activeForRepos: (...a) => store.activeForRepos(...a),
       latestForRepos: (...a) => store.latestForRepos(...a),
+      latestForFeature: (...a) => store.latestForFeature(...a),
       save: (...a) => store.save(...a),
       remove: (...a) => store.remove(...a),
       flightDir: (...a) => store.flightDir(...a),
@@ -346,6 +420,7 @@ describe('machine bug (outer catch)', () => {
       },
       activeForRepos: (...a) => store.activeForRepos(...a),
       latestForRepos: (...a) => store.latestForRepos(...a),
+      latestForFeature: (...a) => store.latestForFeature(...a),
       save: (...a) => store.save(...a),
       remove: (...a) => store.remove(...a),
       flightDir: (...a) => store.flightDir(...a),
@@ -505,7 +580,7 @@ describe('store events', () => {
     expect(countAfterFirst).toBeGreaterThan(0)
 
     store.offEvent(listener)
-    const second = startFlight(args('/repo/other'), deps(allDone()))
+    const second = startFlight({ ...args('/repo/other'), feature: 'other' }, deps(allDone()))
     await second.completion
     expect(events.length).toBe(countAfterFirst)
   })

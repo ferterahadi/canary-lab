@@ -193,7 +193,7 @@ describe("main (upgrade orchestration)", () => {
 
     await main([])
 
-    expect(fs.readFileSync(staleSkill, 'utf-8')).toContain('wait_for_heal_task')
+    expect(fs.readFileSync(staleSkill, 'utf-8')).toContain('start_flight')
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(false)
     expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin', '.mcp.json'))).toBe(false)
   })

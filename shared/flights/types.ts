@@ -1,6 +1,6 @@
-// First Flight — shared data model.
+// Flight — shared data model.
 //
-// A "flight" is the conducted onboarding pipeline behind `canary-lab fly`: one
+// A "flight" is the conducted onboarding pipeline behind `canary-lab flight`: one
 // background job that takes a bare product repo (or several) through
 // similarity → scout → scaffold → env-capture → docs → prd-summary →
 // specs-coverage → portify → run → heal → evaluation-export, pausing at typed
@@ -89,7 +89,7 @@ export type FlightStatus =
   | 'running'
   | 'waiting-for-approval'
   /** Resumable stop: a stage failed, or the server restarted mid-stage.
-   *  `fly` again (or the resume endpoint) picks up from the first open stage. */
+   *  `flight` again (or the resume endpoint) picks up from the first open stage. */
   | 'paused'
   | 'done'
   | 'failed'
