@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { FlightIndexEntry, FlightStageStatus, FlightStatus } from '../../../shared/api/client'
 import { StatusDot } from '../../config/components/atoms'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import { stageLabel, stageStatusTone } from './stage-meta'
 
 // Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress. Idle it's a neutral launcher; while a flight runs it takes the
@@ -23,6 +24,26 @@ export const FLIGHT_STATUS_TONE: Record<FlightStatus, string> = {
 export function flightStatusLabel(status: FlightStatus): string {
   if (status === 'waiting-for-approval') return 'needs approval'
   return status
+}
+
+/** Fixed-width status chip for a flight row (list + picker): label length
+ *  varies a lot ("done" vs a running stage's name vs "needs approval"), so the
+ *  column is pinned to the longest label it can show ("Requirements summary",
+ *  ~110px at this size) — the mini-rail and chip stay aligned across rows, and
+ *  a flight's own row doesn't jump sideways as its status/stage label changes. */
+export function FlightStatusChip({ status, label }: { status: FlightStatus; label?: string }) {
+  const tone = FLIGHT_STATUS_TONE[status]
+  const text = label ?? flightStatusLabel(status)
+  return (
+    <span
+      data-testid="flight-status-chip"
+      title={text}
+      className="inline-flex w-[136px] shrink-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded px-1.5 py-0.5 text-center text-[10.5px] font-medium"
+      style={{ color: tone, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }}
+    >
+      {text}
+    </span>
+  )
 }
 
 function statusRank(status: FlightStatus): number {
@@ -61,7 +82,7 @@ export function FlightsPill({
         aria-expanded={open}
         aria-label="Flights"
         title={active.length
-          ? active.map((f) => `${f.feature}: ${f.currentStage ?? '?'} (${flightStatusLabel(f.status)})`).join('\n')
+          ? active.map((f) => `${f.feature}: ${f.currentStage ? stageLabel(f.currentStage) : '?'} (${flightStatusLabel(f.status)})`).join('\n')
           : 'Flight — one command from bare repo to evaluated run'}
         className="cl-button flex items-center gap-1.5 px-2.5 py-1"
         style={tone ? { color: tone, borderColor: `color-mix(in srgb, ${tone} 45%, var(--border-default))` } : undefined}
@@ -101,19 +122,16 @@ export function FlightsPill({
 export function StageMiniRail({ stages }: { stages: Array<{ key: string; status: FlightStageStatus }> }) {
   const byKey = new Map(stages.map((s) => [s.key, s.status]))
   const toneFor = (status: FlightStageStatus | undefined): string => {
-    if (status === 'done') return 'rgb(52, 211, 153)'
-    if (status === 'running') return 'rgb(56, 189, 248)'
-    if (status === 'waiting-for-approval') return 'rgb(251, 191, 36)'
-    if (status === 'failed') return 'var(--danger)'
+    if (status === undefined || status === 'pending') return 'var(--border-default)'
     if (status === 'skipped') return 'color-mix(in srgb, rgb(52, 211, 153) 40%, transparent)'
-    return 'var(--border-default)'
+    return stageStatusTone(status)
   }
   return (
     <span className="inline-flex items-center gap-[3px]" data-testid="stage-mini-rail" aria-hidden="true">
       {FLIGHT_STAGE_KEYS.map((key) => (
         <span
           key={key}
-          title={`${key}: ${byKey.get(key) ?? 'pending'}`}
+          title={`${stageLabel(key)}: ${byKey.get(key) ?? 'pending'}`}
           className="inline-block h-[8px] w-[8px] rounded-[2px]"
           style={{ background: toneFor(byKey.get(key)) }}
         />
@@ -186,15 +204,10 @@ function FlightsPickerDialog({
                 >
                   <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{f.feature}</span>
                   <StageMiniRail stages={f.stages ?? []} />
-                  <span
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
-                    style={{
-                      color: FLIGHT_STATUS_TONE[f.status],
-                      border: `1px solid color-mix(in srgb, ${FLIGHT_STATUS_TONE[f.status]} 35%, transparent)`,
-                    }}
-                  >
-                    {f.status === 'running' && f.currentStage ? f.currentStage : flightStatusLabel(f.status)}
-                  </span>
+                  <FlightStatusChip
+                    status={f.status}
+                    label={f.status === 'running' && f.currentStage ? stageLabel(f.currentStage) : undefined}
+                  />
                   <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
                 </button>
               </li>

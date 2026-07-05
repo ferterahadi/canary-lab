@@ -3,7 +3,7 @@ import type { Feature, RunDetail } from '../api/types'
 import { useActiveBootSessions, useActiveRuns, useRuns } from '../../features/runs/state/RunsContext'
 import { useBenchmarks } from '../../features/benchmark/state/BenchmarkContext'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { EvaluationExportTaskStatus } from '../../features/evaluation/components/EvaluationExportTaskToast'
+import { EvaluationExportDialogHost } from '../../features/evaluation/components/EvaluationExportTaskToast'
 import { WizardTaskStatus } from '../../features/wizard/components/WizardTaskStatus'
 import { RunsListDialog } from '../../features/runs/components/RunsListDialog'
 import { ServicesDialog } from '../../features/runs/components/ServicesDialog'
@@ -173,14 +173,17 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           {/* R6 consolidation: the Flight pill is the single per-feature entry
               point — Coverage/Portify/Services pills are absorbed into the
               flight detail's per-stage drill-throughs (coverage ledger, portify
-              workflow, run detail). Cleanup stays: it's workspace-level. */}
+              workflow, run detail). R15: the Exports pill is gone too — export
+              progress/download live on the flight's Export results stage and
+              the run detail's Review Evaluation action; only the routed dialog
+              stays mounted (below). Cleanup stays: it's workspace-level. */}
           <RunsPill count={runsCount} onOpen={() => setRunsOpen(true)} />
           <WizardTaskStatus />
-          <EvaluationExportTaskStatus />
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
           <FlightsPill flights={flights} onOpenFlight={(flightId) => onOpenFlight?.(flightId)} />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
+        <EvaluationExportDialogHost />
         <button
           type="button"
           onClick={() => setActionsExpanded((v) => !v)}
