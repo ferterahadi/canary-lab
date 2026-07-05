@@ -1,6 +1,6 @@
 ---
 name: canary-lab
-description: Use when the user asks Codex to run, verify, debug, heal, create, or export Canary Lab features through Canary Lab MCP tools. Guides Codex through external run repair plus author workflows with create_feature, env capture, external draft apply, and evaluation export.
+description: Use when the user asks Codex to run, verify, debug, heal, create, cover, portify, export, or onboard Canary Lab features through Canary Lab MCP tools. Guides Codex through external run repair (start_run, wait_for_heal_task, signal_run), feature authoring (create_feature, env capture, external draft apply), the semantic coverage ledger (PRD summary + coverage mapping via start_external_summary/coverage), portify concurrency-readiness, evaluation export (start_external_evaluation_export), and First Flight end-to-end onboarding (start_flight/respond_flight_checkpoint — bare repos to a green, covered, healed run plus evaluation export).
 ---
 
 # Canary Lab
