@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, task: null, flight: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, flight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -203,15 +203,14 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
 
-  it('round-trips an evaluation export dialog (dialog + task qualifier)', () => {
-    persistView(view({ feature: 'checkout', dialog: 'evaluation', task: 'task_abc' }))
-    expect(window.location.search).toContain('dialog=evaluation')
-    expect(window.location.search).toContain('task=task_abc')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'evaluation', task: 'task_abc' }))
+  it('R29: ignores the retired evaluation dialog in a stale deep link', () => {
+    window.history.replaceState(null, '', '/?dialog=evaluation&task=task_abc&feature=checkout')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
   })
 
-  it('drops a stray task when the dialog is not evaluation', () => {
-    persistView(view({ feature: 'checkout', dialog: 'config', task: 'task_abc' }))
+  it('R29: clears a stale task param on the next persist', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&task=task_abc')
+    persistView(view({ feature: 'checkout', dialog: 'config' }))
     expect(window.location.search).not.toContain('task=')
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
@@ -231,21 +230,6 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     persistView(view({ feature: 'checkout', dialog: null }))
     expect(window.location.search).not.toContain('dialog=')
     expect(window.location.search).toContain('feature=checkout')
-  })
-
-  it('reads the task param when dialog=evaluation', () => {
-    window.history.replaceState(null, '', '/?dialog=evaluation&task=eval-task-abc&feature=checkout')
-    const state = readPersistedView()
-    expect(state.dialog).toBe('evaluation')
-    expect(state.task).toBe('eval-task-abc')
-    expect(state.feature).toBe('checkout')
-  })
-
-  it('returns null task when dialog=evaluation but task param is absent (|| null branch)', () => {
-    window.history.replaceState(null, '', '/?dialog=evaluation&feature=checkout')
-    const state = readPersistedView()
-    expect(state.dialog).toBe('evaluation')
-    expect(state.task).toBeNull()
   })
 
   it('round-trips the flight id when view=flights (deep-linked flight detail)', () => {

@@ -110,7 +110,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
     expect(container.textContent).toContain('development')
     expect(container.textContent).toContain('master')
     expect(container.textContent).toContain('oddle-merchant-pass')
-    expect(container.textContent).toContain('recommended')
+    expect(container.textContent).toContain('Recommended')
     // Not the raw exception string.
     expect(container.textContent).not.toContain('Repo branch check failed')
   })
@@ -131,7 +131,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
     expect(onPinCurrent).toHaveBeenCalledOnce()
   })
 
-  it('lists every affected repo when more than one drifted', async () => {
+  it('expands to a per-repo list when repos diverge, without a from→to diff', async () => {
     await render({
       error: branchMismatchError([
         { name: 'oddle-merchant-pass', path: '/a', expected: 'development', current: 'master', detached: false, isGitRepo: true },
@@ -140,9 +140,16 @@ describe('RunStartErrorDialog — branch mismatch', () => {
       onSwitchBranches: vi.fn(),
       onPinCurrent: vi.fn(),
     })
-    expect(container.textContent).toContain('Affects oddle-merchant-pass, unified-dashboard')
-    // Shared expected branch is still named; divergent currents collapse to a label.
+    // Shared target collapses to one name; the Switch action names the count.
+    expect(container.textContent).toContain('development')
     expect(container.textContent).toContain('Switch 2 repos')
+    // Divergent current branches expand into a per-repo list on the Pin card.
+    expect(container.textContent).toContain('oddle-merchant-pass')
+    expect(container.textContent).toContain('unified-dashboard')
+    expect(container.textContent).toContain('master')
+    expect(container.textContent).toContain('hotfix/x')
+    // Still no from→to diff arrow anywhere.
+    expect(container.textContent).not.toContain('→')
   })
 
   it('surfaces an action failure inline and keeps the dialog open', async () => {

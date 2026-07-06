@@ -138,13 +138,16 @@ function BranchMismatchBody({ mismatch, onSwitchBranches, onPinCurrent, onClose 
   const [actionError, setActionError] = useState<string | null>(null)
   const repos = mismatch.repos
   const n = repos.length
-
-  // The common case: every drifted repo shares one expected branch, and one
-  // current branch. Name them when they agree; fall back to a generic label
-  // when the repos diverge (still correct — the actions act per-repo).
-  const expectedName = uniqueOrNull(repos.map((r) => r.expected))
-  const currentName = uniqueOrNull(repos.map((r) => (r.isGitRepo && !r.detached ? r.current : null)))
   const repoLabel = n === 1 ? repos[0].name : `${n} repos`
+
+  // Each choice is described by the branch it lands every repo on — Switch →
+  // each repo's configured `expected`; Pin → each repo's `current`. When those
+  // agree across repos we show one branch name; when they diverge we list them
+  // per repo. Either way each card shows an END STATE, never a `from → to` diff.
+  const switchRows = repos.map((r) => ({ repo: r.name, branch: r.expected }))
+  const pinRows = repos.map((r) => ({ repo: r.name, branch: currentBranchLabel(r) }))
+  const expectedName = uniqueOrNull(switchRows.map((r) => r.branch))
+  const currentName = uniqueOrNull(pinRows.map((r) => r.branch))
 
   const run = (which: 'switch' | 'pin', fn?: () => Promise<void>) => async (): Promise<void> => {
     if (!fn) return
@@ -160,25 +163,26 @@ function BranchMismatchBody({ mismatch, onSwitchBranches, onPinCurrent, onClose 
 
   return (
     <>
-      <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+      <h2 className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
+        <GitBranchIcon />
         Which branch should this run test?
       </h2>
       <p className="mt-1.5 text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
         <span className="font-mono">{mismatch.feature}</span> is set to always test{' '}
-        <span className="font-mono">{expectedName ?? 'its configured branch'}</span>, but{' '}
-        {n === 1 ? <><span className="font-mono">{repos[0].name}</span> is</> : `${n} repos are`} on{' '}
-        <span className="font-mono">{currentName ?? 'another branch'}</span> right now — so running as-is would
+        <span className="font-mono">{expectedName ?? 'specific branches'}</span>, but{' '}
+        {n === 1 ? <><span className="font-mono">{repos[0].name}</span> is</> : `its ${n} repos are`} on{' '}
+        <span className="font-mono">{currentName ?? 'other branches'}</span> right now — so running as-is would
         test the wrong code.
       </p>
 
       <div className="mt-3.5 flex flex-col gap-2">
         {onSwitchBranches && (
           <OptionCard
-            branch={expectedName ?? 'Its configured branch'}
-            role="the branch this feature targets"
-            action={busy === 'switch'
-              ? 'Switching…'
-              : `Switch ${repoLabel} to ${expectedName ? 'it' : 'their branches'}, then run`}
+            singleBranch={expectedName}
+            title="The branches this feature targets"
+            rows={switchRows}
+            sideLabel="recommended"
+            action={busy === 'switch' ? 'Switching…' : `Switch ${repoLabel}, then run`}
             recommended
             disabled={busy !== null}
             onClick={run('switch', onSwitchBranches)}
@@ -186,22 +190,16 @@ function BranchMismatchBody({ mismatch, onSwitchBranches, onPinCurrent, onClose 
         )}
         {onPinCurrent && (
           <OptionCard
-            branch={currentName ?? 'The current branches'}
-            role="the branch you’re on now"
-            action={busy === 'pin'
-              ? 'Pinning…'
-              : `Pin the feature to ${currentName ? 'it' : 'them'}, then run`}
+            singleBranch={currentName}
+            title="The branches you’re on now"
+            rows={pinRows}
+            sideLabel="pins each where it is"
+            action={busy === 'pin' ? 'Pinning…' : `Pin the feature to ${currentName ? 'it' : 'these'}, then run`}
             disabled={busy !== null}
             onClick={run('pin', onPinCurrent)}
           />
         )}
       </div>
-
-      {n > 1 && (
-        <p className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          Affects {repos.map((r) => r.name).join(', ')}.
-        </p>
-      )}
 
       {actionError && (
         <p className="mt-2 text-[12px] leading-relaxed font-mono" style={{ color: 'var(--danger)' }}>
@@ -223,11 +221,16 @@ function BranchMismatchBody({ mismatch, onSwitchBranches, onPinCurrent, onClose 
   )
 }
 
-// A single branch choice. The whole card is the button — big hit target, the
-// branch name is the headline, and one line says exactly what picking it does.
-function OptionCard({ branch, role, action, recommended, disabled, onClick }: {
-  branch: string
-  role: string
+// A single branch choice — the whole card is the button. When every repo lands
+// on the same branch (`singleBranch`), that name is the headline. When they
+// diverge, the headline is `title` and each repo's resulting branch is listed.
+// The recommended card carries the accent wash + a badge; both show a trailing
+// chevron so the card reads as clickable.
+function OptionCard({ singleBranch, title, rows, sideLabel, action, recommended, disabled, onClick }: {
+  singleBranch: string | null
+  title: string
+  rows: Array<{ repo: string; branch: string }>
+  sideLabel: string
   action: string
   recommended?: boolean
   disabled: boolean
@@ -238,22 +241,73 @@ function OptionCard({ branch, role, action, recommended, disabled, onClick }: {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="cl-branch-option w-full rounded border px-3 py-2.5 text-left disabled:opacity-50"
-      style={{ borderColor: recommended ? 'var(--accent)' : 'var(--border-default)' }}
+      className={`cl-branch-option ${recommended ? 'cl-branch-option-rec' : ''} flex w-full items-start gap-3 rounded px-3 py-2.5 text-left disabled:opacity-50`}
     >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="font-mono text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>
-          {branch}
-        </span>
-        <span className="text-[11px]" style={{ color: recommended ? 'var(--accent)' : 'var(--text-muted)' }}>
-          {recommended ? 'recommended' : role}
-        </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span
+            className={`${singleBranch ? 'font-mono' : ''} text-[13px] font-medium`}
+            style={{ color: 'var(--text-primary)' }}
+          >
+            {singleBranch ?? title}
+          </span>
+          {recommended
+            ? <span className="cl-badge-accent">Recommended</span>
+            : <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{sideLabel}</span>}
+        </div>
+        {!singleBranch && (
+          <div className="mt-1.5 flex flex-col gap-0.5">
+            {rows.map((r) => (
+              <div key={r.repo} className="flex items-baseline justify-between gap-3 font-mono text-[12px]">
+                <span style={{ color: 'var(--text-secondary)' }}>{r.repo}</span>
+                <span style={{ color: 'var(--text-primary)' }}>{r.branch}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div
+          className="mt-1 text-[12px]"
+          style={{ color: recommended ? 'var(--text-primary)' : 'var(--text-secondary)' }}
+        >
+          {action}
+        </div>
       </div>
-      <div className="mt-0.5 text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-        {action}
-      </div>
+      <ChevronRightIcon />
     </button>
   )
+}
+
+function GitBranchIcon() {
+  return (
+    <svg
+      width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ color: 'var(--text-muted)' }} aria-hidden="true"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  )
+}
+
+function ChevronRightIcon() {
+  return (
+    <svg
+      className="cl-branch-chevron mt-0.5 shrink-0"
+      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
+  )
+}
+
+function currentBranchLabel(r: { isGitRepo: boolean; detached: boolean; current: string | null }): string {
+  if (!r.isGitRepo) return 'not a git repo'
+  if (r.detached) return 'detached HEAD'
+  return r.current ?? 'unknown'
 }
 
 function uniqueOrNull(values: Array<string | null>): string | null {

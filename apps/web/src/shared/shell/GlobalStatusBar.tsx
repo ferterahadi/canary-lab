@@ -4,7 +4,6 @@ import { useActiveBootSessions, useActiveVerifyRuns, useRuns } from '../../featu
 import { StatusPill } from '../ui/StatusPill'
 import { useBenchmarks } from '../../features/benchmark/state/BenchmarkContext'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { EvaluationExportDialogHost } from '../../features/evaluation/components/EvaluationExportTaskToast'
 import { ServicesDialog } from '../../features/runs/components/ServicesDialog'
 import { BenchmarkWindow } from '../../features/benchmark/components/BenchmarkWindow'
 import { McpHealthBadge } from './McpHealthBadge'
@@ -217,7 +216,6 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
-        <EvaluationExportDialogHost />
         <button
           type="button"
           onClick={() => setActionsExpanded((v) => !v)}
