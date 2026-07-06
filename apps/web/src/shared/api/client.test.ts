@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   ApiError,
   asRepoCollision,
+  asBranchMismatch,
   acceptPlan,
   acceptSpec,
   addEnvsetSlot,
@@ -111,6 +112,8 @@ import {
   cleanupPortify,
   getVersionStatus,
   startVersionUpdate,
+  getFlightEntryOptions,
+  startFlight,
   listFlights,
   getFlight,
   respondFlightCheckpoint,
@@ -1187,6 +1190,19 @@ describe('api client', () => {
     expect(asRepoCollision(new ApiError(409, { type: 'something_else' }))).toBeNull()
   })
 
+  it('asBranchMismatch returns the payload for a 409 branch-mismatch ApiError, else null', () => {
+    const body = {
+      type: 'repo_branch_mismatch',
+      feature: 'foo',
+      error: 'Repo branch check failed:\n...',
+      repos: [{ name: 'app', path: '/a', expected: 'feature/x', current: 'main', detached: false, isGitRepo: true }],
+    }
+    expect(asBranchMismatch(new ApiError(409, body))).toEqual(body)
+    expect(asBranchMismatch(new Error('nope'))).toBeNull()
+    expect(asBranchMismatch(new ApiError(500, body))).toBeNull()
+    expect(asBranchMismatch(new ApiError(409, { type: 'repo_collision_requires_choice' }))).toBeNull()
+  })
+
   it('uses globalThis.fetch by default when no fetchImpl provided', async () => {
     const original = globalThis.fetch
     const stub = vi.fn().mockResolvedValue(ok([]))
@@ -1529,6 +1545,32 @@ describe('api client', () => {
     const result = await cleanupPortify({ baseUrl: 'http://x', fetchImpl })
     expect(result).toEqual(listing)
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/cleanup/portify', { method: 'GET' })
+  })
+
+  it('getFlightEntryOptions GETs the stage-entry menu for a feature (env optional)', async () => {
+    const options = { feature: 'checkout', stages: [] }
+    const fetchImpl = vi.fn().mockImplementation(() => Promise.resolve(ok(options)))
+    const result = await getFlightEntryOptions('checkout', undefined, { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(options)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/flights/entry?feature=checkout', { method: 'GET' })
+
+    await getFlightEntryOptions('checkout', 'staging', { baseUrl: 'http://x', fetchImpl })
+    expect(fetchImpl).toHaveBeenLastCalledWith(
+      'http://x/api/flights/entry?feature=checkout&env=staging',
+      { method: 'GET' },
+    )
+  })
+
+  it('startFlight POSTs the start body and returns the created manifest', async () => {
+    const manifest = { flightId: 'fl_1', status: 'running' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    const body = { feature: 'checkout', repoPaths: ['/repo'], description: 'checkout flow', mode: 'jump' as const, fromStage: 'run' as const }
+    const result = await startFlight(body, { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/flights')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual(body)
   })
 
   it('listFlights GETs the flights index and unwraps the flights array', async () => {

@@ -418,3 +418,131 @@ describe('flight entry modes (continue / redo / jump)', () => {
     expect((jump.json() as { error: string }).error).toMatch(/use --from-stage run/)
   })
 })
+
+describe('flight entry options (GET /api/flights/entry)', () => {
+  interface EntryBody {
+    feature: string
+    flight: { flightId: string; status: string; stages: Array<{ key: string; status: string }> } | null
+    active: boolean
+    canContinue: boolean
+    prefill: { repoPaths: string[]; description: string; env: string; coverageTarget: number }
+    stages: Array<{ key: string; allowed: boolean; reason?: string }>
+  }
+  const entryFor = async (feature: string) => {
+    const resp = await app.inject({ method: 'GET', url: `/api/flights/entry?feature=${feature}` })
+    return { status: resp.statusCode, body: resp.json() as EntryBody }
+  }
+  const stageOf = (body: EntryBody, key: string) => body.stages.find((s) => s.key === key)!
+
+  /** A real feature.config the loader can parse, with declared repos. */
+  function writeFeatureConfig(feature: string): string {
+    const featureDir = path.join(tmpDir, 'features', feature)
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports.config = { name: '${feature}', repos: [{ name: 'app', localPath: '${repoDir}' }] }\n`,
+    )
+    return featureDir
+  }
+
+  it('400s without a feature and 404s a feature with no record and no config', async () => {
+    app = await buildApp(allDone())
+    expect((await app.inject({ method: 'GET', url: '/api/flights/entry' })).statusCode).toBe(400)
+    const missing = await entryFor('ghost')
+    expect(missing.status).toBe(404)
+  })
+
+  it('expands ~ in config-declared repo paths for the prefill', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'homey')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports.config = { name: 'homey', repos: [{ name: 'app', localPath: '~/some/repo' }] }\n`,
+    )
+    app = await buildApp(allDone())
+    const { body } = await entryFor('homey')
+    expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'some/repo')])
+  })
+
+  it('reports per-stage verdicts for a set-up feature that never flew (config prefill)', async () => {
+    writeFeatureConfig('checkout')
+    app = await buildApp(allDone())
+    const { status, body } = await entryFor('checkout')
+    expect(status).toBe(200)
+    expect(body.flight).toBeNull()
+    expect(body.active).toBe(false)
+    expect(body.canContinue).toBe(false)
+    expect(body.prefill.repoPaths).toEqual([repoDir])
+    expect(body.prefill.description).toBe('')
+    // Config exists → entering after scaffold is fine; env-capture evidence
+    // is missing → anything past it is blocked with the validator's message.
+    expect(stageOf(body, 'similarity').allowed).toBe(true)
+    expect(stageOf(body, 'env-capture').allowed).toBe(true)
+    expect(stageOf(body, 'docs')).toMatchObject({ allowed: false })
+    expect(stageOf(body, 'docs').reason).toMatch(/envsets\/local/)
+    expect(stageOf(body, 'heal')).toMatchObject({ allowed: false })
+    expect(stageOf(body, 'heal').reason).toMatch(/use --from-stage run/)
+    expect(stageOf(body, 'evaluation-export').allowed).toBe(false)
+  })
+
+  it('unlocks stages as on-disk evidence appears, and prefills from the latest manifest', async () => {
+    const featureDir = writeFeatureConfig('checkout')
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api.env'), 'PORT=0\n')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), '{}')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'e2e', 'checkout.spec.ts'), '// spec\n')
+
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const { body } = await entryFor('checkout')
+    expect(body.flight).toMatchObject({ flightId, status: 'done' })
+    expect(body.active).toBe(false)
+    expect(body.canContinue).toBe(false)
+    expect(body.prefill).toMatchObject({ repoPaths: [repoDir], description: 'checkout flow', env: 'local' })
+    expect(stageOf(body, 'run').allowed).toBe(true)
+    // No runId recorded on the flight links (stub adapters) → export blocked.
+    expect(stageOf(body, 'evaluation-export').allowed).toBe(false)
+    expect(stageOf(body, 'evaluation-export').reason).toMatch(/no run yet/)
+  })
+
+  it('flags an active flight (attach, don’t start) and continue for a paused one', async () => {
+    writeFeatureConfig('checkout')
+    let gate: (() => void) | null = null
+    let fail = true
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => {
+        await new Promise<void>((resolve) => { gate = resolve })
+        return fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }
+      },
+    }
+    app = await buildApp(adapters)
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    // The docs adapter parks on the gate — wait until the conductor reaches it
+    // so "active" is observed mid-stage, not at the pre-drive instant.
+    const deadline = Date.now() + 3000
+    while (gate === null) {
+      if (Date.now() > deadline) throw new Error('docs adapter never started')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+
+    const whileActive = await entryFor('checkout')
+    expect(whileActive.body.active).toBe(true)
+    expect(whileActive.body.canContinue).toBe(false)
+
+    gate!()
+    await waitForStatus(flightId, ['paused'])
+    fail = false
+
+    const whilePaused = await entryFor('checkout')
+    expect(whilePaused.body.active).toBe(false)
+    expect(whilePaused.body.canContinue).toBe(true)
+    expect(whilePaused.body.flight).toMatchObject({ flightId, status: 'paused' })
+  })
+})

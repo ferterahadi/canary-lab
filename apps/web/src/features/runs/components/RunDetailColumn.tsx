@@ -321,7 +321,7 @@ function RunOverviewTab({
       // R15: the status-bar Exports pill is gone, so surface the task
       // immediately — starting an export opens the routed export dialog.
       void Promise.resolve(startExport(manifest.runId, mode))
-        .then((task) => openTask(task.taskId))
+        .then((task) => { if (task?.taskId) openTask(task.taskId) })
         .catch(() => setExportError(true))
     })
   }, [gatePromo, manifest.runId, openTask, startExport])

@@ -9,15 +9,18 @@ import { VerticalSplit } from './shared/ui/VerticalSplit'
 import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
 import { AddTestWizard } from './features/wizard/components/AddTestWizard'
 import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
+import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
 import { PortifyWizard } from './features/portify/components/PortifyWizard'
 import { LogCleanupPage } from './features/logs/components/LogCleanupPage'
 import { CoverageLedgerPage } from './features/coverage/components/CoverageLedgerPage'
 import { FlightPage } from './features/flights/components/FlightPage'
+import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
 import type { RepoCollisionChoice } from './shared/api/client'
 import * as api from './shared/api/client'
 import { connectWorkspaceEvents } from './features/runs/api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useWizardDrafts } from './features/wizard/state/WizardDraftContext'
+import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
 import { useEvaluationExports } from './features/evaluation/state/EvaluationExportContext'
 import type { Feature, VersionStatus } from './shared/api/types'
 import type { FlightIndexEntry } from './shared/api/client'
@@ -47,6 +50,10 @@ export function App() {
   const [journalRefreshKeys, setJournalRefreshKeys] = useState<Record<string, number>>({})
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
+  // A run-start failure that isn't a collision (404 feature gone, 400 bad env,
+  // 5xx server error, network) — surfaced as a dialog so the Run button never
+  // fails silently. Holds the params so the dialog's Retry can replay it.
+  const [startError, setStartError] = useState<{ feature: string; env?: string; mode: 'test' | 'boot'; error: unknown } | null>(null)
   // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
   // 'revisit' reopens an in-flight workflow (from the status bar) by id.
   // R24: hydrate from the URL — `wf` present = revisit, absent = start-new.
@@ -70,6 +77,11 @@ export function App() {
   const [flights, setFlights] = useState<FlightIndexEntry[]>([])
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(PERSISTED_VIEW.flight)
   const [flightsRefreshKey, setFlightsRefreshKey] = useState(0)
+  // R25: the flight stage-entry launcher — routed (dialog=flight-start,
+  // qualified by the durable feature param) so a deep link / refresh reopens it.
+  const [flightStartFor, setFlightStartFor] = useState<string | null>(
+    PERSISTED_VIEW.dialog === 'flight-start' ? PERSISTED_VIEW.feature : null,
+  )
   // Current-vs-latest version + self-update job state. Sourced from the server,
   // refetched on every `version-changed` event (registry check resolved, or the
   // update job advanced) so the footer indicator updates live.
@@ -92,7 +104,23 @@ export function App() {
   const allRunsRef = useRef(allRuns)
   useEffect(() => { allRunsRef.current = allRuns }, [allRuns])
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
-  const { wizardOpen, closeWizard, startNewWizard } = useWizardDrafts()
+  const { wizardOpen, closeWizard, startNewWizard, openTask: openWizardTask } = useWizardDrafts()
+  // R26: per-feature live activity (runs / portify / authoring) — the one
+  // instance behind the Flights pill and the flights landing list. Clicking an
+  // activity-only row opens the activity's REAL surface.
+  const featureActivity = useFeatureActivity()
+  const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
+    if (activity.kind === 'running' && activity.runId) {
+      pendingRunSelectionRef.current = null
+      setSelectedFeature(feature)
+      setSelectedRunId(activity.runId)
+      setView('workspace')
+    } else if (activity.kind === 'portifying' && activity.workflowId) {
+      setPortifyTarget({ kind: 'revisit', workflowId: activity.workflowId })
+    } else if (activity.kind === 'authoring' && activity.draftId) {
+      openWizardTask(activity.draftId)
+    }
+  }, [openWizardTask])
   // R24: the evaluation export dialog's open-state lives in EvaluationExportContext
   // (mounted in the status bar). Read it here — above the persist effect — so the
   // route serializes it, and seed it from the URL on first load below.
@@ -104,7 +132,7 @@ export function App() {
   // Dialog precedence follows z-order: the full-screen overlays (portify > config
   // > wizard) sit above the in-column verify dialog, so the topmost open one owns
   // the URL.
-  const routedDialog = portifyTarget ? 'portify' : configFor ? 'config' : wizardOpen ? 'add-test' : verifyOpen ? 'verification' : evaluationOpen ? 'evaluation' : null
+  const routedDialog = portifyTarget ? 'portify' : configFor ? 'config' : flightStartFor ? 'flight-start' : wizardOpen ? 'add-test' : verifyOpen ? 'verification' : evaluationOpen ? 'evaluation' : null
   const routedWf = portifyTarget?.kind === 'revisit' ? portifyTarget.workflowId : null
   const routedTask = evaluationOpen ? evaluationTask?.taskId ?? null : null
   useEffect(() => {
@@ -210,7 +238,9 @@ export function App() {
         setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision, portsConfigured })
         return
       }
-      /* other errors surfaced via UI */
+      // Any other failure (feature gone, bad env, server/boot error, network):
+      // show it so the Run button never dead-ends silently.
+      setStartError({ feature: selectedFeature, env, mode, error: err })
     }
   }, [selectedFeature, startRunAction])
 
@@ -224,8 +254,33 @@ export function App() {
         pendingRunSelectionRef.current = runId
         setSelectedRunId(runId)
       }
-    } catch { /* surfaced via UI */ }
+    } catch (err) {
+      setStartError({ feature: prompt.feature, env: prompt.env, mode: prompt.mode ?? 'test', error: err })
+    }
   }, [collisionPrompt, startRunAction])
+
+  // Branch-mismatch recovery (from the RunStartErrorDialog). Both throw on
+  // failure so the dialog surfaces it inline and stays open; on success they
+  // clear the error and replay the original start. handleStartRun's own catch
+  // re-populates startError if the replay hits a fresh failure.
+  const switchBranchesAndRun = useCallback(async (): Promise<void> => {
+    const se = startError
+    const mismatch = se && api.asBranchMismatch(se.error)
+    if (!se || !mismatch) return
+    for (const repo of mismatch.repos) {
+      await api.checkoutRepoBranch(se.feature, repo.name, repo.expected)
+    }
+    setStartError(null)
+    await handleStartRun(se.env, se.mode)
+  }, [startError, handleStartRun])
+
+  const pinCurrentAndRun = useCallback(async (): Promise<void> => {
+    const se = startError
+    if (!se) return
+    await api.pinFeatureBranchesToCurrent(se.feature)
+    setStartError(null)
+    await handleStartRun(se.env, se.mode)
+  }, [startError, handleStartRun])
 
   const handleStartVerification = useCallback(async (input: {
     configId?: string
@@ -401,6 +456,7 @@ export function App() {
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
+          onStartFlight={(f) => { setSelectedFeature(f); setFlightStartFor(f) }}
         />
       ),
     },
@@ -458,15 +514,17 @@ export function App() {
       <GlobalStatusBar
         activeRunDetail={activeRunDetail}
         features={features}
+        onOpenCleanup={() => setView('cleanup')}
+        flights={flights}
+        activity={featureActivity}
+        onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
+        onOpenActivity={openActivity}
         onNavigateToRun={(feature, runId) => {
           pendingRunSelectionRef.current = null
           setSelectedFeature(feature)
           setSelectedRunId(runId)
           setView('workspace')
         }}
-        onOpenCleanup={() => setView('cleanup')}
-        flights={flights}
-        onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
@@ -495,6 +553,8 @@ export function App() {
           ? <FlightPage
               flightId={selectedFlightId}
               refreshKey={flightsRefreshKey}
+              activity={featureActivity}
+              onOpenActivity={openActivity}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
               onOpenRun={(feature, runId) => {
@@ -505,9 +565,21 @@ export function App() {
               }}
               onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
               onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+              onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
             />
           : <ResizablePanels panels={panels} />}
       </div>
+      {flightStartFor && (
+        <FlightStartDialog
+          feature={flightStartFor}
+          onClose={() => setFlightStartFor(null)}
+          onOpenFlight={(flightId) => {
+            setFlightStartFor(null)
+            setSelectedFlightId(flightId)
+            setView('flights')
+          }}
+        />
+      )}
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
@@ -555,6 +627,20 @@ export function App() {
           onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); setPortifyTarget({ kind: 'new', feature: f }) }}
           onChoose={resolveCollision}
           onCancel={() => setCollisionPrompt(null)}
+        />
+      )}
+      {startError && (
+        <RunStartErrorDialog
+          error={startError.error}
+          feature={startError.feature}
+          onRetry={() => {
+            const { env, mode } = startError
+            setStartError(null)
+            void handleStartRun(env, mode)
+          }}
+          onSwitchBranches={switchBranchesAndRun}
+          onPinCurrent={pinCurrentAndRun}
+          onClose={() => setStartError(null)}
         />
       )}
       {portifyTarget && (

@@ -1,4 +1,5 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import {
@@ -20,10 +21,14 @@ import {
 } from '../logic/conductor'
 import {
   FLIGHT_STAGE_KEYS,
+  isActiveFlightStatus,
   type FlightCheckpointResponse,
+  type FlightEntryOptions,
   type FlightOptions,
+  type FlightStageEntryOption,
   type FlightStageKey,
 } from '../logic/types'
+import { loadFeatures } from '../../config/logic/feature-loader'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface FlightRouteDeps {
@@ -102,6 +107,68 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
   }
 
   app.get('/api/flights', async () => ({ flights: store.list() }))
+
+  // Stage-entry menu for one feature (the UI's "flight from here" dialog).
+  // Static segment, so it never shadows /api/flights/:id.
+  app.get<{ Querystring: { feature?: string; env?: string } }>(
+    '/api/flights/entry',
+    async (req, reply) => {
+      const feature = req.query?.feature?.trim()
+      if (!feature) {
+        reply.code(400)
+        return { error: 'feature query is required' }
+      }
+      const env = req.query?.env?.trim() || 'local'
+
+      const entry = store.latestForFeature(feature)
+      const manifest = entry ? store.get(entry.flightId) : null
+      // Best-effort config read for the prefill — a config that fails
+      // validation elsewhere must not take the entry menu down with it.
+      let config
+      try {
+        config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
+      } catch {
+        config = undefined
+      }
+      if (!manifest && !config) {
+        reply.code(404)
+        return { error: `feature not set up: ${feature} (no flight record and no feature.config)` }
+      }
+
+      const validate = buildStageEntryValidator(deps.featuresDir)
+      const stages: FlightStageEntryOption[] = FLIGHT_STAGE_KEYS.map((key) => {
+        const reason = validate({ feature, fromStage: key, env, existing: manifest })
+        return reason ? { key, allowed: false, reason } : { key, allowed: true }
+      })
+
+      // Configs may declare repos as `~/...` — expand so the prefill posts
+      // paths the start route's realpath check accepts.
+      const configRepoPaths = (config?.repos ?? [])
+        .map((r) => r.localPath)
+        .filter((p): p is string => typeof p === 'string' && p.length > 0)
+        .map((p) => (p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p))
+      const options: FlightEntryOptions = {
+        feature,
+        flight: manifest
+          ? {
+              flightId: manifest.flightId,
+              status: manifest.status,
+              stages: manifest.stages.map((s) => ({ key: s.key, status: s.status })),
+            }
+          : null,
+        active: manifest ? isActiveFlightStatus(manifest.status) : false,
+        canContinue: manifest?.status === 'paused',
+        prefill: {
+          repoPaths: manifest?.repoPaths ?? configRepoPaths,
+          description: manifest?.description ?? '',
+          env: manifest?.opts.env ?? env,
+          coverageTarget: manifest?.opts.coverageTarget ?? 100,
+        },
+        stages,
+      }
+      return options
+    },
+  )
 
   app.get<{ Params: { id: string } }>('/api/flights/:id', async (req, reply) => {
     const manifest = store.get(req.params.id)

@@ -406,6 +406,17 @@ export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: num
   return { sessions, count: sessions.length }
 }
 
+// Deployed-env verification runs that are live right now (record-only, no
+// heal). Surfaced by the global Deploy-check pill (R27) — a verify is neither
+// a test run nor a boot. `executionType === 'verify'` is the discriminator.
+export function useActiveVerifyRuns(): { runs: RunIndexEntry[]; count: number } {
+  const { state } = useRunsContext()
+  const runs = state.runs.filter(
+    (r) => r.executionType === 'verify' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+  )
+  return { runs, count: runs.length }
+}
+
 // Read-only access to the per-run detail map (manifests + summaries). Lets the
 // runs dialog surface allocated ports without calling useRun() per row (which
 // would break the Rules of Hooks inside a list map).

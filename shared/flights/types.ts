@@ -74,6 +74,11 @@ export interface FlightStage {
   /** Harness-computed proof the stage settled on (boot summary, coverage
    *  ledger snapshot, archive path…) — never agent-asserted. */
   evidence?: unknown
+  /** Structured LIVE progress while the stage runs (kept after it settles as
+   *  the audit trail). Shape is stage-specific — specs-coverage publishes
+   *  `SpecsCoverageProgress` so the UI can render the authoring↔mapping loop
+   *  instead of parsing log text. */
+  progress?: unknown
   /** Present while status is `waiting-for-approval`. */
   checkpoint?: FlightCheckpoint
   /** The response that released the checkpoint (kept for the audit trail). */
@@ -147,6 +152,61 @@ export interface FlightIndexEntry {
   updatedAt: string
   endedAt?: string
   [key: string]: unknown
+}
+
+/** One settled pass of the specs↔coverage loop: what the pass left behind,
+ *  harness-computed (the ledger after mapping, or the validation verdict that
+ *  burned the pass). */
+export interface SpecsCoveragePass {
+  pass: number
+  /** Ledger % after this pass's mapping (absent when validation burned it). */
+  coveragePct?: number
+  gapsOpen?: number
+  /** Why the pass didn't reach mapping ('spec files rejected', 'dry-run failed'). */
+  note?: string
+}
+
+/** Live shape of the specs↔coverage stage — the authoring↔mapping loop the
+ *  flight view renders as a pass timeline. Published via `FlightStage.progress`
+ *  on every sub-phase transition; the last snapshot survives settle. */
+export interface SpecsCoverageProgress {
+  pass: number
+  maxPasses: number
+  /** What the loop is doing RIGHT NOW inside the current pass. */
+  phase: 'authoring' | 'validating' | 'mapping'
+  /** Ledger % going INTO the current pass (the target drives the loop). */
+  coveragePct: number
+  target: number
+  gapsOpen: number
+  /** Settled passes, oldest first. */
+  passes: SpecsCoveragePass[]
+}
+
+/** One row of the stage-entry menu: can a flight start AT this stage right
+ *  now, and if not, which prerequisite is missing (the validator's message). */
+export interface FlightStageEntryOption {
+  key: FlightStageKey
+  allowed: boolean
+  reason?: string
+}
+
+/** GET /api/flights/entry — what the UI needs to offer "flight this feature
+ *  from stage X": the latest flight record (attach/continue targets),
+ *  per-stage entry verdicts computed by the SAME validator the start path
+ *  enforces (no client-side prereq duplication), and the start-form prefill. */
+export interface FlightEntryOptions {
+  feature: string
+  flight: {
+    flightId: string
+    status: FlightStatus
+    stages: Array<{ key: FlightStageKey; status: FlightStageStatus }>
+  } | null
+  /** True → the flight is running/waiting now; open it instead of starting. */
+  active: boolean
+  /** True → mode "continue" is available (paused flight, first open stage). */
+  canContinue: boolean
+  prefill: { repoPaths: string[]; description: string; env: string; coverageTarget: number }
+  stages: FlightStageEntryOption[]
 }
 
 /** Flight statuses that hold the single-flight lock for their repo set. */

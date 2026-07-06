@@ -1199,10 +1199,11 @@ const COVERAGE_CSS = `
    full-height rule separates the two summaries (requirements coverage | test strength),
    echoing the column divider below. */
 .clcov-strength{flex:none;align-self:stretch;justify-content:flex-end;padding-left:24px;border-left:1px solid var(--border-default)}
-/* Narrow viewport (e.g. a half-width window): the strength cluster drops to its own
-   full-width row with a TOP divider instead of clipping past the right edge. The
-   left rule only makes sense while it sits beside the breakdown. */
-@media (max-width:820px){
+/* Narrow viewport: the strength cluster drops to its own full-width row with a
+   TOP divider instead of crushing the gap legend into a vertical stack (R24 —
+   the row genuinely needs ~1100px: ring + legend + ratios + 4 strength chips).
+   The left rule only makes sense while it sits beside the breakdown. */
+@media (max-width:1120px){
   .clcov-strength{flex:1 0 100%;align-self:auto;justify-content:flex-start;padding-left:0;padding-top:14px;border-left:none;border-top:1px solid var(--border-default)}
 }
 .clcov-chip{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:999px;padding:4px 11px;transition:background .14s,border-color .14s,opacity .14s,transform .1s}
@@ -1216,7 +1217,7 @@ const COVERAGE_CSS = `
 /* Breakdown grows to fill (pushing the strength cluster to the right edge); the BAR
    is what's capped, not the column — capping the column zeroed its flex-grow when the
    strength cluster used margin-left:auto, collapsing the legend into a wrapped stack. */
-.clcov-breakdown{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.clcov-breakdown{flex:1;min-width:min(300px,100%);display:flex;flex-direction:column;gap:8px}
 .clcov-bar{display:flex;height:9px;width:100%;max-width:520px;border-radius:999px;overflow:hidden;background:var(--bg-base);border:1px solid var(--border-default)}
 .clcov-bar-seg{height:100%;min-width:3px;transition:flex-grow .35s ease}
 .clcov-bar-seg+.clcov-bar-seg{box-shadow:-1px 0 0 color-mix(in srgb,var(--bg-base) 70%,transparent)}

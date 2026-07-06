@@ -21,4 +21,6 @@ export type {
   FlightOptions,
   FlightManifest,
   FlightIndexEntry,
+  FlightStageEntryOption,
+  FlightEntryOptions,
 } from '../../../../../../shared/flights/types'

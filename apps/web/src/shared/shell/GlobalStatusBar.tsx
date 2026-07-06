@@ -1,34 +1,40 @@
 import { useEffect, useState } from 'react'
 import type { Feature, RunDetail } from '../api/types'
-import { useActiveBootSessions, useActiveRuns, useRuns } from '../../features/runs/state/RunsContext'
+import { useActiveBootSessions, useActiveVerifyRuns, useRuns } from '../../features/runs/state/RunsContext'
+import { StatusPill } from '../ui/StatusPill'
 import { useBenchmarks } from '../../features/benchmark/state/BenchmarkContext'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { EvaluationExportDialogHost } from '../../features/evaluation/components/EvaluationExportTaskToast'
-import { WizardTaskStatus } from '../../features/wizard/components/WizardTaskStatus'
-import { RunsListDialog } from '../../features/runs/components/RunsListDialog'
 import { ServicesDialog } from '../../features/runs/components/ServicesDialog'
 import { BenchmarkWindow } from '../../features/benchmark/components/BenchmarkWindow'
 import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
-import { RunsPill } from '../../features/runs/components/RunsPill'
 import { DirtyTestsPill } from '../../features/runs/components/DirtyTestsPill'
 import { DirtyReviewDialog } from '../../features/runs/components/DirtyReviewDialog'
 import { BenchmarkPill } from '../../features/benchmark/components/BenchmarkPill'
 import { CleanupPill } from '../../features/logs/components/CleanupPill'
 import { FlightsPill } from '../../features/flights/components/FlightsPill'
+import type { FeatureActivity } from '../../features/flights/state/feature-activity'
 import type { FlightIndexEntry } from '../api/client'
 
 interface Props {
   activeRunDetail: RunDetail | null
   /** Every feature — feeds the dirty-tests review panel. */
   features?: Feature[]
-  onNavigateToRun?: (feature: string, runId: string) => void
   onOpenCleanup?: () => void
   /** Flight index (App owns it, WS-driven) — feeds the Flights pill. */
   flights?: FlightIndexEntry[]
+  /** Per-feature live activity (runs / portify / authoring) — App owns the
+   *  one useFeatureActivity instance; the pill stays presentational. */
+  activity?: Map<string, FeatureActivity>
   /** Open the routed flight detail view (null = the flights landing list). */
   onOpenFlight?: (flightId: string | null) => void
+  /** Open the real surface behind an activity-only pill row (run detail /
+   *  portify workflow / wizard draft) — App routes it. */
+  onOpenActivity?: (feature: string, activity: FeatureActivity) => void
+  /** Open a run's detail (the Deploy-check pill's click-through) — App routes it. */
+  onNavigateToRun?: (feature: string, runId: string) => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
@@ -42,20 +48,23 @@ interface Props {
 // they're looking at may be stale until the socket reconnects.
 //
 // This component is the orchestrator: it owns the cross-feature state and
-// dialog wiring, and composes presentational pills (RunsPill, FlightsPill,
+// dialog wiring, and composes presentational pills (FlightsPill,
 // BenchmarkPill, CleanupPill) and badges (ConnectionBadge, McpHealthBadge,
 // StatusChip) that each live in their own file. Since the R6 consolidation the
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRun, onOpenCleanup, flights = [], onOpenFlight }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], activity = new Map(), onOpenFlight, onOpenActivity, onNavigateToRun }: Props) {
   const { connection } = useRuns()
-  const { runs: activeRuns } = useActiveRuns()
   const { count: bootCount } = useActiveBootSessions()
-  // Boots are NOT runs: the Runs button counts only test/verify runs; held
-  // boot sessions surface as a chip that opens the Services dialog.
-  const runsCount = activeRuns.filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark').length
-  const [runsOpen, setRunsOpen] = useState(false)
+  // Deployed-env verification runs (record-only) get their own pill (R27) —
+  // a verify is neither a test run nor a boot, so neither the Flights pill
+  // nor Services should have to explain it.
+  const { runs: verifyRuns } = useActiveVerifyRuns()
+  // Boots are NOT runs: held boot sessions surface as a chip that opens the
+  // Services dialog; test/verify runs light the Flights pill (R26 — the pill
+  // consolidation absorbed the old Runs pill; per-feature activity rows are
+  // the way into a live run now).
   const [servicesOpen, setServicesOpen] = useState(false)
   const [benchmarkOpen, setBenchmarkOpen] = useState(false)
   const [dirtyReviewOpen, setDirtyReviewOpen] = useState(false)
@@ -83,10 +92,14 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
   // 1.0.0) — hidden unless explicitly requested via ?showBenchmark=true.
   const showBenchmark = new URLSearchParams(window.location.search).get('showBenchmark') === 'true'
   // Aggregate "something's happening" count shown on the toggle when collapsed,
-  // so an active benchmark / run / flight is never hidden behind the chevron.
-  const activeFlightCount = flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').length
+  // so an active benchmark / flight / run / portify / authoring job is never
+  // hidden behind the chevron. Mirrors the Flights pill's own attention set.
+  const activeFlightCount = new Set([
+    ...flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').map((f) => f.feature),
+    ...activity.keys(),
+  ]).size
   const actionsActiveCount =
-    (showBenchmark && activeBenchmark ? 1 : 0) + (runsCount > 0 ? 1 : 0) + (activeFlightCount > 0 ? 1 : 0)
+    (showBenchmark && activeBenchmark ? 1 : 0) + (activeFlightCount > 0 ? 1 : 0)
   const status = activeRunDetail?.manifest.status
 
   // Guard: only treat 'running' and 'healing' as truly active. The runs
@@ -127,21 +140,6 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           </div>
         </>
       )}
-      {bootCount > 0 && (
-        <>
-          <span className="cl-divider shrink-0">·</span>
-          <button
-            type="button"
-            data-testid="boot-services-chip"
-            onClick={() => setServicesOpen(true)}
-            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-            title="Show booted services"
-            aria-label={`Show booted services (${bootCount} up)`}
-          >
-            {bootCount} booted
-          </button>
-        </>
-      )}
       {dirtyFeatureCount > 0 && (
         <>
           <span className="cl-divider shrink-0">·</span>
@@ -173,14 +171,50 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
           {/* R6 consolidation: the Flight pill is the single per-feature entry
               point — Coverage/Portify/Services pills are absorbed into the
               flight detail's per-stage drill-throughs (coverage ledger, portify
-              workflow, run detail). R15: the Exports pill is gone too — export
-              progress/download live on the flight's Export results stage and
-              the run detail's Review Evaluation action; only the routed dialog
-              stays mounted (below). Cleanup stays: it's workspace-level. */}
-          <RunsPill count={runsCount} onOpen={() => setRunsOpen(true)} />
-          <WizardTaskStatus />
+              workflow, run detail). R15/R19: the Exports and Wizards pills are
+              gone too — exports live on the flight's Export results stage and
+              the run detail's Review Evaluation action; wizard drafts resume
+              through the routed add-test dialog (openTask re-attaches to the
+              latest draft). R26: the Runs pill is absorbed as well — a live
+              run (or portify / authoring job) lights the Flights pill and its
+              per-feature rows say what's happening. Cleanup stays: it's
+              workspace-level. */}
           {showBenchmark && <BenchmarkPill active={Boolean(activeBenchmark)} onOpen={() => setBenchmarkOpen(true)} />}
-          <FlightsPill flights={flights} onOpenFlight={(flightId) => onOpenFlight?.(flightId)} />
+          {/* R27: held boot sessions, renamed + moved into the action cluster —
+              "Services" is the domain word for the health-checked processes
+              the boot holds up. Visible only while something is up. */}
+          {bootCount > 0 && (
+            <StatusPill
+              dotState="running"
+              name="Services"
+              detail={`${bootCount} up`}
+              count={bootCount > 1 ? bootCount : undefined}
+              countTone="boot"
+              onClick={() => setServicesOpen(true)}
+              title={`${bootCount} booted service session${bootCount > 1 ? 's' : ''} held up for manual testing — open to inspect or stop`}
+              ariaLabel={`Show booted services (${bootCount} up)`}
+            />
+          )}
+          {/* R27: deployed-env verification (record-only run against a live
+              environment) — "Deploy check" says the outcome, not the internals.
+              Click lands on the verification run's detail. */}
+          {verifyRuns.length > 0 && (
+            <StatusPill
+              dotState="running"
+              name="Deploy check"
+              detail={verifyRuns[0].verificationConfigName ?? verifyRuns[0].feature}
+              count={verifyRuns.length > 1 ? verifyRuns.length : undefined}
+              onClick={() => onNavigateToRun?.(verifyRuns[0].feature, verifyRuns[0].runId)}
+              title={`Verifying the deployed environment (record-only): ${verifyRuns.map((r) => r.feature).join(', ')}`}
+              ariaLabel={`Open deploy check (${verifyRuns.length} active)`}
+            />
+          )}
+          <FlightsPill
+            flights={flights}
+            activity={activity}
+            onOpenFlight={(flightId) => onOpenFlight?.(flightId)}
+            onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}
+          />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <EvaluationExportDialogHost />
@@ -224,12 +258,6 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onNavigateToRu
         </button>
       </div>
       </div>
-      {runsOpen && (
-        <RunsListDialog
-          onClose={() => setRunsOpen(false)}
-          onNavigateToRun={(feature, runId) => onNavigateToRun?.(feature, runId)}
-        />
-      )}
       {servicesOpen && <ServicesDialog onClose={() => setServicesOpen(false)} />}
       {dirtyReviewOpen && <DirtyReviewDialog features={features} onClose={() => setDirtyReviewOpen(false)} />}
       {benchmarkOpen && <BenchmarkWindow onClose={() => setBenchmarkOpen(false)} />}

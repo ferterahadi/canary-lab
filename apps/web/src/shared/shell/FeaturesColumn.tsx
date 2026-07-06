@@ -32,6 +32,8 @@ interface Props {
   onOpenPortify?: (workflowId: string) => void
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
+  /** Opens the flight stage-entry launcher for a feature (R25 column entry point). */
+  onStartFlight?: (feature: string) => void
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
@@ -61,6 +63,7 @@ export function FeaturesColumn({
   onStartPortify,
   onOpenPortify,
   onOpenCoverage,
+  onStartFlight,
   versionStatus,
 }: Props) {
   const { startNewWizard } = useWizardDrafts()
@@ -170,6 +173,22 @@ export function FeaturesColumn({
                   </button>
                   {runState && (
                     <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
+                  )}
+                  {onStartFlight && (
+                    <Tooltip label="Flight">
+                      <button
+                        type="button"
+                        onClick={() => { onSelectFeature(f.name); onStartFlight(f.name) }}
+                        aria-label={`Flight ${f.name}`}
+                        data-testid={`flight-action-${f.name}`}
+                        className="feature-row__cog cl-icon-button mr-0.5 h-7 w-7 shrink-0 self-center"
+                      >
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M22 2L11 13" />
+                          <path d="M22 2l-7 20-4-9-9-4 20-7z" />
+                        </svg>
+                      </button>
+                    </Tooltip>
                   )}
                   {onOpenCoverage && (
                     <Tooltip label="Coverage">

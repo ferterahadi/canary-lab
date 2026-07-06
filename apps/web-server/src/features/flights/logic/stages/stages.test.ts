@@ -97,16 +97,19 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void } {
+function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightManifest; setStage: (key: FlightStageKey, patch: Partial<FlightStage>) => void; progressLog: unknown[] } {
   const state = { m }
+  const progressLog: unknown[] = []
   const setStage = (key: FlightStageKey, patch: Partial<FlightStage>): void => {
     state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
   }
   return {
+    progressLog,
     ctx: {
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
       appendLog: () => {},
+      setProgress: (progress) => { progressLog.push(progress) },
       patchFlight: (patch) => {
         state.m = {
           ...state.m,
@@ -1293,6 +1296,51 @@ describe('specs-coverage stage', () => {
     // Edit-in-place contract: absolute feature dir in the prompt, no inlined specs.
     expect(prompts[0]).toContain(path.join(featuresDir, 'checkout'))
     expect(prompts[0]).not.toContain('{{')
+  })
+
+  it('R27: publishes the loop shape — authoring/validating/mapping per pass, with the pass history', async () => {
+    const ledgers = [ledger(0), ledger(40), ledger(100)]
+    const d = deps({
+      spawnAgent: writingSpawnAgent([]),
+      validateSpecs: async () => ({ ok: true }),
+      coverage: {
+        compute: (() => ledgers.shift() ?? ledger(100)) as never,
+        runEngine: (async () => ({}) as never) as never,
+      },
+    })
+    const { ctx, progressLog } = ctxFor(manifest())
+    const outcome = await specsCoverageStage(d).run(ctx)
+    expect(outcome).toMatchObject({ kind: 'done' })
+
+    const phases = (progressLog as Array<{ pass: number; phase: string }>).map((p) => `${p.pass}:${p.phase}`)
+    expect(phases).toEqual([
+      '1:authoring', '1:validating', '1:mapping', '1:mapping', // pass 1 settles at 40%
+      '2:authoring', '2:validating', '2:mapping', '2:mapping', // pass 2 reaches 100%
+    ])
+    const last = progressLog.at(-1) as { maxPasses: number; target: number; passes: Array<{ pass: number; coveragePct?: number }> }
+    expect(last.maxPasses).toBe(5)
+    expect(last.passes).toEqual([
+      { pass: 1, coveragePct: 40, gapsOpen: 1 },
+      { pass: 2, coveragePct: 100, gapsOpen: 0 },
+    ])
+  })
+
+  it('R27: a pass burned by validation is recorded with its note, not a coverage number', async () => {
+    let call = 0
+    const d = deps({
+      spawnAgent: writingSpawnAgent([]),
+      validateSpecs: async () => (call++ === 0 ? { ok: false, errors: 'boom' } : { ok: true }),
+      coverage: {
+        compute: (() => ledger(call === 0 ? 0 : call === 1 ? 0 : 100)) as never,
+        runEngine: (async () => ({}) as never) as never,
+      },
+    })
+    const { ctx, progressLog } = ctxFor(manifest())
+    const outcome = await specsCoverageStage(d).run(ctx)
+    expect(outcome).toMatchObject({ kind: 'done' })
+    const last = progressLog.at(-1) as { passes: Array<{ pass: number; note?: string; coveragePct?: number }> }
+    expect(last.passes[0]).toEqual({ pass: 1, note: 'specs failed to compile/list' })
+    expect(last.passes[1]).toMatchObject({ pass: 2, coveragePct: 100 })
   })
 
   it('parks on coverage-stuck at the iteration bound and accept-partial settles with the ledger recorded', async () => {

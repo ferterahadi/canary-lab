@@ -177,6 +177,13 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'verification' }))
   })
 
+  it('round-trips the feature-scoped flight-start dialog (URL-only, not mirrored)', () => {
+    persistView(view({ feature: 'checkout', dialog: 'flight-start' }))
+    expect(window.location.search).toContain('dialog=flight-start')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'flight-start' }))
+    expect(localStorage.getItem(KEY)).not.toContain('flight-start')
+  })
+
   it('round-trips a portify revisit (dialog + wf qualifier)', () => {
     persistView(view({ feature: 'checkout', dialog: 'portify', wf: 'wf_abc' }))
     expect(window.location.search).toContain('dialog=portify')

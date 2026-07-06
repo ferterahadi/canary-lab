@@ -19,8 +19,10 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // pickers) are deliberately NOT routed. `verification` is feature-scoped and
 // lives in the workspace runs column. `evaluation` is the export-progress dialog
 // (status-bar toast) — its task record persists server-side, so a deep link
-// re-opens it.
-export type RouteDialog = 'config' | 'portify' | 'add-test' | 'verification' | 'evaluation'
+// re-opens it. `flight-start` is the stage-entry launcher — feature-scoped (the
+// durable `feature` param qualifies it) and rebuilt from GET /api/flights/entry,
+// so a cold load is coherent.
+export type RouteDialog = 'config' | 'portify' | 'add-test' | 'verification' | 'evaluation' | 'flight-start'
 
 export interface PersistedView {
   view: WorkspaceView
@@ -43,7 +45,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'portify', 'add-test', 'verification', 'evaluation']
+const DIALOGS: RouteDialog[] = ['config', 'portify', 'add-test', 'verification', 'evaluation', 'flight-start']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)

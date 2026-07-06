@@ -24,7 +24,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // PORT lets a harness (e.g. a preview runner) assign a free port;
+    // 5173 stays the human default.
+    port: Number(process.env.PORT) || 5173,
     proxy: {
       '/api': { target: apiTarget, changeOrigin: true },
       '/mcp': { target: apiTarget, changeOrigin: true },

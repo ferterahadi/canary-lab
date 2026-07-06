@@ -147,8 +147,21 @@ export async function collectRepoBranchSnapshots(feature: FeatureConfig): Promis
   return out
 }
 
+// One drifted repo, in the shape the client dialog renders (repo · current →
+// expected). `current` is null when the checkout isn't a git repo; `detached`
+// flags a detached HEAD (no branch to name).
+export interface RepoBranchMismatch {
+  name: string
+  path: string
+  expected: string
+  current: string | null
+  detached: boolean
+  isGitRepo: boolean
+}
+
 export async function validateConfiguredRepoBranches(feature: FeatureConfig): Promise<void> {
   const failures: string[] = []
+  const mismatches: RepoBranchMismatch[] = []
   for (const repo of feature.repos ?? []) {
     const expected = repo.branch
     if (!expected) continue
@@ -158,20 +171,26 @@ export async function validateConfiguredRepoBranches(feature: FeatureConfig): Pr
     const status = await getGitStatus(repoPath)
     if (!status.isGitRepo) {
       failures.push(`${repo.name}: ${repoPath} is not a git repository`)
+      mismatches.push({ name: repo.name, path: repoPath, expected, current: null, detached: false, isGitRepo: false })
       continue
     }
     if (status.detached) {
       failures.push(`${repo.name}: expected ${expected}, but checkout is detached`)
+      mismatches.push({ name: repo.name, path: repoPath, expected, current: status.currentBranch, detached: true, isGitRepo: true })
       continue
     }
     if (status.currentBranch !== expected) {
       failures.push(`${repo.name}: expected ${expected}, current ${status.currentBranch}`)
+      mismatches.push({ name: repo.name, path: repoPath, expected, current: status.currentBranch, detached: false, isGitRepo: true })
     }
   }
   if (failures.length > 0) {
+    // Carry the structured rows alongside the human message so REST/MCP callers
+    // that don't understand `branchMismatch` still get the readable `error`,
+    // while the web dialog can render a per-repo table + a switch/re-pin action.
     throw Object.assign(
       new Error(`Repo branch check failed:\n${failures.join('\n')}`),
-      { statusCode: 409 },
+      { statusCode: 409, branchMismatch: mismatches },
     )
   }
 }

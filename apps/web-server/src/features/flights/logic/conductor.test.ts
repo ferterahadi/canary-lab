@@ -182,6 +182,37 @@ describe('startFlight', () => {
     expect(calls).toEqual(['run', 'heal', 'evaluation-export'])
   })
 
+  it('a jump to evaluation-export keeps the validated runId; other jumps reset links', async () => {
+    const adapters = allDone()
+    adapters.run = { run: async (ctx) => { ctx.patchFlight({ links: { runId: 'run-42' } }); return { kind: 'done' } } }
+    let exportSawRunId: string | undefined
+    adapters['evaluation-export'] = {
+      run: async (ctx) => { exportSawRunId = ctx.manifest().links?.runId; return { kind: 'done' } },
+    }
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+    expect(store.get(first.manifest.flightId)!.links?.runId).toBe('run-42')
+
+    // The prerequisite the validator approved (links.runId) must survive the
+    // jump's stage-record reset — the export stage reads it as its input.
+    exportSawRunId = undefined
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'evaluation-export' as const }, {
+      ...deps(adapters),
+      validateStageEntry: () => null,
+    })
+    await jumped.completion
+    expect(exportSawRunId).toBe('run-42')
+    expect(store.get(jumped.manifest.flightId)!.status).toBe('done')
+
+    // A jump anywhere earlier regenerates the run — links reset as before.
+    const rerun = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'run' as const }, {
+      ...deps(adapters),
+      validateStageEntry: () => null,
+    })
+    expect(rerun.manifest.links).toBeUndefined()
+    await rerun.completion
+  })
+
   it('rejects fromStage when no validator is wired (stage entry unsupported)', () => {
     expect(() =>
       startFlight({ ...args(), fromStage: 'docs' as const }, deps(allDone())),

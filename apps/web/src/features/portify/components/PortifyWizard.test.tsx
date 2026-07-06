@@ -169,7 +169,7 @@ describe('PortifyWizard', () => {
     // Save closes outright — no in-place transition to a confirmation screen
     // (the appearing "Done" button caused a layout shift).
     expect(onSaved).toHaveBeenCalled()
-    expect(container.textContent).not.toContain('Saved as overlay')
+    expect(container.textContent).not.toContain('can now run in parallel')
   })
 
   it('opens the feedback modal from Request changes and resumes the agent on submit', async () => {
@@ -344,7 +344,7 @@ describe('PortifyWizard', () => {
     const { onSaved } = await renderWizard()
     await act(async () => clickButton('Start ▶'))
     await flush()
-    expect(container.textContent).toContain('Saved as overlay')
+    expect(container.textContent).toContain('can now run in parallel')
     expect(container.textContent).toContain('features/cns/portify/')
     await act(async () => clickButton('Done'))
     expect(onSaved).toHaveBeenCalled()
@@ -379,7 +379,7 @@ describe('PortifyWizard', () => {
     // Review and Save are folded into one saved screen: the confirmation, the
     // overlay path, and the diff all show together — and it's read-only (no
     // Save / Request-changes).
-    expect(container.textContent).toContain('Saved as overlay')
+    expect(container.textContent).toContain('can now run in parallel')
     expect(container.textContent).toContain('saved ✓')
     expect(container.textContent).toContain('features/cns/portify/')
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
@@ -389,7 +389,7 @@ describe('PortifyWizard', () => {
     // The same saved screen is reachable from the Review stepper node.
     await act(async () => clickByTitle('Go to Review'))
     await flush()
-    expect(container.textContent).toContain('Saved as overlay')
+    expect(container.textContent).toContain('can now run in parallel')
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
   })
 
