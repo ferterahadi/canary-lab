@@ -31,6 +31,7 @@ import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
 import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
 import { useRun } from '../state/RunsContext'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
+import { EvaluationTaskPanel } from '../../evaluation/components/EvaluationTaskPanel'
 import { useMcpPromo } from '../../../shared/shell/McpPromoContext'
 import { deriveRunViewModel, type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
@@ -312,19 +313,20 @@ function RunOverviewTab({
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exportError, setExportError] = useState(false)
-  const { startExport, openTask } = useEvaluationExports()
+  const { startExport, taskForRun } = useEvaluationExports()
   const { gatePromo } = useMcpPromo()
+  // R29: the standalone export dialog is gone — the export lives HERE. This
+  // run's latest task renders inline below the run facts; starting one makes
+  // the panel appear in place.
+  const exportTask = taskForRun(manifest.runId)
   const handleExportEvaluation = useCallback(async (mode: EvaluationExportMode) => {
     setExportMenuOpen(false)
     setExportError(false)
     gatePromo('export-evaluation', () => {
-      // R15: the status-bar Exports pill is gone, so surface the task
-      // immediately — starting an export opens the routed export dialog.
       void Promise.resolve(startExport(manifest.runId, mode))
-        .then((task) => { if (task?.taskId) openTask(task.taskId) })
         .catch(() => setExportError(true))
     })
-  }, [gatePromo, manifest.runId, openTask, startExport])
+  }, [gatePromo, manifest.runId, startExport])
 
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
@@ -423,6 +425,14 @@ function RunOverviewTab({
       {manifest.executionType === 'boot' && view.primaryAlert && (
         <div className={`mt-4 rounded-md border px-2.5 py-2 text-xs ${alertClass(view.primaryAlert.tone)}`}>
           {view.primaryAlert.message}
+        </div>
+      )}
+      {/* R29: this run's evaluation export, in place — progress, output, and
+          the download once the archive is ready. */}
+      {exportTask && (
+        <div className="mt-4">
+          <SectionHeader>Evaluation</SectionHeader>
+          <EvaluationTaskPanel task={exportTask} />
         </div>
       )}
       <div className="mt-4">

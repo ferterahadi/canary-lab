@@ -36,6 +36,7 @@ export function flightStatusLabel(status: FlightStatus): string {
  *  a running flight — the colour means the same thing everywhere). */
 const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: string }> = {
   'running': { label: 'running', title: 'Test run in progress' },
+  'exporting': { label: 'exporting', title: 'Evaluation export in progress' },
   'portifying': { label: 'portifying', title: 'Port-ification in progress' },
   'authoring': { label: 'authoring', title: 'Authoring test specs' },
 }

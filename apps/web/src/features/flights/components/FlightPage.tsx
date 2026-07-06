@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import type {
   FlightCheckpoint,
@@ -11,11 +11,13 @@ import type {
 import type { JournalEntry, RunDetail } from '../../../shared/api/types'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { StatusDot } from '../../config/components/atoms'
+import { EvaluationTaskPanel } from '../../evaluation/components/EvaluationTaskPanel'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { ActivityOnlyRow, FLIGHT_STATUS_TONE, FlightStatusChip, StageMiniRail, featureActivityRows, flightStatusLabel } from './FlightsPill'
 import type { FeatureActivity } from '../state/feature-activity'
 import {
   FactsGrid,
+  STAGE_COMPANION,
   STAGE_ICON,
   StageStatusChip,
   specsCoverageProgress,
@@ -23,6 +25,7 @@ import {
   stageRailRows,
   stageStateLine,
   stageStatusTone,
+  type StageFact,
   type StageRailRow,
 } from './stage-meta'
 
@@ -200,7 +203,10 @@ function FlightDetail({
   const stageKey = selectedStage ?? autoStage
   const row = railRows.find((s) => s.key === stageKey) ?? null
   const stage = flight?.stages.find((s) => s.key === stageKey) ?? null
-  const healStage = flight?.stages.find((s) => s.key === 'heal') ?? null
+  // The pair-merged rows (run+heal, scaffold+env-capture, docs+prd-summary)
+  // carry their folded companion so its facts/checkpoint/log surface too.
+  const companionKey = stageKey ? STAGE_COMPANION[stageKey] : undefined
+  const companionStage = (companionKey ? flight?.stages.find((s) => s.key === companionKey) : null) ?? null
 
   if (error) {
     return (
@@ -311,7 +317,7 @@ function FlightDetail({
           {!stage || !row ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Pick a stage.</div>
           ) : (
-            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} heal={healStage} onResponded={refetch} drill={drill} />
+            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} onResponded={refetch} drill={drill} />
           )}
         </main>
       </div>
@@ -352,13 +358,15 @@ function stageDrillThrough(
 //   3. facts — the 2–4 things the user cares about at this stage (FactsGrid)
 //   4. checkpoint / error, when the stage needs the user
 //   5. the agent's live output ONLY while it is working (never for test runs)
-//   6. ▸ View details — evidence/log audit trail + historical agent timeline
+//   6. ▸ View details — ONE formatted log pane (R30): the agent timeline where
+//      an agent acted, the tagged system log otherwise; raw evidence JSON is
+//      gone — anything the user cares about is a fact.
 function StageDetail({
   flightId,
   flight,
   row,
   stage,
-  heal,
+  companion,
   onResponded,
   drill,
 }: {
@@ -366,7 +374,8 @@ function StageDetail({
   flight: FlightManifest
   row: StageRailRow
   stage: FlightStage
-  heal: FlightStage | null
+  /** The folded half of a pair-merged row (heal / env-capture / prd-summary). */
+  companion: FlightStage | null
   onResponded: () => void
   drill: FlightDrillThroughs
 }) {
@@ -377,19 +386,25 @@ function StageDetail({
   const agentDir =
     loopProgress && stage.status === 'running' && loopProgress.phase === 'mapping'
       ? 'coverage-map'
-      : AGENT_STAGE_DIRS[stage.key]
-  const merged = stage.key === 'run'
+      : AGENT_STAGE_DIRS[stage.key] ?? (companion ? AGENT_STAGE_DIRS[companion.key] : undefined)
+  const runMerged = stage.key === 'run'
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
-  const facts = stageFacts(stage, flight, heal ?? undefined)
+  const facts = stageFacts(stage, flight, companion ?? undefined)
   const drillThrough = stageDrillThrough(stage, flight, drill)
   const [detailsOpen, setDetailsOpen] = useState(false)
-  const runId = merged
+  const runId = runMerged
     ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
-  const checkpointStage = stage.status === 'waiting-for-approval' ? stage : null
-  const error = stage.error ?? heal?.error
-  const hasDetails = stage.evidence !== undefined || Boolean(stage.log) || Boolean(merged && heal?.evidence !== undefined) || Boolean(agentDir && settled)
+  // A pair row surfaces whichever half is parked on a checkpoint (the
+  // missing-env checkpoint lives on the folded env-capture, run-failed on run).
+  const checkpointStage =
+    stage.status === 'waiting-for-approval' ? stage
+    : companion?.status === 'waiting-for-approval' ? companion
+    : null
+  const error = stage.error ?? companion?.error
+  const combinedLog = [stage.log, companion?.log].filter(Boolean).join('')
+  const hasDetails = Boolean(combinedLog) || Boolean(agentDir && settled)
 
   return (
     <>
@@ -413,18 +428,28 @@ function StageDetail({
 
       {/* Where are we — one plain sentence, always present. */}
       <div data-testid="stage-state-line" className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-        {stageStateLine(stage, flight)}
+        {stageStateLine(stage, flight, companion ?? undefined)}
       </div>
 
       <FactsGrid facts={facts} />
 
-      {/* Test run & auto-repair (R22): what's running now, what each repair
-          cycle fixed — no agent output, the run detail page holds the rest. */}
-      {merged && runId && <RunRepairSummary runId={runId} active={live} />}
+      {/* Feature setup (R32): how the feature is actually configured — the
+          FeatureConfigEditor digest (repos, run commands, ports, Playwright). */}
+      {stage.key === 'scaffold' && (stage.status === 'done' || stage.status === 'skipped') && (
+        <FeatureConfigDigest feature={flight.feature} />
+      )}
+
+      {/* Test Run (R22): what's running now, what each repair cycle fixed —
+          no agent output, the run detail page holds the rest. */}
+      {runMerged && runId && <RunRepairSummary runId={runId} active={live} />}
 
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
           timeline — coverage % after each mapping feeds the next authoring. */}
       {loopProgress && <SpecsPassTimeline progress={loopProgress} live={live} />}
+
+      {/* Evaluation Report (R29): the export task's status + output live here —
+          the one home for "how is my evaluation coming along". */}
+      {stage.key === 'evaluation-export' && <ExportTaskPanel flight={flight} stage={stage} />}
 
       {(row.status === 'failed' && error) && (
         <div className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>
@@ -455,7 +480,7 @@ function StageDetail({
             onClick={() => setDetailsOpen((open) => !open)}
             className="cl-button px-2 py-0.5 text-[11px]"
           >
-            {detailsOpen ? '▾ Hide details' : '▸ View details'}
+            {detailsOpen ? '▾ Hide log' : '▸ View log'}
           </button>
           {detailsOpen && (
             <div className="mt-2 flex flex-col gap-2">
@@ -464,28 +489,124 @@ function StageDetail({
                   <AgentSessionView source={{ kind: 'flight', flightId, stage: agentDir, live: false }} />
                 </AgentBlock>
               )}
-              {stage.evidence !== undefined && (
-                <div>
-                  <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Evidence</h3>
-                  <pre className="overflow-auto rounded border p-2 text-[10.5px]" style={{ borderColor: 'var(--border-default)', fontFamily: 'var(--font-mono)', maxHeight: 220 }}>
-                    {JSON.stringify(merged && heal?.evidence !== undefined ? { run: stage.evidence, repair: heal.evidence } : stage.evidence, null, 2)}
-                  </pre>
-                </div>
-              )}
-              {stage.log && (
-                <div>
-                  <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Log</h3>
-                  <pre className="overflow-auto whitespace-pre-wrap rounded border p-2 text-[10.5px]" style={{ borderColor: 'var(--border-default)', fontFamily: 'var(--font-mono)', maxHeight: 260 }}>
-                    {stage.log}
-                  </pre>
-                </div>
-              )}
+              {combinedLog && <FlightStageLog log={combinedLog} />}
             </div>
           )}
         </section>
       )}
     </>
   )
+}
+
+/** The system half of a stage's story (R30): the conductor's `[tagged]` log
+ *  lines as scannable rows — tag chip + line, mono, pinned to the tail while
+ *  it grows. Agent output never renders here (that's AgentSessionView's job). */
+function FlightStageLog({ log }: { log: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [log])
+  const lines = log.split('\n').filter((l) => l.trim() !== '')
+  return (
+    <div
+      ref={ref}
+      data-testid="stage-log"
+      className="flex max-h-[260px] flex-col gap-[3px] overflow-auto rounded border p-2"
+      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', scrollbarGutter: 'stable' }}
+    >
+      {lines.map((line, i) => {
+        const m = /^\[([\w-]+)\]\s?(.*)$/.exec(line)
+        return (
+          <div key={i} className="flex items-baseline gap-2 text-[10.5px]" style={{ fontFamily: 'var(--font-mono)' }}>
+            {m && (
+              <span
+                className="shrink-0 rounded px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide"
+                style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+              >
+                {m[1]}
+              </span>
+            )}
+            <span className="min-w-0 whitespace-pre-wrap break-words" style={{ color: 'var(--text-secondary)' }}>
+              {m ? m[2] : line}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/** Feature setup's config digest (R32): a read-only summary of what
+ *  FeatureConfigEditor holds — repos, run commands, port slots, Playwright —
+ *  fetched from the live config, rendered through the same FactsGrid. */
+function FeatureConfigDigest({ feature }: { feature: string }) {
+  const [facts, setFacts] = useState<StageFact[]>([])
+  useEffect(() => {
+    let alive = true
+    Promise.all([
+      api.getFeatureConfigDoc(feature).catch(() => null),
+      api.getPlaywrightConfig(feature).catch(() => null),
+    ]).then(([config, playwright]) => {
+      if (alive) setFacts(configDigestFacts(config?.parsed.value ?? null, playwright?.parsed.value ?? null))
+    })
+    return () => { alive = false }
+  }, [feature])
+  if (facts.length === 0) return null
+  return (
+    <div data-testid="feature-config-digest">
+      <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Configuration</h3>
+      <FactsGrid facts={facts} />
+    </div>
+  )
+}
+
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}
+
+/** Distill the parsed feature.config + playwright.config into fact rows. Pure
+ *  and defensive: config ASTs carry `$expr` stand-ins and hand-edited shapes —
+ *  anything unreadable simply doesn't produce a row. */
+export function configDigestFacts(config: unknown, playwright: unknown): StageFact[] {
+  const facts: StageFact[] = []
+  const repos = Array.isArray(asRecord(config)?.repos) ? (asRecord(config)!.repos as unknown[]) : []
+  const repoNames: string[] = []
+  const commands: Array<{ command: string; service: string; ports: string[] }> = []
+  for (const r of repos) {
+    const repo = asRecord(r)
+    if (!repo) continue
+    const name = typeof repo.name === 'string' ? repo.name : null
+    const branch = typeof repo.branch === 'string' ? repo.branch : null
+    if (name) repoNames.push(branch ? `${name} @ ${branch}` : name)
+    const startCommands = Array.isArray(repo.startCommands) ? repo.startCommands : []
+    for (const sc of startCommands) {
+      const svc = asRecord(sc)
+      if (!svc || typeof svc.command !== 'string') continue
+      const ports = (Array.isArray(svc.ports) ? svc.ports : [])
+        .map((p) => asRecord(p))
+        .filter((p): p is Record<string, unknown> => p !== null)
+        .map((p) => `${typeof p.name === 'string' ? p.name : '?'}${typeof p.env === 'string' ? ` (${p.env})` : ''}`)
+      commands.push({ command: svc.command, service: typeof svc.name === 'string' ? svc.name : name ?? 'service', ports })
+    }
+  }
+  if (repoNames.length > 0) facts.push({ label: 'Repos', value: repoNames.join(', '), mono: true })
+  for (const c of commands) {
+    facts.push({ label: commands.length === 1 ? 'Run command' : `Run · ${c.service}`, value: c.command, mono: true, title: c.service })
+    if (c.ports.length > 0) facts.push({ label: 'Ports', value: c.ports.join(', '), mono: true })
+  }
+  const pw = asRecord(playwright)
+  if (pw) {
+    const use = asRecord(pw.use)
+    const bits = [
+      typeof pw.workers === 'number' ? `${pw.workers} worker${pw.workers === 1 ? '' : 's'}` : null,
+      typeof pw.retries === 'number' ? `${pw.retries} retr${pw.retries === 1 ? 'y' : 'ies'}` : null,
+      typeof use?.video === 'string' ? `video ${use.video}` : null,
+      typeof use?.trace === 'string' ? `trace ${use.trace}` : null,
+    ].filter(Boolean)
+    if (bits.length > 0) facts.push({ label: 'Playwright', value: bits.join(' · ') })
+  }
+  return facts
 }
 
 /** Frame for a live agent timeline. Flight agents are canary-spawned on this
@@ -609,8 +730,22 @@ function RunRepairSummary({ runId, active }: { runId: string; active: boolean })
   )
 }
 
-/** Export results' primary action (R15): the explicit download, in the header
- *  slot every stage reserves for its one action. */
+/** Evaluation Report's live heart (R29): the export task's status + output —
+ *  agent timeline for a localized rewrite, external card for a handed-off
+ *  export, progress text for raw — rendered where the export happens. This is
+ *  the home the standalone export dialog dissolved into. */
+function ExportTaskPanel({ flight, stage }: { flight: FlightManifest; stage: FlightStage }) {
+  const { taskById, taskForRun } = useEvaluationExports()
+  const ev = (stage.evidence ?? {}) as Record<string, unknown>
+  const taskId = (typeof ev.taskId === 'string' ? ev.taskId : undefined) ?? flight.links?.evaluationTaskId
+  const runId = flight.links?.runId
+  const task = (taskId ? taskById(taskId) : null) ?? (runId ? taskForRun(runId) : null)
+  if (!task) return null
+  return <EvaluationTaskPanel task={task} showDownload={false} />
+}
+
+/** Evaluation Report's primary action (R15): the explicit download, in the
+ *  header slot every stage reserves for its one action. */
 function DownloadEvaluationAction({ flight, stage }: { flight: FlightManifest; stage: FlightStage }) {
   const { downloadTask } = useEvaluationExports()
   const [failed, setFailed] = useState(false)

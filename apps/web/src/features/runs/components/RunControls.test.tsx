@@ -29,6 +29,11 @@ vi.mock('../state/RunsContext', () => ({
 vi.mock('../../evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: vi.fn(() => ({
     startExport: vi.fn(),
+    taskForRun: vi.fn(() => null),
+    taskById: vi.fn(() => null),
+    watchTask: vi.fn(),
+    downloadTask: vi.fn(),
+    logsByTaskId: {},
   })),
 }))
 
@@ -249,7 +254,7 @@ describe('run overview', () => {
     const { useRun } = await import('../state/RunsContext')
     const { useEvaluationExports } = await import('../../evaluation/state/EvaluationExportContext')
     const startExport = vi.fn()
-    vi.mocked(useEvaluationExports).mockReturnValue({ startExport } as ReturnType<typeof useEvaluationExports>)
+    vi.mocked(useEvaluationExports).mockReturnValue({ startExport, taskForRun: () => null } as unknown as ReturnType<typeof useEvaluationExports>)
     vi.mocked(useRun).mockReturnValue({
       detail: runDetail({ status: 'passed' }),
       indexed: undefined,

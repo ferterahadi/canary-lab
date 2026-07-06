@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => ({
   resumeFlight: vi.fn(),
   abortFlight: vi.fn(),
   downloadTask: vi.fn(),
+  getFeatureConfigDoc: vi.fn(),
+  getPlaywrightConfig: vi.fn(),
+  taskById: vi.fn(),
+  taskForRun: vi.fn(),
 }))
 
 vi.mock('../../../shared/api/client', () => ({
@@ -25,6 +29,8 @@ vi.mock('../../../shared/api/client', () => ({
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
   resumeFlight: mocks.resumeFlight,
   abortFlight: mocks.abortFlight,
+  getFeatureConfigDoc: mocks.getFeatureConfigDoc,
+  getPlaywrightConfig: mocks.getPlaywrightConfig,
 }))
 
 // The agent timeline is its own tested component with live transports — stub it.
@@ -34,10 +40,16 @@ vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
   ),
 }))
 
-// The export block reads the download action from the export context; the
-// provider needs live sockets, so stub the hook.
+// The export stage reads the download action + task lookups from the export
+// context; the provider needs live sockets, so stub the hook.
 vi.mock('../../evaluation/state/EvaluationExportContext', () => ({
-  useEvaluationExports: () => ({ downloadTask: mocks.downloadTask }),
+  useEvaluationExports: () => ({
+    downloadTask: mocks.downloadTask,
+    taskById: mocks.taskById,
+    taskForRun: mocks.taskForRun,
+    logsByTaskId: {},
+    watchTask: vi.fn(),
+  }),
 }))
 
 import { FlightPage } from './FlightPage'
@@ -52,6 +64,10 @@ beforeEach(() => {
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
   mocks.listJournal.mockResolvedValue([])
   mocks.downloadTask.mockResolvedValue(undefined)
+  mocks.getFeatureConfigDoc.mockRejectedValue(new Error('no config'))
+  mocks.getPlaywrightConfig.mockRejectedValue(new Error('no config'))
+  mocks.taskById.mockReturnValue(null)
+  mocks.taskForRun.mockReturnValue(null)
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -111,9 +127,10 @@ describe('FlightPage', () => {
     }))
     await render('fl_1')
     for (const key of FLIGHT_STAGE_KEYS) {
-      if (key === 'similarity' || key === 'heal') {
-        // R21/R22: plumbing rows are hidden — similarity passed silently, heal
-        // is folded into the run row.
+      if (key === 'similarity' || key === 'heal' || key === 'env-capture' || key === 'prd-summary') {
+        // R21/R22/R32/R33: plumbing + folded pair companions never get their
+        // own row — similarity passed silently, heal folds into run,
+        // env-capture into scaffold, prd-summary into docs.
         expect(container.querySelector(`[data-testid="stage-rail-${key}"]`)).toBeNull()
       } else {
         expect(container.querySelector(`[data-testid="stage-rail-${key}"]`)).toBeTruthy()
@@ -291,10 +308,15 @@ describe('trailer model (R14–R18)', () => {
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel readiness')
     expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('Feature setup')
-    // Run + heal are one user step; similarity never shows unless it needs a human.
-    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('Test run & auto-repair')
+    expect(container.querySelector('[data-testid="stage-rail-docs"]')?.textContent).toContain('Requirements')
+    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Evaluation Report')
+    // Run + heal are one user step; similarity never shows unless it needs a
+    // human; the pair companions (env-capture, prd-summary) fold into their rows.
+    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('Test Run')
     expect(container.querySelector('[data-testid="stage-rail-heal"]')).toBeNull()
     expect(container.querySelector('[data-testid="stage-rail-similarity"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-rail-env-capture"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-rail-prd-summary"]')).toBeNull()
   })
 
   it('R21: similarity appears ONLY when parked on the match checkpoint', async () => {
@@ -411,7 +433,33 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('generating')
   })
 
-  it('R20: facts fold evidence into plain rows; raw JSON hides behind View details', async () => {
+  it('R20/R30: facts fold evidence into plain rows; raw evidence JSON never renders', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'portify' ? { evidence: { workflowId: 'wf-3', edits: false }, log: '[portify] double boot verified\n' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('None needed')
+    expect(container.textContent).not.toContain('"workflowId"')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
+    })
+    // R30: the disclosure is ONE formatted log pane — tagged rows, no JSON dump.
+    expect(container.textContent).not.toContain('"workflowId"')
+    const log = container.querySelector('[data-testid="stage-log"]')
+    expect(log?.textContent).toContain('portify')
+    expect(log?.textContent).toContain('double boot verified')
+  })
+
+  it('R30: a stage with no log and no agent has no details disclosure', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
@@ -425,12 +473,7 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
-    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('None needed')
-    expect(container.textContent).not.toContain('"workflowId"')
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
-    })
-    expect(container.textContent).toContain('"workflowId"')
+    expect(container.querySelector('[data-testid="stage-details-toggle"]')).toBeNull()
   })
 
   it('R22: the merged run row shows verdict/repair facts and NO agent output', async () => {
@@ -530,7 +573,8 @@ describe('trailer model (R14–R18)', () => {
     }))
     await render('fl_1', 1)
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-prd-summary"]')?.click()
+      // R33: prd-summary folds into the Requirements (docs) row.
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click()
     })
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('5')
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
@@ -538,5 +582,141 @@ describe('trailer model (R14–R18)', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
     })
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-stage')).toBe('prd-summary')
+  })
+
+  it('R32: Feature setup absorbs env-capture — merged facts, boot proof, config digest', async () => {
+    mocks.getFeatureConfigDoc.mockResolvedValue({
+      path: '/ws/features/checkout/feature.config.cjs',
+      format: 'cjs',
+      content: '',
+      parsed: {
+        value: {
+          repos: [{
+            name: 'shop',
+            localPath: '/repo/shop',
+            startCommands: [{ name: 'api', command: 'npm run dev', ports: [{ name: 'api', env: 'PORT' }] }],
+          }],
+        },
+        complexFields: [],
+        source: '',
+      },
+    })
+    mocks.getPlaywrightConfig.mockResolvedValue({
+      path: '/ws/features/checkout/playwright.config.ts',
+      format: 'ts',
+      content: '',
+      parsed: { value: { workers: 2, retries: 1, use: { video: 'on' } }, complexFields: [], source: '' },
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'scaffold' ? { evidence: { featureDir: '/ws/features/checkout' } } : {}),
+        ...(key === 'env-capture' ? { evidence: { captured: 2, boot: { services: [{ name: 'api', status: 'healthy' }] } } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
+    })
+    // Pair-settled state line speaks the whole step.
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
+      .toBe('Feature "checkout" created — env captured (2 files), dry-run boot passed.')
+    const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
+    expect(facts).toContain('checkout')
+    expect(facts).toContain('2 files')
+    expect(facts).toContain('api healthy')
+    // R32: the config digest — run command, ports, Playwright — from the live config.
+    const digest = container.querySelector('[data-testid="feature-config-digest"]')?.textContent ?? ''
+    expect(digest).toContain('npm run dev')
+    expect(digest).toContain('api (PORT)')
+    expect(digest).toContain('2 workers · 1 retry · video on')
+  })
+
+  it('R32: the folded env-capture checkpoint surfaces on the Feature setup row', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'waiting-for-approval',
+      currentStage: 'env-capture',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'env-capture'
+          ? ('waiting-for-approval' as const)
+          : key === 'similarity' || key === 'scout' || key === 'scaffold'
+            ? ('done' as const)
+            : ('pending' as const),
+        ...(key === 'env-capture'
+          ? { checkpoint: { kind: 'missing-env' as const, message: 'Provide values', options: ['retry', 'waive'], data: { missing: ['API_KEY'] } } }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    // The merged scaffold row carries the waiting state and the checkpoint UI.
+    expect(container.querySelector('[data-testid="stage-rail-env-capture"]')).toBeNull()
+    expect(container.querySelector('[data-testid="checkpoint-controls"]')?.textContent).toContain('Provide values')
+    expect(container.querySelector('[data-testid="checkpoint-env-values"]')).toBeTruthy()
+  })
+
+  it('R31/R33: repo-scan facts list the repos; Requirements facts list the docs', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      repoPaths: ['/repo/shop', '/repo/api'],
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'scout' ? { evidence: { configSource: 'module.exports = {}', envFiles: ['/repo/shop/.env'] } } : {}),
+        ...(key === 'docs' ? { evidence: { source: 'repo-docs', docs: ['shop-readme.md', 'api-spec.md'] } } : {}),
+        ...(key === 'prd-summary' ? { evidence: { requirementCount: 7 } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click()
+    })
+    const scoutFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
+    expect(scoutFacts).toContain('shop · /repo/shop')
+    expect(scoutFacts).toContain('api · /repo/api')
+    expect(scoutFacts).toContain('.env')
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
+      .toBe('7 requirements distilled from 2 docs (repo-docs).')
+    const docsFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
+    expect(docsFacts).toContain('shop-readme.md')
+    expect(docsFacts).toContain('api-spec.md')
+    expect(docsFacts).toContain('repo-docs')
+    expect(docsFacts).toContain('7')
+  })
+
+  it('R29: the export stage renders the task panel when the export task is known', async () => {
+    mocks.taskById.mockReturnValue({
+      taskId: 'task-7',
+      runId: 'run-9',
+      feature: 'checkout',
+      mode: 'localized',
+      status: 'running',
+      createdAt: '',
+      updatedAt: '',
+      downloadReady: false,
+      sessionRef: { agent: 'claude', sessionId: 'sid' },
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'evaluation-export',
+      links: { runId: 'run-9', evaluationTaskId: 'task-7' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'evaluation-export' ? ('running' as const) : ('done' as const),
+        ...(key === 'evaluation-export' ? { evidence: { taskId: 'task-7' } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="evaluation-task-panel"]')).toBeTruthy()
+    // A localized rewrite with a pinned session streams the agent timeline.
+    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBe('evaluation')
   })
 })

@@ -101,7 +101,7 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.logsByTaskId['persisted-running']).toContain('running restored log')
   })
 
-  it('starts an export, streams logs, refreshes on exit, and exposes selection helpers', async () => {
+  it('starts an export, streams logs, refreshes on exit, and exposes lookup helpers', async () => {
     const captured = renderProbe()
     const running = task({ taskId: 'task-1', runId: 'run-1', mode: 'localized', status: 'running' })
     const completed = task({ ...running, status: 'completed', downloadReady: true })
@@ -114,8 +114,9 @@ describe('EvaluationExportProvider', () => {
 
     expect(api.startEvaluationExport).toHaveBeenCalledWith('run-1', 'localized')
     expect(taskSocket('task-1').url).toBe('ws://test/ws/evaluation-exports/task-1')
-    expect(captured.value?.latestTask?.taskId).toBe('task-1')
-    expect(captured.value?.selectedTask?.taskId).toBe('task-1')
+    expect(captured.value?.tasks[0]?.taskId).toBe('task-1')
+    expect(captured.value?.taskById('task-1')?.taskId).toBe('task-1')
+    expect(captured.value?.taskById('missing')).toBeNull()
     expect(captured.value?.taskForRun('run-1')?.taskId).toBe('task-1')
     expect(captured.value?.taskForRun('missing')).toBeNull()
     expect(captured.value?.logsByTaskId['task-1']).toContain('localized output')
@@ -129,23 +130,19 @@ describe('EvaluationExportProvider', () => {
       taskSocket('task-1').fire({ type: 'exit', code: 0 })
       await Promise.resolve()
     })
-    expect(captured.value?.latestTask?.status).toBe('completed')
+    expect(captured.value?.tasks[0]?.status).toBe('completed')
 
+    // watchTask on a task that already streams is a no-op (one socket).
     act(() => {
-      captured.value?.openTask()
+      captured.value?.watchTask('task-1')
     })
-    expect(captured.value?.dialogOpen).toBe(true)
+    expect(exportSockets()).toHaveLength(1)
 
     await act(async () => {
       await captured.value?.downloadTask('task-1')
       await captured.value?.downloadTask('unknown-task')
     })
     expect(api.downloadEvaluationExportTask).toHaveBeenCalledWith(completed)
-
-    act(() => {
-      captured.value?.closeDialog()
-    })
-    expect(captured.value?.dialogOpen).toBe(false)
   })
 
   it('records refresh failures when a task log stream exits before task refresh succeeds', async () => {
@@ -183,7 +180,7 @@ describe('EvaluationExportProvider', () => {
     expect(captured.value?.logsByTaskId['task-string-failure']).toContain('unable to refresh task: offline string')
   })
 
-  it('keeps an explicitly selected remaining task when dismissing another task', async () => {
+  it('keeps the remaining task when dismissing another task', async () => {
     const captured = renderProbe()
     const older = task({ taskId: 'older-task', runId: 'run-old', createdAt: '2026-01-01T00:00:00.000Z' })
     const newer = task({ taskId: 'newer-task', runId: 'run-new', createdAt: '2026-01-02T00:00:00.000Z' })
@@ -196,33 +193,31 @@ describe('EvaluationExportProvider', () => {
       await captured.value?.startExport('run-old', 'raw')
       await captured.value?.startExport('run-new', 'raw')
     })
-    act(() => {
-      captured.value?.openTask('older-task')
-    })
-    expect(captured.value?.selectedTask?.taskId).toBe('older-task')
-    expect(captured.value?.dialogOpen).toBe(true)
 
     await act(async () => {
       await captured.value?.dismissTask('newer-task')
     })
 
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['older-task'])
-    expect(captured.value?.selectedTask?.taskId).toBe('older-task')
-    expect(captured.value?.dialogOpen).toBe(true)
+    expect(captured.value?.taskById('older-task')?.taskId).toBe('older-task')
   })
 
-  it('leaves the dialog closed when opening without any known task', () => {
+  it('watchTask attaches a log stream for a task it did not start (R29 panels)', async () => {
+    const existing = task({ taskId: 'cold-task', runId: 'run-cold', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([existing])
     const captured = renderProbe()
-
-    act(() => {
-      captured.value?.openTask()
+    await act(async () => {
+      await Promise.resolve()
     })
-
-    expect(captured.value?.selectedTask).toBeNull()
-    expect(captured.value?.dialogOpen).toBe(false)
+    // Startup reconciliation already subscribed it once; watchTask stays a no-op.
+    expect(exportSockets()).toHaveLength(1)
+    act(() => {
+      captured.value?.watchTask('cold-task')
+    })
+    expect(exportSockets()).toHaveLength(1)
   })
 
-  it('handles duplicate task subscriptions, string failures, and missing selections', async () => {
+  it('handles duplicate task subscriptions and string failures', async () => {
     vi.useFakeTimers()
     class ThrowingStringWebSocket {
       constructor() {
@@ -240,12 +235,6 @@ describe('EvaluationExportProvider', () => {
       await captured.value?.startExport('run-a', 'raw')
     })
     expect(captured.value?.logsByTaskId['same-task']).toContain('log stream unavailable: socket string failure')
-
-    act(() => {
-      captured.value?.openTask('missing-task')
-    })
-    expect(captured.value?.selectedTask).toBeNull()
-
     expect(captured.value?.logsByTaskId['same-task']).toContain('queued raw output export')
   })
 
@@ -264,18 +253,12 @@ describe('EvaluationExportProvider', () => {
     })
     expect(captured.value?.logsByTaskId['task-3']).toContain('log stream unavailable: socket unavailable')
 
-    act(() => {
-      captured.value?.openTask('task-3')
-    })
-    expect(captured.value?.dialogOpen).toBe(true)
-
     await act(async () => {
       await captured.value?.dismissTask('task-3')
     })
     expect(api.cancelEvaluationExportTask).toHaveBeenCalledWith('task-3')
     expect(captured.value?.tasks).toEqual([])
-    expect(captured.value?.selectedTask).toBeNull()
-    expect(captured.value?.dialogOpen).toBe(false)
+    expect(captured.value?.taskById('task-3')).toBeNull()
     expect(captured.value?.logsByTaskId['task-3']).toBeUndefined()
 
     const socketCaptured = renderProbe()
@@ -362,7 +345,7 @@ describe('EvaluationExportProvider', () => {
     })
 
     expect(api.listEvaluationExportTasks).toHaveBeenCalledTimes(1)
-    expect(captured.value?.latestTask?.taskId).toBe('external-task')
+    expect(captured.value?.tasks[0]?.taskId).toBe('external-task')
     expect(captured.value?.taskForRun('run-external')?.taskId).toBe('external-task')
     expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-task')
   })
@@ -382,7 +365,7 @@ describe('EvaluationExportProvider', () => {
       workspaceSocket().fire({ type: 'features-changed' })
     })
 
-    expect(captured.value?.latestTask?.taskId).toBe('external-completed')
+    expect(captured.value?.tasks.map((item) => item.taskId)).toContain('external-completed')
     expect(FakeWebSocket.instances.map((socket) => socket.url)).toContain('ws://test/ws/evaluation-exports/external-running')
     expect(FakeWebSocket.instances.map((socket) => socket.url)).not.toContain('ws://test/ws/evaluation-exports/external-completed')
   })
@@ -406,7 +389,7 @@ describe('EvaluationExportProvider', () => {
       await Promise.resolve()
     })
 
-    expect(captured.value?.latestTask?.status).toBe('completed')
+    expect(captured.value?.tasks[0]?.status).toBe('completed')
     expect(exportSockets()).toHaveLength(1)
   })
 
@@ -417,18 +400,14 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    act(() => {
-      captured.value?.openTask('delete-me')
-    })
-    expect(captured.value?.dialogOpen).toBe(true)
+    expect(captured.value?.taskById('delete-me')?.taskId).toBe('delete-me')
 
     act(() => {
       workspaceSocket().fire({ type: 'evaluation-export-deleted', taskId: 'delete-me' })
     })
 
     expect(captured.value?.tasks).toEqual([])
-    expect(captured.value?.selectedTask).toBeNull()
-    expect(captured.value?.dialogOpen).toBe(false)
+    expect(captured.value?.taskById('delete-me')).toBeNull()
   })
 
   it('keeps known tasks when periodic discovery fails', async () => {

@@ -76,11 +76,12 @@ describe('FlightsPill', () => {
     expect(document.body.querySelector('[data-testid="flights-task-menu"]')?.textContent).toContain('npx canary-lab flight')
   })
 
-  it('renders one mini-rail cell per USER-VISIBLE stage (similarity hidden, run+heal merged)', () => {
+  it('renders one mini-rail cell per USER-VISIBLE stage (plumbing hidden, pairs merged)', () => {
     render([flight({})])
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const rail = document.body.querySelector('[data-testid="stage-mini-rail"]')
-    expect(rail?.children.length).toBe(FLIGHT_STAGE_KEYS.length - 2)
+    // similarity hidden; run+heal, scaffold+env-capture, docs+prd-summary merged (R21/R22/R32/R33).
+    expect(rail?.children.length).toBe(FLIGHT_STAGE_KEYS.length - 4)
   })
 
   // R26 — the pill is the one live indicator for the absorbed surfaces.

@@ -152,7 +152,7 @@ describe('CoverageLedgerPage — flight generating banner (R14)', () => {
     })
     await act(async () => { await Promise.resolve() })
     const banner = container.querySelector('[data-testid="coverage-flight-generating"]')
-    expect(banner?.textContent).toContain('Coverage mapping is running')
+    expect(banner?.textContent).toContain('Test authoring & coverage is running')
     expect(banner?.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('generating')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="coverage-open-flight"]')?.click()
