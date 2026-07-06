@@ -615,9 +615,11 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
     <div>
       {saved ? (
         <>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(52,211,153)' }}>✓ Saved as overlay</div>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6, color: 'rgb(52,211,153)' }}>
+            ✓ Saved — {m.feature} can now run in parallel
+          </div>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
-            The verified port rewrite is captured as an ephemeral overlay. <b style={{ color: 'var(--text-secondary)' }}>{m.feature}</b> now boots concurrently — parallel runs and benchmark arms get distinct ports — and your product repo is never modified. On every run the overlay is applied into a per-run worktree before boot and reverse-applied at teardown.
+            Parallel runs and benchmark arms each get their own ports. Your repo is never modified.
           </p>
         </>
       ) : (
@@ -648,17 +650,24 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
       )}
       {saved ? (
         <>
+          {/* R23 (canary-first-flight): say what the saved artifact IS and when
+              it acts — labeled rows, not a bare path + checkmark column. */}
           <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginTop: 16 }}>
             <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
-              Overlay
+              How this is used
             </div>
-            <code style={{ ...mono, display: 'block', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{overlayPath}</code>
-            {m.repos.map((r) => (
-              <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', padding: '3px 0' }}>
-                <span style={{ color: 'rgb(52,211,153)' }}>✓</span>
-                <span>{r.name}</span>
-              </div>
-            ))}
+            <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr)', columnGap: 16, rowGap: 6, alignItems: 'baseline' }}>
+              <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Applies to</span>
+              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {m.repos.map((r) => r.name).join(', ')}
+              </span>
+              <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>When</span>
+              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                Applied to a per-run copy before each boot, removed at teardown
+              </span>
+              <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Stored in</span>
+              <code style={{ ...mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="Inside your canary workspace — not the product repo">{overlayPath}</code>
+            </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
             <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>

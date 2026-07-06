@@ -9,6 +9,7 @@ import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-sessi
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
+import type { SpecsCoveragePass, SpecsCoverageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps } from './context'
 
@@ -169,11 +170,27 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
 
     let ledger = compute(m.feature)
     let validationErrors = ''
+    // The loop's structured live shape (R27): every sub-phase transition is
+    // published via ctx.setProgress so the flight view renders the
+    // authoring↔mapping loop instead of parsing log text.
+    const passes: SpecsCoveragePass[] = []
+    const publish = (pass: number, phase: SpecsCoverageProgress['phase']): void => {
+      ctx.setProgress({
+        pass,
+        maxPasses: MAX_ITERATIONS,
+        phase,
+        coveragePct: ledger.coveragePct,
+        target,
+        gapsOpen: gapRows(ledger).length,
+        passes: [...passes],
+      } satisfies SpecsCoverageProgress)
+    }
     for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration += 1) {
       if (targetMet(ledger, target)) {
         return { kind: 'done', evidence: ledgerEvidence(ledger) }
       }
       ctx.appendLog(`[specs] iteration ${iteration}: ${ledger.coveragePct}% / ${target}% — ${gapRows(ledger).length} gap(s)\n`)
+      publish(iteration, 'authoring')
 
       await spawnAgent({
         prompt: buildSpecsPrompt({
@@ -195,10 +212,12 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       // The agent edited <featureDir>/e2e/*.spec.ts in place; re-read what
       // landed on disk and gate it through the same draft validation as the
       // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
+      publish(iteration, 'validating')
       const applied = applyExternalDraftFiles({ featureDir })
       if (!applied.ok) {
         ctx.appendLog(`[specs] spec files rejected: ${applied.error}\n`)
         validationErrors = applied.error
+        passes.push({ pass: iteration, note: 'spec files rejected' })
         continue // burns an iteration; the bound keeps this finite
       }
       ctx.appendLog(`[specs] validated ${applied.written.length} file(s)\n`)
@@ -212,10 +231,12 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         validationErrors = dryRun.errors
         ctx.appendLog(`[specs] dry-run validation failed:\n${dryRun.errors.slice(0, MAX_VALIDATION_ERROR_CHARS)}\n`)
         ledger = compute(m.feature)
+        passes.push({ pass: iteration, note: 'specs failed to compile/list' })
         continue
       }
       validationErrors = ''
 
+      publish(iteration, 'mapping')
       await runEngine({
         featuresDir: deps.featuresDir,
         logsDir: deps.logsDir,
@@ -233,6 +254,10 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       })
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
       ledger = compute(m.feature)
+      passes.push({ pass: iteration, coveragePct: ledger.coveragePct, gapsOpen: gapRows(ledger).length })
+      // Settle the pass in the published shape (phase stays 'mapping' — the
+      // next loop head flips it to 'authoring' if another pass starts).
+      publish(iteration, 'mapping')
     }
 
     if (targetMet(ledger, target)) return { kind: 'done', evidence: ledgerEvidence(ledger) }

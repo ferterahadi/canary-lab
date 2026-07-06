@@ -80,6 +80,10 @@ export interface StageContext {
   flightDir: string
   /** Append to the current stage's display log (persists + broadcasts). */
   appendLog(chunk: string): void
+  /** Publish the stage's structured live progress (persists + broadcasts,
+   *  same channel as appendLog). The last snapshot survives settle as the
+   *  audit trail — see FlightStage.progress. */
+  setProgress(progress: unknown): void
   /** Merge flight-level fields an adapter is allowed to settle: deliverable
    *  links, the run verdict, and the target feature (similarity re-pointing
    *  the flight at an existing feature). */
@@ -230,7 +234,13 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       endedAt: undefined,
       error: undefined,
       runVerdict: undefined,
-      links: undefined,
+      // A jump straight to evaluation-export was validated AGAINST the old
+      // record's run — that runId is the stage's input, so it must survive
+      // the reset (the deliverable links are dropped and regenerated).
+      links:
+        mode === 'jump' && args.fromStage === 'evaluation-export' && existing.links?.runId
+          ? { runId: existing.links.runId }
+          : undefined,
     }
     store.save(manifest)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
@@ -401,6 +411,9 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         appendLog: (chunk) => {
           const cur = read().stages.find((s) => s.key === stage.key)
           patchStage(stage.key, { log: (cur?.log ?? '') + chunk })
+        },
+        setProgress: (progress) => {
+          patchStage(stage.key, { progress })
         },
         patchFlight: (patch) => {
           const cur = read()

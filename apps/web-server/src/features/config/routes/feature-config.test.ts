@@ -244,6 +244,28 @@ describe('feature.config endpoints', () => {
     }
   })
 
+  it('re-pins the feature to the repo’s current branch', async () => {
+    const repo = buildGitRepo('repo-pin')
+    // Feature is pinned to feature/demo, but the repo sits on main.
+    buildFeature('branchy-pin', {
+      config: `module.exports = { config: { name: 'branchy-pin', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)}, branch: 'feature/demo' }], featureDir: __dirname } }`,
+    })
+    const events: WorkspaceEvent[] = []
+    const app = await makeApp({ events })
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/branchy-pin/pin-current-branches' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ name: 'branchy-pin', pins: [{ name: 'app', branch: 'main' }] })
+      // Config rewritten so the pin now matches what's checked out.
+      const onDisk = fs.readFileSync(path.join(featuresDir, 'branchy-pin', 'feature.config.cjs'), 'utf-8')
+      expect(onDisk).toContain("branch: 'main'")
+      expect(onDisk).not.toContain('feature/demo')
+      expect(events).toContainEqual({ type: 'features-changed' })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('returns git status for an arbitrary workspace repo path', async () => {
     const repo = buildGitRepo('workspace-repo')
     const app = await makeApp()

@@ -5,8 +5,10 @@
 import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
 import type {
   FlightCheckpointResponse as FlightCheckpointResponseT,
+  FlightEntryOptions as FlightEntryOptionsT,
   FlightIndexEntry as FlightIndexEntryT,
   FlightManifest as FlightManifestT,
+  FlightStageKey as FlightStageKeyT,
 } from '../../../../../shared/flights/types'
 import type {
   AuditList,
@@ -1417,6 +1419,48 @@ export function asRepoCollision(err: unknown): RepoCollisionChoice | null {
   return null
 }
 
+// One drifted repo from a start-time branch check: pinned `expected` vs the
+// `current` checkout (null when not a git repo; `detached` = detached HEAD).
+export interface RepoBranchMismatchRow {
+  name: string
+  path: string
+  expected: string
+  current: string | null
+  detached: boolean
+  isGitRepo: boolean
+}
+
+export interface RepoBranchMismatch {
+  type: 'repo_branch_mismatch'
+  feature: string
+  repos: RepoBranchMismatchRow[]
+  error: string
+}
+
+/** Returns the branch-mismatch payload when `err` is the 409 raised because the
+ *  feature's repos aren't on their configured branch, else null. */
+export function asBranchMismatch(err: unknown): RepoBranchMismatch | null {
+  if (err instanceof ApiError && err.status === 409 && err.body && typeof err.body === 'object'
+    && (err.body as { type?: string }).type === 'repo_branch_mismatch') {
+    return err.body as RepoBranchMismatch
+  }
+  return null
+}
+
+// Re-pin every repo's configured branch to whatever it's currently checked out
+// on (the inverse of checkoutRepoBranch). Future runs then test those branches.
+export function pinFeatureBranchesToCurrent(
+  feature: string,
+  opts?: ClientOptions,
+): Promise<{ name: string; pins: Array<{ name: string; branch: string }> }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/pin-current-branches`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
 export function startRun(
   feature: string,
   opts?: ClientOptions & { env?: string; isolation?: 'worktree' | 'queue'; mode?: 'test' | 'boot' },
@@ -1784,7 +1828,51 @@ export type {
   FlightStatus,
   FlightCheckpoint,
   FlightCheckpointResponse,
+  FlightEntryOptions,
+  FlightStageEntryOption,
+  SpecsCoveragePass,
+  SpecsCoverageProgress,
 } from '../../../../../shared/flights/types'
+
+/** Stage-entry menu for one feature: latest flight record, per-stage
+ *  allowed/blocked verdicts (server-computed), and the start-form prefill. */
+export function getFlightEntryOptions(
+  feature: string,
+  env?: string,
+  opts?: ClientOptions,
+): Promise<FlightEntryOptionsT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const params = new URLSearchParams({ feature })
+  if (env) params.set('env', env)
+  return request<FlightEntryOptionsT>(
+    `${baseUrl}/api/flights/entry?${params.toString()}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export interface StartFlightBody {
+  feature: string
+  repoPaths: string[]
+  description: string
+  env?: string
+  coverageTarget?: number
+  /** Required when the feature already has a flight record. */
+  mode?: 'continue' | 'redo' | 'jump'
+  /** Stage to start at (mode "jump", or fresh stage entry). */
+  fromStage?: FlightStageKeyT
+}
+
+/** Start / continue / redo / jump a flight (POST /api/flights, non-blocking —
+ *  the 201 manifest is the just-kicked conductor's snapshot). */
+export function startFlight(body: StartFlightBody, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    fetchImpl,
+  )
+}
 
 export function listFlights(opts?: ClientOptions): Promise<FlightIndexEntryT[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

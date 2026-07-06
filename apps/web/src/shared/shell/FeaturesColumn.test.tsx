@@ -157,6 +157,39 @@ describe('FeaturesColumn coverage action (R8)', () => {
   })
 })
 
+describe('FeaturesColumn flight action (R25)', () => {
+  const feature = (name: string) => ({ name, repos: [], envs: [] })
+
+  it('opens the flight launcher for the row and selects the feature', () => {
+    const onStartFlight = vi.fn()
+    const onSelectFeature = vi.fn()
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          onSelectFeature={onSelectFeature}
+          onStartFlight={onStartFlight}
+        />,
+      )
+    })
+    act(() => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-action-alpha"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(onSelectFeature).toHaveBeenCalledWith('alpha')
+    expect(onStartFlight).toHaveBeenCalledWith('alpha')
+  })
+
+  it('omits the flight action when no handler is provided', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
+      )
+    })
+    expect(container.querySelector('[data-testid="flight-action-alpha"]')).toBeNull()
+  })
+})
+
 function featureRow(name: string): HTMLLIElement {
   const row = [...container.querySelectorAll('li.feature-row')]
     .find((li) => li.textContent?.includes(name))

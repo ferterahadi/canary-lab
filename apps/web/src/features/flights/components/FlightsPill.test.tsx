@@ -5,7 +5,8 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightIndexEntry } from '../../../shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
-import { FlightsPill } from './FlightsPill'
+import type { FeatureActivity } from '../state/feature-activity'
+import { FlightsPill, featureChipState } from './FlightsPill'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -75,10 +76,79 @@ describe('FlightsPill', () => {
     expect(document.body.querySelector('[data-testid="flights-task-menu"]')?.textContent).toContain('npx canary-lab flight')
   })
 
-  it('renders one mini-rail cell per stage', () => {
+  it('renders one mini-rail cell per USER-VISIBLE stage (similarity hidden, run+heal merged)', () => {
     render([flight({})])
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const rail = document.body.querySelector('[data-testid="stage-mini-rail"]')
-    expect(rail?.children.length).toBe(FLIGHT_STAGE_KEYS.length)
+    expect(rail?.children.length).toBe(FLIGHT_STAGE_KEYS.length - 2)
+  })
+
+  // R26 — the pill is the one live indicator for the absorbed surfaces.
+
+  it('lights up from activity alone (a standalone run, zero flights)', () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'running', runId: 'r1' }]])
+    act(() => { root.render(<FlightsPill flights={[]} activity={activity} onOpenFlight={vi.fn()} />) })
+    expect(container.textContent).toContain('Flights · 1 active')
+    expect(container.querySelector('[data-testid="flights-pill-count"]')?.textContent).toBe('1')
+  })
+
+  it('dedupes a flight and its own stage job to one active feature', () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'portifying', workflowId: 'wf1' }]])
+    act(() => { root.render(<FlightsPill flights={[flight({})]} activity={activity} onOpenFlight={vi.fn()} />) })
+    expect(container.textContent).toContain('Flights · 1 active')
+  })
+
+  it("the feature's chip narrates the live activity verb over the flight status", () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'authoring', draftId: 'd1' }]])
+    act(() => { root.render(<FlightsPill flights={[flight({ status: 'done' })]} activity={activity} onOpenFlight={vi.fn()} />) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('authoring')
+  })
+
+  it('with no activity the chip shows the LAST state (done / failed / aborted)', () => {
+    act(() => { root.render(<FlightsPill flights={[flight({ status: 'failed' })]} onOpenFlight={vi.fn()} />) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('failed')
+  })
+
+  it('a parked checkpoint outranks live activity (the human is the blocker)', () => {
+    const chip = featureChipState(
+      { status: 'waiting-for-approval', currentStage: 'portify' },
+      { kind: 'portifying', workflowId: 'wf1' },
+    )
+    expect(chip.label).toBe('to approve')
+    expect(chip.rank).toBe(0)
+  })
+
+  it('activity on a feature with no flight gets a row that opens the real surface', () => {
+    const onOpenActivity = vi.fn()
+    const activity = new Map<string, FeatureActivity>([['pay', { kind: 'portifying', workflowId: 'wf9' }]])
+    act(() => { root.render(<FlightsPill flights={[flight({})]} activity={activity} onOpenFlight={vi.fn()} onOpenActivity={onOpenActivity} />) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="activity-open-pay"]')
+    expect(row).toBeTruthy()
+    expect(row?.textContent).toContain('no flight')
+    act(() => { row?.click() })
+    expect(onOpenActivity).toHaveBeenCalledWith('pay', { kind: 'portifying', workflowId: 'wf9' })
+  })
+
+  it('live rows sort above resting flights (worst-first)', () => {
+    const activity = new Map<string, FeatureActivity>([['live-f', { kind: 'running', runId: 'r1' }]])
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[
+            flight({ flightId: 'fl_done', id: 'fl_done', feature: 'done-f', status: 'done' }),
+            flight({ flightId: 'fl_live', id: 'fl_live', feature: 'live-f', status: 'done' }),
+          ]}
+          activity={activity}
+          onOpenFlight={vi.fn()}
+        />,
+      )
+    })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    const rows = [...document.body.querySelectorAll('[data-testid^="flight-open-"]')]
+    // The done flight whose feature is running again floats above the resting one.
+    expect(rows[0]?.getAttribute('data-testid')).toBe('flight-open-fl_live')
   })
 })

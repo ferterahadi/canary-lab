@@ -431,6 +431,21 @@ body {
   outline: none;
 }
 
+/* Branch choice cards in the run-start branch-mismatch dialog — whole card is
+   a button. Border colour is set inline (accent for the recommended option);
+   hover only lifts the background so the accent border is preserved. */
+.cl-branch-option {
+  background: var(--bg-surface);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+.cl-branch-option:hover:not(:disabled),
+.cl-branch-option:focus-visible {
+  background: var(--bg-hover);
+  outline: none;
+}
+
 .cl-sort-th {
   transition: color 120ms ease;
 }

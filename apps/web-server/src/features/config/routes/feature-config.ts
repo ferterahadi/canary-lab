@@ -266,6 +266,64 @@ export async function featureConfigRoutes(
     },
   )
 
+  // Re-pin every repo's configured branch to whatever it's currently on. The
+  // inverse of the checkout route: instead of moving working trees onto the
+  // pinned branch, adopt the current branches as the new pins so future runs
+  // test them. Powers the "Pin feature to current branches" action on the
+  // run-start branch-mismatch dialog. 409 if any repo has no branch to pin.
+  app.post<{ Params: { name: string } }>(
+    '/api/features/:name/pin-current-branches',
+    async (req, reply) => {
+      const features = loadFeatures(deps.featuresDir)
+      const feature = features.find((f) => f.name === req.params.name)
+      if (!feature?.featureDir) {
+        reply.code(404)
+        return { error: 'feature not found' }
+      }
+      const cfg = findExistingConfig(feature.featureDir, FEATURE_CONFIG_NAMES)
+      if (!cfg) {
+        reply.code(404)
+        return { error: 'config file not found' }
+      }
+      const pins: Array<{ name: string; branch: string }> = []
+      for (const repo of feature.repos ?? []) {
+        if (typeof repo.localPath !== 'string') continue
+        const status = await getGitStatus(resolveRepoPath(repo.localPath))
+        if (!status.isGitRepo || status.detached || !status.currentBranch) {
+          reply.code(409)
+          return { error: `${repo.name}: no branch to pin (detached HEAD or not a git repository)` }
+        }
+        pins.push({ name: repo.name, branch: status.currentBranch })
+      }
+      const source = fs.readFileSync(cfg.path, 'utf-8')
+      const { value } = readFeatureConfig(source)
+      const repos = value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as { repos?: unknown }).repos
+        : undefined
+      if (!Array.isArray(repos)) {
+        reply.code(400)
+        return { error: 'config has no editable repos array' }
+      }
+      for (const entry of repos) {
+        if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+          const rec = entry as { name?: unknown; branch?: unknown }
+          const pin = pins.find((p) => p.name === rec.name)
+          if (pin) rec.branch = pin.branch
+        }
+      }
+      let next: string
+      try {
+        next = writeFeatureConfig(source, value)
+      } catch (err) {
+        reply.code(400)
+        return { error: (err as Error).message }
+      }
+      fs.writeFileSync(cfg.path, next)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+      return { name: feature.name, pins }
+    },
+  )
+
   app.delete<{ Params: { name: string }; Body: { confirmName?: string } }>(
     '/api/features/:name',
     async (req, reply) => {

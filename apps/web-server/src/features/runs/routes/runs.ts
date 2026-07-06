@@ -6,7 +6,7 @@ import type { RunStore, OrchestratorLike, RestartHealResult, RestartRunResult, S
 import { loadFeatures } from '../../config/logic/feature-loader'
 import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import type { ClientKind } from '../../../../../../shared/run-mode'
-import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
+import { getGitRoot, resolveRepoPath, type RepoBranchMismatch } from '../../../shared/git-repo'
 import { removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees, isUnder } from '../../runs/logic/runtime/worktree-inventory'
 import { launchEditorDir } from '../../../shared/editor-launch'
@@ -287,7 +287,15 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
         ? (err as { statusCode: number }).statusCode
         : 500
       reply.code(code)
-      return { error: err instanceof Error ? err.message : String(err) }
+      const message = err instanceof Error ? err.message : String(err)
+      // A configured-branch mismatch carries structured rows — surface them as a
+      // typed 409 (like repo_collision_requires_choice) so the UI can offer to
+      // switch the repos onto the pinned branch, or re-pin the feature.
+      const mismatch = (err as { branchMismatch?: RepoBranchMismatch[] }).branchMismatch
+      if (Array.isArray(mismatch) && mismatch.length > 0) {
+        return { type: 'repo_branch_mismatch' as const, feature, repos: mismatch, error: message }
+      }
+      return { error: message }
     }
   })
 
