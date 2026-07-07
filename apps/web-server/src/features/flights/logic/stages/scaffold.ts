@@ -30,6 +30,14 @@ function withFeatureName(configSource: string, feature: string): string {
   return configSource.replace(/(\bname\s*:\s*)(['"`])(?:(?!\2).)*\2/, `$1'${feature}'`)
 }
 
+/** Injects `group:` after `name:` when the flight carries one (plan-features
+ *  launches tag sibling features with a shared group) — the scout draft never
+ *  contains the field, so this is a plain insert, not a replace. */
+function withGroup(configSource: string, group: string | undefined): string {
+  if (!group) return configSource
+  return configSource.replace(/(\bname\s*:\s*(['"`])(?:(?!\2).)*\2\s*,?)/, `$1\n  group: '${group}',`)
+}
+
 export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
   const approvalCheckpoint = (ctx: StageContext, extra?: { error?: string }): FlightCheckpoint => {
     const m = ctx.manifest()
@@ -77,7 +85,7 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     }
     if (fs.existsSync(configPath)) {
       const existing = fs.readFileSync(configPath, 'utf-8')
-      if (existing === withFeatureName(draft.configSource, m.feature) || marker === m.feature) {
+      if (existing === withGroup(withFeatureName(draft.configSource, m.feature), m.opts.group) || marker === m.feature) {
         writeMarker(m.feature)
         return { ok: true, featureDir: featureDirFor(deps, m.feature), reused: true }
       }
@@ -100,7 +108,7 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     })
     if (!created.ok) return { ok: false, outcome: { kind: 'failed', error: created.error } }
 
-    const finalConfig = withFeatureName(draft.configSource, feature)
+    const finalConfig = withGroup(withFeatureName(draft.configSource, feature), m.opts.group)
     fs.writeFileSync(path.join(created.featureDir, 'feature.config.cjs'), finalConfig)
     try {
       readFeatureConfig(finalConfig)

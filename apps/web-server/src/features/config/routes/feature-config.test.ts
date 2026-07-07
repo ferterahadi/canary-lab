@@ -512,6 +512,25 @@ export default defineConfig({ testDir: './e2e' })`,
     }
   })
 
+  it('PUT emits features-changed so an open editor refetches live', async () => {
+    buildFeature('gamma-evt', {
+      playwright: `module.exports = { testDir: './e2e' }`,
+    })
+    const events: WorkspaceEvent[] = []
+    const app = await makeApp({ events })
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/features/gamma-evt/playwright',
+        payload: { value: { testDir: './tests' } },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(events).toContainEqual({ type: 'features-changed' })
+    } finally {
+      await app.close()
+    }
+  })
+
   it('PUT 404 for unknown feature', async () => {
     const app = await makeApp()
     try {

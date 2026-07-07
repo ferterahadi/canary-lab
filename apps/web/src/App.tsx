@@ -22,6 +22,7 @@ import { useFeatureActivity, type FeatureActivity } from './features/flights/sta
 import { STAGE_LABEL } from './features/flights/components/stage-meta'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { ToastHost, type ToastItem } from './features/config/components/atoms'
+import { AGGREGATE_TOAST_ID, attentionKey, flightNeedsAttention } from './features/flights/state/flight-toasts'
 import type { Feature, VersionStatus } from './shared/api/types'
 import type { FlightIndexEntry } from './shared/api/client'
 import { readPersistedView, persistView, onViewChangedInOtherTab } from './shared/lib/workspace-view-state'
@@ -366,45 +367,75 @@ export function App() {
     return [...seen.values()]
   }, [features])
 
-  // R51: checkpoint/pause toasts — diff flight statuses on every index refresh
-  // and toast the transitions INTO waiting-for-approval (or into a non-user
-  // pause). Suppressed while that flight's detail is already on screen; the
-  // initial load seeds silently (no toast storm on refresh).
+  // R51/R68: attention toasts — diff flight statuses on every index refresh and
+  // toast a flight the moment it starts needing the user (waiting-for-approval,
+  // or a non-user / non-queue pause). These are STICKY (never auto-dismiss) so a
+  // laptop-sleep-reconnect nag isn't gone by the time the user looks. R68 fixes:
+  //  - the seed pass no longer swallows already-waiting flights: on first load,
+  //    if N flights already need input, fire ONE aggregate sticky toast (a storm
+  //    of per-flight toasts on boot would be noise);
+  //  - a flight FIRST SEEN in an attention state after seed fires its own toast
+  //    (the old code skipped `was === undefined`, so a reconnect that revealed a
+  //    freshly-parked flight never toasted);
+  //  - queued flights never toast (they wait on capacity, not the user).
+  // An individual flight's toast is suppressed only while THAT flight's detail is
+  // on screen; the aggregate + other flights' toasts still show.
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const dismissToast = useCallback((id: string) => setToasts((t) => t.filter((x) => x.id !== id)), [])
-  const prevFlightStatusRef = useRef<Map<string, string> | null>(null)
+  const prevFlightKeyRef = useRef<Map<string, string> | null>(null)
+  const openFlight = useCallback((flightId: string) => {
+    setSelectedFlightId(flightId)
+    setView('flights')
+  }, [])
   useEffect(() => {
-    const prev = prevFlightStatusRef.current
-    prevFlightStatusRef.current = new Map(flights.map((f) => [f.flightId, f.status]))
-    if (prev === null) return
-    for (const f of flights) {
-      const was = prev.get(f.flightId)
-      if (was === undefined || was === f.status) continue
-      if (view === 'flights' && selectedFlightId === f.flightId) continue
-      const stageLabel = f.currentStage ? STAGE_LABEL[f.currentStage] ?? f.currentStage : null
-      if (f.status === 'waiting-for-approval') {
+    const prev = prevFlightKeyRef.current
+    prevFlightKeyRef.current = new Map(flights.map((f) => [f.flightId, attentionKey(f)]))
+
+    // Seed pass (first index load): don't fire a per-flight toast for every
+    // already-parked flight — collapse them into a single aggregate sticky
+    // toast so a fresh page never opens under a wall of notifications.
+    if (prev === null) {
+      const waiting = flights.filter(flightNeedsAttention)
+      if (waiting.length > 0) {
         setToasts((t) => [
-          ...t.filter((x) => x.id !== f.flightId),
+          ...t.filter((x) => x.id !== AGGREGATE_TOAST_ID),
           {
-            id: f.flightId,
-            title: `${f.feature} needs input`,
-            body: stageLabel ? `${stageLabel} is waiting for you` : 'A checkpoint is waiting for you',
-            onClick: () => { setSelectedFlightId(f.flightId); setView('flights') },
-          },
-        ])
-      } else if (f.status === 'paused' && f.pauseReason !== 'user') {
-        setToasts((t) => [
-          ...t.filter((x) => x.id !== f.flightId),
-          {
-            id: f.flightId,
-            title: `${f.feature} paused`,
-            body: stageLabel ? `${stageLabel} failed — open to resume` : 'A stage failed — open to resume',
-            onClick: () => { setSelectedFlightId(f.flightId); setView('flights') },
+            id: AGGREGATE_TOAST_ID,
+            title: `${waiting.length} flight${waiting.length === 1 ? '' : 's'} need your input`,
+            body: 'Open the flights view to respond',
+            sticky: true,
+            onClick: () => setView('flights'),
           },
         ])
       }
+      return
     }
-  }, [flights, view, selectedFlightId])
+
+    for (const f of flights) {
+      // A flight that is first seen (post-seed) already in an attention state,
+      // or that transitions into one, both qualify. Skip when the attention key
+      // is unchanged (already toasted) and when the flight no longer needs input.
+      const was = prev.get(f.flightId)
+      if (was === attentionKey(f)) continue
+      if (!flightNeedsAttention(f)) continue
+      // Suppress only while THIS flight's detail is on screen.
+      if (view === 'flights' && selectedFlightId === f.flightId) continue
+      const stageLabel = f.currentStage ? STAGE_LABEL[f.currentStage] ?? f.currentStage : null
+      const isCheckpoint = f.status === 'waiting-for-approval'
+      setToasts((t) => [
+        ...t.filter((x) => x.id !== f.flightId),
+        {
+          id: f.flightId,
+          title: isCheckpoint ? `${f.feature} needs input` : `${f.feature} paused`,
+          body: isCheckpoint
+            ? (stageLabel ? `${stageLabel} is waiting for you` : 'A checkpoint is waiting for you')
+            : (stageLabel ? `${stageLabel} failed — open to resume` : 'A stage failed — open to resume'),
+          sticky: true,
+          onClick: () => openFlight(f.flightId),
+        },
+      ])
+    }
+  }, [flights, view, selectedFlightId, openFlight])
 
   // Initial version check on mount.
   useEffect(() => { refreshVersion() }, [refreshVersion])

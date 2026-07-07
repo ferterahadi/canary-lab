@@ -63,6 +63,44 @@ describe('GeneralTab', () => {
     expect(putFeatureConfigDoc).toHaveBeenCalledWith('old_feature', expect.objectContaining({ name: 'new_feature' }))
     expect(onFeatureRenamed).toHaveBeenCalledWith('new_feature')
   })
+
+  it('round-trips the group field, and drops the key when cleared', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(doc('feat', { group: 'checkout' }))
+    vi.mocked(putFeatureConfigDoc).mockResolvedValue(doc('feat', { group: 'billing' }))
+
+    await act(async () => {
+      root.render(<GeneralTab feature="feat" />)
+    })
+
+    // Inputs in DOM order: Name (0), Group (1) — Description is a <textarea>.
+    const groupInput = container.querySelectorAll('input')[1] as HTMLInputElement
+    expect(groupInput.value).toBe('checkout')
+
+    await act(async () => {
+      setInputValue(groupInput, 'billing')
+      groupInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await clickSave()
+    expect(putFeatureConfigDoc).toHaveBeenCalledWith('feat', expect.objectContaining({ group: 'billing' }))
+
+    // Clearing the field removes the key rather than persisting an empty string.
+    vi.mocked(putFeatureConfigDoc).mockClear()
+    await act(async () => {
+      setInputValue(groupInput, '')
+      groupInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await clickSave()
+    const savedValue = vi.mocked(putFeatureConfigDoc).mock.calls[0][1] as Record<string, unknown>
+    expect('group' in savedValue).toBe(false)
+  })
+
+  async function clickSave(): Promise<void> {
+    const save = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Save')
+    expect(save).toBeTruthy()
+    await act(async () => {
+      save!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+  }
 })
 
 function setInputValue(input: HTMLInputElement, value: string): void {
@@ -70,7 +108,7 @@ function setInputValue(input: HTMLInputElement, value: string): void {
   setter?.call(input, value)
 }
 
-function doc(name: string): ParsedConfigDoc {
+function doc(name: string, extra: { group?: string } = {}): ParsedConfigDoc {
   return {
     path: `/features/${name}/feature.config.cjs`,
     format: 'cjs',
@@ -79,6 +117,7 @@ function doc(name: string): ParsedConfigDoc {
       value: {
         name,
         description: 'desc',
+        ...(extra.group !== undefined ? { group: extra.group } : {}),
         envs: ['local'],
         repos: [],
         featureDir: { $expr: '__dirname' },

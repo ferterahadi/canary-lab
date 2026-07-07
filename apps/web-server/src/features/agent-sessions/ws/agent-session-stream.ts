@@ -196,6 +196,25 @@ export async function agentSessionStreamRoutes(
     },
   )
 
+  // Plan-features agent session — same ref-file convention, under the plan
+  // task's record dir (logs/flight-plans/<taskId>/). The new-flight dialog
+  // watches the breakdown agent think here before the proposal lands (R54).
+  app.get<{ Params: { taskId: string } }>(
+    '/ws/flight-plans/:taskId/agent-session',
+    { websocket: true },
+    (socket, req) => {
+      const dir = path.join(deps.logsDir, 'flight-plans', req.params.taskId)
+      const handle = tailAgentSession({
+        ref: resolveWorkflowAgentRef(dir) ?? { agent: 'claude', sessionId: '', logPath: '' },
+        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
+        onEvent: (event) => sendJson(socket, { type: 'event', event }),
+        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+        discoverRef: () => resolveWorkflowAgentRef(dir),
+      })
+      socket.on('close', () => handle.close())
+    },
+  )
+
   // Port-ification agent session — same ref-file convention as the benchmark,
   // under the portify workflow dir.
   app.get<{ Params: { workflowId: string } }>(

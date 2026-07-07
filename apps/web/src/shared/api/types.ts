@@ -63,6 +63,9 @@ export interface FeatureDirtyState {
 export interface Feature {
   name: string
   description?: string
+  /** Optional grouping label — features sharing a group render under one
+   *  section in the UI. Absent when the feature declares no group. */
+  group?: string
   repos: FeatureRepo[]
   envs: string[]
   /** A saved port overlay exists (features/<feature>/portify/) → boots

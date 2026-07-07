@@ -10,6 +10,7 @@ import { FlightRunStore, type FlightStore } from '../logic/store'
 import {
   FlightConflictError,
   FlightExistsError,
+  FlightFrozenError,
   FlightStageEntryError,
   startFlight,
   resumeFlight,
@@ -17,7 +18,9 @@ import {
   abortFlight,
   pauseFlight,
   redoFlight,
-  patchFlightMetadata,
+  deleteFlight,
+  enqueueFlight,
+  drainQueuedFlights,
   type FlightConductorDeps,
   type FlightEntryMode,
   type StageAdapters,
@@ -31,6 +34,9 @@ import {
   type FlightStageEntryOption,
   type FlightStageKey,
 } from '../logic/types'
+import { deriveFeatureSlug, type PlannedFeature } from '../../../../../../shared/flights/types'
+import { PlanFeaturesStore, startPlanFeatures } from '../logic/plan-features'
+import type { FlightAgentSpawner } from '../logic/stages/context'
 import { loadFeatures } from '../../config/logic/feature-loader'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
@@ -44,6 +50,11 @@ export interface FlightRouteDeps {
   /** Shared store (so WS + restart-reconcile see the same instance). Omitted
    *  in tests → a fresh file-backed store over logsDir. */
   flightStore?: FlightStore
+  /** Shared plan-features store (boot reconcile owns it). Omitted in tests →
+   *  a fresh file-backed store over logsDir. */
+  planStore?: PlanFeaturesStore
+  /** Test seam for the plan-features agent spawn. */
+  planAgent?: FlightAgentSpawner
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -108,6 +119,7 @@ function expandHome(p: string): string {
 
 export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps): Promise<void> {
   const store = deps.flightStore ?? new FlightRunStore(deps.logsDir)
+  const planStore = deps.planStore ?? new PlanFeaturesStore(deps.logsDir)
   const conductorDeps: FlightConductorDeps = {
     store,
     adapters: deps.adapters,
@@ -115,7 +127,18 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     validateStageEntry: buildStageEntryValidator(deps.featuresDir),
   }
 
-  app.get('/api/flights', async () => ({ flights: store.list() }))
+  // One row per feature: the invariant is one flight record per feature, but
+  // pre-invariant history left superseded records in the index — collapse to
+  // the latest (list is newest-first) instead of destructively pruning disk.
+  app.get('/api/flights', async () => {
+    const seen = new Set<string>()
+    const flights = store.list().filter((e) => {
+      if (seen.has(e.feature)) return false
+      seen.add(e.feature)
+      return true
+    })
+    return { flights }
+  })
 
   // Stage-entry menu for one feature (the UI's "flight from here" dialog).
   // Static segment, so it never shadows /api/flights/:id.
@@ -173,10 +196,6 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           : null,
         active: manifest ? isActiveFlightStatus(manifest.status) : false,
         canContinue: manifest?.status === 'paused',
-        editable: {
-          description: !manifest || !isActiveFlightStatus(manifest.status),
-          repoPaths: !manifest || !isActiveFlightStatus(manifest.status),
-        },
         prefill: {
           repoPaths: manifest?.repoPaths ?? configRepoPaths,
           description: manifest?.description ?? '',
@@ -228,12 +247,21 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       reply.code(400)
       return { error: `invalid fromStage: ${body.fromStage} (expected one of ${FLIGHT_STAGE_KEYS.join(', ')})` }
     }
+    // Repos + intent are frozen on the record, so a mode-carrying call
+    // (continue / redo / jump) may omit them — the conductor reuses the stored
+    // values. A fresh start still requires both.
+    const hasMode = body.mode !== undefined
     const repoPaths = Array.isArray(body.repoPaths) ? body.repoPaths : []
-    if (repoPaths.length === 0 || repoPaths.some((p) => typeof p !== 'string')) {
+    if (repoPaths.some((p) => typeof p !== 'string')) {
+      reply.code(400)
+      return { error: 'repoPaths must be a string array' }
+    }
+    if (!hasMode && repoPaths.length === 0) {
       reply.code(400)
       return { error: 'repoPaths (non-empty string array) is required' }
     }
-    if (typeof body.description !== 'string' || body.description.trim() === '') {
+    const description = typeof body.description === 'string' ? body.description.trim() : ''
+    if (!hasMode && description === '') {
       reply.code(400)
       return { error: 'description is required' }
     }
@@ -272,7 +300,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         {
           feature: body.feature.trim(),
           repoPaths: resolved,
-          description: body.description.trim(),
+          description,
           opts,
           ...(body.mode ? { mode: body.mode as FlightEntryMode } : {}),
           ...(body.fromStage ? { fromStage: body.fromStage as FlightStageKey } : {}),
@@ -295,6 +323,10 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           existingStatus: err.existingStatus,
           options: err.options,
         }
+      }
+      if (err instanceof FlightFrozenError) {
+        reply.code(409)
+        return { error: err.message, type: 'flight_frozen' }
       }
       if (err instanceof FlightStageEntryError) {
         reply.code(400)
@@ -361,30 +393,41 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     }
   })
 
-  // Edit a NON-ACTIVE flight's intent/repos (the Repo Scan stage's edit
-  // affordance). A repo-set change resets the stage array — forced redo from
-  // Repo Scan — and leaves the flight paused so the UI offers Continue.
-  app.patch<{
-    Params: { id: string }
-    Body: { description?: string; repoPaths?: string[] } | undefined
-  }>('/api/flights/:id', async (req, reply) => {
-    const body = req.body ?? {}
-    if (body.description === undefined && body.repoPaths === undefined) {
-      reply.code(400)
-      return { error: 'nothing to patch — pass description and/or repoPaths' }
+  // Delete a NON-ACTIVE flight record — the frozen-repos escape hatch. The
+  // feature and its on-disk artifacts stay; the pill row returns to "not
+  // flown" so a fresh start can pick new repos/intent.
+  app.delete<{ Params: { id: string } }>('/api/flights/:id', async (req, reply) => {
+    try {
+      deleteFlight(req.params.id, conductorDeps)
+      return { deleted: true }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      reply.code(message.includes('not found') ? 404 : 409)
+      return { error: message }
     }
-    if (body.description !== undefined && (typeof body.description !== 'string' || body.description.trim() === '')) {
-      reply.code(400)
-      return { error: 'description must be a non-empty string' }
-    }
-    let resolved: string[] | undefined
-    if (body.repoPaths !== undefined) {
-      if (!Array.isArray(body.repoPaths) || body.repoPaths.length === 0 || body.repoPaths.some((p) => typeof p !== 'string')) {
+  })
+
+  // ---- Plan features (pre-flight intent breakdown) ------------------------
+  // The new-flight dialog's "Plan flight" step: an agent judges whether the
+  // intent describes one feature or several, the user confirms the proposal,
+  // and launch creates one flight per feature — the first running, the rest
+  // parked `queued` for the conductor's sequential drain.
+
+  app.post<{ Body: { repoPaths?: string[]; description?: string } | undefined }>(
+    '/api/flights/plan-features',
+    async (req, reply) => {
+      const body = req.body ?? {}
+      const repoPaths = Array.isArray(body.repoPaths) ? body.repoPaths : []
+      if (repoPaths.length === 0 || repoPaths.some((p) => typeof p !== 'string')) {
         reply.code(400)
-        return { error: 'repoPaths must be a non-empty string array' }
+        return { error: 'repoPaths (non-empty string array) is required' }
       }
-      resolved = []
-      for (const p of body.repoPaths) {
+      if (typeof body.description !== 'string' || body.description.trim() === '') {
+        reply.code(400)
+        return { error: 'description is required' }
+      }
+      const resolved: string[] = []
+      for (const p of repoPaths) {
         try {
           resolved.push(fs.realpathSync(path.resolve(expandHome(p))))
         } catch {
@@ -392,25 +435,126 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           return { error: `repo path does not exist: ${p}` }
         }
       }
-    }
-    try {
-      return patchFlightMetadata(
-        req.params.id,
-        {
-          ...(body.description !== undefined ? { description: body.description.trim() } : {}),
-          ...(resolved ? { repoPaths: resolved } : {}),
-        },
-        conductorDeps,
+      const task = startPlanFeatures(
+        { repoPaths: resolved, description: body.description.trim() },
+        planStore,
+        { logsDir: deps.logsDir, spawnAgent: deps.planAgent },
       )
-    } catch (err) {
-      if (err instanceof FlightConflictError) {
-        reply.code(409)
-        return { error: err.message, type: 'flight_conflict', existingFlightId: err.existingFlightId }
+      reply.code(202)
+      return task
+    },
+  )
+
+  app.get<{ Params: { taskId: string } }>(
+    '/api/flights/plan-features/:taskId',
+    async (req, reply) => {
+      const task = planStore.get(req.params.taskId)
+      if (!task) {
+        reply.code(404)
+        return { error: `plan task not found: ${req.params.taskId}` }
       }
-      const message = err instanceof Error ? err.message : String(err)
-      reply.code(message.includes('not found') ? 404 : 409)
-      return { error: message }
+      return task
+    },
+  )
+
+  app.get<{ Params: { taskId: string } }>(
+    '/api/flights/plan-features/:taskId/agent-session',
+    async (req, reply) => {
+      const ref = resolveWorkflowAgentRef(planStore.recordDir(req.params.taskId))
+      if (!ref) {
+        reply.code(404)
+        return { reason: 'no-session' }
+      }
+      const { events, meta } = loadAgentSession(ref)
+      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+    },
+  )
+
+  app.post<{
+    Params: { taskId: string }
+    Body:
+      | {
+          features?: Array<Partial<PlannedFeature>>
+          env?: string
+          coverageTarget?: number
+          yolo?: boolean
+        }
+      | undefined
+  }>('/api/flights/plan-features/:taskId/launch', async (req, reply) => {
+    const task = planStore.get(req.params.taskId)
+    if (!task) {
+      reply.code(404)
+      return { error: `plan task not found: ${req.params.taskId}` }
     }
+    if (task.status !== 'done') {
+      reply.code(409)
+      return { error: `plan task is ${task.status} — only a settled proposal can launch` }
+    }
+    const body = req.body ?? {}
+    const raw = Array.isArray(body.features) ? body.features : []
+    if (raw.length === 0) {
+      reply.code(400)
+      return { error: 'features (non-empty array) is required' }
+    }
+    const features: PlannedFeature[] = []
+    for (const f of raw) {
+      const name = deriveFeatureSlug(String(f?.name ?? ''))
+      const description = String(f?.description ?? '').trim()
+      if (!name || name === 'feature' || !description) {
+        reply.code(400)
+        return { error: 'every feature needs a slug name and a description' }
+      }
+      features.push({ name, description, ...(f?.group ? { group: deriveFeatureSlug(String(f.group)) } : {}) })
+    }
+    if (new Set(features.map((f) => f.name)).size !== features.length) {
+      reply.code(400)
+      return { error: 'feature names must be unique' }
+    }
+    // Name collisions are settled BEFORE anything is created — a partial
+    // launch (2 of 5 flights minted) would be worse than a listed rejection.
+    const conflicts = features
+      .map((f) => f.name)
+      .filter(
+        (name) =>
+          store.latestForFeature(name) !== null ||
+          fs.existsSync(path.join(deps.featuresDir, name)),
+      )
+    if (conflicts.length > 0) {
+      reply.code(409)
+      return {
+        error: `feature name(s) already in use: ${conflicts.join(', ')} — rename them in the proposal`,
+        type: 'feature_name_conflicts',
+        conflicts,
+      }
+    }
+    const coverageTarget = body.coverageTarget ?? 100
+    const optsFor = (f: PlannedFeature): FlightOptions => ({
+      env: body.env ?? 'local',
+      coverageTarget,
+      yolo: body.yolo === true,
+      // The proposal step already answered "new feature over this repo?" for
+      // every sibling — similarity must not re-ask (or yolo-rerun the first).
+      plannedSplit: true,
+      ...(f.group ? { group: f.group } : {}),
+    })
+    const flightIds: string[] = []
+    for (const [i, f] of features.entries()) {
+      const args = { feature: f.name, repoPaths: task.repoPaths, description: f.description, opts: optsFor(f) }
+      if (i === 0) {
+        try {
+          flightIds.push(startFlight(args, conductorDeps).manifest.flightId)
+          continue
+        } catch (err) {
+          // Repo already busy with an unrelated active flight → park this one
+          // queued too; the drain starts it when the repo frees up.
+          if (!(err instanceof FlightConflictError)) throw err
+        }
+      }
+      flightIds.push(enqueueFlight(args, conductorDeps).flightId)
+    }
+    planStore.save({ ...task, status: 'launched', launchedFlightIds: flightIds, updatedAt: new Date().toISOString() })
+    reply.code(201)
+    return { flightIds }
   })
 
   // Snapshot of a stage's agent session (scout / prd-summary / specs-N /
@@ -444,4 +588,9 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       return { error: message }
     }
   })
+
+  // Boot drain: a server restart may have interrupted a plan-features batch
+  // mid-queue — reconcile parked the running flight `paused`, so a `queued`
+  // sibling whose repos are free can proceed now that adapters exist.
+  drainQueuedFlights(conductorDeps)
 }

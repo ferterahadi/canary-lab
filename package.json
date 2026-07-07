@@ -69,6 +69,7 @@
     "dev:web": "vite --config apps/web/vite.config.ts",
     "postinstall": "node tools/fix-node-pty-permissions.mjs",
     "prepack": "npm run build",
+    "e2e:flight": "tsx scripts/e2e-flight-drive.ts",
     "smoke:pack": "node tools/smoke-pack.mjs",
     "publish:package": "node tools/publish-package.mjs",
     "changelog": "node tools/generate-changelog.mjs",

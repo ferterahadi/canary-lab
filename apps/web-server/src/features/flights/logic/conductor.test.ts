@@ -10,10 +10,13 @@ import {
   abortFlight,
   pauseFlight,
   redoFlight,
-  patchFlightMetadata,
+  deleteFlight,
+  enqueueFlight,
+  drainQueuedFlights,
   reopenStages,
   FlightConflictError,
   FlightExistsError,
+  FlightFrozenError,
   FlightStageEntryError,
   type FlightConductorDeps,
   type StageAdapter,
@@ -853,52 +856,135 @@ describe('rewind outcome', () => {
   })
 })
 
-describe('patchFlightMetadata', () => {
-  it('edits the description of a non-active flight in place', async () => {
+describe('frozen repos + intent (R57)', () => {
+  it('redo with a DIFFERENT repo set is rejected — repos are frozen on the record', async () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))
     await completion
-    const patched = patchFlightMetadata(manifest.flightId, { description: 'new intent' }, deps(allDone()))
-    expect(patched.description).toBe('new intent')
-    expect(patched.status).toBe('done') // description-only edits do not reset anything
-    expect(patched.stages.every((s) => s.status === 'done')).toBe(true)
+    expect(() =>
+      startFlight({ ...args('/repo/b'), mode: 'redo' }, deps(allDone())),
+    ).toThrow(FlightFrozenError)
+    expect(store.get(manifest.flightId)!.repoPaths).toEqual(['/repo/a'])
   })
 
-  it('a repo-set change resets the stage array — forced redo from Repo Scan — and parks paused', async () => {
+  it('redo with a DIFFERENT description is rejected — intent is frozen on the record', async () => {
+    const { completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(() =>
+      startFlight({ ...args(), description: 'something else entirely', mode: 'redo' }, deps(allDone())),
+    ).toThrow(FlightFrozenError)
+  })
+
+  it('redo with EMPTY repos/description reuses the stored values (the CLI/dialog omission path)', async () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))
     await completion
-    const patched = patchFlightMetadata(manifest.flightId, { repoPaths: ['/repo/b'] }, deps(allDone()))
-    expect(patched.repoPaths).toEqual(['/repo/b'])
-    expect(patched.status).toBe('paused')
-    expect(patched.pauseReason).toBe('user')
-    expect(patched.stages.every((s) => s.status === 'pending')).toBe(true)
-    expect(patched.links).toBeUndefined()
-    expect(patched.runVerdict).toBeUndefined()
+    const redone = startFlight(
+      { feature: 'checkout', repoPaths: [], description: '', opts: OPTS, mode: 'redo' },
+      deps(allDone()),
+    )
+    expect(redone.manifest.flightId).toBe(manifest.flightId)
+    expect(redone.manifest.repoPaths).toEqual(['/repo/a'])
+    expect(redone.manifest.description).toBe('checkout flow')
+    await redone.completion
   })
 
-  it('an unchanged repo set does NOT reset the stages', async () => {
+  it('a mode-carrying call for a feature with NO record still requires real inputs', async () => {
+    expect(() =>
+      startFlight({ feature: 'ghost', repoPaths: [], description: '', opts: OPTS, mode: 'redo' }, deps(allDone())),
+    ).toThrow(FlightStageEntryError)
+  })
+})
+
+describe('deleteFlight', () => {
+  it('removes a settled record so the feature can start fresh', async () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))
     await completion
-    const patched = patchFlightMetadata(manifest.flightId, { repoPaths: ['/repo/a'] }, deps(allDone()))
-    expect(patched.status).toBe('done')
-    expect(patched.stages.every((s) => s.status === 'done')).toBe(true)
+    deleteFlight(manifest.flightId, deps(allDone()))
+    expect(store.get(manifest.flightId)).toBeNull()
+    expect(store.latestForFeature('checkout')).toBeNull()
   })
 
-  it('rejects edits on an active flight', async () => {
+  it('rejects deleting an active flight — stop it first', async () => {
     const adapters = allDone()
     adapters.scout = { run: () => new Promise(() => {}) }
     const { manifest } = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
-    expect(() => patchFlightMetadata(manifest.flightId, { description: 'x' }, deps(allDone()))).toThrow(/pause it before editing/)
+    expect(() => deleteFlight(manifest.flightId, deps(allDone()))).toThrow(/stop it before deleting/)
+    expect(store.get(manifest.flightId)).not.toBeNull()
+  })
+})
+
+describe('enqueueFlight + drainQueuedFlights (R54)', () => {
+  it('enqueue parks a fresh record paused/queued without driving it', () => {
+    const queued = enqueueFlight(args(), deps(allDone()))
+    expect(queued.status).toBe('paused')
+    expect(queued.pauseReason).toBe('queued')
+    expect(queued.stages.every((s) => s.status === 'pending')).toBe(true)
+    expect(store.get(queued.flightId)!.status).toBe('paused')
   })
 
-  it('rejects a repo set already claimed by another active flight', async () => {
+  it('enqueue refuses a feature that already has a record', async () => {
+    const { completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(() => enqueueFlight(args(), deps(allDone()))).toThrow(FlightExistsError)
+  })
+
+  it('a settling flight drains the oldest queued sibling; the chain runs the batch sequentially', async () => {
+    // Three queued flights on the same repo; drain starts them one at a time,
+    // each settle pulling the next.
+    const started: string[] = []
+    const adapters = allDone()
+    adapters.similarity = {
+      run: async (ctx) => {
+        started.push(ctx.manifest().feature)
+        return { kind: 'done' }
+      },
+    }
+    const d = deps(adapters)
+    enqueueFlight({ ...args(), feature: 'f-one' }, d)
+    enqueueFlight({ ...args(), feature: 'f-two' }, d)
+    enqueueFlight({ ...args(), feature: 'f-three' }, d)
+    drainQueuedFlights(d)
+    // Drains cascade off each settle; wait for the tail to finish.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(started).toEqual(['f-one', 'f-two', 'f-three'])
+    expect(store.list().every((e) => e.status === 'done')).toBe(true)
+  })
+
+  it('drain skips queued flights whose repos are held by an active flight', async () => {
     const adapters = allDone()
     adapters.scout = { run: () => new Promise(() => {}) }
-    startFlight({ ...args('/repo/b'), feature: 'other' }, deps(adapters))
+    startFlight({ ...args(), feature: 'holder' }, deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
-    const { manifest, completion } = startFlight(args(), deps(allDone()))
-    await completion
-    expect(() => patchFlightMetadata(manifest.flightId, { repoPaths: ['/repo/b'] }, deps(allDone()))).toThrow(FlightConflictError)
+    const d = deps(allDone())
+    const queued = enqueueFlight({ ...args(), feature: 'waiting' }, d)
+    drainQueuedFlights(d)
+    expect(store.get(queued.flightId)!.status).toBe('paused')
+    expect(store.get(queued.flightId)!.pauseReason).toBe('queued')
+  })
+
+  it('a queued flight on a FREE repo drains even while another repo is busy', async () => {
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    startFlight({ ...args('/repo/busy'), feature: 'holder' }, deps(adapters))
+    await new Promise((r) => setTimeout(r, 10))
+    const d = deps(allDone())
+    enqueueFlight({ ...args('/repo/free'), feature: 'free-rider' }, d)
+    drainQueuedFlights(d)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(store.latestForFeature('free-rider')!.status).toBe('done')
+  })
+
+  it('abort drains the queue too — the repo is freed', async () => {
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    const d = deps(adapters)
+    const { manifest } = startFlight({ ...args(), feature: 'holder' }, d)
+    await new Promise((r) => setTimeout(r, 10))
+    const drained = deps(allDone())
+    enqueueFlight({ ...args(), feature: 'next-up' }, drained)
+    abortFlight(manifest.flightId, drained)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(store.latestForFeature('next-up')!.status).toBe('done')
   })
 })
 

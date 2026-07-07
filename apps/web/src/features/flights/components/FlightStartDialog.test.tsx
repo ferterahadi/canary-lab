@@ -8,6 +8,9 @@ import type { FlightEntryOptions } from '../../../shared/api/client'
 const mocks = vi.hoisted(() => ({
   getFlightEntryOptions: vi.fn(),
   startFlight: vi.fn(),
+  planFeatures: vi.fn(),
+  getPlanFeaturesTask: vi.fn(),
+  launchPlannedFeatures: vi.fn(),
 }))
 
 vi.mock('../../../shared/api/client', async (importOriginal) => ({
@@ -15,6 +18,17 @@ vi.mock('../../../shared/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../shared/api/client')>()),
   getFlightEntryOptions: mocks.getFlightEntryOptions,
   startFlight: mocks.startFlight,
+  planFeatures: mocks.planFeatures,
+  getPlanFeaturesTask: mocks.getPlanFeaturesTask,
+  launchPlannedFeatures: mocks.launchPlannedFeatures,
+}))
+
+// The planning view embeds the live agent timeline — its transports are its
+// own tested concern; stub it.
+vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
+  AgentSessionView: ({ source }: { source: { kind: string } }) => (
+    <div data-testid="agent-session-view" data-kind={source.kind} />
+  ),
 }))
 
 import { ApiError } from '../../../shared/api/client'
@@ -46,7 +60,6 @@ function entry(over: Partial<FlightEntryOptions> = {}): FlightEntryOptions {
     flight: null,
     active: false,
     canContinue: false,
-    editable: { description: true, repoPaths: true },
     prefill: { repoPaths: ['/repo'], description: '', env: 'local', coverageTarget: 100 },
     stages: [
       { key: 'similarity', allowed: true },
@@ -121,10 +134,13 @@ describe('FlightStartDialog', () => {
     await flush()
     expect(mocks.startFlight).toHaveBeenCalledWith(expect.objectContaining({
       feature: 'checkout',
-      repoPaths: ['/repo'],
-      description: 'checkout flow',
       mode: 'continue',
     }))
+    // Frozen args (R57): a record exists, so repos + intent are omitted — the
+    // server reuses the stored values.
+    const body = mocks.startFlight.mock.calls[0][0] as Record<string, unknown>
+    expect(body.repoPaths).toBeUndefined()
+    expect(body.description).toBeUndefined()
     expect(onOpenFlight).toHaveBeenCalledWith('fl_1')
   })
 
@@ -222,14 +238,23 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     }
   })
 
-  it('derives the feature slug from the first picked repo and posts a plain start', async () => {
+  it('R54: submit plans first — the breakdown agent owns the dialog, with a single-flight escape hatch', async () => {
+    mocks.planFeatures.mockResolvedValue({ taskId: 't1', status: 'running', repoPaths: ['/repo/Oddle Shop'], description: 'test the checkout flow' })
     mocks.startFlight.mockResolvedValue({ flightId: 'fl_new' })
     const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Oddle Shop' }] })
     const textarea = container.querySelector('textarea')!
     setValue(textarea, 'test the checkout flow')
     click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
     expect(byTestId('flight-start-derived-feature')?.textContent).toContain('oddle-shop')
+    expect(byTestId('flight-start-submit')?.textContent).toBe('Plan flight →')
     click(byTestId('flight-start-submit')!)
+    await flush()
+    expect(mocks.planFeatures).toHaveBeenCalledWith({ repoPaths: ['/repo/Oddle Shop'], description: 'test the checkout flow' })
+    expect(mocks.startFlight).not.toHaveBeenCalled()
+    // The planning view: live agent timeline + the escape hatch.
+    expect(byTestId('flight-plan-view')).toBeTruthy()
+    expect(byTestId('agent-session-view')?.getAttribute('data-kind')).toBe('flight-plan')
+    click(byTestId('flight-plan-skip')!)
     await flush()
     expect(mocks.startFlight).toHaveBeenCalledWith({
       feature: 'oddle-shop',
@@ -237,6 +262,113 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
       description: 'test the checkout flow',
     })
     expect(onOpenFlight).toHaveBeenCalledWith('fl_new')
+  })
+
+  it('R54: a one-feature plan auto-launches without another click', async () => {
+    mocks.planFeatures.mockResolvedValue({
+      taskId: 't1',
+      status: 'done',
+      repoPaths: ['/repo/shop'],
+      description: 'test checkout',
+      result: { split: false, features: [{ name: 'shop', description: 'test checkout' }] },
+    })
+    mocks.launchPlannedFeatures.mockResolvedValue({ flightIds: ['fl_a'] })
+    const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
+    setValue(container.querySelector('textarea')!, 'test checkout')
+    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    expect(mocks.launchPlannedFeatures).toHaveBeenCalledWith('t1', { features: [{ name: 'shop', description: 'test checkout' }] })
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_a')
+  })
+
+  it('R54: a multi-feature plan needs confirmation — proposal cards + token warning, then one launch', async () => {
+    mocks.planFeatures.mockResolvedValue({
+      taskId: 't2',
+      status: 'done',
+      repoPaths: ['/repo/shop'],
+      description: 'test everything',
+      result: {
+        split: true,
+        features: [
+          { name: 'checkout', description: 'the checkout flow', group: 'shop' },
+          { name: 'catalog', description: 'browsing + search', group: 'shop' },
+          { name: 'account', description: 'signup + login', group: 'shop' },
+        ],
+      },
+    })
+    mocks.launchPlannedFeatures.mockResolvedValue({ flightIds: ['fl_1', 'fl_2', 'fl_3'] })
+    const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
+    setValue(container.querySelector('textarea')!, 'test everything')
+    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    // Nothing launches before the user confirms.
+    expect(mocks.launchPlannedFeatures).not.toHaveBeenCalled()
+    expect(byTestId('flight-proposal-view')).toBeTruthy()
+    expect(byTestId('flight-proposal-card-0')).toBeTruthy()
+    expect(byTestId('flight-proposal-card-2')).toBeTruthy()
+    expect(byTestId('flight-proposal-token-warning')?.textContent).toContain('3× the usual token cost')
+    expect((byTestId('flight-proposal-group') as HTMLInputElement).value).toBe('shop')
+    click(byTestId('flight-proposal-confirm')!)
+    await flush()
+    expect(mocks.launchPlannedFeatures).toHaveBeenCalledWith('t2', {
+      features: [
+        { name: 'checkout', description: 'the checkout flow', group: 'shop' },
+        { name: 'catalog', description: 'browsing + search', group: 'shop' },
+        { name: 'account', description: 'signup + login', group: 'shop' },
+      ],
+    })
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_1')
+  })
+
+  it('R54: launch name conflicts mark the colliding cards inline and block nothing else', async () => {
+    mocks.planFeatures.mockResolvedValue({
+      taskId: 't3',
+      status: 'done',
+      repoPaths: ['/repo/shop'],
+      description: 'test everything',
+      result: {
+        split: true,
+        features: [
+          { name: 'checkout', description: 'the checkout flow' },
+          { name: 'catalog', description: 'browsing + search' },
+        ],
+      },
+    })
+    mocks.launchPlannedFeatures.mockRejectedValue(
+      new ApiError(409, { error: 'feature name(s) already in use: checkout', type: 'feature_name_conflicts', conflicts: ['checkout'] }),
+    )
+    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
+    setValue(container.querySelector('textarea')!, 'test everything')
+    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    click(byTestId('flight-proposal-confirm')!)
+    await flush()
+    expect(byTestId('flight-proposal-conflict-0')?.textContent).toContain('already exists')
+    expect(byTestId('flight-proposal-conflict-1')).toBeNull()
+    expect(byTestId('flight-start-error')?.textContent).toContain('already in use')
+  })
+
+  it('R67: the existing-record 409 flips the dialog into feature-scoped mode instead of a raw error', async () => {
+    mocks.planFeatures.mockRejectedValue(
+      new ApiError(409, { error: 'flight exists', type: 'flight_exists_requires_choice', flightId: 'fl_old' }),
+    )
+    mocks.getFlightEntryOptions.mockResolvedValue(entry({
+      feature: 'shop',
+      flight: { flightId: 'fl_old', status: 'done', stages: [] },
+      prefill: { repoPaths: ['/repo/shop'], description: 'old intent', env: 'local', coverageTarget: 100 },
+    }))
+    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
+    setValue(container.querySelector('textarea')!, 'test everything')
+    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    expect(mocks.getFlightEntryOptions).toHaveBeenCalledWith('shop')
+    // Feature-scoped + frozen: intent read-only, no repo picker.
+    expect(byTestId('flight-start-frozen-intent')?.textContent).toContain('old intent')
+    expect(byTestId('repo-multi-picker')).toBeNull()
   })
 
   it('adds a free repo path through the picker input', async () => {

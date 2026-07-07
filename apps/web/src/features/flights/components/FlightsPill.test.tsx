@@ -131,6 +131,13 @@ describe('FlightsPill', () => {
     // R39: no "no flight" text — the live progress chip carries the state.
     expect(row?.textContent).not.toContain('no flight')
     expect(row?.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('portifying')
+    // R56: a synthesized mini rail shows WHERE in the pipeline the live job
+    // sits — the mapped stage (portify) renders in the sky "running" tone,
+    // every other stage stays pending (grey). No fake 'done' squares.
+    const rail = row?.querySelector('[data-testid="stage-mini-rail"]')
+    expect(rail).toBeTruthy()
+    const portifyCell = rail?.querySelector('[data-testid="stage-mini-cell-portify"]') as HTMLElement | null
+    expect(portifyCell?.style.background).toContain('56, 189, 248') // running tone (sky)
     act(() => { row?.click() })
     expect(onOpenActivity).toHaveBeenCalledWith('pay', { kind: 'portifying', workflowId: 'wf9' })
   })
@@ -163,7 +170,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
       root.render(
         <FlightsPill
           flights={[flight({ status: 'done', currentStage: null })]}
-          features={['checkout', 'menu-management']}
+          features={[{ name: 'checkout' }, { name: 'menu-management' }]}
           onOpenFlight={vi.fn()}
           onStartFlight={onStartFlight}
         />,
@@ -186,7 +193,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
       root.render(
         <FlightsPill
           flights={[flight({ feature: 'checkout', status: 'waiting-for-approval' })]}
-          features={['checkout', 'aaa-never-flown']}
+          features={[{ name: 'checkout' }, { name: 'aaa-never-flown' }]}
           onOpenFlight={vi.fn()}
           onStartFlight={vi.fn()}
         />,

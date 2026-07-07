@@ -64,6 +64,21 @@ export class FlightStageEntryError extends Error {
   }
 }
 
+/** A flight's repos + intent are frozen once the record exists — every redo /
+ *  jump / continue reuses the stored values. Thrown when a caller passes a
+ *  DIFFERENT repo set or description, so the CLI/REST/MCP all reject the edit
+ *  with the same escape hatch instead of silently mutating the record. */
+export class FlightFrozenError extends Error {
+  readonly statusCode = 409
+  constructor(public readonly feature: string, what: 'repos' | 'intent') {
+    super(
+      `${what === 'repos' ? 'repo list' : 'intent'} is frozen for feature "${feature}" — ` +
+        `a flight's repos and intent are set when it first starts; delete the flight to start fresh with different ones`,
+    )
+    this.name = 'FlightFrozenError'
+  }
+}
+
 export type StageOutcome =
   | { kind: 'done'; evidence?: unknown }
   | { kind: 'skipped'; reason: string }
@@ -276,11 +291,21 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     if (mode === 'jump' && !args.fromStage) {
       throw new FlightStageEntryError('jump requires fromStage')
     }
-    checkStageEntry(args, deps, existing)
+    // Repos + intent are frozen on the record: empty/identical args reuse the
+    // stored values, different ones are rejected (delete the flight to change
+    // them). Options (env / coverage target / yolo) stay caller-supplied.
+    if (args.repoPaths.length > 0 && !sameRepoSet(args.repoPaths, existing.repoPaths)) {
+      throw new FlightFrozenError(args.feature, 'repos')
+    }
+    const description = args.description.trim()
+    if (description && description !== existing.description) {
+      throw new FlightFrozenError(args.feature, 'intent')
+    }
+    checkStageEntry({ ...args, repoPaths: existing.repoPaths }, deps, existing)
     const manifest: FlightManifest = {
       ...existing,
-      repoPaths: args.repoPaths,
-      description: args.description,
+      repoPaths: existing.repoPaths,
+      description: existing.description,
       opts: args.opts,
       status: 'running',
       pauseReason: undefined,
@@ -303,6 +328,14 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     return { manifest, completion: drive(manifest.flightId, deps) }
   }
 
+  // Fresh record: the caller must actually supply the inputs (a mode-carrying
+  // call that found no record to reuse lands here with empty fallbacks).
+  if (args.repoPaths.length === 0) {
+    throw new FlightStageEntryError(`feature "${args.feature}" has no flight record — repoPaths are required to start one`)
+  }
+  if (!args.description.trim()) {
+    throw new FlightStageEntryError(`feature "${args.feature}" has no flight record — a description is required to start one`)
+  }
   checkStageEntry(args, deps, null)
 
   const flightId = (deps.newFlightId ?? defaultFlightId)()
@@ -405,50 +438,73 @@ export function redoFlight(flightId: string, deps: FlightConductorDeps): StartFl
   )
 }
 
-export interface FlightMetadataPatch {
-  description?: string
-  repoPaths?: string[]
-}
-
-/** Edit a non-active flight's intent/repos (the Repo Scan stage's edit
- *  affordance). A repo-set change invalidates every downstream stage's
- *  evidence, so it resets the stage array — a forced redo from Repo Scan —
- *  and leaves the flight `paused` so the UI offers Continue. */
-export function patchFlightMetadata(
-  flightId: string,
-  patch: FlightMetadataPatch,
+/** Create a flight record WITHOUT driving it — parked `paused`/`queued` for
+ *  the conductor's queue drain (the plan-features launch parks every feature
+ *  after the first this way). The feature must not already have a record. */
+export function enqueueFlight(
+  args: Omit<StartFlightArgs, 'fromStage' | 'mode'>,
   deps: FlightConductorDeps,
 ): FlightManifest {
   const { store } = deps
   const now = deps.now ?? (() => new Date().toISOString())
-  const current = store.get(flightId)
-  if (!current) throw new Error(`flight not found: ${flightId}`)
-  if (isActiveFlightStatus(current.status)) {
-    throw new Error(`flight ${flightId} is ${current.status} — pause it before editing intent or repos`)
+  const existing = store.latestForFeature(args.feature)
+  if (existing) {
+    throw new FlightExistsError(args.feature, existing.flightId, existing.status as FlightManifest['status'])
   }
-  let manifest: FlightManifest = { ...current, updatedAt: now() }
-  if (patch.description !== undefined) manifest = { ...manifest, description: patch.description }
-  if (patch.repoPaths && !sameRepoSet(patch.repoPaths, current.repoPaths)) {
-    const active = store.activeForRepos(patch.repoPaths)
-    if (active && active.flightId !== flightId) {
-      throw new FlightConflictError(patch.repoPaths, active.flightId)
-    }
-    manifest = {
-      ...manifest,
-      repoPaths: patch.repoPaths,
-      status: 'paused',
-      pauseReason: 'user',
-      currentStage: FLIGHT_STAGE_KEYS[0],
-      stages: freshStages(undefined, now),
-      links: undefined,
-      runVerdict: undefined,
-      error: undefined,
-      endedAt: undefined,
-    }
+  const manifest: FlightManifest = {
+    flightId: (deps.newFlightId ?? defaultFlightId)(),
+    feature: args.feature,
+    repoPaths: args.repoPaths,
+    description: args.description,
+    opts: args.opts,
+    status: 'paused',
+    pauseReason: 'queued',
+    currentStage: FLIGHT_STAGE_KEYS[0],
+    stages: freshStages(undefined, now),
+    createdAt: now(),
+    updatedAt: now(),
   }
   store.save(manifest)
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   return manifest
+}
+
+/** Start the next `queued` flight whose repos are free — called whenever a
+ *  flight settles (done / stage-failed park / hard fail / abort) and after
+ *  boot reconcile. One start per drain: the started flight's own settle
+ *  drains the one after it, which is what keeps the batch sequential. A user
+ *  pause or a checkpoint park deliberately does NOT drain — the repo lock is
+ *  still morally held by the flight the user is working on. */
+export function drainQueuedFlights(deps: FlightConductorDeps): void {
+  const { store } = deps
+  const queued = store
+    .list()
+    .filter((e) => e.status === 'paused' && e.pauseReason === 'queued')
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+  for (const entry of queued) {
+    if (store.activeForRepos(entry.repoPaths)) continue
+    try {
+      resumeFlight(entry.flightId, deps)
+    } catch {
+      continue // raced with a manual start — try the next queued flight
+    }
+    return
+  }
+}
+
+/** Delete a NON-ACTIVE flight record (the frozen-repos escape hatch). The
+ *  feature and its on-disk artifacts stay — only the flight record goes, so
+ *  the pill row returns to "not flown" and a fresh start can pick new
+ *  repos/intent. */
+export function deleteFlight(flightId: string, deps: FlightConductorDeps): void {
+  const { store } = deps
+  const current = store.get(flightId)
+  if (!current) throw new Error(`flight not found: ${flightId}`)
+  if (isActiveFlightStatus(current.status)) {
+    throw new Error(`flight ${flightId} is ${current.status} — stop it before deleting`)
+  }
+  store.remove(flightId)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
 }
 
 /** Flip the named stages (and everything after the earliest of them — their
@@ -544,6 +600,7 @@ export function abortFlight(flightId: string, deps: FlightConductorDeps): Flight
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   driveControllers.get(flightId)?.abort()
   if (openStage) void interruptStage(flightId, openStage.key, 'abort', deps)
+  drainQueuedFlights(deps)
   return manifest
 }
 
@@ -591,6 +648,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
       const idx = firstOpenStageIndex(m)
       if (idx === -1) {
         save({ ...m, status: 'done', currentStage: null, updatedAt: now(), endedAt: now() })
+        drainQueuedFlights(deps)
         return
       }
 
@@ -754,6 +812,9 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         const cur = read()
         save({ ...cur, status: 'paused', pauseReason: 'stage-failed', error: outcome.error, updatedAt: now() })
       }
+      // The park frees the repo lock — a queued sibling may proceed while the
+      // human looks at this one (still only one RUNNING flight at a time).
+      drainQueuedFlights(deps)
       return
     }
   } catch (err) {
@@ -768,6 +829,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         error: err instanceof Error ? err.message : String(err),
       })
     }
+    drainQueuedFlights(deps)
   } finally {
     if (driveControllers.get(flightId) === controller) driveControllers.delete(flightId)
   }

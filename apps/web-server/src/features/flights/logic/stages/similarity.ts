@@ -69,6 +69,13 @@ export function similarityStage(deps: FlightStageDeps): StageAdapter {
       const m = ctx.manifest()
       const { match, scanned } = findMatch(deps, m.repoPaths, ctx.appendLog)
       if (!match) return { kind: 'done', evidence: { scanned, match: null } }
+      if (m.opts.plannedSplit) {
+        // A confirmed plan-features batch deliberately creates N distinct
+        // features over one repo — the "new feature?" question was already
+        // answered at the proposal step, for every sibling.
+        ctx.appendLog(`[similarity] ${match.feature} covers ${match.repo}, but this flight is a confirmed planned split — creating a new feature\n`)
+        return applyChoice(ctx, match, 'new')
+      }
       if (m.opts.yolo) {
         ctx.appendLog(`[similarity] ${match.feature} already covers ${match.repo} — yolo defaults to rerun\n`)
         return applyChoice(ctx, match, 'rerun')

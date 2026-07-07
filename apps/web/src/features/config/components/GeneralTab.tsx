@@ -12,6 +12,7 @@ const DEFAULT_HEAL_THRESHOLD = 2
 interface Slice {
   name: string
   description: string
+  group: string
   healOnFailureThreshold?: number
 }
 
@@ -38,6 +39,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
       return {
         name: asString(v.name),
         description: asString(v.description),
+        group: asString(v.group),
         healOnFailureThreshold: asOptionalNumber(v.healOnFailureThreshold),
       }
     },
@@ -48,6 +50,11 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
         name: slice.name,
         description: slice.description,
       }
+      // Group is optional: a non-empty value persists it; clearing the field
+      // removes the key entirely rather than writing an empty string.
+      const group = slice.group.trim()
+      if (group) next.group = group
+      else delete next.group
       // Always persist a concrete number (including `0` = opt out). An absent
       // value materializes the default so the saved config is explicit and
       // matches the server-side default.
@@ -86,6 +93,9 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
               value={ed.draft.description}
               onChange={(description) => ed.setDraft((d) => ({ ...d, description }))}
             />
+          </FieldRow>
+          <FieldRow label="Group" hint="Features with the same group are shown together.">
+            <TextInput value={ed.draft.group} onChange={(group) => ed.setDraft((d) => ({ ...d, group }))} />
           </FieldRow>
         </div>
 

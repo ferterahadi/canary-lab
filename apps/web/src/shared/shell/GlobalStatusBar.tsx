@@ -213,7 +213,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           <FlightsPill
             flights={flights}
             activity={activity}
-            features={features.map((f) => f.name)}
+            features={features.map((f) => ({ name: f.name, group: f.group }))}
             onStartFlight={(feature) => onStartFlight?.(feature)}
             onOpenFlight={(flightId) => onOpenFlight?.(flightId)}
             onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}

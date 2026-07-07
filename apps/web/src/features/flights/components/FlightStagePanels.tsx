@@ -1,110 +1,51 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../../../shared/api/client'
-import type { FlightManifest } from '../../../shared/api/client'
+import type { FlightManifest, FlightStageStatus } from '../../../shared/api/client'
 import type { FeatureDocsListing } from '../../../shared/api/types'
 import { DocPill, readAsBase64 } from '../../coverage/components/CoverageDocsRail'
-import { RepoMultiPicker } from './RepoMultiPicker'
-import { FactsGrid, type StageFact } from './stage-meta'
+import { FactsGrid, StageStatusChip, type StageFact } from './stage-meta'
 
-// Stage-specific panels for the flight detail view (R42/R43/R44) — each one a
+// Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
 // lens onto the SAME data its full surface owns (feature.config.cjs via the
 // config-doc API, docs/ via the docs API), so edits here and edits there are
 // the same write and stay live-synced through the existing WorkspaceEvents.
 
-// ─── Repo Scan: intent + repos, editable while the flight is not active (R42) ─
+// ─── Repo Scan: the flight's inputs, read-only (R57) ─────────────────────────
+// Repos + intent are FROZEN once the flight starts (server-enforced across
+// UI/MCP/CLI) — this panel presents them as the flight's charter: the intent
+// as a quote, one card per repo. The escape hatch is deleting the flight.
 
-export function RepoScanEditor({ flight, onSaved }: { flight: FlightManifest; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false)
-  const [description, setDescription] = useState(flight.description)
-  const [repoPaths, setRepoPaths] = useState<string[]>(flight.repoPaths)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+function repoBaseName(p: string): string {
+  return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p
+}
 
-  const reposChanged =
-    [...repoPaths].sort().join('\n') !== [...flight.repoPaths].sort().join('\n')
-  const changed = reposChanged || description.trim() !== flight.description
-
-  const save = (): void => {
-    setBusy(true)
-    setError(null)
-    api.patchFlight(flight.flightId, {
-      ...(description.trim() !== flight.description ? { description: description.trim() } : {}),
-      ...(reposChanged ? { repoPaths } : {}),
-    })
-      .then(() => {
-        setEditing(false)
-        onSaved()
-      })
-      .catch((err: unknown) => {
-        const body = err instanceof api.ApiError ? (err.body as { error?: string } | null) : null
-        setError(body?.error ?? (err instanceof Error ? err.message : String(err)))
-      })
-      .finally(() => setBusy(false))
-  }
-
-  if (!editing) {
-    return (
-      <button
-        type="button"
-        data-testid="repo-scan-edit"
-        onClick={() => {
-          setDescription(flight.description)
-          setRepoPaths(flight.repoPaths)
-          setEditing(true)
-        }}
-        className="cl-button self-start px-2 py-0.5 text-[11px]"
-      >
-        Edit intent &amp; repos
-      </button>
-    )
-  }
-
+export function RepoScanPanel({ flight }: { flight: FlightManifest }) {
   return (
-    <section
-      data-testid="repo-scan-editor"
-      className="flex flex-col gap-2 rounded border p-2.5"
-      style={{ borderColor: 'var(--border-default)' }}
-    >
-      <label className="flex flex-col gap-1">
-        <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-          Intent
-        </span>
-        <textarea
-          data-testid="repo-scan-description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={3}
-          spellCheck={false}
-          className="w-full rounded border p-2 text-[12px] outline-none"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)' }}
-        />
-      </label>
-      <div className="flex flex-col gap-1">
-        <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-          Repos
-        </span>
-        <RepoMultiPicker known={[]} selected={repoPaths} onChange={setRepoPaths} />
+    <section data-testid="repo-scan-panel" className="flex flex-col gap-2">
+      <blockquote
+        data-testid="flight-intent"
+        className="m-0 rounded border-l-2 px-3 py-2 text-[12.5px] leading-relaxed"
+        style={{ borderColor: 'rgb(56, 189, 248)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+      >
+        “{flight.description}”
+      </blockquote>
+      <div className="flex flex-wrap gap-1.5">
+        {flight.repoPaths.map((p) => (
+          <div
+            key={p}
+            data-testid={`repo-card-${repoBaseName(p)}`}
+            className="flex min-w-0 flex-col gap-0.5 rounded border px-2.5 py-1.5"
+            style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
+          >
+            <span className="text-[11.5px] font-medium">{repoBaseName(p)}</span>
+            <span className="max-w-[340px] truncate text-[10px]" title={p} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+              {p}
+            </span>
+          </div>
+        ))}
       </div>
-      {reposChanged && (
-        <div className="text-[10.5px]" style={{ color: 'rgb(251, 191, 36)' }}>
-          Changing repos restarts this flight from Repo Scan — every later stage's record is reset.
-        </div>
-      )}
-      {error && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          data-testid="repo-scan-save"
-          disabled={busy || !changed || description.trim() === '' || repoPaths.length === 0}
-          onClick={save}
-          className="cl-button px-2.5 py-1 text-xs"
-          style={{ color: 'rgb(56, 189, 248)' }}
-        >
-          {busy ? 'Saving…' : 'Save'}
-        </button>
-        <button type="button" disabled={busy} onClick={() => setEditing(false)} className="cl-button px-2.5 py-1 text-xs">
-          Cancel
-        </button>
+      <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+        Repos and intent are set when the flight first starts. To test different ones, delete this flight and start fresh.
       </div>
     </section>
   )
@@ -265,30 +206,38 @@ export function FeatureSetupPanel({
 
       {readFacts.length > 0 && <FactsGrid facts={readFacts} />}
 
-      <div className="grid grid-cols-[130px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
-        {services.map((row) => (
-          <SetupField
-            key={`${row.repoIdx}-${row.cmdIdx}`}
-            label={services.length === 1 ? 'Start command' : `Run · ${row.service}`}
-            value={row.command}
-            editable={editable}
-            onSave={(v) => setCommand(row, v)}
-            testId={`setup-command-${row.service}`}
-          />
-        ))}
-        {services.map((row) => (row.health ? (
-          <ReadRow key={`h-${row.repoIdx}-${row.cmdIdx}`} label="Health check" value={row.health} mono />
-        ) : null))}
-        {services.map((row) => (row.ports.length > 0 ? (
-          <ReadRow
-            key={`p-${row.repoIdx}-${row.cmdIdx}`}
-            label="Port slot"
-            value={row.ports.join(', ')}
-            mono
-            info={`A named placeholder for the port ${row.service} listens on. Canary injects a free port into it at boot, so runs of this feature can start side by side without clashing. Edit slots under Advanced setup → Ports.`}
-          />
-        ) : null))}
-      </div>
+      {/* R58: one block per service — everything that boots it in one place,
+          instead of command/health/port rows interleaved across services. */}
+      {services.map((row) => (
+        <div
+          key={`${row.repoIdx}-${row.cmdIdx}`}
+          data-testid={`setup-service-${row.service}`}
+          className="flex flex-col gap-1.5 rounded border px-2.5 py-2"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
+        >
+          <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+            {row.service}
+          </span>
+          <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
+            <SetupField
+              label="Start command"
+              value={row.command}
+              editable={editable}
+              onSave={(v) => setCommand(row, v)}
+              testId={`setup-command-${row.service}`}
+            />
+            {row.health && <ReadRow label="Health check" value={row.health} mono />}
+            {row.ports.length > 0 && (
+              <ReadRow
+                label="Port slot"
+                value={row.ports.join(', ')}
+                mono
+                info={`A named placeholder for the port ${row.service} listens on. Canary injects a free port into it at boot, so runs of this feature can start side by side without clashing. Edit slots under Advanced setup → Ports.`}
+              />
+            )}
+          </div>
+        </div>
+      ))}
 
       {pw && (
         <div data-testid="setup-playwright" className="flex flex-col gap-1.5">
@@ -427,16 +376,20 @@ function ModeRow({ label, value, editable, onSave, testId }: {
   )
 }
 
-// ─── Requirements: the docs manager (R44) ────────────────────────────────────
+// ─── Requirements: the docs manager (R44/R59) ────────────────────────────────
 // List / add / link / remove requirement docs right where the flight pauses
-// for them. Same REST endpoints as the coverage rail + MCP tools; linked docs
-// carry the ↗ marker (the user's original is the live source).
+// for them (user-confirmed 2026-07-07: adding docs HERE stays — the ledger's
+// rail is the other lens on the same folder). Same REST endpoints as the
+// coverage rail + MCP tools; linked docs carry the ↗ marker (the user's
+// original is the live source); the distilled-summary chip narrates the
+// folded prd-summary half.
 
 export function FlightDocsPanel({
   feature,
   locked,
   refreshKey,
   onChanged,
+  summaryStatus,
 }: {
   feature: string
   /** True while the PRD summary is being generated from these docs. */
@@ -444,6 +397,8 @@ export function FlightDocsPanel({
   /** Bumped on coverage-changed so out-of-band doc writes show live. */
   refreshKey?: number
   onChanged?: () => void
+  /** The folded prd-summary stage's status — rendered as the summary chip. */
+  summaryStatus?: FlightStageStatus
 }) {
   const [listing, setListing] = useState<FeatureDocsListing | null>(null)
   const [busy, setBusy] = useState(false)
@@ -507,9 +462,23 @@ export function FlightDocsPanel({
 
   return (
     <section data-testid="flight-docs-panel" className="flex flex-col gap-1.5">
-      <h3 className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-        Requirement docs
-      </h3>
+      <div className="flex items-center gap-2">
+        <h3 className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+          Requirement docs
+        </h3>
+        {sourceDocs.length > 0 && (
+          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            {sourceDocs.length} source{sourceDocs.length === 1 ? '' : 's'}
+          </span>
+        )}
+        <div className="flex-1" />
+        {summaryStatus && summaryStatus !== 'pending' && (
+          <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="docs-summary-chip">
+            Summary
+            <StageStatusChip status={summaryStatus} />
+          </span>
+        )}
+      </div>
       <input
         ref={fileInputRef}
         data-testid="flight-doc-file-input"

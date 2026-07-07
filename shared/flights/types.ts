@@ -104,8 +104,11 @@ export type FlightStatus =
 
 /** Why a flight is `paused` — drives the UI copy ("paused by you" vs "stage
  *  failed") and keeps a user pause from reading as an error. Absent on
- *  pre-existing manifests (legacy = stage-failed/restart semantics). */
-export type FlightPauseReason = 'user' | 'stage-failed' | 'restart'
+ *  pre-existing manifests (legacy = stage-failed/restart semantics).
+ *  `queued` = parked by the plan-features launch waiting for the repo's active
+ *  flight to settle — auto-started by the conductor's queue drain, never an
+ *  attention state. */
+export type FlightPauseReason = 'user' | 'stage-failed' | 'restart' | 'queued'
 
 export interface FlightOptions {
   /** Envset name the flight captures into / runs against. */
@@ -116,6 +119,14 @@ export interface FlightOptions {
   base?: string
   /** Skip every checkpoint except missing-env. */
   yolo: boolean
+  /** Grouping label the scaffold writes into feature.config.cjs (`group:`) —
+   *  set by the plan-features launch so sibling features render together. */
+  group?: string
+  /** This flight came from a confirmed plan-features proposal: the user
+   *  already chose to create N distinct features over the same repo(s), so
+   *  the similarity stage takes the 'new' path instead of re-asking (or
+   *  yolo-rerunning the sibling that scaffolded first). */
+  plannedSplit?: boolean
 }
 
 export interface FlightManifest {
@@ -217,10 +228,6 @@ export interface FlightEntryOptions {
   active: boolean
   /** True → mode "continue" is available (paused flight, first open stage). */
   canContinue: boolean
-  /** Whether the flight's intent/repos may be edited right now (non-active
-   *  flights only) — one server verdict shared by the start dialog and the
-   *  Repo Scan stage detail, instead of a duplicated client-side rule. */
-  editable: { description: boolean; repoPaths: boolean }
   prefill: { repoPaths: string[]; description: string; env: string; coverageTarget: number }
   stages: FlightStageEntryOption[]
 }
@@ -237,6 +244,44 @@ export function isActiveFlightStatus(status: FlightStatus): boolean {
 
 export function isTerminalFlightStatus(status: FlightStatus): boolean {
   return status === 'done' || status === 'failed' || status === 'aborted'
+}
+
+/** One feature the plan-features agent proposes for a broad intent. `name` is
+ *  a slug (deriveFeatureSlug alphabet); `description` becomes that flight's
+ *  intent; `scope` is the one-line rationale shown on the proposal card. */
+export interface PlannedFeature {
+  name: string
+  description: string
+  scope?: string
+  /** Shared grouping label for sibling features split from one intent. */
+  group?: string
+}
+
+/** The plan-features agent's judgment: does the intent describe one coherent
+ *  feature or several? `features` always has ≥1 entry (split=false → exactly
+ *  one, carrying a properly named single feature). */
+export interface PlanFeaturesResult {
+  split: boolean
+  features: PlannedFeature[]
+}
+
+/** `launched` = the proposal was confirmed and its flights exist — a terminal
+ *  state that keeps a second launch from double-creating them. */
+export type PlanFeaturesTaskStatus = 'running' | 'done' | 'failed' | 'launched'
+
+/** File-backed record of one plan-features agent run (the pre-flight intent
+ *  breakdown behind the new-flight dialog). */
+export interface PlanFeaturesTask {
+  taskId: string
+  repoPaths: string[]
+  description: string
+  status: PlanFeaturesTaskStatus
+  result?: PlanFeaturesResult
+  error?: string
+  /** Flights created by the launch, in queue order (first one is running). */
+  launchedFlightIds?: string[]
+  createdAt: string
+  updatedAt: string
 }
 
 /** Feature name derived from a repo path — the ONE slug rule shared by the

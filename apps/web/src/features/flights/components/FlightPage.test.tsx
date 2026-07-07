@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   abortFlight: vi.fn(),
   pauseFlight: vi.fn(),
   redoFlight: vi.fn(),
-  patchFlight: vi.fn(),
+  deleteFlight: vi.fn(),
+  listRuns: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
   getPlaywrightConfig: vi.fn(),
@@ -44,7 +45,8 @@ vi.mock('../../../shared/api/client', () => ({
   abortFlight: mocks.abortFlight,
   pauseFlight: mocks.pauseFlight,
   redoFlight: mocks.redoFlight,
-  patchFlight: mocks.patchFlight,
+  deleteFlight: mocks.deleteFlight,
+  listRuns: mocks.listRuns,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
   putFeatureConfigDoc: mocks.putFeatureConfigDoc,
@@ -91,6 +93,7 @@ let root: Root
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
+  mocks.listRuns.mockResolvedValue([])
   mocks.listJournal.mockResolvedValue([])
   mocks.downloadTask.mockResolvedValue(undefined)
   mocks.getFeatureConfigDoc.mockRejectedValue(new Error('no config'))
@@ -726,9 +729,11 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click()
     })
+    // R57: repos + intent moved from scout facts into the read-only RepoScanPanel.
+    expect(container.querySelector('[data-testid="repo-card-shop"]')?.textContent).toContain('/repo/shop')
+    expect(container.querySelector('[data-testid="repo-card-api"]')?.textContent).toContain('/repo/api')
+    expect(container.querySelector('[data-testid="flight-intent"]')?.textContent).toContain('checkout flow')
     const scoutFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(scoutFacts).toContain('shop · /repo/shop')
-    expect(scoutFacts).toContain('api · /repo/api')
     expect(scoutFacts).toContain('.env')
 
     await act(async () => {
@@ -736,6 +741,8 @@ describe('trailer model (R14–R18)', () => {
     })
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
       .toBe('7 requirements distilled from 2 docs (repo-docs).')
+    // R59: the folded prd-summary's status chips the Requirements header.
+    expect(container.querySelector('[data-testid="docs-summary-chip"]')?.textContent).toContain('done')
     const docsFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
     expect(docsFacts).toContain('shop-readme.md')
     expect(docsFacts).toContain('api-spec.md')
@@ -807,5 +814,172 @@ describe('flight controls (R48)', () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user', currentStage: 'docs' }))
     await render('fl_1')
     expect(container.querySelector('[data-testid="flight-status"]')?.getAttribute('title')).toContain('Paused by you')
+  })
+})
+
+describe('detail redesign (R53–R68)', () => {
+  const doneStages = () => FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+
+  it('R62: the header has no back button; delete confirms once then deletes and returns to the list', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: doneStages() }))
+    const onSelectFlight = vi.fn()
+    await act(async () => {
+      root.render(
+        <FlightPage flightId="fl_1" refreshKey={0} onSelectFlight={onSelectFlight} onClose={vi.fn()} />,
+      )
+    })
+    expect(container.querySelector('[aria-label="All flights"]')).toBeNull()
+    const del = container.querySelector<HTMLButtonElement>('[data-testid="flight-delete"]')
+    expect(del).toBeTruthy()
+    await act(async () => { del!.click() })
+    expect(mocks.deleteFlight).not.toHaveBeenCalled()
+    mocks.deleteFlight.mockResolvedValue({ deleted: true })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-delete-confirm"]')?.click()
+    })
+    expect(mocks.deleteFlight).toHaveBeenCalledWith('fl_1')
+    expect(onSelectFlight).toHaveBeenCalledWith(null)
+  })
+
+  it('R64: a live run for the feature flips the settled run row to running and lists the run cards', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: doneStages() }))
+    mocks.listRuns.mockResolvedValue([
+      { runId: 'run-live', feature: 'checkout', status: 'running', startedAt: '2026-01-01T00:03:00Z', executionType: 'run' },
+      { runId: 'run-9', feature: 'checkout', status: 'passed', startedAt: '2026-01-01T00:00:00Z', executionType: 'run' },
+      { runId: 'boot-1', feature: 'checkout', status: 'running', startedAt: '2026-01-01T00:01:00Z', executionType: 'boot' },
+    ])
+    mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' }, summary: { total: 8, passed: 8, failed: [] } })
+    const activity = new Map([['checkout', { kind: 'running' as const, runId: 'run-live' }]])
+    const onOpenRun = vi.fn()
+    await act(async () => {
+      root.render(
+        <FlightPage flightId="fl_1" refreshKey={0} onSelectFlight={vi.fn()} onClose={vi.fn()} activity={activity} onOpenRun={onOpenRun} />,
+      )
+    })
+    const runRail = container.querySelector('[data-testid="stage-rail-run"]')
+    expect(runRail?.textContent).toContain('▸')
+    expect(runRail?.textContent).not.toContain('✓')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    const cards = container.querySelector('[data-testid="feature-runs"]')
+    expect(cards).toBeTruthy()
+    // Boot sessions are plumbing — only the two real test runs render.
+    expect(cards?.textContent).toContain('8/8 passed')
+    const buttons = cards!.querySelectorAll('button')
+    expect(buttons.length).toBe(2)
+    await act(async () => { buttons[1]?.click() })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
+  })
+
+  it('R61: the summary strip shows elapsed, coverage, run verdict, docs and report readiness', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      createdAt: '2026-01-01T00:00:00Z',
+      endedAt: '2026-01-01T00:02:14Z',
+      runVerdict: 'passed',
+      links: { runId: 'run-9', evaluationZip: '/tmp/eval.zip' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'specs-coverage' ? { progress: { pass: 2, phase: 'mapping', passes: [{ pass: 1, coveragePct: 62, gapsOpen: 3 }, { pass: 2, coveragePct: 94, gapsOpen: 1 }] } } : {}),
+        ...(key === 'docs' ? { evidence: { docs: ['a.md', 'b.md', 'c.md'] } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    const strip = container.querySelector('[data-testid="flight-summary-strip"]')?.textContent ?? ''
+    expect(strip).toContain('2m 14s')
+    expect(strip).toContain('94%')
+    expect(strip).toContain('passed')
+    expect(strip).toContain('3')
+    expect(strip).toContain('ready')
+  })
+
+  it('R66: a settled agent stage folds its activity behind one toggle — tagged lines split around the embedded timeline', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'scout' ? { log: '[scout] inspecting repos\n[scout] spawning agent…\nraw agent chatter\n[scout] config drafted\n' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click()
+    })
+    // Settled → collapsed by default, one disclosure.
+    expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
+    expect(toggle?.textContent).toContain('View activity')
+    await act(async () => { toggle!.click() })
+    const activitySection = container.querySelector('[data-testid="stage-activity"]')!
+    const logs = activitySection.querySelectorAll('[data-testid="stage-log"]')
+    expect(logs.length).toBe(2)
+    expect(logs[0].textContent).toContain('spawning agent…')
+    expect(logs[0].textContent).not.toContain('config drafted')
+    expect(logs[1].textContent).toContain('config drafted')
+    // The untagged agent chatter never renders in the rail — the timeline owns it.
+    expect(activitySection.textContent).not.toContain('raw agent chatter')
+    const asv = activitySection.querySelector('[data-testid="agent-session-view"]')
+    expect(asv?.getAttribute('data-stage')).toBe('scout')
+  })
+
+  it('R66: a live agent stage renders the activity expanded with no toggle', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'scout',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scout' ? ('running' as const) : ('pending' as const),
+        ...(key === 'scout' ? { log: '[scout] spawning agent…\n' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="stage-details-toggle"]')).toBeNull()
+    const activitySection = container.querySelector('[data-testid="stage-activity"]')!
+    expect(activitySection.querySelector('[data-testid="stage-log"]')?.textContent).toContain('spawning agent…')
+    const asv = activitySection.querySelector('[data-testid="agent-session-view"]')
+    expect(asv?.getAttribute('data-stage')).toBe('scout')
+  })
+
+  it('R66: an agentless stage falls back to the raw tagged log (no timeline)', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'scaffold' ? { log: '[scaffold] reused the existing feature setup\n' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
+    })
+    const activitySection = container.querySelector('[data-testid="stage-activity"]')!
+    expect(activitySection.querySelector('[data-testid="agent-session-view"]')).toBeNull()
+    expect(activitySection.querySelector('[data-testid="stage-log"]')?.textContent).toContain('reused the existing feature setup')
+  })
+
+  it('R60: rail rows carry stage durations once settled', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:00:30Z' } : {}),
+        ...(key === 'heal' ? { startedAt: '2026-01-01T00:00:30Z', endedAt: '2026-01-01T00:01:10Z' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    // The merged run row spans run start → heal end (70s).
+    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('1m 10s')
   })
 })

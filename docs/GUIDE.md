@@ -74,6 +74,10 @@ Checkpoints pause the flight for a human: config approval once the feature is sc
 
 Flights are resumable background jobs: a crash or a failed stage parks the flight `paused`, and the next `flight` on the same repo resumes from the first open stage (`--fresh` starts over). A repo that already has a feature parks on a rerun / enhance / new choice — never a silent duplicate.
 
+A flight's **repos and intent freeze** the moment it first starts — redo, jump-to-stage, and resume all reuse the stored repos + description across the CLI, the web UI, and MCP. Passing a different repo set or description is rejected (`flight_frozen`); to change them, **delete the flight in the web UI** (Flights pill → flight → delete — only when it is not active; stop it first). Deletion drops the flight record only: the feature and its on-disk artifacts stay, and its pill row returns to "not flown" so a fresh flight can pick new repos/intent. There is no delete command or MCP tool — deletion is a web-UI action.
+
+Broad intent, several features: in the web UI's new-flight dialog, a wide description ("test the whole app") is split by an agent into N proposed features for you to confirm; launch then creates one flight per feature. The first starts immediately and the rest are **queued** (`paused`, `pauseReason: "queued"`) — a queued flight is waiting its turn behind another flight on the same repo(s), not stuck, and auto-starts the moment that repo frees. Same-`group` features (set `group: "<name>"` in `feature.config.cjs`) render together under one accordion in the pill's feature list. (The intent breakdown is a web-UI flow; it is not exposed over the CLI or MCP.)
+
 ## External Authoring Workflow
 
 External clients can use the MCP `author` profile to create durable Canary Lab tasks without asking Canary Lab to author content:
