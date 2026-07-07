@@ -121,14 +121,16 @@ describe('FlightsPill', () => {
     expect(chip.rank).toBe(0)
   })
 
-  it('activity on a feature with no flight gets a row that opens the real surface', () => {
+  it('activity on a feature with no flight gets a row (progress chip, no "no flight" label) that opens it', () => {
     const onOpenActivity = vi.fn()
     const activity = new Map<string, FeatureActivity>([['pay', { kind: 'portifying', workflowId: 'wf9' }]])
     act(() => { root.render(<FlightsPill flights={[flight({})]} activity={activity} onOpenFlight={vi.fn()} onOpenActivity={onOpenActivity} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const row = document.body.querySelector<HTMLButtonElement>('[data-testid="activity-open-pay"]')
     expect(row).toBeTruthy()
-    expect(row?.textContent).toContain('no flight')
+    // R39: no "no flight" text — the live progress chip carries the state.
+    expect(row?.textContent).not.toContain('no flight')
+    expect(row?.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('portifying')
     act(() => { row?.click() })
     expect(onOpenActivity).toHaveBeenCalledWith('pay', { kind: 'portifying', workflowId: 'wf9' })
   })
@@ -151,5 +153,53 @@ describe('FlightsPill', () => {
     const rows = [...document.body.querySelectorAll('[data-testid^="flight-open-"]')]
     // The done flight whose feature is running again floats above the resting one.
     expect(rows[0]?.getAttribute('data-testid')).toBe('flight-open-fl_live')
+  })
+})
+
+describe('FlightsPill — every feature 1:1 (R49)', () => {
+  it('lists never-flown features as greyed-rail rows that open the flight launcher', () => {
+    const onStartFlight = vi.fn()
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[flight({ status: 'done', currentStage: null })]}
+          features={['checkout', 'menu-management']}
+          onOpenFlight={vi.fn()}
+          onStartFlight={onStartFlight}
+        />,
+      )
+    })
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Flights"]')!.click()
+    })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="not-flown-menu-management"]')
+    expect(row).toBeTruthy()
+    // Same anatomy as a flight row: greyed mini rail squares + the chip (never a dash).
+    expect(row!.querySelector('[data-testid="stage-mini-rail"]')).toBeTruthy()
+    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('not flown')
+    act(() => { row!.click() })
+    expect(onStartFlight).toHaveBeenCalledWith('menu-management')
+  })
+
+  it('never duplicates a feature that already has a flight row, and not-flown rows sink to the bottom', () => {
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[flight({ feature: 'checkout', status: 'waiting-for-approval' })]}
+          features={['checkout', 'aaa-never-flown']}
+          onOpenFlight={vi.fn()}
+          onStartFlight={vi.fn()}
+        />,
+      )
+    })
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Flights"]')!.click()
+    })
+    const rows = [...document.body.querySelectorAll('[data-testid^="flight-open-"], [data-testid^="not-flown-"]')]
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.getAttribute('data-testid')).toBe('flight-open-fl_1')
+    expect(rows[1]?.getAttribute('data-testid')).toBe('not-flown-aaa-never-flown')
+    // A never-flown feature does not light the pill.
+    expect(container.querySelector('[data-testid="flights-pill-count"]')).toBeTruthy() // the waiting flight does
   })
 })

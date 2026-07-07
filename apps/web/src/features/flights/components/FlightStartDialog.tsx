@@ -8,12 +8,19 @@ import type {
 } from '../../../shared/api/client'
 import { Modal, Textarea } from '../../config/components/atoms'
 import { STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
+import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 
-// R25: the UI's flight launcher. One dialog per feature that answers "where do
-// you want the pipeline to (re)start?" — a stage menu in the rail's vocabulary,
-// where each row's clickability is the SERVER's stage-entry verdict
-// (GET /api/flights/entry), never a client-side prerequisite guess. Picking a
-// row + Start posts the same /api/flights body the CLI and MCP send
+// R25/R40: the UI's flight launcher — THE entry point for flights.
+// Two modes off one dialog:
+//   • new-flight (feature == null, opened from "+ New"): asks exactly two
+//     things — intent + repo list (RepoMultiPicker); the feature name derives
+//     from the first repo (the CLI's slug rule); the Start-from menu renders
+//     fully locked ("unlocks after the first flight" — R41).
+//   • feature-scoped (existing behavior): the stage menu answers "where do you
+//     want the pipeline to (re)start?", each row's clickability being the
+//     SERVER's stage-entry verdict (GET /api/flights/entry), never a
+//     client-side prerequisite guess.
+// Picking + Start posts the same /api/flights body the CLI and MCP send
 // (four-surface parity), so continue / redo / jump behave identically here.
 
 /** The pickable steps: stage keys minus `heal` (always run-driven — the server
@@ -37,12 +44,19 @@ function rowLabel(key: FlightStageKey): string {
   return key === 'similarity' ? 'Full flight — from the beginning' : STAGE_LABEL[key]
 }
 
+const FIRST_FLIGHT_REASON = "available after this feature's first flight"
+
 export function FlightStartDialog({
   feature,
+  knownRepos = [],
   onClose,
   onOpenFlight,
 }: {
-  feature: string
+  /** Feature to (re)fly, or null → new-flight mode (intent + repo picker). */
+  feature: string | null
+  /** Known workspace repos (flattened from the features' configs) offered by
+   *  the picker; free paths can always be added. */
+  knownRepos?: RepoOption[]
   onClose: () => void
   /** Navigate to the flight detail view (just-started or already-active). */
   onOpenFlight: (flightId: string) => void
@@ -50,17 +64,22 @@ export function FlightStartDialog({
   const [entry, setEntry] = useState<FlightEntryOptions | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [description, setDescription] = useState('')
-  const [picked, setPicked] = useState<FlightStageKey | 'continue' | null>(null)
+  const [repoPaths, setRepoPaths] = useState<string[]>([])
+  const [picked, setPicked] = useState<FlightStageKey | 'continue' | null>(feature ? null : 'similarity')
   const [busy, setBusy] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
 
+  const newFlight = feature === null
+
   useEffect(() => {
+    if (newFlight) return
     let alive = true
     api.getFlightEntryOptions(feature)
       .then((options) => {
         if (!alive) return
         setEntry(options)
         setDescription(options.prefill.description)
+        setRepoPaths(options.prefill.repoPaths)
         setPicked(options.canContinue ? 'continue' : null)
       })
       .catch((err: unknown) => {
@@ -68,7 +87,7 @@ export function FlightStartDialog({
         setLoadError(err instanceof Error ? err.message : String(err))
       })
     return () => { alive = false }
-  }, [feature])
+  }, [feature, newFlight])
 
   const byKey = useMemo(() => {
     const map = new Map<FlightStageKey, FlightStageEntryOption>()
@@ -81,22 +100,42 @@ export function FlightStartDialog({
     return map
   }, [entry])
 
-  const canSubmit =
-    entry !== null
-    && !entry.active
-    && !busy
-    && picked !== null
-    && description.trim() !== ''
-    && entry.prefill.repoPaths.length > 0
+  const derivedFeature = newFlight && repoPaths.length > 0 ? api.deriveFeatureSlug(repoPaths[0]) : null
+
+  // Repos are editable on a fresh start of a non-active flight (the server
+  // resets downstream evidence on a repo change); locked mid-menu picks.
+  const reposEditable = newFlight || (Boolean(entry?.editable?.repoPaths) && picked === 'similarity')
+
+  const canSubmit = newFlight
+    ? !busy && description.trim() !== '' && repoPaths.length > 0
+    : entry !== null && !entry.active && !busy && picked !== null && description.trim() !== '' && repoPaths.length > 0
 
   const start = (): void => {
-    if (!entry || picked === null) return
+    if (busy) return
     setBusy(true)
     setStartError(null)
+    const fail = (err: unknown): void => {
+      const body = err instanceof api.ApiError ? (err.body as { error?: string } | null) : null
+      setStartError(body?.error ?? (err instanceof Error ? err.message : String(err)))
+      setBusy(false)
+    }
+
+    if (newFlight) {
+      api.startFlight({
+        feature: derivedFeature ?? 'feature',
+        repoPaths,
+        description: description.trim(),
+      })
+        .then((manifest) => onOpenFlight(manifest.flightId))
+        .catch(fail)
+      return
+    }
+
+    if (!entry || picked === null) return
     const hasRecord = entry.flight !== null
     const body: api.StartFlightBody = {
-      feature,
-      repoPaths: entry.prefill.repoPaths,
+      feature: feature!,
+      repoPaths,
       description: description.trim(),
       env: entry.prefill.env,
       coverageTarget: entry.prefill.coverageTarget,
@@ -108,23 +147,62 @@ export function FlightStartDialog({
     }
     api.startFlight(body)
       .then((manifest) => onOpenFlight(manifest.flightId))
-      .catch((err: unknown) => {
-        const body = err instanceof api.ApiError ? (err.body as { error?: string } | null) : null
-        setStartError(body?.error ?? (err instanceof Error ? err.message : String(err)))
-        setBusy(false)
-      })
+      .catch(fail)
   }
 
+  const stageMenu = (
+    <div className="flex flex-col gap-0.5" role="radiogroup" aria-label="Start from">
+      <span className="mb-0.5 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+        Start from
+      </span>
+
+      {!newFlight && entry?.canContinue && (
+        <StageRow
+          testId="flight-start-continue"
+          selected={picked === 'continue'}
+          onPick={() => setPicked('continue')}
+          icon="▸"
+          iconTone="rgb(56, 189, 248)"
+          label="Continue where it left off"
+          sub="Resumes the paused flight at its first open stage."
+        />
+      )}
+
+      {PICKABLE.map((key) => {
+        // New flights always start from the beginning: the whole menu renders
+        // visible-but-locked so the re-entry affordance is learnable (R41).
+        const verdict = newFlight
+          ? { key, allowed: key === 'similarity', reason: key === 'similarity' ? undefined : FIRST_FLIGHT_REASON }
+          : byKey.get(key)
+        const allowed = verdict?.allowed ?? false
+        const status = key === 'similarity' ? undefined : lastStatus.get(key)
+        return (
+          <StageRow
+            key={key}
+            testId={`flight-start-stage-${key}`}
+            selected={picked === key}
+            disabled={!allowed}
+            onPick={() => setPicked(key)}
+            icon={status ? STAGE_ICON[status] : '·'}
+            iconTone={stageStatusTone(status)}
+            label={rowLabel(key)}
+            sub={allowed ? undefined : verdict?.reason}
+          />
+        )
+      })}
+    </div>
+  )
+
   return (
-    <Modal open onClose={onClose} eyebrow="Flight" title={feature} width={520}>
+    <Modal open onClose={onClose} eyebrow="Flight" title={feature ?? 'Start a flight'} width={520}>
       <div className="flex flex-col gap-3 p-4">
         {loadError ? (
           <div data-testid="flight-start-error" className="text-[11.5px]" style={{ color: 'var(--danger)' }}>
             {loadError}
           </div>
-        ) : !entry ? (
+        ) : !newFlight && !entry ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading stage options…</div>
-        ) : entry.active ? (
+        ) : !newFlight && entry?.active ? (
           // Attach, never a second start: the single-flight lock holds server-side.
           <div className="flex flex-col gap-2">
             <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
@@ -142,66 +220,56 @@ export function FlightStartDialog({
           </div>
         ) : (
           <>
-            <div className="truncate text-[10.5px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {entry.prefill.repoPaths.join(', ')}
-            </div>
-
             <label className="flex flex-col gap-1">
               <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                What to test
+                What should this flight test?
               </span>
               <Textarea
                 value={description}
                 onChange={setDescription}
                 minRows={2}
                 maxRows={4}
-                placeholder="e.g. the checkout flow end to end"
+                placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
               />
             </label>
-
-            <div className="flex flex-col gap-0.5" role="radiogroup" aria-label="Start from">
-              <span className="mb-0.5 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                Start from
-              </span>
-
-              {entry.canContinue && (
-                <StageRow
-                  testId="flight-start-continue"
-                  selected={picked === 'continue'}
-                  onPick={() => setPicked('continue')}
-                  icon="▸"
-                  iconTone="rgb(56, 189, 248)"
-                  label="Continue where it left off"
-                  sub="Resumes the paused flight at its first open stage."
-                />
-              )}
-
-              {PICKABLE.map((key) => {
-                const verdict = byKey.get(key)
-                const allowed = verdict?.allowed ?? false
-                const status = key === 'similarity' ? undefined : lastStatus.get(key)
-                return (
-                  <StageRow
-                    key={key}
-                    testId={`flight-start-stage-${key}`}
-                    selected={picked === key}
-                    disabled={!allowed}
-                    onPick={() => setPicked(key)}
-                    icon={status ? STAGE_ICON[status] : '·'}
-                    iconTone={stageStatusTone(status)}
-                    label={rowLabel(key)}
-                    sub={allowed ? undefined : verdict?.reason}
-                  />
-                )
-              })}
+            <div className="-mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+              Documents referenced here are linked into the flight automatically.
             </div>
 
-            {entry.flight !== null && (
+            <div className="flex flex-col gap-1">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                Repos
+              </span>
+              <RepoMultiPicker
+                known={knownRepos}
+                selected={repoPaths}
+                onChange={setRepoPaths}
+                disabled={!reposEditable}
+                disabledReason={
+                  entry && !entry.editable?.repoPaths
+                    ? 'Pause or stop the flight to change its repos.'
+                    : 'Repos can change only on a full restart — pick "Full flight" to edit them.'
+                }
+              />
+              {derivedFeature && (
+                <div data-testid="flight-start-derived-feature" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                  Feature name: <span style={{ fontFamily: 'var(--font-mono)' }}>{derivedFeature}</span> — derived automatically
+                </div>
+              )}
+            </div>
+
+            {stageMenu}
+
+            {newFlight ? (
+              <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                Step entry unlocks after this feature's first flight.
+              </div>
+            ) : entry?.flight !== null ? (
               <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
                 Starting resets this flight's stage records; captured artifacts on
                 disk (config, envset, docs, specs) are kept and reused.
               </div>
-            )}
+            ) : null}
 
             {startError && (
               <div data-testid="flight-start-error" className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>

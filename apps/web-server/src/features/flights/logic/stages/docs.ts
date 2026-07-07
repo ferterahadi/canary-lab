@@ -1,19 +1,24 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { execFileSync } from 'child_process'
-import { writeFeatureDoc } from '../../../config/logic/feature-authoring'
+import { linkFeatureDoc, writeFeatureDoc } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, type FlightStageDeps } from './context'
 
 // Populate features/<f>/docs/ from the PRD-source hierarchy:
-//   (0) docs already present (user-dropped, or MCP-path conversation docs) →
-//   (1) requirement-bearing repo docs (README, docs/**.md) →
-//   (2) the code diff vs the base branch, when a meaningful one exists →
-//   (3) the flight description alone.
-// Non-yolo flights park on the prd-source checkpoint so the user can drop a
-// real PRD before canary infers one. Everything lands through the same
-// writeFeatureDoc used by the UI + MCP, feeding the same PRD engine.
+//   (0)   docs already present (user-dropped, or MCP-path conversation docs)
+//   (0.5) local doc paths referenced in the intent ("refer to ~/…/prd.md") —
+//         symlinked in, so the user's original stays the live source
+//   (1)   requirement-bearing repo docs (README, docs/**.md)
+//   (2)   the code diff vs the base branch, when a meaningful one exists
+//   (3)   the flight description alone.
+// Non-yolo flights ALWAYS park on the prd-source checkpoint — even when docs
+// exist — so the human gets one deliberate moment to add requirements before
+// the PRD summary runs; `continue` is the zero-friction release. Everything
+// lands through the same writeFeatureDoc/linkFeatureDoc used by the UI + MCP,
+// feeding the same PRD engine.
 
 const MAX_REPO_DOCS = 10
 const MAX_DOC_BYTES = 200 * 1024
@@ -25,10 +30,33 @@ function userDocs(featureDir: string): string[] {
     return fs
       .readdirSync(docsDir)
       .filter((f) => !f.startsWith('_') && /\.(md|markdown|txt)$/i.test(f))
-      .filter((f) => fs.statSync(path.join(docsDir, f)).size > 0)
+      .filter((f) => {
+        try {
+          return fs.statSync(path.join(docsDir, f)).size > 0
+        } catch {
+          return false // dangling symlink — the docs UI surfaces it as broken
+        }
+      })
   } catch {
     return []
   }
+}
+
+/** Local doc paths the intent references ("… refer to ~/Documents/prd.md").
+ *  Absolute or ~-relative, no spaces (a quoted path with spaces is out of
+ *  scope — the Requirements checkpoint's add-path input covers it). */
+const INTENT_PATH_RE = /(?:~|\/)[^\s"'`,;]+\.(?:md|markdown|txt)\b/gi
+
+export function intentDocPaths(description: string): string[] {
+  const hits = description.match(INTENT_PATH_RE) ?? []
+  const expanded = hits.map((p) => (p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p))
+  return [...new Set(expanded)].filter((p) => {
+    try {
+      return fs.statSync(p).isFile()
+    } catch {
+      return false
+    }
+  })
 }
 
 function findRepoDocs(repoPaths: string[]): Array<{ repo: string; file: string }> {
@@ -135,32 +163,70 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     return { kind: 'done', evidence: { source, docs } }
   }
 
+  /** Rung 0.5 — symlink local docs the intent references into docs/. */
+  const linkIntentDocs = (ctx: StageContext): string[] => {
+    const m = ctx.manifest()
+    const linked: string[] = []
+    for (const target of intentDocPaths(m.description)) {
+      const result = linkFeatureDoc(ctxAuthoring, { feature: m.feature, targetPath: target })
+      if (result.ok) {
+        linked.push(result.relativePath)
+        ctx.appendLog(`[docs] ${result.linked ? 'linked' : 'copied'} ${target} → docs/${path.basename(result.relativePath)}\n`)
+      } else {
+        ctx.appendLog(`[docs] could not link ${target}: ${result.error}\n`)
+      }
+    }
+    if (linked.length > 0) {
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
+    }
+    return linked
+  }
+
+  const park = (ctx: StageContext, linked: string[]): StageOutcome => {
+    const m = ctx.manifest()
+    const docs = userDocs(featureDirFor(deps, m.feature))
+    const repoDocs = findRepoDocs(m.repoPaths)
+    const hasDocs = docs.length > 0
+    return {
+      kind: 'checkpoint',
+      checkpoint: {
+        kind: 'prd-source',
+        message: hasDocs
+          ? `${docs.length} requirement doc(s) ready for "${m.feature}"${linked.length > 0 ? ` (${linked.length} linked from your intent)` : ''}. Add more into features/${m.feature}/docs/ — or link local paths — then continue. Or pick another source to infer from.`
+          : `No PRD docs yet for "${m.feature}". Drop doc files into features/${m.feature}/docs/ (or link local paths) and retry, or pick a source to infer from.`,
+        options: hasDocs
+          ? ['continue', 'use-repo-docs', 'infer-from-diff', 'description-only', 'retry']
+          : ['use-repo-docs', 'infer-from-diff', 'description-only', 'retry'],
+        data: { docs, linked, repoDocsDetected: repoDocs.map((d) => d.file) },
+      },
+    }
+  }
+
   return {
     async run(ctx) {
       const m = ctx.manifest()
+      const linked = linkIntentDocs(ctx)
       const existing = userDocs(featureDirFor(deps, m.feature))
-      if (existing.length > 0) {
-        return { kind: 'done', evidence: { source: 'existing', docs: existing } }
+      if (m.opts.yolo) {
+        if (existing.length > 0) {
+          return { kind: 'done', evidence: { source: linked.length > 0 ? 'intent-linked' : 'existing', docs: existing } }
+        }
+        return gather(ctx, 'auto')
       }
-      if (m.opts.yolo) return gather(ctx, 'auto')
-
-      const repoDocs = findRepoDocs(m.repoPaths)
-      return {
-        kind: 'checkpoint',
-        checkpoint: {
-          kind: 'prd-source',
-          message: `No PRD docs yet for "${m.feature}". Drop doc files into features/${m.feature}/docs/ and retry, or pick a source to infer from.`,
-          options: ['use-repo-docs', 'infer-from-diff', 'description-only', 'retry'],
-          data: { repoDocsDetected: repoDocs.map((d) => d.file) },
-        },
-      }
+      // Requirements always pause (non-yolo): one deliberate moment to add
+      // docs, even when some already exist — `continue` releases immediately.
+      return park(ctx, linked)
     },
     async onCheckpointResponse(ctx, response) {
       const m = ctx.manifest()
-      // The user may have dropped docs while we waited — hierarchy rung 0.
       const existing = userDocs(featureDirFor(deps, m.feature))
-      if (existing.length > 0) return { kind: 'done', evidence: { source: 'dropped', docs: existing } }
       const choice = response.choice ?? ''
+      if (choice === 'continue') {
+        if (existing.length > 0) {
+          return { kind: 'done', evidence: { source: 'user-confirmed', docs: existing } }
+        }
+        return park(ctx, []) // nothing to continue with — re-park
+      }
       if (choice === 'retry') return this.run!(ctx)
       if (['use-repo-docs', 'infer-from-diff', 'description-only'].includes(choice)) {
         return gather(ctx, choice === 'infer-from-diff' ? 'diff' : choice)

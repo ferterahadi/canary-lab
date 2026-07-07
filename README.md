@@ -125,7 +125,7 @@ scout the repo → draft `feature.config.cjs` (you approve) → capture env file
 | Entry | `init`, learn UI/MCP, then per-feature setup | `npx canary-lab flight ../shop "checkout flow"` |
 | feature.config.cjs | hand-written: repos, startCommands, `${port.api}`, healthCheck | agent scouts the repo and drafts it; a dry-run boot verifies it |
 | Env → envsets | know + call the capture tool yourself | automatic; missing secrets are the one checkpoint never skipped |
-| Docs/PRD | copy files into `docs/`, trigger the summary | drop a PRD at the checkpoint — else inferred from repo docs / the diff vs your base branch |
+| Docs/PRD | copy files into `docs/`, trigger the summary | the flight pauses for your docs — add files or link local paths (symlinked); else inferred from repo docs / the diff vs your base branch |
 | Specs + coverage | author + tag + map by hand | authoring loop until the coverage ledger has no gaps |
 | Run + heal + proof | drive the loop, export manually | stages; the flight ends with the evaluation archive on disk |
 | Human steps | ~10, expert knowledge required | 1 command + approve checkpoints (`--yolo` skips all but missing secrets) |

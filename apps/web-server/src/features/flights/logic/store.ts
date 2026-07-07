@@ -50,6 +50,7 @@ function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
     feature: m.feature,
     repoPaths: m.repoPaths,
     status: m.status,
+    ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
     currentStage: m.currentStage,
     stages: m.stages.map((s) => ({ key: s.key, status: s.status })),
     updatedAt: m.updatedAt,
@@ -80,6 +81,7 @@ export class FlightRunStore implements FlightStore {
         mark: (m, now) => ({
           ...m,
           status: 'paused',
+          pauseReason: 'restart' as const,
           updatedAt: now,
           stages: m.stages.map((s) =>
             s.status === 'running' ? { ...s, status: 'pending' as const } : s,

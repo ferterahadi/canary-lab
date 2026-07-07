@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, flight: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -166,11 +166,6 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
 
-  it('round-trips the add-test dialog with no feature', () => {
-    persistView(view({ dialog: 'add-test' }))
-    expect(readPersistedView()).toEqual(view({ dialog: 'add-test' }))
-  })
-
   it('round-trips the feature-scoped verification dialog', () => {
     persistView(view({ feature: 'checkout', dialog: 'verification' }))
     expect(window.location.search).toContain('dialog=verification')
@@ -184,23 +179,24 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('flight-start')
   })
 
-  it('round-trips a portify revisit (dialog + wf qualifier)', () => {
-    persistView(view({ feature: 'checkout', dialog: 'portify', wf: 'wf_abc' }))
-    expect(window.location.search).toContain('dialog=portify')
-    expect(window.location.search).toContain('wf=wf_abc')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'portify', wf: 'wf_abc' }))
+  it('round-trips the new-flight launcher dialog (R40 — no feature qualifier needed)', () => {
+    persistView(view({ dialog: 'flight-new' }))
+    expect(window.location.search).toContain('dialog=flight-new')
+    expect(readPersistedView()).toEqual(view({ dialog: 'flight-new' }))
+    expect(localStorage.getItem(KEY)).not.toContain('flight-new')
   })
 
-  it('treats a portify dialog with no wf as start-new (wf omitted)', () => {
-    persistView(view({ feature: 'checkout', dialog: 'portify', wf: null }))
-    expect(window.location.search).not.toContain('wf=')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'portify' }))
+  it('R50: ignores the retired add-test / portify dialogs in stale deep links', () => {
+    window.history.replaceState(null, '', '/?dialog=add-test')
+    expect(readPersistedView()).toEqual(view({}))
+    window.history.replaceState(null, '', '/?dialog=portify&wf=wf_abc&feature=checkout')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
   })
 
-  it('drops a stray wf when the dialog is not portify', () => {
-    persistView(view({ feature: 'checkout', dialog: 'config', wf: 'wf_abc' }))
+  it('R50: clears a stale wf param on the next persist', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&wf=wf_abc')
+    persistView(view({ feature: 'checkout' }))
     expect(window.location.search).not.toContain('wf=')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
 
   it('R29: ignores the retired evaluation dialog in a stale deep link', () => {

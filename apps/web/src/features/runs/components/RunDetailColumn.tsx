@@ -31,7 +31,6 @@ import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
 import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
 import { useRun } from '../state/RunsContext'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
-import { EvaluationTaskPanel } from '../../evaluation/components/EvaluationTaskPanel'
 import { useMcpPromo } from '../../../shared/shell/McpPromoContext'
 import { deriveRunViewModel, type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
@@ -313,12 +312,11 @@ function RunOverviewTab({
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [exportError, setExportError] = useState(false)
-  const { startExport, taskForRun } = useEvaluationExports()
+  const { startExport } = useEvaluationExports()
   const { gatePromo } = useMcpPromo()
-  // R29: the standalone export dialog is gone — the export lives HERE. This
-  // run's latest task renders inline below the run facts; starting one makes
-  // the panel appear in place.
-  const exportTask = taskForRun(manifest.runId)
+  // R38: run detail keeps only the "Review Evaluation" trigger — the export's
+  // progress/output is watched via the Flights pill (it blinks on an active
+  // export) and the flight's Evaluation Report stage, not inline here.
   const handleExportEvaluation = useCallback(async (mode: EvaluationExportMode) => {
     setExportMenuOpen(false)
     setExportError(false)
@@ -425,14 +423,6 @@ function RunOverviewTab({
       {manifest.executionType === 'boot' && view.primaryAlert && (
         <div className={`mt-4 rounded-md border px-2.5 py-2 text-xs ${alertClass(view.primaryAlert.tone)}`}>
           {view.primaryAlert.message}
-        </div>
-      )}
-      {/* R29: this run's evaluation export, in place — progress, output, and
-          the download once the archive is ready. */}
-      {exportTask && (
-        <div className="mt-4">
-          <SectionHeader>Evaluation</SectionHeader>
-          <EvaluationTaskPanel task={exportTask} />
         </div>
       )}
       <div className="mt-4">

@@ -224,6 +224,13 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
 
     const resumed = respondToFlightCheckpoint(manifest.flightId, { choice: 'rerun' }, second.deps)
     await resumed.completion
+    // Non-yolo flights park once more before the terminal stage: the
+    // export-mode choice (raw vs localized).
+    const preExport = store.get(manifest.flightId)!
+    expect(preExport.status).toBe('waiting-for-approval')
+    expect(preExport.stages.find((s) => s.key === 'evaluation-export')!.checkpoint?.kind).toBe('export-mode')
+    const exported = respondToFlightCheckpoint(manifest.flightId, { choice: 'raw' }, second.deps)
+    await exported.completion
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('done')
     expect(final.feature).toBe('first-flight-app') // re-pointed at the existing feature

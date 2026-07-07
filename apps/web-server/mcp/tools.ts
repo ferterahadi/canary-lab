@@ -38,6 +38,7 @@ import {
   getFeatureRepoStatus,
   writeFeatureDoc,
   deleteFeatureDoc,
+  linkFeatureDoc,
   type EnvFileSource,
 } from '../src/features/config/logic/feature-authoring'
 import {
@@ -46,6 +47,7 @@ import {
   computeFeatureCoverage,
   listFeatureDocs,
 } from '../src/features/coverage/logic/coverage/service'
+import { deriveFeatureSlug } from '../../../shared/flights/types'
 import { CoverageJobRunStore } from '../src/features/coverage/logic/coverage/jobs/store'
 import { CoverageJobConflictError } from '../src/features/coverage/logic/coverage/jobs/runner'
 import {
@@ -815,16 +817,30 @@ export function registerCanaryLabTools(
 
   registerTool('write_feature_doc', {
     description:
-      'Write a prose doc (session, plan, notes) into a feature\'s docs/ dir. Create-or-replace (re-writing the same relPath overwrites); markdown only (.md/.markdown). Use for "add this plan/distillation to feature <name>".',
+      'Write a prose doc (session, plan, notes) into a feature\'s docs/ dir, OR link a LOCAL file in place via link_path (symlinked so the user\'s original stays the live source; copy fallback where symlinks aren\'t permitted). Create-or-replace (re-writing the same relPath overwrites); written docs are markdown only (.md/.markdown), linked docs may also be .txt. Use for "add this plan/distillation to feature <name>" or "use ~/Documents/prd.md as the requirements".',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
-      relPath: z.string().describe('Path relative to the feature docs/ dir, e.g. "notes.md" or "sessions/2026-05-28.md". A leading "docs/" is optional. Must end in .md or .markdown.'),
-      content: z.string().describe('Markdown document body.'),
+      relPath: z.string().optional().describe('Path relative to the feature docs/ dir, e.g. "notes.md" or "sessions/2026-05-28.md". A leading "docs/" is optional. Required with content; defaults to the target basename with link_path.'),
+      content: z.string().optional().describe('Markdown document body. Mutually exclusive with link_path.'),
+      link_path: z.string().optional().describe('Absolute or ~-relative path of a LOCAL doc to link into docs/ instead of writing content. Mutually exclusive with content.'),
     },
-  }, async ({ feature, relPath, content }) => {
+  }, async ({ feature, relPath, content, link_path }) => {
+    if ((content === undefined) === (link_path === undefined)) {
+      return errorResult('pass exactly one of content (write a doc) or link_path (link a local file)')
+    }
+    if (link_path !== undefined) {
+      const result = linkFeatureDoc(
+        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        { feature, targetPath: link_path, ...(relPath ? { relPath } : {}) },
+      )
+      if (!result.ok) return errorResult(result.error)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
+      return asJsonResult({ written: true, linked: result.linked, path: result.writtenPath, relativePath: result.relativePath })
+    }
+    if (!relPath) return errorResult('relPath is required with content')
     const result = writeFeatureDoc(
       { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
-      { feature, relPath, content },
+      { feature, relPath, content: content! },
     )
     if (!result.ok) return errorResult(result.error)
     // Docs feed the PRD summary; refresh the Docs rail + coverage headline live.
@@ -1471,19 +1487,25 @@ export function registerCanaryLabTools(
       const cp = view.checkpoint as { stage?: string; kind?: string; options?: string[] } | undefined
       const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint — call respond_flight_checkpoint(flightId, choice: one of ${JSON.stringify(cp?.options ?? [])}).`
       if (cp?.kind === 'prd-source') {
-        return `${base} BEFORE responding: if this conversation carries requirements, distill them with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) — dropped docs win the source hierarchy; then respond with any choice (e.g. "retry").`
+        return `${base} The Requirements stage ALWAYS pauses here so the human can add docs. BEFORE responding: if this conversation carries requirements, distill them with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md") — then respond "continue" (releases with the docs present) or pick a source to infer from.`
+      }
+      if (cp?.kind === 'config-approval') {
+        return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
+      }
+      if (cp?.kind === 'export-mode') {
+        return `${base} raw = fast report straight from run evidence; localized = an agent rewrites per-test reasoning (slower, more readable).`
       }
       return base
     }
     if (view.status === 'running') return 'Flight is running — re-call get_flight to follow it; it parks on checkpoints and settles to done/paused/failed.'
-    if (view.status === 'paused') return 'Flight is paused (a stage failed or the server restarted). Fix the cause if needed, then start_flight on the same repos resumes it from the failed stage.'
+    if (view.status === 'paused') return 'Flight is paused (a stage failed, the server restarted, or the user paused it). Fix the cause if needed, then start_flight on the same repos resumes it from the first open stage.'
     if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive. Point the user at reviewing it now: unzip and open evaluation.html (per-test reasoning + verdicts; video playback where the tests drive a browser). Reviewing the evaluation IS the core loop, not an optional extra.'
     return ''
   }
   const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
 
   registerTool('start_flight', {
-    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed conversation-distilled docs via write_feature_doc. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named).',
+    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Non-yolo checkpoint order: config-approval parks AFTER the feature is scaffolded (approve the real on-disk config), the Requirements/prd-source checkpoint ALWAYS parks (add docs, then "continue"), and export-mode picks raw vs localized before the terminal export. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named).',
     inputSchema: {
       repoPaths: z.array(z.string()).min(1).describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them.'),
       description: z.string().describe('What to test, e.g. "checkout flow".'),
@@ -1519,7 +1541,7 @@ export function registerCanaryLabTools(
       payload: {
         repoPaths,
         description,
-        feature: feature ?? (path.basename(repoPaths[0]).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'first-flight'),
+        feature: feature ?? deriveFeatureSlug(repoPaths[0]),
         ...(env ? { env } : {}),
         ...(coverage_target !== undefined ? { coverageTarget: coverage_target } : {}),
         ...(base ? { base } : {}),
@@ -1567,12 +1589,12 @@ export function registerCanaryLabTools(
   })
 
   registerTool('respond_flight_checkpoint', {
-    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval. For the prd-source checkpoint, first write conversation-distilled requirements with write_feature_doc — dropped docs win the source hierarchy.',
+    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). prd-source ALWAYS parks (Requirements pause by design): first add docs with write_feature_doc (content or link_path), then respond "continue" — or pick a source to infer from. export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
     inputSchema: {
       flightId: z.string(),
       choice: z.string().optional().describe('One of the checkpoint\'s options.'),
       values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
-      data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited draft.'),
+      data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited config — written through to the feature\'s on-disk feature.config.cjs before validation.'),
     },
   }, async ({ flightId, choice, values, data }) => {
     if (!deps.flightsRequest) return flightsUnavailable()

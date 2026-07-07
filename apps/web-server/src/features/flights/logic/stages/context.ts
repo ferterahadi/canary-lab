@@ -40,6 +40,19 @@ export interface FlightAgentSpawnOpts {
   /** Where the agent-session ref is parked so AgentSessionView can stream it. */
   stageDir: string
   onChunk?: (text: string) => void
+  /** Aborted when the user pauses/aborts the flight — the spawn SIGTERMs the
+   *  agent and throws StageCancelledError instead of a generic exit error. */
+  signal?: AbortSignal
+}
+
+/** Thrown when in-flight stage work was cancelled by a user pause/abort — the
+ *  drive loop's re-read rule swallows it (the stage is already `pending`);
+ *  it must never be recorded as a stage failure. */
+export class StageCancelledError extends Error {
+  constructor(what: string) {
+    super(`${what} cancelled by flight pause/abort`)
+    this.name = 'StageCancelledError'
+  }
 }
 
 export type FlightAgentSpawner = (opts: FlightAgentSpawnOpts) => Promise<{ text: string }>
@@ -77,6 +90,7 @@ export const FLIGHT_AGENT_IDLE_MS = 5 * 60 * 1000
  *  runner, session pinned so the JSONL both feeds the idle backstop and lets
  *  the UI attach an AgentSessionView to the stage. */
 export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
+  if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
   const sessionId = crypto.randomUUID()
   writeWorkflowAgentRef(opts.stageDir, {
     agent: 'claude',
@@ -95,12 +109,19 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
     idleMs: FLIGHT_AGENT_IDLE_MS,
     activityPath: claudeSessionLogPath(opts.cwd, sessionId),
   })
-  const result = await handle.done
-  const text = recoverClaudeFinalText(result.stdout)
-  if (result.code !== 0 && !text.trim()) {
-    throw new Error(`agent exited with code ${result.code ?? 'null'}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
+  const onAbort = () => handle.stop('SIGTERM')
+  opts.signal?.addEventListener('abort', onAbort, { once: true })
+  try {
+    const result = await handle.done
+    if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
+    const text = recoverClaudeFinalText(result.stdout)
+    if (result.code !== 0 && !text.trim()) {
+      throw new Error(`agent exited with code ${result.code ?? 'null'}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
+    }
+    return { text }
+  } finally {
+    opts.signal?.removeEventListener('abort', onAbort)
   }
-  return { text }
 }
 
 /** Pull the first JSON object out of an agent's final answer — fenced
@@ -129,15 +150,26 @@ export class PollTimeoutError extends Error {
 export async function pollUntil<T>(
   read: () => Promise<T>,
   settled: (value: T) => boolean,
-  opts: { what: string; intervalMs?: number; timeoutMs: number },
+  opts: { what: string; intervalMs?: number; timeoutMs: number; signal?: AbortSignal },
 ): Promise<T> {
   const interval = opts.intervalMs ?? 2000
   const deadline = Date.now() + opts.timeoutMs
   for (;;) {
+    if (opts.signal?.aborted) throw new StageCancelledError(opts.what)
     const value = await read()
     if (settled(value)) return value
     if (Date.now() >= deadline) throw new PollTimeoutError(opts.what, opts.timeoutMs)
-    await new Promise((r) => setTimeout(r, interval))
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        opts.signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }, interval)
+      const onAbort = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+      opts.signal?.addEventListener('abort', onAbort, { once: true })
+    })
   }
 }
 

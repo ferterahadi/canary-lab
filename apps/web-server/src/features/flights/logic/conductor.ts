@@ -72,12 +72,21 @@ export type StageOutcome =
   /** Settle this stage as done and continue at a LATER stage, marking the
    *  stages in between skipped (similarity's "rerun" jumps straight to run). */
   | { kind: 'jump'; to: FlightStageKey; evidence?: unknown; skipReason: string }
+  /** Re-open an EARLIER stage (and everything from it up to the current one)
+   *  and continue the loop there — the config-approval "redraft" re-runs
+   *  scout. Only meaningful from onCheckpointResponse; a forward target is an
+   *  error (that's what `jump` is for). */
+  | { kind: 'rewind'; to: FlightStageKey; reason: string }
 
 export interface StageContext {
   /** Fresh manifest snapshot (re-read on every call). */
   manifest(): FlightManifest
   /** Per-flight sidecar dir for stage artifacts / agent-session refs. */
   flightDir: string
+  /** Aborted when the user pauses or aborts the flight mid-stage. Adapters
+   *  pass it to agent spawns / polls so in-flight work stops promptly instead
+   *  of running to completion against a parked flight. */
+  signal: AbortSignal
   /** Append to the current stage's display log (persists + broadcasts). */
   appendLog(chunk: string): void
   /** Publish the stage's structured live progress (persists + broadcasts,
@@ -95,6 +104,11 @@ export interface StageAdapter {
   /** Consume the response that releases this stage's checkpoint. Absent →
    *  any response re-runs the stage from scratch. */
   onCheckpointResponse?(ctx: StageContext, response: FlightCheckpointResponse): Promise<StageOutcome>
+  /** Best-effort teardown of work this stage delegated to another subsystem
+   *  (the run stage aborts its run) when the user pauses/aborts the flight.
+   *  In-process work is cancelled via ctx.signal instead. Errors are logged
+   *  and swallowed — interrupt must never block the pause itself. */
+  interrupt?(ctx: StageContext, kind: 'pause' | 'abort'): Promise<void>
 }
 
 export type StageAdapters = Partial<Record<FlightStageKey, StageAdapter>>
@@ -144,6 +158,47 @@ export interface StartFlightResult {
 
 function defaultFlightId(): string {
   return `fl_${crypto.randomBytes(6).toString('hex')}`
+}
+
+/** In-flight drive cancellation, keyed by flightId. One controller per drive
+ *  invocation; pause/abort fire it so the running stage's agent spawn / poll
+ *  stops promptly. In-memory by design — after a restart there is nothing to
+ *  cancel (store reconcile already parked the flight). */
+const driveControllers = new Map<string, AbortController>()
+
+/** Best-effort interrupt of the open stage's delegated work (run abort etc.).
+ *  Never throws — a broken interrupt must not block the pause/abort itself. */
+async function interruptStage(
+  flightId: string,
+  stageKey: FlightStageKey,
+  kind: 'pause' | 'abort',
+  deps: FlightConductorDeps,
+): Promise<void> {
+  const adapter = deps.adapters[stageKey]
+  if (!adapter?.interrupt) return
+  const { store } = deps
+  const ctx: StageContext = {
+    manifest: () => {
+      const m = store.get(flightId)
+      if (!m) throw new Error(`flight not found: ${flightId}`)
+      return m
+    },
+    flightDir: store.flightDir(flightId),
+    signal: new AbortController().signal,
+    appendLog: () => {},
+    setProgress: () => {},
+    patchFlight: () => {},
+  }
+  try {
+    await adapter.interrupt(ctx, kind)
+  } catch {
+    /* best-effort */
+  }
+}
+
+function sameRepoSet(a: string[], b: string[]): boolean {
+  const norm = (paths: string[]) => [...paths].map((p) => p.replace(/[\\/]+$/, '')).sort().join('\n')
+  return norm(a) === norm(b)
 }
 
 /** Fresh stage array; with `fromStage`, everything before it is pre-skipped
@@ -228,6 +283,7 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       description: args.description,
       opts: args.opts,
       status: 'running',
+      pauseReason: undefined,
       currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
       stages: freshStages(mode === 'jump' ? args.fromStage : undefined, now),
       updatedAt: now(),
@@ -283,6 +339,7 @@ export function resumeFlight(flightId: string, deps: FlightConductorDeps): Start
   const manifest: FlightManifest = {
     ...current,
     status: 'running',
+    pauseReason: undefined,
     error: undefined,
     updatedAt: now(),
     stages: current.stages.map((s) =>
@@ -292,6 +349,143 @@ export function resumeFlight(flightId: string, deps: FlightConductorDeps): Start
   store.save(manifest)
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   return { manifest, completion: drive(flightId, deps) }
+}
+
+/** User-initiated pause of an active flight. Parks FIRST (so the drive loop's
+ *  re-read sees `paused` before the abort lands — the pause-race rule), then
+ *  cancels the in-flight stage work via the drive's AbortController and the
+ *  stage's best-effort interrupt hook. The open stage flips back to `pending`
+ *  so resume re-runs it from its own postcondition check; a checkpoint that
+ *  was parked is cleared the same way (re-running the stage re-issues it). */
+export function pauseFlight(flightId: string, deps: FlightConductorDeps): FlightManifest {
+  const { store } = deps
+  const now = deps.now ?? (() => new Date().toISOString())
+  const current = store.get(flightId)
+  if (!current) throw new Error(`flight not found: ${flightId}`)
+  if (!isActiveFlightStatus(current.status)) {
+    throw new Error(`flight ${flightId} is ${current.status}, not active — nothing to pause`)
+  }
+  const openStage = current.stages.find(
+    (s) => s.status === 'running' || s.status === 'waiting-for-approval',
+  )
+  const manifest: FlightManifest = {
+    ...current,
+    status: 'paused',
+    pauseReason: 'user',
+    updatedAt: now(),
+    stages: current.stages.map((s) =>
+      s.key === openStage?.key ? { ...s, status: 'pending' as const, checkpoint: undefined } : s,
+    ),
+  }
+  store.save(manifest)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+  driveControllers.get(flightId)?.abort()
+  if (openStage) void interruptStage(flightId, openStage.key, 'pause', deps)
+  return manifest
+}
+
+/** "Start over" — restart this record from stage 1 with its own stored
+ *  intent/repos/options, so the header button doesn't reconstruct the start
+ *  body client-side. Active flights must be paused/aborted first. */
+export function redoFlight(flightId: string, deps: FlightConductorDeps): StartFlightResult {
+  const current = deps.store.get(flightId)
+  if (!current) throw new Error(`flight not found: ${flightId}`)
+  if (isActiveFlightStatus(current.status)) {
+    throw new Error(`flight ${flightId} is ${current.status} — pause or abort it before starting over`)
+  }
+  return startFlight(
+    {
+      feature: current.feature,
+      repoPaths: current.repoPaths,
+      description: current.description,
+      opts: current.opts,
+      mode: 'redo',
+    },
+    deps,
+  )
+}
+
+export interface FlightMetadataPatch {
+  description?: string
+  repoPaths?: string[]
+}
+
+/** Edit a non-active flight's intent/repos (the Repo Scan stage's edit
+ *  affordance). A repo-set change invalidates every downstream stage's
+ *  evidence, so it resets the stage array — a forced redo from Repo Scan —
+ *  and leaves the flight `paused` so the UI offers Continue. */
+export function patchFlightMetadata(
+  flightId: string,
+  patch: FlightMetadataPatch,
+  deps: FlightConductorDeps,
+): FlightManifest {
+  const { store } = deps
+  const now = deps.now ?? (() => new Date().toISOString())
+  const current = store.get(flightId)
+  if (!current) throw new Error(`flight not found: ${flightId}`)
+  if (isActiveFlightStatus(current.status)) {
+    throw new Error(`flight ${flightId} is ${current.status} — pause it before editing intent or repos`)
+  }
+  let manifest: FlightManifest = { ...current, updatedAt: now() }
+  if (patch.description !== undefined) manifest = { ...manifest, description: patch.description }
+  if (patch.repoPaths && !sameRepoSet(patch.repoPaths, current.repoPaths)) {
+    const active = store.activeForRepos(patch.repoPaths)
+    if (active && active.flightId !== flightId) {
+      throw new FlightConflictError(patch.repoPaths, active.flightId)
+    }
+    manifest = {
+      ...manifest,
+      repoPaths: patch.repoPaths,
+      status: 'paused',
+      pauseReason: 'user',
+      currentStage: FLIGHT_STAGE_KEYS[0],
+      stages: freshStages(undefined, now),
+      links: undefined,
+      runVerdict: undefined,
+      error: undefined,
+      endedAt: undefined,
+    }
+  }
+  store.save(manifest)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+  return manifest
+}
+
+/** Flip the named stages (and everything after the earliest of them — their
+ *  evidence is downstream of the reopened work) back to `pending` on a
+ *  NON-ACTIVE flight, so an out-of-band redo (coverage's "Redo from the
+ *  start" clearing the PRD) reflects into the flight record live. No-op on
+ *  active flights — the running conductor owns those. */
+export function reopenStages(
+  flightId: string,
+  keys: FlightStageKey[],
+  deps: FlightConductorDeps,
+): FlightManifest | null {
+  const { store } = deps
+  const now = deps.now ?? (() => new Date().toISOString())
+  const current = store.get(flightId)
+  if (!current) return null
+  if (isActiveFlightStatus(current.status)) return null
+  const indices = keys.map((k) => FLIGHT_STAGE_KEYS.indexOf(k)).filter((i) => i >= 0)
+  if (indices.length === 0) return null
+  const earliest = Math.min(...indices)
+  const manifest: FlightManifest = {
+    ...current,
+    status: 'paused',
+    pauseReason: 'user',
+    currentStage: FLIGHT_STAGE_KEYS[earliest],
+    updatedAt: now(),
+    endedAt: undefined,
+    error: undefined,
+    links: undefined,
+    runVerdict: undefined,
+    stages: current.stages.map((s, i) =>
+      i >= earliest ? { key: s.key, status: 'pending' as const } : s,
+    ),
+  }
+  store.save(manifest)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+  return manifest
 }
 
 /** Release a `waiting-for-approval` flight with the client's answer. The
@@ -335,15 +529,21 @@ export function abortFlight(flightId: string, deps: FlightConductorDeps): Flight
   const now = deps.now ?? (() => new Date().toISOString())
   const current = store.get(flightId)
   if (!current) throw new Error(`flight not found: ${flightId}`)
+  const openStage = current.stages.find(
+    (s) => s.status === 'running' || s.status === 'waiting-for-approval',
+  )
   const manifest: FlightManifest = {
     ...current,
     status: 'aborted',
+    pauseReason: undefined,
     currentStage: null,
     updatedAt: now(),
     endedAt: now(),
   }
   store.save(manifest)
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+  driveControllers.get(flightId)?.abort()
+  if (openStage) void interruptStage(flightId, openStage.key, 'abort', deps)
   return manifest
 }
 
@@ -379,12 +579,14 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
   }
 
   let pendingResponse = opts.checkpointResponse
+  const controller = new AbortController()
+  driveControllers.set(flightId, controller)
 
   try {
     for (;;) {
       let m = read()
-      // Aborted out from under us (abortFlight while an adapter ran).
-      if (m.status === 'aborted') return
+      // Aborted/paused out from under us (abortFlight/pauseFlight between stages).
+      if (m.status === 'aborted' || m.status === 'paused') return
 
       const idx = firstOpenStageIndex(m)
       if (idx === -1) {
@@ -408,6 +610,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
       const ctx: StageContext = {
         manifest: read,
         flightDir: store.flightDir(flightId),
+        signal: controller.signal,
         appendLog: (chunk) => {
           const cur = read().stages.find((s) => s.key === stage.key)
           patchStage(stage.key, { log: (cur?.log ?? '') + chunk })
@@ -439,6 +642,33 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
               : await adapter.run(ctx)
         } catch (err) {
           outcome = { kind: 'failed', error: err instanceof Error ? err.message : String(err) }
+        }
+      }
+
+      // The pause-race rule: the flight may have been paused/aborted while the
+      // adapter ran. Work that finished, finished — persist a settled outcome's
+      // evidence — but never advance a parked flight, and never record the
+      // cancellation itself as `failed` (the open stage was already flipped
+      // back to `pending` by pause/abort).
+      {
+        const after = read()
+        if (after.status === 'aborted' || after.status === 'paused') {
+          if (outcome.kind === 'done') {
+            patchStage(stage.key, {
+              status: 'done',
+              endedAt: now(),
+              ...(outcome.evidence !== undefined ? { evidence: outcome.evidence } : {}),
+              checkpoint: undefined,
+            })
+          } else if (outcome.kind === 'skipped') {
+            patchStage(stage.key, {
+              status: 'skipped',
+              endedAt: now(),
+              skipReason: outcome.reason,
+              checkpoint: undefined,
+            })
+          }
+          return
         }
       }
 
@@ -486,6 +716,31 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         })
         continue
       }
+      if (outcome.kind === 'rewind') {
+        const targetIdx = FLIGHT_STAGE_KEYS.indexOf(outcome.to)
+        if (targetIdx < 0 || targetIdx > idx) {
+          patchStage(stage.key, {
+            status: 'failed',
+            endedAt: now(),
+            error: `illegal rewind ${stage.key} → ${outcome.to}`,
+          })
+          const cur = read()
+          save({ ...cur, status: 'paused', pauseReason: 'stage-failed', updatedAt: now() })
+          return
+        }
+        // Re-open the target stage and everything up to (and including) the
+        // current one — their evidence is discarded, the loop re-runs them.
+        const cur = read()
+        save({
+          ...cur,
+          updatedAt: now(),
+          currentStage: outcome.to,
+          stages: cur.stages.map((s, i) =>
+            i >= targetIdx && i <= idx ? { key: s.key, status: 'pending' as const } : s,
+          ),
+        })
+        continue
+      }
       if (outcome.kind === 'checkpoint') {
         patchStage(stage.key, { status: 'waiting-for-approval', checkpoint: outcome.checkpoint })
         const cur = read()
@@ -497,7 +752,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
       patchStage(stage.key, { status: 'failed', endedAt: now(), error: outcome.error })
       {
         const cur = read()
-        save({ ...cur, status: 'paused', error: outcome.error, updatedAt: now() })
+        save({ ...cur, status: 'paused', pauseReason: 'stage-failed', error: outcome.error, updatedAt: now() })
       }
       return
     }
@@ -513,5 +768,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         error: err instanceof Error ? err.message : String(err),
       })
     }
+  } finally {
+    if (driveControllers.get(flightId) === controller) driveControllers.delete(flightId)
   }
 }

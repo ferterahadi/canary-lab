@@ -19,11 +19,17 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // pickers) are deliberately NOT routed. `verification` is feature-scoped and
 // lives in the workspace runs column. `flight-start` is the stage-entry
 // launcher — feature-scoped (the durable `feature` param qualifies it) and
-// rebuilt from GET /api/flights/entry, so a cold load is coherent. The former
-// `evaluation` dialog is gone (R29) — export progress lives on the flight's
-// Evaluation Report stage (?view=flights&flight=…) and the run detail's
-// Evaluation panel (?feature=…&run=…), both already routed.
-export type RouteDialog = 'config' | 'portify' | 'add-test' | 'verification' | 'flight-start'
+// rebuilt from GET /api/flights/entry, so a cold load is coherent.
+// `flight-new` is the new-flight launcher (intent + repo picker, no feature
+// yet — the "+ New" action) — needs only the features list, so a cold load is
+// coherent too. The former `evaluation` dialog is gone (R29) — export progress
+// lives on the flight's Evaluation Report stage (?view=flights&flight=…) and
+// the run detail's Evaluation panel (?feature=…&run=…), both already routed.
+// `add-test` and `portify` are gone too (R50): flight is the one GUI entry —
+// AddTestWizard was deleted outright, and the portify workflow view survives
+// only as an EMBEDDED surface (flight drill-through, collision recovery,
+// benchmark), opened ephemerally, never by URL.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new'
 
 export interface PersistedView {
   view: WorkspaceView
@@ -32,8 +38,6 @@ export interface PersistedView {
   run: string | null
   /** Open routed dialog, if any (URL only). */
   dialog: RouteDialog | null
-  /** Workflow id qualifier for `dialog: 'portify'` — present = revisit, absent = start-new. */
-  wf: string | null
   /** Flight id qualifier for `view: 'flights'` — which flight detail to open
    *  (URL only; absent = the flights landing list). */
   flight: string | null
@@ -44,7 +48,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'portify', 'add-test', 'verification', 'flight-start']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-new']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)
@@ -59,10 +63,10 @@ function setOrDelete(params: URLSearchParams, key: string, value: string | null)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, wf: null, flight: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
- *  (durable tier only — run/dialog/wf are never mirrored there). */
+ *  (durable tier only — run/dialog are never mirrored there). */
 export function readPersistedView(): PersistedView {
   // URL wins — it's what a refresh, a copy-pasted/new tab, or a deep link carries.
   try {
@@ -71,13 +75,12 @@ export function readPersistedView(): PersistedView {
     const feature = params.get('feature') || null
     const run = params.get('run') || null
     const dialog = parseDialog(params.get('dialog'))
-    const wf = dialog === 'portify' ? params.get('wf') || null : null
     // `flight` only qualifies the flights view — dropped elsewhere.
     const flight = v === 'flights' ? params.get('flight') || null : null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, wf, flight }
-    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, wf, flight: null }
+    if (isView(v)) return { view: v, feature, run, dialog, flight }
+    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -100,10 +103,10 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'feature', state.feature)
     setOrDelete(params, 'run', state.run)
     setOrDelete(params, 'dialog', state.dialog)
-    // `wf` only qualifies the portify revisit dialog — drop it otherwise.
-    setOrDelete(params, 'wf', state.dialog === 'portify' ? state.wf : null)
-    // `task` qualified the retired evaluation dialog (R29) — clear it from
-    // stale URLs so old deep links don't carry a dead param forward.
+    // `wf` qualified the retired portify dialog (R50) and `task` the retired
+    // evaluation dialog (R29) — clear both from stale URLs so old deep links
+    // don't carry dead params forward.
+    setOrDelete(params, 'wf', null)
     setOrDelete(params, 'task', null)
     // `flight` only qualifies the flights view — drop it otherwise.
     setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)

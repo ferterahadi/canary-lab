@@ -1826,6 +1826,7 @@ export type {
   FlightStageKey,
   FlightStageStatus,
   FlightStatus,
+  FlightPauseReason,
   FlightCheckpoint,
   FlightCheckpointResponse,
   FlightEntryOptions,
@@ -1833,6 +1834,7 @@ export type {
   SpecsCoveragePass,
   SpecsCoverageProgress,
 } from '../../../../../shared/flights/types'
+export { deriveFeatureSlug } from '../../../../../shared/flights/types'
 
 /** Stage-entry menu for one feature: latest flight record, per-stage
  *  allowed/blocked verdicts (server-computed), and the start-form prefill. */
@@ -1916,6 +1918,56 @@ export function abortFlight(flightId: string, opts?: ClientOptions): Promise<Fli
   return request<FlightManifestT>(
     `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/abort`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** User-initiated pause: parks the flight resumable (pauseReason "user") and
+ *  cancels the in-flight stage work server-side. */
+export function pauseFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/pause`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** "Start over" — restart the record from stage 1 with its own stored args. */
+export function redoFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/redo`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** Edit a NON-ACTIVE flight's intent/repos. A repo change resets the stage
+ *  array (forced redo from Repo Scan) — the server enforces + warns. */
+export function patchFlight(
+  flightId: string,
+  patch: { description?: string; repoPaths?: string[] },
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}`,
+    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) },
+    fetchImpl,
+  )
+}
+
+/** Link a LOCAL doc path into a feature's docs/ (symlink, copy fallback). */
+export function linkFeatureDocPath(
+  feature: string,
+  targetPath: string,
+  opts?: ClientOptions,
+): Promise<{ written: boolean; relativePath: string; linked: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ written: boolean; relativePath: string; linked: boolean }>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs/link`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: targetPath }) },
     fetchImpl,
   )
 }

@@ -464,7 +464,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'some/repo')])
   })
 
-  it('reports per-stage verdicts for a set-up feature that never flew (config prefill)', async () => {
+  it('locks every stage entry (except the full flight) for a feature that never flew — R41', async () => {
     writeFeatureConfig('checkout')
     app = await buildApp(allDone())
     const { status, body } = await entryFor('checkout')
@@ -472,17 +472,17 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.flight).toBeNull()
     expect(body.active).toBe(false)
     expect(body.canContinue).toBe(false)
+    expect(body.editable).toEqual({ description: true, repoPaths: true })
     expect(body.prefill.repoPaths).toEqual([repoDir])
     expect(body.prefill.description).toBe('')
-    // Config exists → entering after scaffold is fine; env-capture evidence
-    // is missing → anything past it is blocked with the validator's message.
+    // No flight record → the stage-entry menu is fully locked: a first flight
+    // always starts from the beginning, even when on-disk evidence would
+    // otherwise satisfy a jump. (The start route stays permissive for CLI.)
     expect(stageOf(body, 'similarity').allowed).toBe(true)
-    expect(stageOf(body, 'env-capture').allowed).toBe(true)
-    expect(stageOf(body, 'docs')).toMatchObject({ allowed: false })
-    expect(stageOf(body, 'docs').reason).toMatch(/envsets\/local/)
-    expect(stageOf(body, 'heal')).toMatchObject({ allowed: false })
-    expect(stageOf(body, 'heal').reason).toMatch(/use --from-stage run/)
-    expect(stageOf(body, 'evaluation-export').allowed).toBe(false)
+    for (const key of ['scout', 'env-capture', 'docs', 'specs-coverage', 'run', 'evaluation-export'] as const) {
+      expect(stageOf(body, key)).toMatchObject({ allowed: false })
+      expect(stageOf(body, key).reason).toMatch(/first flight/)
+    }
   })
 
   it('unlocks stages as on-disk evidence appears, and prefills from the latest manifest', async () => {
@@ -544,5 +544,116 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(whilePaused.body.active).toBe(false)
     expect(whilePaused.body.canContinue).toBe(true)
     expect(whilePaused.body.flight).toMatchObject({ flightId, status: 'paused' })
+  })
+})
+
+describe('POST /api/flights/:id/pause + /redo + PATCH /api/flights/:id', () => {
+  const hangingScout = (): StageAdapters => {
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    return adapters
+  }
+
+  it('pause parks an active flight with pauseReason user; 409 on a settled one; 404 unknown', async () => {
+    app = await buildApp(hangingScout())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['running'])
+
+    const paused = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+    expect(paused.statusCode).toBe(200)
+    expect(paused.json()).toMatchObject({ status: 'paused', pauseReason: 'user' })
+
+    const again = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+    expect(again.statusCode).toBe(409)
+
+    const unknown = await app.inject({ method: 'POST', url: '/api/flights/nope/pause' })
+    expect(unknown.statusCode).toBe(404)
+  })
+
+  it('redo restarts the same record from stage 1 (201); 409 while active', async () => {
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const redone = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo` })
+    expect(redone.statusCode).toBe(201)
+    expect((redone.json() as { flightId: string }).flightId).toBe(flightId)
+    await waitForStatus(flightId, ['done'])
+  })
+
+  it('PATCH edits the description of a non-active flight; repo change resets stages', async () => {
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const descOnly = await app.inject({
+      method: 'PATCH',
+      url: `/api/flights/${flightId}`,
+      body: { description: 'sharper intent' },
+    })
+    expect(descOnly.statusCode).toBe(200)
+    expect(descOnly.json()).toMatchObject({ description: 'sharper intent', status: 'done' })
+
+    const otherRepo = path.join(tmpDir, 'other-repo')
+    fs.mkdirSync(otherRepo, { recursive: true })
+    const repoChange = await app.inject({
+      method: 'PATCH',
+      url: `/api/flights/${flightId}`,
+      body: { repoPaths: [otherRepo] },
+    })
+    expect(repoChange.statusCode).toBe(200)
+    const body = repoChange.json() as { status: string; pauseReason?: string; stages: Array<{ status: string }> }
+    expect(body.status).toBe('paused')
+    expect(body.pauseReason).toBe('user')
+    expect(body.stages.every((s) => s.status === 'pending')).toBe(true)
+  })
+
+  it('PATCH validates its body and rejects edits on an active flight', async () => {
+    app = await buildApp(hangingScout())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['running'])
+
+    const empty = await app.inject({ method: 'PATCH', url: `/api/flights/${flightId}`, body: {} })
+    expect(empty.statusCode).toBe(400)
+
+    const badRepo = await app.inject({
+      method: 'PATCH',
+      url: `/api/flights/${flightId}`,
+      body: { repoPaths: [path.join(tmpDir, 'no-such-dir')] },
+    })
+    expect(badRepo.statusCode).toBe(400)
+
+    const active = await app.inject({
+      method: 'PATCH',
+      url: `/api/flights/${flightId}`,
+      body: { description: 'while running' },
+    })
+    expect(active.statusCode).toBe(409)
+  })
+})
+
+describe('~-relative repo paths (dialog picker parity)', () => {
+  it('expands a leading ~ on start and PATCH like the entry prefill does', async () => {
+    const os = await import('os')
+    const home = os.homedir()
+    const rel = `.cl-flight-route-test-${process.pid}`
+    const abs = path.join(home, rel)
+    fs.mkdirSync(abs, { recursive: true })
+    try {
+      app = await buildApp(allDone())
+      const started = await app.inject({
+        method: 'POST',
+        url: '/api/flights',
+        body: startBody({ repoPaths: [`~/${rel}`] }),
+      })
+      expect(started.statusCode).toBe(201)
+      expect((started.json() as { repoPaths: string[] }).repoPaths[0]).toBe(fs.realpathSync(abs))
+    } finally {
+      fs.rmSync(abs, { recursive: true, force: true })
+    }
   })
 })

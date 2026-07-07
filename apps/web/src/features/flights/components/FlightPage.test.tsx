@@ -14,9 +14,22 @@ const mocks = vi.hoisted(() => ({
   respondFlightCheckpoint: vi.fn(),
   resumeFlight: vi.fn(),
   abortFlight: vi.fn(),
+  pauseFlight: vi.fn(),
+  redoFlight: vi.fn(),
+  patchFlight: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
   getPlaywrightConfig: vi.fn(),
+  putFeatureConfigDoc: vi.fn(),
+  putPlaywrightConfig: vi.fn(),
+  listFeatureDocs: vi.fn(),
+  importFeatureDoc: vi.fn(),
+  deleteFeatureDoc: vi.fn(),
+  linkFeatureDocPath: vi.fn(),
+  openEditor: vi.fn(),
+  cancelHealRun: vi.fn(),
+  stopRun: vi.fn(),
+  restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
 }))
@@ -29,8 +42,24 @@ vi.mock('../../../shared/api/client', () => ({
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
   resumeFlight: mocks.resumeFlight,
   abortFlight: mocks.abortFlight,
+  pauseFlight: mocks.pauseFlight,
+  redoFlight: mocks.redoFlight,
+  patchFlight: mocks.patchFlight,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
+  putFeatureConfigDoc: mocks.putFeatureConfigDoc,
+  putPlaywrightConfig: mocks.putPlaywrightConfig,
+  listFeatureDocs: mocks.listFeatureDocs,
+  importFeatureDoc: mocks.importFeatureDoc,
+  deleteFeatureDoc: mocks.deleteFeatureDoc,
+  linkFeatureDocPath: mocks.linkFeatureDocPath,
+  openEditor: mocks.openEditor,
+  cancelHealRun: mocks.cancelHealRun,
+  stopRun: mocks.stopRun,
+  restartRun: mocks.restartRun,
+  ApiError: class ApiError extends Error {
+    constructor(message: string, public status = 500, public body: unknown = null) { super(message) }
+  },
 }))
 
 // The agent timeline is its own tested component with live transports — stub it.
@@ -66,6 +95,7 @@ beforeEach(() => {
   mocks.downloadTask.mockResolvedValue(undefined)
   mocks.getFeatureConfigDoc.mockRejectedValue(new Error('no config'))
   mocks.getPlaywrightConfig.mockRejectedValue(new Error('no config'))
+  mocks.listFeatureDocs.mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
   container = document.createElement('div')
@@ -121,7 +151,7 @@ describe('FlightPage', () => {
             ? ('done' as const)
             : ('pending' as const),
         ...(key === 'scout'
-          ? { checkpoint: { kind: 'config-approval' as const, message: 'Approve the draft config?', options: ['approve', 'redraft', 'reject'], data: { configSource: 'module.exports = {}' } } }
+          ? { checkpoint: { kind: 'config-approval' as const, message: 'Approve the draft config?', options: ['approve', 'redraft'], data: { configSource: 'module.exports = {}', configPath: '/w/features/checkout/feature.config.cjs' } } }
           : {}),
       })),
     }))
@@ -138,8 +168,9 @@ describe('FlightPage', () => {
     }
     const controls = container.querySelector('[data-testid="checkpoint-controls"]')
     expect(controls?.textContent).toContain('Approve the draft config?')
-    // The draft config is editable and approve posts the response.
-    expect(container.querySelector('[data-testid="checkpoint-config"]')).toBeTruthy()
+    // R43: no raw config textarea — the Feature Setup panel + Advanced setup
+    // are the edit surface; approve just posts the choice (server re-reads disk).
+    expect(container.querySelector('[data-testid="checkpoint-config"]')).toBeNull()
     mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-choice-approve"]')?.click()
@@ -628,11 +659,31 @@ describe('trailer model (R14–R18)', () => {
     expect(facts).toContain('checkout')
     expect(facts).toContain('2 files')
     expect(facts).toContain('api healthy')
-    // R32: the config digest — run command, ports, Playwright — from the live config.
-    const digest = container.querySelector('[data-testid="feature-config-digest"]')?.textContent ?? ''
-    expect(digest).toContain('npm run dev')
-    expect(digest).toContain('api (PORT)')
-    expect(digest).toContain('2 workers · 1 retry · video on')
+    // R43: the editable setup panel — run command as an input writing the real
+    // config doc, ports labeled with their env, Playwright as per-setting rows.
+    const panel = container.querySelector('[data-testid="feature-setup-panel"]')
+    expect(panel).toBeTruthy()
+    const commandInput = panel?.querySelector<HTMLInputElement>('[data-testid="setup-command-api"]')
+    expect(commandInput?.value).toBe('npm run dev')
+    expect(panel?.textContent).toContain('api → PORT')
+    expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-pw-workers"]')?.value).toBe('2')
+    expect(panel?.querySelector<HTMLSelectElement>('[data-testid="setup-pw-video"]')?.value).toBe('on')
+    // An edit writes through to the SAME on-disk doc Advanced setup edits.
+    mocks.putFeatureConfigDoc.mockResolvedValue({})
+    await act(async () => {
+      // Drive the CONTROLLED input the way React sees it: native setter + input
+      // event (React dedupes plain .value writes), then focusout for onBlur.
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      setValue.call(commandInput, 'npm run start')
+      commandInput!.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => {
+      commandInput!.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
+    })
+    expect(mocks.putFeatureConfigDoc).toHaveBeenCalledTimes(1)
+    const [featureArg, valueArg] = mocks.putFeatureConfigDoc.mock.calls[0] as [string, { repos: Array<{ startCommands: Array<{ command: string }> }> }]
+    expect(featureArg).toBe('checkout')
+    expect(valueArg.repos[0].startCommands[0].command).toBe('npm run start')
   })
 
   it('R32: the folded env-capture checkpoint surfaces on the Feature setup row', async () => {
@@ -718,5 +769,43 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="evaluation-task-panel"]')).toBeTruthy()
     // A localized rewrite with a pinned session streams the agent timeline.
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBe('evaluation')
+  })
+})
+
+describe('flight controls (R48)', () => {
+  it('an active flight offers Pause + Stop; pause posts and refetches', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="flight-pause"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="flight-abort"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="flight-start-over"]')).toBeNull()
+    mocks.pauseFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user' }))
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-pause"]')?.click()
+    })
+    expect(mocks.pauseFlight).toHaveBeenCalledWith('fl_1')
+  })
+
+  it('a paused flight offers Continue + Start over; start over confirms once then redoes', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user', currentStage: 'docs' }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="flight-resume"]')?.textContent).toBe('Continue')
+    expect(container.querySelector('[data-testid="flight-pause"]')).toBeNull()
+    const startOver = container.querySelector<HTMLButtonElement>('[data-testid="flight-start-over"]')
+    expect(startOver).toBeTruthy()
+    await act(async () => { startOver!.click() })
+    // First click arms the confirm; nothing fired yet.
+    expect(mocks.redoFlight).not.toHaveBeenCalled()
+    mocks.redoFlight.mockResolvedValue(manifest({ status: 'running' }))
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="flight-start-over-confirm"]')?.click()
+    })
+    expect(mocks.redoFlight).toHaveBeenCalledWith('fl_1')
+  })
+
+  it('the paused status chip explains WHO paused it (pauseReason tooltip)', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user', currentStage: 'docs' }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="flight-status"]')?.getAttribute('title')).toContain('Paused by you')
   })
 })

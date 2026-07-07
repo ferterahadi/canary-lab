@@ -46,6 +46,7 @@ function entry(over: Partial<FlightEntryOptions> = {}): FlightEntryOptions {
     flight: null,
     active: false,
     canContinue: false,
+    editable: { description: true, repoPaths: true },
     prefill: { repoPaths: ['/repo'], description: '', env: 'local', coverageTarget: 100 },
     stages: [
       { key: 'similarity', allowed: true },
@@ -197,5 +198,64 @@ describe('FlightStartDialog', () => {
     click(byTestId('flight-start-submit')!)
     await flush()
     expect(byTestId('flight-start-error')!.textContent).toContain('flight conflict: repo busy')
+  })
+})
+
+describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
+  const setValue = (el: HTMLTextAreaElement | HTMLInputElement, value: string): void => {
+    const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value)
+    act(() => { el.dispatchEvent(new Event('input', { bubbles: true })) })
+  }
+
+  it('asks exactly two things — intent + repos — and never calls the entry endpoint', async () => {
+    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
+    expect(mocks.getFlightEntryOptions).not.toHaveBeenCalled()
+    expect(byTestId('repo-multi-picker')).toBeTruthy()
+    // The whole Start-from menu renders locked: only the full flight is pickable.
+    const fullFlight = byTestId('flight-start-stage-similarity') as HTMLButtonElement
+    expect(fullFlight.disabled).toBe(false)
+    for (const key of ['scout', 'docs', 'specs-coverage', 'run', 'evaluation-export']) {
+      const rowEl = byTestId(`flight-start-stage-${key}`) as HTMLButtonElement
+      expect(rowEl.disabled).toBe(true)
+      expect(rowEl.textContent).toContain("first flight")
+    }
+  })
+
+  it('derives the feature slug from the first picked repo and posts a plain start', async () => {
+    mocks.startFlight.mockResolvedValue({ flightId: 'fl_new' })
+    const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Oddle Shop' }] })
+    const textarea = container.querySelector('textarea')!
+    setValue(textarea, 'test the checkout flow')
+    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    expect(byTestId('flight-start-derived-feature')?.textContent).toContain('oddle-shop')
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    expect(mocks.startFlight).toHaveBeenCalledWith({
+      feature: 'oddle-shop',
+      repoPaths: ['/repo/Oddle Shop'],
+      description: 'test the checkout flow',
+    })
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_new')
+  })
+
+  it('adds a free repo path through the picker input', async () => {
+    await render({ feature: null })
+    const input = byTestId('repo-pick-add-input') as HTMLInputElement
+    setValue(input, '/somewhere/new-repo')
+    click(byTestId('repo-pick-add')!)
+    expect(byTestId('repo-pick-new-repo')).toBeTruthy()
+    expect(byTestId('flight-start-derived-feature')?.textContent).toContain('new-repo')
+  })
+
+  it('will not start without an intent and at least one repo', async () => {
+    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
+    const submit = byTestId('flight-start-submit') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    expect((byTestId('flight-start-submit') as HTMLButtonElement).disabled).toBe(true)
+    const textarea = container.querySelector('textarea')!
+    setValue(textarea, 'test something')
+    expect((byTestId('flight-start-submit') as HTMLButtonElement).disabled).toBe(false)
   })
 })

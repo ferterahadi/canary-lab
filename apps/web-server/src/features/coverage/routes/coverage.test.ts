@@ -29,6 +29,8 @@ import type { WorkspaceEvent } from '../../../shared/workspace-events'
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../../coverage/logic/coverage/jobs/store'
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
 import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
+import { FlightRunStore } from '../../flights/logic/store'
+import { FLIGHT_STAGE_KEYS } from '../../flights/logic/types'
 
 let tmpDir: string
 let featuresDir: string
@@ -667,5 +669,135 @@ describe('coverage routes', () => {
       payload: { kind: 'coverage' },
     })
     expect(res.statusCode).toBe(500)
+  })
+})
+
+describe('coverage-redo backflow into the flight record', () => {
+  it('clearing the PRD summary reopens the non-active flight docs/prd-summary/specs-coverage stages', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\ncart' })
+    const flightStore = new FlightRunStore(logsDir)
+    const doneStages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+    flightStore.save({
+      flightId: 'fl-backflow',
+      feature: 'checkout',
+      repoPaths: ['/repo/a'],
+      description: 'checkout flow',
+      opts: { env: 'local', coverageTarget: 100, yolo: false },
+      status: 'done',
+      currentStage: null,
+      stages: doneStages,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+
+    const backflowApp = Fastify()
+    await backflowApp.register(coverageRoutes, {
+      featuresDir,
+      logsDir,
+      projectRoot: tmpDir,
+      flightStore,
+      workspaceEvents: { publish: (e) => events.push(e) },
+    })
+    await backflowApp.ready()
+    try {
+      const res = await backflowApp.inject({ method: 'DELETE', url: '/api/features/checkout/prd-summary' })
+      expect(res.statusCode).toBe(200)
+      const flight = flightStore.get('fl-backflow')!
+      expect(flight.status).toBe('paused')
+      expect(flight.pauseReason).toBe('user')
+      for (const key of ['docs', 'prd-summary', 'specs-coverage', 'run', 'evaluation-export'] as const) {
+        expect(flight.stages.find((s) => s.key === key)!.status).toBe('pending')
+      }
+      for (const key of ['similarity', 'scout', 'scaffold', 'env-capture'] as const) {
+        expect(flight.stages.find((s) => s.key === key)!.status).toBe('done')
+      }
+      expect(events.some((e) => e.type === 'flights-changed')).toBe(true)
+    } finally {
+      await backflowApp.close()
+    }
+  })
+
+  it('leaves an ACTIVE flight untouched (the running conductor owns it)', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\ncart' })
+    const flightStore = new FlightRunStore(logsDir)
+    flightStore.save({
+      flightId: 'fl-active',
+      feature: 'checkout',
+      repoPaths: ['/repo/a'],
+      description: 'checkout flow',
+      opts: { env: 'local', coverageTarget: 100, yolo: false },
+      status: 'running',
+      currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'running' as const })),
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    const backflowApp = Fastify()
+    await backflowApp.register(coverageRoutes, {
+      featuresDir,
+      logsDir,
+      projectRoot: tmpDir,
+      flightStore,
+      workspaceEvents: { publish: (e) => events.push(e) },
+    })
+    await backflowApp.ready()
+    try {
+      await backflowApp.inject({ method: 'DELETE', url: '/api/features/checkout/prd-summary' })
+      expect(flightStore.get('fl-active')!.status).toBe('running')
+    } finally {
+      await backflowApp.close()
+    }
+  })
+})
+
+describe('POST /api/features/:name/docs/link + symlink-aware listing', () => {
+  it('links a local path into docs/ and the listing marks it linked', async () => {
+    writeFeature('checkout', SPEC)
+    const target = path.join(tmpDir, 'external-prd.md')
+    fs.writeFileSync(target, '# External')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/docs/link',
+      payload: { path: target },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ written: true, linked: true })
+    expect(events.some((e) => e.type === 'coverage-changed')).toBe(true)
+
+    const list = await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })
+    const docs = (list.json() as { docs: Array<Record<string, unknown>> }).docs
+    const linkedDoc = docs.find((d) => d.relPath === 'external-prd.md')!
+    expect(linkedDoc).toMatchObject({ linked: true, linkTarget: expect.stringContaining('external-prd.md') })
+    expect(linkedDoc.broken).toBeUndefined()
+  })
+
+  it('a dangling link is listed as broken instead of crashing the rail', async () => {
+    writeFeature('checkout', SPEC)
+    const target = path.join(tmpDir, 'gone.md')
+    fs.writeFileSync(target, 'soon gone')
+    await app.inject({ method: 'POST', url: '/api/features/checkout/docs/link', payload: { path: target } })
+    fs.rmSync(target)
+    const list = await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })
+    expect(list.statusCode).toBe(200)
+    const docs = (list.json() as { docs: Array<Record<string, unknown>> }).docs
+    expect(docs.find((d) => d.relPath === 'gone.md')).toMatchObject({ linked: true, broken: true })
+  })
+
+  it('validates the body and maps lib failures to 400/404', async () => {
+    writeFeature('checkout', SPEC)
+    const noPath = await app.inject({ method: 'POST', url: '/api/features/checkout/docs/link', payload: {} })
+    expect(noPath.statusCode).toBe(400)
+    const missing = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/docs/link',
+      payload: { path: path.join(tmpDir, 'nope.md') },
+    })
+    expect(missing.statusCode).toBe(400)
+    const ghost = await app.inject({
+      method: 'POST',
+      url: '/api/features/ghost/docs/link',
+      payload: { path: path.join(tmpDir, 'nope.md') },
+    })
+    expect([400, 404]).toContain(ghost.statusCode)
   })
 })

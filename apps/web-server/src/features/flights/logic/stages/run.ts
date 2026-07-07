@@ -20,26 +20,12 @@ async function readManifest(deps: FlightStageDeps, runId: string): Promise<RunMa
 }
 
 export function runStage(deps: FlightStageDeps): StageAdapter {
-  const startAndWait = async (ctx: StageContext): Promise<StageOutcome> => {
+  const waitForVerdict = async (ctx: StageContext, runId: string): Promise<StageOutcome> => {
     const m = ctx.manifest()
-    let resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature: m.feature, env: m.opts.env } })
-    let body = resp.json() as Record<string, unknown>
-    if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {
-      ctx.appendLog(`[run] repo busy (${String(body.conflictingFeature)}) — queueing\n`)
-      resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature: m.feature, env: m.opts.env, isolation: 'queue' } })
-      body = resp.json() as Record<string, unknown>
-    }
-    if (resp.statusCode !== 201 && resp.statusCode !== 202) {
-      return { kind: 'failed', error: `run start rejected (${resp.statusCode}): ${String(body.error ?? 'unknown')}` }
-    }
-    const runId = String(body.runId)
-    ctx.patchFlight({ links: { runId } })
-    ctx.appendLog(`[run] ${runId} started (auto-heal per workspace settings)\n`)
-
     const manifest = await pollUntil(
       () => readManifest(deps, runId),
       (man) => Boolean(man && isTerminalRunStatus(man.status)),
-      { what: `run ${runId}`, intervalMs: 3000, timeoutMs: RUN_TIMEOUT_MS },
+      { what: `run ${runId}`, intervalMs: 3000, timeoutMs: RUN_TIMEOUT_MS, signal: ctx.signal },
     )
     const status = manifest!.status as 'passed' | 'failed' | 'aborted'
     ctx.patchFlight({ runVerdict: status })
@@ -61,16 +47,56 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     }
   }
 
+  const startAndWait = async (ctx: StageContext, opts?: { forceNew?: boolean }): Promise<StageOutcome> => {
+    const m = ctx.manifest()
+
+    // Resume after a pause/restart: the run this flight started may still be
+    // going (or already terminal) — re-attach instead of double-starting.
+    if (!opts?.forceNew && m.links?.runId) {
+      const existing = await readManifest(deps, m.links.runId)
+      if (existing) {
+        ctx.appendLog(`[run] re-attaching to ${m.links.runId} (${existing.status})\n`)
+        return waitForVerdict(ctx, m.links.runId)
+      }
+    }
+
+    let resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature: m.feature, env: m.opts.env } })
+    let body = resp.json() as Record<string, unknown>
+    if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {
+      ctx.appendLog(`[run] repo busy (${String(body.conflictingFeature)}) — queueing\n`)
+      resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature: m.feature, env: m.opts.env, isolation: 'queue' } })
+      body = resp.json() as Record<string, unknown>
+    }
+    if (resp.statusCode !== 201 && resp.statusCode !== 202) {
+      return { kind: 'failed', error: `run start rejected (${resp.statusCode}): ${String(body.error ?? 'unknown')}` }
+    }
+    const runId = String(body.runId)
+    ctx.patchFlight({ links: { runId } })
+    ctx.appendLog(`[run] ${runId} started (auto-heal per workspace settings)\n`)
+    return waitForVerdict(ctx, runId)
+  }
+
   return {
-    run: startAndWait,
+    run: (ctx) => startAndWait(ctx),
     async onCheckpointResponse(ctx, response) {
-      if (response.choice === 'rerun') return startAndWait(ctx)
+      if (response.choice === 'rerun') return startAndWait(ctx, { forceNew: true })
       if (response.choice === 'export-as-is') {
         const stage = ctx.manifest().stages.find((s) => s.key === 'run')
         return { kind: 'done', evidence: stage?.checkpoint?.data }
       }
       const stage = ctx.manifest().stages.find((s) => s.key === 'run')
       return { kind: 'checkpoint', checkpoint: stage!.checkpoint! }
+    },
+    // Aborting the flight aborts its run; a PAUSE deliberately does not — the
+    // run keeps its own lifecycle (controls live on the Test Run stage / run
+    // detail), and resume re-attaches to it via links.runId.
+    async interrupt(ctx, kind) {
+      if (kind !== 'abort') return
+      const runId = ctx.manifest().links?.runId
+      if (!runId) return
+      const existing = await readManifest(deps, runId)
+      if (!existing || isTerminalRunStatus(existing.status)) return
+      await deps.inject({ method: 'POST', url: `/api/runs/${encodeURIComponent(runId)}/abort` })
     },
   }
 }

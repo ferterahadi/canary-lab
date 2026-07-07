@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type JSX } fr
 import * as api from '../../../shared/api/client'
 import type { FeatureDocsListing } from '../../../shared/api/types'
 
-function readAsBase64(file: File): Promise<string> {
+export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
@@ -298,6 +298,9 @@ export function CoverageDocsRail(props: Props): JSX.Element {
                   dirPrefix={dirPrefix}
                   generated={d.generated}
                   sizeBytes={d.sizeBytes}
+                  linked={d.linked}
+                  linkTarget={d.linkTarget}
+                  broken={d.broken}
                   busy={locked}
                   onOpen={() => openDoc(d.absPath)}
                   onRemove={docsReadOnly ? undefined : () => removeDoc(d.relPath)}
@@ -398,7 +401,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   )
 }
 
-function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle }: {
+export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle, linked, linkTarget, broken }: {
   relPath: string
   dirPrefix: string
   generated: boolean
@@ -408,6 +411,11 @@ function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRem
   /** Omitted when the doc set is frozen (a summary exists) — the pill is read-only. */
   onRemove?: () => void
   removeTitle: string
+  /** Symlinked doc — the user's original elsewhere is the live source (R44). */
+  linked?: boolean
+  linkTarget?: string
+  /** Dangling symlink (its target moved) — dangerous tint, still deletable. */
+  broken?: boolean
 }) {
   const [hover, setHover] = useState(false)
   return (
@@ -444,11 +452,20 @@ function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRem
         </svg>
       </span>
       <div className="min-w-0 flex-1">
-        <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12, lineHeight: 1.3 }} className="truncate" title={`${dirPrefix}${relPath}`}>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{relPath}</span>
+        <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12, lineHeight: 1.3 }} className="truncate" title={linked && linkTarget ? `↗ ${linkTarget}` : `${dirPrefix}${relPath}`}>
+          <span style={{ color: broken ? 'var(--danger)' : 'var(--text-primary)', fontWeight: 600 }}>{relPath}</span>
+          {linked && (
+            <span
+              data-testid={`doc-linked-${relPath}`}
+              className="ml-1.5 rounded px-1 py-[1px] text-[9px] font-semibold"
+              style={{ color: broken ? 'var(--danger)' : 'rgb(56,189,248)', border: `1px solid color-mix(in srgb, ${broken ? 'var(--danger)' : 'rgb(56,189,248)'} 40%, transparent)` }}
+            >
+              {broken ? 'link broken' : 'symlink ↗'}
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-          {generated ? 'Generated PRD artifact' : 'Source doc'} · {formatBytes(sizeBytes)}
+          {generated ? 'Generated PRD artifact' : linked ? 'Linked doc — the original stays the live source' : 'Source doc'} · {formatBytes(sizeBytes)}
         </div>
       </div>
       {onRemove && (

@@ -7,12 +7,7 @@ import { FeaturesColumn } from './FeaturesColumn'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-const startNewWizard = vi.fn()
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
-
-vi.mock('../../features/wizard/state/WizardDraftContext', () => ({
-  useWizardDrafts: () => ({ startNewWizard }),
-}))
 
 vi.mock('./McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
@@ -37,7 +32,6 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  startNewWizard.mockReset()
   gatePromo.mockReset()
   gatePromo.mockImplementation((_action: string, continueAction: () => void) => continueAction())
 })
@@ -50,7 +44,8 @@ afterEach(() => {
 })
 
 describe('FeaturesColumn MCP promo gate', () => {
-  it('gates creating a new feature before opening the wizard', () => {
+  it('gates the "+ New" flight launcher behind the promo (R40: New starts a flight)', () => {
+    const onStartNewFlight = vi.fn()
     gatePromo.mockImplementationOnce(() => {})
 
     act(() => {
@@ -59,6 +54,7 @@ describe('FeaturesColumn MCP promo gate', () => {
           features={[]}
           selectedFeature={null}
           onSelectFeature={() => {}}
+          onStartNewFlight={onStartNewFlight}
         />,
       )
     })
@@ -68,14 +64,14 @@ describe('FeaturesColumn MCP promo gate', () => {
     })
 
     expect(gatePromo).toHaveBeenCalledWith('create-feature', expect.any(Function))
-    expect(startNewWizard).not.toHaveBeenCalled()
+    expect(onStartNewFlight).not.toHaveBeenCalled()
 
     act(() => {
       const continueAction = gatePromo.mock.calls[0][1] as () => void
       continueAction()
     })
 
-    expect(startNewWizard).toHaveBeenCalledTimes(1)
+    expect(onStartNewFlight).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -157,27 +153,21 @@ describe('FeaturesColumn coverage action (R8)', () => {
   })
 })
 
-describe('FeaturesColumn flight action (R25)', () => {
+describe('FeaturesColumn flight action (R40: per-row action removed)', () => {
   const feature = (name: string) => ({ name, repos: [], envs: [] })
 
-  it('opens the flight launcher for the row and selects the feature', () => {
-    const onStartFlight = vi.fn()
-    const onSelectFeature = vi.fn()
+  it('renders no per-row flight action — the pill picker and "+ New" own flight entry', () => {
     act(() => {
       root.render(
         <FeaturesColumn
           features={[feature('alpha')]}
           selectedFeature={null}
-          onSelectFeature={onSelectFeature}
-          onStartFlight={onStartFlight}
+          onSelectFeature={() => {}}
+          onStartNewFlight={() => {}}
         />,
       )
     })
-    act(() => {
-      container.querySelector<HTMLButtonElement>('[data-testid="flight-action-alpha"]')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    expect(onSelectFeature).toHaveBeenCalledWith('alpha')
-    expect(onStartFlight).toHaveBeenCalledWith('alpha')
+    expect(container.querySelector('[data-testid="flight-action-alpha"]')).toBeNull()
   })
 
   it('omits the flight action when no handler is provided', () => {
