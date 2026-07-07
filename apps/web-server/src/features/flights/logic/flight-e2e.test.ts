@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { FlightRunStore } from './store'
-import { startFlight, respondToFlightCheckpoint, type FlightConductorDeps } from './conductor'
+import { startFlight, respondToFlightCheckpoint, deleteFlight, FlightFrozenError, type FlightConductorDeps } from './conductor'
 import { buildFlightStageAdapters } from './stages'
 import type { FlightStageDeps } from './stages/context'
 import { writeEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
@@ -200,6 +200,41 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
     expect(final.stages.find((s) => s.key === 'heal')!.evidence).toMatchObject({ healCycles: 1 })
 
     expect(spawnAgent).toHaveBeenCalledTimes(2) // scout + one specs round
+  })
+
+  it('R57/R67 over real adapters: redo reuses the record with stored args, frozen args reject, delete frees the feature', async () => {
+    const { deps } = buildDeps('first-flight-app')
+    const { manifest, completion } = startFlight(
+      { feature: 'first-flight-app', repoPaths: [repoDir], description: 'todo flow', opts: OPTS_YOLO },
+      deps,
+    )
+    await completion
+    // "Start over" — empty args mean the stored (frozen) repos + intent.
+    await startFlight(
+      { feature: 'first-flight-app', repoPaths: [], description: '', opts: OPTS_YOLO, mode: 'redo' },
+      deps,
+    ).completion
+    const settled = store.get(manifest.flightId)!
+    expect(settled.flightId).toBe(manifest.flightId) // same record, not a duplicate
+    expect(store.list()).toHaveLength(1)
+    expect(settled.status).toBe('done')
+    expect(settled.repoPaths).toEqual([repoDir]) // stored args reused
+    expect(settled.description).toBe('todo flow')
+
+    // Frozen forever: differing repos or intent are a 409-class error.
+    expect(() => startFlight(
+      { feature: 'first-flight-app', repoPaths: [tmpDir], description: 'todo flow', opts: OPTS_YOLO, mode: 'redo' },
+      deps,
+    )).toThrow(FlightFrozenError)
+    expect(() => startFlight(
+      { feature: 'first-flight-app', repoPaths: [], description: 'a different intent', opts: OPTS_YOLO, mode: 'redo' },
+      deps,
+    )).toThrow(FlightFrozenError)
+
+    // Delete is the escape hatch: the record goes, the feature dir stays.
+    deleteFlight(manifest.flightId, deps)
+    expect(store.list()).toHaveLength(0)
+    expect(fs.existsSync(path.join(featuresDir, settled.feature, 'feature.config.cjs'))).toBe(true)
   })
 
   it('a second flight on the same repo hits the similarity checkpoint; rerun reaches the export without re-authoring', async () => {

@@ -6,8 +6,10 @@ import Fastify, { type FastifyInstance } from 'fastify'
 import { flightsRoutes } from './flights'
 import { FlightRunStore, type FlightStore, type FlightStoreEvent } from '../logic/store'
 import type { StageAdapters } from '../logic/conductor'
+import type { FlightAgentSpawner } from '../logic/stages/context'
 import { FLIGHT_STAGE_KEYS } from '../logic/types'
 import type { FlightIndexEntry, FlightManifest } from '../logic/types'
+import type { PlanFeaturesTask } from '../../../../../../shared/flights/types'
 
 let tmpDir: string
 let repoDir: string
@@ -19,7 +21,11 @@ function allDone(): StageAdapters {
   ) as StageAdapters
 }
 
-async function buildApp(adapters: StageAdapters, flightStore?: FlightStore): Promise<FastifyInstance> {
+async function buildApp(
+  adapters: StageAdapters,
+  flightStore?: FlightStore,
+  planAgent?: FlightAgentSpawner,
+): Promise<FastifyInstance> {
   const instance = Fastify({ logger: false })
   await instance.register(flightsRoutes, {
     featuresDir: path.join(tmpDir, 'features'),
@@ -27,6 +33,7 @@ async function buildApp(adapters: StageAdapters, flightStore?: FlightStore): Pro
     projectRoot: tmpDir,
     adapters,
     ...(flightStore ? { flightStore } : {}),
+    ...(planAgent ? { planAgent } : {}),
   })
   return instance
 }
@@ -472,7 +479,6 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.flight).toBeNull()
     expect(body.active).toBe(false)
     expect(body.canContinue).toBe(false)
-    expect(body.editable).toEqual({ description: true, repoPaths: true })
     expect(body.prefill.repoPaths).toEqual([repoDir])
     expect(body.prefill.description).toBe('')
     // No flight record → the stage-entry menu is fully locked: a first flight
@@ -547,7 +553,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
   })
 })
 
-describe('POST /api/flights/:id/pause + /redo + PATCH /api/flights/:id', () => {
+describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
   const hangingScout = (): StageAdapters => {
     const adapters = allDone()
     adapters.scout = { run: () => new Promise(() => {}) }
@@ -583,61 +589,225 @@ describe('POST /api/flights/:id/pause + /redo + PATCH /api/flights/:id', () => {
     await waitForStatus(flightId, ['done'])
   })
 
-  it('PATCH edits the description of a non-active flight; repo change resets stages', async () => {
+  it('repos + intent are frozen: a redo with different values is a 409 flight_frozen', async () => {
     app = await buildApp(allDone())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
     await waitForStatus(flightId, ['done'])
 
-    const descOnly = await app.inject({
-      method: 'PATCH',
-      url: `/api/flights/${flightId}`,
-      body: { description: 'sharper intent' },
-    })
-    expect(descOnly.statusCode).toBe(200)
-    expect(descOnly.json()).toMatchObject({ description: 'sharper intent', status: 'done' })
-
     const otherRepo = path.join(tmpDir, 'other-repo')
     fs.mkdirSync(otherRepo, { recursive: true })
     const repoChange = await app.inject({
-      method: 'PATCH',
-      url: `/api/flights/${flightId}`,
-      body: { repoPaths: [otherRepo] },
+      method: 'POST',
+      url: '/api/flights',
+      body: startBody({ repoPaths: [otherRepo], mode: 'redo' }),
     })
-    expect(repoChange.statusCode).toBe(200)
-    const body = repoChange.json() as { status: string; pauseReason?: string; stages: Array<{ status: string }> }
-    expect(body.status).toBe('paused')
-    expect(body.pauseReason).toBe('user')
-    expect(body.stages.every((s) => s.status === 'pending')).toBe(true)
+    expect(repoChange.statusCode).toBe(409)
+    expect(repoChange.json()).toMatchObject({ type: 'flight_frozen' })
+
+    const intentChange = await app.inject({
+      method: 'POST',
+      url: '/api/flights',
+      body: startBody({ description: 'a different intent', mode: 'redo' }),
+    })
+    expect(intentChange.statusCode).toBe(409)
+    expect(intentChange.json()).toMatchObject({ type: 'flight_frozen' })
   })
 
-  it('PATCH validates its body and rejects edits on an active flight', async () => {
-    app = await buildApp(hangingScout())
+  it('a mode-carrying POST may omit repos + description — the stored values are reused', async () => {
+    app = await buildApp(allDone())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
-    await waitForStatus(flightId, ['running'])
+    await waitForStatus(flightId, ['done'])
 
-    const empty = await app.inject({ method: 'PATCH', url: `/api/flights/${flightId}`, body: {} })
-    expect(empty.statusCode).toBe(400)
-
-    const badRepo = await app.inject({
-      method: 'PATCH',
-      url: `/api/flights/${flightId}`,
-      body: { repoPaths: [path.join(tmpDir, 'no-such-dir')] },
+    const redone = await app.inject({
+      method: 'POST',
+      url: '/api/flights',
+      body: { feature: 'checkout', mode: 'redo' },
     })
-    expect(badRepo.statusCode).toBe(400)
+    expect(redone.statusCode).toBe(201)
+    const body = redone.json() as { flightId: string; repoPaths: string[]; description: string }
+    expect(body.flightId).toBe(flightId)
+    expect(body.repoPaths).toEqual([repoDir])
+    expect(body.description).toBe('checkout flow')
+    await waitForStatus(flightId, ['done'])
+  })
 
-    const active = await app.inject({
-      method: 'PATCH',
-      url: `/api/flights/${flightId}`,
-      body: { description: 'while running' },
+  it('DELETE removes a settled record (feature returns to not-flown); 409 while active; 404 unknown', async () => {
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const deleted = await app.inject({ method: 'DELETE', url: `/api/flights/${flightId}` })
+    expect(deleted.statusCode).toBe(200)
+    expect(deleted.json()).toEqual({ deleted: true })
+    const list = await app.inject({ method: 'GET', url: '/api/flights' })
+    expect((list.json() as { flights: unknown[] }).flights).toHaveLength(0)
+
+    const unknown = await app.inject({ method: 'DELETE', url: `/api/flights/${flightId}` })
+    expect(unknown.statusCode).toBe(404)
+
+    const activeApp = await buildApp(hangingScout())
+    const started2 = await activeApp.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const activeId = (started2.json() as { flightId: string }).flightId
+    const whileActive = await activeApp.inject({ method: 'DELETE', url: `/api/flights/${activeId}` })
+    expect(whileActive.statusCode).toBe(409)
+    await activeApp.close()
+  })
+})
+
+describe('GET /api/flights collapses to latest-per-feature (R67)', () => {
+  it('pre-invariant duplicate records for one feature render as one row (the newest)', async () => {
+    const store = new FlightRunStore(tmpDir)
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+    const mk = (flightId: string, feature: string, createdAt: string): FlightManifest => ({
+      flightId,
+      feature,
+      repoPaths: [repoDir],
+      description: 'legacy',
+      opts: { env: 'local', coverageTarget: 100, yolo: false },
+      status: 'done',
+      currentStage: null,
+      stages: stages.map((s) => ({ ...s })),
+      createdAt,
+      updatedAt: createdAt,
     })
-    expect(active.statusCode).toBe(409)
+    // Saved oldest-first; list() is newest-first, so fl-legacy-3 is the keeper.
+    store.save(mk('fl-legacy-1', 'first-flight-smoke', '2026-01-01T00:00:00Z'))
+    store.save(mk('fl-legacy-2', 'first-flight-smoke', '2026-01-02T00:00:00Z'))
+    store.save(mk('fl-legacy-3', 'first-flight-smoke', '2026-01-03T00:00:00Z'))
+    store.save(mk('fl-other', 'other-feature', '2026-01-01T12:00:00Z'))
+
+    app = await buildApp(allDone(), store)
+    const res = await app.inject({ method: 'GET', url: '/api/flights' })
+    const flights = (res.json() as { flights: Array<{ flightId: string; feature: string }> }).flights
+    expect(flights).toHaveLength(2)
+    expect(flights.find((f) => f.feature === 'first-flight-smoke')!.flightId).toBe('fl-legacy-3')
+  })
+})
+
+describe('plan-features (R54)', () => {
+  const planText = (features: unknown) => `\`\`\`json\n${JSON.stringify({ split: Array.isArray(features) && (features as unknown[]).length > 1, features })}\n\`\`\``
+
+  const agentReturning = (text: string | (() => string)): FlightAgentSpawner => async () => ({
+    text: typeof text === 'function' ? text() : text,
+  })
+
+  async function planAndWait(instance: FastifyInstance, body?: Record<string, unknown>): Promise<PlanFeaturesTask> {
+    const res = await instance.inject({
+      method: 'POST',
+      url: '/api/flights/plan-features',
+      body: { repoPaths: [repoDir], description: 'test everything in this repo', ...body },
+    })
+    expect(res.statusCode).toBe(202)
+    const { taskId } = res.json() as { taskId: string }
+    const deadline = Date.now() + 3000
+    for (;;) {
+      const poll = await instance.inject({ method: 'GET', url: `/api/flights/plan-features/${taskId}` })
+      const task = poll.json() as PlanFeaturesTask
+      if (task.status !== 'running') return task
+      if (Date.now() > deadline) throw new Error('plan task never settled')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+  }
+
+  it('runs the plan agent and settles the proposal (normalized, deduped names)', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'Auth Flow', description: 'test login + signup', scope: 'auth only', group: 'My Shop' },
+      { name: 'checkout-flow', description: 'test the checkout', scope: 'cart to payment', group: 'My Shop' },
+    ])))
+    const task = await planAndWait(app)
+    expect(task.status).toBe('done')
+    expect(task.result).toMatchObject({
+      split: true,
+      features: [
+        { name: 'auth-flow', description: 'test login + signup', group: 'my-shop' },
+        { name: 'checkout-flow', description: 'test the checkout', group: 'my-shop' },
+      ],
+    })
+  })
+
+  it('an unparseable agent answer fails the task with the parse story', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning('I could not decide.'))
+    const task = await planAndWait(app)
+    expect(task.status).toBe('failed')
+    expect(task.error).toMatch(/JSON/)
+  })
+
+  it('launch creates one running flight + queued siblings that drain sequentially', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'one', description: 'test one' },
+      { name: 'two', description: 'test two' },
+      { name: 'three', description: 'test three' },
+    ])))
+    const task = await planAndWait(app)
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+    expect(launched.statusCode).toBe(201)
+    const { flightIds } = launched.json() as { flightIds: string[] }
+    expect(flightIds).toHaveLength(3)
+    // Stub adapters settle instantly, so the drain chain runs the whole batch.
+    const deadline = Date.now() + 3000
+    for (;;) {
+      const list = await app.inject({ method: 'GET', url: '/api/flights' })
+      const flights = (list.json() as { flights: Array<{ status: string; opts?: unknown }> }).flights
+      if (flights.length === 3 && flights.every((f) => f.status === 'done')) break
+      if (Date.now() > deadline) throw new Error(`batch never drained: ${JSON.stringify(flights)}`)
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    // A second launch must not double-create the batch.
+    const again = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+    expect(again.statusCode).toBe(409)
+  })
+
+  it('launch rejects name collisions with existing features/flights up front', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'checkout', description: 'test checkout' },
+      { name: 'fresh-one', description: 'test fresh' },
+    ])))
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    await waitForStatus((started.json() as { flightId: string }).flightId, ['done'])
+    const task = await planAndWait(app)
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+    expect(launched.statusCode).toBe(409)
+    expect(launched.json()).toMatchObject({ type: 'feature_name_conflicts', conflicts: ['checkout'] })
+    // Nothing was created — a partial batch would be worse than the rejection.
+    const list = await app.inject({ method: 'GET', url: '/api/flights' })
+    expect((list.json() as { flights: Array<{ feature: string }> }).flights.map((f) => f.feature)).toEqual(['checkout'])
+  })
+
+  it('POST attaches to a running task for the same inputs instead of double-spawning', async () => {
+    let spawns = 0
+    let release: (() => void) | null = null
+    const gated: FlightAgentSpawner = async () => {
+      spawns += 1
+      await new Promise<void>((resolve) => { release = resolve })
+      return { text: planText([{ name: 'solo', description: 'test solo' }]) }
+    }
+    app = await buildApp(allDone(), undefined, gated)
+    const body = { repoPaths: [repoDir], description: 'test everything in this repo' }
+    const first = await app.inject({ method: 'POST', url: '/api/flights/plan-features', body })
+    const second = await app.inject({ method: 'POST', url: '/api/flights/plan-features', body })
+    expect((second.json() as { taskId: string }).taskId).toBe((first.json() as { taskId: string }).taskId)
+    expect(spawns).toBe(1)
+    release!()
   })
 })
 
 describe('~-relative repo paths (dialog picker parity)', () => {
-  it('expands a leading ~ on start and PATCH like the entry prefill does', async () => {
+  it('expands a leading ~ on start like the entry prefill does', async () => {
     const os = await import('os')
     const home = os.homedir()
     const rel = `.cl-flight-route-test-${process.pid}`

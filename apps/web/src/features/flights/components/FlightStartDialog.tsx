@@ -1,25 +1,32 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import type {
   FlightEntryOptions,
   FlightStageEntryOption,
   FlightStageKey,
   FlightStageStatus,
+  PlanFeaturesTask,
+  PlannedFeature,
 } from '../../../shared/api/client'
+import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { Modal, Textarea } from '../../config/components/atoms'
 import { STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 
-// R25/R40: the UI's flight launcher — THE entry point for flights.
+// R25/R40/R54/R63: the UI's flight launcher — THE entry point for flights.
 // Two modes off one dialog:
 //   • new-flight (feature == null, opened from "+ New"): asks exactly two
-//     things — intent + repo list (RepoMultiPicker); the feature name derives
-//     from the first repo (the CLI's slug rule); the Start-from menu renders
-//     fully locked ("unlocks after the first flight" — R41).
+//     things — intent + repo list — then ALWAYS plans first (R54): the
+//     breakdown agent judges whether the intent is one feature or several.
+//     One feature → the flight starts straight away; several → a proposal
+//     step (editable cards + token warning) that launches one flight per
+//     feature, the first running and the rest queued sequentially.
 //   • feature-scoped (existing behavior): the stage menu answers "where do you
 //     want the pipeline to (re)start?", each row's clickability being the
 //     SERVER's stage-entry verdict (GET /api/flights/entry), never a
-//     client-side prerequisite guess.
+//     client-side prerequisite guess. Repos + intent are FROZEN once a record
+//     exists (R57/R63) — no repo section, intent read-only, the request body
+//     omits both so the server reuses the stored values.
 // Picking + Start posts the same /api/flights body the CLI and MCP send
 // (four-surface parity), so continue / redo / jump behave identically here.
 
@@ -46,6 +53,11 @@ function rowLabel(key: FlightStageKey): string {
 
 const FIRST_FLIGHT_REASON = "available after this feature's first flight"
 
+/** The new-flight side of the dialog moves through three views (one per
+ *  lifecycle state): the intent+repos form, the live planning agent, and the
+ *  multi-feature proposal awaiting confirmation. */
+type NewFlightPhase = 'form' | 'planning' | 'proposal'
+
 export function FlightStartDialog({
   feature,
   knownRepos = [],
@@ -61,6 +73,10 @@ export function FlightStartDialog({
   /** Navigate to the flight detail view (just-started or already-active). */
   onOpenFlight: (flightId: string) => void
 }) {
+  // A new-flight submit that hits the existing-record 409 switches the dialog
+  // itself into feature-scoped mode (R67) — resolvedFeature drives everything
+  // the `feature` prop used to.
+  const [resolvedFeature, setResolvedFeature] = useState<string | null>(feature)
   const [entry, setEntry] = useState<FlightEntryOptions | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [description, setDescription] = useState('')
@@ -69,12 +85,20 @@ export function FlightStartDialog({
   const [busy, setBusy] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
 
-  const newFlight = feature === null
+  // R54 plan flow state.
+  const [phase, setPhase] = useState<NewFlightPhase>('form')
+  const [planTask, setPlanTask] = useState<PlanFeaturesTask | null>(null)
+  const [proposal, setProposal] = useState<PlannedFeature[]>([])
+  const [sharedGroup, setSharedGroup] = useState('')
+  const [conflicts, setConflicts] = useState<string[]>([])
+  const autoLaunched = useRef(false)
+
+  const newFlight = resolvedFeature === null
 
   useEffect(() => {
     if (newFlight) return
     let alive = true
-    api.getFlightEntryOptions(feature)
+    api.getFlightEntryOptions(resolvedFeature)
       .then((options) => {
         if (!alive) return
         setEntry(options)
@@ -87,7 +111,52 @@ export function FlightStartDialog({
         setLoadError(err instanceof Error ? err.message : String(err))
       })
     return () => { alive = false }
-  }, [feature, newFlight])
+  }, [resolvedFeature, newFlight])
+
+  // Planning: poll the task until the agent settles. Attach-or-start means the
+  // task may already be done on the first poll.
+  useEffect(() => {
+    if (planTask?.status !== 'running') return
+    const id = setInterval(() => {
+      api.getPlanFeaturesTask(planTask.taskId).then(setPlanTask).catch(() => {})
+    }, 1500)
+    return () => clearInterval(id)
+  }, [planTask?.taskId, planTask?.status])
+
+  // A settled plan advances the phase: one feature starts without another
+  // click; several become the proposal step.
+  useEffect(() => {
+    if (planTask?.status !== 'done' || !planTask.result) return
+    const features = planTask.result.features
+    if (features.length <= 1) {
+      if (autoLaunched.current) return
+      autoLaunched.current = true
+      api.launchPlannedFeatures(planTask.taskId, { features })
+        .then(({ flightIds }) => onOpenFlight(flightIds[0]))
+        .catch((err: unknown) => {
+          // A name collision on the single feature still needs the user —
+          // surface the proposal card so they can rename it.
+          autoLaunched.current = false
+          applyLaunchFailure(err)
+          setProposal(features)
+          setSharedGroup(features[0]?.group ?? '')
+          setPhase('proposal')
+        })
+      return
+    }
+    setProposal(features)
+    setSharedGroup(features.find((f) => f.group)?.group ?? '')
+    setPhase('proposal')
+  }, [planTask, onOpenFlight])
+
+  const applyLaunchFailure = (err: unknown): void => {
+    const body = err instanceof api.ApiError
+      ? (err.body as { error?: string; type?: string; conflicts?: string[] } | null)
+      : null
+    if (body?.type === 'feature_name_conflicts') setConflicts(body.conflicts ?? [])
+    setStartError(body?.error ?? (err instanceof Error ? err.message : String(err)))
+    setBusy(false)
+  }
 
   const byKey = useMemo(() => {
     const map = new Map<FlightStageKey, FlightStageEntryOption>()
@@ -101,42 +170,87 @@ export function FlightStartDialog({
   }, [entry])
 
   const derivedFeature = newFlight && repoPaths.length > 0 ? api.deriveFeatureSlug(repoPaths[0]) : null
-
-  // Repos are editable on a fresh start of a non-active flight (the server
-  // resets downstream evidence on a repo change); locked mid-menu picks.
-  const reposEditable = newFlight || (Boolean(entry?.editable?.repoPaths) && picked === 'similarity')
+  // Frozen once flown (R57): a record means repos + intent are fixed forever —
+  // the form neither shows the picker nor sends the values.
+  const hasRecord = !newFlight && entry?.flight != null
+  const needsArgs = newFlight || (entry !== null && entry.flight === null)
 
   const canSubmit = newFlight
     ? !busy && description.trim() !== '' && repoPaths.length > 0
-    : entry !== null && !entry.active && !busy && picked !== null && description.trim() !== '' && repoPaths.length > 0
+    : entry !== null && !entry.active && !busy && picked !== null
+      && (!needsArgs || (description.trim() !== '' && repoPaths.length > 0))
 
-  const start = (): void => {
+  const openFlightFail = (err: unknown): void => {
+    const body = err instanceof api.ApiError
+      ? (err.body as { error?: string; type?: string; flightId?: string } | null)
+      : null
+    // The derived feature already has a flight record → flip the dialog into
+    // feature-scoped mode instead of surfacing a raw conflict (R67).
+    if (body?.type === 'flight_exists_requires_choice' && derivedFeature) {
+      setBusy(false)
+      setStartError(null)
+      setPhase('form')
+      setResolvedFeature(derivedFeature)
+      return
+    }
+    setStartError(body?.error ?? (err instanceof Error ? err.message : String(err)))
+    setBusy(false)
+  }
+
+  /** R54: the new-flight primary action — run the breakdown agent first. */
+  const planFlight = (): void => {
     if (busy) return
     setBusy(true)
     setStartError(null)
-    const fail = (err: unknown): void => {
-      const body = err instanceof api.ApiError ? (err.body as { error?: string } | null) : null
-      setStartError(body?.error ?? (err instanceof Error ? err.message : String(err)))
-      setBusy(false)
-    }
-
-    if (newFlight) {
-      api.startFlight({
-        feature: derivedFeature ?? 'feature',
-        repoPaths,
-        description: description.trim(),
+    api.planFeatures({ repoPaths, description: description.trim() })
+      .then((task) => {
+        setPlanTask(task)
+        setPhase('planning')
+        setBusy(false)
       })
-        .then((manifest) => onOpenFlight(manifest.flightId))
-        .catch(fail)
-      return
-    }
+      .catch(openFlightFail)
+  }
 
-    if (!entry || picked === null) return
-    const hasRecord = entry.flight !== null
-    const body: api.StartFlightBody = {
-      feature: feature!,
+  /** The planning escape hatch — one flight for the whole intent, no agent. */
+  const startSingleFlight = (): void => {
+    if (busy) return
+    setBusy(true)
+    setStartError(null)
+    api.startFlight({
+      feature: derivedFeature ?? 'feature',
       repoPaths,
       description: description.trim(),
+    })
+      .then((manifest) => onOpenFlight(manifest.flightId))
+      .catch(openFlightFail)
+  }
+
+  /** Proposal confirm: one flight per card, sequentially queued (R54). */
+  const launchProposal = (): void => {
+    if (busy || !planTask) return
+    setBusy(true)
+    setStartError(null)
+    setConflicts([])
+    const features = proposal.map((f) => ({
+      ...f,
+      ...(sharedGroup.trim() ? { group: sharedGroup.trim() } : {}),
+    }))
+    api.launchPlannedFeatures(planTask.taskId, { features })
+      .then(({ flightIds }) => onOpenFlight(flightIds[0]))
+      .catch(applyLaunchFailure)
+  }
+
+  const start = (): void => {
+    if (busy) return
+    if (newFlight) { planFlight(); return }
+    if (!entry || picked === null) return
+    setBusy(true)
+    setStartError(null)
+    const body: api.StartFlightBody = {
+      feature: resolvedFeature!,
+      // Frozen args (R57): with a record, omit repos + intent — the server
+      // reuses the stored values (and 409s on differing ones).
+      ...(needsArgs ? { repoPaths, description: description.trim() } : {}),
       env: entry.prefill.env,
       coverageTarget: entry.prefill.coverageTarget,
       ...(picked === 'continue'
@@ -147,7 +261,7 @@ export function FlightStartDialog({
     }
     api.startFlight(body)
       .then((manifest) => onOpenFlight(manifest.flightId))
-      .catch(fail)
+      .catch(openFlightFail)
   }
 
   const stageMenu = (
@@ -193,8 +307,14 @@ export function FlightStartDialog({
     </div>
   )
 
+  const errorBlock = startError && (
+    <div data-testid="flight-start-error" className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>
+      {startError}
+    </div>
+  )
+
   return (
-    <Modal open onClose={onClose} eyebrow="Flight" title={feature ?? 'Start a flight'} width={520}>
+    <Modal open onClose={onClose} eyebrow="Flight" title={resolvedFeature ?? 'Start a flight'} width={620}>
       <div className="flex flex-col gap-3 p-4">
         {loadError ? (
           <div data-testid="flight-start-error" className="text-[11.5px]" style={{ color: 'var(--danger)' }}>
@@ -218,45 +338,79 @@ export function FlightStartDialog({
               Open the running flight →
             </button>
           </div>
+        ) : newFlight && phase === 'planning' ? (
+          <PlanningView
+            task={planTask}
+            busy={busy}
+            error={errorBlock}
+            onSkip={startSingleFlight}
+            onCancel={onClose}
+          />
+        ) : newFlight && phase === 'proposal' ? (
+          <ProposalView
+            proposal={proposal}
+            conflicts={conflicts}
+            sharedGroup={sharedGroup}
+            busy={busy}
+            error={errorBlock}
+            onChange={setProposal}
+            onGroupChange={setSharedGroup}
+            onConfirm={launchProposal}
+            onCancel={onClose}
+          />
         ) : (
           <>
             <label className="flex flex-col gap-1">
               <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
                 What should this flight test?
               </span>
-              <Textarea
-                value={description}
-                onChange={setDescription}
-                minRows={2}
-                maxRows={4}
-                placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
-              />
-            </label>
-            <div className="-mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-              Documents referenced here are linked into the flight automatically.
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                Repos
-              </span>
-              <RepoMultiPicker
-                known={knownRepos}
-                selected={repoPaths}
-                onChange={setRepoPaths}
-                disabled={!reposEditable}
-                disabledReason={
-                  entry && !entry.editable?.repoPaths
-                    ? 'Pause or stop the flight to change its repos.'
-                    : 'Repos can change only on a full restart — pick "Full flight" to edit them.'
-                }
-              />
-              {derivedFeature && (
-                <div data-testid="flight-start-derived-feature" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                  Feature name: <span style={{ fontFamily: 'var(--font-mono)' }}>{derivedFeature}</span> — derived automatically
-                </div>
+              {hasRecord ? (
+                // Frozen intent (R57): presented, never edited, from here.
+                <blockquote
+                  data-testid="flight-start-frozen-intent"
+                  className="rounded border-l-2 py-1 pl-2.5 text-[12px]"
+                  style={{ borderColor: 'rgb(56, 189, 248)', color: 'var(--text-secondary)' }}
+                >
+                  {entry?.prefill.description || '—'}
+                </blockquote>
+              ) : (
+                <Textarea
+                  value={description}
+                  onChange={setDescription}
+                  minRows={2}
+                  maxRows={4}
+                  placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
+                />
               )}
-            </div>
+            </label>
+            {hasRecord ? (
+              <div className="-mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                Repos and intent froze when this flight first started — delete the flight to test different ones.
+              </div>
+            ) : (
+              <div className="-mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                Documents referenced here are linked into the flight automatically.
+              </div>
+            )}
+
+            {/* R63: no repo section once a record exists — repos are frozen. */}
+            {needsArgs && (
+              <div className="flex flex-col gap-1">
+                <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+                  Repos
+                </span>
+                <RepoMultiPicker
+                  known={knownRepos}
+                  selected={repoPaths}
+                  onChange={setRepoPaths}
+                />
+                {derivedFeature && (
+                  <div data-testid="flight-start-derived-feature" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                    Feature name: <span style={{ fontFamily: 'var(--font-mono)' }}>{derivedFeature}</span> — derived automatically
+                  </div>
+                )}
+              </div>
+            )}
 
             {stageMenu}
 
@@ -264,18 +418,14 @@ export function FlightStartDialog({
               <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
                 Step entry unlocks after this feature's first flight.
               </div>
-            ) : entry?.flight !== null ? (
+            ) : hasRecord ? (
               <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
                 Starting resets this flight's stage records; captured artifacts on
                 disk (config, envset, docs, specs) are kept and reused.
               </div>
             ) : null}
 
-            {startError && (
-              <div data-testid="flight-start-error" className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>
-                {startError}
-              </div>
-            )}
+            {errorBlock}
 
             <div className="flex items-center justify-end gap-1.5">
               <button type="button" onClick={onClose} className="cl-button px-2.5 py-1 text-xs">Cancel</button>
@@ -287,13 +437,174 @@ export function FlightStartDialog({
                 className="cl-button px-2.5 py-1 text-xs"
                 style={{ color: canSubmit ? 'rgb(56, 189, 248)' : undefined, opacity: canSubmit ? 1 : 0.55 }}
               >
-                {busy ? 'Starting…' : picked === 'continue' ? 'Continue flight' : 'Start flight'}
+                {busy ? 'Starting…' : newFlight ? 'Plan flight →' : picked === 'continue' ? 'Continue flight' : 'Start flight'}
               </button>
             </div>
           </>
         )}
       </div>
     </Modal>
+  )
+}
+
+/** R54: the breakdown agent owns the dialog while it thinks — its timeline is
+ *  the content, with the single-flight escape hatch always in reach. */
+function PlanningView({
+  task,
+  busy,
+  error,
+  onSkip,
+  onCancel,
+}: {
+  task: PlanFeaturesTask | null
+  busy: boolean
+  error: ReactNode
+  onSkip: () => void
+  onCancel: () => void
+}) {
+  const failed = task?.status === 'failed'
+  return (
+    <div className="flex flex-col gap-2.5" data-testid="flight-plan-view">
+      <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+        {failed
+          ? 'Planning failed — you can still start one flight for the whole intent.'
+          : 'Judging whether this intent is one feature or several…'}
+      </div>
+      {failed && task?.error && (
+        <div data-testid="flight-plan-error" className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>
+          {task.error}
+        </div>
+      )}
+      {task && !failed && (
+        <div className="flex min-h-[260px] flex-col rounded border" style={{ borderColor: 'var(--border-default)' }}>
+          <AgentSessionView source={{ kind: 'flight-plan', taskId: task.taskId, live: task.status === 'running' }} />
+        </div>
+      )}
+      {error}
+      <div className="flex items-center justify-end gap-1.5">
+        <button type="button" onClick={onCancel} className="cl-button px-2.5 py-1 text-xs">
+          Close — keep planning in the background
+        </button>
+        <button
+          type="button"
+          data-testid="flight-plan-skip"
+          disabled={busy}
+          onClick={onSkip}
+          className="cl-button px-2.5 py-1 text-xs"
+          style={{ color: failed ? 'rgb(56, 189, 248)' : undefined }}
+        >
+          {busy ? 'Starting…' : 'Skip planning — start a single flight'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** R54: the proposal step — the agent's split as editable cards, the token
+ *  cost stated plainly, nothing launches until the user confirms. */
+function ProposalView({
+  proposal,
+  conflicts,
+  sharedGroup,
+  busy,
+  error,
+  onChange,
+  onGroupChange,
+  onConfirm,
+  onCancel,
+}: {
+  proposal: PlannedFeature[]
+  conflicts: string[]
+  sharedGroup: string
+  busy: boolean
+  error: ReactNode
+  onChange: (features: PlannedFeature[]) => void
+  onGroupChange: (group: string) => void
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const patch = (i: number, part: Partial<PlannedFeature>): void => {
+    onChange(proposal.map((f, idx) => (idx === i ? { ...f, ...part } : f)))
+  }
+  const n = proposal.length
+  return (
+    <div className="flex flex-col gap-2.5" data-testid="flight-proposal-view">
+      <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+        The intent breaks down into {n} feature{n === 1 ? '' : 's'} — each gets its own flight and test suite.
+      </div>
+
+      <ul className="m-0 flex max-h-[320px] list-none flex-col gap-1.5 overflow-auto p-0 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+        {proposal.map((f, i) => {
+          const slug = api.deriveFeatureSlug(f.name)
+          const conflicted = conflicts.includes(slug)
+          return (
+            <li
+              key={i}
+              data-testid={`flight-proposal-card-${i}`}
+              className="flex flex-col gap-1.5 rounded border p-2.5"
+              style={{ borderColor: conflicted ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default))' : 'var(--border-default)' }}
+            >
+              <input
+                value={f.name}
+                onChange={(e) => patch(i, { name: e.target.value })}
+                aria-label="Feature name"
+                spellCheck={false}
+                className="w-full rounded border px-2 py-1 text-[12px] outline-none"
+                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+              />
+              {conflicted && (
+                <div data-testid={`flight-proposal-conflict-${i}`} className="text-[10.5px]" style={{ color: 'var(--danger)' }}>
+                  A feature named "{slug}" already exists — rename this one.
+                </div>
+              )}
+              <Textarea value={f.description} onChange={(v) => patch(i, { description: v })} minRows={1} maxRows={3} />
+              {f.scope && (
+                <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                  {f.scope}
+                </div>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+
+      <label className="flex items-center gap-2">
+        <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+          Group
+        </span>
+        <input
+          value={sharedGroup}
+          onChange={(e) => onGroupChange(e.target.value)}
+          data-testid="flight-proposal-group"
+          placeholder="optional — houses these features under one accordion"
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded border px-2 py-1 text-[11.5px] outline-none"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+        />
+      </label>
+
+      {n > 1 && (
+        <div data-testid="flight-proposal-token-warning" className="rounded border px-2.5 py-2 text-[11px]" style={{ borderColor: 'color-mix(in srgb, rgb(251, 191, 36) 45%, var(--border-default))', color: 'rgb(251, 191, 36)' }}>
+          Runs {n} flights one at a time — expect roughly {n}× the usual token cost.
+        </div>
+      )}
+
+      {error}
+
+      <div className="flex items-center justify-end gap-1.5">
+        <button type="button" onClick={onCancel} className="cl-button px-2.5 py-1 text-xs">Cancel</button>
+        <button
+          type="button"
+          data-testid="flight-proposal-confirm"
+          disabled={busy || proposal.some((f) => !f.name.trim() || !f.description.trim())}
+          onClick={onConfirm}
+          className="cl-button px-2.5 py-1 text-xs"
+          style={{ color: 'rgb(56, 189, 248)' }}
+        >
+          {busy ? 'Launching…' : n === 1 ? 'Start the flight' : `Start ${n} flights`}
+        </button>
+      </div>
+    </div>
   )
 }
 

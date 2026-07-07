@@ -8,19 +8,21 @@ import type {
   FlightStageKey,
   SpecsCoverageProgress as SpecsCoverageProgressT,
 } from '../../../shared/api/client'
-import type { JournalEntry, RunDetail } from '../../../shared/api/types'
+import type { JournalEntry, RunDetail, RunIndexEntry } from '../../../shared/api/types'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { StatusDot } from '../../config/components/atoms'
 import { EvaluationTaskPanel } from '../../evaluation/components/EvaluationTaskPanel'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
+import { RunRow } from '../../runs/components/RunRow'
 import { ActivityOnlyRow, FLIGHT_STATUS_TONE, FlightStatusChip, NotFlownRow, StageMiniRail, featureActivityRows, flightStatusLabel } from './FlightsPill'
-import { FeatureSetupPanel, FlightDocsPanel, RepoScanEditor } from './FlightStagePanels'
+import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel } from './FlightStagePanels'
 import type { FeatureActivity } from '../state/feature-activity'
 import {
   FactsGrid,
   STAGE_COMPANION,
   STAGE_ICON,
   StageStatusChip,
+  formatDuration,
   specsCoverageProgress,
   stageFacts,
   stageRailRows,
@@ -94,7 +96,7 @@ export function FlightPage({
   return (
     <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
       {flightId
-        ? <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
+        ? <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
         : <FlightsLanding refreshKey={refreshKey} activity={activity} features={features} onSelectFlight={onSelectFlight} onOpenActivity={onOpenActivity} onStartFlight={onStartFlight} onClose={onClose} />}
     </div>
   )
@@ -179,6 +181,7 @@ function FlightDetail({
   onOpenConfig,
   configRefreshKey,
   docsRefreshKey,
+  activity,
   drill,
 }: {
   flightId: string
@@ -189,6 +192,8 @@ function FlightDetail({
   onOpenConfig?: (feature: string) => void
   configRefreshKey?: number
   docsRefreshKey?: number
+  /** Per-feature live activity — drives the run row's live icon (R64). */
+  activity?: Map<string, FeatureActivity>
   drill: FlightDrillThroughs
 }) {
   const [flight, setFlight] = useState<FlightManifest | null>(null)
@@ -213,7 +218,14 @@ function FlightDetail({
 
   // The rail hides conductor plumbing (R21) and merges run+heal into one user
   // step (R22) — selection and auto-pick both work on these visible rows.
-  const railRows = useMemo(() => (flight ? stageRailRows(flight.stages) : []), [flight])
+  // While a run for this feature is live, the run row reads `running` (blue +
+  // pulse) instead of its settled verdict — the icon must never show a green
+  // tick over a run that is still working (R64).
+  const runLive = flight ? activity?.get(flight.feature)?.kind === 'running' : false
+  const railRows = useMemo(() => {
+    const rows = flight ? stageRailRows(flight.stages) : []
+    return runLive ? rows.map((r) => (r.key === 'run' && r.status !== 'running' ? { ...r, status: 'running' as const } : r)) : rows
+  }, [flight, runLive])
 
   // Default the selected stage to the one that needs eyes: waiting → running →
   // first failed → last done. The user's explicit pick wins.
@@ -249,7 +261,6 @@ function FlightDetail({
   return (
     <>
       <header className="flex items-center gap-3 border-b px-4 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
-        <button type="button" onClick={onBackToList} aria-label="All flights" className="cl-button px-2 py-1 text-xs">←</button>
         {/* R17: the title answers "what is this?" alone on its own line; the
             status chip gets its own slot on the line below so "is it done?"
             never competes with the name. */}
@@ -299,6 +310,7 @@ function FlightDetail({
           </button>
         )}
         {!active && <StartOverButton flightId={flightId} onDone={refetch} />}
+        {!active && <DeleteFlightButton flightId={flightId} onDeleted={onBackToList} />}
         {active && (
           <button
             type="button"
@@ -324,6 +336,8 @@ function FlightDetail({
         <button type="button" onClick={onClose} className="cl-button px-2.5 py-1 text-xs">Close</button>
       </header>
 
+      <FlightSummaryStrip flight={flight} />
+
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="Flight stages"
@@ -333,6 +347,11 @@ function FlightDetail({
           {railRows.map((s) => {
             const selected = s.key === stageKey
             const t = stageStatusTone(s.status)
+            // A merged row's wall-clock spans its primary + folded companion
+            // (run→heal, scaffold→env-capture, docs→prd-summary) — R61.
+            const primary = flight.stages.find((st) => st.key === s.key)
+            const folded = flight.stages.find((st) => st.key === STAGE_COMPANION[s.key])
+            const duration = formatDuration(primary?.startedAt, folded?.endedAt ?? primary?.endedAt)
             return (
               <button
                 key={s.key}
@@ -350,6 +369,11 @@ function FlightDetail({
                 <span className="min-w-0 flex-1 truncate" style={{ color: s.status === 'pending' ? 'var(--text-muted)' : undefined }}>
                   {s.label}
                 </span>
+                {duration && s.status !== 'running' && (
+                  <span className="shrink-0 text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    {duration}
+                  </span>
+                )}
                 {s.status === 'running' && <StatusDot state="running" className="shrink-0" />}
               </button>
             )
@@ -360,7 +384,7 @@ function FlightDetail({
           {!stage || !row ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Pick a stage.</div>
           ) : (
-            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} onResponded={refetch} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
+            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} onResponded={refetch} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
           )}
         </main>
       </div>
@@ -400,16 +424,17 @@ function stageDrillThrough(
 //   2. state line — one plain sentence
 //   3. facts — the 2–4 things the user cares about at this stage (FactsGrid)
 //   4. checkpoint / error, when the stage needs the user
-//   5. the agent's live output ONLY while it is working (never for test runs)
-//   6. ▸ View details — ONE formatted log pane (R30): the agent timeline where
-//      an agent acted, the tagged system log otherwise; raw evidence JSON is
-//      gone — anything the user cares about is a fact.
+//   5. the activity band (R66): ONE chronological story — the conductor's
+//      tagged lines, the agent timeline (AgentSessionView) embedded where the
+//      agent worked, the wrap-up lines after. Expanded while the stage works;
+//      one "▸ View activity" disclosure once it settles.
 function StageDetail({
   flightId,
   flight,
   row,
   stage,
   companion,
+  runLive,
   onResponded,
   onOpenConfig,
   configRefreshKey,
@@ -422,6 +447,8 @@ function StageDetail({
   stage: FlightStage
   /** The folded half of a pair-merged row (heal / env-capture / prd-summary). */
   companion: FlightStage | null
+  /** A run for this feature is live right now (R64) — the run row polls. */
+  runLive?: boolean
   onResponded: () => void
   onOpenConfig?: (feature: string) => void
   configRefreshKey?: number
@@ -441,7 +468,6 @@ function StageDetail({
   const settled = row.status === 'done' || row.status === 'failed'
   const facts = stageFacts(stage, flight, companion ?? undefined)
   const drillThrough = stageDrillThrough(stage, flight, drill)
-  const [detailsOpen, setDetailsOpen] = useState(false)
   const runId = runMerged
     ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
@@ -453,7 +479,6 @@ function StageDetail({
     : null
   const error = stage.error ?? companion?.error
   const combinedLog = [stage.log, companion?.log].filter(Boolean).join('')
-  const hasDetails = Boolean(combinedLog) || Boolean(agentDir && settled)
 
   return (
     <>
@@ -482,12 +507,10 @@ function StageDetail({
 
       <FactsGrid facts={facts} />
 
-      {/* Repo Scan (R42): intent + repos are editable while the flight is not
-          actively working — a repo change resets it to the start (server-owned
-          rule; the editor warns before saving). */}
-      {stage.key === 'scout' && flight.status !== 'running' && flight.status !== 'waiting-for-approval' && (
-        <RepoScanEditor flight={flight} onSaved={onResponded} />
-      )}
+      {/* Repo Scan (R57): repos + intent presented read-only — they freeze the
+          moment the flight first starts; deleting the flight is the escape
+          hatch (the panel says so). */}
+      {stage.key === 'scout' && <RepoScanPanel flight={flight} />}
 
       {/* Feature setup (R43): the editable digest over the REAL on-disk config
           — same doc Advanced setup (FeatureConfigEditor) edits, live both ways. */}
@@ -500,13 +523,15 @@ function StageDetail({
         />
       )}
 
-      {/* Requirements (R44): the docs manager lives where the flight pauses
-          for docs — add files, link local paths, remove; linked docs marked ↗. */}
+      {/* Requirements (R44/R59): the docs manager lives where the flight pauses
+          for docs — add files, link local paths, remove; linked docs marked ↗.
+          The folded prd-summary's status chips the header (R59). */}
       {stage.key === 'docs' && stage.status !== 'pending' && (
         <FlightDocsPanel
           feature={flight.feature}
           locked={row.status === 'running'}
           refreshKey={docsRefreshKey}
+          summaryStatus={companion?.status}
           onChanged={onResponded}
         />
       )}
@@ -515,13 +540,15 @@ function StageDetail({
           no agent output, the run detail page holds the rest. */}
       {runMerged && runId && <RunRepairSummary runId={runId} active={live} />}
 
+      {/* Test Run (R64): every run this feature has had, as the same cards the
+          runs list renders — click drills into the real run detail. */}
+      {runMerged && row.status !== 'pending' && (
+        <FeatureRunsPanel feature={flight.feature} live={Boolean(runLive) || live} onOpenRun={drill.onOpenRun} />
+      )}
+
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
           timeline — coverage % after each mapping feeds the next authoring. */}
       {loopProgress && <SpecsPassTimeline progress={loopProgress} live={live} />}
-
-      {/* Evaluation Report (R29): the export task's status + output live here —
-          the one home for "how is my evaluation coming along". */}
-      {stage.key === 'evaluation-export' && <ExportTaskPanel flight={flight} stage={stage} />}
 
       {(row.status === 'failed' && error) && (
         <div className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>
@@ -533,53 +560,119 @@ function StageDetail({
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
       )}
 
-      {/* The agent's live output, only while it works — a settled stage answers
-          with facts; the historical timeline lives behind View details. */}
-      {agentDir && live && (
-        <AgentBlock>
-          {/* Keyed by sidecar so the loop's authoring→mapping swap remounts
-              the timeline onto the other agent's stream. */}
-          <AgentSessionView key={agentDir} source={{ kind: 'flight', flightId, stage: agentDir, live: true }} />
-        </AgentBlock>
-      )}
-
-      {hasDetails && (
-        <section>
-          <button
-            type="button"
-            data-testid="stage-details-toggle"
-            aria-expanded={detailsOpen}
-            onClick={() => setDetailsOpen((open) => !open)}
-            className="cl-button px-2 py-0.5 text-[11px]"
-          >
-            {detailsOpen ? '▾ Hide log' : '▸ View log'}
-          </button>
-          {detailsOpen && (
-            <div className="mt-2 flex flex-col gap-2">
-              {agentDir && settled && (
-                <AgentBlock>
-                  <AgentSessionView source={{ kind: 'flight', flightId, stage: agentDir, live: false }} />
-                </AgentBlock>
-              )}
-              {combinedLog && <FlightStageLog log={combinedLog} />}
-            </div>
-          )}
-        </section>
-      )}
+      {/* R66: one chronological activity band per stage — the tagged system
+          lines with the agent timeline embedded where the agent worked. The
+          Evaluation Report's export task renders as the band instead (R65). */}
+      <StageActivity
+        flightId={flightId}
+        agentDir={agentDir}
+        live={live}
+        settled={settled}
+        log={combinedLog}
+        band={stage.key === 'evaluation-export' ? <ExportTaskPanel flight={flight} stage={stage} /> : undefined}
+      />
     </>
+  )
+}
+
+/** The stage's activity band (R66): FlightStageLog + AgentBlock unified. The
+ *  conductor's `[tagged]` lines and the agent's timeline are one story — the
+ *  lines logged before the agent spawned render above the embedded
+ *  AgentSessionView, the wrap-up lines after it below. `stage.log` has no
+ *  timestamps, so the split is positional: agent chunks are mirrored into the
+ *  log untagged, so the first/last untagged line brackets the agent's slot;
+ *  a settled log with no untagged lines splits after the last spawn
+ *  announcement (a tagged line ending in `…`). Untagged middles never render
+ *  here — the timeline shows them richer. Expanded while the stage works; one
+ *  "▸ View activity" disclosure once settled. */
+function StageActivity({
+  flightId,
+  agentDir,
+  live,
+  settled,
+  log,
+  band,
+}: {
+  flightId: string
+  agentDir?: string
+  live: boolean
+  settled: boolean
+  log: string
+  /** Replaces the default agent band (Evaluation Report's export task, R65). */
+  band?: ReactNode
+}) {
+  const [userToggled, setUserToggled] = useState<boolean | null>(null)
+  const lines = log.split('\n').filter((l) => l.trim() !== '')
+  const hasBand = band !== undefined || Boolean(agentDir)
+  if (lines.length === 0 && !hasBand) return null
+  const open = userToggled ?? !settled
+
+  const isTagged = (l: string): boolean => /^\[[\w-]+\]/.test(l)
+  let pre = lines
+  let post: string[] = []
+  if (hasBand) {
+    const firstUntagged = lines.findIndex((l) => !isTagged(l))
+    if (firstUntagged >= 0) {
+      let lastUntagged = firstUntagged
+      for (let i = lines.length - 1; i >= firstUntagged; i--) {
+        if (!isTagged(lines[i])) { lastUntagged = i; break }
+      }
+      pre = lines.slice(0, firstUntagged)
+      post = lines.slice(lastUntagged + 1)
+    } else if (!live) {
+      // No agent chunks were mirrored — split after the adapters' spawn
+      // announcement so the timeline still sits where the agent ran.
+      let splitAt = lines.length
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (isTagged(lines[i]) && lines[i].trimEnd().endsWith('…')) { splitAt = i + 1; break }
+      }
+      pre = lines.slice(0, splitAt)
+      post = lines.slice(splitAt)
+    }
+  }
+
+  return (
+    <section data-testid="stage-activity" className="flex min-h-0 flex-col gap-2">
+      {settled && (
+        <button
+          type="button"
+          data-testid="stage-details-toggle"
+          aria-expanded={open}
+          onClick={() => setUserToggled(!open)}
+          className="cl-button self-start px-2 py-0.5 text-[11px]"
+        >
+          {open ? '▾ Hide activity' : '▸ View activity'}
+        </button>
+      )}
+      {open && (
+        <>
+          {pre.length > 0 && <FlightStageLog lines={pre} />}
+          {band !== undefined
+            ? band
+            : agentDir && (
+              <AgentBlock>
+                {/* Keyed by sidecar so the specs loop's authoring→mapping swap
+                    remounts the timeline onto the other agent's stream. */}
+                <AgentSessionView key={agentDir} source={{ kind: 'flight', flightId, stage: agentDir, live }} />
+              </AgentBlock>
+            )}
+          {post.length > 0 && <FlightStageLog lines={post} />}
+        </>
+      )}
+    </section>
   )
 }
 
 /** The system half of a stage's story (R30): the conductor's `[tagged]` log
  *  lines as scannable rows — tag chip + line, mono, pinned to the tail while
- *  it grows. Agent output never renders here (that's AgentSessionView's job). */
-function FlightStageLog({ log }: { log: string }) {
+ *  it grows. Agent output never renders here (that's AgentSessionView's job);
+ *  StageActivity hands each slot its pre-split lines (R66). */
+function FlightStageLog({ lines }: { lines: string[] }) {
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = ref.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [log])
-  const lines = log.split('\n').filter((l) => l.trim() !== '')
+  }, [lines])
   return (
     <div
       ref={ref}
@@ -647,8 +740,101 @@ function StartOverButton({ flightId, onDone }: { flightId: string; onDone: () =>
   )
 }
 
+/** Delete a settled flight record (R57): the frozen repos/intent escape hatch.
+ *  Two-click like Start over; the feature stays and returns to "not flown". */
+function DeleteFlightButton({ flightId, onDeleted }: { flightId: string; onDeleted: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        data-testid="flight-delete"
+        onClick={() => setConfirming(true)}
+        className="cl-button px-2.5 py-1 text-xs"
+        title="Delete this flight record — the feature stays and reads as not flown. Repos and intent are frozen per flight; deleting is how you start fresh with different ones."
+      >
+        Delete flight
+      </button>
+    )
+  }
+  return (
+    <button
+      type="button"
+      data-testid="flight-delete-confirm"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true)
+        api.deleteFlight(flightId)
+          .then(onDeleted)
+          .catch(() => {})
+          .finally(() => { setBusy(false); setConfirming(false) })
+      }}
+      className="cl-button px-2.5 py-1 text-xs"
+      style={{ color: 'var(--danger)' }}
+    >
+      {busy ? 'Deleting…' : 'Really delete?'}
+    </button>
+  )
+}
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}
+
+/** The header's summary strip (R61): the flight's headline numbers — elapsed
+ *  wall-clock, coverage %, run verdict, doc count, report readiness — derived
+ *  entirely from the manifest; items that don't exist yet simply don't render. */
+function FlightSummaryStrip({ flight }: { flight: FlightManifest }) {
+  const items: Array<{ label: string; value: string; tone?: string }> = []
+
+  const elapsed = formatDuration(flight.createdAt, flight.endedAt ?? flight.updatedAt)
+  if (elapsed && (flight.endedAt || flight.status !== 'running')) {
+    items.push({ label: flight.endedAt ? 'Elapsed' : 'Elapsed so far', value: elapsed })
+  }
+
+  const specs = flight.stages.find((s) => s.key === 'specs-coverage')
+  const progress = specsCoverageProgress(specs)
+  const lastMapped = progress?.passes.filter((p) => p.note == null).at(-1)
+  if (lastMapped) {
+    items.push({
+      label: 'Coverage',
+      value: `${lastMapped.coveragePct}%`,
+      tone: lastMapped.gapsOpen === 0 ? 'rgb(52, 211, 153)' : 'rgb(251, 191, 36)',
+    })
+  }
+
+  if (flight.runVerdict) {
+    items.push({
+      label: 'Run',
+      value: flight.runVerdict,
+      tone: flight.runVerdict === 'passed' ? 'rgb(52, 211, 153)' : flight.runVerdict === 'failed' ? 'var(--danger)' : 'var(--text-muted)',
+    })
+  }
+
+  const docsEv = asRecord(flight.stages.find((s) => s.key === 'docs')?.evidence)
+  const docs = Array.isArray(docsEv?.docs) ? docsEv.docs.length : 0
+  if (docs > 0) items.push({ label: 'Docs', value: String(docs) })
+
+  if (flight.links?.evaluationZip) items.push({ label: 'Report', value: 'ready', tone: 'rgb(52, 211, 153)' })
+
+  if (items.length === 0) return null
+  return (
+    <div
+      data-testid="flight-summary-strip"
+      className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b px-4 py-1.5"
+      style={{ borderColor: 'var(--border-default)' }}
+    >
+      {items.map((item) => (
+        <span key={item.label} className="flex items-baseline gap-1.5 text-[11px]">
+          <span className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+            {item.label}
+          </span>
+          <span style={{ color: item.tone ?? 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{item.value}</span>
+        </span>
+      ))}
+    </div>
+  )
 }
 
 /** Distill the parsed feature.config + playwright.config into fact rows. Pure
@@ -746,6 +932,60 @@ function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageProgress
             </span>
           </li>
         )}
+      </ul>
+    </div>
+  )
+}
+
+/** Every test run this feature has had (R64), as the runs list's own cards —
+ *  status chip (passed / healing / running / failed), pass counts from the run
+ *  summary, click → the real run detail. Boot/benchmark/verify sessions are
+ *  plumbing, not test runs — they don't render here. Polls gently while any
+ *  run is live so a settling run flips its chip without a refresh. */
+function FeatureRunsPanel({
+  feature,
+  live,
+  onOpenRun,
+}: {
+  feature: string
+  live: boolean
+  onOpenRun?: (feature: string, runId: string) => void
+}) {
+  const [runs, setRuns] = useState<RunIndexEntry[]>([])
+  const [details, setDetails] = useState<Map<string, RunDetail>>(new Map())
+  useEffect(() => {
+    let alive = true
+    const load = (): void => {
+      api.listRuns({ feature })
+        .then(async (all) => {
+          const shown = all
+            .filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify')
+            .slice(0, 6)
+          if (!alive) return
+          setRuns(shown)
+          const pairs = await Promise.all(
+            shown.map(async (r) => [r.runId, await api.getRunDetail(r.runId).catch(() => null)] as const),
+          )
+          if (alive) setDetails(new Map(pairs.filter((p): p is [string, RunDetail] => p[1] !== null)))
+        })
+        .catch(() => {})
+    }
+    load()
+    if (!live) return () => { alive = false }
+    const id = setInterval(load, 5000)
+    return () => { alive = false; clearInterval(id) }
+  }, [feature, live])
+
+  if (runs.length === 0) return null
+  return (
+    <div data-testid="feature-runs">
+      <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+        Runs
+      </h3>
+      <ul className="m-0 flex list-none flex-col gap-1 rounded border p-1" style={{ borderColor: 'var(--border-default)' }}>
+        {runs.map((r) => (
+          <RunRow key={r.runId} run={r} detail={details.get(r.runId)} onSelect={(run) => onOpenRun?.(feature, run.runId)} />
+        ))}
       </ul>
     </div>
   )

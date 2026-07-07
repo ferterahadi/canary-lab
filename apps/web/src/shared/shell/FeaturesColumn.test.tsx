@@ -180,6 +180,84 @@ describe('FeaturesColumn flight action (R40: per-row action removed)', () => {
   })
 })
 
+describe('FeaturesColumn grouping (R55)', () => {
+  const feature = (name: string, group?: string) => ({ name, repos: [], envs: [], group })
+
+  beforeEach(() => localStorage.clear())
+
+  it('renders grouped features under a collapsible accordion and leaves ungrouped rows flat', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('checkout', 'shop'), feature('cart', 'shop'), feature('admin')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+    const section = container.querySelector('[data-testid="feature-group-shop"]')
+    expect(section).toBeTruthy()
+    // Both grouped rows live under the shop accordion; the ungrouped one does not.
+    expect(section!.querySelector('li.feature-row')?.textContent).toContain('checkout')
+    expect([...section!.querySelectorAll('li.feature-row')]).toHaveLength(2)
+    const admin = featureRow('admin')
+    expect(section!.contains(admin)).toBe(false)
+    // The count chip reflects the group size.
+    expect(container.querySelector('[data-testid="feature-group-toggle-shop"]')?.textContent).toContain('2')
+  })
+
+  it('collapses and re-expands a group, persisting the closed state to localStorage', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('checkout', 'shop'), feature('cart', 'shop')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="feature-group-toggle-shop"]')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(featureRow('checkout')).toBeTruthy()
+    act(() => { toggle.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.querySelector('[data-testid="feature-group-toggle-shop"]')?.getAttribute('aria-expanded')).toBe('false')
+    // Rows are gone while collapsed.
+    expect([...container.querySelectorAll('li.feature-row')]).toHaveLength(0)
+    // Closed state persisted so a remount stays collapsed.
+    expect(JSON.parse(localStorage.getItem('cl-feature-groups-open')!)).toEqual({ shop: false })
+    act(() => { root.unmount() })
+    root = createRoot(container)
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('checkout', 'shop'), feature('cart', 'shop')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+    expect(container.querySelector('[data-testid="feature-group-toggle-shop"]')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('orders groups worst-first — a group with an active run sorts above a calm one', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('calm', 'zzz-calm'), feature('busy', 'aaa-active')]}
+          selectedFeature={null}
+          activeRunFeature="busy"
+          activeRunStatus="running"
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+    const groups = [...container.querySelectorAll('[data-testid^="feature-group-toggle-"]')]
+    // The active group floats above the calm one despite the reverse alphabetical names.
+    expect(groups[0]?.getAttribute('data-testid')).toBe('feature-group-toggle-aaa-active')
+    expect(groups[1]?.getAttribute('data-testid')).toBe('feature-group-toggle-zzz-calm')
+  })
+})
+
 function featureRow(name: string): HTMLLIElement {
   const row = [...container.querySelectorAll('li.feature-row')]
     .find((li) => li.textContent?.includes(name))

@@ -26,6 +26,7 @@ export type AgentSessionSource =
   | { kind: 'coverage'; jobId: string; live?: boolean }
   | { kind: 'evaluation'; taskId: string; live?: boolean }
   | { kind: 'flight'; flightId: string; stage: string; live?: boolean }
+  | { kind: 'flight-plan'; taskId: string; live?: boolean }
 
 interface Props {
   source: AgentSessionSource
@@ -74,6 +75,7 @@ export function AgentSessionView({ source }: Props) {
       if (source.kind === 'coverage') return api.getCoverageAgentSession(source.jobId)
       if (source.kind === 'evaluation') return api.getEvaluationAgentSession(source.taskId)
       if (source.kind === 'flight') return api.getFlightAgentSession(source.flightId, source.stage)
+      if (source.kind === 'flight-plan') return api.getFlightPlanAgentSession(source.taskId)
       return api.getDraftAgentSession(source.draftId, source.stage)
     }
 
@@ -100,7 +102,9 @@ export function AgentSessionView({ source }: Props) {
                     ? { kind: 'evaluation', taskId: source.taskId }
                     : source.kind === 'flight'
                       ? { kind: 'flight', flightId: source.flightId, stage: source.stage }
-                      : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+                      : source.kind === 'flight-plan'
+                        ? { kind: 'flight-plan', taskId: source.taskId }
+                        : { kind: 'draft', draftId: source.draftId, stage: source.stage },
           onSession: (session) => {
             if (cancelled) return
             setState((prev) => prev
@@ -267,6 +271,7 @@ function sourceCacheKey(source: AgentSessionSource): string {
   if (source.kind === 'coverage') return `coverage:${source.jobId}:${source.live ? '1' : '0'}`
   if (source.kind === 'evaluation') return `evaluation:${source.taskId}:${source.live ? '1' : '0'}`
   if (source.kind === 'flight') return `flight:${source.flightId}:${source.stage}:${source.live ? '1' : '0'}`
+  if (source.kind === 'flight-plan') return `flight-plan:${source.taskId}:${source.live ? '1' : '0'}`
   return `draft:${source.draftId}:${source.stage}:${source.live ? '1' : '0'}`
 }
 

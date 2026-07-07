@@ -15,6 +15,7 @@ export type AgentSessionSocketSource =
   | { kind: 'coverage'; jobId: string }
   | { kind: 'evaluation'; taskId: string }
   | { kind: 'flight'; flightId: string; stage: string }
+  | { kind: 'flight-plan'; taskId: string }
 
 export interface AgentSessionSocketMessage {
   type: 'session' | 'event' | 'error' | 'done'
@@ -59,6 +60,9 @@ function urlFor(base: string, source: AgentSessionSocketSource): string {
   }
   if (source.kind === 'flight') {
     return `${base}/ws/flights/${encodeURIComponent(source.flightId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
+  }
+  if (source.kind === 'flight-plan') {
+    return `${base}/ws/flight-plans/${encodeURIComponent(source.taskId)}/agent-session`
   }
   return `${base}/ws/draft/${encodeURIComponent(source.draftId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
 }

@@ -62,10 +62,43 @@ describe('ToastHost (R51)', () => {
     expect(onDismiss).toHaveBeenCalledWith('fl_1')
   })
 
-  it('auto-dismisses after the timeout', () => {
+  it('auto-dismisses a non-sticky toast after the timeout', () => {
     const onDismiss = vi.fn()
     act(() => { root.render(<ToastHost toasts={[toast()]} onDismiss={onDismiss} />) })
     act(() => { vi.advanceTimersByTime(8000) })
     expect(onDismiss).toHaveBeenCalledWith('fl_1')
+  })
+
+  it('a sticky toast NEVER auto-dismisses, even past the timeout (R68)', () => {
+    const onDismiss = vi.fn()
+    act(() => { root.render(<ToastHost toasts={[toast({ sticky: true })]} onDismiss={onDismiss} />) })
+    act(() => { vi.advanceTimersByTime(60_000) })
+    expect(onDismiss).not.toHaveBeenCalled()
+    // It still shows a "needs input" eyebrow + is marked sticky.
+    const card = container.querySelector('[data-testid="toast-fl_1"]')
+    expect(card?.getAttribute('data-sticky')).toBe('true')
+    expect(card?.textContent).toContain('Needs input')
+  })
+
+  it('a sticky toast does not block a co-shown non-sticky toast from dismissing (R68)', () => {
+    const onDismiss = vi.fn()
+    act(() => {
+      root.render(
+        <ToastHost
+          toasts={[toast({ id: 'sticky', sticky: true }), toast({ id: 'info' })]}
+          onDismiss={onDismiss}
+        />,
+      )
+    })
+    act(() => { vi.advanceTimersByTime(8000) })
+    expect(onDismiss).toHaveBeenCalledWith('info')
+    expect(onDismiss).not.toHaveBeenCalledWith('sticky')
+  })
+
+  it('the container sits at z-[90] so it clears the workflow surfaces (R68)', () => {
+    const onDismiss = vi.fn()
+    act(() => { root.render(<ToastHost toasts={[toast()]} onDismiss={onDismiss} />) })
+    const host = container.querySelector('[data-testid="toast-host"]')
+    expect(host?.className).toContain('z-[90]')
   })
 })

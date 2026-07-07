@@ -9,6 +9,8 @@ import type {
   FlightIndexEntry as FlightIndexEntryT,
   FlightManifest as FlightManifestT,
   FlightStageKey as FlightStageKeyT,
+  PlannedFeature as PlannedFeatureT,
+  PlanFeaturesTask as PlanFeaturesTaskT,
 } from '../../../../../shared/flights/types'
 import type {
   AuditList,
@@ -832,6 +834,25 @@ export function browseDir(dir: string, opts?: ClientOptions): Promise<FsBrowseRe
   const qs = dir ? `?dir=${encodeURIComponent(dir)}` : ''
   return request<FsBrowseResponse>(
     `${baseUrl}/api/fs/browse${qs}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export interface DirectoryBrowseResult {
+  path: string
+  parent: string | null
+  entries: Array<{ name: string; path: string }>
+}
+
+// Directory-only picker backed by GET /api/fs/browse-dirs — dirs only, jailed to
+// the user's home tree (distinct from `browseDir`, which lists files+dirs
+// anywhere). Omit `path` to start at home.
+export function browseDirectory(path?: string, opts?: ClientOptions): Promise<DirectoryBrowseResult> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const qs = path ? `?path=${encodeURIComponent(path)}` : ''
+  return request<DirectoryBrowseResult>(
+    `${baseUrl}/api/fs/browse-dirs${qs}`,
     { method: 'GET' },
     fetchImpl,
   )
@@ -1833,6 +1854,9 @@ export type {
   FlightStageEntryOption,
   SpecsCoveragePass,
   SpecsCoverageProgress,
+  PlannedFeature,
+  PlanFeaturesTask,
+  PlanFeaturesTaskStatus,
 } from '../../../../../shared/flights/types'
 export { deriveFeatureSlug } from '../../../../../shared/flights/types'
 
@@ -1855,8 +1879,11 @@ export function getFlightEntryOptions(
 
 export interface StartFlightBody {
   feature: string
-  repoPaths: string[]
-  description: string
+  /** Omit on continue/redo/jump — repos are frozen; the server reuses the
+   *  stored set and 409s (`flight_frozen`) on a differing one. */
+  repoPaths?: string[]
+  /** Omit on continue/redo/jump — intent is frozen like the repos. */
+  description?: string
   env?: string
   coverageTarget?: number
   /** Required when the feature already has a flight record. */
@@ -1943,17 +1970,13 @@ export function redoFlight(flightId: string, opts?: ClientOptions): Promise<Flig
   )
 }
 
-/** Edit a NON-ACTIVE flight's intent/repos. A repo change resets the stage
- *  array (forced redo from Repo Scan) — the server enforces + warns. */
-export function patchFlight(
-  flightId: string,
-  patch: { description?: string; repoPaths?: string[] },
-  opts?: ClientOptions,
-): Promise<FlightManifestT> {
+/** Delete a NON-ACTIVE flight record (repos + intent are frozen — deletion is
+ *  the escape hatch). 409 while the flight is active; the feature stays. */
+export function deleteFlight(flightId: string, opts?: ClientOptions): Promise<{ deleted: boolean }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
-  return request<FlightManifestT>(
+  return request<{ deleted: boolean }>(
     `${baseUrl}/api/flights/${encodeURIComponent(flightId)}`,
-    { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) },
+    { method: 'DELETE' },
     fetchImpl,
   )
 }
@@ -1983,6 +2006,66 @@ export async function getFlightAgentSession(
   try {
     return await request<AgentSessionResponse>(
       `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/agent-session?stage=${encodeURIComponent(stage)}`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+// ─── Plan features (pre-flight intent breakdown, R54) ─────────────────────
+
+/** Kick the breakdown agent: judges whether the intent is one feature or
+ *  several. 202 with the task record; attach-or-start server-side (same repo
+ *  set + description reattaches to the running task). */
+export function planFeatures(
+  body: { repoPaths: string[]; description: string },
+  opts?: ClientOptions,
+): Promise<PlanFeaturesTaskT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PlanFeaturesTaskT>(
+    `${baseUrl}/api/flights/plan-features`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    fetchImpl,
+  )
+}
+
+export function getPlanFeaturesTask(taskId: string, opts?: ClientOptions): Promise<PlanFeaturesTaskT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PlanFeaturesTaskT>(
+    `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+/** Launch the confirmed proposal: one flight per feature — the first starts
+ *  now, the rest park `queued` and drain sequentially. 409 type
+ *  `feature_name_conflicts` lists names already in use (nothing created). */
+export function launchPlannedFeatures(
+  taskId: string,
+  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean },
+  opts?: ClientOptions,
+): Promise<{ flightIds: string[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ flightIds: string[] }>(
+    `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/launch`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    fetchImpl,
+  )
+}
+
+/** Snapshot of the breakdown agent's session. 404 → null (not spawned yet). */
+export async function getFlightPlanAgentSession(
+  taskId: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/agent-session`,
       { method: 'GET' },
       fetchImpl,
     )

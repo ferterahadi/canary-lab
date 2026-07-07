@@ -393,6 +393,7 @@ export async function featureConfigRoutes(
       }
       fs.writeFileSync(cfg.path, next)
       const parsed = readPlaywrightConfig(next)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return { path: cfg.path, format: cfg.format, content: next, parsed }
     },
   )

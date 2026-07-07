@@ -229,20 +229,12 @@ export function stageFacts(
         : []
     }
     case 'scout': {
-      // R31: the repos themselves, not a count — name first, full path behind
-      // the truncation/tooltip.
+      // R57: repos + intent render as the RepoScanPanel's cards; the facts keep
+      // only what the scan itself discovered.
       const envFiles = Array.isArray(ev.envFiles) ? (ev.envFiles as unknown[]).filter((f): f is string => typeof f === 'string') : []
-      return [
-        ...flight.repoPaths.map((p, i) => ({
-          label: flight.repoPaths.length === 1 ? 'Repo' : `Repo ${i + 1}`,
-          value: `${baseName(p)} · ${p}`,
-          mono: true,
-          title: p,
-        })),
-        ...(envFiles.length > 0
-          ? [{ label: 'Env files', value: envFiles.map(baseName).join(', '), mono: true, title: envFiles.join('\n') }]
-          : []),
-      ]
+      return envFiles.length > 0
+        ? [{ label: 'Env files', value: envFiles.map(baseName).join(', '), mono: true, title: envFiles.join('\n') }]
+        : []
     }
     case 'scaffold': {
       // R32: the merged Feature setup row — identity + the env/boot proof from
@@ -336,6 +328,19 @@ export function stageFacts(
     default:
       return []
   }
+}
+
+/** Compact wall-clock duration between two ISO stamps ("4s", "2m 14s",
+ *  "1h 03m") — the rail rows and the summary strip both render it (R61). */
+export function formatDuration(startedAt?: string, endedAt?: string): string | null {
+  if (!startedAt || !endedAt) return null
+  const ms = Date.parse(endedAt) - Date.parse(startedAt)
+  if (!Number.isFinite(ms) || ms < 0) return null
+  const s = Math.round(ms / 1000)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
+  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
 }
 
 const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {

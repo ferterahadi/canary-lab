@@ -267,6 +267,14 @@ describe('similarity stage', () => {
     expect(current().feature).toBe('existing-checkout')
   })
 
+  it('a planned-split flight takes the "new" path without asking — even under yolo (R54)', async () => {
+    writeFeatureConfigCjs('existing-checkout', repoDir)
+    const { ctx, current } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true, plannedSplit: true } }))
+    const outcome = await similarityStage(deps()).run(ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { choice: 'new' } })
+    expect(current().feature).toBe('checkout') // never re-pointed at the sibling
+  })
+
   it('enhance re-enters the existing feature at docs', async () => {
     writeFeatureConfigCjs('existing-checkout', repoDir)
     const adapter = similarityStage(deps())
@@ -553,6 +561,19 @@ describe('scaffold stage', () => {
     const { ctx } = ctxFor(withScoutEvidence(yoloManifest(), VALID_CONFIG()))
     const outcome = await scaffoldStage(deps()).run(ctx)
     expect(outcome.kind).toBe('done')
+  })
+
+  it('injects the flight\'s group into the scaffolded config (plan-features batches)', async () => {
+    const grouped = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, group: 'my-shop' } })
+    const { ctx } = ctxFor(withScoutEvidence(grouped, VALID_CONFIG()))
+    const outcome = await scaffoldStage(deps()).run(ctx)
+    expect(outcome.kind).toBe('checkpoint')
+    const written = fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8')
+    expect(written).toMatch(/name: 'checkout',\s*\n\s*group: 'my-shop',/)
+    // Idempotent on resume: the grouped config is recognized as this flight's own.
+    const again = await scaffoldStage(deps()).run(ctx)
+    expect(again.kind).toBe('checkpoint')
+    expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8')).toBe(written)
   })
 
   it('approve re-reads the CURRENT on-disk config (edits made while parked count)', async () => {

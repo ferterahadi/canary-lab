@@ -126,6 +126,28 @@ describe('GlobalStatusBar', () => {
     expect(container.querySelector('[data-testid="flights-pill"]')?.textContent).toContain('Flights · 2 active')
   })
 
+  it('threads each feature\'s group into the Flights pill picker (R55 grouping)', async () => {
+    await act(async () => {
+      root.render(
+        <GlobalStatusBar
+          activeRunDetail={null}
+          features={[
+            { name: 'checkout', repos: [], envs: [], group: 'shop' },
+            { name: 'cart', repos: [], envs: [], group: 'shop' },
+            { name: 'admin', repos: [], envs: [] },
+          ]}
+        />,
+      )
+    })
+    // Open the picker and confirm the grouped features collapse under their
+    // shared group's disclosure while the ungrouped one stays flat.
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Flights"]')?.click()
+    })
+    expect(document.body.querySelector('[data-testid="flight-group-shop"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-testid="not-flown-admin"]')).toBeTruthy()
+  })
+
   it('surfaces booted services as a status chip (boots are not feature activity)', async () => {
     mockBootSessions.value = { sessions: [{}], count: 1 }
     await act(async () => {

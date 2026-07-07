@@ -8,6 +8,7 @@ import type { ClientKind } from '../../shared/run-mode'
 import { featuresRoutes } from './src/features/config/routes/features'
 import { coverageRoutes } from './src/features/coverage/routes/coverage'
 import { featureConfigRoutes } from './src/features/config/routes/feature-config'
+import { fsBrowseRoutes } from './src/features/config/routes/fs-browse'
 import { verificationRoutes } from './src/features/coverage/routes/verification'
 import { projectConfigRoutes } from './src/features/config/routes/project-config'
 import { runsRoutes, type ExternalHealAgentRequest } from './src/features/runs/routes/runs'
@@ -33,6 +34,7 @@ import { portifyStreamRoutes } from './src/features/portify/ws/portify-stream'
 import { PortifyRunStore } from './src/features/portify/logic/runtime/store'
 import { CoverageJobRunStore } from './src/features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './src/features/flights/logic/store'
+import { PlanFeaturesStore } from './src/features/flights/logic/plan-features'
 import { flightsRoutes } from './src/features/flights/routes/flights'
 import { buildFlightStageAdapters } from './src/features/flights/logic/stages'
 import { DirtySpecStore } from './src/features/runs/logic/dirty-specs/store'
@@ -216,6 +218,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // single-flight lock nor shows as live forever.
   const flightStore = new FlightRunStore(logsDir)
   flightStore.reconcileInterrupted(() => new Date().toISOString())
+  // Plan-features agent tasks: a task left 'running' belongs to a dead
+  // process — flip it to 'failed' so the dialog offers "plan again" instead of
+  // polling a corpse. (Queued flights the launch parked are drained by the
+  // flights route registration below, once adapters exist to drive them.)
+  const planStore = new PlanFeaturesStore(logsDir)
+  planStore.reconcileInterrupted(() => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the
   // single source of truth both the UI feature list and the MCP run result read.
@@ -294,6 +302,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     logsDir,
     projectRoot: opts.projectRoot,
     flightStore,
+    planStore,
     workspaceEvents,
     adapters: buildFlightStageAdapters({
       featuresDir,
@@ -319,6 +328,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       .list({ feature: featureName })
       .some((run) => isActiveRunStatus(run.status)),
   })
+  await app.register(fsBrowseRoutes)
   const startVerification = async (
     featureName: string,
     input: ResolveVerificationInput,

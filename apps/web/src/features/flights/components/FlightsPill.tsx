@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { FlightIndexEntry, FlightStageStatus, FlightStatus } from '../../../shared/api/client'
-import { StatusDot } from '../../config/components/atoms'
+import type { FlightIndexEntry, FlightPauseReason, FlightStageKey, FlightStageStatus, FlightStatus } from '../../../shared/api/client'
+import { ChevronRightIcon, StatusDot } from '../../config/components/atoms'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
+import { Tooltip } from '../../../shared/ui/Tooltip'
 import { stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
+import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
 
 // Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress, and (since the pill consolidation) the one live indicator for
@@ -41,6 +43,27 @@ const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: string 
   'authoring': { label: 'authoring', title: 'Authoring test specs' },
 }
 
+/** Which flight stage a standalone activity kind maps onto — so an
+ *  activity-only row (no flight record) can still show WHERE in the pipeline
+ *  the live job sits (R56). */
+const ACTIVITY_STAGE: Record<FeatureActivityKind, FlightStageKey> = {
+  'authoring': 'specs-coverage',
+  'exporting': 'evaluation-export',
+  'portifying': 'portify',
+  'running': 'run',
+}
+
+/** Synthesize a per-stage array for an activity-only row: the mapped stage is
+ *  'running' (renders the sky-blue "current" tone), every other stage is
+ *  'pending' (grey). Honest — no fake 'done' squares for stages that never ran. */
+export function activityStages(kind: FeatureActivityKind): Array<{ key: FlightStageKey; status: FlightStageStatus }> {
+  const current = ACTIVITY_STAGE[kind]
+  return FLIGHT_STAGE_KEYS.map((key) => ({
+    key,
+    status: (key === current ? 'running' : 'pending') as FlightStageStatus,
+  }))
+}
+
 export interface FeatureChipState {
   /** Visible chip text — short labels only, the column is fixed-width. */
   label: string
@@ -65,13 +88,25 @@ export interface FeatureChipState {
  *   3. flight conductor active       → "running"     (sky — between stage jobs)
  *   4. flight paused                 → "paused"      (amber)
  *   5. nothing happening             → the LAST state: "done" / "failed" / "aborted"
+ *
+ *  A `queued` sibling (paused with pauseReason 'queued' — parked by a
+ *  plan-features launch, auto-started by the conductor) is NOT an attention
+ *  state: it reads muted/neutral ("queued") and ranks just above never-flown,
+ *  since nothing is asked of the human.
  */
 export function featureChipState(
-  flight: Pick<FlightIndexEntry, 'status' | 'currentStage'> | null,
+  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason'> | null,
   activity?: FeatureActivity,
 ): FeatureChipState {
   if (flight?.status === 'waiting-for-approval') {
     return { label: 'to approve', tone: FLIGHT_STATUS_TONE['waiting-for-approval'], live: false, rank: 0, title: 'needs approval' }
+  }
+  // A queued sibling needs no attention — muted, and it sinks below every
+  // resting state (only never-flown ranks lower). Checked before live activity
+  // isn't needed (a queued flight has no live job of its own), but before the
+  // generic paused branch it must be.
+  if (flight?.status === 'paused' && flight.pauseReason === 'queued') {
+    return { label: 'queued', tone: 'var(--text-muted)', live: false, rank: 5.5, title: 'queued — starts automatically when the repo is free' }
   }
   if (activity) {
     const chip = ACTIVITY_CHIP[activity.kind]
@@ -104,7 +139,7 @@ export function FlightStatusChip({
   flight,
   activity,
 }: {
-  flight: Pick<FlightIndexEntry, 'status' | 'currentStage'> | null
+  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason'> | null
   activity?: FeatureActivity
 }) {
   const chip = featureChipState(flight, activity)
@@ -128,26 +163,90 @@ export interface FeatureActivityRow {
   activity?: FeatureActivity
 }
 
+/** A workspace feature the picker/landing lists know about — a bare name, or a
+ *  name + optional group (R55). Both call sites pass whatever they have; the
+ *  row builder normalizes. */
+export type FeatureRef = string | { name: string; group?: string }
+
+function featureName(f: FeatureRef): string {
+  return typeof f === 'string' ? f : f.name
+}
+
 /** Merge flights + the activity map + the workspace feature list into rows,
  *  worst-first (the row that needs the human floats to the top; live rows
  *  above resting ones; never-flown features sink to the bottom, 1:1 — every
- *  feature has exactly one row, R49). */
+ *  feature has exactly one row, R49).
+ *
+ *  Defensive: even if an old server hands back two flight records for the same
+ *  feature, the client shows ONE row per feature — the first (newest, since the
+ *  index arrives worst/most-recent first and the sort is stable per feature)
+ *  wins. This keeps the 1:1 invariant against a stale server. */
 export function featureActivityRows(
   flights: FlightIndexEntry[],
   activity: Map<string, FeatureActivity>,
-  features: string[] = [],
+  features: FeatureRef[] = [],
 ): FeatureActivityRow[] {
-  const rows: FeatureActivityRow[] = flights.map((f) => ({ feature: f.feature, flight: f, activity: activity.get(f.feature) }))
-  for (const [feature, act] of activity) {
-    if (!flights.some((f) => f.feature === feature)) rows.push({ feature, flight: null, activity: act })
+  const rows: FeatureActivityRow[] = []
+  const seen = new Set<string>()
+  for (const f of flights) {
+    if (seen.has(f.feature)) continue // dedupe by feature — keep the first
+    seen.add(f.feature)
+    rows.push({ feature: f.feature, flight: f, activity: activity.get(f.feature) })
   }
-  for (const feature of features) {
-    if (!rows.some((r) => r.feature === feature)) rows.push({ feature, flight: null })
+  for (const [feature, act] of activity) {
+    if (seen.has(feature)) continue
+    seen.add(feature)
+    rows.push({ feature, flight: null, activity: act })
+  }
+  for (const f of features) {
+    const name = featureName(f)
+    if (seen.has(name)) continue
+    seen.add(name)
+    rows.push({ feature: name, flight: null })
   }
   return rows.sort((a, b) =>
     featureChipState(a.flight, a.activity).rank - featureChipState(b.flight, b.activity).rank
     || (b.flight?.updatedAt ?? '').localeCompare(a.flight?.updatedAt ?? '')
     || a.feature.localeCompare(b.feature))
+}
+
+/** A picker section: ungrouped rows render flat at top level; grouped rows
+ *  collapse under a disclosure. `null` group = the flat top-level bucket. */
+export interface PickerGroup {
+  group: string | null
+  rows: FeatureActivityRow[]
+  /** The worst (lowest) chip rank in the group — orders the sections. */
+  worstRank: number
+}
+
+/** Split already-sorted rows into the flat bucket + one section per group
+ *  (R55). Rows keep their global (worst-first) order within each section;
+ *  sections order by their worst row's rank. `features` supplies the
+ *  feature→group lookup (a flight/activity row has no group of its own). */
+export function groupPickerRows(rows: FeatureActivityRow[], features: FeatureRef[]): {
+  ungrouped: FeatureActivityRow[]
+  groups: PickerGroup[]
+} {
+  const groupOf = new Map<string, string | undefined>()
+  for (const f of features) {
+    if (typeof f !== 'string') groupOf.set(f.name, f.group?.trim() || undefined)
+  }
+  const ungrouped: FeatureActivityRow[] = []
+  const byGroup = new Map<string, FeatureActivityRow[]>()
+  for (const row of rows) {
+    const group = groupOf.get(row.feature)
+    if (!group) { ungrouped.push(row); continue }
+    const bucket = byGroup.get(group) ?? []
+    bucket.push(row)
+    byGroup.set(group, bucket)
+  }
+  const groups: PickerGroup[] = [...byGroup.entries()].map(([group, groupRows]) => ({
+    group,
+    rows: groupRows,
+    worstRank: Math.min(...groupRows.map((r) => featureChipState(r.flight, r.activity).rank)),
+  }))
+  groups.sort((a, b) => a.worstRank - b.worstRank || a.group!.localeCompare(b.group!))
+  return { ungrouped, groups }
 }
 
 export function FlightsPill({
@@ -161,8 +260,9 @@ export function FlightsPill({
   flights: FlightIndexEntry[]
   /** Per-feature live activity (runs / portify / authoring) from useFeatureActivity — App owns it. */
   activity?: Map<string, FeatureActivity>
-  /** Every workspace feature name — the picker lists them 1:1 (R49). */
-  features?: string[]
+  /** Every workspace feature — the picker lists them 1:1 (R49) and groups those
+   *  that declare a `group` under a disclosure (R55). */
+  features?: Array<{ name: string; group?: string }>
   onOpenFlight: (flightId: string | null) => void
   /** Open the real surface behind an activity-only row (no flight record). */
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
@@ -179,6 +279,15 @@ export function FlightsPill({
     ...activity.keys(),
   ])
   const activeCount = attention.size
+
+  // R68: a persistent amber dot on the trigger whenever a flight is blocked on
+  // the human — parked on a checkpoint, or paused for a reason that isn't a
+  // deliberate user pause or a queued sibling (queued starts itself; a user
+  // pause was the user's own choice). Independent of any toast — it stays until
+  // the underlying state resolves.
+  const needsAttention = flights.some((f) =>
+    f.status === 'waiting-for-approval'
+    || (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued'))
 
   const tone = waiting.length > 0 ? FLIGHT_STATUS_TONE['waiting-for-approval'] : activeCount > 0 ? 'var(--accent)' : undefined
   const label = waiting.length > 0
@@ -202,9 +311,20 @@ export function FlightsPill({
         aria-expanded={open}
         aria-label="Flights"
         title={tooltip}
-        className="cl-button flex items-center gap-1.5 px-2.5 py-1"
+        className="cl-button relative flex items-center gap-1.5 px-2.5 py-1"
         style={tone ? { color: tone, borderColor: `color-mix(in srgb, ${tone} 45%, var(--border-default))` } : undefined}
       >
+        {needsAttention && (
+          <span
+            data-testid="flights-attention-dot"
+            aria-hidden="true"
+            className="absolute -right-1 -top-1 h-[6px] w-[6px] rounded-full"
+            style={{
+              background: 'var(--warning)',
+              boxShadow: '0 0 6px color-mix(in srgb, var(--warning) 70%, transparent)',
+            }}
+          />
+        )}
         {activeCount > 0 ? (
           <StatusDot state="running" className="shrink-0" />
         ) : (
@@ -252,14 +372,15 @@ export function StageMiniRail({ stages }: { stages: Array<{ key: string; status:
     return stageStatusTone(status)
   }
   return (
-    <span className="inline-flex items-center gap-[3px]" data-testid="stage-mini-rail" aria-hidden="true">
+    <span className="inline-flex items-center gap-[3px]" data-testid="stage-mini-rail">
       {stageRailRows(source).map((row) => (
-        <span
-          key={row.key}
-          title={`${row.label}: ${row.status}`}
-          className="inline-block h-[8px] w-[8px] rounded-[2px]"
-          style={{ background: toneFor(row.status) }}
-        />
+        <Tooltip key={row.key} label={`${row.label} — ${row.status}`}>
+          <span
+            data-testid={`stage-mini-cell-${row.key}`}
+            className="inline-block h-[8px] w-[8px] rounded-[2px]"
+            style={{ background: toneFor(row.status) }}
+          />
+        </Tooltip>
       ))}
     </span>
   )
@@ -276,7 +397,7 @@ function FlightsPickerDialog({
 }: {
   flights: FlightIndexEntry[]
   activity: Map<string, FeatureActivity>
-  features: string[]
+  features: Array<{ name: string; group?: string }>
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
@@ -289,6 +410,8 @@ function FlightsPickerDialog({
   }, [onClose])
 
   const rows = featureActivityRows(flights, activity, features)
+  // R55: split into the flat top-level bucket + collapsible group sections.
+  const { ungrouped, groups } = groupPickerRows(rows, features)
 
   // Portalled to <body>: the status-bar action cluster is overflow-hidden and
   // carries a transform during its collapse animation.
@@ -323,31 +446,30 @@ function FlightsPickerDialog({
             </div>
           </div>
         ) : (
-          <ul className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto p-2 scrollbar-thin">
-            {rows.map((row) => (
-              <li key={row.flight?.flightId ?? `activity-${row.feature}`}>
-                {row.flight ? (
-                  <button
-                    type="button"
-                    data-testid={`flight-open-${row.flight.flightId}`}
-                    onClick={() => onPick(row.flight!.flightId)}
-                    className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
-                    style={{ border: '1px solid var(--border-default)' }}
-                    title={`Open flight ${row.flight.flightId} (${row.feature})`}
-                  >
-                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{row.feature}</span>
-                    <StageMiniRail stages={row.flight.stages ?? []} />
-                    <FlightStatusChip flight={row.flight} activity={row.activity} />
-                    <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
-                  </button>
-                ) : row.activity ? (
-                  <ActivityOnlyRow feature={row.feature} activity={row.activity} onOpen={onPickActivity} />
-                ) : (
-                  <NotFlownRow feature={row.feature} onStart={onStartFlight} />
-                )}
-              </li>
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto p-2 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+            {ungrouped.length > 0 && (
+              <ul className="flex flex-col gap-1">
+                {ungrouped.map((row) => (
+                  <PickerRow
+                    key={row.flight?.flightId ?? `activity-${row.feature}`}
+                    row={row}
+                    onPick={onPick}
+                    onPickActivity={onPickActivity}
+                    onStartFlight={onStartFlight}
+                  />
+                ))}
+              </ul>
+            )}
+            {groups.map((section) => (
+              <PickerGroupSection
+                key={section.group!}
+                section={section}
+                onPick={onPick}
+                onPickActivity={onPickActivity}
+                onStartFlight={onStartFlight}
+              />
             ))}
-          </ul>
+          </div>
         )}
 
         <footer className="border-t px-4 py-2.5 text-[10.5px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>
@@ -356,6 +478,108 @@ function FlightsPickerDialog({
       </section>
     </div>,
     document.body,
+  )
+}
+
+/** One picker row — a flight, an activity-only feature, or a never-flown one.
+ *  Shared by the flat top-level list and the group sections (R55). */
+function PickerRow({
+  row,
+  onPick,
+  onPickActivity,
+  onStartFlight,
+}: {
+  row: FeatureActivityRow
+  onPick: (flightId: string | null) => void
+  onPickActivity: (feature: string, activity: FeatureActivity) => void
+  onStartFlight: (feature: string) => void
+}) {
+  if (row.flight) {
+    return (
+      <li>
+        <button
+          type="button"
+          data-testid={`flight-open-${row.flight.flightId}`}
+          onClick={() => onPick(row.flight!.flightId)}
+          className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
+          style={{ border: '1px solid var(--border-default)' }}
+          title={`Open flight ${row.flight.flightId} (${row.feature})`}
+        >
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{row.feature}</span>
+          <StageMiniRail stages={row.flight.stages ?? []} />
+          <FlightStatusChip flight={row.flight} activity={row.activity} />
+          <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
+        </button>
+      </li>
+    )
+  }
+  return (
+    <li>
+      {row.activity
+        ? <ActivityOnlyRow feature={row.feature} activity={row.activity} onOpen={onPickActivity} />
+        : <NotFlownRow feature={row.feature} onStart={onStartFlight} />}
+    </li>
+  )
+}
+
+const GROUPS_OPEN_STORAGE_KEY = 'cl-flight-groups-open'
+
+/** A collapsible group section (R55): chevron + group name + count + a tiny
+ *  worst-state chip; rows render under the disclosure. Open-state persists per
+ *  group in localStorage, default OPEN. */
+function PickerGroupSection({
+  section,
+  onPick,
+  onPickActivity,
+  onStartFlight,
+}: {
+  section: PickerGroup
+  onPick: (flightId: string | null) => void
+  onPickActivity: (feature: string, activity: FeatureActivity) => void
+  onStartFlight: (feature: string) => void
+}) {
+  const group = section.group!
+  const [open, setOpen] = useState(() => readGroupOpen(GROUPS_OPEN_STORAGE_KEY, group))
+  const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, next); return next })
+  // The worst row drives the section's summary chip (same comparator).
+  const worst = section.rows.reduce((acc, r) =>
+    featureChipState(r.flight, r.activity).rank < featureChipState(acc.flight, acc.activity).rank ? r : acc, section.rows[0])
+  return (
+    <section data-testid={`flight-group-${group}`}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        data-testid={`flight-group-toggle-${group}`}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+      >
+        <span
+          aria-hidden="true"
+          className="inline-flex shrink-0 transition-transform duration-150"
+          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
+        >
+          <ChevronRightIcon />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          {group}
+        </span>
+        <span className="cl-count-chip shrink-0">{section.rows.length}</span>
+        <FlightStatusChip flight={worst.flight} activity={worst.activity} />
+      </button>
+      {open && (
+        <ul className="mt-1 flex flex-col gap-1 pl-4">
+          {section.rows.map((row) => (
+            <PickerRow
+              key={row.flight?.flightId ?? `activity-${row.feature}`}
+              row={row}
+              onPick={onPick}
+              onPickActivity={onPickActivity}
+              onStartFlight={onStartFlight}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -412,6 +636,7 @@ export function ActivityOnlyRow({
       title={`${feature}: ${ACTIVITY_CHIP[activity.kind].title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{feature}</span>
+      <StageMiniRail stages={activityStages(activity.kind)} />
       <FlightStatusChip flight={null} activity={activity} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
     </button>

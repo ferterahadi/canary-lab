@@ -1457,6 +1457,7 @@ export function registerCanaryLabTools(
   const flightView = (raw: unknown): Record<string, unknown> => {
     const m = raw as {
       flightId: string; feature: string; status: string; currentStage: string | null
+      pauseReason?: string
       runVerdict?: string; error?: string; links?: unknown
       stages?: Array<{ key: string; status: string; error?: string; skipReason?: string; checkpoint?: unknown }>
     }
@@ -1470,6 +1471,7 @@ export function registerCanaryLabTools(
       feature: m.feature,
       status: m.status,
       currentStage: m.currentStage,
+      ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
       ...(m.runVerdict ? { runVerdict: m.runVerdict } : {}),
       ...(m.error ? { error: m.error } : {}),
       ...(m.links ? { links: m.links } : {}),
@@ -1498,17 +1500,18 @@ export function registerCanaryLabTools(
       return base
     }
     if (view.status === 'running') return 'Flight is running — re-call get_flight to follow it; it parks on checkpoints and settles to done/paused/failed.'
-    if (view.status === 'paused') return 'Flight is paused (a stage failed, the server restarted, or the user paused it). Fix the cause if needed, then start_flight on the same repos resumes it from the first open stage.'
+    if (view.status === 'paused' && view.pauseReason === 'queued') return 'Flight is queued — it is waiting its turn behind another flight on the same repo(s) and starts automatically when that repo frees. No action needed; tell the user it is queued, not stuck. Only if they want it started early, re-call start_flight (it resumes a queued flight now).'
+    if (view.status === 'paused') return 'Flight is paused (a stage failed, the server restarted, or the user paused it). Fix the cause if needed, then start_flight on the same repos resumes it from the first open stage — its repos and intent are frozen, so re-call without new repoPaths/description (they are reused).'
     if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive. Point the user at reviewing it now: unzip and open evaluation.html (per-test reasoning + verdicts; video playback where the tests drive a browser). Reviewing the evaluation IS the core loop, not an optional extra.'
     return ''
   }
   const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
 
   registerTool('start_flight', {
-    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Non-yolo checkpoint order: config-approval parks AFTER the feature is scaffolded (approve the real on-disk config), the Requirements/prd-source checkpoint ALWAYS parks (add docs, then "continue"), and export-mode picks raw vs localized before the terminal export. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named).',
+    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Non-yolo checkpoint order: config-approval parks AFTER the feature is scaffolded (approve the real on-disk config), the Requirements/prd-source checkpoint ALWAYS parks (add docs, then "continue"), and export-mode picks raw vs localized before the terminal export. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A flight\'s repos and intent are FROZEN once it first starts: on redo / from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing a DIFFERENT repo set or description is rejected with type:"flight_frozen"; to change them the user deletes the flight in the web UI (there is no delete tool). A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early.',
     inputSchema: {
-      repoPaths: z.array(z.string()).min(1).describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them.'),
-      description: z.string().describe('What to test, e.g. "checkout flow".'),
+      repoPaths: z.array(z.string()).min(1).optional().describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them. REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s repos are frozen and the stored set is reused (a different set is rejected with flight_frozen).'),
+      description: z.string().optional().describe('What to test, e.g. "checkout flow". REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s intent is frozen and the stored value is reused (a different one is rejected with flight_frozen).'),
       feature: z.string().optional().describe('Feature name; defaults to a slug of the first repo basename.'),
       env: z.string().optional().describe('Envset name (default "local").'),
       coverage_target: z.number().min(0).max(100).optional().describe('Coverage % the specs↔coverage loop must reach (default 100).'),
@@ -1520,10 +1523,20 @@ export function registerCanaryLabTools(
     },
   }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, fresh, redo, from_stage }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
+    // Repos + intent are frozen once a flight exists, so redo / from_stage /
+    // resume may OMIT repoPaths/description — but then we need `feature` to
+    // locate the record (there is no repo set to match on).
+    if ((repoPaths === undefined || repoPaths.length === 0) && !feature) {
+      return errorResult('start_flight needs repoPaths for a fresh start, or `feature` to redo / jump / resume an existing flight (its frozen repos + intent are reused).')
+    }
     const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
-    const flights = ((list.body as { flights?: Array<{ flightId: string; status: string; repoPaths?: string[] }> }).flights ?? [])
-    const targets = new Set(repoPaths.map((p) => path.resolve(p)))
-    const latest = flights.find((f) => (f.repoPaths ?? []).some((p) => targets.has(path.resolve(p))))
+    const flights = ((list.body as { flights?: Array<{ flightId: string; feature?: string; status: string; repoPaths?: string[] }> }).flights ?? [])
+    const targets = new Set((repoPaths ?? []).map((p) => path.resolve(p)))
+    const latest = flights.find((f) =>
+      targets.size > 0
+        ? (f.repoPaths ?? []).some((p) => targets.has(path.resolve(p)))
+        : f.feature === feature,
+    )
     if (latest && (latest.status === 'running' || latest.status === 'waiting-for-approval') && !redo && !from_stage) {
       const current = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(latest.flightId)}` })
       const view = flightView(current.body)
@@ -1535,13 +1548,18 @@ export function registerCanaryLabTools(
       const view = flightView(resumed.body)
       return asJsonResult({ ...view, note: 'resumed the paused flight from its first open stage', next: flightNext(view) })
     }
+    const hasRepos = repoPaths !== undefined && repoPaths.length > 0
     const started = await deps.flightsRequest({
       method: 'POST',
       url: '/api/flights',
       payload: {
-        repoPaths,
-        description,
-        feature: feature ?? deriveFeatureSlug(repoPaths[0]),
+        // Repos + intent are frozen on the record: send them only when the
+        // caller actually provided them (a fresh start, or an explicit —
+        // matching — reuse). Omitting them on redo / jump lets the server
+        // reuse the stored values; a DIFFERENT value would 409 flight_frozen.
+        ...(hasRepos ? { repoPaths } : {}),
+        ...(description !== undefined ? { description } : {}),
+        feature: feature ?? (hasRepos ? deriveFeatureSlug(repoPaths[0]) : ''),
         ...(env ? { env } : {}),
         ...(coverage_target !== undefined ? { coverageTarget: coverage_target } : {}),
         ...(base ? { base } : {}),
@@ -1558,8 +1576,11 @@ export function registerCanaryLabTools(
         existingFlightId: startedBody.existingFlightId,
         existingStatus: startedBody.existingStatus,
         options: startedBody.options,
-        next: 'This feature already has a flight record. Re-call start_flight with redo:true to restart from stage 1, or from_stage:"<stage>" to jump (prerequisites checked). A paused record resumes automatically without either flag.',
+        next: 'This feature already has a flight record. Re-call start_flight with redo:true to restart from stage 1, or from_stage:"<stage>" to jump (prerequisites checked) — OMIT repoPaths/description so the frozen stored values are reused. A paused record resumes automatically without either flag.',
       })
+    }
+    if (started.statusCode === 409 && startedBody.type === 'flight_frozen') {
+      return errorResult(`${String(startedBody.error ?? 'this flight\'s repos and intent are frozen')}. Re-call start_flight WITHOUT repoPaths/description (the stored values are reused), or delete the flight in the web UI to start fresh with different ones.`)
     }
     if (started.statusCode !== 201) {
       return errorResult(`start_flight failed (${started.statusCode}): ${String(startedBody.error ?? '')}`)
@@ -1569,7 +1590,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('get_flight', {
-    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed.',
+    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses.',
     inputSchema: {
       flightId: z.string().optional().describe('Omit to list all flights (slim rows).'),
     },
@@ -1578,7 +1599,9 @@ export function registerCanaryLabTools(
     if (!flightId) {
       const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
       const rows = ((list.body as { flights?: Array<Record<string, unknown>> }).flights ?? []).map((f) => ({
-        flightId: f.flightId, feature: f.feature, status: f.status, currentStage: f.currentStage, repoPaths: f.repoPaths,
+        flightId: f.flightId, feature: f.feature, status: f.status,
+        ...(f.pauseReason ? { pauseReason: f.pauseReason } : {}),
+        currentStage: f.currentStage, repoPaths: f.repoPaths,
       }))
       return asJsonResult({ flights: rows })
     }

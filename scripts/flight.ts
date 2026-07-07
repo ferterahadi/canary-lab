@@ -91,8 +91,34 @@ export function parseFlightArgs(argv: string[], isDir: (p: string) => boolean = 
     positionals.push(arg)
   }
 
+  // A flight's repos + intent are frozen after the first start, so a
+  // mode-carrying re-entry (--redo / --from-stage) may OMIT the repo/description
+  // positionals — the server reuses the stored values. Then --feature is how we
+  // locate the record (there is no repo set to match on).
+  const modeReentry = redo || fromStage !== undefined
+  if (modeReentry && positionals.length === 0) {
+    if (!feature) {
+      return { ok: false, error: `${redo ? '--redo' : '--from-stage'} without repo paths needs --feature <name> to name the flight to reuse (its frozen repos + intent are kept).` }
+    }
+    return {
+      ok: true,
+      args: {
+        repoPaths: [],
+        description: '',
+        feature,
+        env,
+        coverageTarget,
+        ...(base ? { base } : {}),
+        yolo,
+        fresh,
+        redo,
+        ...(fromStage ? { fromStage } : {}),
+      },
+    }
+  }
+
   if (positionals.length < 2) {
-    return { ok: false, error: 'Usage: canary-lab flight <repo-path...> "<what to test>" — needs at least one repo path and a description' }
+    return { ok: false, error: 'Usage: canary-lab flight <repo-path...> "<what to test>" — needs at least one repo path and a description (omit both with --redo/--from-stage --feature <name> to reuse a flight\'s frozen repos + intent)' }
   }
   const description = positionals[positionals.length - 1]
   const repos = positionals.slice(0, -1)
@@ -357,12 +383,21 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
   // its first open stage; `--fresh` always starts a new flight (the server
   // still 409s while one is genuinely active).
   const listed = await requestJson('GET', `${base}/api/flights`)
-  const latest = latestForRepos(((listed.json.flights ?? []) as FlightIndexEntry[]), flight.repoPaths)
+  const allFlights = (listed.json.flights ?? []) as FlightIndexEntry[]
+  // With repo positionals, match on the repo set; a mode re-entry that omitted
+  // them (frozen repos reused) matches on the feature name instead.
+  const latest =
+    flight.repoPaths.length > 0
+      ? latestForRepos(allFlights, flight.repoPaths)
+      : (allFlights.find((f) => f.feature === feature) ?? null)
 
   const startBody = (mode?: string, fromStage?: string) => ({
     feature,
-    repoPaths: flight.repoPaths,
-    description: flight.description,
+    // Repos + intent are frozen after the first start: on a mode re-entry that
+    // omitted them, leave them out so the server reuses the stored values (a
+    // DIFFERENT value would be rejected with flight_frozen).
+    ...(flight.repoPaths.length > 0 ? { repoPaths: flight.repoPaths } : {}),
+    ...(flight.description ? { description: flight.description } : {}),
     env: flight.env,
     coverageTarget: flight.coverageTarget,
     ...(flight.base ? { base: flight.base } : {}),
@@ -427,13 +462,22 @@ export async function main(args = process.argv.slice(2)): Promise<void> {
     if (started.status === 409 && started.json.type === 'flight_conflict') {
       info(`A flight is already active for this repo — attaching to ${dim(String(started.json.existingFlightId))}.`)
       flightId = String(started.json.existingFlightId)
+    } else if (started.status === 409 && started.json.type === 'flight_frozen') {
+      // Repos + intent are frozen once a flight exists. A redo/jump that passed
+      // DIFFERENT repos or description gets here — steer to the reuse path.
+      fail(`This feature's repos and intent are frozen for its flight — they're set when it first starts and can't be changed on a redo/jump.`)
+      info(`Re-run without new repo paths or description (e.g. \`canary-lab flight --redo --feature ${feature}\`) to reuse the stored ones,`)
+      info('or delete the flight in the web UI to start fresh with different repos/intent.')
+      process.exit(1)
+      return
     } else if (started.status !== 201) {
       fail(`Could not start the flight (${started.status}): ${String(started.json.error ?? '')}`)
       process.exit(1)
       return
     } else {
       flightId = String((started.json as { flightId?: string }).flightId)
-      ok(`Flight ${dim(flightId)} started for ${dim(flight.repoPaths.join(', '))} → feature "${feature}".`)
+      const forWhat = flight.repoPaths.length > 0 ? flight.repoPaths.join(', ') : `feature "${feature}"`
+      ok(`Flight ${dim(flightId)} started for ${dim(forWhat)} → feature "${feature}".`)
       info(`Watch it live in the web UI: ${dim(base)}`)
     }
   }
