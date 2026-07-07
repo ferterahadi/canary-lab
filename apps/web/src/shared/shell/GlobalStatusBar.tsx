@@ -32,6 +32,8 @@ interface Props {
   /** Open the real surface behind an activity-only pill row (run detail /
    *  portify workflow / wizard draft) — App routes it. */
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
+  /** Open the flight launcher for a never-flown picker row (R49). */
+  onStartFlight?: (feature: string) => void
   /** Open a run's detail (the Deploy-check pill's click-through) — App routes it. */
   onNavigateToRun?: (feature: string, runId: string) => void
 }
@@ -53,7 +55,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], activity = new Map(), onOpenFlight, onOpenActivity, onNavigateToRun }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], activity = new Map(), onOpenFlight, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -211,6 +213,8 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           <FlightsPill
             flights={flights}
             activity={activity}
+            features={features.map((f) => f.name)}
+            onStartFlight={(feature) => onStartFlight?.(feature)}
             onOpenFlight={(flightId) => onOpenFlight?.(flightId)}
             onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}
           />

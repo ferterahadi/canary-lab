@@ -288,7 +288,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir, dirtySpecStore })
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, workspaceEvents })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, flightStore, workspaceEvents })
   await app.register(flightsRoutes, {
     featuresDir,
     logsDir,

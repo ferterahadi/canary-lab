@@ -59,7 +59,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
       const view = await pollUntil(
         () => read(workflowId),
         (v) => v.status === 'ready-to-save' || v.status === 'saved' || v.status === 'failed' || v.status === 'aborted',
-        { what: `portify ${workflowId}`, intervalMs: 3000, timeoutMs: PORTIFY_TIMEOUT_MS },
+        { what: `portify ${workflowId}`, intervalMs: 3000, timeoutMs: PORTIFY_TIMEOUT_MS, signal: ctx.signal },
       )
       if (view.status === 'failed' || view.status === 'aborted') {
         return { kind: 'failed', error: `portify ${view.status}${view.error ? `: ${view.error}` : ''}` }

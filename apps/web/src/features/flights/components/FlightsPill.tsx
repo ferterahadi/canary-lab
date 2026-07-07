@@ -78,9 +78,9 @@ export function featureChipState(
     return { label: chip.label, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: chip.title }
   }
   if (!flight) {
-    // Unreachable by the render rule (a row exists only with a flight or an
-    // activity) — kept total so the function can't throw on a race.
-    return { label: '—', tone: 'var(--text-muted)', live: false, rank: 6, title: 'no activity' }
+    // R49: a feature that has never flown — one row per workspace feature,
+    // muted, at the bottom; clicking it opens the flight launcher.
+    return { label: 'not flown', tone: 'var(--text-muted)', live: false, rank: 6, title: 'never flown — start a flight' }
   }
   if (flight.status === 'running') {
     return {
@@ -128,33 +128,46 @@ export interface FeatureActivityRow {
   activity?: FeatureActivity
 }
 
-/** Merge flights + the activity map into rows, worst-first (the row that
- *  needs the human floats to the top; live rows above resting ones). */
+/** Merge flights + the activity map + the workspace feature list into rows,
+ *  worst-first (the row that needs the human floats to the top; live rows
+ *  above resting ones; never-flown features sink to the bottom, 1:1 — every
+ *  feature has exactly one row, R49). */
 export function featureActivityRows(
   flights: FlightIndexEntry[],
   activity: Map<string, FeatureActivity>,
+  features: string[] = [],
 ): FeatureActivityRow[] {
   const rows: FeatureActivityRow[] = flights.map((f) => ({ feature: f.feature, flight: f, activity: activity.get(f.feature) }))
   for (const [feature, act] of activity) {
     if (!flights.some((f) => f.feature === feature)) rows.push({ feature, flight: null, activity: act })
   }
+  for (const feature of features) {
+    if (!rows.some((r) => r.feature === feature)) rows.push({ feature, flight: null })
+  }
   return rows.sort((a, b) =>
     featureChipState(a.flight, a.activity).rank - featureChipState(b.flight, b.activity).rank
-    || (b.flight?.updatedAt ?? '').localeCompare(a.flight?.updatedAt ?? ''))
+    || (b.flight?.updatedAt ?? '').localeCompare(a.flight?.updatedAt ?? '')
+    || a.feature.localeCompare(b.feature))
 }
 
 export function FlightsPill({
   flights,
   activity = new Map(),
+  features = [],
   onOpenFlight,
   onOpenActivity,
+  onStartFlight,
 }: {
   flights: FlightIndexEntry[]
   /** Per-feature live activity (runs / portify / authoring) from useFeatureActivity — App owns it. */
   activity?: Map<string, FeatureActivity>
+  /** Every workspace feature name — the picker lists them 1:1 (R49). */
+  features?: string[]
   onOpenFlight: (flightId: string | null) => void
   /** Open the real surface behind an activity-only row (no flight record). */
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
+  /** Open the flight launcher for a never-flown feature (R49). */
+  onStartFlight?: (feature: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const waiting = flights.filter((f) => f.status === 'waiting-for-approval')
@@ -215,8 +228,10 @@ export function FlightsPill({
         <FlightsPickerDialog
           flights={flights}
           activity={activity}
+          features={features}
           onPick={(id) => { setOpen(false); onOpenFlight(id) }}
           onPickActivity={(feature, act) => { setOpen(false); onOpenActivity?.(feature, act) }}
+          onStartFlight={(feature) => { setOpen(false); onStartFlight?.(feature) }}
           onClose={() => setOpen(false)}
         />
       )}
@@ -253,14 +268,18 @@ export function StageMiniRail({ stages }: { stages: Array<{ key: string; status:
 function FlightsPickerDialog({
   flights,
   activity,
+  features,
   onPick,
   onPickActivity,
+  onStartFlight,
   onClose,
 }: {
   flights: FlightIndexEntry[]
   activity: Map<string, FeatureActivity>
+  features: string[]
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
+  onStartFlight: (feature: string) => void
   onClose: () => void
 }) {
   useEffect(() => {
@@ -269,7 +288,7 @@ function FlightsPickerDialog({
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const rows = featureActivityRows(flights, activity)
+  const rows = featureActivityRows(flights, activity, features)
 
   // Portalled to <body>: the status-bar action cluster is overflow-hidden and
   // carries a transform during its collapse animation.
@@ -321,8 +340,10 @@ function FlightsPickerDialog({
                     <FlightStatusChip flight={row.flight} activity={row.activity} />
                     <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
                   </button>
+                ) : row.activity ? (
+                  <ActivityOnlyRow feature={row.feature} activity={row.activity} onOpen={onPickActivity} />
                 ) : (
-                  <ActivityOnlyRow feature={row.feature} activity={row.activity!} onOpen={onPickActivity} />
+                  <NotFlownRow feature={row.feature} onStart={onStartFlight} />
                 )}
               </li>
             ))}
@@ -338,9 +359,40 @@ function FlightsPickerDialog({
   )
 }
 
+/** Row for a feature that has never flown (R49): same anatomy as a flight row
+ *  — name, mini rail, chip — but the rail renders fully greyed (all-pending
+ *  squares at reduced opacity, per the mock review: squares, never a dash) and
+ *  clicking opens the feature-scoped flight launcher. */
+export function NotFlownRow({
+  feature,
+  onStart,
+}: {
+  feature: string
+  onStart: (feature: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={`not-flown-${feature}`}
+      onClick={() => onStart(feature)}
+      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
+      style={{ border: '1px solid var(--border-default)' }}
+      title={`${feature}: never flown — start a flight`}
+    >
+      <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium" style={{ color: 'var(--text-secondary)' }}>{feature}</span>
+      <span style={{ opacity: 0.55 }}>
+        <StageMiniRail stages={[]} />
+      </span>
+      <FlightStatusChip flight={null} />
+      <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
+    </button>
+  )
+}
+
 /** Row for a feature with live activity but no flight record (a standalone
- *  run / portify / authoring job): same shape as a flight row, "no flight" in
- *  the mini-rail slot, and clicking opens the activity's REAL surface. */
+ *  run / portify / authoring job): same shape as a flight row, the live
+ *  progress chip always carrying the state (R39 — no "no flight" label), and
+ *  clicking opens the flights view. */
 export function ActivityOnlyRow({
   feature,
   activity,
@@ -360,7 +412,6 @@ export function ActivityOnlyRow({
       title={`${feature}: ${ACTIVITY_CHIP[activity.kind].title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{feature}</span>
-      <span className="shrink-0 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>no flight</span>
       <FlightStatusChip flight={null} activity={activity} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
     </button>

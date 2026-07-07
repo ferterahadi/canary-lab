@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
-import { useWizardDrafts } from '../../features/wizard/state/WizardDraftContext'
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor } from '../../features/config/components/FeatureConfigEditor'
 import { ThemeToggle } from '../ui/ThemeToggle'
@@ -26,14 +25,11 @@ interface Props {
   /** Incremented by App when a portify overlay is saved → the open Ports tab
    *  refetches its config doc so the rewritten slots show without a tab switch. */
   portsRefreshKey?: number
-  /** Opens the port-ification wizard for a feature (Service tab entry). */
-  onStartPortify?: (feature: string) => void
-  /** Reopens a past/active port-ification workflow (Ports-tab history). */
-  onOpenPortify?: (workflowId: string) => void
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
-  /** Opens the flight stage-entry launcher for a feature (R25 column entry point). */
-  onStartFlight?: (feature: string) => void
+  /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
+   *  Flight is the only GUI path to a new feature (R40/R50). */
+  onStartNewFlight?: () => void
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
@@ -60,13 +56,10 @@ export function FeaturesColumn({
   onFeaturesChanged,
   coverageRefreshKey,
   portsRefreshKey,
-  onStartPortify,
-  onOpenPortify,
   onOpenCoverage,
-  onStartFlight,
+  onStartNewFlight,
   versionStatus,
 }: Props) {
-  const { startNewWizard } = useWizardDrafts()
   const { gatePromo } = useMcpPromo()
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -99,9 +92,9 @@ export function FeaturesColumn({
         </div>
         <button
           type="button"
-          onClick={() => gatePromo('create-feature', startNewWizard)}
+          onClick={() => gatePromo('create-feature', () => onStartNewFlight?.())}
           className="cl-button shrink-0 whitespace-nowrap px-2.5 py-1"
-          title="Add a new feature"
+          title="Start a flight on new repos"
         >
           + New
         </button>
@@ -174,22 +167,6 @@ export function FeaturesColumn({
                   {runState && (
                     <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
                   )}
-                  {onStartFlight && (
-                    <Tooltip label="Flight">
-                      <button
-                        type="button"
-                        onClick={() => { onSelectFeature(f.name); onStartFlight(f.name) }}
-                        aria-label={`Flight ${f.name}`}
-                        data-testid={`flight-action-${f.name}`}
-                        className="feature-row__cog cl-icon-button mr-0.5 h-7 w-7 shrink-0 self-center"
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <path d="M22 2L11 13" />
-                          <path d="M22 2l-7 20-4-9-9-4 20-7z" />
-                        </svg>
-                      </button>
-                    </Tooltip>
-                  )}
                   {onOpenCoverage && (
                     <Tooltip label="Coverage">
                       <button
@@ -253,8 +230,6 @@ export function FeaturesColumn({
           feature={configFor}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
           portsRefreshKey={portsRefreshKey}
-          onStartPortify={onStartPortify}
-          onOpenPortify={(workflowId) => { setConfigFor(null); onOpenPortify?.(workflowId) }}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)

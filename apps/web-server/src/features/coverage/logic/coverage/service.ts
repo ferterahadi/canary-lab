@@ -597,6 +597,13 @@ export interface FeatureDoc {
   /** A generated PRD artifact (`_prd-*`) vs a source doc the user added. */
   generated: boolean
   sizeBytes: number
+  /** A symlink to a doc that lives elsewhere (the user's original is the live
+   *  source). Absent for plain files. */
+  linked?: boolean
+  /** The symlink's target, when linked (shown in the docs UI tooltip). */
+  linkTarget?: string
+  /** A symlink whose target no longer exists — surfaced, never crashed on. */
+  broken?: boolean
 }
 
 export interface FeatureDocsListing {
@@ -616,8 +623,37 @@ export function listFeatureDocs(featuresDir: string, feature: string): FeatureDo
   if (fs.existsSync(docsDir)) {
     for (const name of fs.readdirSync(docsDir).sort()) {
       const full = path.join(docsDir, name)
-      if (!fs.statSync(full).isFile() || !name.toLowerCase().endsWith('.md')) continue
-      docs.push({ relPath: name, absPath: path.resolve(full), generated: isGeneratedDoc(name), sizeBytes: fs.statSync(full).size })
+      if (!/\.(md|markdown|txt)$/i.test(name)) continue
+      // lstat first: a dangling symlink (its target moved) must be listed as
+      // broken, not crash the whole docs rail.
+      const lst = fs.lstatSync(full)
+      const isLink = lst.isSymbolicLink()
+      let stat: fs.Stats | null = null
+      try {
+        stat = fs.statSync(full)
+      } catch {
+        /* dangling symlink */
+      }
+      if (stat && !stat.isFile()) continue
+      docs.push({
+        relPath: name,
+        absPath: path.resolve(full),
+        generated: isGeneratedDoc(name),
+        sizeBytes: stat?.size ?? 0,
+        ...(isLink
+          ? {
+              linked: true,
+              linkTarget: (() => {
+                try {
+                  return fs.readlinkSync(full)
+                } catch {
+                  return undefined
+                }
+              })(),
+              ...(stat ? {} : { broken: true }),
+            }
+          : {}),
+      })
     }
   }
   const summary = readPrdSummary(featureDir)

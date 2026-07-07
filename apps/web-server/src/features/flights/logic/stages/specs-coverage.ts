@@ -208,6 +208,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         // the flight view's AgentSessionView follows the newest spawn.
         stageDir: path.join(ctx.flightDir, 'specs-coverage'),
         onChunk: ctx.appendLog,
+        signal: ctx.signal,
       })
       // The agent edited <featureDir>/e2e/*.spec.ts in place; re-read what
       // landed on disk and gate it through the same draft validation as the

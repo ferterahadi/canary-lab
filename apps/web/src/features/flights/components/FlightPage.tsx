@@ -13,7 +13,8 @@ import { AgentSessionView } from '../../agent-sessions/components/AgentSessionVi
 import { StatusDot } from '../../config/components/atoms'
 import { EvaluationTaskPanel } from '../../evaluation/components/EvaluationTaskPanel'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
-import { ActivityOnlyRow, FLIGHT_STATUS_TONE, FlightStatusChip, StageMiniRail, featureActivityRows, flightStatusLabel } from './FlightsPill'
+import { ActivityOnlyRow, FLIGHT_STATUS_TONE, FlightStatusChip, NotFlownRow, StageMiniRail, featureActivityRows, flightStatusLabel } from './FlightsPill'
+import { FeatureSetupPanel, FlightDocsPanel, RepoScanEditor } from './FlightStagePanels'
 import type { FeatureActivity } from '../state/feature-activity'
 import {
   FactsGrid,
@@ -61,8 +62,12 @@ export function FlightPage({
   onSelectFlight,
   onClose,
   activity,
+  features,
   onOpenActivity,
   onStartFlight,
+  onOpenConfig,
+  configRefreshKey,
+  docsRefreshKey,
   onOpenRun,
   onOpenCoverage,
   onOpenPortify,
@@ -73,16 +78,24 @@ export function FlightPage({
   onClose: () => void
   /** Per-feature live activity (runs / portify / authoring) — App owns it. */
   activity?: Map<string, FeatureActivity>
+  /** Every workspace feature name — the landing lists them 1:1 (R49). */
+  features?: string[]
   /** Open the real surface behind an activity-only landing row. */
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
   /** Opens the stage-entry launcher for the flight's feature (R25 re-fly). */
   onStartFlight?: (feature: string) => void
+  /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup. */
+  onOpenConfig?: (feature: string) => void
+  /** Bumped on features-changed → the setup digest refetches (two-way sync). */
+  configRefreshKey?: number
+  /** Bumped on coverage-changed → the Requirements docs list refetches. */
+  docsRefreshKey?: number
 } & FlightDrillThroughs) {
   return (
     <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
       {flightId
-        ? <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
-        : <FlightsLanding refreshKey={refreshKey} activity={activity} onSelectFlight={onSelectFlight} onOpenActivity={onOpenActivity} onClose={onClose} />}
+        ? <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
+        : <FlightsLanding refreshKey={refreshKey} activity={activity} features={features} onSelectFlight={onSelectFlight} onOpenActivity={onOpenActivity} onStartFlight={onStartFlight} onClose={onClose} />}
     </div>
   )
 }
@@ -90,14 +103,18 @@ export function FlightPage({
 function FlightsLanding({
   refreshKey,
   activity = new Map(),
+  features = [],
   onSelectFlight,
   onOpenActivity,
+  onStartFlight,
   onClose,
 }: {
   refreshKey: number
   activity?: Map<string, FeatureActivity>
+  features?: string[]
   onSelectFlight: (flightId: string) => void
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
+  onStartFlight?: (feature: string) => void
   onClose: () => void
 }) {
   const [flights, setFlights] = useState<FlightIndexEntry[]>([])
@@ -117,13 +134,13 @@ function FlightsLanding({
         <div className="flex-1" />
         <button type="button" onClick={onClose} className="cl-button px-2.5 py-1 text-xs">Close</button>
       </header>
-      {flights.length === 0 && activity.size === 0 ? (
+      {flights.length === 0 && activity.size === 0 && features.length === 0 ? (
         <div className="flex flex-1 items-center justify-center text-xs" style={{ color: 'var(--text-muted)' }}>
           No flights yet — start one from a terminal and it appears here live.
         </div>
       ) : (
         <ul className="flex flex-col gap-1.5 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
-          {featureActivityRows(flights, activity).map((row) => (
+          {featureActivityRows(flights, activity, features).map((row) => (
             <li key={row.flight?.flightId ?? `activity-${row.feature}`}>
               {row.flight ? (
                 <button
@@ -140,8 +157,10 @@ function FlightsLanding({
                   <StageMiniRail stages={row.flight.stages ?? []} />
                   <FlightStatusChip flight={row.flight} activity={row.activity} />
                 </button>
+              ) : row.activity ? (
+                <ActivityOnlyRow feature={row.feature} activity={row.activity} onOpen={(f, a) => onOpenActivity?.(f, a)} />
               ) : (
-                <ActivityOnlyRow feature={row.feature} activity={row.activity!} onOpen={(f, a) => onOpenActivity?.(f, a)} />
+                <NotFlownRow feature={row.feature} onStart={(f) => onStartFlight?.(f)} />
               )}
             </li>
           ))}
@@ -157,6 +176,9 @@ function FlightDetail({
   onBackToList,
   onClose,
   onStartFlight,
+  onOpenConfig,
+  configRefreshKey,
+  docsRefreshKey,
   drill,
 }: {
   flightId: string
@@ -164,6 +186,9 @@ function FlightDetail({
   onBackToList: () => void
   onClose: () => void
   onStartFlight?: (feature: string) => void
+  onOpenConfig?: (feature: string) => void
+  configRefreshKey?: number
+  docsRefreshKey?: number
   drill: FlightDrillThroughs
 }) {
   const [flight, setFlight] = useState<FlightManifest | null>(null)
@@ -233,6 +258,11 @@ function FlightDetail({
           <div className="mt-0.5 flex min-w-0 items-center gap-2">
             <span
               data-testid="flight-status"
+              title={flight.status === 'paused'
+                ? (flight.pauseReason === 'user' ? 'Paused by you — Continue resumes it'
+                  : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
+                  : 'A stage failed — Continue retries it')
+                : undefined}
               className="inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
               style={{ color: tone, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }}
             >
@@ -244,8 +274,9 @@ function FlightDetail({
             </span>
           </div>
         </div>
-        {/* R25: a settled flight offers the stage-entry launcher — repeat any
-            step whose prerequisites hold, without leaving for a terminal. */}
+        {/* R48: the control cluster is always present — Pause+Stop while the
+            flight works, Continue+Start over when paused, Start over+Repeat a
+            step when settled. Never hunt for the button. */}
         {!active && onStartFlight && (
           <button
             type="button"
@@ -264,7 +295,19 @@ function FlightDetail({
             className="cl-button px-2.5 py-1 text-xs"
             style={{ color: 'rgb(56, 189, 248)' }}
           >
-            Resume
+            Continue
+          </button>
+        )}
+        {!active && <StartOverButton flightId={flightId} onDone={refetch} />}
+        {active && (
+          <button
+            type="button"
+            data-testid="flight-pause"
+            onClick={() => { api.pauseFlight(flightId).then(refetch).catch(() => {}) }}
+            className="cl-button px-2.5 py-1 text-xs"
+            title="Pause the flight — in-flight stage work stops safely; Continue resumes it"
+          >
+            ⏸ Pause
           </button>
         )}
         {active && (
@@ -275,7 +318,7 @@ function FlightDetail({
             className="cl-button px-2.5 py-1 text-xs"
             style={{ color: 'var(--danger)' }}
           >
-            Abort
+            ⏹ Stop
           </button>
         )}
         <button type="button" onClick={onClose} className="cl-button px-2.5 py-1 text-xs">Close</button>
@@ -317,7 +360,7 @@ function FlightDetail({
           {!stage || !row ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Pick a stage.</div>
           ) : (
-            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} onResponded={refetch} drill={drill} />
+            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} onResponded={refetch} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
           )}
         </main>
       </div>
@@ -339,7 +382,7 @@ function stageDrillThrough(
       return { label: 'Open run detail →', onClick: () => open(flight.feature, runId) }
     }
   }
-  if ((stage.key === 'specs-coverage' || stage.key === 'prd-summary') && drill.onOpenCoverage && stage.status !== 'pending') {
+  if (stage.key === 'specs-coverage' && drill.onOpenCoverage && stage.status !== 'pending') {
     const open = drill.onOpenCoverage
     return { label: 'Open coverage ledger →', onClick: () => open(flight.feature) }
   }
@@ -368,6 +411,9 @@ function StageDetail({
   stage,
   companion,
   onResponded,
+  onOpenConfig,
+  configRefreshKey,
+  docsRefreshKey,
   drill,
 }: {
   flightId: string
@@ -377,6 +423,9 @@ function StageDetail({
   /** The folded half of a pair-merged row (heal / env-capture / prd-summary). */
   companion: FlightStage | null
   onResponded: () => void
+  onOpenConfig?: (feature: string) => void
+  configRefreshKey?: number
+  docsRefreshKey?: number
   drill: FlightDrillThroughs
 }) {
   // R27: the specs↔coverage loop runs TWO agents per pass — the authoring
@@ -433,10 +482,33 @@ function StageDetail({
 
       <FactsGrid facts={facts} />
 
-      {/* Feature setup (R32): how the feature is actually configured — the
-          FeatureConfigEditor digest (repos, run commands, ports, Playwright). */}
-      {stage.key === 'scaffold' && (stage.status === 'done' || stage.status === 'skipped') && (
-        <FeatureConfigDigest feature={flight.feature} />
+      {/* Repo Scan (R42): intent + repos are editable while the flight is not
+          actively working — a repo change resets it to the start (server-owned
+          rule; the editor warns before saving). */}
+      {stage.key === 'scout' && flight.status !== 'running' && flight.status !== 'waiting-for-approval' && (
+        <RepoScanEditor flight={flight} onSaved={onResponded} />
+      )}
+
+      {/* Feature setup (R43): the editable digest over the REAL on-disk config
+          — same doc Advanced setup (FeatureConfigEditor) edits, live both ways. */}
+      {stage.key === 'scaffold' && stage.status !== 'pending' && (
+        <FeatureSetupPanel
+          feature={flight.feature}
+          editable={flight.status !== 'running'}
+          refreshKey={configRefreshKey}
+          onOpenConfig={onOpenConfig}
+        />
+      )}
+
+      {/* Requirements (R44): the docs manager lives where the flight pauses
+          for docs — add files, link local paths, remove; linked docs marked ↗. */}
+      {stage.key === 'docs' && stage.status !== 'pending' && (
+        <FlightDocsPanel
+          feature={flight.feature}
+          locked={row.status === 'running'}
+          refreshKey={docsRefreshKey}
+          onChanged={onResponded}
+        />
       )}
 
       {/* Test Run (R22): what's running now, what each repair cycle fixed —
@@ -537,27 +609,41 @@ function FlightStageLog({ log }: { log: string }) {
   )
 }
 
-/** Feature setup's config digest (R32): a read-only summary of what
- *  FeatureConfigEditor holds — repos, run commands, port slots, Playwright —
- *  fetched from the live config, rendered through the same FactsGrid. */
-function FeatureConfigDigest({ feature }: { feature: string }) {
-  const [facts, setFacts] = useState<StageFact[]>([])
-  useEffect(() => {
-    let alive = true
-    Promise.all([
-      api.getFeatureConfigDoc(feature).catch(() => null),
-      api.getPlaywrightConfig(feature).catch(() => null),
-    ]).then(([config, playwright]) => {
-      if (alive) setFacts(configDigestFacts(config?.parsed.value ?? null, playwright?.parsed.value ?? null))
-    })
-    return () => { alive = false }
-  }, [feature])
-  if (facts.length === 0) return null
+/** "Start over" (R48): redo this record from stage 1 — destructive to the
+ *  flight's stage evidence, so the button asks once inline before firing. */
+function StartOverButton({ flightId, onDone }: { flightId: string; onDone: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  if (!confirming) {
+    return (
+      <button
+        type="button"
+        data-testid="flight-start-over"
+        onClick={() => setConfirming(true)}
+        className="cl-button px-2.5 py-1 text-xs"
+        title="Restart this flight from the beginning — its stage records are reset (artifacts on disk are kept and reused)"
+      >
+        ↺ Start over
+      </button>
+    )
+  }
   return (
-    <div data-testid="feature-config-digest">
-      <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Configuration</h3>
-      <FactsGrid facts={facts} />
-    </div>
+    <button
+      type="button"
+      data-testid="flight-start-over-confirm"
+      disabled={busy}
+      onClick={() => {
+        setBusy(true)
+        api.redoFlight(flightId)
+          .then(onDone)
+          .catch(() => {})
+          .finally(() => { setBusy(false); setConfirming(false) })
+      }}
+      className="cl-button px-2.5 py-1 text-xs"
+      style={{ color: 'rgb(251, 191, 36)' }}
+    >
+      {busy ? 'Restarting…' : 'Really start over?'}
+    </button>
   )
 }
 
@@ -694,12 +780,18 @@ function RunRepairSummary({ runId, active }: { runId: string; active: boolean })
         : 'Running tests'
   const failing = summary?.failed ?? []
   const cycles = [...journal].sort((a, b) => (b.iteration ?? 0) - (a.iteration ?? 0)).slice(0, 3)
+  // R46: the services this run booted — names + live status, straight from the
+  // run manifest the run detail page reads.
+  const services = (manifest?.services ?? []).map((svc) => `${svc.name} (${svc.status})`)
 
   if (!nowLine && failing.length === 0 && cycles.length === 0 && !summary) return null
   return (
     <div data-testid="run-repair-summary" className="flex flex-col gap-1.5">
       <FactsGrid facts={[
         ...(nowLine ? [{ label: 'Now', value: nowLine }] : []),
+        ...(services.length > 0
+          ? [{ label: 'Services', value: services.join(', '), mono: true }]
+          : []),
         ...(summary && summary.total > 0
           ? [{ label: 'Tests', value: `${summary.passed}/${summary.total} passed`, tone: failing.length > 0 ? 'warn' as const : 'good' as const }]
           : []),
@@ -711,6 +803,45 @@ function RunRepairSummary({ runId, active }: { runId: string; active: boolean })
             }]
           : []),
       ]} />
+      {/* R46: the run's own controls, right on the stage — same endpoints the
+          run detail page drives; all state flows back over the runs WS. */}
+      {manifest && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="run-stage-controls">
+          {active && manifest.status === 'healing' && (
+            <button
+              type="button"
+              data-testid="run-stage-cancel-heal"
+              onClick={() => { api.cancelHealRun(runId).catch(() => {}) }}
+              className="cl-button px-2 py-0.5 text-[11px]"
+            >
+              Cancel repair
+            </button>
+          )}
+          {active && (
+            <button
+              type="button"
+              data-testid="run-stage-stop"
+              onClick={() => { api.stopRun(runId).catch(() => {}) }}
+              className="cl-button px-2 py-0.5 text-[11px]"
+              style={{ color: 'var(--danger)' }}
+            >
+              ⏹ Stop run
+            </button>
+          )}
+          {!active && (manifest.status === 'failed' || manifest.status === 'aborted') && (
+            <button
+              type="button"
+              data-testid="run-stage-restart"
+              onClick={() => { api.restartRun(runId).catch(() => {}) }}
+              className="cl-button px-2 py-0.5 text-[11px]"
+              style={{ color: 'rgb(56, 189, 248)' }}
+              title="Re-run the remaining/failed tests on the same run"
+            >
+              ▸ Restart run
+            </button>
+          )}
+        </div>
+      )}
       {cycles.length > 0 && (
         <div data-testid="repair-journal">
           <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Repairs</h3>
@@ -781,7 +912,6 @@ function CheckpointControls({
   onResponded: () => void
 }) {
   const [busy, setBusy] = useState(false)
-  const [configSource, setConfigSource] = useState<string | null>(null)
   const [envText, setEnvText] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -795,9 +925,9 @@ function CheckpointControls({
   }
 
   const data = (checkpoint.data ?? {}) as Record<string, unknown>
-  const draftConfig = typeof data.configSource === 'string' ? data.configSource : null
   const missing = Array.isArray(data.missing) ? (data.missing as string[]) : []
   const diff = typeof data.diff === 'string' ? data.diff : null
+  const configError = typeof data.error === 'string' ? data.error : null
 
   return (
     <section
@@ -814,21 +944,15 @@ function CheckpointControls({
       <p className="text-[12px]">{checkpoint.message}</p>
 
       {checkpoint.kind === 'prd-source' && (
-        <p className="text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          Drop docs into features/{flight.feature}/docs/ then choose retry — dropped docs win the hierarchy.
+        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          Add or link docs above (they land in features/{flight.feature}/docs/), then continue — or pick a source to infer from.
         </p>
       )}
 
-      {draftConfig !== null && (
-        <textarea
-          data-testid="checkpoint-config"
-          value={configSource ?? draftConfig}
-          onChange={(e) => setConfigSource(e.target.value)}
-          spellCheck={false}
-          rows={Math.min(24, draftConfig.split('\n').length + 2)}
-          className="w-full rounded border p-2 text-[11px] outline-none"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
-        />
+      {checkpoint.kind === 'config-approval' && configError && (
+        <p data-testid="checkpoint-config-error" className="text-[11px]" style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>
+          {configError}
+        </p>
       )}
 
       {diff && (
@@ -878,10 +1002,7 @@ function CheckpointControls({
             type="button"
             data-testid={`checkpoint-choice-${option}`}
             disabled={busy}
-            onClick={() => {
-              const edited = configSource !== null && configSource !== draftConfig
-              respond({ choice: option, ...(edited && option === 'approve' ? { data: { configSource } } : {}) })
-            }}
+            onClick={() => respond({ choice: option })}
             className="cl-button px-2.5 py-1 text-xs"
             style={option === (checkpoint.options ?? [])[0] ? { color: 'rgb(56, 189, 248)' } : undefined}
           >

@@ -14,6 +14,7 @@ import {
   externalTestFileRules,
   getFeatureEnvsetSummary,
   getFeatureRepoStatus,
+  linkFeatureDoc,
   parseRedactedEntries,
   writeFeatureDoc,
 } from './feature-authoring'
@@ -590,5 +591,109 @@ describe('deleteFeatureDoc', () => {
     writeFeatureConfig('del_test5')
     expect(deleteFeatureDoc(ctx(), { feature: 'del_test5', relPath: 'missing.md' }))
       .toEqual({ ok: false, error: 'doc not found' })
+  })
+})
+
+describe('linkFeatureDoc', () => {
+  it('symlinks a local doc into docs/ and reports linked: true', () => {
+    const featureDir = writeFeatureConfig('link_test')
+    const target = path.join(tmpDir, 'external-prd.md')
+    fs.writeFileSync(target, '# External PRD')
+    const res = linkFeatureDoc(ctx(), { feature: 'link_test', targetPath: target })
+    expect(res).toMatchObject({ ok: true, linked: true, relativePath: path.join('docs', 'external-prd.md') })
+    const dest = path.join(featureDir, 'docs', 'external-prd.md')
+    expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(dest, 'utf8')).toBe('# External PRD')
+  })
+
+  it('the user original stays the live source — edits show through the link', () => {
+    const featureDir = writeFeatureConfig('link_live')
+    const target = path.join(tmpDir, 'live.md')
+    fs.writeFileSync(target, 'v1')
+    linkFeatureDoc(ctx(), { feature: 'link_live', targetPath: target })
+    fs.writeFileSync(target, 'v2')
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'live.md'), 'utf8')).toBe('v2')
+  })
+
+  it('accepts a plain-text target (links keep their original name)', () => {
+    writeFeatureConfig('link_txt')
+    const target = path.join(tmpDir, 'notes.txt')
+    fs.writeFileSync(target, 'plain notes')
+    expect(linkFeatureDoc(ctx(), { feature: 'link_txt', targetPath: target })).toMatchObject({ ok: true })
+  })
+
+  it('expands a ~-relative target path', () => {
+    writeFeatureConfig('link_home')
+    // Use a real file under the home dir via a relative spelling.
+    const home = os.homedir()
+    const target = path.join(home, `.cl-link-test-${process.pid}.md`)
+    fs.writeFileSync(target, 'home doc')
+    try {
+      const res = linkFeatureDoc(ctx(), { feature: 'link_home', targetPath: `~/${path.basename(target)}` })
+      expect(res).toMatchObject({ ok: true })
+    } finally {
+      fs.rmSync(target, { force: true })
+    }
+  })
+
+  it('rejects a missing target, a directory, and a disallowed extension', () => {
+    writeFeatureConfig('link_rejects')
+    expect(linkFeatureDoc(ctx(), { feature: 'link_rejects', targetPath: path.join(tmpDir, 'nope.md') }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('does not exist') })
+    expect(linkFeatureDoc(ctx(), { feature: 'link_rejects', targetPath: tmpDir }))
+      .toMatchObject({ ok: false, error: 'target is not a file' })
+    const bin = path.join(tmpDir, 'app.bin')
+    fs.writeFileSync(bin, 'x')
+    expect(linkFeatureDoc(ctx(), { feature: 'link_rejects', targetPath: bin }))
+      .toMatchObject({ ok: false, error: expect.stringContaining('can be linked') })
+  })
+
+  it('replaces an existing doc of the same name', () => {
+    const featureDir = writeFeatureConfig('link_replace')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'docs', 'prd.md'), 'old copy')
+    const target = path.join(tmpDir, 'prd.md')
+    fs.writeFileSync(target, 'linked now')
+    const res = linkFeatureDoc(ctx(), { feature: 'link_replace', targetPath: target })
+    expect(res).toMatchObject({ ok: true, linked: true })
+    expect(fs.readFileSync(path.join(featureDir, 'docs', 'prd.md'), 'utf8')).toBe('linked now')
+  })
+})
+
+describe('symlink-aware doc write/delete', () => {
+  it('writeFeatureDoc onto a symlink replaces the link — never writes through into the target', () => {
+    const featureDir = writeFeatureConfig('link_write_guard')
+    const target = path.join(tmpDir, 'original.md')
+    fs.writeFileSync(target, 'original content')
+    linkFeatureDoc(ctx(), { feature: 'link_write_guard', targetPath: target })
+    const res = writeFeatureDoc(ctx(), { feature: 'link_write_guard', relPath: 'original.md', content: 'replaced in docs' })
+    expect(res).toMatchObject({ ok: true })
+    const dest = path.join(featureDir, 'docs', 'original.md')
+    expect(fs.lstatSync(dest).isSymbolicLink()).toBe(false)
+    expect(fs.readFileSync(dest, 'utf8')).toBe('replaced in docs')
+    // The user's original is untouched.
+    expect(fs.readFileSync(target, 'utf8')).toBe('original content')
+  })
+
+  it('deleteFeatureDoc removes the link only — the target survives', () => {
+    const featureDir = writeFeatureConfig('link_delete')
+    const target = path.join(tmpDir, 'survives.md')
+    fs.writeFileSync(target, 'keep me')
+    linkFeatureDoc(ctx(), { feature: 'link_delete', targetPath: target })
+    const res = deleteFeatureDoc(ctx(), { feature: 'link_delete', relPath: 'survives.md' })
+    expect(res).toMatchObject({ ok: true })
+    expect(fs.existsSync(path.join(featureDir, 'docs', 'survives.md'))).toBe(false)
+    expect(fs.readFileSync(target, 'utf8')).toBe('keep me')
+  })
+
+  it('deleteFeatureDoc removes a DANGLING symlink (target already moved)', () => {
+    const featureDir = writeFeatureConfig('link_dangling')
+    const target = path.join(tmpDir, 'moves-away.md')
+    fs.writeFileSync(target, 'soon gone')
+    linkFeatureDoc(ctx(), { feature: 'link_dangling', targetPath: target })
+    fs.rmSync(target)
+    const res = deleteFeatureDoc(ctx(), { feature: 'link_dangling', relPath: 'moves-away.md' })
+    expect(res).toMatchObject({ ok: true })
+    expect(fs.lstatSync(path.join(featureDir, 'docs'), { throwIfNoEntry: false })).toBeTruthy()
   })
 })

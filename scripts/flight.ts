@@ -220,6 +220,9 @@ async function promptCheckpoint(checkpoint: FlightCheckpoint): Promise<FlightChe
   line()
   section(`Checkpoint — ${checkpoint.kind}`)
   info(checkpoint.message)
+  if (checkpoint.kind === 'prd-source') {
+    info('Tip: drop files into features/<feature>/docs/ (or link them from the web UI), then answer "continue".')
+  }
   if (checkpoint.kind === 'missing-env') {
     const missing = Array.isArray((checkpoint.data as { missing?: string[] } | undefined)?.missing)
       ? ((checkpoint.data as { missing: string[] }).missing)

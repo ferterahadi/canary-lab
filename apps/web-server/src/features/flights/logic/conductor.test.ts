@@ -8,6 +8,10 @@ import {
   resumeFlight,
   respondToFlightCheckpoint,
   abortFlight,
+  pauseFlight,
+  redoFlight,
+  patchFlightMetadata,
+  reopenStages,
   FlightConflictError,
   FlightExistsError,
   FlightStageEntryError,
@@ -678,5 +682,276 @@ describe('FlightRunStore repo lookups', () => {
 
     expect(store.activeForRepos(['/repo/a'])).toBeNull()
     expect(store.latestForRepos(['/repo/a'])).toBeNull()
+  })
+})
+
+describe('pauseFlight', () => {
+  it('parks an active flight resumable with pauseReason user; the open stage flips to pending', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: async () => {
+        const parked = pauseFlight('fl-1', d)
+        expect(parked.status).toBe('paused')
+        release()
+        return { kind: 'failed', error: 'SIGTERM' } satisfies StageOutcome
+      },
+    }
+    const { manifest, completion } = startFlight(args(), d)
+    await gate
+    await completion
+    const final = store.get(manifest.flightId)!
+    // The pause-race rule: the cancellation error is NOT recorded as failed —
+    // the stage stays pending, ready to re-run on resume.
+    expect(final.status).toBe('paused')
+    expect(final.pauseReason).toBe('user')
+    expect(final.stages.find((s) => s.key === 'scout')!.status).toBe('pending')
+    expect(final.stages.find((s) => s.key === 'scout')!.error).toBeUndefined()
+  })
+
+  it('persists a done outcome that settled during the pause, but never advances', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    const d = deps(adapters)
+    adapters.scout = {
+      run: async (ctx) => {
+        calls.push(ctx.manifest().currentStage as FlightStageKey)
+        pauseFlight('fl-1', d)
+        return { kind: 'done', evidence: { finished: true } } satisfies StageOutcome
+      },
+    }
+    const { manifest, completion } = startFlight(args(), d)
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('paused')
+    // Work that finished, finished — evidence persisted…
+    expect(final.stages.find((s) => s.key === 'scout')!).toMatchObject({ status: 'done', evidence: { finished: true } })
+    // …but nothing after scout ran.
+    expect(calls).toEqual(['similarity', 'scout'])
+  })
+
+  it('aborts the stage context signal so in-flight agent work stops promptly', async () => {
+    let sawAbort = false
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: (ctx) =>
+        new Promise((resolve) => {
+          ctx.signal.addEventListener('abort', () => {
+            sawAbort = true
+            resolve({ kind: 'failed', error: 'cancelled' })
+          })
+          pauseFlight('fl-1', d)
+        }),
+    }
+    const { completion } = startFlight(args(), d)
+    await completion
+    expect(sawAbort).toBe(true)
+  })
+
+  it('pausing a parked checkpoint clears it back to pending; resume re-issues it', async () => {
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({
+        kind: 'checkpoint',
+        checkpoint: { kind: 'prd-source', message: 'docs?', options: ['continue'] },
+      }),
+    }
+    const d = deps(adapters)
+    const { manifest, completion } = startFlight(args(), d)
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+
+    const paused = pauseFlight(manifest.flightId, d)
+    expect(paused.status).toBe('paused')
+    expect(paused.stages.find((s) => s.key === 'docs')!).toMatchObject({ status: 'pending' })
+    expect(paused.stages.find((s) => s.key === 'docs')!.checkpoint).toBeUndefined()
+
+    const resumed = resumeFlight(manifest.flightId, d)
+    await resumed.completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('waiting-for-approval')
+    expect(final.stages.find((s) => s.key === 'docs')!.checkpoint?.kind).toBe('prd-source')
+  })
+
+  it('calls the open stage adapter interrupt hook with "pause" (best-effort)', async () => {
+    const interrupts: string[] = []
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: () => new Promise(() => {}), // hangs
+      interrupt: async (_ctx, kind) => {
+        interrupts.push(kind)
+      },
+    }
+    startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+    pauseFlight('fl-1', d)
+    await new Promise((r) => setTimeout(r, 10))
+    expect(interrupts).toEqual(['pause'])
+  })
+
+  it('refuses to pause a non-active flight', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(() => pauseFlight(manifest.flightId, deps(allDone()))).toThrow(/not active/)
+  })
+
+  it('resume clears pauseReason', async () => {
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = { run: () => new Promise(() => {}) }
+    const { manifest } = startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+    pauseFlight(manifest.flightId, d)
+    const resumed = resumeFlight(manifest.flightId, deps(allDone()))
+    await resumed.completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('done')
+    expect(final.pauseReason).toBeUndefined()
+  })
+})
+
+describe('rewind outcome', () => {
+  it('re-opens the target stage and everything up to the current one, then re-runs from the target', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    let scaffoldRuns = 0
+    adapters.scaffold = {
+      run: async (ctx) => {
+        calls.push(ctx.manifest().currentStage as FlightStageKey)
+        scaffoldRuns += 1
+        if (scaffoldRuns === 1) return { kind: 'rewind', to: 'scout', reason: 'redraft' }
+        return { kind: 'done' }
+      },
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('done')
+    // scout ran twice: once forward, once after the rewind.
+    expect(calls.filter((k) => k === 'scout')).toHaveLength(2)
+    expect(scaffoldRuns).toBe(2)
+  })
+
+  it('a forward rewind target is illegal and parks the flight failed-stage', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => ({ kind: 'rewind', to: 'run', reason: 'nope' }),
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('paused')
+    expect(final.pauseReason).toBe('stage-failed')
+    expect(final.stages.find((s) => s.key === 'scout')!).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('illegal rewind'),
+    })
+  })
+})
+
+describe('patchFlightMetadata', () => {
+  it('edits the description of a non-active flight in place', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const patched = patchFlightMetadata(manifest.flightId, { description: 'new intent' }, deps(allDone()))
+    expect(patched.description).toBe('new intent')
+    expect(patched.status).toBe('done') // description-only edits do not reset anything
+    expect(patched.stages.every((s) => s.status === 'done')).toBe(true)
+  })
+
+  it('a repo-set change resets the stage array — forced redo from Repo Scan — and parks paused', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const patched = patchFlightMetadata(manifest.flightId, { repoPaths: ['/repo/b'] }, deps(allDone()))
+    expect(patched.repoPaths).toEqual(['/repo/b'])
+    expect(patched.status).toBe('paused')
+    expect(patched.pauseReason).toBe('user')
+    expect(patched.stages.every((s) => s.status === 'pending')).toBe(true)
+    expect(patched.links).toBeUndefined()
+    expect(patched.runVerdict).toBeUndefined()
+  })
+
+  it('an unchanged repo set does NOT reset the stages', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const patched = patchFlightMetadata(manifest.flightId, { repoPaths: ['/repo/a'] }, deps(allDone()))
+    expect(patched.status).toBe('done')
+    expect(patched.stages.every((s) => s.status === 'done')).toBe(true)
+  })
+
+  it('rejects edits on an active flight', async () => {
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    const { manifest } = startFlight(args(), deps(adapters))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(() => patchFlightMetadata(manifest.flightId, { description: 'x' }, deps(allDone()))).toThrow(/pause it before editing/)
+  })
+
+  it('rejects a repo set already claimed by another active flight', async () => {
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    startFlight({ ...args('/repo/b'), feature: 'other' }, deps(adapters))
+    await new Promise((r) => setTimeout(r, 10))
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(() => patchFlightMetadata(manifest.flightId, { repoPaths: ['/repo/b'] }, deps(allDone()))).toThrow(FlightConflictError)
+  })
+})
+
+describe('redoFlight', () => {
+  it('restarts the record from stage 1 with its own stored args', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const redone = redoFlight(manifest.flightId, deps(allDone()))
+    await redone.completion
+    const final = store.get(manifest.flightId)!
+    expect(final.flightId).toBe(manifest.flightId) // same record, never a second manifest
+    expect(final.status).toBe('done')
+    expect(final.description).toBe('checkout flow')
+  })
+
+  it('refuses on an active flight', async () => {
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    const { manifest } = startFlight(args(), deps(adapters))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(() => redoFlight(manifest.flightId, deps(allDone()))).toThrow(/pause or abort/)
+  })
+})
+
+describe('reopenStages', () => {
+  it('flips the named stages and everything after them to pending on a settled flight', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const reopened = reopenStages(manifest.flightId, ['docs', 'prd-summary', 'specs-coverage'], deps(allDone()))!
+    expect(reopened.status).toBe('paused')
+    expect(reopened.pauseReason).toBe('user')
+    expect(reopened.currentStage).toBe('docs')
+    for (const key of ['similarity', 'scout', 'scaffold', 'env-capture'] as const) {
+      expect(reopened.stages.find((s) => s.key === key)!.status).toBe('done')
+    }
+    for (const key of ['docs', 'prd-summary', 'specs-coverage', 'portify', 'run', 'heal', 'evaluation-export'] as const) {
+      expect(reopened.stages.find((s) => s.key === key)!.status).toBe('pending')
+    }
+    expect(reopened.links).toBeUndefined()
+  })
+
+  it('is a no-op on an active flight (the running conductor owns it)', async () => {
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    const { manifest } = startFlight(args(), deps(adapters))
+    await new Promise((r) => setTimeout(r, 10))
+    expect(reopenStages(manifest.flightId, ['docs'], deps(allDone()))).toBeNull()
+  })
+
+  it('is a no-op on an unknown flight or empty key set', async () => {
+    expect(reopenStages('nope', ['docs'], deps(allDone()))).toBeNull()
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(reopenStages(manifest.flightId, [], deps(allDone()))).toBeNull()
   })
 })

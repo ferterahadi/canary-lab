@@ -41,12 +41,13 @@ export type FlightStageStatus =
  *  autonomous; `--yolo` skips all of these except `missing-env`. */
 export type FlightCheckpointKind =
   | 'similarity-choice' // existing feature matches the target repos → rerun / enhance / new
-  | 'config-approval'   // scout's draft feature.config.cjs, before the first boot
+  | 'config-approval'   // the scaffolded feature.config.cjs, before the first boot
   | 'missing-env'       // env capture found keys it cannot source (never skipped)
-  | 'prd-source'        // docs stage: drop a PRD or accept the inferred source
+  | 'prd-source'        // docs stage: add/confirm requirement docs before the PRD summary
   | 'coverage-stuck'    // specs↔coverage loop hit its bound with gaps left
   | 'portify-apply'     // portify agent proposes edits; approve before apply
   | 'run-failed'        // run ended failed/aborted after heal → rerun or export as-is
+  | 'export-mode'       // pick the evaluation flavor before exporting: raw | localized
 
 export interface FlightCheckpoint {
   kind: FlightCheckpointKind
@@ -93,12 +94,18 @@ export interface FlightStage {
 export type FlightStatus =
   | 'running'
   | 'waiting-for-approval'
-  /** Resumable stop: a stage failed, or the server restarted mid-stage.
-   *  `flight` again (or the resume endpoint) picks up from the first open stage. */
+  /** Resumable stop: a stage failed, the server restarted mid-stage, or the
+   *  user paused it. `flight` again (or the resume endpoint) picks up from the
+   *  first open stage. `FlightManifest.pauseReason` says which it was. */
   | 'paused'
   | 'done'
   | 'failed'
   | 'aborted'
+
+/** Why a flight is `paused` — drives the UI copy ("paused by you" vs "stage
+ *  failed") and keeps a user pause from reading as an error. Absent on
+ *  pre-existing manifests (legacy = stage-failed/restart semantics). */
+export type FlightPauseReason = 'user' | 'stage-failed' | 'restart'
 
 export interface FlightOptions {
   /** Envset name the flight captures into / runs against. */
@@ -121,6 +128,8 @@ export interface FlightManifest {
   description: string
   opts: FlightOptions
   status: FlightStatus
+  /** Present while status is `paused` — see FlightPauseReason. */
+  pauseReason?: FlightPauseReason
   /** The stage the conductor is at (or stopped at). Null once terminal. */
   currentStage: FlightStageKey | null
   stages: FlightStage[]
@@ -146,6 +155,9 @@ export interface FlightIndexEntry {
   feature: string
   repoPaths: string[]
   status: FlightStatus
+  /** Present while status is `paused` — lets the pill/toast tell a user pause
+   *  from a stage failure without fetching the full manifest. */
+  pauseReason?: FlightPauseReason
   currentStage: FlightStageKey | null
   /** Slim per-stage status summary (feeds the UI's mini progress rail). */
   stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
@@ -205,6 +217,10 @@ export interface FlightEntryOptions {
   active: boolean
   /** True → mode "continue" is available (paused flight, first open stage). */
   canContinue: boolean
+  /** Whether the flight's intent/repos may be edited right now (non-active
+   *  flights only) — one server verdict shared by the start dialog and the
+   *  Repo Scan stage detail, instead of a duplicated client-side rule. */
+  editable: { description: boolean; repoPaths: boolean }
   prefill: { repoPaths: string[]; description: string; env: string; coverageTarget: number }
   stages: FlightStageEntryOption[]
 }
@@ -221,4 +237,14 @@ export function isActiveFlightStatus(status: FlightStatus): boolean {
 
 export function isTerminalFlightStatus(status: FlightStatus): boolean {
   return status === 'done' || status === 'failed' || status === 'aborted'
+}
+
+/** Feature name derived from a repo path — the ONE slug rule shared by the
+ *  CLI, the MCP start_flight tool, and the new-flight dialog, so all four
+ *  surfaces derive identical names (basename → lowercase → non-alphanumerics
+ *  collapsed to '-'). */
+export function deriveFeatureSlug(repoPath: string): string {
+  const base = repoPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'feature'
+  const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  return slug || 'feature'
 }

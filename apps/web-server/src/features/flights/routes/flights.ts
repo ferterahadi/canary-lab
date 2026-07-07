@@ -15,6 +15,9 @@ import {
   resumeFlight,
   respondToFlightCheckpoint,
   abortFlight,
+  pauseFlight,
+  redoFlight,
+  patchFlightMetadata,
   type FlightConductorDeps,
   type FlightEntryMode,
   type StageAdapters,
@@ -97,6 +100,12 @@ export function buildStageEntryValidator(featuresDir: string) {
   }
 }
 
+/** Expand a leading `~` the way the entry prefill does — feature configs (and
+ *  therefore the dialog's repo picker) may declare repos home-relative. */
+function expandHome(p: string): string {
+  return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p
+}
+
 export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps): Promise<void> {
   const store = deps.flightStore ?? new FlightRunStore(deps.logsDir)
   const conductorDeps: FlightConductorDeps = {
@@ -135,8 +144,14 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         return { error: `feature not set up: ${feature} (no flight record and no feature.config)` }
       }
 
+      // A feature that has never flown always starts from the beginning — the
+      // stage-entry menu unlocks only once a flight record exists (R41). The
+      // start route itself stays permissive for CLI power users.
       const validate = buildStageEntryValidator(deps.featuresDir)
       const stages: FlightStageEntryOption[] = FLIGHT_STAGE_KEYS.map((key) => {
+        if (!manifest && key !== 'similarity') {
+          return { key, allowed: false, reason: 'available after this feature\'s first flight' }
+        }
         const reason = validate({ feature, fromStage: key, env, existing: manifest })
         return reason ? { key, allowed: false, reason } : { key, allowed: true }
       })
@@ -158,6 +173,10 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           : null,
         active: manifest ? isActiveFlightStatus(manifest.status) : false,
         canContinue: manifest?.status === 'paused',
+        editable: {
+          description: !manifest || !isActiveFlightStatus(manifest.status),
+          repoPaths: !manifest || !isActiveFlightStatus(manifest.status),
+        },
         prefill: {
           repoPaths: manifest?.repoPaths ?? configRepoPaths,
           description: manifest?.description ?? '',
@@ -229,11 +248,12 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     }
 
     // Realpath the repo set: it is the single-flight key, so two spellings of
-    // the same directory must collide, not slip past each other.
+    // the same directory must collide, not slip past each other. Configs may
+    // declare repos as `~/...` — expand like the entry prefill does.
     const resolved: string[] = []
     for (const p of repoPaths) {
       try {
-        resolved.push(fs.realpathSync(path.resolve(p)))
+        resolved.push(fs.realpathSync(path.resolve(expandHome(p))))
       } catch {
         reply.code(400)
         return { error: `repo path does not exist: ${p}` }
@@ -308,6 +328,85 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       const { manifest } = resumeFlight(req.params.id, conductorDeps)
       return manifest
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      reply.code(message.includes('not found') ? 404 : 409)
+      return { error: message }
+    }
+  })
+
+  // User-initiated pause: parks the flight resumable and cancels the in-flight
+  // stage work (agent SIGTERM / poll abort). The run stage's run keeps its own
+  // lifecycle — see the run adapter's interrupt note.
+  app.post<{ Params: { id: string } }>('/api/flights/:id/pause', async (req, reply) => {
+    try {
+      return pauseFlight(req.params.id, conductorDeps)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      reply.code(message.includes('not found') ? 404 : 409)
+      return { error: message }
+    }
+  })
+
+  // "Start over" — redo this record from stage 1 using its own stored
+  // intent/repos/options (no client-side body reconstruction).
+  app.post<{ Params: { id: string } }>('/api/flights/:id/redo', async (req, reply) => {
+    try {
+      const { manifest } = redoFlight(req.params.id, conductorDeps)
+      reply.code(201)
+      return manifest
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      reply.code(message.includes('not found') ? 404 : 409)
+      return { error: message }
+    }
+  })
+
+  // Edit a NON-ACTIVE flight's intent/repos (the Repo Scan stage's edit
+  // affordance). A repo-set change resets the stage array — forced redo from
+  // Repo Scan — and leaves the flight paused so the UI offers Continue.
+  app.patch<{
+    Params: { id: string }
+    Body: { description?: string; repoPaths?: string[] } | undefined
+  }>('/api/flights/:id', async (req, reply) => {
+    const body = req.body ?? {}
+    if (body.description === undefined && body.repoPaths === undefined) {
+      reply.code(400)
+      return { error: 'nothing to patch — pass description and/or repoPaths' }
+    }
+    if (body.description !== undefined && (typeof body.description !== 'string' || body.description.trim() === '')) {
+      reply.code(400)
+      return { error: 'description must be a non-empty string' }
+    }
+    let resolved: string[] | undefined
+    if (body.repoPaths !== undefined) {
+      if (!Array.isArray(body.repoPaths) || body.repoPaths.length === 0 || body.repoPaths.some((p) => typeof p !== 'string')) {
+        reply.code(400)
+        return { error: 'repoPaths must be a non-empty string array' }
+      }
+      resolved = []
+      for (const p of body.repoPaths) {
+        try {
+          resolved.push(fs.realpathSync(path.resolve(expandHome(p))))
+        } catch {
+          reply.code(400)
+          return { error: `repo path does not exist: ${p}` }
+        }
+      }
+    }
+    try {
+      return patchFlightMetadata(
+        req.params.id,
+        {
+          ...(body.description !== undefined ? { description: body.description.trim() } : {}),
+          ...(resolved ? { repoPaths: resolved } : {}),
+        },
+        conductorDeps,
+      )
+    } catch (err) {
+      if (err instanceof FlightConflictError) {
+        reply.code(409)
+        return { error: err.message, type: 'flight_conflict', existingFlightId: err.existingFlightId }
+      }
       const message = err instanceof Error ? err.message : String(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message }

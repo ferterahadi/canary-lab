@@ -397,13 +397,16 @@ describe('scout stage', () => {
   const draftJson = (config: string) =>
     '```json\n' + JSON.stringify({ configSource: config, envFiles: [path.join(repoDir, '.env')] }) + '\n```'
 
-  it('drafts, validates the parse, and parks on config-approval', async () => {
+  it('drafts, validates the parse, and settles done — approval parks on scaffold now', async () => {
     const d = deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) })
     const outcome = await scoutStage(d).run(ctxFor(manifest()).ctx)
-    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'config-approval' } })
+    expect(outcome).toMatchObject({
+      kind: 'done',
+      evidence: { configSource: expect.stringContaining('module.exports') },
+    })
   })
 
-  it('yolo skips the approval checkpoint', async () => {
+  it('yolo settles done identically (no checkpoint on scout either way)', async () => {
     const d = deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) })
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } })
     const outcome = await scoutStage(d).run(ctxFor(m).ctx)
@@ -414,16 +417,6 @@ describe('scout stage', () => {
     const d = deps({ spawnAgent: async () => ({ text: draftJson('this is not javascript {{{') }) })
     const outcome = await scoutStage(d).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('does not parse') })
-  })
-
-  it('approve settles the stage with the draft as evidence', async () => {
-    const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
-    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
-    setStage('scout', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
-    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve' })
-    expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining('module.exports') } })
   })
 
   it('falls back to the default agent spawner when spawnAgent is not injected', async () => {
@@ -439,7 +432,7 @@ describe('scout stage', () => {
     process.env.CANARY_LAB_CLAUDE_BIN = script
     try {
       const outcome = await scoutStage(deps({ spawnAgent: undefined })).run(ctxFor(manifest()).ctx)
-      expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'config-approval' } })
+      expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining('module.exports') } })
     } finally {
       if (original === undefined) delete process.env.CANARY_LAB_CLAUDE_BIN
       else process.env.CANARY_LAB_CLAUDE_BIN = original
@@ -450,7 +443,7 @@ describe('scout stage', () => {
     const draftText = '```json\n' + JSON.stringify({ configSource: VALID_CONFIG(), envFiles: 'not-an-array' }) + '\n```'
     const d = deps({ spawnAgent: async () => ({ text: draftText }) })
     const outcome = await scoutStage(d).run(ctxFor(manifest()).ctx)
-    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', data: { envFiles: [] } } })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { envFiles: [] } })
   })
 
   it('fails when the agent returns an empty configSource', async () => {
@@ -459,63 +452,77 @@ describe('scout stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no configSource') })
   })
 
-  it('redraft re-spawns the agent and re-parks on a fresh draft', async () => {
-    let calls = 0
-    const d = deps({
-      spawnAgent: async () => {
-        calls += 1
-        return { text: draftJson(VALID_CONFIG(calls === 1 ? 'checkout' : 'checkout-redrafted')) }
-      },
+  // LEGACY release path: manifests that parked on scout's config-approval
+  // BEFORE the checkpoint moved to scaffold (remove after one release).
+  describe('legacy config-approval release', () => {
+    const legacyParked = (draftConfig: string) => {
+      const { ctx, setStage } = ctxFor(manifest())
+      const draft = { configSource: draftConfig, envFiles: [] }
+      setStage('scout', {
+        status: 'waiting-for-approval',
+        checkpoint: { kind: 'config-approval', message: 'legacy', options: ['approve', 'redraft', 'reject'], data: draft },
+      })
+      return { ctx }
+    }
+
+    it('approve settles the stage with the stored draft as evidence', async () => {
+      const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
+      const { ctx } = legacyParked(VALID_CONFIG())
+      const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve' })
+      expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining('module.exports') } })
     })
-    const adapter = scoutStage(d)
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
-    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
-    setStage('scout', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
-    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'redraft' })
-    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'config-approval' } })
-    expect(calls).toBe(2)
-  })
 
-  it('reject fails the stage', async () => {
-    const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
-    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
-    setStage('scout', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
-    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'reject' })
-    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('rejected at the approval checkpoint') })
-  })
+    it('approve accepts a user-edited configSource', async () => {
+      const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
+      const { ctx } = legacyParked(VALID_CONFIG())
+      const edited = VALID_CONFIG('checkout-edited')
+      const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve', data: { configSource: edited } })
+      expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining('checkout-edited') } })
+    })
 
-  it('an unrecognized checkpoint choice re-parks on the same checkpoint', async () => {
-    const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
-    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
-    setStage('scout', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
-    const outcome = await adapter.onCheckpointResponse!(ctx, {})
-    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'config-approval' } })
-  })
+    it('approve fails when the user-edited configSource does not parse', async () => {
+      const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
+      const { ctx } = legacyParked(VALID_CONFIG())
+      const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve', data: { configSource: 'not javascript {{{' } })
+      expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('does not parse') })
+    })
 
-  it('approve accepts a user-edited configSource from the approval UI', async () => {
-    const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
-    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
-    setStage('scout', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
-    const edited = VALID_CONFIG('checkout-edited')
-    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve', data: { configSource: edited } })
-    expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining("checkout-edited") } })
-  })
+    it('redraft re-spawns the agent and settles done (scaffold parks the new approval)', async () => {
+      let calls = 0
+      const adapter = scoutStage(
+        deps({
+          spawnAgent: async () => {
+            calls += 1
+            return { text: draftJson(VALID_CONFIG('checkout-redrafted')) }
+          },
+        }),
+      )
+      const { ctx } = legacyParked(VALID_CONFIG())
+      const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'redraft' })
+      expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining('checkout-redrafted') } })
+      expect(calls).toBe(1)
+    })
 
-  it('approve fails when the user-edited configSource does not parse', async () => {
-    const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
-    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
-    setStage('scout', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
-    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve', data: { configSource: 'not javascript {{{' } })
-    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('does not parse') })
+    it('reject fails the stage', async () => {
+      const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
+      const { ctx } = legacyParked(VALID_CONFIG())
+      const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'reject' })
+      expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('rejected at the approval checkpoint') })
+    })
+
+    it('an unrecognized choice re-parks on the same stored checkpoint', async () => {
+      const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
+      const { ctx } = legacyParked(VALID_CONFIG())
+      const outcome = await adapter.onCheckpointResponse!(ctx, {})
+      expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'config-approval' } })
+    })
+
+    it('a response with no stored checkpoint re-runs the scan from scratch', async () => {
+      const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
+      const { ctx } = ctxFor(manifest())
+      const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'whatever' })
+      expect(outcome.kind).toBe('done')
+    })
   })
 })
 
@@ -527,18 +534,80 @@ describe('scaffold stage', () => {
     }
   }
 
-  it('scaffolds the feature and lays the approved config over the skeleton', async () => {
+  const yoloManifest = (over: Partial<FlightManifest> = {}) =>
+    manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true }, ...over })
+
+  it('scaffolds the feature, lays the config over the skeleton, and parks on config-approval', async () => {
     const { ctx } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
     const outcome = await scaffoldStage(deps()).run(ctx)
-    expect(outcome.kind).toBe('done')
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'config-approval', options: ['approve', 'redraft'] },
+    })
     const written = fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8')
     expect(written).toContain("name: 'checkout'")
     expect(written).toContain('startCommands')
   })
 
+  it('yolo skips the approval checkpoint', async () => {
+    const { ctx } = ctxFor(withScoutEvidence(yoloManifest(), VALID_CONFIG()))
+    const outcome = await scaffoldStage(deps()).run(ctx)
+    expect(outcome.kind).toBe('done')
+  })
+
+  it('approve re-reads the CURRENT on-disk config (edits made while parked count)', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    // The user edited the on-disk config (digest / FeatureConfigEditor) while parked.
+    const configPath = path.join(featuresDir, 'checkout', 'feature.config.cjs')
+    fs.writeFileSync(configPath, fs.readFileSync(configPath, 'utf-8').replace('startCommands', 'startCommands /* edited */'))
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { approved: true } })
+  })
+
+  it('approve re-parks with the parse error when the on-disk config is broken (never fails the flight)', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'not javascript {{{')
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve' })
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'config-approval', data: { error: expect.any(String) } },
+    })
+  })
+
+  it('a configSource in the response data writes through to disk before validation (MCP/CLI path)', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const edited = VALID_CONFIG('checkout')
+      .replace('startCommands', 'startCommands /* via-mcp */')
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve', data: { configSource: edited } })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { approved: true } })
+    expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8')).toContain('via-mcp')
+  })
+
+  it('redraft rewinds to scout for a fresh draft', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'redraft' })
+    expect(outcome).toMatchObject({ kind: 'rewind', to: 'scout' })
+  })
+
   it('never overwrites an existing feature — picks a free name and re-points the flight', async () => {
     writeFeatureConfigCjs('checkout', path.join(tmpDir, 'other-repo'))
-    const { ctx, current } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const { ctx, current } = ctxFor(withScoutEvidence(yoloManifest(), VALID_CONFIG()))
     const outcome = await scaffoldStage(deps()).run(ctx)
     expect(outcome.kind).toBe('done')
     expect(current().feature).toBe('checkout-2')
@@ -548,22 +617,36 @@ describe('scaffold stage', () => {
   })
 
   it('is idempotent on resume', async () => {
-    const m = withScoutEvidence(manifest(), VALID_CONFIG())
-    await scaffoldStage(deps()).run(ctxFor(m).ctx)
-    const again = await scaffoldStage(deps()).run(ctxFor(m).ctx)
+    const m = withScoutEvidence(yoloManifest(), VALID_CONFIG())
+    const first = ctxFor(m)
+    await scaffoldStage(deps()).run(first.ctx)
+    const again = await scaffoldStage(deps()).run(first.ctx)
     expect(again).toMatchObject({ kind: 'done', evidence: { reused: true } })
   })
 
-  it('fails when there is no approved scout draft to scaffold from', async () => {
+  it('recognizes its own feature via the scaffold marker even after the config was edited', async () => {
+    const m = withScoutEvidence(yoloManifest(), VALID_CONFIG())
+    const { ctx, current } = ctxFor(m)
+    await scaffoldStage(deps()).run(ctx)
+    // The user edited the config while the flight was paused — the marker says
+    // the feature is this flight's own; no free-name fork.
+    const configPath = path.join(featuresDir, 'checkout', 'feature.config.cjs')
+    fs.writeFileSync(configPath, fs.readFileSync(configPath, 'utf-8').replace('startCommands', 'startCommands /* edited */'))
+    const again = await scaffoldStage(deps()).run(ctx)
+    expect(again).toMatchObject({ kind: 'done', evidence: { reused: true } })
+    expect(current().feature).toBe('checkout')
+  })
+
+  it('fails when there is no scout draft to scaffold from', async () => {
     const { ctx } = ctxFor(manifest())
     const outcome = await scaffoldStage(deps()).run(ctx)
-    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no approved scout draft') })
+    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no scout draft') })
   })
 
   it('keeps incrementing the free-name suffix past -2 when it too is taken', async () => {
     writeFeatureConfigCjs('checkout', path.join(tmpDir, 'other-repo'))
     writeFeatureConfigCjs('checkout-2', path.join(tmpDir, 'other-repo-2'))
-    const { ctx, current } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const { ctx, current } = ctxFor(withScoutEvidence(yoloManifest(), VALID_CONFIG()))
     const outcome = await scaffoldStage(deps()).run(ctx)
     expect(outcome.kind).toBe('done')
     expect(current().feature).toBe('checkout-3')
@@ -864,10 +947,53 @@ describe('docs stage', () => {
     fs.mkdirSync(path.join(featuresDir, 'checkout', 'docs'), { recursive: true })
   })
 
-  it('is done immediately when docs already exist (dropped / MCP path)', async () => {
+  it('parks even when docs already exist — with `continue` as the release (requirements always pause)', async () => {
     fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'prd.md'), '# PRD\nreal doc')
     const outcome = await docsStage(deps()).run(ctxFor(manifest()).ctx)
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'prd-source', options: expect.arrayContaining(['continue']) },
+    })
+  })
+
+  it('continue releases the checkpoint with the present docs', async () => {
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'prd.md'), '# PRD\nreal doc')
+    const adapter = docsStage(deps())
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'continue' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'user-confirmed', docs: ['prd.md'] } })
+  })
+
+  it('continue with no docs present re-parks instead of settling empty', async () => {
+    const adapter = docsStage(deps())
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'continue' })
+    expect(outcome.kind).toBe('checkpoint')
+  })
+
+  it('yolo with existing docs settles done without parking', async () => {
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'prd.md'), '# PRD\nreal doc')
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } })
+    const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'existing' } })
+  })
+
+  it('symlinks a local doc path referenced in the intent into docs/ (rung 0.5)', async () => {
+    const prdPath = path.join(tmpDir, 'external-prd.md')
+    fs.writeFileSync(prdPath, '# External PRD\nthe checkout flow')
+    const m = manifest({ description: `test checkout, refer to ${prdPath}` })
+    const parked = await docsStage(deps()).run(ctxFor(m).ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect((parked.checkpoint.data as { linked: string[] }).linked.length).toBe(1)
+    const dest = path.join(featuresDir, 'checkout', 'docs', 'external-prd.md')
+    expect(fs.lstatSync(dest).isSymbolicLink()).toBe(true)
+    expect(fs.readFileSync(dest, 'utf-8')).toContain('External PRD')
   })
 
   it('yolo auto-gathers repo docs (README) into the feature', async () => {
@@ -885,7 +1011,7 @@ describe('docs stage', () => {
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'description-only', docs: ['description.md'] } })
   })
 
-  it('parks on prd-source otherwise, and a drop while parked wins the hierarchy', async () => {
+  it('parks on prd-source otherwise; a drop while parked releases via continue', async () => {
     const adapter = docsStage(deps())
     const { ctx, setStage } = ctxFor(manifest())
     const parked = await adapter.run(ctx)
@@ -893,8 +1019,8 @@ describe('docs stage', () => {
     expect(parked.checkpoint.kind).toBe('prd-source')
     setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'dropped.md'), '# Dropped PRD')
-    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'use-repo-docs' })
-    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'dropped' } })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'continue' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'user-confirmed', docs: ['dropped.md'] } })
   })
 
   it('is done immediately when the docs dir does not exist yet (userDocs catch)', async () => {
@@ -2035,6 +2161,61 @@ describe('run + heal stages', () => {
 })
 
 describe('evaluation-export stage', () => {
+  /** Non-yolo flights park on export-mode first; these mechanics tests run
+   *  yolo (raw) — the checkpoint itself is covered below. */
+  const yoloRun = (links?: { runId?: string; evaluationZip?: string }) =>
+    manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true }, ...(links ? { links } : {}) })
+
+  it('parks on export-mode (raw vs localized) before starting, non-yolo', async () => {
+    const outcome = await evaluationExportStage(deps()).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'export-mode', options: ['raw', 'localized'], data: { runId: 'run-1' } },
+    })
+  })
+
+  it('the chosen mode is passed through to the export engine', async () => {
+    const calls: InjectCall[] = []
+    const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-loc')
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
+        writeEvaluationExportTask(logsDir, {
+          taskId: 'eval-task-loc',
+          runId: 'run-1',
+          feature: 'checkout',
+          mode: 'localized',
+          status: 'completed',
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z',
+          downloadReady: true,
+          archiveBase: 'canary-lab-evaluation-checkout-run-1',
+        } as never)
+        fs.writeFileSync(path.join(taskDir, 'export.zip'), 'PK')
+        return { statusCode: 202, body: { taskId: 'eval-task-loc' } }
+      }
+      return undefined
+    }, calls)
+    const adapter = evaluationExportStage(deps({ inject }))
+    const { ctx, setStage } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('evaluation-export', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'localized' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { mode: 'localized' } })
+    const start = calls.find((c) => c.url.endsWith('/evaluation-export'))
+    expect(start?.payload).toMatchObject({ mode: 'localized' })
+  })
+
+  it('an unrecognized export-mode choice re-parks', async () => {
+    const adapter = evaluationExportStage(deps())
+    const { ctx, setStage } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('evaluation-export', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'shiny' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'export-mode' } })
+  })
+
   it('drives the export task and settles only when the archive exists on disk', async () => {
     const taskDir = path.join(logsDir, 'evaluation-exports', 'eval-task-1')
     const inject = makeInject((call) => {
@@ -2055,7 +2236,7 @@ describe('evaluation-export stage', () => {
       }
       return undefined
     })
-    const { ctx, current } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+    const { ctx, current } = ctxFor(yoloRun({ runId: 'run-1' }))
     const outcome = await evaluationExportStage(deps({ inject })).run(ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { taskId: 'eval-task-1' } })
     expect(current().links?.evaluationZip).toBe(path.join(taskDir, 'export.zip'))
@@ -2067,7 +2248,7 @@ describe('evaluation-export stage', () => {
 
     const zip = path.join(tmpDir, 'export.zip')
     fs.writeFileSync(zip, 'PK')
-    const m = manifest({ links: { runId: 'run-1', evaluationZip: zip } })
+    const m = yoloRun({ runId: 'run-1', evaluationZip: zip })
     const reused = await evaluationExportStage(deps()).run(ctxFor(m).ctx)
     expect(reused).toMatchObject({ kind: 'done', evidence: { reused: true } })
   })
@@ -2077,7 +2258,7 @@ describe('evaluation-export stage', () => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) return { statusCode: 400, body: { error: 'bad mode' } }
       return undefined
     })
-    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
+    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(yoloRun({ runId: 'run-1' })).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('evaluation export rejected') })
   })
 
@@ -2086,7 +2267,7 @@ describe('evaluation-export stage', () => {
       if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) return { statusCode: 202, body: {} }
       return undefined
     })
-    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
+    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(yoloRun({ runId: 'run-1' })).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('evaluation export rejected') })
   })
 
@@ -2109,7 +2290,7 @@ describe('evaluation-export stage', () => {
       }
       return undefined
     })
-    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
+    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(yoloRun({ runId: 'run-1' })).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('zip step exploded') })
   })
 
@@ -2132,7 +2313,7 @@ describe('evaluation-export stage', () => {
       }
       return undefined
     })
-    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
+    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(yoloRun({ runId: 'run-1' })).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: 'evaluation export failed: archiver crashed mid-stream' })
   })
 
@@ -2154,7 +2335,7 @@ describe('evaluation-export stage', () => {
       }
       return undefined
     })
-    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
+    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(yoloRun({ runId: 'run-1' })).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: 'evaluation export failed: failed' })
   })
 
@@ -2177,7 +2358,7 @@ describe('evaluation-export stage', () => {
       }
       return undefined
     })
-    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
+    const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(yoloRun({ runId: 'run-1' })).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no archive at') })
   })
 })

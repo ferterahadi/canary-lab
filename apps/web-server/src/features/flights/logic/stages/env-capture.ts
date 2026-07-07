@@ -55,7 +55,7 @@ async function bootVerify(
         if (services.some((s) => s.status === 'timeout')) return true
         return services.length > 0 && services.every((s) => s.status === 'ready')
       },
-      { what: `boot run ${runId}`, timeoutMs: BOOT_VERIFY_TIMEOUT_MS },
+      { what: `boot run ${runId}`, timeoutMs: BOOT_VERIFY_TIMEOUT_MS, signal: ctx.signal },
     )
     const evidence: BootEvidence = {
       runId,

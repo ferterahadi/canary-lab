@@ -34,19 +34,26 @@ export function isGeneratedDoc(relPath: string): boolean {
 }
 
 /**
- * Read all source docs (`*.md`, excluding generated `_prd-*`) under
- * features/<feature>/docs/. Missing docs dir → empty collection (stable hash).
+ * Read all source docs (`*.md`/`*.markdown`/`*.txt`, excluding generated
+ * `_prd-*`) under features/<feature>/docs/. Missing docs dir → empty
+ * collection (stable hash). Symlinked docs are read through the link (the
+ * user's original is the live source); a dangling symlink is skipped — it
+ * must not crash the PRD summary, the docs rail lists it as broken instead.
  */
 export function readDocsCollection(featureDir: string): DocsCollection {
   const docsDir = docsDirFor(featureDir)
   const entries: DocEntry[] = []
   if (fs.existsSync(docsDir)) {
     for (const name of fs.readdirSync(docsDir).sort()) {
-      if (!name.toLowerCase().endsWith('.md')) continue
+      if (!/\.(md|markdown|txt)$/i.test(name)) continue
       if (isGeneratedDoc(name)) continue
       const full = path.join(docsDir, name)
-      if (!fs.statSync(full).isFile()) continue
-      entries.push({ relPath: name, content: fs.readFileSync(full, 'utf-8') })
+      try {
+        if (!fs.statSync(full).isFile()) continue
+        entries.push({ relPath: name, content: fs.readFileSync(full, 'utf-8') })
+      } catch {
+        /* dangling symlink — skip, surfaced as broken by the docs listing */
+      }
     }
   }
   return { docsDir, entries, docsHash: computeDocsHash(entries) }

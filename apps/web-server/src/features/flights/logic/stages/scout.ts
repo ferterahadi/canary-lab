@@ -8,8 +8,10 @@ import { extractJson, type FlightStageDeps, defaultSpawnAgent } from './context'
 // and draft a feature.config.cjs (dev commands, port slots, health checks) +
 // the env files the app needs. The agent proposes; the harness validates the
 // draft parses (config AST) here and proves it boots later (env-capture's
-// dry-run boot). Non-yolo flights park on config-approval before anything is
-// written to the workspace.
+// dry-run boot). Scout always completes — the config-approval checkpoint
+// parks AFTER scaffold writes the real feature, so approval targets the
+// on-disk feature.config.cjs (editable in place + via FeatureConfigEditor,
+// two-way synced) instead of a draft string only the checkpoint holds.
 
 export interface ScoutDraft {
   configSource: string
@@ -60,32 +62,25 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'scout'),
       onChunk: ctx.appendLog,
+      signal: ctx.signal,
     })
     const draft = extractJson<ScoutDraft>(text)
     draft.envFiles = Array.isArray(draft.envFiles) ? draft.envFiles.filter((f) => typeof f === 'string') : []
     const invalid = validateDraft(draft)
     if (invalid) return { kind: 'failed', error: invalid }
-
-    if (m.opts.yolo) return { kind: 'done', evidence: draft }
-    return {
-      kind: 'checkpoint',
-      checkpoint: {
-        kind: 'config-approval',
-        message: `Scout drafted feature.config.cjs for "${m.feature}" (${draft.envFiles.length} env file(s) detected). Approve it to scaffold the feature — the config gets boot-verified after env capture.`,
-        options: ['approve', 'redraft', 'reject'],
-        data: draft,
-      },
-    }
+    return { kind: 'done', evidence: draft }
   }
 
   return {
     run: draftAndValidate,
+    // LEGACY release path (remove after one release): manifests that parked on
+    // scout's config-approval BEFORE the checkpoint moved to scaffold still
+    // release correctly through the old responder.
     async onCheckpointResponse(ctx, response) {
       const stage = ctx.manifest().stages.find((s) => s.key === 'scout')
       const draft = stage?.checkpoint?.data as ScoutDraft | undefined
       const choice = response.choice ?? ''
       if (choice === 'approve' && draft) {
-        // The user may have hand-tweaked the draft in the approval UI.
         const edited = (response.data as Partial<ScoutDraft> | undefined)?.configSource
         const final: ScoutDraft = edited ? { ...draft, configSource: edited } : draft
         const invalid = validateDraft(final)
@@ -94,7 +89,8 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       }
       if (choice === 'redraft') return draftAndValidate(ctx)
       if (choice === 'reject') return { kind: 'failed', error: 'config draft rejected at the approval checkpoint' }
-      return { kind: 'checkpoint', checkpoint: stage!.checkpoint! }
+      if (!stage?.checkpoint) return draftAndValidate(ctx)
+      return { kind: 'checkpoint', checkpoint: stage.checkpoint }
     },
   }
 }
