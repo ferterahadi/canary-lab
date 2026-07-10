@@ -10,6 +10,7 @@ Judgment rules:
 - Hard cap: at most 6 features. If the repo suggests more, merge the smallest related domains.
 - Each feature gets: a short slug `name` (lowercase, hyphens — e.g. "checkout-flow"), a `description` written as a self-contained testing intent for that feature alone (it becomes the flight's intent verbatim — make it specific about what to exercise and what done looks like), and a one-line `scope` saying what's in and out.
 - When you propose more than one feature, also propose a shared `group` slug (e.g. the repo name) on every feature so they render together.
+- When `split` is false, `features` holds exactly ONE entry, and the `group` key is omitted entirely.
 
 Reply with ONLY a JSON object in a ```json fence, shaped exactly:
 { "split": <true when more than one feature>, "features": [{ "name": "<slug>", "description": "<self-contained testing intent>", "scope": "<one line>", "group": "<shared slug, only when split>" }] }

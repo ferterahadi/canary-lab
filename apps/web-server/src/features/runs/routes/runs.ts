@@ -204,13 +204,15 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(400)
       return { error: healAgent.error }
     }
-    // Heal-claim policy: only Desktop clients may own a heal claim. A
-    // disallowed (CLI / 'other') client still triggers an external-origin run
-    // (so it uses External-client heal, not the project Heal Agent) — it just
-    // can't claim, so it starts with `claimable: false` and waits for a
-    // Desktop/UI drive. A request with no healAgent body (e.g. the UI Run
-    // button) is left untouched and uses the project config. The reuse-active
-    // path below funnels through broker.claim, which rejects on its own.
+    // Heal-claim policy: only runner-spawned PTY agents Canary Lab launches
+    // itself (claude-pty/codex-pty) are denied a heal claim. A disallowed
+    // client still triggers an external-origin run (so it uses External-client
+    // heal, not the project Heal Agent) — it just can't claim, so it starts
+    // with `claimable: false` and waits for an interactive Claude/Codex client
+    // or the web UI to drive it. A request with no healAgent body (e.g. the UI
+    // Run button) is left untouched and uses the project config. The
+    // reuse-active path below funnels through broker.claim, which rejects on
+    // its own.
     const claimSuppressed = !!healAgent && !('error' in healAgent) && !isHealClaimAllowed(healAgent.clientKind)
     const externalRunReq = healAgent ? { ...healAgent, claimable: !claimSuppressed } : undefined
     if (healAgent) {
@@ -233,7 +235,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
             ? {
                 claimSuppressed: true,
                 message:
-                  'Heal claiming is restricted to Claude/Codex Desktop clients. CLI clients can run/verify but cannot own a heal claim.',
+                  'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself). Interactive Claude/Codex clients (Desktop or CLI) can run, verify, and own a heal claim.',
               }
             : {}),
           ...(req.body?.forceNew
@@ -278,7 +280,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
           ? {
               claimSuppressed: true,
               message:
-                'Heal claiming is restricted to Claude/Codex Desktop clients; this run started without a heal claim. Drive heal from Desktop or the web UI.',
+                'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself), so this run started without a heal claim. Drive heal from an interactive Claude/Codex client or the web UI.',
             }
           : {}),
       }

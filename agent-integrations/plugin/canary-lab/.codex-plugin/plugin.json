@@ -3,6 +3,6 @@
   "version": "1.0.0",
   "interface": {
     "displayName": "Canary Lab",
-    "shortDescription": "Run and heal Canary Lab features through MCP."
+    "shortDescription": "Run, heal, verify, and evaluate product features through the Canary Lab MCP (flight pipeline + focused workflows)."
   }
 }

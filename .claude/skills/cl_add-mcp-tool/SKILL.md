@@ -17,15 +17,16 @@ Keep-in-Sync Invariants](../../../docs/ARCHITECTURE.md#keep-in-sync-invariants).
    tools call `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
 2. **Add the name to the `CanaryLabMcpToolName` union** (top of `tools.ts`).
 3. **Add to every workflow array the tool genuinely belongs to (usually one)** —
-   `REPAIR_TOOLS`, `VERIFY_TOOLS`, `AUTHOR_TOOLS`, `PORTIFY_TOOLS`, or
-   `FULL_ONLY_TOOLS` (all in `tools.ts`). Cross-workflow tools appear in several
-   arrays (e.g. `list_features`). `LIFECYCLE_TOOLS` and `FULL_TOOLS` are both
-   computed deduped unions — never edit either (lifecycle = all workflows minus
-   portify; full = lifecycle + portify). `registerCanaryLabTools` throws at
-   registration if a tool is in no profile.
+   `REPAIR_TOOLS`, `VERIFY_TOOLS`, `AUTHOR_TOOLS`, `COVERAGE_TOOLS`,
+   `EXPORT_TOOLS`, `FLIGHT_TOOLS`, `PORTIFY_TOOLS`, or `FULL_ONLY_TOOLS` (all in
+   `tools.ts`). Cross-workflow tools appear in several arrays (e.g.
+   `list_features`). `LIFECYCLE_TOOLS` and `FULL_TOOLS` are both computed
+   deduped unions — never edit either (lifecycle = repair + verify + author +
+   coverage + export + flight + full_only; full = lifecycle + portify).
+   `registerCanaryLabTools` throws at registration if a tool is in no profile.
 4. **Mirror the name in `apps/web-server/mcp/server.smoke.test.ts`** — the test
-   keeps its own copies of the profile arrays so SDK shape changes are caught.
-   Update every array you touched in step 3.
+   keeps its own copies of all eight workflow arrays so SDK shape changes are
+   caught. Update every array you touched in step 3.
 5. **Destructive tool?** Gate on `confirm: z.literal(true)` in the input schema
    (pattern: `abort_run`, `write_envset`).
 6. **Run-following tool?** Append `nextSteps` via `healWaitNext` so result-driven

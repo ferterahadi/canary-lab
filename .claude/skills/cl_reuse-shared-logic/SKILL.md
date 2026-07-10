@@ -36,14 +36,14 @@ slightly different" is how five slightly-different copies are born.
 **Every** agent-spawn site composes `runAgentProcess`
 (`apps/web-server/src/features/agent-sessions/logic/agent-process.ts`) instead of
 re-implementing "spawn → pipe stdout → tee → bump idle → cancel → recover answer".
-Current sites (relative to `apps/web-server/src/features/`; verify with
-`grep -rln runAgentProcess apps/web-server/src --include='*.ts' | grep -v '\.test\.'`):
+Current sites, as of 2026-07 (relative to `apps/web-server/src/features/`; the
+grep below is the source of truth over this list — re-run it, don't trust the
+list alone: `grep -rln runAgentProcess apps/web-server/src --include='*.ts' | grep -v '\.test\.'`):
 
 - `wizard/logic/wizard-agent-runner.ts`, `coverage/logic/coverage/annotate-engine.ts`,
   `coverage/logic/coverage/prd-summary.ts`, `evaluation/logic/test-review-export.ts`,
   `portify/logic/runtime/agent.ts`, `benchmark/logic/runtime/runner.ts` (the
-  benchmark's sabotage agent), `flights/logic/stages/context.ts`,
-  `runs/logic/heal/heal-claim-policy.ts`
+  benchmark's sabotage agent), `flights/logic/stages/context.ts`
 
 The primitive owns the shared core: spawn; pipe + tee stdout/stderr; bump the idle
 clock on every chunk; `startIdleTimer` with the session-JSONL-growth backstop. The

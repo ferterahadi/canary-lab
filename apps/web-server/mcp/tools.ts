@@ -1226,8 +1226,8 @@ export function registerCanaryLabTools(
     return asJsonResult({
       task: evaluationExportTaskView(task),
       reportSchema: externalEvaluationReportSchema(detail),
-      runSnapshotVia: `get_run_snapshot("${runId}")`,
-      nextSteps: ['call get_run_snapshot(runId) if you need the run summary/failures while authoring', 'author structured evaluation wording', 'submit_external_evaluation_export'],
+      runSnapshotVia: `get_run("${runId}")`,
+      nextSteps: ['call get_run(runId) if you need the run summary/failures while authoring', 'author structured evaluation wording', 'submit_external_evaluation_export'],
     })
   })
 
@@ -2091,7 +2091,7 @@ export function registerCanaryLabTools(
     if (!result.accepted) {
       if (result.reason === 'client-kind-not-allowed') {
         return errorResult(
-          `client-kind-not-allowed: heal claiming is restricted to Claude/Codex Desktop (this client is ${result.clientKind}). The run can still be run/verified; drive heal from Desktop or the web UI.`,
+          `client-kind-not-allowed: heal claiming is open to interactive Claude/Codex clients (Desktop or CLI); it is suppressed only for runner-spawned PTY agents Canary Lab launches itself (this client is ${result.clientKind}). The run can still be run/verified; drive heal from an interactive client or the web UI.`,
         )
       }
       return errorResult(`already-claimed by session ${result.currentSession.sessionId} (${result.currentSession.clientKind})`)

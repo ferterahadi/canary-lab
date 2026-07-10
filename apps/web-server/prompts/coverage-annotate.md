@@ -15,6 +15,8 @@ For each mapped test, also state which path(s) it exercises:
 - `sad` — the unhappy / negative / error flow (invalid input, failure, denial).
 - `edge` — a boundary or extreme case within a path.
 
+Always include `pathTypes` on every mapping.
+
 ## Variants
 
 {{variantInstructions}}
@@ -60,3 +62,5 @@ good the test is):
     }
   ]
 }
+
+Your entire final message must be the JSON object — nothing before or after it.

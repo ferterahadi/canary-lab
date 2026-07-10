@@ -42,10 +42,15 @@ Nothing in this chain polls. Nothing auto-retries. If you don't call
 | `journal-changed` (carries `runId`) | A run's journal file changed | bump `journalRefreshKeys[runId]` |
 | `draft-created/updated/deleted` | Wizard draft mutations | draft context reducer |
 | `evaluation-export-*` | Eval export task lifecycle | export task context |
+| `version-changed` | Registry `latest` moved, or an update job finished | `refreshVersion()` |
+| `flights-changed` | A flight's state changed (stage advance, checkpoint, completion) | `refreshFlights()` + bump `flightsRefreshKey` |
 
 Pick the narrowest type that fits. `features-changed` is a catch-all for the feature
 list; `coverage-changed` is scoped to coverage headlines. Prefer scoped events — they
 avoid unnecessary re-fetches across all features.
+
+This table is a snapshot; the authoritative union is `WorkspaceEvent` in
+`apps/web-server/src/shared/workspace-events.ts` — read it before adding a type.
 
 ## Checklist — adding a new mutation
 

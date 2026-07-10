@@ -29,7 +29,7 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 | Full-screen workspace view | `CoverageLedgerPage`, `LogCleanupPage` (`fixed inset-0`, header bar + panes) |
 | Modal with tabs | `FeatureConfigEditor` (`.cl-modal-backdrop` + `.cl-modal` + `<nav>` tabs) |
 | Status-bar launcher | the `*Pill` components in `GlobalStatusBar` |
-| Background-task surface | the Portify pill + dialog (see `cl_async-task-ux`) |
+| Background-task surface | `FlightsPill` + `FlightPage` (`features/flights/components/`) (see `cl_async-task-ux`) |
 | Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + the agent timeline via `AgentSessionView`, always on) that OWNS the view while a job runs; not a banner over a dimmed result |
 | Live agent progress / CLI output | **`AgentSessionView`** — never a raw log `<pre>` |
 

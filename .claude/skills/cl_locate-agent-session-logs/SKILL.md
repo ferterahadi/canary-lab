@@ -58,12 +58,14 @@ otherwise.)
   resolvers. If a literal appears anywhere else on a path that will be *read
   back* to find a log, it's a stray; fold it into the resolver. (Two such
   strays existed: `portify/agent.ts` and `agent-session-tailer.ts`.)
-  Known occurrences *outside* this rule's scope: `scripts/agent.ts:177,184`
-  (skill-install destinations) and `scripts/setup.ts:208,211` (CLI-presence
-  detection). These are install-time paths, not session-log lookups — but note
-  they currently ignore `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, so a relocated
-  config home gets skills installed under the default dotdir. If you touch
-  them, route through the resolvers rather than adding more literals.
+  Known occurrences *outside* this rule's scope: the skill-install destination
+  paths in `scripts/agent.ts` (`path.join(home, '.codex'|'.claude', 'skills',
+  …)`) and the CLI-presence detection checks in `scripts/setup.ts`
+  (`fs.existsSync(path.join(homeDir, '.codex'|'.claude'))`). These are
+  install-time paths, not session-log lookups — but note they currently
+  ignore `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, so a relocated config home gets
+  skills installed under the default dotdir. If you touch them, route through
+  the resolvers rather than adding more literals.
 
 ## Why lookup stays correct: everything keys off `process.env`
 
