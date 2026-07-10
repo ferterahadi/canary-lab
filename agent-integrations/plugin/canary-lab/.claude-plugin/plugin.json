@@ -1,7 +1,7 @@
 {
   "name": "canary-lab",
   "version": "1.0.0",
-  "description": "Run and heal Canary Lab features through MCP.",
+  "description": "Run, heal, verify, and evaluate product features through the Canary Lab MCP (flight pipeline + focused workflows).",
   "author": {
     "name": "Canary Lab"
   }

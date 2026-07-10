@@ -120,7 +120,7 @@ export async function externalHealRoutes(
             reason: result.reason,
             clientKind: result.clientKind,
             message:
-              'Heal claiming is restricted to Claude/Codex Desktop clients. CLI clients can run and verify, but cannot own a heal claim.',
+              'Heal claiming is blocked for runner-spawned agents (the benchmark/portify PTY sessions Canary Lab launches itself). Interactive Claude/Codex clients (Desktop or CLI) can run, verify, and own a heal claim.',
           }
         }
         reply.code(409)

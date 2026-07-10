@@ -13,7 +13,8 @@ You are deliberately breaking this app to benchmark an AI repair loop. Introduce
 **three to five interacting** defects across multiple functions / handlers in the
 application / service code. Aim for failures that compound rather than stack
 independently — e.g. a wrong status, a skipped side effect, and a bad value that
-together confuse the symptom.
+together confuse the symptom. E.g. bug A corrupts a value that bug B then
+mis-handles, so the visible symptom points at neither.
 
 Requirements:
 

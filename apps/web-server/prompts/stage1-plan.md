@@ -51,6 +51,8 @@ Each array item has exactly four fields:
 - `actions` — 1–4 short strings describing the concrete things the test will do. May be slightly more technical (button labels, field names) but should still read as instructions, not code. Example: `["Click the 'Sign in' button", "Type the seeded customer email into the email field"]`.
 - `expectedOutcome` — a single sentence naming a durable observable result.
 
+Do not add any other keys to a plan item.
+
 ## Inputs
 
 ### Optional PRD / user context

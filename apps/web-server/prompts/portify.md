@@ -61,7 +61,7 @@ The health check must prove THIS boot bound ITS injected port:
 
 - Point the `healthCheck` at the primary externally-reachable service's injected port via `${port.<slot>}`.
 - Prefer an endpoint that reflects only whether the service's own HTTP server is up — decoupled from whether downstream dependencies are healthy. If the existing health route returns non-2xx when a dependency is down, add (or target) a lightweight liveness route (e.g. `/healthz` returning `{ status: 'OK' }`) so a slow/unavailable dependency doesn't fail the port check.
-- Give multi-service stacks a generous `deadlineMs` (the whole stack has to come up), and a `timeoutMs` that tolerates a cold start.
+- Give multi-service stacks a generous `deadlineMs` (the whole stack has to come up), and a `timeoutMs` that tolerates a cold start (e.g. `deadlineMs: 120000, timeoutMs: 5000`).
 
 ## 6. Don't forget config files and env defaults
 
@@ -108,6 +108,22 @@ Output a concise accounting of EVERY port-like construct you encountered — eac
 - **Left untouched** — with a ONE-LINE reason each: e.g. "dead code: no production importers, only referenced by its own `.spec.ts`"; "already env-driven"; "shared RabbitMQ broker, not per-run"; "OAuth redirect pre-registered — runs one at a time"; "test file".
 
 This report is for the human reviewer. Make a deliberately-skipped duplicate distinguishable from an oversight — a port-shaped construct you didn't trace is a bug, not a skip.
+
+Use this skeleton:
+
+```
+Portified:
+- ...
+
+Left untouched (already env-driven):
+- ...
+
+Left untouched (needs discussion):
+- ...
+
+Verification notes:
+- ...
+```
 
 ---
 

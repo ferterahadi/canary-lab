@@ -18,8 +18,9 @@ Open gaps to close{{iterationNote}}:
 Hard rules:
 - Create or rewrite spec files directly with your Read/Write/Edit tools. Files live directly under {{featureDir}}/e2e/ and end in .spec.ts.
 - Every spec imports: import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
-- Tag each test title with the requirement + path it covers: "@req-<id> @path-<happy|sad|edge>" (and "@variant-<value>" when the requirement spans variants). One test may carry several tags.
-- Tests hit the app through the URLs/ports the feature config boots — use process.env like the existing specs do; never hardcode a port.
-- Assert real user-observable effects, not merely 200s.
+- Tag each test title with the requirement + path it covers: "@req-<id> @path-<happy|sad|edge>" (and "@variant-<value>" when the requirement spans variants). One test may carry several tags. Example: `test('@req-R2 @path-sad rejects an expired voucher', async ({ request }) => { … })`
+- Resolve each service's base URL as: `process.env.CANARY_PORT_<slot> ? \`http://localhost:${process.env.CANARY_PORT_<slot>}\` : <the config's fallback port>` — `<slot>` is the `ports[].name` declared in the feature config. Never hardcode a port.
+- Assert real user-observable effects, not merely 200s. No `toHaveURL(/.*/)`, no `waitForTimeout` as an assertion.
+- If a gap cannot be exercised because the app exposes no surface for it, skip it and name it in your one-line summary — do not write a test that fakes the behavior.
 
 Do NOT reply with JSON or file contents — the runner reads the spec files you wrote on disk. When done, reply with a one-line summary of what you changed.

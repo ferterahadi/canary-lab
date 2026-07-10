@@ -6,15 +6,17 @@ type: skill
 
 # Canary Lab — Run + Heal Loop
 
-Connect with the `repair` MCP profile (`npx canary-lab mcp --profile repair`);
-the composite `lifecycle`/`full` profiles carry the same tools. Canary Lab
-owns the run verdicts and artifacts; this client applies the fixes.
+Canary Lab owns the run verdicts and artifacts; this client applies the
+fixes. These tools arrive via the Canary Lab MCP server. If this client is
+already connected (the plugin connects with `full`), skip this step. To
+configure a connection manually: `npx canary-lab mcp --profile repair` (the
+composite `lifecycle`/`full` profiles carry the same tools).
 
 ## Workspace Bootstrap
 
 1. Read `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`); one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`.
-2. Check `/mcp/health` on the UI's port (default `7421`; a project may pin its own in `canary-lab.config.json` — `npx canary-lab mcp doctor` discovers the active URL). Confirm `projectRoot` matches the selected workspace.
-3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal.
+2. Check `/mcp/health` on the UI's port: read `port` from the workspace's `canary-lab.config.json` (fallback `7421`), then `curl -s http://127.0.0.1:<port>/mcp/health` — success is a JSON response. Confirm `projectRoot` matches the selected workspace.
+3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up.
 
 ## External Run Loop
 
@@ -24,20 +26,36 @@ owns the run verdicts and artifacts; this client applies the fixes.
 4. If `start_run` returns an active run, continue that run. But if it returns `type: "boot_session"` (or `executionType: "boot"`), the run is a held boot-only session — services are up, no tests run, and there is no heal task. Do not claim heal or call `wait_for_heal_task`; report that services are ready and that the user can stop them with `abort_run` (confirm:true) when done. A service that fails its readiness probe is marked failed (its status shows `timeout`) but the session stays held — boot never self-aborts on a health-check failure, so report which services came up and which failed; only `abort_run` tears it down.
 5. If `start_run` reports `already-claimed`, stop and tell the user which session owns the run. If it returns `claimSuppressed: true`, this session is a runner-spawned PTY agent (the benchmark/portify sessions Canary Lab launches itself) and cannot own the heal loop — interactive clients are *not* suppressed, so you normally won't hit this. The run still runs in External-client heal mode (it does **not** fall back to the project's configured heal agent — it waits for a drive); do not call `wait_for_heal_task`. Report the run id and tell the user to drive heal from an interactive Claude/Codex client or the web UI.
 6. Handle user interrupts explicitly: "pause", "intercept", or "pause and heal" means call `pause_run`; "stop heal" or "cancel repair" means call `cancel_heal`; "abort", "kill the run", or "stop everything" means call `abort_run` only with the required confirmation.
-7. Call `wait_for_heal_task` with the same `session_id`. It blocks for a short bounded window and heartbeats for you. If it returns `type: "still_waiting"`, the run is still active and the window just elapsed — this is **not** terminal: immediately call `wait_for_heal_task` again with the same `runId` + `session_id`. Loop on `still_waiting` until you get `needs_heal` / `passed` / `failed`. (If it ever returns `type: "boot_session"`, the run is a held boot-only session — report services are up and stop here; do not wait again.)
+7. Call `wait_for_heal_task` with the `runId` from `start_run` and the same `session_id`. It blocks for a short bounded window and heartbeats for you. If it returns `type: "still_waiting"`, the run is still active and the window just elapsed — this is **not** terminal: immediately call `wait_for_heal_task` again with the same `runId` + `session_id`. Loop on `still_waiting` until you get `needs_heal` / `passed` / `failed`. (If it ever returns `type: "boot_session"`, the run is a held boot-only session — report services are up and stop here; do not wait again.)
 8. If it returns `passed`, summarize using `result.counts.statusLine` and stop.
 9. If it returns `failed`, report the terminal status using `result.counts.statusLine` and relevant failure summary.
    - If the result carries `dirtyTests` (a test spec changed since the last green run — can appear on `passed`, `failed`, or `needs_heal`), relay `result.dirtyTests.message` to the user **verbatim** (e.g. "⚠️ Tests have been modified, please review.") alongside the outcome. Do **not** block, gate, re-run, revert, or edit the test files to "fix" it — it's an awareness signal so the user can review or commit the change, not an error to act on.
-10. If it returns `needs_heal`, treat the returned heal context as the compact first-stop packet: inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, current failures, and the checked-out source code. The packet is slim — `context.healIndex` and `context.journal` are **paths** (`Read` them when needed), and each `context.failedTests[]` entry carries a `failureId` plus pointer dirs (`errorPath`, `traceDir`, `playwrightMcpDir`). `context.healPrompt` and `context.nextSteps` are sent on the **first** `needs_heal` only; on repeat cycles (cycle ≥ 2) the context carries just the changed failure packet plus a `context.guidance` breadcrumb — reuse the cycle-1 map, or call `get_heal_context` to re-fetch it. If the **same** tests fail 3+ cycles running, `context.escalation` appears — you're stuck: read `context.escalation.readFirst` and follow `context.escalation.tactics` (change tactic — revert or build on the prior diff, don't fire a fresh unrelated hypothesis) instead of repeating the last fix. A `needs_heal` task can also be a **service that failed to boot** — then `context.failedTests` is empty and `context.bootFailure` is set instead (service name + `logPath`) because no tests ran; `Read` `context.bootFailure.logPath` to find why the service won't serve, fix the service/app code, then `signal_run` `kind: "restart"` (`context.nextSteps` already reflects this). Call `get_run_snapshot` only when you need the verbose raw summary, full counts, or deeper debugging fields.
+10. If it returns `needs_heal`, treat the returned heal context as the compact first-stop packet — which part of it matters depends on the situation:
+    - **`context.failedTests` non-empty, first cycle** (`context.healPrompt` present): inspect `context.healPrompt.startHere` first, then use `context.healPrompt.resources`, current failures, and the checked-out source code. The packet is slim — `context.healIndex` and `context.journal` are **paths** (`Read` them when needed), and each `context.failedTests[]` entry carries a `failureId` plus pointer dirs (`errorPath`, `traceDir`, `playwrightMcpDir`).
+    - **cycle ≥ 2** (`context.guidance` present, no `context.healPrompt`): `context.healPrompt` and `context.nextSteps` are sent on the **first** `needs_heal` only — on repeat cycles the context carries just the changed failure packet plus a `context.guidance` breadcrumb. Reuse the cycle-1 map, or call `get_heal_context` to re-fetch it.
+    - **`context.escalation` present**: the **same** tests failed 3+ cycles running — you're stuck. Read `context.escalation.readFirst` and follow `context.escalation.tactics` (change tactic — revert or build on the prior diff, don't fire a fresh unrelated hypothesis) instead of repeating the last fix.
+    - **`context.failedTests` empty AND `context.bootFailure` set**: a **service failed to boot** — no tests ran. `Read` `context.bootFailure.logPath` to find why the service won't serve, fix the service/app code, then `signal_run` `kind: "restart"` (`context.nextSteps` already reflects this).
+
+    Call `get_run_snapshot` only when you need the verbose raw summary, full counts, or deeper debugging fields.
 11. When **several** tests fail, fan out the diagnosis **and the fix-drafting**: dispatch one read-only sub-agent per failure, hand it the `failureId`, and have it call `get_failure_detail(runId, failureId)` to investigate just that slice in parallel and report back a hypothesis **plus a concrete proposed patch** (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must **not** touch the working tree or call `signal_run`; they only investigate and draft. Then **you** apply the patches yourself, serially — reconcile by hand if two patches touch the same file — then re-test and `signal_run` once. Only investigation + drafting fan out; applying, re-testing, and signalling stay single-threaded. (For a single failure, just investigate and fix it directly.)
 12. Fix app/service code, not tests, unless the test is provably wrong.
 13. Call `signal_run` **once** per cycle with `kind: "rerun"` for test-only/app-code fixes that do not need service restart, or `kind: "restart"` when services or env need restarting. Include `hypothesis` and `fixDescription`; Canary Lab writes the journal from that signal and its observed git diff. One accountable signal per cycle, even when you fixed several failures.
 14. Do not call a separate journal-writing tool; the runner records failing tests, changed files, signal, outcome, and diff.
 15. Repeat from `wait_for_heal_task` (looping on `still_waiting`) until the run passes or reaches terminal failure.
 
+## `wait_for_heal_task` result types
+
+| Result | Action |
+| --- | --- |
+| `still_waiting` | Not terminal — re-call with the same `runId` + `session_id`. |
+| `needs_heal` | Fix (see step 10), `signal_run` once, then wait again. |
+| `passed` | Report `result.counts.statusLine`, stop. |
+| `failed` | Report `result.counts.statusLine` + failure summary, stop. |
+| `boot_session` | Report which services came up, stop — never wait again. |
+
 ## Guardrails
 
-- Keep the same `session_id` for the whole conversation.
+- `session_id` recipe: generate one id at the start of the conversation (any unique string) and pass that identical value in every tool call for the rest of the conversation.
 - `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run` and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.
 - `start_run` is the single entrypoint for start/resume/restart intent. With no `run_ref`/`force_new`, a healing run for the feature is continued by default. Concurrent runs are allowed: a same-app collision returns `repo_collision_requires_choice` (resolve with `isolation: "worktree"` or `"queue"`); over the resource budget, the run is `queued` and starts automatically.
 - For requests like "rerun 7cvh", `start_run` resolves the run suffix and restarts that same failed/aborted run in remaining-test mode. Canary Lab reruns failed tests first, then skipped tests, then pending/not-run tests; do not tell the user no test filter exists.

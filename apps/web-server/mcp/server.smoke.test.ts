@@ -595,9 +595,10 @@ describe('MCP HTTP server (smoke)', () => {
       expect(JSON.stringify(exportBody.reportSchema)).not.toContain('evaluation.md')
       expect(exportBody.reportSchema.textSlots.length).toBeGreaterThan(0)
       // The verbose run snapshot is no longer embedded — the agent fetches it on
-      // demand via get_run_snapshot instead of paying for it on every export start.
+      // demand via get_run instead of paying for it on every export start
+      // (get_run_snapshot is not in the export profile's tool set).
       expect(exportBody).not.toHaveProperty('runContext')
-      expect(exportBody.runSnapshotVia).toContain('get_run_snapshot')
+      expect(exportBody.runSnapshotVia).toContain('get_run(')
 
       const rejectedMarkdown = await client.callTool({
         name: 'submit_external_evaluation_export',
