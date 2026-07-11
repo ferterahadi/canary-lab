@@ -1,4 +1,5 @@
 import { StatusDot, type StatusDotState } from '../../features/config/components/atoms'
+import { Chip } from '../ui/StatusChip'
 
 // Compact pill: green = WS open, amber pulse = reconnecting/connecting,
 // rose = disconnected. Sits left of the MCP/services chips so the
@@ -8,23 +9,22 @@ export function ConnectionBadge({
 }: {
   state: 'connecting' | 'live' | 'reconnecting' | 'disconnected'
 }) {
-  const palette: Record<typeof state, { dot: StatusDotState; text: string; label: string; pulse: boolean }> = {
-    live:         { dot: 'success', text: 'text-emerald-700/90 dark:text-emerald-300/90', label: 'live',         pulse: false },
-    connecting:   { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'connecting',   pulse: true },
-    reconnecting: { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'reconnecting', pulse: true },
-    disconnected: { dot: 'failed',  text: 'text-rose-700/90 dark:text-rose-300/90',       label: 'offline',      pulse: false },
+  const palette: Record<typeof state, { dot: StatusDotState; tone: string; label: string; pulse: boolean }> = {
+    live:         { dot: 'success', tone: 'var(--success)', label: 'live',         pulse: false },
+    connecting:   { dot: 'warning', tone: 'var(--warning)', label: 'connecting',   pulse: true },
+    reconnecting: { dot: 'warning', tone: 'var(--warning)', label: 'reconnecting', pulse: true },
+    disconnected: { dot: 'failed',  tone: 'var(--danger)',  label: 'offline',      pulse: false },
   }
   const p = palette[state]
   return (
-    <div
-      data-testid="runs-connection-badge"
-      data-state={state}
-      className={`flex shrink-0 items-center gap-1.5 ${p.text}`}
-      style={{ fontSize: 11.5, fontWeight: 500 }}
-      title={`Runs stream: ${p.label}`}
-    >
-      <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />
-      <span>{p.label}</span>
+    <div className="shrink-0" data-testid="runs-connection-badge" data-state={state} title={`Runs stream: ${p.label}`}>
+      <Chip
+        tone={p.tone}
+        icon={<StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />}
+        label={p.label}
+        fontSize={11.5}
+        fontWeight={500}
+      />
     </div>
   )
 }

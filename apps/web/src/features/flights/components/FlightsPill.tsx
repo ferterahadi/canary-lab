@@ -3,6 +3,7 @@ import type { FlightIndexEntry, FlightPauseReason, FlightStageKey, FlightStageSt
 import { ChevronRightIcon, SlideOverPanel } from '../../config/components/atoms'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
+import { Chip } from '../../../shared/ui/StatusChip'
 import { StatusPill } from '../../../shared/ui/StatusPill'
 import { Tooltip } from '../../../shared/ui/Tooltip'
 import { stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
@@ -144,14 +145,7 @@ export function FlightStatusChip({
 }) {
   const chip = featureChipState(flight, activity)
   return (
-    <span
-      data-testid="flight-status-chip"
-      title={chip.title}
-      className="inline-flex w-[72px] shrink-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded px-1.5 py-0.5 text-center text-[10.5px] font-medium"
-      style={{ color: chip.tone, border: `1px solid color-mix(in srgb, ${chip.tone} 35%, transparent)` }}
-    >
-      {chip.label}
-    </span>
+    <Chip testId="flight-status-chip" chrome="border" tone={chip.tone} label={chip.label} width={72} title={chip.title} />
   )
 }
 

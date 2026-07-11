@@ -1,5 +1,6 @@
 import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '../../../shared/api/client'
 import { StatusDot } from '../../config/components/atoms'
+import { Chip } from '../../../shared/ui/StatusChip'
 
 // One home for the flight-stage presentation vocabulary (R14/R16/R18): the
 // user-facing stage labels, the status tone/icon treatment, the shared status
@@ -82,16 +83,15 @@ const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
 export function StageStatusChip({ status }: { status: FlightStageStatus }) {
   const tone = stageStatusTone(status)
   return (
-    <span
-      data-testid="stage-status-chip"
-      className="inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
-      style={{ color: tone, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }}
-    >
-      {status === 'running'
+    <Chip
+      testId="stage-status-chip"
+      chrome="border"
+      tone={tone}
+      icon={status === 'running'
         ? <StatusDot state="running" className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
-      {STAGE_STATUS_LABEL[status]}
-    </span>
+      label={STAGE_STATUS_LABEL[status]}
+    />
   )
 }
 

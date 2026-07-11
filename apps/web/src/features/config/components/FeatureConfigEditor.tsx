@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { GeneralTab } from './GeneralTab'
 import { ReposTab } from './ReposTab'
 import { PortsTab } from './PortsTab'
 import { EnvsetsTab } from './EnvsetsTab'
 import { PlaywrightTab } from './PlaywrightTab'
-import { CloseIcon, ConfirmModal, TrashIcon } from './atoms'
+import { ConfirmModal, Modal, TrashIcon } from './atoms'
 import * as api from '../../../shared/api/client'
 
 type Tab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
@@ -37,12 +37,6 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const closeDeleteConfirm = (): void => {
     if (deleting) return
     setConfirmDelete(false)
@@ -65,22 +59,15 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
   }
 
   return (
-    <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div
-        className="cl-modal flex h-[88vh] w-[min(960px,94vw)] flex-col overflow-hidden rounded-lg"
-        style={{ background: 'var(--bg-elevated)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="cl-dialog-header">
-          <div className="min-w-0 flex-1">
-            <div className="cl-kicker mb-1">Feature configuration</div>
-            <div className="truncate text-sm font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-              {feature}
-            </div>
-          </div>
+    <>
+      <Modal
+        open
+        onClose={onClose}
+        eyebrow="Feature configuration"
+        title={feature}
+        width={960}
+        height="88vh"
+        headerActions={
           <button
             type="button"
             onClick={() => {
@@ -95,65 +82,56 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
           >
             <TrashIcon />
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="cl-icon-button h-7 w-7 shrink-0"
-            style={{ border: '1px solid var(--border-default)' }}
-          >
-            <CloseIcon size={14} />
-          </button>
-        </header>
-
-        <nav
-          className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs"
-        >
-          <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
-          <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
-          <TabButton active={tab === 'ports'} onClick={() => setTab('ports')}>Ports</TabButton>
-          <TabButton active={tab === 'envsets'} onClick={() => setTab('envsets')}>Envsets</TabButton>
-          <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
-        </nav>
-
-        <div className="flex-1 min-h-0">
-          {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
-          {tab === 'repos' && <ReposTab feature={feature} refreshKey={reposRefreshKey} />}
-          {tab === 'ports' && <PortsTab feature={feature} portified={portified} portsRefreshKey={portsRefreshKey} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
-          {tab === 'envsets' && <EnvsetsTab feature={feature} />}
-          {tab === 'playwright' && <PlaywrightTab feature={feature} />}
-        </div>
-        <ConfirmModal
-          open={confirmDelete}
-          title="Delete feature"
-          message={
-            <div className="space-y-3">
-              <p>
-                This permanently deletes <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code> from the features folder, including its config, Playwright tests, envsets, and helper files.
-              </p>
-              <p style={{ color: 'var(--danger)' }}>
-                This cannot be undone. Type the feature name to confirm.
-              </p>
-              <input
-                value={confirmName}
-                onChange={(e) => setConfirmName(e.target.value)}
-                className="cl-input w-full rounded-md px-2 py-1.5 text-xs"
-                style={{ fontFamily: 'var(--font-mono)' }}
-                autoFocus
-                placeholder={feature}
-              />
-              {deleteError && <p style={{ color: 'var(--danger)' }}>{deleteError}</p>}
+        }
+        subheader={
+          <>
+            <nav className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs">
+              <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
+              <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
+              <TabButton active={tab === 'ports'} onClick={() => setTab('ports')}>Ports</TabButton>
+              <TabButton active={tab === 'envsets'} onClick={() => setTab('envsets')}>Envsets</TabButton>
+              <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
+            </nav>
+            <div className="flex-1 min-h-0">
+              {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
+              {tab === 'repos' && <ReposTab feature={feature} refreshKey={reposRefreshKey} />}
+              {tab === 'ports' && <PortsTab feature={feature} portified={portified} portsRefreshKey={portsRefreshKey} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
+              {tab === 'envsets' && <EnvsetsTab feature={feature} />}
+              {tab === 'playwright' && <PlaywrightTab feature={feature} />}
             </div>
-          }
-          confirmLabel="Delete Feature"
-          variant="danger"
-          busy={deleting}
-          confirmDisabled={confirmName !== feature}
-          onCancel={closeDeleteConfirm}
-          onConfirm={deleteCurrentFeature}
-        />
-      </div>
-    </div>
+          </>
+        }
+      />
+      <ConfirmModal
+        open={confirmDelete}
+        title="Delete feature"
+        message={
+          <div className="space-y-3">
+            <p>
+              This permanently deletes <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code> from the features folder, including its config, Playwright tests, envsets, and helper files.
+            </p>
+            <p style={{ color: 'var(--danger)' }}>
+              This cannot be undone. Type the feature name to confirm.
+            </p>
+            <input
+              value={confirmName}
+              onChange={(e) => setConfirmName(e.target.value)}
+              className="cl-input w-full rounded-md px-2 py-1.5 text-xs"
+              style={{ fontFamily: 'var(--font-mono)' }}
+              autoFocus
+              placeholder={feature}
+            />
+            {deleteError && <p style={{ color: 'var(--danger)' }}>{deleteError}</p>}
+          </div>
+        }
+        confirmLabel="Delete Feature"
+        variant="danger"
+        busy={deleting}
+        confirmDisabled={confirmName !== feature}
+        onCancel={closeDeleteConfirm}
+        onConfirm={deleteCurrentFeature}
+      />
+    </>
   )
 }
 

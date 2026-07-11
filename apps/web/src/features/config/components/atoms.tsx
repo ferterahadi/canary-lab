@@ -642,9 +642,11 @@ export function Modal({
   description,
   meta,
   width = 480,
+  height,
   role = 'dialog',
   ariaLabel,
   headerActions,
+  subheader,
   footer,
   children,
 }: {
@@ -664,6 +666,11 @@ export function Modal({
   /** Optional metadata content rendered as a 2-col grid under the title. */
   meta?: ReactNode
   width?: number
+  /** Fixed height (e.g. `'88vh'` or a px number) instead of shrinking to fit
+   *  content — for a multi-tab/paginated dialog whose body height should stay
+   *  stable as the active section's content amount changes. Omit to shrink-
+   *  wrap content up to the default `max-h-[calc(100vh-2rem)]` cap. */
+  height?: number | string
   /** ARIA role for the dialog surface — `alertdialog` for error/confirmation
    *  interruptions, `dialog` (default) otherwise. */
   role?: 'dialog' | 'alertdialog'
@@ -673,11 +680,18 @@ export function Modal({
   /** Extra header buttons rendered before the built-in Close button (e.g. a
    *  destructive delete action on a hero dialog). */
   headerActions?: ReactNode
+  /** Rendered between the header and the scrollable body, outside the scroll
+   *  area — e.g. a tab bar that should stay put while its section scrolls.
+   *  When a caller's whole body already manages its own scroll region (a
+   *  tabbed editor whose panels each own scrolling + a pinned save bar),
+   *  put that body here instead of `children` — otherwise Modal's own
+   *  scroll wrapper would double up with the panel's. */
+  subheader?: ReactNode
   /** Rendered as a pinned footer strip below the scrollable body — use this
    *  instead of putting action buttons in `children` so they don't scroll
    *  away with tall content. */
   footer?: ReactNode
-  children: ReactNode
+  children?: ReactNode
 }) {
   useEscapeToClose(onClose, open)
   if (!open) return null
@@ -695,6 +709,7 @@ export function Modal({
         style={{
           width,
           maxWidth: '94vw',
+          ...(height ? { height } : {}),
           background: 'var(--bg-elevated)',
         }}
         onClick={(e) => e.stopPropagation()}
@@ -736,9 +751,12 @@ export function Modal({
             </button>
           </header>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-          {children}
-        </div>
+        {subheader}
+        {children != null && (
+          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+            {children}
+          </div>
+        )}
         {footer && (
           <div className="cl-panel-footer flex items-center justify-end gap-2 px-4 py-3">
             {footer}

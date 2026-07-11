@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import type { VerificationConfig, VerificationTarget } from '../../../shared/api/types'
-import { CloseIcon } from '../../config/components/atoms'
+import { CloseIcon, useEscapeToClose } from '../../config/components/atoms'
 
 interface VerificationDialogProps {
   feature: string
@@ -184,6 +184,8 @@ export function VerificationDialog({
       setStarting(false)
     }
   }, [onClose, onStart, playwrightEnvsetId, selectedConfigId, targetUrls])
+
+  useEscapeToClose(onClose)
 
   return (
     <div className="cl-modal-backdrop absolute inset-0 z-50 flex items-center justify-center p-4 sm:p-6">

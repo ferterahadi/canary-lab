@@ -1,5 +1,6 @@
 import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '../../../shared/api/types'
 import { StatusDot, type StatusDotState } from '../../config/components/atoms'
+import { Chip } from '../../../shared/ui/StatusChip'
 import { shortTime } from '../../../shared/lib/format'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
@@ -109,12 +110,15 @@ export function RunStatusChip({ status, executionType }: { status: RunStatus; ex
     : CHIP[status]
   const label = boot ? (status === 'running' ? 'services up' : 'stopped') : status
   return (
-    <span
-      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-      style={{ background: palette.bg, color: palette.text }}
-    >
-      {label}
-    </span>
+    <Chip
+      chrome="fill"
+      tone={palette.text}
+      background={palette.bg}
+      label={label}
+      uppercase
+      fontSize={10}
+      fontWeight={600}
+    />
   )
 }
 

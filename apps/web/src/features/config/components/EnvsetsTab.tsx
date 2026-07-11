@@ -4,6 +4,7 @@ import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIc
 import { FileBrowserList } from './FolderPicker'
 import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'
+import { useEditableSlice } from './useEditableSlice'
 
 const NEW_ENV_SENTINEL = '__new_env__'
 const NEW_SLOT_SENTINEL = '__new_slot__'
@@ -491,43 +492,20 @@ function SlotEditor({
   slot: string
   siblingEnvs: string[]
 }) {
-  const [doc, setDoc] = useState<api.EnvsetSlotDoc | null>(null)
-  const [draft, setDraft] = useState<KvEntry[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [savedAt, setSavedAt] = useState<number | null>(null)
   const [copyOpen, setCopyOpen] = useState(false)
+  const ed = useEditableSlice<api.EnvsetSlotDoc, KvEntry[]>({
+    load: () => api.getEnvsetSlot(feature, env, slot),
+    extract: (doc) => doc.entries,
+    merge: (_doc, slice) => slice,
+    save: (payload) => api.putEnvsetSlot(feature, env, slot, payload as KvEntry[]),
+    deps: [feature, env, slot],
+  })
 
-  useEffect(() => {
-    let cancelled = false
-    api.getEnvsetSlot(feature, env, slot)
-      .then((d) => { if (!cancelled) { setDoc(d); setDraft(d.entries); setError(null) } })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setError(e instanceof Error ? e.message : 'Failed to load')
-      })
-    return () => { cancelled = true }
-  }, [feature, env, slot])
+  if (ed.error && !ed.doc) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
+  if (ed.loading || !ed.doc || !ed.draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
 
-  if (error) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{error}</div>
-  if (!doc || !draft) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
-
-  const dirty = JSON.stringify(draft) !== JSON.stringify(doc.entries)
-
-  const onSave = async (): Promise<void> => {
-    setSaving(true)
-    setError(null)
-    try {
-      const next = await api.putEnvsetSlot(feature, env, slot, draft)
-      setDoc(next)
-      setDraft(next.entries)
-      setSavedAt(Date.now())
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Save failed')
-    } finally {
-      setSaving(false)
-    }
-  }
+  const draft = ed.draft
+  const doc = ed.doc
 
   return (
     <div className="flex h-full flex-1 min-h-0 flex-col">
@@ -539,7 +517,7 @@ function SlotEditor({
               <input
                 type="text"
                 value={entry.key}
-                onChange={(e) => setDraft(draft.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
+                onChange={(e) => ed.setDraft(draft.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
                 placeholder="KEY"
                 className="w-[40%] rounded-md px-2.5 py-1.5 text-xs outline-none"
                 style={{
@@ -556,7 +534,7 @@ function SlotEditor({
                     typing `${` offers the feature's declared port slots. */}
                 <TemplatedInput
                   value={entry.value}
-                  onChange={(v) => setDraft(draft.map((x, j) => j === i ? { ...x, value: v } : x))}
+                  onChange={(v) => ed.setDraft(draft.map((x, j) => j === i ? { ...x, value: v } : x))}
                   feature={feature}
                   namespaces={['port']}
                   style={{ paddingRight: '2rem' }}
@@ -565,7 +543,7 @@ function SlotEditor({
                   type="button"
                   aria-label="Remove key"
                   title="Remove key"
-                  onClick={() => setDraft(draft.filter((_, j) => j !== i))}
+                  onClick={() => ed.setDraft(draft.filter((_, j) => j !== i))}
                   className="absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus:opacity-100"
                   style={{ color: 'var(--danger)' }}
                 >
@@ -577,7 +555,7 @@ function SlotEditor({
           <div className="mt-1 flex items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setDraft([...draft, { key: '', value: '' }])}
+              onClick={() => ed.setDraft([...draft, { key: '', value: '' }])}
               className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
               style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
             >
@@ -603,12 +581,12 @@ function SlotEditor({
         </div>
       </div>
       <SaveBar
-        dirty={dirty}
-        saving={saving}
-        error={error}
-        savedAt={savedAt}
-        onSave={onSave}
-        onDiscard={() => setDraft(doc.entries)}
+        dirty={ed.dirty}
+        saving={ed.saving}
+        error={ed.error}
+        savedAt={ed.savedAt}
+        onSave={ed.doSave}
+        onDiscard={ed.discard}
       />
       {copyOpen && (
         <CopyFromModal
@@ -618,7 +596,7 @@ function SlotEditor({
           siblingEnvs={siblingEnvs}
           current={draft}
           onClose={() => setCopyOpen(false)}
-          onApply={(merged) => { setDraft(merged); setCopyOpen(false) }}
+          onApply={(merged) => { ed.setDraft(merged); setCopyOpen(false) }}
         />
       )}
     </div>
