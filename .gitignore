@@ -48,6 +48,10 @@ results
 CLAUDE.local.md
 AGENTS.local.md
 
+# Local-only skill: rebuild/restart the workspace UI (overrides the Tier-3
+# canary-apply hand-off on this machine only — never ships)
+.claude/skills/cl_apply-local/
+
 # Superpowers brainstorming scratch
 .superpowers/
 

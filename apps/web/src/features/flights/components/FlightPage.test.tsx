@@ -65,9 +65,15 @@ vi.mock('../../../shared/api/client', () => ({
 }))
 
 // The agent timeline is its own tested component with live transports — stub it.
+// It now also receives the conductor's system lines (R66) as `systemRows`, split
+// pre/post around the agent's slot; expose them so the flight tests can assert
+// they ride the same block instead of standalone log panes.
 vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
-  AgentSessionView: ({ source }: { source: { kind: string; stage?: string } }) => (
-    <div data-testid="agent-session-view" data-kind={source.kind} data-stage={source.stage} />
+  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
+    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
+      {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
+      {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
+    </div>
   ),
 }))
 
@@ -486,11 +492,13 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
     })
-    // R30: the disclosure is ONE formatted log pane — tagged rows, no JSON dump.
+    // R30/R66: the disclosure is ONE block — the system line rides the rail
+    // (an agentless stage renders it as system rows, no JSON dump).
     expect(container.textContent).not.toContain('"workflowId"')
-    const log = container.querySelector('[data-testid="stage-log"]')
-    expect(log?.textContent).toContain('portify')
-    expect(log?.textContent).toContain('double boot verified')
+    const asv = container.querySelector('[data-testid="agent-session-view"]')
+    expect(asv).not.toBeNull()
+    expect(asv?.textContent).toContain('portify')
+    expect(asv?.textContent).toContain('double boot verified')
   })
 
   it('R30: a stage with no log and no agent has no details disclosure', async () => {
@@ -750,18 +758,7 @@ describe('trailer model (R14–R18)', () => {
     expect(docsFacts).toContain('7')
   })
 
-  it('R29: the export stage renders the task panel when the export task is known', async () => {
-    mocks.taskById.mockReturnValue({
-      taskId: 'task-7',
-      runId: 'run-9',
-      feature: 'checkout',
-      mode: 'localized',
-      status: 'running',
-      createdAt: '',
-      updatedAt: '',
-      downloadReady: false,
-      sessionRef: { agent: 'claude', sessionId: 'sid' },
-    })
+  it('R29/R66: the export stage rides the SAME rail — its export task as the agent source', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'evaluation-export',
@@ -773,8 +770,9 @@ describe('trailer model (R14–R18)', () => {
       })),
     }))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="evaluation-task-panel"]')).toBeTruthy()
-    // A localized rewrite with a pinned session streams the agent timeline.
+    // No bespoke export panel — the export task streams through the shared rail
+    // (kind:'evaluation'), identical framing to every other stage.
+    expect(container.querySelector('[data-testid="evaluation-task-panel"]')).toBeNull()
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBe('evaluation')
   })
 })
@@ -896,7 +894,7 @@ describe('detail redesign (R53–R68)', () => {
     expect(strip).toContain('ready')
   })
 
-  it('R66: a settled agent stage folds its activity behind one toggle — tagged lines split around the embedded timeline', async () => {
+  it('R66: a settled agent stage folds its activity behind one toggle — system lines ride the agent timeline, split around its slot', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
@@ -913,18 +911,21 @@ describe('detail redesign (R53–R68)', () => {
     // Settled → collapsed by default, one disclosure.
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
     const toggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
-    expect(toggle?.textContent).toContain('View activity')
+    expect(toggle?.textContent).toContain('Show')
     await act(async () => { toggle!.click() })
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
-    const logs = activitySection.querySelectorAll('[data-testid="stage-log"]')
-    expect(logs.length).toBe(2)
-    expect(logs[0].textContent).toContain('spawning agent…')
-    expect(logs[0].textContent).not.toContain('config drafted')
-    expect(logs[1].textContent).toContain('config drafted')
-    // The untagged agent chatter never renders in the rail — the timeline owns it.
-    expect(activitySection.textContent).not.toContain('raw agent chatter')
+    // R66 (consolidated): ONE block — no standalone tagged-log panes.
+    expect(activitySection.querySelectorAll('[data-testid="stage-log"]').length).toBe(0)
     const asv = activitySection.querySelector('[data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-stage')).toBe('scout')
+    // System lines ride the same block, split around the agent's slot.
+    const pre = [...activitySection.querySelectorAll('[data-testid="system-pre"]')].map((e) => e.textContent).join('\n')
+    const post = [...activitySection.querySelectorAll('[data-testid="system-post"]')].map((e) => e.textContent).join('\n')
+    expect(pre).toContain('spawning agent…')
+    expect(pre).not.toContain('config drafted')
+    expect(post).toContain('config drafted')
+    // The untagged agent chatter never renders as a system row — the timeline owns it.
+    expect(activitySection.textContent).not.toContain('raw agent chatter')
   })
 
   it('R66: a live agent stage renders the activity expanded with no toggle', async () => {
@@ -940,12 +941,15 @@ describe('detail redesign (R53–R68)', () => {
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-details-toggle"]')).toBeNull()
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
-    expect(activitySection.querySelector('[data-testid="stage-log"]')?.textContent).toContain('spawning agent…')
+    // One block: the system line rides the agent timeline, no standalone log pane.
+    expect(activitySection.querySelector('[data-testid="stage-log"]')).toBeNull()
+    const pre = [...activitySection.querySelectorAll('[data-testid="system-pre"]')].map((e) => e.textContent).join('\n')
+    expect(pre).toContain('spawning agent…')
     const asv = activitySection.querySelector('[data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-stage')).toBe('scout')
   })
 
-  it('R66: an agentless stage falls back to the raw tagged log (no timeline)', async () => {
+  it('R66: an agentless stage uses the SAME block — its system lines as rows, no agent timeline', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
@@ -963,8 +967,14 @@ describe('detail redesign (R53–R68)', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
     })
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
-    expect(activitySection.querySelector('[data-testid="agent-session-view"]')).toBeNull()
-    expect(activitySection.querySelector('[data-testid="stage-log"]')?.textContent).toContain('reused the existing feature setup')
+    // Same component as agent stages — but no agent session (no data-stage).
+    const asv = activitySection.querySelector('[data-testid="agent-session-view"]')
+    expect(asv).not.toBeNull()
+    expect(asv?.getAttribute('data-stage')).toBeNull()
+    // No standalone tagged-log pane — the system line is a row on the rail.
+    expect(activitySection.querySelector('[data-testid="stage-log"]')).toBeNull()
+    const pre = [...activitySection.querySelectorAll('[data-testid="system-pre"]')].map((e) => e.textContent).join('\n')
+    expect(pre).toContain('reused the existing feature setup')
   })
 
   it('R60: rail rows carry stage durations once settled', async () => {

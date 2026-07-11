@@ -77,8 +77,10 @@ describe('stage template files', () => {
     expect(t).toContain('Inferred from local diff (no PRD provided).')
     expect(t).toContain('plan-output marker not found')
     expect(t).toContain('Committed branch changes')
-    expect(t).toContain('Use available refs in this order')
-    expect(t.indexOf('local parent')).toBeLessThan(t.indexOf('origin/main'))
+    expect(t).toContain('Fall back to available refs in this order')
+    expect(t.indexOf('the local parent branch')).toBeLessThan(
+      t.indexOf('`merge-base` against `origin/main`'),
+    )
     expect(t).toContain('regression-safety-first')
   })
 
