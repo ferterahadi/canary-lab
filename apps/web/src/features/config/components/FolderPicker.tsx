@@ -109,6 +109,7 @@ export function FolderPickerModal({
 
   return (
     <div
+      data-testid="folder-picker-modal"
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{ background: 'rgba(0,0,0,0.5)' }}
       onClick={onCancel}
@@ -205,6 +206,7 @@ export function FolderPickerModal({
         >
           <button
             type="button"
+            data-testid="folder-picker-cancel"
             onClick={onCancel}
             className="rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider"
             style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
@@ -213,6 +215,7 @@ export function FolderPickerModal({
           </button>
           <button
             type="button"
+            data-testid="folder-picker-confirm"
             disabled={!resp?.absolute}
             onClick={() => {
               if (!resp?.absolute) return

@@ -9,7 +9,7 @@ import type {
   PlannedFeature,
 } from '../../../shared/api/client'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
-import { Modal, Textarea } from '../../config/components/atoms'
+import { ChevronRightIcon, Modal, Textarea } from '../../config/components/atoms'
 import { STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 
@@ -60,14 +60,14 @@ type NewFlightPhase = 'form' | 'planning' | 'proposal'
 
 export function FlightStartDialog({
   feature,
-  knownRepos = [],
   onClose,
   onOpenFlight,
 }: {
   /** Feature to (re)fly, or null → new-flight mode (intent + repo picker). */
   feature: string | null
-  /** Known workspace repos (flattened from the features' configs) offered by
-   *  the picker; free paths can always be added. */
+  /** Accepted for call-site compatibility (App still passes the flattened
+   *  workspace repos); the picker now navigates the filesystem via the shared
+   *  FolderPickerModal, so no seed list is needed. */
   knownRepos?: RepoOption[]
   onClose: () => void
   /** Navigate to the flight detail view (just-started or already-active). */
@@ -84,6 +84,11 @@ export function FlightStartDialog({
   const [picked, setPicked] = useState<FlightStageKey | 'continue' | null>(feature ? null : 'similarity')
   const [busy, setBusy] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+
+  // R69: the full-flight step list is a collapsible preview — the whole journey
+  // shown by default (greyed + locked for a first flight, the real re-entry
+  // control once flown), collapsible to get it out of the way.
+  const [showSteps, setShowSteps] = useState(true)
 
   // R54 plan flow state.
   const [phase, setPhase] = useState<NewFlightPhase>('form')
@@ -264,12 +269,14 @@ export function FlightStartDialog({
       .catch(openFlightFail)
   }
 
-  const stageMenu = (
-    <div className="flex flex-col gap-0.5" role="radiogroup" aria-label="Start from">
-      <span className="mb-0.5 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-        Start from
-      </span>
+  // The number of automated steps behind a full flight (every pickable stage
+  // except the "from the beginning" entry itself) — drives the preview count.
+  const stepCount = PICKABLE.filter((k) => k !== 'similarity').length
 
+  const stageMenu = (
+    <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Start from">
+      {/* Continue sits above the fold — the common resume path, never buried in
+          the collapsible journey list. */}
       {!newFlight && entry?.canContinue && (
         <StageRow
           testId="flight-start-continue"
@@ -282,28 +289,61 @@ export function FlightStartDialog({
         />
       )}
 
-      {PICKABLE.map((key) => {
-        // New flights always start from the beginning: the whole menu renders
-        // visible-but-locked so the re-entry affordance is learnable (R41).
-        const verdict = newFlight
-          ? { key, allowed: key === 'similarity', reason: key === 'similarity' ? undefined : FIRST_FLIGHT_REASON }
-          : byKey.get(key)
-        const allowed = verdict?.allowed ?? false
-        const status = key === 'similarity' ? undefined : lastStatus.get(key)
-        return (
-          <StageRow
-            key={key}
-            testId={`flight-start-stage-${key}`}
-            selected={picked === key}
-            disabled={!allowed}
-            onPick={() => setPicked(key)}
-            icon={status ? STAGE_ICON[status] : '·'}
-            iconTone={stageStatusTone(status)}
-            label={rowLabel(key)}
-            sub={allowed ? undefined : verdict?.reason}
-          />
-        )
-      })}
+      {/* R69: the whole flight as a collapsible preview. Greyed + locked for a
+          first flight (the journey, for the record); the live re-entry control
+          once flown. */}
+      <div className="overflow-hidden rounded border" style={{ borderColor: 'var(--border-default)' }}>
+        <button
+          type="button"
+          data-testid="flight-steps-toggle"
+          aria-expanded={showSteps}
+          onClick={() => setShowSteps((v) => !v)}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/[0.03]"
+          style={{ background: 'var(--bg-selected)' }}
+        >
+          <span
+            aria-hidden="true"
+            className="inline-flex shrink-0 transition-transform duration-150"
+            style={{ color: 'var(--text-muted)', transform: showSteps ? 'rotate(90deg)' : 'none' }}
+          >
+            <ChevronRightIcon />
+          </span>
+          <span className="text-[12px] font-medium" style={{ color: 'var(--text-secondary)' }}>The full flight</span>
+          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{stepCount} steps, fully automated</span>
+          {newFlight && (
+            <span className="ml-auto text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+              step entry unlocks after the first flight
+            </span>
+          )}
+        </button>
+        {showSteps && (
+          <div className="flex flex-col gap-0.5 p-1.5">
+            {PICKABLE.map((key) => {
+              // New flights always start from the beginning: the whole menu
+              // renders visible-but-locked so the re-entry affordance is
+              // learnable (R41).
+              const verdict = newFlight
+                ? { key, allowed: key === 'similarity', reason: key === 'similarity' ? undefined : FIRST_FLIGHT_REASON }
+                : byKey.get(key)
+              const allowed = verdict?.allowed ?? false
+              const status = key === 'similarity' ? undefined : lastStatus.get(key)
+              return (
+                <StageRow
+                  key={key}
+                  testId={`flight-start-stage-${key}`}
+                  selected={picked === key}
+                  disabled={!allowed}
+                  onPick={() => setPicked(key)}
+                  icon={status ? STAGE_ICON[status] : '·'}
+                  iconTone={stageStatusTone(status)}
+                  label={rowLabel(key)}
+                  sub={allowed ? undefined : verdict?.reason}
+                />
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 
@@ -314,7 +354,23 @@ export function FlightStartDialog({
   )
 
   return (
-    <Modal open onClose={onClose} eyebrow="Flight" title={resolvedFeature ?? 'Start a flight'} width={620}>
+    <Modal
+      open
+      onClose={onClose}
+      icon={
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M22 2 11 13" />
+          <path d="M22 2 15 22l-4-9-9-4Z" />
+        </svg>
+      }
+      title={resolvedFeature ?? 'Start a flight'}
+      description={
+        hasRecord
+          ? 'Re-fly this feature — pick where the pipeline restarts.'
+          : 'One command from a bare repo to a green, covered, evaluated run.'
+      }
+      width={620}
+    >
       <div className="flex flex-col gap-3 p-4">
         {loadError ? (
           <div data-testid="flight-start-error" className="text-[11.5px]" style={{ color: 'var(--danger)' }}>
@@ -377,8 +433,7 @@ export function FlightStartDialog({
                 <Textarea
                   value={description}
                   onChange={setDescription}
-                  minRows={2}
-                  maxRows={4}
+                  minRows={5}
                   placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
                 />
               )}
@@ -400,7 +455,6 @@ export function FlightStartDialog({
                   Repos
                 </span>
                 <RepoMultiPicker
-                  known={knownRepos}
                   selected={repoPaths}
                   onChange={setRepoPaths}
                 />
