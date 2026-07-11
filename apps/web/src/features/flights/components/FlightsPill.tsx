@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import type { FlightIndexEntry, FlightPauseReason, FlightStageKey, FlightStageStatus, FlightStatus } from '../../../shared/api/client'
-import { ChevronRightIcon, SlideOverPanel, StatusDot } from '../../config/components/atoms'
+import { ChevronRightIcon, SlideOverPanel } from '../../config/components/atoms'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
+import { StatusPill } from '../../../shared/ui/StatusPill'
 import { Tooltip } from '../../../shared/ui/Tooltip'
 import { stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
 import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
@@ -317,45 +318,26 @@ export function FlightsPill({
 
   return (
     <div className="shrink-0" data-testid="flights-pill">
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-expanded={open}
-        aria-label="Flights"
-        title={tooltip}
-        className="cl-button relative flex items-center gap-1.5 px-2.5 py-1"
-        style={tone ? { color: tone, borderColor: `color-mix(in srgb, ${tone} 45%, var(--border-default))` } : undefined}
-      >
-        {needsAttention && (
-          <span
-            data-testid="flights-attention-dot"
-            aria-hidden="true"
-            className="absolute -right-1 -top-1 h-[6px] w-[6px] rounded-full"
-            style={{
-              background: 'var(--warning)',
-              boxShadow: '0 0 6px color-mix(in srgb, var(--warning) 70%, transparent)',
-            }}
-          />
-        )}
-        {activeCount > 0 ? (
-          <StatusDot state="running" className="shrink-0" />
-        ) : (
+      <StatusPill
+        dotState="running"
+        icon={activeCount > 0 ? undefined : (
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
             <path d="M22 2 11 13" />
             <path d="M22 2 15 22l-4-9-9-4Z" />
           </svg>
         )}
-        <span style={{ fontSize: 12, fontWeight: 500, color: tone }}>{label}</span>
-        {activeCount > 0 && (
-          <span
-            data-testid="flights-pill-count"
-            className="rounded px-1 text-[10px] font-semibold"
-            style={{ background: `color-mix(in srgb, ${tone ?? 'var(--accent)'} 18%, transparent)`, color: tone }}
-          >
-            {activeCount}
-          </span>
-        )}
-      </button>
+        name={label}
+        count={activeCount > 0 ? activeCount : undefined}
+        countColor={tone}
+        countTestId="flights-pill-count"
+        emphasis={Boolean(tone)}
+        emphasisColor={tone}
+        overlayDot={needsAttention}
+        ariaExpanded={open}
+        ariaLabel="Flights"
+        title={tooltip}
+        onClick={() => setOpen(true)}
+      />
       {open && (
         <FlightsPickerDialog
           flights={flights}

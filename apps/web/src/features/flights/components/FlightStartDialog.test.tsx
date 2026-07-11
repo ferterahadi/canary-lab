@@ -36,6 +36,7 @@ vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
 
 import { ApiError } from '../../../shared/api/client'
 import { FlightStartDialog } from './FlightStartDialog'
+import { STAGE_BLURB } from './stage-meta'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -245,11 +246,14 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     // The whole Start-from menu renders locked: only the full flight is pickable.
     const fullFlight = byTestId('flight-start-stage-similarity') as HTMLButtonElement
     expect(fullFlight.disabled).toBe(false)
-    for (const key of ['scout', 'docs', 'specs-coverage', 'run', 'evaluation-export']) {
+    for (const key of ['scout', 'docs', 'specs-coverage', 'run', 'evaluation-export'] as const) {
       const rowEl = byTestId(`flight-start-stage-${key}`) as HTMLButtonElement
       expect(rowEl.disabled).toBe(true)
-      expect(rowEl.textContent).toContain("first flight")
+      // Each row explains what its stage does — not a repeated lock reason.
+      expect(rowEl.textContent).toContain(STAGE_BLURB[key])
     }
+    // The uniform first-flight lock is stated once, on the section header.
+    expect(byTestId('flight-steps-toggle')?.textContent).toContain('unlocks after the first flight')
   })
 
   it('R54: submit plans first — the breakdown agent owns the dialog, with a single-flight escape hatch', async () => {

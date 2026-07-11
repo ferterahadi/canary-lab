@@ -29,6 +29,24 @@ export function stageLabel(key: string): string {
   return (STAGE_LABEL as Record<string, string>)[key] ?? key
 }
 
+/** One-line "what this stage does", in plain language — shown in the flight
+ *  launcher's full-flight preview so the pipeline explains itself, instead of
+ *  every locked row repeating the same "unlocks after the first flight" note
+ *  (that lock is stated once, on the section header). */
+export const STAGE_BLURB: Record<FlightStageKey, string> = {
+  'similarity': 'Runs every step below, start to finish.',
+  'scout': 'Scans your repo to learn its stack, structure, and how it boots.',
+  'scaffold': 'Creates the feature in your workspace with a config and boot command.',
+  'env-capture': 'Captures the environment variables the app needs to start.',
+  'docs': 'Gathers the requirement docs (PRD, specs) that describe the feature.',
+  'prd-summary': 'Distills those docs into a short, testable requirements summary.',
+  'specs-coverage': 'Writes Playwright tests and maps them to requirements until covered.',
+  'portify': 'Makes services read their ports from env so runs can go concurrent.',
+  'run': 'Boots the app and runs the test suite, repairing failures as they surface.',
+  'heal': 'Fixes failing tests by editing app code, then reruns.',
+  'evaluation-export': 'Packages the finished run into a scored, downloadable report.',
+}
+
 /** The single status hue map — rail, chip, mini rail, and any artifact surface
  *  all read this so a colour means the same thing everywhere. */
 export function stageStatusTone(status: FlightStageStatus | undefined): string {

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
-import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, SectionHeader, TextInput, TrashIcon } from './atoms'
+import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, Section, TextInput, TrashIcon } from './atoms'
 import { FileBrowserList } from './FolderPicker'
 import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'
@@ -532,8 +532,8 @@ function SlotEditor({
   return (
     <div className="flex h-full flex-1 min-h-0 flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>{slot}</SectionHeader>
-        <div className="px-4 py-3 flex flex-col gap-1.5">
+        <div className="p-3">
+        <Section title={slot} bodyClassName="px-3.5 py-3 flex flex-col gap-1.5">
           {draft.map((entry, i) => (
             <div key={i} className="group flex items-center gap-1.5">
               <input
@@ -599,6 +599,7 @@ function SlotEditor({
               {doc.unparsedLines.length} line(s) couldn't be parsed and will be preserved verbatim.
             </div>
           )}
+        </Section>
         </div>
       </div>
       <SaveBar

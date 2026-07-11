@@ -1,6 +1,6 @@
 import * as api from '../../../shared/api/client'
 import type { ConfigValue, ParsedConfigDoc } from '../../../shared/api/client'
-import { FieldRow, NumberInput, SectionHeader, TextInput, Textarea, Toggle } from './atoms'
+import { FieldRow, NumberInput, Section, TextInput, Textarea, Toggle } from './atoms'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 
@@ -81,48 +81,52 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>Identity</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow label="Name">
-            <TextInput value={ed.draft.name} onChange={(name) => ed.setDraft((d) => ({ ...d, name }))} />
-          </FieldRow>
-          <FieldRow label="Description">
-            <Textarea
-              minRows={2}
-              maxRows={6}
-              value={ed.draft.description}
-              onChange={(description) => ed.setDraft((d) => ({ ...d, description }))}
-            />
-          </FieldRow>
-          <FieldRow label="Group" hint="Features with the same group are shown together.">
-            <TextInput value={ed.draft.group} onChange={(group) => ed.setDraft((d) => ({ ...d, group }))} />
-          </FieldRow>
-        </div>
+        <div className="flex flex-col gap-3 p-3">
+          <Section title="Identity">
+            <FieldRow label="Name">
+              <TextInput value={ed.draft.name} onChange={(name) => ed.setDraft((d) => ({ ...d, name }))} />
+            </FieldRow>
+            <FieldRow label="Description">
+              <Textarea
+                minRows={2}
+                maxRows={6}
+                value={ed.draft.description}
+                onChange={(description) => ed.setDraft((d) => ({ ...d, description }))}
+              />
+            </FieldRow>
+            <FieldRow label="Group">
+              <TextInput
+                value={ed.draft.group}
+                placeholder="Features with the same group are shown together."
+                onChange={(group) => ed.setDraft((d) => ({ ...d, group }))}
+              />
+            </FieldRow>
+          </Section>
 
-        <SectionHeader>Heal behavior</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow
-            label="Stop & heal after"
-            hint={`On by default (${DEFAULT_HEAL_THRESHOLD} failures). Each new Playwright spawn starts with --max-failures=N; turn off to run the whole suite before healing. Changes made while tests are already running apply to the next rerun or restart, not the current process.`}
-            layout="inline"
-          >
-            <div className="flex items-center gap-3">
-              <Toggle
-                value={healEnabled(ed.draft.healOnFailureThreshold)}
-                onChange={(enabled) => ed.setDraft((d) => ({
-                  ...d,
-                  healOnFailureThreshold: enabled ? healDisplayValue(d.healOnFailureThreshold) : 0,
-                }))}
-              />
-              <NumberInput
-                min={1}
-                value={healDisplayValue(ed.draft.healOnFailureThreshold)}
-                disabled={!healEnabled(ed.draft.healOnFailureThreshold)}
-                onChange={(n) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold: n }))}
-              />
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>failure(s)</span>
-            </div>
-          </FieldRow>
+          <Section title="Heal behavior">
+            <FieldRow
+              label="Stop & heal after"
+              hint={`On by default (${DEFAULT_HEAL_THRESHOLD} failures). Each new Playwright spawn starts with --max-failures=N; turn off to run the whole suite before healing. Changes made while tests are already running apply to the next rerun or restart, not the current process.`}
+              layout="inline"
+            >
+              <div className="flex items-center gap-3">
+                <Toggle
+                  value={healEnabled(ed.draft.healOnFailureThreshold)}
+                  onChange={(enabled) => ed.setDraft((d) => ({
+                    ...d,
+                    healOnFailureThreshold: enabled ? healDisplayValue(d.healOnFailureThreshold) : 0,
+                  }))}
+                />
+                <NumberInput
+                  min={1}
+                  value={healDisplayValue(ed.draft.healOnFailureThreshold)}
+                  disabled={!healEnabled(ed.draft.healOnFailureThreshold)}
+                  onChange={(n) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold: n }))}
+                />
+                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>failure(s)</span>
+              </div>
+            </FieldRow>
+          </Section>
         </div>
       </div>
 

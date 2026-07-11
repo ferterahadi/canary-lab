@@ -10,7 +10,7 @@ import {
   IconButton,
   NumberInput,
   PlusIcon,
-  SectionHeader,
+  Section,
   Segmented,
   TextInput,
   TrashIcon,
@@ -310,8 +310,8 @@ export function ReposTab({ feature, refreshKey }: { feature: string; refreshKey?
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>Services</SectionHeader>
-        <div className="px-4 py-3 flex flex-col gap-3">
+        <div className="p-3">
+        <Section title="Services" bodyClassName="px-3.5 py-3 flex flex-col gap-3">
           {repos.length === 0 && (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
           )}
@@ -348,6 +348,7 @@ export function ReposTab({ feature, refreshKey }: { feature: string; refreshKey?
             <PlusIcon />
             Add Service
           </button>
+        </Section>
         </div>
       </div>
 

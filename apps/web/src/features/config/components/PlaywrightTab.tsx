@@ -4,7 +4,7 @@ import {
   ComplexValueBadge,
   FieldRow,
   NumberInput,
-  SectionHeader,
+  Section,
   Select,
   Toggle,
 } from './atoms'
@@ -128,69 +128,69 @@ export function PlaywrightTab({ feature }: { feature: string }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>Run behavior</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow label="Fully parallel" hint="Run tests inside files in parallel" layout="inline">
-            <Toggle
-              value={ed.draft.fullyParallel ?? false}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, fullyParallel: v }))}
-            />
-          </FieldRow>
-          {numberOrExprField(
-            'Workers',
-            'Concurrent worker processes',
-            ed.draft.workers,
-            (workers) => ed.setDraft((d) => ({ ...d, workers })),
-            1,
-            1,
-          )}
-          {numberOrExprField(
-            'Retries',
-            'Retries per failed test',
-            ed.draft.retries,
-            (retries) => ed.setDraft((d) => ({ ...d, retries })),
-            0,
-            0,
-          )}
-          {numberOrExprField(
-            'Timeout (ms)',
-            'Per-test timeout',
-            ed.draft.timeout,
-            (timeout) => ed.setDraft((d) => ({ ...d, timeout })),
-            0,
-            0,
-          )}
-        </div>
+        <div className="flex flex-col gap-3 p-3">
+          <Section title="Run behavior">
+            <FieldRow label="Fully parallel" hint="Run tests inside files in parallel" layout="inline">
+              <Toggle
+                value={ed.draft.fullyParallel ?? false}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, fullyParallel: v }))}
+              />
+            </FieldRow>
+            {numberOrExprField(
+              'Workers',
+              'Concurrent worker processes',
+              ed.draft.workers,
+              (workers) => ed.setDraft((d) => ({ ...d, workers })),
+              1,
+              1,
+            )}
+            {numberOrExprField(
+              'Retries',
+              'Retries per failed test',
+              ed.draft.retries,
+              (retries) => ed.setDraft((d) => ({ ...d, retries })),
+              0,
+              0,
+            )}
+            {numberOrExprField(
+              'Timeout (ms)',
+              'Per-test timeout',
+              ed.draft.timeout,
+              (timeout) => ed.setDraft((d) => ({ ...d, timeout })),
+              0,
+              0,
+            )}
+          </Section>
 
-        <SectionHeader>Browser & artifacts</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow label="Headless" hint="Hide browser windows during test runs" layout="inline">
-            <Toggle
-              value={ed.draft.use.headless ?? true}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, headless: v } }))}
-            />
-          </FieldRow>
-          <FieldRow label="Video" layout="inline">
-            <Select<string>
-              value={ed.draft.use.video ?? 'off'}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, video: v } }))}
-              options={VIDEO_OPTIONS.map((v) => ({ value: v, label: v }))}
-            />
-          </FieldRow>
-          <FieldRow label="Trace" layout="inline">
-            <Select<string>
-              value={ed.draft.use.trace ?? 'retain-on-failure'}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, trace: v } }))}
-              options={TRACE_OPTIONS.map((v) => ({ value: v, label: v }))}
-            />
-          </FieldRow>
-          <FieldRow label="Screenshot" layout="inline">
-            <Select<string>
-              value={ed.draft.use.screenshot ?? 'only-on-failure'}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, screenshot: v } }))}
-              options={SCREENSHOT_OPTIONS.map((v) => ({ value: v, label: v }))}
-            />
-          </FieldRow>
+          <Section title="Browser & artifacts">
+            <FieldRow label="Headless" hint="Hide browser windows during test runs" layout="inline">
+              <Toggle
+                value={ed.draft.use.headless ?? true}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, headless: v } }))}
+              />
+            </FieldRow>
+            <FieldRow label="Video" layout="inline">
+              <Select<string>
+                value={ed.draft.use.video ?? 'off'}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, video: v } }))}
+                options={VIDEO_OPTIONS.map((v) => ({ value: v, label: v }))}
+              />
+            </FieldRow>
+            <FieldRow label="Trace" layout="inline">
+              <Select<string>
+                value={ed.draft.use.trace ?? 'retain-on-failure'}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, trace: v } }))}
+                options={TRACE_OPTIONS.map((v) => ({ value: v, label: v }))}
+              />
+            </FieldRow>
+            <FieldRow label="Screenshot" layout="inline">
+              <Select<string>
+                value={ed.draft.use.screenshot ?? 'only-on-failure'}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, screenshot: v } }))}
+                options={SCREENSHOT_OPTIONS.map((v) => ({ value: v, label: v }))}
+              />
+            </FieldRow>
+          </Section>
         </div>
       </div>
 

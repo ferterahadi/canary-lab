@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { StatusDot, type StatusDotState } from '../../features/config/components/atoms'
 
 // Tone of the trailing count badge. Kept small + semantic so every pill in the
@@ -32,9 +33,15 @@ export function StatusPill({
   detail,
   count,
   countTone = 'neutral',
+  countColor,
+  countTestId,
   emphasis = false,
   emphasisTone = 'accent',
+  emphasisColor,
   freshPulseKey,
+  icon,
+  overlayDot = false,
+  ariaExpanded,
   onClick,
   title,
   ariaLabel,
@@ -46,41 +53,69 @@ export function StatusPill({
   /** Trailing count badge. Pass `undefined` to omit it entirely. */
   count?: number
   countTone?: StatusPillTone
+  /** An arbitrary CSS colour for the count badge, overriding `countTone` — for a
+   *  caller whose count should track its own dynamic tone (e.g. mirroring
+   *  `emphasisColor`) rather than one of the fixed semantic tones. */
+  countColor?: string
+  /** `data-testid` for the count badge, when a caller's tests target it directly. */
+  countTestId?: string
   /** Coloured border + name text for an attention state. */
   emphasis?: boolean
   /** Which colour `emphasis` uses — accent (default) or danger (integrity warning). */
   emphasisTone?: 'accent' | 'danger'
+  /** An arbitrary CSS colour for `emphasis`, overriding `emphasisTone` — for a
+   *  caller whose attention states span more than accent/danger (e.g. a status
+   *  palette keyed per lifecycle state). */
+  emphasisColor?: string
   /** When set, renders a one-shot pulse keyed on this value (fresh-arrival cue). */
   freshPulseKey?: string | number
+  /** Replace the default `StatusDot` with a custom leading glyph — for a pill
+   *  whose idle state isn't well served by a plain status dot (e.g. a launcher
+   *  icon shown only when nothing is active). */
+  icon?: ReactNode
+  /** Small attention dot pinned to the pill's top-right corner — independent of
+   *  `count`/`emphasis`, for "something here needs a human" regardless of tone. */
+  overlayDot?: boolean
+  /** Pass through when the pill is a disclosure trigger for a picker/menu. */
+  ariaExpanded?: boolean
   onClick: () => void
   title?: string
   ariaLabel?: string
 }) {
   const hasDetail = Boolean(detail)
   const hasPulse = freshPulseKey != null
+  const resolvedEmphasisColor = emphasisColor ?? EMPHASIS_COLOR[emphasisTone]
   const className =
-    `cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1${hasDetail ? ' min-w-0 max-w-[200px]' : ''}${hasPulse ? ' relative' : ''}`
+    `cl-button flex shrink-0 items-center gap-1.5 px-2.5 py-1${hasDetail ? ' min-w-0 max-w-[200px]' : ''}${hasPulse || overlayDot ? ' relative' : ''}`
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
       aria-label={ariaLabel}
+      aria-expanded={ariaExpanded}
       className={className}
       style={
         emphasis
           ? {
-              color: EMPHASIS_COLOR[emphasisTone],
-              borderColor: `color-mix(in srgb, ${EMPHASIS_COLOR[emphasisTone]} 45%, var(--border-default))`,
+              color: resolvedEmphasisColor,
+              borderColor: `color-mix(in srgb, ${resolvedEmphasisColor} 45%, var(--border-default))`,
             }
           : undefined
       }
     >
       {hasPulse && <span key={`pill-pulse-${freshPulseKey}`} aria-hidden="true" className="cl-boot-pill-pulse" />}
-      <StatusDot state={dotState} className="shrink-0" />
+      {overlayDot && (
+        <span
+          aria-hidden="true"
+          className="absolute -right-1 -top-1 h-[6px] w-[6px] rounded-full"
+          style={{ background: 'var(--warning)', boxShadow: '0 0 6px color-mix(in srgb, var(--warning) 70%, transparent)' }}
+        />
+      )}
+      {icon ?? <StatusDot state={dotState} className="shrink-0" />}
       <span
         className="shrink-0"
-        style={{ fontSize: 12, fontWeight: 500, color: emphasis ? EMPHASIS_COLOR[emphasisTone] : 'var(--text-primary)' }}
+        style={{ fontSize: 12, fontWeight: 500, color: emphasis ? resolvedEmphasisColor : 'var(--text-primary)' }}
       >
         {name}
       </span>
@@ -91,8 +126,13 @@ export function StatusPill({
       )}
       {typeof count === 'number' && (
         <span
+          data-testid={countTestId}
           className="inline-flex min-w-[16px] shrink-0 items-center justify-center rounded-full px-1 text-[10px] font-semibold"
-          style={{ background: COUNT_TONE[countTone].bg, color: COUNT_TONE[countTone].color }}
+          style={
+            countColor
+              ? { background: `color-mix(in srgb, ${countColor} 18%, transparent)`, color: countColor }
+              : { background: COUNT_TONE[countTone].bg, color: COUNT_TONE[countTone].color }
+          }
         >
           {count}
         </span>

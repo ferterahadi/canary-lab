@@ -10,7 +10,7 @@ import type {
 } from '../../../shared/api/client'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { ChevronRightIcon, Modal, Textarea } from '../../config/components/atoms'
-import { STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
+import { STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 
 // R25/R40/R54/R63: the UI's flight launcher — THE entry point for flights.
@@ -50,8 +50,6 @@ const PICKABLE: FlightStageKey[] = [
 function rowLabel(key: FlightStageKey): string {
   return key === 'similarity' ? 'Full flight — from the beginning' : STAGE_LABEL[key]
 }
-
-const FIRST_FLIGHT_REASON = "available after this feature's first flight"
 
 /** The new-flight side of the dialog moves through three views (one per
  *  lifecycle state): the intent+repos form, the live planning agent, and the
@@ -364,11 +362,13 @@ export function FlightStartDialog({
               // New flights always start from the beginning: the whole menu
               // renders visible-but-locked so the re-entry affordance is
               // learnable (R41).
-              const verdict = newFlight
-                ? { key, allowed: key === 'similarity', reason: key === 'similarity' ? undefined : FIRST_FLIGHT_REASON }
-                : byKey.get(key)
-              const allowed = verdict?.allowed ?? false
+              const verdict = newFlight ? undefined : byKey.get(key)
+              const allowed = newFlight ? key === 'similarity' : (verdict?.allowed ?? false)
               const status = key === 'similarity' ? undefined : lastStatus.get(key)
+              // Every row explains what its stage does; a re-fly's BLOCKED rows
+              // instead surface the server's specific prerequisite reason. The
+              // uniform first-flight lock is stated once, on the section header.
+              const sub = !newFlight && !allowed ? verdict?.reason : STAGE_BLURB[key]
               return (
                 <StageRow
                   key={key}
@@ -379,7 +379,7 @@ export function FlightStartDialog({
                   icon={status ? STAGE_ICON[status] : '·'}
                   iconTone={stageStatusTone(status)}
                   label={rowLabel(key)}
-                  sub={allowed ? undefined : verdict?.reason}
+                  sub={sub}
                 />
               )
             })}

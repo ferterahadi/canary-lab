@@ -510,6 +510,43 @@ export function SectionHeader({ children }: { children: ReactNode }) {
   )
 }
 
+/** A titled section as a discrete bordered card — a header band + a padded body
+ *  — so multiple sections in a config tab read as distinct blocks instead of
+ *  one continuous list (the old faint `SectionHeader` blurred them together).
+ *  Wrap sibling Sections in a `flex flex-col gap-3 p-3` scroller. */
+export function Section({
+  title,
+  right,
+  children,
+  bodyClassName = 'px-3.5 py-3',
+}: {
+  title: ReactNode
+  /** Optional right-aligned header slot (e.g. an action button). */
+  right?: ReactNode
+  children: ReactNode
+  /** Override the body padding/layout (e.g. a flex list). */
+  bodyClassName?: string
+}) {
+  return (
+    <section
+      className="overflow-hidden rounded-lg"
+      style={{ border: '1px solid var(--border-default)', background: 'var(--bg-elevated)' }}
+    >
+      <div
+        className="flex items-center gap-2 px-3.5 py-2.5"
+        style={{
+          borderBottom: '1px solid var(--border-default)',
+          background: 'color-mix(in srgb, var(--bg-selected) 45%, transparent)',
+        }}
+      >
+        <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>{title}</span>
+        {right != null && <span className="ml-auto flex items-center">{right}</span>}
+      </div>
+      <div className={bodyClassName}>{children}</div>
+    </section>
+  )
+}
+
 export function IconButton({
   onClick,
   ariaLabel,
@@ -607,6 +644,8 @@ export function Modal({
   width = 480,
   role = 'dialog',
   ariaLabel,
+  headerActions,
+  footer,
   children,
 }: {
   open: boolean
@@ -631,6 +670,13 @@ export function Modal({
   /** Accessible name when `title` isn't descriptive enough on its own, or
    *  there's no visible title at all (the body renders its own heading). */
   ariaLabel?: string
+  /** Extra header buttons rendered before the built-in Close button (e.g. a
+   *  destructive delete action on a hero dialog). */
+  headerActions?: ReactNode
+  /** Rendered as a pinned footer strip below the scrollable body — use this
+   *  instead of putting action buttons in `children` so they don't scroll
+   *  away with tall content. */
+  footer?: ReactNode
   children: ReactNode
 }) {
   useEscapeToClose(onClose, open)
@@ -679,6 +725,7 @@ export function Modal({
               )}
               {meta && <div className="cl-meta-grid mt-1">{meta}</div>}
             </div>
+            {headerActions}
             <button
               type="button"
               aria-label="Close"
@@ -692,6 +739,11 @@ export function Modal({
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
           {children}
         </div>
+        {footer && (
+          <div className="cl-panel-footer flex items-center justify-end gap-2 px-4 py-3">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   )

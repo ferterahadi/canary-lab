@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../../shared/api/client'
 import type { EditorChoice, HealAgentChoice, ProjectConfig } from '../../../shared/api/client'
-import { CloseIcon } from './atoms'
+import { Modal } from './atoms'
 import { FolderPicker } from './FolderPicker'
 
 // `auto` and `manual` are intentionally omitted from the settings UI. The
@@ -193,29 +193,36 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
   }
 
   return (
-    <div
-      className="cl-modal-backdrop fixed inset-0 z-40 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        className="cl-modal relative flex max-h-[calc(100vh-2rem)] w-[min(480px,100%)] flex-col overflow-hidden rounded-lg"
-        style={{ background: 'var(--bg-elevated)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="cl-dialog-header">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Project Settings</h2>
-          </div>
+    <Modal
+      open
+      onClose={onClose}
+      title="Project Settings"
+      ariaLabel="Project Settings"
+      footer={
+        <>
+          {error && <span className="mr-auto text-xs" style={{ color: 'var(--danger)' }}>{error}</span>}
+          <button type="button" onClick={onClose} className="cl-button px-3 py-1 text-xs">
+            Close
+          </button>
           <button
             type="button"
-            aria-label="Close settings"
-            onClick={onClose}
-            className="cl-icon-button h-7 w-7 shrink-0"
+            onClick={onSave}
+            disabled={!dirty || saving}
+            className="cl-button px-3 py-1 text-xs"
+            style={{
+              color: dirty ? 'var(--border-focus)' : 'var(--text-muted)',
+              border: '1px solid',
+              borderColor: dirty ? 'color-mix(in srgb, var(--border-focus) 40%, transparent)' : 'var(--border-default)',
+              background: dirty ? 'color-mix(in srgb, var(--border-focus) 8%, transparent)' : 'transparent',
+              opacity: saving ? 0.6 : 1,
+            }}
           >
-            <CloseIcon size={14} />
+            {saving ? 'Saving…' : 'Save'}
           </button>
-        </header>
-        <div className="min-h-0 overflow-y-auto px-4 py-3">
+        </>
+      }
+    >
+        <div className="min-h-0 px-4 py-3">
           {!draft ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               {error ?? 'Loading…'}
@@ -343,33 +350,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
             </>
           )}
         </div>
-        <div className="cl-panel-footer flex items-center justify-end gap-2 px-4 py-3">
-          {error && <span className="mr-auto text-xs" style={{ color: 'var(--danger)' }}>{error}</span>}
-          <button
-            type="button"
-            onClick={onClose}
-            className="cl-button px-3 py-1 text-xs"
-          >
-            Close
-          </button>
-          <button
-            type="button"
-            onClick={onSave}
-            disabled={!dirty || saving}
-            className="cl-button px-3 py-1 text-xs"
-            style={{
-              color: dirty ? 'var(--border-focus)' : 'var(--text-muted)',
-              border: '1px solid',
-              borderColor: dirty ? 'color-mix(in srgb, var(--border-focus) 40%, transparent)' : 'var(--border-default)',
-              background: dirty ? 'color-mix(in srgb, var(--border-focus) 8%, transparent)' : 'transparent',
-              opacity: saving ? 0.6 : 1,
-            }}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        </div>
-      </div>
-    </div>
+    </Modal>
   )
 }
 
