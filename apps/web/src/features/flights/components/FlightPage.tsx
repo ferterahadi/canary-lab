@@ -9,9 +9,8 @@ import type {
   SpecsCoverageProgress as SpecsCoverageProgressT,
 } from '../../../shared/api/client'
 import type { JournalEntry, RunDetail, RunIndexEntry } from '../../../shared/api/types'
-import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
+import { AgentSessionView, type AgentSessionSource } from '../../agent-sessions/components/AgentSessionView'
 import { StatusDot } from '../../config/components/atoms'
-import { EvaluationTaskPanel } from '../../evaluation/components/EvaluationTaskPanel'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { RunRow } from '../../runs/components/RunRow'
 import { ActivityOnlyRow, FLIGHT_STATUS_TONE, FlightStatusChip, NotFlownRow, StageMiniRail, featureActivityRows, flightStatusLabel } from './FlightsPill'
@@ -380,7 +379,7 @@ function FlightDetail({
           })}
         </nav>
 
-        <main className="flex min-w-0 flex-1 flex-col gap-3 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+        <main className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
           {!stage || !row ? (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Pick a stage.</div>
           ) : (
@@ -480,8 +479,26 @@ function StageDetail({
   const error = stage.error ?? companion?.error
   const combinedLog = [stage.log, companion?.log].filter(Boolean).join('')
 
+  // R66: every stage's activity is the same rail. Resolve its one agent source
+  // (if any): agent stages tail their flight session; the Evaluation Report
+  // tails its export task (kind:'evaluation' — a localized rewrite streams a
+  // timeline, a raw export has none and shows only its system rows). Agentless
+  // stages pass no source and render system rows alone.
+  const evalTaskId = stage.key === 'evaluation-export'
+    ? (((stage.evidence as Record<string, unknown> | undefined)?.taskId as string | undefined) ?? flight.links?.evaluationTaskId)
+    : undefined
+  const activitySource: AgentSessionSource | undefined =
+    evalTaskId ? { kind: 'evaluation', taskId: evalTaskId, live }
+    : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
+    : undefined
+  const activityKey = evalTaskId ? `evaluation:${evalTaskId}` : (agentDir ?? 'system-only')
+
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* R66: header, facts and stage panels scroll here; the activity band
+          below fills the rest of the pane so a long transcript scrolls in
+          place instead of the whole stage view running off the bottom. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
       <div className="flex items-center gap-2">
         <h2 className="text-[13px] font-semibold" title={stage.key}>{row.label}</h2>
         <StageStatusChip status={row.status} />
@@ -560,57 +577,61 @@ function StageDetail({
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
       )}
 
-      {/* R66: one chronological activity band per stage — the tagged system
-          lines with the agent timeline embedded where the agent worked. The
-          Evaluation Report's export task renders as the band instead (R65). */}
+      </div>
+      {/* R66: one activity rail per stage — the conductor's tagged system lines
+          and the stage's agent timeline (if any) on a single block. */}
       <StageActivity
-        flightId={flightId}
-        agentDir={agentDir}
+        source={activitySource}
+        sourceKey={activityKey}
         live={live}
         settled={settled}
         log={combinedLog}
-        band={stage.key === 'evaluation-export' ? <ExportTaskPanel flight={flight} stage={stage} /> : undefined}
       />
-    </>
+    </div>
   )
 }
 
-/** The stage's activity band (R66): FlightStageLog + AgentBlock unified. The
- *  conductor's `[tagged]` lines and the agent's timeline are one story — the
- *  lines logged before the agent spawned render above the embedded
- *  AgentSessionView, the wrap-up lines after it below. `stage.log` has no
- *  timestamps, so the split is positional: agent chunks are mirrored into the
- *  log untagged, so the first/last untagged line brackets the agent's slot;
- *  a settled log with no untagged lines splits after the last spawn
- *  announcement (a tagged line ending in `…`). Untagged middles never render
- *  here — the timeline shows them richer. Expanded while the stage works; one
- *  "▸ View activity" disclosure once settled. */
+/** The stage's activity band (R66): ONE consolidated block, identical for every
+ *  stage. The conductor's `[tagged]` system lines and the stage's own agent
+ *  timeline ride one `AgentSessionView` rail (system lines passed as
+ *  `systemRows`, styled apart from the agent's rows). Agent stages tail their
+ *  flight session; the Evaluation Report tails its export task; an agentless
+ *  stage passes no `source` and shows system rows alone.
+ *  `stage.log` has no timestamps, so the split is positional: agent chunks are
+ *  mirrored into the log untagged, so the first/last untagged line brackets the
+ *  agent's slot (→ `pre` before it, `post` after); a settled log with no
+ *  untagged lines splits after the last spawn announcement (a tagged line
+ *  ending in `…`). Untagged middles never render as system rows — the timeline
+ *  shows them richer. Expanded fills ~half the pane; one "▸ View activity"
+ *  disclosure once settled. */
 function StageActivity({
-  flightId,
-  agentDir,
+  source,
+  sourceKey,
   live,
   settled,
   log,
-  band,
 }: {
-  flightId: string
-  agentDir?: string
+  /** The stage's one agent session, if it spawned one (flight agent, or the
+   *  Evaluation Report's export task). Omitted for agentless stages — the rail
+   *  then shows system rows alone. */
+  source?: AgentSessionSource
+  /** Remount key — swaps the timeline when the specs loop flips authoring→map,
+   *  or between export tasks. */
+  sourceKey: string
   live: boolean
   settled: boolean
   log: string
-  /** Replaces the default agent band (Evaluation Report's export task, R65). */
-  band?: ReactNode
 }) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const lines = log.split('\n').filter((l) => l.trim() !== '')
-  const hasBand = band !== undefined || Boolean(agentDir)
-  if (lines.length === 0 && !hasBand) return null
+  const hasSource = source !== undefined
+  if (lines.length === 0 && !hasSource) return null
   const open = userToggled ?? !settled
 
   const isTagged = (l: string): boolean => /^\[[\w-]+\]/.test(l)
   let pre = lines
   let post: string[] = []
-  if (hasBand) {
+  if (hasSource) {
     const firstUntagged = lines.findIndex((l) => !isTagged(l))
     if (firstUntagged >= 0) {
       let lastUntagged = firstUntagged
@@ -632,73 +653,41 @@ function StageActivity({
   }
 
   return (
-    <section data-testid="stage-activity" className="flex min-h-0 flex-col gap-2">
-      {settled && (
-        <button
-          type="button"
-          data-testid="stage-details-toggle"
-          aria-expanded={open}
-          onClick={() => setUserToggled(!open)}
-          className="cl-button self-start px-2 py-0.5 text-[11px]"
-        >
-          {open ? '▾ Hide activity' : '▸ View activity'}
-        </button>
-      )}
+    <section
+      data-testid="stage-activity"
+      className={`flex flex-col border-t ${open ? 'min-h-0 flex-1' : 'shrink-0'}`}
+      style={{ borderColor: 'var(--border-default)', background: 'color-mix(in srgb, var(--bg-elevated) 22%, transparent)' }}
+    >
+      {/* R66: the boundary between the stage's detail (above) and its activity.
+          One labelled bar for every stage; the toggle rides it once settled. */}
+      <div className="flex items-center gap-2.5 px-3 py-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+          Activity
+        </span>
+        <span className="h-px flex-1" style={{ borderTop: '1px dashed var(--border-default)' }} />
+        {settled && (
+          <button
+            type="button"
+            data-testid="stage-details-toggle"
+            aria-expanded={open}
+            onClick={() => setUserToggled(!open)}
+            className="cl-button px-2 py-0.5 text-[11px]"
+          >
+            {open ? '▾ Hide' : '▸ Show'}
+          </button>
+        )}
+      </div>
       {open && (
-        <>
-          {pre.length > 0 && <FlightStageLog lines={pre} />}
-          {band !== undefined
-            ? band
-            : agentDir && (
-              <AgentBlock>
-                {/* Keyed by sidecar so the specs loop's authoring→mapping swap
-                    remounts the timeline onto the other agent's stream. */}
-                <AgentSessionView key={agentDir} source={{ kind: 'flight', flightId, stage: agentDir, live }} />
-              </AgentBlock>
-            )}
-          {post.length > 0 && <FlightStageLog lines={post} />}
-        </>
+        <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+          {/* ONE rail for EVERY stage. The conductor's system lines and the
+              stage's agent timeline (flight agent, or the export task) share it;
+              an agentless stage (no `source`) renders system rows alone. */}
+          <AgentBlock>
+            <AgentSessionView key={sourceKey} source={source} systemRows={{ pre, post }} />
+          </AgentBlock>
+        </div>
       )}
     </section>
-  )
-}
-
-/** The system half of a stage's story (R30): the conductor's `[tagged]` log
- *  lines as scannable rows — tag chip + line, mono, pinned to the tail while
- *  it grows. Agent output never renders here (that's AgentSessionView's job);
- *  StageActivity hands each slot its pre-split lines (R66). */
-function FlightStageLog({ lines }: { lines: string[] }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [lines])
-  return (
-    <div
-      ref={ref}
-      data-testid="stage-log"
-      className="flex max-h-[260px] flex-col gap-[3px] overflow-auto rounded border p-2"
-      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', scrollbarGutter: 'stable' }}
-    >
-      {lines.map((line, i) => {
-        const m = /^\[([\w-]+)\]\s?(.*)$/.exec(line)
-        return (
-          <div key={i} className="flex items-baseline gap-2 text-[10.5px]" style={{ fontFamily: 'var(--font-mono)' }}>
-            {m && (
-              <span
-                className="shrink-0 rounded px-1 py-[1px] text-[9px] font-semibold uppercase tracking-wide"
-                style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
-              >
-                {m[1]}
-              </span>
-            )}
-            <span className="min-w-0 whitespace-pre-wrap break-words" style={{ color: 'var(--text-secondary)' }}>
-              {m ? m[2] : line}
-            </span>
-          </div>
-        )
-      })}
-    </div>
   )
 }
 
@@ -881,20 +870,17 @@ export function configDigestFacts(config: unknown, playwright: unknown): StageFa
   return facts
 }
 
-/** Frame for a live agent timeline. Flight agents are canary-spawned on this
- *  server; the caption says so before showing what they're doing. */
+/** Frame for a stage's consolidated activity (R66): the conductor's system
+ *  rows and the agent's own timeline share one bordered, scrolling rail. Fills
+ *  its half of the stage pane; the rail's own header names the agent. */
 function AgentBlock({ children }: { children: ReactNode }) {
   return (
-    <section className="flex min-h-[240px] flex-1 flex-col gap-1">
-      <span data-testid="agent-origin" className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-        Agent · canary-spawned on this server
-      </span>
-      <div className="flex min-h-0 flex-1 flex-col rounded border" style={{ borderColor: 'var(--border-default)' }}>
-        {children}
-      </div>
-    </section>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border" style={{ borderColor: 'var(--border-default)' }}>
+      {children}
+    </div>
   )
 }
+
 
 function truncate(text: string, max: number): string {
   const line = text.split('\n')[0] ?? ''
@@ -1099,20 +1085,6 @@ function RunRepairSummary({ runId, active }: { runId: string; active: boolean })
       )}
     </div>
   )
-}
-
-/** Evaluation Report's live heart (R29): the export task's status + output —
- *  agent timeline for a localized rewrite, external card for a handed-off
- *  export, progress text for raw — rendered where the export happens. This is
- *  the home the standalone export dialog dissolved into. */
-function ExportTaskPanel({ flight, stage }: { flight: FlightManifest; stage: FlightStage }) {
-  const { taskById, taskForRun } = useEvaluationExports()
-  const ev = (stage.evidence ?? {}) as Record<string, unknown>
-  const taskId = (typeof ev.taskId === 'string' ? ev.taskId : undefined) ?? flight.links?.evaluationTaskId
-  const runId = flight.links?.runId
-  const task = (taskId ? taskById(taskId) : null) ?? (runId ? taskForRun(runId) : null)
-  if (!task) return null
-  return <EvaluationTaskPanel task={task} showDownload={false} />
 }
 
 /** Evaluation Report's primary action (R15): the explicit download, in the
