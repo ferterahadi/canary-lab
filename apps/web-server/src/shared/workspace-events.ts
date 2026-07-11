@@ -24,6 +24,10 @@ export type WorkspaceEvent =
   // A Flight manifest changed (stage transition, checkpoint, settle).
   // The client refetches the flight list / the open flight detail view.
   | { type: 'flights-changed' }
+  // A pre-flight (plan-features) task changed — created, settled to a
+  // proposal, auto-launched, or failed. The client refetches the pre-flight
+  // list so the Flights pill's pre-flight rows update live.
+  | { type: 'pre-flight-changed' }
 
 export interface WorkspaceEventPublisher {
   publish(event: WorkspaceEvent): void

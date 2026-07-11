@@ -86,7 +86,7 @@ function Step({
         </span>
         {!last && <span className="mt-1 w-px flex-1" style={{ background: 'var(--border-default)', minHeight: 14 }} />}
       </div>
-      <div className="min-w-0 flex-1 pb-4">
+      <div className={`min-w-0 flex-1 ${last ? '' : 'pb-4'}`}>
         {title && (
           <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
             {title}
@@ -100,11 +100,16 @@ function Step({
 
 export function FlightStartDialog({
   feature,
+  resumePlanTaskId,
   onClose,
   onOpenFlight,
 }: {
   /** Feature to (re)fly, or null → new-flight mode (intent + repo picker). */
   feature: string | null
+  /** Reopen attached to a backgrounded pre-flight (plan-features) task — a
+   *  Flights-pill pre-flight row routes this. New-flight mode only; the dialog
+   *  fetches the task and drops straight into the planning/proposal view. */
+  resumePlanTaskId?: string | null
   /** Accepted for call-site compatibility (App still passes the flattened
    *  workspace repos); the picker now navigates the filesystem via the shared
    *  FolderPickerModal, so no seed list is needed. */
@@ -130,15 +135,32 @@ export function FlightStartDialog({
   // control once flown), collapsible to get it out of the way.
   const [showSteps, setShowSteps] = useState(true)
 
-  // R54 plan flow state.
-  const [phase, setPhase] = useState<NewFlightPhase>('form')
+  // R54 plan flow state. Resuming a backgrounded pre-flight opens straight in
+  // the planning view (the resume effect attaches the task; the settle effect
+  // then promotes it to the proposal or into the launched flight).
+  const [phase, setPhase] = useState<NewFlightPhase>(resumePlanTaskId ? 'planning' : 'form')
   const [planTask, setPlanTask] = useState<PlanFeaturesTask | null>(null)
   const [proposal, setProposal] = useState<PlannedFeature[]>([])
   const [sharedGroup, setSharedGroup] = useState('')
   const [conflicts, setConflicts] = useState<string[]>([])
   const autoLaunched = useRef(false)
+  const resumeAttached = useRef(false)
 
   const newFlight = resolvedFeature === null
+
+  // Resume: fetch the backgrounded task and hand it to the plan flow.
+  useEffect(() => {
+    if (!resumePlanTaskId || resumeAttached.current) return
+    resumeAttached.current = true
+    api.getPlanFeaturesTask(resumePlanTaskId)
+      .then((task) => {
+        setPlanTask(task)
+        setDescription(task.description)
+        setRepoPaths(task.repoPaths)
+        setPhase('planning')
+      })
+      .catch((err: unknown) => setStartError(err instanceof Error ? err.message : String(err)))
+  }, [resumePlanTaskId])
 
   useEffect(() => {
     if (newFlight) return
@@ -168,30 +190,43 @@ export function FlightStartDialog({
     return () => clearInterval(id)
   }, [planTask?.taskId, planTask?.status])
 
-  // A settled plan advances the phase: one feature starts without another
-  // click; several become the proposal step.
+  // A settled plan advances the phase. Single-feature launching is the
+  // SERVER's job (so a backgrounded plan starts even with the dialog closed) —
+  // once it flips the task to `launched`, jump straight into the new flight.
   useEffect(() => {
-    if (planTask?.status !== 'done' || !planTask.result) return
-    const features = planTask.result.features
-    if (features.length <= 1) {
+    if (!planTask) return
+    if (planTask.status === 'launched' && planTask.launchedFlightIds && planTask.launchedFlightIds.length > 0) {
       if (autoLaunched.current) return
       autoLaunched.current = true
-      api.launchPlannedFeatures(planTask.taskId, { features })
-        .then(({ flightIds }) => onOpenFlight(flightIds[0]))
-        .catch((err: unknown) => {
-          // A name collision on the single feature still needs the user —
-          // surface the proposal card so they can rename it.
-          autoLaunched.current = false
-          applyLaunchFailure(err)
-          setProposal(features)
-          setSharedGroup(features[0]?.group ?? '')
-          setPhase('proposal')
-        })
+      onOpenFlight(planTask.launchedFlightIds[0])
       return
     }
-    setProposal(features)
-    setSharedGroup(features.find((f) => f.group)?.group ?? '')
-    setPhase('proposal')
+    if (planTask.status !== 'done' || !planTask.result) return
+    const features = planTask.result.features
+    const conflicted = (planTask.conflicts?.length ?? 0) > 0
+    // Several features, or a single one whose name clashed → the human decides
+    // (confirm the split / rename). Show the proposal.
+    if (features.length > 1 || conflicted) {
+      setProposal(features)
+      setSharedGroup(features.find((f) => f.group)?.group ?? '')
+      if (conflicted) setConflicts(planTask.conflicts ?? [])
+      setPhase('proposal')
+      return
+    }
+    // Single feature, no conflict. The server has already launched it in the
+    // live flow (we catch `launched` above via the poll); this direct launch
+    // is the fallback for a server without auto-launch, guarded to fire once.
+    if (autoLaunched.current) return
+    autoLaunched.current = true
+    api.launchPlannedFeatures(planTask.taskId, { features })
+      .then(({ flightIds }) => onOpenFlight(flightIds[0]))
+      .catch((err: unknown) => {
+        autoLaunched.current = false
+        applyLaunchFailure(err)
+        setProposal(features)
+        setSharedGroup(features[0]?.group ?? '')
+        setPhase('proposal')
+      })
   }, [planTask, onOpenFlight])
 
   const applyLaunchFailure = (err: unknown): void => {
@@ -395,10 +430,41 @@ export function FlightStartDialog({
     </div>
   )
 
+  // The form view (intent + repos + the collapsible step list) is the only view
+  // whose content height swings with a disclosure toggle. Pin the modal height
+  // there so expanding/collapsing "The full flight" scrolls the body (Modal
+  // already renders a scrollable body + a stable gutter) instead of resizing
+  // the whole dialog. The other views shrink-wrap as before.
+  const formView =
+    !loadError
+    && !(!newFlight && !entry)
+    && !(!newFlight && entry?.active)
+    && !(newFlight && phase === 'planning')
+    && !(newFlight && phase === 'proposal')
+
+  // Pinned to the modal's footer strip (not the scrollable body) so the primary
+  // action stays visible when the step list is expanded and the body scrolls.
+  const formFooter = (
+    <>
+      <button type="button" onClick={onClose} className="cl-button px-3 py-1 text-xs">Cancel</button>
+      <button
+        type="button"
+        data-testid="flight-start-submit"
+        disabled={!canSubmit}
+        onClick={start}
+        className="cl-button-primary px-3.5 py-1 text-xs"
+      >
+        {busy ? 'Starting…' : newFlight ? 'Plan flight →' : picked === 'continue' ? 'Continue flight' : 'Start flight'}
+      </button>
+    </>
+  )
+
   return (
     <Modal
       open
       onClose={onClose}
+      height={formView ? 'min(760px, calc(100vh - 2rem))' : undefined}
+      footer={formView ? formFooter : undefined}
       icon={
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M22 2 11 13" />
@@ -412,6 +478,7 @@ export function FlightStartDialog({
           : 'One command from a bare repo to a green, covered, evaluated run.'
       }
       width={620}
+      stableScrollGutter
     >
       <div className="flex flex-col gap-3 p-4">
         {loadError ? (
@@ -442,7 +509,6 @@ export function FlightStartDialog({
             busy={busy}
             error={errorBlock}
             onSkip={startSingleFlight}
-            onCancel={onClose}
           />
         ) : newFlight && phase === 'proposal' ? (
           <ProposalView
@@ -510,20 +576,6 @@ export function FlightStartDialog({
             )}
 
             {errorBlock}
-
-            <div className="flex items-center justify-end gap-1.5">
-              <button type="button" onClick={onClose} className="cl-button px-2.5 py-1 text-xs">Cancel</button>
-              <button
-                type="button"
-                data-testid="flight-start-submit"
-                disabled={!canSubmit}
-                onClick={start}
-                className="cl-button px-2.5 py-1 text-xs"
-                style={{ color: canSubmit ? 'rgb(56, 189, 248)' : undefined, opacity: canSubmit ? 1 : 0.55 }}
-              >
-                {busy ? 'Starting…' : newFlight ? 'Plan flight →' : picked === 'continue' ? 'Continue flight' : 'Start flight'}
-              </button>
-            </div>
           </>
         )}
       </div>
@@ -532,19 +584,21 @@ export function FlightStartDialog({
 }
 
 /** R54: the breakdown agent owns the dialog while it thinks — its timeline is
- *  the content, with the single-flight escape hatch always in reach. */
+ *  the content. Closing (the modal's ✕) doesn't stop the agent: the plan runs
+ *  on server-side and stays in the Flights pill as a pre-flight row, so there's
+ *  no footer "close" button duplicating the ✕. The single-flight escape hatch
+ *  appears ONLY when planning fails — there it's the way forward, not an
+ *  invitation to bail on a good default that's seconds from settling. */
 function PlanningView({
   task,
   busy,
   error,
   onSkip,
-  onCancel,
 }: {
   task: PlanFeaturesTask | null
   busy: boolean
   error: ReactNode
   onSkip: () => void
-  onCancel: () => void
 }) {
   const failed = task?.status === 'failed'
   return (
@@ -565,21 +619,28 @@ function PlanningView({
         </div>
       )}
       {error}
-      <div className="flex items-center justify-end gap-1.5">
-        <button type="button" onClick={onCancel} className="cl-button px-2.5 py-1 text-xs">
-          Close — keep planning in the background
-        </button>
-        <button
-          type="button"
-          data-testid="flight-plan-skip"
-          disabled={busy}
-          onClick={onSkip}
-          className="cl-button px-2.5 py-1 text-xs"
-          style={{ color: failed ? 'rgb(56, 189, 248)' : undefined }}
-        >
-          {busy ? 'Starting…' : 'Skip planning — start a single flight'}
-        </button>
-      </div>
+      {failed ? (
+        <div className="flex items-center justify-end">
+          <button
+            type="button"
+            data-testid="flight-plan-skip"
+            disabled={busy}
+            onClick={onSkip}
+            className="cl-button px-2.5 py-1 text-xs"
+            style={{ color: 'rgb(56, 189, 248)' }}
+          >
+            {busy ? 'Starting…' : 'Start a single flight'}
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1.5 text-[11px]" data-testid="flight-plan-background-hint" style={{ color: 'var(--text-muted)' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+            <path d="M22 2 11 13" />
+            <path d="M22 2 15 22l-4-9-9-4Z" />
+          </svg>
+          Close anytime — planning keeps running and waits for you in the Flights pill.
+        </div>
+      )}
     </div>
   )
 }
@@ -611,79 +672,182 @@ function ProposalView({
     onChange(proposal.map((f, idx) => (idx === i ? { ...f, ...part } : f)))
   }
   const n = proposal.length
+  // R69 follow-up: cards are read-first so all N features scan at a glance;
+  // the pencil flips one card into its editable fields. A conflicted card is
+  // forced open — you must rename it before anything launches. Opening an edit
+  // snapshots the card so Cancel can revert the live edits (patch writes
+  // straight into `proposal` as the user types).
+  const [editing, setEditing] = useState<Set<number>>(() => new Set())
+  const [snapshots, setSnapshots] = useState<Map<number, PlannedFeature>>(() => new Map())
+  const openEdit = (i: number): void => {
+    setSnapshots((prev) => new Map(prev).set(i, proposal[i]))
+    setEditing((prev) => new Set(prev).add(i))
+  }
+  const closeEdit = (i: number, revert: boolean): void => {
+    if (revert) {
+      const snap = snapshots.get(i)
+      if (snap) onChange(proposal.map((f, idx) => (idx === i ? snap : f)))
+    }
+    setSnapshots((prev) => { const next = new Map(prev); next.delete(i); return next })
+    setEditing((prev) => { const next = new Set(prev); next.delete(i); return next })
+  }
+
   return (
     <div className="flex flex-col gap-2.5" data-testid="flight-proposal-view">
       <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
         The intent breaks down into {n} feature{n === 1 ? '' : 's'} — each gets its own flight and test suite.
       </div>
 
-      <ul className="m-0 flex max-h-[320px] list-none flex-col gap-1.5 overflow-auto p-0 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      {/* R69 follow-up: group + token cost apply to EVERY card, so they head
+          the view instead of trailing under the scrolling list. */}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-stretch gap-2">
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded border px-3 py-2" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-selected)' }}>
+            <span className="shrink-0 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+              Group
+            </span>
+            <input
+              value={sharedGroup}
+              onChange={(e) => onGroupChange(e.target.value)}
+              data-testid="flight-proposal-group"
+              placeholder="optional"
+              spellCheck={false}
+              className="min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+              style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+            />
+          </label>
+          {n > 1 && (
+            <div data-testid="flight-proposal-token-warning" className="flex shrink-0 items-center gap-1.5 rounded border px-2.5 text-[11px]" style={{ borderColor: 'color-mix(in srgb, rgb(251, 191, 36) 45%, var(--border-default))', color: 'rgb(251, 191, 36)' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+                <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5Z" />
+              </svg>
+              {n} flights · ~{n}× the usual token cost
+            </div>
+          )}
+        </div>
+        <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+          {sharedGroup.trim()
+            ? `Houses these ${n} features under one accordion.`
+            : 'Optionally house these features under one accordion.'}
+        </div>
+      </div>
+
+      <ul className="m-0 flex max-h-[360px] list-none flex-col gap-1.5 overflow-auto p-0 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
         {proposal.map((f, i) => {
           const slug = api.deriveFeatureSlug(f.name)
           const conflicted = conflicts.includes(slug)
+          const isEditing = editing.has(i) || conflicted
           return (
             <li
               key={i}
               data-testid={`flight-proposal-card-${i}`}
-              className="flex flex-col gap-1.5 rounded border p-2.5"
-              style={{ borderColor: conflicted ? 'color-mix(in srgb, var(--danger) 50%, var(--border-default))' : 'var(--border-default)' }}
+              className="flex gap-3 rounded-lg p-3"
+              style={
+                conflicted
+                  ? { border: '1px solid color-mix(in srgb, var(--danger) 50%, var(--border-default))' }
+                  : isEditing
+                    ? { border: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)', background: 'var(--accent-soft)' }
+                    : { border: '1px solid var(--border-default)' }
+              }
             >
-              <input
-                value={f.name}
-                onChange={(e) => patch(i, { name: e.target.value })}
-                aria-label="Feature name"
-                spellCheck={false}
-                className="w-full rounded border px-2 py-1 text-[12px] outline-none"
-                style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
-              />
-              {conflicted && (
-                <div data-testid={`flight-proposal-conflict-${i}`} className="text-[10.5px]" style={{ color: 'var(--danger)' }}>
-                  A feature named "{slug}" already exists — rename this one.
-                </div>
-              )}
-              <Textarea value={f.description} onChange={(v) => patch(i, { description: v })} minRows={1} maxRows={3} />
-              {f.scope && (
-                <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                  {f.scope}
-                </div>
-              )}
+              <span
+                aria-hidden="true"
+                className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-medium"
+                style={
+                  isEditing
+                    ? { background: 'var(--accent)', color: '#ffffff' }
+                    : { border: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)', color: 'var(--accent)' }
+                }
+              >
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                {isEditing ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+                      Name
+                    </div>
+                    <input
+                      value={f.name}
+                      onChange={(e) => patch(i, { name: e.target.value })}
+                      aria-label="Feature name"
+                      spellCheck={false}
+                      className="mb-1.5 w-full rounded border px-2 py-1 text-[12px] outline-none"
+                      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+                    />
+                    {conflicted && (
+                      <div data-testid={`flight-proposal-conflict-${i}`} className="mb-1.5 text-[10.5px]" style={{ color: 'var(--danger)' }}>
+                        A feature named "{slug}" already exists — rename this one.
+                      </div>
+                    )}
+                    <div className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+                      Intent
+                    </div>
+                    <Textarea value={f.description} onChange={(v) => patch(i, { description: v })} minRows={4} maxRows={10} />
+                    {!conflicted && (
+                      <div className="mt-1 flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          data-testid={`flight-proposal-cancel-${i}`}
+                          onClick={() => closeEdit(i, true)}
+                          className="cl-button px-2.5 py-1 text-[11px]"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          data-testid={`flight-proposal-done-${i}`}
+                          disabled={!f.name.trim() || !f.description.trim()}
+                          onClick={() => closeEdit(i, false)}
+                          className="cl-button-primary px-3 py-1 text-[11px]"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                        {f.name}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={`Edit ${f.name}`}
+                        data-testid={`flight-proposal-edit-${i}`}
+                        onClick={() => openEdit(i)}
+                        className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors hover:bg-white/[0.04]"
+                        style={{ color: 'var(--text-muted)' }}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                        </svg>
+                        Edit
+                      </button>
+                    </div>
+                    <div className="whitespace-pre-wrap text-[12px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                      {f.description}
+                    </div>
+                  </>
+                )}
+              </div>
             </li>
           )
         })}
       </ul>
 
-      <label className="flex items-center gap-2">
-        <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-          Group
-        </span>
-        <input
-          value={sharedGroup}
-          onChange={(e) => onGroupChange(e.target.value)}
-          data-testid="flight-proposal-group"
-          placeholder="optional — houses these features under one accordion"
-          spellCheck={false}
-          className="min-w-0 flex-1 rounded border px-2 py-1 text-[11.5px] outline-none"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
-        />
-      </label>
-
-      {n > 1 && (
-        <div data-testid="flight-proposal-token-warning" className="rounded border px-2.5 py-2 text-[11px]" style={{ borderColor: 'color-mix(in srgb, rgb(251, 191, 36) 45%, var(--border-default))', color: 'rgb(251, 191, 36)' }}>
-          Runs {n} flights one at a time — expect roughly {n}× the usual token cost.
-        </div>
-      )}
-
       {error}
 
       <div className="flex items-center justify-end gap-1.5">
-        <button type="button" onClick={onCancel} className="cl-button px-2.5 py-1 text-xs">Cancel</button>
+        <button type="button" onClick={onCancel} className="cl-button px-3 py-1 text-xs">Cancel</button>
         <button
           type="button"
           data-testid="flight-proposal-confirm"
           disabled={busy || proposal.some((f) => !f.name.trim() || !f.description.trim())}
           onClick={onConfirm}
-          className="cl-button px-2.5 py-1 text-xs"
-          style={{ color: 'rgb(56, 189, 248)' }}
+          className="cl-button-primary px-3.5 py-1 text-xs"
         >
           {busy ? 'Launching…' : n === 1 ? 'Start the flight' : `Start ${n} flights`}
         </button>

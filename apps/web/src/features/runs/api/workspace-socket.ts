@@ -20,6 +20,7 @@ export type WorkspaceEvent =
   | { type: 'evaluation-export-deleted'; taskId: string }
   | { type: 'version-changed' }
   | { type: 'flights-changed' }
+  | { type: 'pre-flight-changed' }
 
 export interface ConnectWorkspaceEventsOptions {
   wsBase?: string

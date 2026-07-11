@@ -15,7 +15,7 @@ import { BenchmarkPill } from '../../features/benchmark/components/BenchmarkPill
 import { CleanupPill } from '../../features/logs/components/CleanupPill'
 import { FlightsPill } from '../../features/flights/components/FlightsPill'
 import type { FeatureActivity } from '../../features/flights/state/feature-activity'
-import type { FlightIndexEntry } from '../api/client'
+import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -24,6 +24,11 @@ interface Props {
   onOpenCleanup?: () => void
   /** Flight index (App owns it, WS-driven) — feeds the Flights pill. */
   flights?: FlightIndexEntry[]
+  /** Pre-flight (plan-features) tasks in progress / awaiting review — the
+   *  pill's pre-flight rows (App owns it, `pre-flight-changed`-driven). */
+  preFlights?: PlanFeaturesTask[]
+  /** Reopen the new-flight dialog attached to a running/awaiting pre-flight. */
+  onOpenPreFlight?: (taskId: string) => void
   /** Per-feature live activity (runs / portify / authoring) — App owns the
    *  one useFeatureActivity instance; the pill stays presentational. */
   activity?: Map<string, FeatureActivity>
@@ -59,7 +64,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], activity = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -103,6 +108,9 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
     ...flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').map((f) => f.feature),
     ...activity.keys(),
   ]).size
+    // Pre-flights in progress / awaiting review count as active too, so a
+    // backgrounded plan isn't hidden behind the collapsed-actions chevron.
+    + preFlights.filter((t) => t.status === 'running' || t.status === 'done').length
   const actionsActiveCount =
     (showBenchmark && activeBenchmark ? 1 : 0) + (activeFlightCount > 0 ? 1 : 0)
   const status = activeRunDetail?.manifest.status
@@ -216,6 +224,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           )}
           <FlightsPill
             flights={flights}
+            preFlights={preFlights}
             activity={activity}
             features={features.map((f) => ({ name: f.name, group: f.group }))}
             open={flightsPickerOpen}
@@ -223,6 +232,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             onStartFlight={(feature) => onStartFlight?.(feature)}
             onOpenFlight={(flightId) => onOpenFlight?.(flightId)}
             onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}
+            onOpenPreFlight={(taskId) => onOpenPreFlight?.(taskId)}
           />
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>

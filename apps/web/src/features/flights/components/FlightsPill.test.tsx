@@ -3,10 +3,20 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightIndexEntry } from '../../../shared/api/client'
+import type { FlightIndexEntry, PlanFeaturesTask } from '../../../shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { FlightsPill, featureChipState } from './FlightsPill'
+
+const preFlight = (over: Partial<PlanFeaturesTask>): PlanFeaturesTask => ({
+  taskId: 'fp_1',
+  repoPaths: ['/repo/shop'],
+  description: 'test the checkout flow end to end',
+  status: 'running',
+  createdAt: '2026-01-01T00:00:00Z',
+  updatedAt: '2026-01-01T00:00:00Z',
+  ...over,
+})
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -74,6 +84,46 @@ describe('FlightsPill', () => {
     render([])
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     expect(document.body.querySelector('[data-testid="flights-task-menu"]')?.textContent).toContain('npx canary-lab flight')
+  })
+
+  it('surfaces a backgrounded pre-flight as its own row and reopens it on click', () => {
+    const onOpenPreFlight = vi.fn()
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[]}
+          preFlights={[preFlight({ taskId: 'fp_9', status: 'running' })]}
+          onOpenFlight={vi.fn()}
+          onOpenPreFlight={onOpenPreFlight}
+        />,
+      )
+    })
+    // A running pre-flight counts as active on the trigger.
+    expect(container.textContent).toContain('Flights · 1 active')
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="pre-flight-open-fp_9"]')
+    expect(row).toBeTruthy()
+    expect(row?.textContent).toContain('test the checkout flow')
+    expect(row?.textContent).toContain('planning')
+    act(() => { row!.click() })
+    expect(onOpenPreFlight).toHaveBeenCalledWith('fp_9')
+  })
+
+  it('a settled pre-flight reads "to review" and flags the pill for attention', () => {
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[]}
+          preFlights={[preFlight({ taskId: 'fp_done', status: 'done' })]}
+          onOpenFlight={vi.fn()}
+          onOpenPreFlight={vi.fn()}
+        />,
+      )
+    })
+    expect(container.textContent).toContain('approval needed')
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="pre-flight-open-fp_done"]')
+    expect(row?.textContent).toContain('to review')
   })
 
   it('renders one mini-rail cell per USER-VISIBLE stage (plumbing hidden, pairs merged)', () => {

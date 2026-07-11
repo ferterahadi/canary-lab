@@ -788,6 +788,46 @@ describe('plan-features (R54)', () => {
     expect((list.json() as { flights: Array<{ feature: string }> }).flights.map((f) => f.feature)).toEqual(['checkout'])
   })
 
+  it('a single-feature plan auto-launches server-side (no proposal, no /launch call)', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'solo-feature', description: 'test the whole thing' },
+    ])))
+    const task = await planAndWait(app)
+    expect(task.status).toBe('launched')
+    expect(task.launchedFlightIds).toHaveLength(1)
+    const list = await app.inject({ method: 'GET', url: '/api/flights' })
+    expect((list.json() as { flights: Array<{ feature: string }> }).flights.map((f) => f.feature)).toContain('solo-feature')
+  })
+
+  it('a single-feature plan whose name clashes stays done with the conflict recorded', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'checkout', description: 'test checkout' },
+    ])))
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    await waitForStatus((started.json() as { flightId: string }).flightId, ['done'])
+    const task = await planAndWait(app)
+    expect(task.status).toBe('done')
+    expect(task.conflicts).toEqual(['checkout'])
+    expect(task.launchedFlightIds).toBeUndefined()
+  })
+
+  it('GET plan-features lists running/done tasks and drops launched ones', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'alpha', description: 'test alpha' },
+      { name: 'beta', description: 'test beta' },
+    ])))
+    const task = await planAndWait(app) // multi-feature → done, awaiting the human
+    const listed = await app.inject({ method: 'GET', url: '/api/flights/plan-features' })
+    expect((listed.json() as { tasks: PlanFeaturesTask[] }).tasks.map((t) => t.taskId)).toContain(task.taskId)
+    await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+    const after = await app.inject({ method: 'GET', url: '/api/flights/plan-features' })
+    expect((after.json() as { tasks: PlanFeaturesTask[] }).tasks.map((t) => t.taskId)).not.toContain(task.taskId)
+  })
+
   it('POST attaches to a running task for the same inputs instead of double-spawning', async () => {
     let spawns = 0
     let release: (() => void) | null = null

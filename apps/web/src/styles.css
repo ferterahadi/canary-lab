@@ -163,6 +163,15 @@ body {
   height: var(--scrollbar-size);
 }
 
+/* Scrollable but with no visible scrollbar (still scrolls via wheel/trackpad). */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .resize-handle {
   width: 1px;
   cursor: col-resize;
@@ -266,6 +275,42 @@ body {
 .vertical-resize-handle:hover,
 .vertical-resize-handle.dragging {
   background: var(--accent);
+}
+
+.vertical-collapse-btn {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: 9999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 150ms ease;
+  opacity: 0;
+  box-shadow: var(--shadow-panel);
+}
+.vertical-resize-handle:hover .vertical-collapse-btn,
+.vertical-collapse-btn:hover,
+.vertical-collapse-btn:focus-visible {
+  opacity: 1;
+}
+.vertical-collapse-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.vertical-collapse-btn svg {
+  width: 9px;
+  height: 9px;
+  pointer-events: none;
 }
 
 @keyframes canary-pulse {

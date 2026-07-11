@@ -34,11 +34,11 @@ import {
   type FlightStageEntryOption,
   type FlightStageKey,
 } from '../logic/types'
-import { deriveFeatureSlug, type PlannedFeature } from '../../../../../../shared/flights/types'
-import { PlanFeaturesStore, startPlanFeatures } from '../logic/plan-features'
+import { deriveFeatureSlug, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
+import { PlanFeaturesStore, startPlanFeatures, type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import type { FlightAgentSpawner } from '../logic/stages/context'
 import { loadFeatures } from '../../config/logic/feature-loader'
-import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface FlightRouteDeps {
   featuresDir: string
@@ -115,6 +115,68 @@ export function buildStageEntryValidator(featuresDir: string) {
  *  therefore the dialog's repo picker) may declare repos home-relative. */
 function expandHome(p: string): string {
   return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p
+}
+
+export interface PlannedLaunchDeps {
+  store: FlightStore
+  featuresDir: string
+  conductorDeps: FlightConductorDeps
+  workspaceEvents?: WorkspaceEventPublisher
+}
+
+/** Mint one flight per planned feature — the first running, the rest parked
+ *  `queued` for the conductor's sequential drain. Synchronous (startFlight /
+ *  enqueueFlight kick their agents off detached), so both callers — the
+ *  `/launch` route (user-confirmed proposal) and the plan agent's single-feature
+ *  auto-launch — run to completion without an await gap, and the plan-task
+ *  status flip that guards against a double launch is atomic. `features` must
+ *  already be validated (named + described + unique); name collisions are
+ *  settled up front so a partial launch can't happen. */
+export function executePlannedLaunch(
+  args: {
+    repoPaths: string[]
+    features: PlannedFeature[]
+    env: string
+    coverageTarget: number
+    yolo: boolean
+  },
+  deps: PlannedLaunchDeps,
+): PlanAutoLaunchOutcome {
+  const conflicts = args.features
+    .map((f) => f.name)
+    .filter(
+      (name) =>
+        deps.store.latestForFeature(name) !== null ||
+        fs.existsSync(path.join(deps.featuresDir, name)),
+    )
+  if (conflicts.length > 0) return { launched: false, conflicts }
+
+  const optsFor = (f: PlannedFeature): FlightOptions => ({
+    env: args.env,
+    coverageTarget: args.coverageTarget,
+    yolo: args.yolo,
+    // The proposal step already answered "new feature over this repo?" for
+    // every sibling — similarity must not re-ask (or yolo-rerun the first).
+    plannedSplit: true,
+    ...(f.group ? { group: f.group } : {}),
+  })
+  const flightIds: string[] = []
+  for (const [i, f] of args.features.entries()) {
+    const launchArgs = { feature: f.name, repoPaths: args.repoPaths, description: f.description, opts: optsFor(f) }
+    if (i === 0) {
+      try {
+        flightIds.push(startFlight(launchArgs, deps.conductorDeps).manifest.flightId)
+        continue
+      } catch (err) {
+        // Repo already busy with an unrelated active flight → park this one
+        // queued too; the drain starts it when the repo frees up.
+        if (!(err instanceof FlightConflictError)) throw err
+      }
+    }
+    flightIds.push(enqueueFlight(launchArgs, deps.conductorDeps).flightId)
+  }
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+  return { launched: true, flightIds }
 }
 
 export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps): Promise<void> {
@@ -438,12 +500,37 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       const task = startPlanFeatures(
         { repoPaths: resolved, description: body.description.trim() },
         planStore,
-        { logsDir: deps.logsDir, spawnAgent: deps.planAgent },
+        {
+          logsDir: deps.logsDir,
+          spawnAgent: deps.planAgent,
+          workspaceEvents: deps.workspaceEvents,
+          // A single-feature plan launches itself — even if the dialog is
+          // closed (backgrounded). Multi-feature is left for the proposal.
+          autoLaunch: (settled) =>
+            executePlannedLaunch(
+              { repoPaths: settled.repoPaths, features: settled.result!.features, env: 'local', coverageTarget: 100, yolo: false },
+              { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
+            ),
+        },
       )
       reply.code(202)
       return task
     },
   )
+
+  // The pre-flight list behind the Flights pill's pre-flight rows — every plan
+  // task still needing continuation (running) or the user's confirmation
+  // (done: a multi-feature proposal, or a single feature whose name clashed).
+  // `launched`/`failed` are terminal and drop off (a failed backgrounded plan
+  // produced nothing — the user re-plans from "+ New").
+  app.get('/api/flights/plan-features', async () => {
+    const tasks = planStore
+      .list()
+      .filter((e) => e.status === 'running' || e.status === 'done')
+      .map((e) => planStore.get(e.id))
+      .filter((t): t is PlanFeaturesTask => t !== null)
+    return { tasks }
+  })
 
   app.get<{ Params: { taskId: string } }>(
     '/api/flights/plan-features/:taskId',
@@ -510,51 +597,30 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       reply.code(400)
       return { error: 'feature names must be unique' }
     }
-    // Name collisions are settled BEFORE anything is created — a partial
-    // launch (2 of 5 flights minted) would be worse than a listed rejection.
-    const conflicts = features
-      .map((f) => f.name)
-      .filter(
-        (name) =>
-          store.latestForFeature(name) !== null ||
-          fs.existsSync(path.join(deps.featuresDir, name)),
-      )
-    if (conflicts.length > 0) {
+    // The shared helper settles name collisions BEFORE anything is created — a
+    // partial launch (2 of 5 flights minted) would be worse than a rejection.
+    const outcome = executePlannedLaunch(
+      {
+        repoPaths: task.repoPaths,
+        features,
+        env: body.env ?? 'local',
+        coverageTarget: body.coverageTarget ?? 100,
+        yolo: body.yolo === true,
+      },
+      { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
+    )
+    if (!outcome.launched) {
       reply.code(409)
       return {
-        error: `feature name(s) already in use: ${conflicts.join(', ')} — rename them in the proposal`,
+        error: `feature name(s) already in use: ${outcome.conflicts.join(', ')} — rename them in the proposal`,
         type: 'feature_name_conflicts',
-        conflicts,
+        conflicts: outcome.conflicts,
       }
     }
-    const coverageTarget = body.coverageTarget ?? 100
-    const optsFor = (f: PlannedFeature): FlightOptions => ({
-      env: body.env ?? 'local',
-      coverageTarget,
-      yolo: body.yolo === true,
-      // The proposal step already answered "new feature over this repo?" for
-      // every sibling — similarity must not re-ask (or yolo-rerun the first).
-      plannedSplit: true,
-      ...(f.group ? { group: f.group } : {}),
-    })
-    const flightIds: string[] = []
-    for (const [i, f] of features.entries()) {
-      const args = { feature: f.name, repoPaths: task.repoPaths, description: f.description, opts: optsFor(f) }
-      if (i === 0) {
-        try {
-          flightIds.push(startFlight(args, conductorDeps).manifest.flightId)
-          continue
-        } catch (err) {
-          // Repo already busy with an unrelated active flight → park this one
-          // queued too; the drain starts it when the repo frees up.
-          if (!(err instanceof FlightConflictError)) throw err
-        }
-      }
-      flightIds.push(enqueueFlight(args, conductorDeps).flightId)
-    }
-    planStore.save({ ...task, status: 'launched', launchedFlightIds: flightIds, updatedAt: new Date().toISOString() })
+    planStore.save({ ...task, status: 'launched', launchedFlightIds: outcome.flightIds, updatedAt: new Date().toISOString() })
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'pre-flight-changed' })
     reply.code(201)
-    return { flightIds }
+    return { flightIds: outcome.flightIds }
   })
 
   // Snapshot of a stage's agent session (scout / prd-summary / specs-N /

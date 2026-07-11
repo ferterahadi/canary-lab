@@ -11,7 +11,14 @@ import {
   type PlannedFeature,
 } from '../../../../../../shared/flights/types'
 import { renderPrompt } from '../../../shared/prompts'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { defaultSpawnAgent, extractJson, type FlightAgentSpawner } from './stages/context'
+
+/** Outcome of the server's single-feature auto-launch attempt. A name clash
+ *  leaves the plan `done` (the dialog reopens on the proposal to rename). */
+export type PlanAutoLaunchOutcome =
+  | { launched: true; flightIds: string[] }
+  | { launched: false; conflicts: string[] }
 
 // Pre-flight intent breakdown — the agent task behind the new-flight dialog's
 // "Plan flight" step. One file-backed task per repo set (non-blocking ·
@@ -26,6 +33,14 @@ export interface PlanFeaturesDeps {
   /** Injected in tests; defaults to the flight's claude spawner. */
   spawnAgent?: FlightAgentSpawner
   now?: () => string
+  /** Emits `pre-flight-changed` on create/settle/launch so the Flights pill's
+   *  pre-flight rows update live (cl_ws-driven-state). */
+  workspaceEvents?: WorkspaceEventPublisher
+  /** The server's single-feature launcher — wired by the route to the shared
+   *  launch helper. Runs synchronously right after the plan settles, so a
+   *  backgrounded plan (dialog closed) still starts, and so it can't interleave
+   *  with a client `/launch` POST. Absent in tests → no auto-launch. */
+  autoLaunch?: (task: PlanFeaturesTask) => PlanAutoLaunchOutcome
 }
 
 function indexEntryOf(t: PlanFeaturesTask): TaskIndexEntry {
@@ -138,6 +153,7 @@ export function startPlanFeatures(
     updatedAt: now(),
   }
   store.save(task)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'pre-flight-changed' })
   void runPlanAgent(task, store, deps)
   return task
 }
@@ -149,11 +165,15 @@ async function runPlanAgent(
 ): Promise<void> {
   const now = deps.now ?? (() => new Date().toISOString())
   const spawn = deps.spawnAgent ?? defaultSpawnAgent
-  const settle = (patch: Partial<PlanFeaturesTask>) => {
+  const emit = () => publishWorkspaceEvent(deps.workspaceEvents, { type: 'pre-flight-changed' })
+  const settle = (patch: Partial<PlanFeaturesTask>): PlanFeaturesTask | null => {
     const cur = store.get(task.taskId)
     // Reconcile may have failed the task while the agent ran — don't resurrect.
-    if (!cur || cur.status !== 'running') return
-    store.save({ ...cur, ...patch, updatedAt: now() })
+    if (!cur || cur.status !== 'running') return null
+    const next = { ...cur, ...patch, updatedAt: now() }
+    store.save(next)
+    emit()
+    return next
   }
   try {
     const prompt = renderPrompt('plan-features.md', {
@@ -166,7 +186,23 @@ async function runPlanAgent(
       stageDir: store.recordDir(task.taskId),
     })
     const result = normalizePlanResult(extractJson<PlanFeaturesResult>(text))
-    settle({ status: 'done', result })
+    const done = settle({ status: 'done', result })
+    // A single-feature plan is the server's to launch — synchronously, right
+    // here, so a backgrounded plan still starts and no client `/launch` can
+    // interleave. Multi-feature always waits for the user's proposal confirm.
+    if (done && !result.split && deps.autoLaunch) {
+      const outcome = deps.autoLaunch(done)
+      const cur = store.get(task.taskId)
+      if (!cur || cur.status !== 'done') return // a client /launch beat us to it
+      if (outcome.launched) {
+        store.save({ ...cur, status: 'launched', launchedFlightIds: outcome.flightIds, updatedAt: now() })
+      } else {
+        // Name clash — leave it `done` with the conflicts recorded; the dialog
+        // reopens on the proposal card so the user can rename and launch.
+        store.save({ ...cur, conflicts: outcome.conflicts, updatedAt: now() })
+      }
+      emit()
+    }
   } catch (err) {
     settle({ status: 'failed', error: err instanceof Error ? err.message : String(err) })
   }

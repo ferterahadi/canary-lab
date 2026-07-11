@@ -278,6 +278,10 @@ export interface PlanFeaturesTask {
   status: PlanFeaturesTaskStatus
   result?: PlanFeaturesResult
   error?: string
+  /** Set on a settled single-feature plan the server could NOT auto-launch
+   *  because the derived name is already in use — the task stays `done` and the
+   *  dialog reopens on the proposal card so the user can rename. */
+  conflicts?: string[]
   /** Flights created by the launch, in queue order (first one is running). */
   launchedFlightIds?: string[]
   createdAt: string

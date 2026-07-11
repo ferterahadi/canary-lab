@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { FlightIndexEntry, FlightPauseReason, FlightStageKey, FlightStageStatus, FlightStatus } from '../../../shared/api/client'
+import type { FlightIndexEntry, FlightPauseReason, FlightStageKey, FlightStageStatus, FlightStatus, PlanFeaturesTask } from '../../../shared/api/client'
 import { ChevronRightIcon, SlideOverPanel } from '../../config/components/atoms'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
@@ -33,6 +33,28 @@ export const FLIGHT_STATUS_TONE: Record<FlightStatus, string> = {
 export function flightStatusLabel(status: FlightStatus): string {
   if (status === 'waiting-for-approval') return 'needs approval'
   return status
+}
+
+/** Chip state for a pre-flight (plan-features) row — the intent breakdown that
+ *  runs BEFORE any feature/flight exists. `running` = the agent is judging one
+ *  feature or several (sky, live); `done` = it settled and needs the human
+ *  (amber "to review": confirm a multi-feature split, or rename a single
+ *  feature whose name clashed). Ranks between a flight checkpoint (0) and a
+ *  running flight (1) — a pending proposal is waiting on the human. */
+export function preFlightChipState(
+  task: Pick<PlanFeaturesTask, 'status' | 'conflicts'>,
+): { label: string; tone: string; live: boolean; rank: number; title: string } {
+  if (task.status === 'running') {
+    return { label: 'planning', tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: 'Judging whether this intent is one feature or several' }
+  }
+  const conflict = (task.conflicts?.length ?? 0) > 0
+  return {
+    label: 'to review',
+    tone: FLIGHT_STATUS_TONE['waiting-for-approval'],
+    live: false,
+    rank: 0.5,
+    title: conflict ? 'Name already in use — reopen to rename and launch' : 'Proposal ready — reopen to confirm the split',
+  }
 }
 
 /** Chip verb + tooltip per live activity kind (sky = in progress, same hue as
@@ -245,6 +267,7 @@ export function groupPickerRows(rows: FeatureActivityRow[], features: FeatureRef
 
 export function FlightsPill({
   flights,
+  preFlights = [],
   activity = new Map(),
   features = [],
   open: controlledOpen,
@@ -252,8 +275,12 @@ export function FlightsPill({
   onOpenFlight,
   onOpenActivity,
   onStartFlight,
+  onOpenPreFlight,
 }: {
   flights: FlightIndexEntry[]
+  /** Pre-flight (plan-features) tasks in progress / awaiting review — rendered
+   *  as their own rows above the feature rows (they precede any feature). */
+  preFlights?: PlanFeaturesTask[]
   /** Per-feature live activity (runs / portify / authoring) from useFeatureActivity — App owns it. */
   activity?: Map<string, FeatureActivity>
   /** Every workspace feature — the picker lists them 1:1 (R49) and groups those
@@ -270,6 +297,8 @@ export function FlightsPill({
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
   /** Open the flight launcher for a never-flown feature (R49). */
   onStartFlight?: (feature: string) => void
+  /** Reopen the new-flight dialog attached to a running/awaiting pre-flight. */
+  onOpenPreFlight?: (taskId: string) => void
 }) {
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen ?? internalOpen
@@ -277,6 +306,10 @@ export function FlightsPill({
     if (onOpenChange) onOpenChange(next)
     else setInternalOpen(next)
   }
+  // Defensive: the server list is already scoped to running/done, but a stale
+  // frame shouldn't render launched/failed rows.
+  const preFlightRows = preFlights.filter((t) => t.status === 'running' || t.status === 'done')
+  const preFlightReview = preFlightRows.filter((t) => t.status === 'done')
   const waiting = flights.filter((f) => f.status === 'waiting-for-approval')
   // Everything alive right now, deduped by feature: active flights AND live
   // activity on the absorbed surfaces (a flight's run stage and its run count
@@ -285,29 +318,33 @@ export function FlightsPill({
     ...flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').map((f) => f.feature),
     ...activity.keys(),
   ])
-  const activeCount = attention.size
+  // Pre-flights are pre-feature (no feature key yet) — they add to the count
+  // on their own, above the feature rows.
+  const activeCount = attention.size + preFlightRows.length
 
-  // R68: a persistent amber dot on the trigger whenever a flight is blocked on
-  // the human — parked on a checkpoint, or paused for a reason that isn't a
-  // deliberate user pause or a queued sibling (queued starts itself; a user
-  // pause was the user's own choice). Independent of any toast — it stays until
-  // the underlying state resolves.
-  const needsAttention = flights.some((f) =>
+  // R68: a persistent amber dot on the trigger whenever the human is the
+  // blocker — a flight parked on a checkpoint / paused for a non-user,
+  // non-queued reason, OR a pre-flight settled and awaiting review. Independent
+  // of any toast — it stays until the underlying state resolves.
+  const needsAttention = preFlightReview.length > 0 || flights.some((f) =>
     f.status === 'waiting-for-approval'
     || (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued'))
 
-  const tone = waiting.length > 0 ? FLIGHT_STATUS_TONE['waiting-for-approval'] : activeCount > 0 ? 'var(--accent)' : undefined
-  const label = waiting.length > 0
+  const needsHuman = waiting.length > 0 || preFlightReview.length > 0
+  const tone = needsHuman ? FLIGHT_STATUS_TONE['waiting-for-approval'] : activeCount > 0 ? 'var(--accent)' : undefined
+  const label = needsHuman
     ? `Flights · approval needed`
     : activeCount > 0
       ? `Flights · ${activeCount} active`
       : 'Flights'
 
   const tooltip = activeCount > 0
-    ? featureActivityRows(flights, activity)
-        .filter((r) => attention.has(r.feature))
-        .map((r) => `${r.feature}: ${featureChipState(r.flight, r.activity).title}`)
-        .join('\n')
+    ? [
+        ...preFlightRows.map((t) => `pre-flight: ${preFlightChipState(t).title}`),
+        ...featureActivityRows(flights, activity)
+          .filter((r) => attention.has(r.feature))
+          .map((r) => `${r.feature}: ${featureChipState(r.flight, r.activity).title}`),
+      ].join('\n')
     : 'Flight — one command from bare repo to evaluated run'
 
   return (
@@ -335,11 +372,13 @@ export function FlightsPill({
       {open && (
         <FlightsPickerDialog
           flights={flights}
+          preFlights={preFlightRows}
           activity={activity}
           features={features}
           onPick={(id) => { setOpen(false); onOpenFlight(id) }}
           onPickActivity={(feature, act) => { setOpen(false); onOpenActivity?.(feature, act) }}
           onStartFlight={(feature) => { setOpen(false); onStartFlight?.(feature) }}
+          onPickPreFlight={(taskId) => { setOpen(false); onOpenPreFlight?.(taskId) }}
           onClose={() => setOpen(false)}
         />
       )}
@@ -376,24 +415,31 @@ export function StageMiniRail({ stages }: { stages: Array<{ key: string; status:
 
 function FlightsPickerDialog({
   flights,
+  preFlights,
   activity,
   features,
   onPick,
   onPickActivity,
   onStartFlight,
+  onPickPreFlight,
   onClose,
 }: {
   flights: FlightIndexEntry[]
+  preFlights: PlanFeaturesTask[]
   activity: Map<string, FeatureActivity>
   features: Array<{ name: string; group?: string }>
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
+  onPickPreFlight: (taskId: string) => void
   onClose: () => void
 }) {
   const rows = featureActivityRows(flights, activity, features)
   // R55: split into the flat top-level bucket + collapsible group sections.
   const { ungrouped, groups } = groupPickerRows(rows, features)
+  // Pre-flights precede any feature, so they sit above the feature rows —
+  // sorted worst-first (a settled "to review" above a still-planning one).
+  const preFlightRows = [...preFlights].sort((a, b) => preFlightChipState(a).rank - preFlightChipState(b).rank)
 
   // Portalled to <body>: the status-bar action cluster is overflow-hidden and
   // carries a transform during its collapse animation.
@@ -418,7 +464,7 @@ function FlightsPickerDialog({
       }
       footer="Every stage verdict is computed by canary (boot passed, coverage met, run green) — the agent only proposes."
     >
-      {rows.length === 0 ? (
+      {rows.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
           No flights yet. Start one from a terminal:
           <div className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-base)', border: '1px solid var(--border-default)' }}>
@@ -427,6 +473,13 @@ function FlightsPickerDialog({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto p-2 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+          {preFlightRows.length > 0 && (
+            <ul className="flex flex-col gap-1">
+              {preFlightRows.map((task) => (
+                <PreFlightRow key={task.taskId} task={task} onOpen={onPickPreFlight} />
+              ))}
+            </ul>
+          )}
           {ungrouped.length > 0 && (
             <ul className="flex flex-col gap-1">
               {ungrouped.map((row) => (
@@ -525,7 +578,8 @@ function PickerGroupSection({
         onClick={toggle}
         aria-expanded={open}
         data-testid={`flight-group-toggle-${group}`}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+        style={{ border: '1px solid transparent' }}
       >
         <span
           aria-hidden="true"
@@ -539,6 +593,9 @@ function PickerGroupSection({
         </span>
         <span className="cl-count-chip shrink-0">{section.rows.length}</span>
         <FlightStatusChip flight={worst.flight} activity={worst.activity} />
+        {/* Invisible arrow-width spacer: aligns the group's status chip with the
+         *  trailing '→' column on every row below (rows reserve this width). */}
+        <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'transparent' }}>→</span>
       </button>
       {open && (
         <ul className="mt-1 flex flex-col gap-1 pl-4">
@@ -614,5 +671,44 @@ export function ActivityOnlyRow({
       <FlightStatusChip flight={null} activity={activity} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
     </button>
+  )
+}
+
+/** Row for a pre-flight (plan-features) task — the intent breakdown running
+ *  BEFORE any feature exists. No stage rail (nothing has entered the pipeline);
+ *  the intent text is the label, the chip carries the state ("planning" while
+ *  the agent judges, "to review" once it settles), and clicking reopens the
+ *  new-flight dialog attached to the task. */
+export function PreFlightRow({
+  task,
+  onOpen,
+}: {
+  task: PlanFeaturesTask
+  onOpen: (taskId: string) => void
+}) {
+  const chip = preFlightChipState(task)
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid={`pre-flight-open-${task.taskId}`}
+        onClick={() => onOpen(task.taskId)}
+        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
+        style={{ border: '1px solid var(--border-default)' }}
+        title={`${chip.title} — ${task.description}`}
+      >
+        <span aria-hidden="true" className="shrink-0" style={{ color: 'var(--text-muted)' }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M22 2 11 13" />
+            <path d="M22 2 15 22l-4-9-9-4Z" />
+          </svg>
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[12.5px]" style={{ color: 'var(--text-secondary)' }}>
+          {task.description}
+        </span>
+        <Chip testId="pre-flight-status-chip" chrome="border" tone={chip.tone} label={chip.label} width={72} title={chip.title} />
+        <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
+      </button>
+    </li>
   )
 }

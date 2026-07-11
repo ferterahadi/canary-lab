@@ -648,6 +648,7 @@ export function Modal({
   headerActions,
   subheader,
   footer,
+  stableScrollGutter,
   children,
 }: {
   open: boolean
@@ -691,6 +692,11 @@ export function Modal({
    *  instead of putting action buttons in `children` so they don't scroll
    *  away with tall content. */
   footer?: ReactNode
+  /** Reserve the vertical scrollbar's gutter even when it isn't showing, so a
+   *  body whose height changes with a toggle/disclosure (e.g. the flight
+   *  launcher's collapsible step list) doesn't jump sideways as the scrollbar
+   *  appears and disappears. */
+  stableScrollGutter?: boolean
   children?: ReactNode
 }) {
   useEscapeToClose(onClose, open)
@@ -753,7 +759,10 @@ export function Modal({
         )}
         {subheader}
         {children != null && (
-          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
+          <div
+            className="min-h-0 flex-1 overflow-y-auto scrollbar-thin"
+            style={stableScrollGutter ? { scrollbarGutter: 'stable' } : undefined}
+          >
             {children}
           </div>
         )}

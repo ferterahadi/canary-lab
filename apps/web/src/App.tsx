@@ -24,7 +24,7 @@ import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { ToastHost, type ToastItem } from './features/config/components/atoms'
 import { AGGREGATE_TOAST_ID, attentionKey, flightNeedsAttention } from './features/flights/state/flight-toasts'
 import type { Feature, VersionStatus } from './shared/api/types'
-import type { FlightIndexEntry } from './shared/api/client'
+import type { FlightIndexEntry, PlanFeaturesTask } from './shared/api/client'
 import { readPersistedView, persistView, onViewChangedInOtherTab } from './shared/lib/workspace-view-state'
 
 // R12: hydrate the open view + selected feature from the URL/localStorage so a
@@ -74,6 +74,13 @@ export function App() {
   const [flights, setFlights] = useState<FlightIndexEntry[]>([])
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(PERSISTED_VIEW.flight)
   const [flightsRefreshKey, setFlightsRefreshKey] = useState(0)
+  // Pre-flight (plan-features) tasks in progress / awaiting review — the pill's
+  // pre-flight rows. WS-driven via `pre-flight-changed` (+ a poll-while-running
+  // backstop), so a backgrounded plan stays visible and re-openable.
+  const [preFlights, setPreFlights] = useState<PlanFeaturesTask[]>([])
+  // The pre-flight a pill row reopened the new-flight dialog onto (attaches the
+  // dialog to the running/awaiting task instead of a fresh form).
+  const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(null)
   // R25: the flight stage-entry launcher — routed (dialog=flight-start,
   // qualified by the durable feature param) so a deep link / refresh reopens it.
   const [flightStartFor, setFlightStartFor] = useState<string | null>(
@@ -323,8 +330,23 @@ export function App() {
     api.listFlights().then(setFlights).catch(() => {})
   }, [])
 
+  const refreshPreFlights = useCallback((): void => {
+    api.listPlanFeatures().then((r) => setPreFlights(r.tasks)).catch(() => {})
+  }, [])
+
   // Initial flights load (feeds the pill + landing list before any event fires).
   useEffect(() => { refreshFlights() }, [refreshFlights])
+  useEffect(() => { refreshPreFlights() }, [refreshPreFlights])
+
+  // A running pre-flight settles via `pre-flight-changed`, but that push is
+  // best-effort — back a running plan with a gentle poll (cl_live-state-sync)
+  // so the pill catches the running→done/launched flip even if the event drops.
+  const anyPreFlightRunning = preFlights.some((t) => t.status === 'running')
+  useEffect(() => {
+    if (!anyPreFlightRunning) return
+    const id = setInterval(refreshPreFlights, 2500)
+    return () => clearInterval(id)
+  }, [anyPreFlightRunning, refreshPreFlights])
 
   // R14 (canary-first-flight): artifact surfaces (coverage ledger) render live
   // "a flight is generating this" state off the flights index. The
@@ -487,6 +509,9 @@ export function App() {
             refreshFlights()
             setFlightsRefreshKey((key) => key + 1)
           }
+          if (event.type === 'pre-flight-changed') {
+            refreshPreFlights()
+          }
         },
         // The bus has no replay, so any mutation that happened while the socket
         // was down (e.g. across a canary-apply server restart) was never
@@ -505,13 +530,14 @@ export function App() {
           refreshVersion()
           refreshFlights()
           setFlightsRefreshKey((key) => key + 1)
+          refreshPreFlights()
         },
       })
     } catch {
       // Initial REST load and direct UI callbacks still keep the page usable.
     }
     return () => conn?.close()
-  }, [refreshFeatures, refreshVersion, refreshFlights])
+  }, [refreshFeatures, refreshVersion, refreshFlights, refreshPreFlights])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
@@ -572,6 +598,7 @@ export function App() {
           defaultTopPercent={25}
           minTopPx={120}
           minBottomPx={320}
+          collapsible
           top={(
             <RunsColumn
               feature={selectedFeature}
@@ -600,6 +627,8 @@ export function App() {
         features={features}
         onOpenCleanup={() => setView('cleanup')}
         flights={flights}
+        preFlights={preFlights}
+        onOpenPreFlight={(taskId) => { setResumePlanTaskId(taskId); setFlightStartNew(true) }}
         activity={featureActivity}
         onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
         flightsPickerOpen={view === 'flights' && !selectedFlightId}
@@ -665,11 +694,13 @@ export function App() {
       {(flightStartFor !== null || flightStartNew) && (
         <FlightStartDialog
           feature={flightStartNew ? null : flightStartFor}
+          resumePlanTaskId={flightStartNew ? resumePlanTaskId : null}
           knownRepos={knownRepos}
-          onClose={() => { setFlightStartFor(null); setFlightStartNew(false) }}
+          onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null) }}
           onOpenFlight={(flightId) => {
             setFlightStartFor(null)
             setFlightStartNew(false)
+            setResumePlanTaskId(null)
             setSelectedFlightId(flightId)
             setView('flights')
             refreshFlights()

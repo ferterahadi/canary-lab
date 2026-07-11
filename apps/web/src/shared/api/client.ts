@@ -2022,6 +2022,18 @@ export function getPlanFeaturesTask(taskId: string, opts?: ClientOptions): Promi
   )
 }
 
+/** Pre-flight tasks still needing continuation (running) or the user's
+ *  confirmation (done) — the Flights pill's pre-flight rows. Refetched on the
+ *  `pre-flight-changed` WorkspaceEvent. */
+export function listPlanFeatures(opts?: ClientOptions): Promise<{ tasks: PlanFeaturesTaskT[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ tasks: PlanFeaturesTaskT[] }>(
+    `${baseUrl}/api/flights/plan-features`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 /** Launch the confirmed proposal: one flight per feature — the first starts
  *  now, the rest park `queued` and drain sequentially. 409 type
  *  `feature_name_conflicts` lists names already in use (nothing created). */
