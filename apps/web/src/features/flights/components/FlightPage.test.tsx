@@ -132,7 +132,7 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-async function render(flightId: string | null, refreshKey = 0) {
+async function render(flightId: string, refreshKey = 0) {
   await act(async () => {
     root.render(
       <FlightPage flightId={flightId} refreshKey={refreshKey} onSelectFlight={vi.fn()} onClose={vi.fn()} />,
@@ -141,14 +141,6 @@ async function render(flightId: string | null, refreshKey = 0) {
 }
 
 describe('FlightPage', () => {
-  it('renders the landing list without a flight id', async () => {
-    mocks.listFlights.mockResolvedValue([
-      { id: 'fl_1', flightId: 'fl_1', feature: 'checkout', repoPaths: ['/repo/shop'], status: 'done', currentStage: null, stages: [], createdAt: '', updatedAt: '' },
-    ])
-    await render(null)
-    expect(container.querySelector('[data-testid="flight-row-fl_1"]')).toBeTruthy()
-  })
-
   it('renders the full stage rail and auto-selects the stage that needs eyes', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'waiting-for-approval',
@@ -297,6 +289,60 @@ describe('stage summary + drill-through (R6)', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-run"]')?.click()
     })
     expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
+  })
+
+  it('run being repaired by an external client shows an [external] system row on the activity rail', async () => {
+    // Option 1: an externally-claimed heal has no Canary session to tail, so the
+    // rail carries an honest status row instead of a blank/empty timeline.
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: {
+        runId: 'run-9',
+        status: 'healing',
+        healMode: 'external',
+        externalHealSession: {
+          sessionId: 'sess-abc',
+          clientKind: 'claude',
+          conversationName: 'fix checkout',
+          claimedAt: '2026-01-01T00:00:00Z',
+          lastHeartbeatAt: '2026-01-01T00:00:03Z',
+          status: 'healing',
+          cycleCount: 2,
+        },
+      },
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'run',
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'run' ? ('running' as const) : ('done' as const),
+      })),
+    }))
+    await render('fl_1')
+    const pre = [...container.querySelectorAll('[data-testid="system-pre"]')].map((n) => n.textContent)
+    expect(pre.some((l) => l?.includes('[external] Heal claimed by Claude'))).toBe(true)
+    expect(pre.some((l) => l?.includes('healing') && l?.includes('repair cycle 2'))).toBe(true)
+  })
+
+  it('a normal (auto) heal shows no [external] row', async () => {
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: { runId: 'run-9', status: 'healing', healMode: 'auto' },
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'run',
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'run' ? ('running' as const) : ('done' as const),
+      })),
+    }))
+    await render('fl_1')
+    const pre = [...container.querySelectorAll('[data-testid="system-pre"]')].map((n) => n.textContent)
+    expect(pre.some((l) => l?.includes('[external]'))).toBe(false)
   })
 
   it('specs-coverage drills through to the coverage ledger; portify to its workflow', async () => {

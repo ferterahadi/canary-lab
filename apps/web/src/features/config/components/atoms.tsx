@@ -586,6 +586,8 @@ export function Modal({
   title,
   eyebrow,
   status,
+  icon,
+  description,
   meta,
   width = 480,
   children,
@@ -598,13 +600,18 @@ export function Modal({
   eyebrow?: string
   /** Optional status dot shown to the left of the title. */
   status?: StatusDotState
+  /** Optional glyph rendered in an accent tile left of the title block — for
+   *  hero dialogs whose header is an identity, not just a label. */
+  icon?: ReactNode
+  /** Optional one-line purpose sentence under the title (sentence case). */
+  description?: string
   /** Optional metadata content rendered as a 2-col grid under the title. */
   meta?: ReactNode
   width?: number
   children: ReactNode
 }) {
   if (!open) return null
-  const hasHeader = Boolean(title || eyebrow || meta || status)
+  const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
   return (
     <div
       className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -622,12 +629,26 @@ export function Modal({
         {hasHeader && (
           <header className="cl-dialog-header">
             {status && <StatusDot state={status} className="mt-1" />}
+            {icon && (
+              <span
+                aria-hidden="true"
+                className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+                style={{ background: 'color-mix(in srgb, var(--accent) 15%, transparent)', color: 'var(--accent)' }}
+              >
+                {icon}
+              </span>
+            )}
             <div className="min-w-0 flex-1">
               {eyebrow && <div className="cl-kicker mb-1">{eyebrow}</div>}
               {title && (
                 <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
                   {title}
                 </h2>
+              )}
+              {description && (
+                <p className="mt-0.5 text-[12px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
+                  {description}
+                </p>
               )}
               {meta && <div className="cl-meta-grid mt-1">{meta}</div>}
             </div>

@@ -27,8 +27,12 @@ interface Props {
   /** Per-feature live activity (runs / portify / authoring) — App owns the
    *  one useFeatureActivity instance; the pill stays presentational. */
   activity?: Map<string, FeatureActivity>
-  /** Open the routed flight detail view (null = the flights landing list). */
+  /** Open the routed flight detail view (null = the flights picker). */
   onOpenFlight?: (flightId: string | null) => void
+  /** Picker open-state, driven off the route (`view=flights` + no flight) so it's
+   *  the same deep-linkable surface the URL addresses — see cl_route-every-surface. */
+  flightsPickerOpen?: boolean
+  onFlightsPickerOpenChange?: (open: boolean) => void
   /** Open the real surface behind an activity-only pill row (run detail /
    *  portify workflow / wizard draft) — App routes it. */
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
@@ -55,7 +59,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], activity = new Map(), onOpenFlight, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], activity = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -214,6 +218,8 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             flights={flights}
             activity={activity}
             features={features.map((f) => ({ name: f.name, group: f.group }))}
+            open={flightsPickerOpen}
+            onOpenChange={onFlightsPickerOpenChange}
             onStartFlight={(feature) => onStartFlight?.(feature)}
             onOpenFlight={(flightId) => onOpenFlight?.(flightId)}
             onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}

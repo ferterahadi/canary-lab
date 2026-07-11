@@ -8,7 +8,6 @@ import type { ClientKind } from '../../shared/run-mode'
 import { featuresRoutes } from './src/features/config/routes/features'
 import { coverageRoutes } from './src/features/coverage/routes/coverage'
 import { featureConfigRoutes } from './src/features/config/routes/feature-config'
-import { fsBrowseRoutes } from './src/features/config/routes/fs-browse'
 import { verificationRoutes } from './src/features/coverage/routes/verification'
 import { projectConfigRoutes } from './src/features/config/routes/project-config'
 import { runsRoutes, type ExternalHealAgentRequest } from './src/features/runs/routes/runs'
@@ -328,7 +327,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       .list({ feature: featureName })
       .some((run) => isActiveRunStatus(run.status)),
   })
-  await app.register(fsBrowseRoutes)
   const startVerification = async (
     featureName: string,
     input: ResolveVerificationInput,

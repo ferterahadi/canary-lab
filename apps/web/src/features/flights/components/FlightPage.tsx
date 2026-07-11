@@ -2,18 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import * as api from '../../../shared/api/client'
 import type {
   FlightCheckpoint,
-  FlightIndexEntry,
   FlightManifest,
   FlightStage,
   FlightStageKey,
   SpecsCoverageProgress as SpecsCoverageProgressT,
 } from '../../../shared/api/client'
-import type { JournalEntry, RunDetail, RunIndexEntry } from '../../../shared/api/types'
+import type { ExternalHealSession, JournalEntry, RunDetail, RunIndexEntry } from '../../../shared/api/types'
 import { AgentSessionView, type AgentSessionSource } from '../../agent-sessions/components/AgentSessionView'
 import { StatusDot } from '../../config/components/atoms'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { RunRow } from '../../runs/components/RunRow'
-import { ActivityOnlyRow, FLIGHT_STATUS_TONE, FlightStatusChip, NotFlownRow, StageMiniRail, featureActivityRows, flightStatusLabel } from './FlightsPill'
+import { clientLabel } from '../../runs/components/external-client-branding'
+import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel } from './FlightStagePanels'
 import type { FeatureActivity } from '../state/feature-activity'
 import {
@@ -36,9 +36,10 @@ import {
 // verdict per stage), the selected stage's "trailer" on the right (R16): one
 // state line, the agent's identity + live output where an agent acts, and a
 // view-details affordance — the raw evidence/log stay behind the disclosure,
-// the real surfaces behind the drill-through. Without a flight id it renders
-// the landing list. Live via `flights-changed` events (refreshKey) + a gentle
-// poll while the flight is active.
+// the real surfaces behind the drill-through. The flights *list* is the picker
+// dialog (FlightsPickerDialog, `?view=flights` with no flight) — this view only
+// renders a selected flight. Live via `flights-changed` events (refreshKey) + a
+// gentle poll while the flight is active.
 
 /** Stage key → the sidecar dir its adapter pins an agent-session ref into.
  *  Stages without an agent (similarity, scaffold, run…) have no entry. */
@@ -46,6 +47,18 @@ const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
   'scout': 'scout',
   'prd-summary': 'prd-summary',
   'specs-coverage': 'specs-coverage',
+}
+
+/** The `[external]` activity-rail line for the run stage when its heal was
+ *  claimed by an external MCP client (Claude Desktop / Codex) — the honest
+ *  "this repair runs in your own window" indicator. An external agent's
+ *  transcript never reaches Canary (Canary is only the MCP server it calls), so
+ *  this is a status row (client · state · cycle), never a mirrored timeline. The
+ *  full picture is one drill-through away on the run detail's External panel. */
+export function externalHealSystemLine(session: ExternalHealSession): string {
+  const who = clientLabel(session.clientKind, 'an external client')
+  const cycle = session.cycleCount > 0 ? ` · repair cycle ${session.cycleCount}` : ''
+  return `[external] Heal claimed by ${who} — ${session.status}${cycle}`
 }
 
 /** Drill-through targets: each stage view is a LENS onto the real underlying
@@ -63,8 +76,6 @@ export function FlightPage({
   onSelectFlight,
   onClose,
   activity,
-  features,
-  onOpenActivity,
   onStartFlight,
   onOpenConfig,
   configRefreshKey,
@@ -73,16 +84,13 @@ export function FlightPage({
   onOpenCoverage,
   onOpenPortify,
 }: {
-  flightId: string | null
+  flightId: string
   refreshKey: number
+  /** Back to the flights picker (null clears the selected flight). */
   onSelectFlight: (flightId: string | null) => void
   onClose: () => void
   /** Per-feature live activity (runs / portify / authoring) — App owns it. */
   activity?: Map<string, FeatureActivity>
-  /** Every workspace feature name — the landing lists them 1:1 (R49). */
-  features?: string[]
-  /** Open the real surface behind an activity-only landing row. */
-  onOpenActivity?: (feature: string, activity: FeatureActivity) => void
   /** Opens the stage-entry launcher for the flight's feature (R25 re-fly). */
   onStartFlight?: (feature: string) => void
   /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup. */
@@ -94,80 +102,8 @@ export function FlightPage({
 } & FlightDrillThroughs) {
   return (
     <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
-      {flightId
-        ? <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
-        : <FlightsLanding refreshKey={refreshKey} activity={activity} features={features} onSelectFlight={onSelectFlight} onOpenActivity={onOpenActivity} onStartFlight={onStartFlight} onClose={onClose} />}
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
     </div>
-  )
-}
-
-function FlightsLanding({
-  refreshKey,
-  activity = new Map(),
-  features = [],
-  onSelectFlight,
-  onOpenActivity,
-  onStartFlight,
-  onClose,
-}: {
-  refreshKey: number
-  activity?: Map<string, FeatureActivity>
-  features?: string[]
-  onSelectFlight: (flightId: string) => void
-  onOpenActivity?: (feature: string, activity: FeatureActivity) => void
-  onStartFlight?: (feature: string) => void
-  onClose: () => void
-}) {
-  const [flights, setFlights] = useState<FlightIndexEntry[]>([])
-  useEffect(() => {
-    let alive = true
-    api.listFlights().then((f) => { if (alive) setFlights(f) }).catch(() => {})
-    return () => { alive = false }
-  }, [refreshKey])
-
-  return (
-    <>
-      <header className="flex items-center gap-3 border-b px-4 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
-        <h1 className="text-sm font-semibold">🕊️ Flights</h1>
-        <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          npx canary-lab flight &lt;repo&gt; "what to test"
-        </span>
-        <div className="flex-1" />
-        <button type="button" onClick={onClose} className="cl-button px-2.5 py-1 text-xs">Close</button>
-      </header>
-      {flights.length === 0 && activity.size === 0 && features.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          No flights yet — start one from a terminal and it appears here live.
-        </div>
-      ) : (
-        <ul className="flex flex-col gap-1.5 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
-          {featureActivityRows(flights, activity, features).map((row) => (
-            <li key={row.flight?.flightId ?? `activity-${row.feature}`}>
-              {row.flight ? (
-                <button
-                  type="button"
-                  data-testid={`flight-row-${row.flight.flightId}`}
-                  onClick={() => onSelectFlight(row.flight!.flightId)}
-                  className="flex w-full items-center gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-white/[0.04]"
-                  style={{ border: '1px solid var(--border-default)' }}
-                >
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{row.feature}</span>
-                  <span className="truncate text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                    {(row.flight.repoPaths ?? []).join(', ')}
-                  </span>
-                  <StageMiniRail stages={row.flight.stages ?? []} />
-                  <FlightStatusChip flight={row.flight} activity={row.activity} />
-                </button>
-              ) : row.activity ? (
-                <ActivityOnlyRow feature={row.feature} activity={row.activity} onOpen={(f, a) => onOpenActivity?.(f, a)} />
-              ) : (
-                <NotFlownRow feature={row.feature} onStart={(f) => onStartFlight?.(f)} />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </>
   )
 }
 
@@ -470,6 +406,27 @@ function StageDetail({
   const runId = runMerged
     ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
+  // The run detail behind the merged Run stage — one poll, shared by the repair
+  // summary and the external-heal indicator below (don't fetch it twice).
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null)
+  useEffect(() => {
+    if (!runMerged || !runId) { setRunDetail(null); return }
+    let alive = true
+    const load = (): void => { api.getRunDetail(runId).then((d) => { if (alive) setRunDetail(d) }).catch(() => {}) }
+    load()
+    if (!live) return () => { alive = false }
+    const id = setInterval(load, 5000)
+    return () => { alive = false; clearInterval(id) }
+  }, [runMerged, runId, live])
+  // R66/external: when a flight's run is being (or was) repaired by an external
+  // MCP client, the run has no Canary-spawned heal session to tail — so instead
+  // of a blank rail we surface an honest `[external]` status row at the head of
+  // the activity band. Status only (an external agent's transcript never reaches
+  // Canary); the full picture is one drill-through away on the run detail.
+  const externalHeal = runDetail?.manifest?.healMode === 'external'
+    ? runDetail.manifest.externalHealSession
+    : undefined
+  const leadingSystemRows = externalHeal ? [externalHealSystemLine(externalHeal)] : []
   // A pair row surfaces whichever half is parked on a checkpoint (the
   // missing-env checkpoint lives on the folded env-capture, run-failed on run).
   const checkpointStage =
@@ -555,7 +512,7 @@ function StageDetail({
 
       {/* Test Run (R22): what's running now, what each repair cycle fixed —
           no agent output, the run detail page holds the rest. */}
-      {runMerged && runId && <RunRepairSummary runId={runId} active={live} />}
+      {runMerged && runId && <RunRepairSummary runId={runId} detail={runDetail} active={live} />}
 
       {/* Test Run (R64): every run this feature has had, as the same cards the
           runs list renders — click drills into the real run detail. */}
@@ -586,6 +543,7 @@ function StageDetail({
         live={live}
         settled={settled}
         log={combinedLog}
+        leadingSystemRows={leadingSystemRows}
       />
     </div>
   )
@@ -610,6 +568,7 @@ function StageActivity({
   live,
   settled,
   log,
+  leadingSystemRows = [],
 }: {
   /** The stage's one agent session, if it spawned one (flight agent, or the
    *  Evaluation Report's export task). Omitted for agentless stages — the rail
@@ -621,11 +580,15 @@ function StageActivity({
   live: boolean
   settled: boolean
   log: string
+  /** Extra system rows pinned at the very head of the rail, before the
+   *  conductor's log — e.g. the `[external]` row when the run is being repaired
+   *  by an external MCP client (no Canary session to tail). */
+  leadingSystemRows?: string[]
 }) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const lines = log.split('\n').filter((l) => l.trim() !== '')
   const hasSource = source !== undefined
-  if (lines.length === 0 && !hasSource) return null
+  if (lines.length === 0 && !hasSource && leadingSystemRows.length === 0) return null
   const open = userToggled ?? !settled
 
   const isTagged = (l: string): boolean => /^\[[\w-]+\]/.test(l)
@@ -683,7 +646,7 @@ function StageActivity({
               stage's agent timeline (flight agent, or the export task) share it;
               an agentless stage (no `source`) renders system rows alone. */}
           <AgentBlock>
-            <AgentSessionView key={sourceKey} source={source} systemRows={{ pre, post }} />
+            <AgentSessionView key={sourceKey} source={source} systemRows={{ pre: [...leadingSystemRows, ...pre], post }} />
           </AgentBlock>
         </div>
       )}
@@ -980,13 +943,11 @@ function FeatureRunsPanel({
 /** The merged run row's live heart (R22): what is happening RIGHT NOW and what
  *  each repair cycle fixed — sourced from the run manifest + heal journal, not
  *  the agent's raw output. Polls gently while the run is active. */
-function RunRepairSummary({ runId, active }: { runId: string; active: boolean }) {
-  const [detail, setDetail] = useState<RunDetail | null>(null)
+function RunRepairSummary({ runId, detail, active }: { runId: string; detail: RunDetail | null; active: boolean }) {
   const [journal, setJournal] = useState<JournalEntry[]>([])
   useEffect(() => {
     let alive = true
     const load = (): void => {
-      api.getRunDetail(runId).then((d) => { if (alive) setDetail(d) }).catch(() => {})
       api.listJournal({ run: runId }).then((j) => { if (alive) setJournal(j) }).catch(() => {})
     }
     load()

@@ -839,25 +839,6 @@ export function browseDir(dir: string, opts?: ClientOptions): Promise<FsBrowseRe
   )
 }
 
-export interface DirectoryBrowseResult {
-  path: string
-  parent: string | null
-  entries: Array<{ name: string; path: string }>
-}
-
-// Directory-only picker backed by GET /api/fs/browse-dirs — dirs only, jailed to
-// the user's home tree (distinct from `browseDir`, which lists files+dirs
-// anywhere). Omit `path` to start at home.
-export function browseDirectory(path?: string, opts?: ClientOptions): Promise<DirectoryBrowseResult> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  const qs = path ? `?path=${encodeURIComponent(path)}` : ''
-  return request<DirectoryBrowseResult>(
-    `${baseUrl}/api/fs/browse-dirs${qs}`,
-    { method: 'GET' },
-    fetchImpl,
-  )
-}
-
 export interface ReadDotenvResponse {
   path: string
   entries: { key: string; value: string }[]

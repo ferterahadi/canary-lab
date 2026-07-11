@@ -253,6 +253,8 @@ export function FlightsPill({
   flights,
   activity = new Map(),
   features = [],
+  open: controlledOpen,
+  onOpenChange,
   onOpenFlight,
   onOpenActivity,
   onStartFlight,
@@ -263,13 +265,24 @@ export function FlightsPill({
   /** Every workspace feature — the picker lists them 1:1 (R49) and groups those
    *  that declare a `group` under a disclosure (R55). */
   features?: Array<{ name: string; group?: string }>
+  /** Controlled/uncontrolled hybrid (cl_route-every-surface): App drives the
+   *  picker's open-state off the route (`view=flights` + no flight selected) so
+   *  it's the same deep-linkable surface the URL addresses. Absent → the pill
+   *  falls back to its own state (keeps this component's unit tests standalone). */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
   onOpenFlight: (flightId: string | null) => void
   /** Open the real surface behind an activity-only row (no flight record). */
   onOpenActivity?: (feature: string, activity: FeatureActivity) => void
   /** Open the flight launcher for a never-flown feature (R49). */
   onStartFlight?: (feature: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = controlledOpen ?? internalOpen
+  const setOpen = (next: boolean): void => {
+    if (onOpenChange) onOpenChange(next)
+    else setInternalOpen(next)
+  }
   const waiting = flights.filter((f) => f.status === 'waiting-for-approval')
   // Everything alive right now, deduped by feature: active flights AND live
   // activity on the absorbed surfaces (a flight's run stage and its run count

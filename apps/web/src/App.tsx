@@ -602,6 +602,11 @@ export function App() {
         flights={flights}
         activity={featureActivity}
         onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
+        flightsPickerOpen={view === 'flights' && !selectedFlightId}
+        onFlightsPickerOpenChange={(open) => {
+          if (open) { setSelectedFlightId(null); setView('flights') }
+          else setView('workspace')
+        }}
         onOpenActivity={openActivity}
         onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
         onNavigateToRun={(feature, runId) => {
@@ -634,16 +639,14 @@ export function App() {
               generatingFlight={coverageGeneratingFlight}
               onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
             />
-          : view === 'flights'
+          : view === 'flights' && selectedFlightId
           ? <FlightPage
               flightId={selectedFlightId}
               refreshKey={flightsRefreshKey}
               activity={featureActivity}
-              features={features.map((f) => f.name)}
               onOpenConfig={(feature) => setConfigFor(feature)}
               configRefreshKey={reposRefreshKey}
               docsRefreshKey={coverageRefreshKey}
-              onOpenActivity={openActivity}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
               onOpenRun={(feature, runId) => {

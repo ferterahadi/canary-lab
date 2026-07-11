@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   planFeatures: vi.fn(),
   getPlanFeaturesTask: vi.fn(),
   launchPlannedFeatures: vi.fn(),
+  listWorkspaceDirs: vi.fn(),
 }))
 
 vi.mock('../../../shared/api/client', async (importOriginal) => ({
@@ -21,6 +22,8 @@ vi.mock('../../../shared/api/client', async (importOriginal) => ({
   planFeatures: mocks.planFeatures,
   getPlanFeaturesTask: mocks.getPlanFeaturesTask,
   launchPlannedFeatures: mocks.launchPlannedFeatures,
+  // The repo picker reuses FolderPickerModal, which lists dirs via this.
+  listWorkspaceDirs: mocks.listWorkspaceDirs,
 }))
 
 // The planning view embeds the live agent timeline — its transports are its
@@ -224,6 +227,17 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     act(() => { el.dispatchEvent(new Event('input', { bubbles: true })) })
   }
 
+  // R69: a repo enters via "Add repo" → the shared FolderPickerModal. The mock
+  // resolves the picker's listing to `path`, so confirming adds that abs path;
+  // the derived feature is the first repo's basename.
+  const addRepo = async (path: string): Promise<void> => {
+    mocks.listWorkspaceDirs.mockResolvedValue({ root: '/', at: path, absolute: path, parent: '/', dirs: [] })
+    click(byTestId('repo-pick-add')!)
+    await flush()
+    click(byTestId('folder-picker-confirm')!)
+    await flush()
+  }
+
   it('asks exactly two things — intent + repos — and never calls the entry endpoint', async () => {
     await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
     expect(mocks.getFlightEntryOptions).not.toHaveBeenCalled()
@@ -244,7 +258,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Oddle Shop' }] })
     const textarea = container.querySelector('textarea')!
     setValue(textarea, 'test the checkout flow')
-    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    await addRepo('/repo/Oddle Shop')
     expect(byTestId('flight-start-derived-feature')?.textContent).toContain('oddle-shop')
     expect(byTestId('flight-start-submit')?.textContent).toBe('Plan flight →')
     click(byTestId('flight-start-submit')!)
@@ -275,7 +289,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     mocks.launchPlannedFeatures.mockResolvedValue({ flightIds: ['fl_a'] })
     const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
     setValue(container.querySelector('textarea')!, 'test checkout')
-    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    await addRepo('/repo/shop')
     click(byTestId('flight-start-submit')!)
     await flush()
     expect(mocks.launchPlannedFeatures).toHaveBeenCalledWith('t1', { features: [{ name: 'shop', description: 'test checkout' }] })
@@ -300,7 +314,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     mocks.launchPlannedFeatures.mockResolvedValue({ flightIds: ['fl_1', 'fl_2', 'fl_3'] })
     const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
     setValue(container.querySelector('textarea')!, 'test everything')
-    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    await addRepo('/repo/shop')
     click(byTestId('flight-start-submit')!)
     await flush()
     // Nothing launches before the user confirms.
@@ -341,7 +355,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     )
     await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
     setValue(container.querySelector('textarea')!, 'test everything')
-    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    await addRepo('/repo/shop')
     click(byTestId('flight-start-submit')!)
     await flush()
     click(byTestId('flight-proposal-confirm')!)
@@ -362,7 +376,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     }))
     await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
     setValue(container.querySelector('textarea')!, 'test everything')
-    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    await addRepo('/repo/shop')
     click(byTestId('flight-start-submit')!)
     await flush()
     expect(mocks.getFlightEntryOptions).toHaveBeenCalledWith('shop')
@@ -371,12 +385,10 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     expect(byTestId('repo-multi-picker')).toBeNull()
   })
 
-  it('adds a free repo path through the picker input', async () => {
+  it('adds a repo through the shared folder picker', async () => {
     await render({ feature: null })
-    const input = byTestId('repo-pick-add-input') as HTMLInputElement
-    setValue(input, '/somewhere/new-repo')
-    click(byTestId('repo-pick-add')!)
-    expect(byTestId('repo-pick-new-repo')).toBeTruthy()
+    await addRepo('/somewhere/new-repo')
+    expect(byTestId('repo-row-new-repo')).toBeTruthy()
     expect(byTestId('flight-start-derived-feature')?.textContent).toContain('new-repo')
   })
 
@@ -384,7 +396,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
     const submit = byTestId('flight-start-submit') as HTMLButtonElement
     expect(submit.disabled).toBe(true)
-    click(container.querySelector('[data-testid="repo-pick-shop"] input')!)
+    await addRepo('/repo/shop')
     expect((byTestId('flight-start-submit') as HTMLButtonElement).disabled).toBe(true)
     const textarea = container.querySelector('textarea')!
     setValue(textarea, 'test something')
