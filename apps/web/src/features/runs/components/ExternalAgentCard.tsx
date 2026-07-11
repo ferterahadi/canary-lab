@@ -26,7 +26,7 @@ export function pillPalette(color: string): PillPalette {
   }
 }
 
-export function StatusPill({ label, palette }: { label: string; palette: PillPalette }) {
+export function ExternalStatusPill({ label, palette }: { label: string; palette: PillPalette }) {
   return (
     <span
       className="rounded-full px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
@@ -107,7 +107,7 @@ interface ExternalAgentCardProps {
   headline: string
   // Optional secondary line under the headline (e.g. conversation name).
   subtitle?: string
-  // The status pill — typically <StatusPill label={…} palette={…} />.
+  // The status pill — typically <ExternalStatusPill label={…} palette={…} />.
   statusPill?: ReactNode
   // Trailing items in the pill row (session id, heartbeat, cycle count).
   meta?: ReactNode

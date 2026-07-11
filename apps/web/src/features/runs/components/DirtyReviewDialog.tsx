@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Feature } from '../../../shared/api/types'
 import * as api from '../../../shared/api/client'
+import { SlideOverPanel } from '../../config/components/atoms'
 
 interface Props {
   features: Feature[]
@@ -17,12 +18,6 @@ export function DirtyReviewDialog({ features, onClose }: Props) {
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [error, setError] = useState<Record<string, string | undefined>>({})
   const [workspaceOpenError, setWorkspaceOpenError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   // The list is fed by live feature data — once a feature clears it drops out on
   // its own. Close when nothing is left so the panel doesn't linger empty.
@@ -58,16 +53,11 @@ export function DirtyReviewDialog({ features, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-end bg-black/30 p-6" onClick={onClose}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="Modified test files"
-        className="flex max-h-[calc(100vh-3rem)] w-[min(560px,calc(100vw-3rem))] flex-col rounded-lg border shadow-2xl"
-        style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="cl-dialog-header">
+    <SlideOverPanel
+      onClose={onClose}
+      ariaLabel="Modified test files"
+      header={
+        <>
           <h2 className="min-w-0 flex-1 text-sm font-semibold" style={{ color: 'var(--danger)' }}>
             Tests modified
           </h2>
@@ -89,19 +79,20 @@ export function DirtyReviewDialog({ features, onClose }: Props) {
           >
             Close
           </button>
-        </header>
+        </>
+      }
+    >
+      <div className="px-4 pt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+        A test file changed since the last green run, so its verdicts aren&apos;t attested. Commit the
+        change to clear the flag.
+      </div>
+      {workspaceOpenError && (
+        <div className="px-4 pt-1 text-[11px]" style={{ color: 'var(--danger)' }}>{workspaceOpenError}</div>
+      )}
 
-        <div className="px-4 pt-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-          A test file changed since the last green run, so its verdicts aren&apos;t attested. Commit the
-          change to clear the flag.
-        </div>
-        {workspaceOpenError && (
-          <div className="px-4 pt-1 text-[11px]" style={{ color: 'var(--danger)' }}>{workspaceOpenError}</div>
-        )}
-
-        <div className="min-h-0 flex-1 overflow-auto p-3 scrollbar-thin">
-          <ul className="flex flex-col gap-3">
-            {dirty.map((f) => {
+      <div className="min-h-0 flex-1 overflow-auto p-3 scrollbar-thin">
+        <ul className="flex flex-col gap-3">
+          {dirty.map((f) => {
               const specs = f.dirty?.specs ?? []
               const isBusy = busy[f.name] ?? false
               return (
@@ -165,7 +156,6 @@ export function DirtyReviewDialog({ features, onClose }: Props) {
             })}
           </ul>
         </div>
-      </section>
-    </div>
+    </SlideOverPanel>
   )
 }

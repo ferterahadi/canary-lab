@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { ApiError, asBranchMismatch, type RepoBranchMismatch } from '../../../shared/api/client'
+import { Modal } from '../../config/components/atoms'
 
 // Maps a failed `POST /api/runs` into a human headline, the raw server reason,
 // and a "what to do next" hint. Kept pure + exported so it's unit-testable
@@ -75,29 +76,21 @@ interface Props {
 // Mirrors the CollisionConfirmDialog pattern.
 export function RunStartErrorDialog({ error, feature, onRetry, onSwitchBranches, onPinCurrent, onClose }: Props) {
   const mismatch = asBranchMismatch(error)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   return (
-    <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
-      onClick={onClose}
+    <Modal
+      open
+      onClose={onClose}
+      width={480}
+      role="alertdialog"
+      ariaLabel={mismatch ? 'Repos not on the feature’s branch' : 'Run failed to start'}
     >
-      <div
-        className="cl-modal w-[480px] p-5"
-        style={{ background: 'var(--bg-elevated)' }}
-        onClick={(e) => e.stopPropagation()}
-        role="alertdialog"
-        aria-label={mismatch ? 'Repos not on the feature’s branch' : 'Run failed to start'}
-      >
+      <div className="p-5">
         {mismatch
           ? <BranchMismatchBody mismatch={mismatch} onSwitchBranches={onSwitchBranches} onPinCurrent={onPinCurrent} onClose={onClose} />
           : <GenericErrorBody error={error} feature={feature} onRetry={onRetry} onClose={onClose} />}
       </div>
-    </div>
+    </Modal>
   )
 }
 

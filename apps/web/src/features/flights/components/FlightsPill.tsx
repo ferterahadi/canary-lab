@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useState } from 'react'
 import type { FlightIndexEntry, FlightPauseReason, FlightStageKey, FlightStageStatus, FlightStatus } from '../../../shared/api/client'
-import { ChevronRightIcon, StatusDot } from '../../config/components/atoms'
+import { ChevronRightIcon, SlideOverPanel, StatusDot } from '../../config/components/atoms'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
 import { Tooltip } from '../../../shared/ui/Tooltip'
@@ -416,30 +415,20 @@ function FlightsPickerDialog({
   onStartFlight: (feature: string) => void
   onClose: () => void
 }) {
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const rows = featureActivityRows(flights, activity, features)
   // R55: split into the flat top-level bucket + collapsible group sections.
   const { ungrouped, groups } = groupPickerRows(rows, features)
 
   // Portalled to <body>: the status-bar action cluster is overflow-hidden and
   // carries a transform during its collapse animation.
-  return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-start justify-end bg-black/30 p-6" onClick={onClose}>
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="Open flights"
-        data-testid="flights-task-menu"
-        className="flex max-h-[calc(100vh-3rem)] w-[min(560px,calc(100vw-3rem))] flex-col rounded-lg border shadow-2xl"
-        style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="cl-dialog-header">
+  return (
+    <SlideOverPanel
+      onClose={onClose}
+      ariaLabel="Open flights"
+      testId="flights-task-menu"
+      portal
+      header={
+        <>
           <div className="min-w-0 flex-1">
             <h2 className="text-sm font-semibold">🕊️ Flights</h2>
             <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
@@ -449,48 +438,44 @@ function FlightsPickerDialog({
           <button type="button" aria-label="Close flights picker" onClick={onClose} className="rounded px-2 py-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
             Close
           </button>
-        </header>
-
-        {rows.length === 0 ? (
-          <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-            No flights yet. Start one from a terminal:
-            <div className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-base)', border: '1px solid var(--border-default)' }}>
-              npx canary-lab flight ../your-repo "what to test"
-            </div>
+        </>
+      }
+      footer="Every stage verdict is computed by canary (boot passed, coverage met, run green) — the agent only proposes."
+    >
+      {rows.length === 0 ? (
+        <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+          No flights yet. Start one from a terminal:
+          <div className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-base)', border: '1px solid var(--border-default)' }}>
+            npx canary-lab flight ../your-repo "what to test"
           </div>
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto p-2 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
-            {ungrouped.length > 0 && (
-              <ul className="flex flex-col gap-1">
-                {ungrouped.map((row) => (
-                  <PickerRow
-                    key={row.flight?.flightId ?? `activity-${row.feature}`}
-                    row={row}
-                    onPick={onPick}
-                    onPickActivity={onPickActivity}
-                    onStartFlight={onStartFlight}
-                  />
-                ))}
-              </ul>
-            )}
-            {groups.map((section) => (
-              <PickerGroupSection
-                key={section.group!}
-                section={section}
-                onPick={onPick}
-                onPickActivity={onPickActivity}
-                onStartFlight={onStartFlight}
-              />
-            ))}
-          </div>
-        )}
-
-        <footer className="border-t px-4 py-2.5 text-[10.5px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>
-          Every stage verdict is computed by canary (boot passed, coverage met, run green) — the agent only proposes.
-        </footer>
-      </section>
-    </div>,
-    document.body,
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto p-2 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+          {ungrouped.length > 0 && (
+            <ul className="flex flex-col gap-1">
+              {ungrouped.map((row) => (
+                <PickerRow
+                  key={row.flight?.flightId ?? `activity-${row.feature}`}
+                  row={row}
+                  onPick={onPick}
+                  onPickActivity={onPickActivity}
+                  onStartFlight={onStartFlight}
+                />
+              ))}
+            </ul>
+          )}
+          {groups.map((section) => (
+            <PickerGroupSection
+              key={section.group!}
+              section={section}
+              onPick={onPick}
+              onPickActivity={onPickActivity}
+              onStartFlight={onStartFlight}
+            />
+          ))}
+        </div>
+      )}
+    </SlideOverPanel>
   )
 }
 

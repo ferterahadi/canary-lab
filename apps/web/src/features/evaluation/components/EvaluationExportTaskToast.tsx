@@ -4,8 +4,8 @@ import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type E
 import {
   ExternalAgentCard,
   ExternalClientCta,
+  ExternalStatusPill,
   pillPalette,
-  StatusPill as CardStatusPill,
   useOpenAgentApp,
   type PillPalette,
 } from '../../runs/components/ExternalAgentCard'
@@ -124,7 +124,7 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
         eyebrow="External evaluation export session"
         headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
         subtitle={task.conversationName}
-        statusPill={<CardStatusPill label={label} palette={palette} />}
+        statusPill={<ExternalStatusPill label={label} palette={palette} />}
         meta={
           task.sessionId && (
             <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>

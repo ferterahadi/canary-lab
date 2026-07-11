@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { RunIndexEntry, RunStatus } from '../../../shared/api/types'
-import { ChevronRightIcon } from '../../config/components/atoms'
+import { ChevronRightIcon, SlideOverPanel } from '../../config/components/atoms'
 import { useRunDetails, useRuns } from '../state/RunsContext'
 import { RunRow } from './RunRow'
 
@@ -33,30 +33,16 @@ export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
   // Finished runs are the long tail — collapsed by default so active work leads.
   const [finishedOpen, setFinishedOpen] = useState(false)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const navigate = (r: RunIndexEntry): void => { onNavigateToRun(r.feature, r.runId); onClose() }
   const finishedRuns = runs.filter((r) => FINISHED_STATUSES.includes(r.status))
   const hasActive = ACTIVE_GROUPS.some((g) => runs.some((r) => g.statuses.includes(r.status)))
 
   return (
-    <div
-      className="fixed inset-0 z-[60] flex items-start justify-end bg-black/30 p-6"
-      onClick={onClose}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-label="All runs"
-        className="flex max-h-[calc(100vh-3rem)] w-[min(560px,calc(100vw-3rem))] flex-col rounded-lg border shadow-2xl"
-        style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="cl-dialog-header">
+    <SlideOverPanel
+      onClose={onClose}
+      ariaLabel="All runs"
+      header={
+        <>
           <h2 className="min-w-0 flex-1 text-sm font-semibold">Runs</h2>
           <button
             type="button"
@@ -67,8 +53,9 @@ export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
           >
             Close
           </button>
-        </header>
-
+        </>
+      }
+    >
         <div className="min-h-0 flex-1 overflow-auto p-2 scrollbar-thin">
           {runs.length === 0 ? (
             <div className="px-3 py-8 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -126,7 +113,6 @@ export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
             </>
           )}
         </div>
-      </section>
-    </div>
+    </SlideOverPanel>
   )
 }

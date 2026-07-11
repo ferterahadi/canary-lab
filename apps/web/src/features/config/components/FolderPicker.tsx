@@ -65,6 +65,63 @@ export function FolderPicker({ value, onChange, placeholder, title, confirmLabel
   )
 }
 
+/** The "parent (`../`) + entries" list shared by every filesystem browser in
+ *  the app — `FolderPickerModal` below (directories only, via
+ *  `listWorkspaceDirs`) and the file pickers in `EnvsetsTab` (dirs + files,
+ *  via `browseDir` — a different endpoint since those need to select a
+ *  specific file, not just land on a folder). The two APIs return different
+ *  shapes, so this only shares the list rendering, not the data fetch. */
+export function FileBrowserList({
+  browse,
+  onNavigate,
+  onPickFile,
+  minHeight = 260,
+  maxHeightVh = 50,
+}: {
+  browse: api.FsBrowseResponse | null
+  onNavigate: (dir: string) => void
+  /** Called with the picked file's full absolute path. */
+  onPickFile: (fullPath: string) => void
+  minHeight?: number
+  maxHeightVh?: number
+}) {
+  return (
+    <div
+      className="overflow-y-auto scrollbar-thin rounded-md"
+      style={{ border: '1px solid var(--border-default)', maxHeight: `${maxHeightVh}vh`, minHeight }}
+    >
+      {browse?.parent && (
+        <button
+          type="button"
+          onClick={() => onNavigate(browse.parent!)}
+          className="block w-full truncate px-3 py-1.5 text-left text-xs"
+          style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+        >
+          ../
+        </button>
+      )}
+      {browse?.entries.map((e) => (
+        <button
+          key={e.name}
+          type="button"
+          onClick={() => {
+            const full = `${browse.dir}/${e.name}`.replace(/\/+/g, '/')
+            if (e.isDir) onNavigate(full)
+            else onPickFile(full)
+          }}
+          className="block w-full truncate px-3 py-1.5 text-left text-xs hover:opacity-80"
+          style={{ color: e.isDir ? 'var(--text-primary)' : 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+        >
+          {e.isDir ? `${e.name}/` : e.name}
+        </button>
+      ))}
+      {browse && browse.entries.length === 0 && (
+        <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Empty directory.</div>
+      )}
+    </div>
+  )
+}
+
 export function FolderPickerModal({
   initialPath,
   title,

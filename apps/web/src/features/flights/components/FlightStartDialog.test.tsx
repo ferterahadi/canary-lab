@@ -259,7 +259,6 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     const textarea = container.querySelector('textarea')!
     setValue(textarea, 'test the checkout flow')
     await addRepo('/repo/Oddle Shop')
-    expect(byTestId('flight-start-derived-feature')?.textContent).toContain('oddle-shop')
     expect(byTestId('flight-start-submit')?.textContent).toBe('Plan flight →')
     click(byTestId('flight-start-submit')!)
     await flush()
@@ -389,7 +388,6 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     await render({ feature: null })
     await addRepo('/somewhere/new-repo')
     expect(byTestId('repo-row-new-repo')).toBeTruthy()
-    expect(byTestId('flight-start-derived-feature')?.textContent).toContain('new-repo')
   })
 
   it('will not start without an intent and at least one repo', async () => {

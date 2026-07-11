@@ -1,6 +1,6 @@
 import type { DraftRecord, ExternalDraftStage } from '../../../shared/api/types'
 import { clientLabel, clientTint, shortSession, type ExternalClientKind } from './external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, StatusPill } from './ExternalAgentCard'
+import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from './ExternalAgentCard'
 
 interface Props {
   draft: DraftRecord
@@ -25,7 +25,7 @@ export function ExternalDraftAgentPanel({ draft, stageView }: Props) {
       eyebrow="External authoring session"
       headline={headlineFor(clientKind)}
       subtitle={draft.externalConversationName ?? undefined}
-      statusPill={<StatusPill label={stageLabel(stage)} palette={stagePalette(stage)} />}
+      statusPill={<ExternalStatusPill label={stageLabel(stage)} palette={stagePalette(stage)} />}
       meta={
         draft.externalSessionId && (
           <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>

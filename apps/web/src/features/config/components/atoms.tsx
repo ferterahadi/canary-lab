@@ -580,6 +580,21 @@ export function FolderIcon() {
   )
 }
 
+/** Close on Escape — the one behavior every dialog/panel in the app wants.
+ *  Shared so it's implemented once instead of a fresh `keydown` effect per
+ *  dialog (it had drifted to 6+ near-identical copies). Components that
+ *  unmount on close (most dialogs) can omit `enabled`; components that stay
+ *  mounted and toggle visibility internally (e.g. `Modal`) must pass their
+ *  own `open` flag so the listener isn't live while hidden. */
+export function useEscapeToClose(onClose: () => void, enabled = true): void {
+  useEffect(() => {
+    if (!enabled) return
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose, enabled])
+}
+
 export function Modal({
   open,
   onClose,
@@ -590,6 +605,8 @@ export function Modal({
   description,
   meta,
   width = 480,
+  role = 'dialog',
+  ariaLabel,
   children,
 }: {
   open: boolean
@@ -608,8 +625,15 @@ export function Modal({
   /** Optional metadata content rendered as a 2-col grid under the title. */
   meta?: ReactNode
   width?: number
+  /** ARIA role for the dialog surface — `alertdialog` for error/confirmation
+   *  interruptions, `dialog` (default) otherwise. */
+  role?: 'dialog' | 'alertdialog'
+  /** Accessible name when `title` isn't descriptive enough on its own, or
+   *  there's no visible title at all (the body renders its own heading). */
+  ariaLabel?: string
   children: ReactNode
 }) {
+  useEscapeToClose(onClose, open)
   if (!open) return null
   const hasHeader = Boolean(title || eyebrow || meta || status || icon || description)
   return (
@@ -618,6 +642,9 @@ export function Modal({
       onClick={onClose}
     >
       <div
+        role={role}
+        aria-label={ariaLabel ?? title}
+        aria-modal="true"
         className="cl-modal relative flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg"
         style={{
           width,
@@ -736,6 +763,69 @@ export function ConfirmModal({
       </div>
     </Modal>
   )
+}
+
+/** Right-anchored slide-out panel — the second dialog shape in the app,
+ *  alongside `Modal`. Used for grouped/list surfaces (Runs, Services, Modified
+ *  test files, the Flights picker) instead of a centered modal. Wraps the
+ *  shared backdrop/section shell + `cl-dialog-header` chrome; each caller
+ *  supplies its own header actions, body, and optional footer. */
+export function SlideOverPanel({
+  onClose,
+  ariaLabel,
+  width = 560,
+  header,
+  footer,
+  portal = false,
+  testId,
+  children,
+}: {
+  onClose: () => void
+  ariaLabel: string
+  /** Panel width in px, clamped to the viewport via `calc(100vw - 3rem)`. */
+  width?: number
+  /** Rendered inside the shared `cl-dialog-header` row — title/subtitle plus
+   *  any actions (a Close button is the caller's responsibility, same as before). */
+  header: ReactNode
+  /** Rendered as a bordered footer strip below the body, when present. */
+  footer?: ReactNode
+  /** Portal to `document.body` — needed when the panel is mounted somewhere
+   *  `overflow: hidden` or transformed (e.g. inside the collapsing status bar). */
+  portal?: boolean
+  testId?: string
+  children: ReactNode
+}) {
+  useEscapeToClose(onClose)
+  const node = (
+    <div className="fixed inset-0 z-[60] flex items-start justify-end bg-black/30 p-6" onClick={onClose}>
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        data-testid={testId}
+        className="flex max-h-[calc(100vh-3rem)] flex-col rounded-lg border shadow-2xl"
+        style={{
+          width: `min(${width}px, calc(100vw - 3rem))`,
+          borderColor: 'var(--border-default)',
+          background: 'var(--bg-elevated)',
+          color: 'var(--text-primary)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="cl-dialog-header">{header}</header>
+        {children}
+        {footer && (
+          <footer
+            className="border-t px-4 py-2.5 text-[10.5px]"
+            style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}
+          >
+            {footer}
+          </footer>
+        )}
+      </section>
+    </div>
+  )
+  return portal && typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
 export function ChevronRightIcon() {

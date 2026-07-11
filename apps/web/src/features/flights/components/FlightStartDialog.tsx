@@ -58,6 +58,48 @@ const FIRST_FLIGHT_REASON = "available after this feature's first flight"
  *  multi-feature proposal awaiting confirmation. */
 type NewFlightPhase = 'form' | 'planning' | 'proposal'
 
+/** R69 (concept C): one numbered step in the launch form — a badge + connector
+ *  rail on the left, the section's title + content on the right, so the setup
+ *  reads as an ordered sequence (intent → repos → launch). `active` tints the
+ *  badge accent (an editable input step); the last step drops its connector. */
+function Step({
+  n,
+  title,
+  active,
+  last,
+  children,
+}: {
+  n: number
+  title?: string
+  active?: boolean
+  last?: boolean
+  children: ReactNode
+}) {
+  const tone = active ? 'var(--accent)' : 'var(--text-muted)'
+  return (
+    <div className="flex gap-3">
+      <div className="flex flex-col items-center pt-0.5">
+        <span
+          aria-hidden="true"
+          className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-medium"
+          style={{ border: `1px solid color-mix(in srgb, ${tone} 55%, transparent)`, color: tone }}
+        >
+          {n}
+        </span>
+        {!last && <span className="mt-1 w-px flex-1" style={{ background: 'var(--border-default)', minHeight: 14 }} />}
+      </div>
+      <div className="min-w-0 flex-1 pb-4">
+        {title && (
+          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+            {title}
+          </div>
+        )}
+        {children}
+      </div>
+    </div>
+  )
+}
+
 export function FlightStartDialog({
   feature,
   onClose,
@@ -416,68 +458,56 @@ export function FlightStartDialog({
           />
         ) : (
           <>
-            <label className="flex flex-col gap-1">
-              <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                What should this flight test?
-              </span>
-              {hasRecord ? (
-                // Frozen intent (R57): presented, never edited, from here.
-                <blockquote
-                  data-testid="flight-start-frozen-intent"
-                  className="rounded border-l-2 py-1 pl-2.5 text-[12px]"
-                  style={{ borderColor: 'rgb(56, 189, 248)', color: 'var(--text-secondary)' }}
-                >
-                  {entry?.prefill.description || '—'}
-                </blockquote>
-              ) : (
-                <Textarea
-                  value={description}
-                  onChange={setDescription}
-                  minRows={5}
-                  placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
-                />
-              )}
-            </label>
-            {hasRecord ? (
-              <div className="-mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                Repos and intent froze when this flight first started — delete the flight to test different ones.
-              </div>
-            ) : (
-              <div className="-mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                Documents referenced here are linked into the flight automatically.
-              </div>
-            )}
-
-            {/* R63: no repo section once a record exists — repos are frozen. */}
-            {needsArgs && (
-              <div className="flex flex-col gap-1">
-                <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-                  Repos
-                </span>
-                <RepoMultiPicker
-                  selected={repoPaths}
-                  onChange={setRepoPaths}
-                />
-                {derivedFeature && (
-                  <div data-testid="flight-start-derived-feature" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                    Feature name: <span style={{ fontFamily: 'var(--font-mono)' }}>{derivedFeature}</span> — derived automatically
+            {/* R69 (concept C): the launch form as a numbered sequence —
+                intent → repos → the pipeline — so each section is unmistakably
+                its own step. Repos folds out when a record already froze them. */}
+            <div className="flex flex-col">
+              <Step n={1} title="What should this flight test?" active={!hasRecord}>
+                {hasRecord ? (
+                  // Frozen intent (R57): presented, never edited, from here.
+                  <blockquote
+                    data-testid="flight-start-frozen-intent"
+                    className="rounded border-l-2 py-1 pl-2.5 text-[12px]"
+                    style={{ borderColor: 'rgb(56, 189, 248)', color: 'var(--text-secondary)' }}
+                  >
+                    {entry?.prefill.description || '—'}
+                  </blockquote>
+                ) : (
+                  <Textarea
+                    value={description}
+                    onChange={setDescription}
+                    minRows={5}
+                    placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
+                  />
+                )}
+                {hasRecord && (
+                  <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                    Repos and intent froze when this flight first started — delete the flight to test different ones.
                   </div>
                 )}
-              </div>
-            )}
+              </Step>
 
-            {stageMenu}
+              {/* R63: no repo section once a record exists — repos are frozen. */}
+              {needsArgs && (
+                <Step n={2} title="Repos" active>
+                  <RepoMultiPicker
+                    selected={repoPaths}
+                    onChange={setRepoPaths}
+                  />
+                </Step>
+              )}
 
-            {newFlight ? (
-              <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                Step entry unlocks after this feature's first flight.
-              </div>
-            ) : hasRecord ? (
+              <Step n={needsArgs ? 3 : 2} last>
+                {stageMenu}
+              </Step>
+            </div>
+
+            {hasRecord && (
               <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
                 Starting resets this flight's stage records; captured artifacts on
                 disk (config, envset, docs, specs) are kept and reused.
               </div>
-            ) : null}
+            )}
 
             {errorBlock}
 

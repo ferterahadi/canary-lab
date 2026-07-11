@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, SectionHeader, TextInput, TrashIcon } from './atoms'
+import { FileBrowserList } from './FolderPicker'
 import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'
 
@@ -365,9 +366,8 @@ function AddSlotModal({
 
   useEffect(() => { loadDir('') }, [])
 
-  const onPickFile = (name: string): void => {
-    if (!browse) return
-    const full = `${browse.dir}/${name}`.replace(/\/+/g, '/')
+  const onPickFile = (full: string): void => {
+    const name = full.split('/').pop() ?? full
     setPicked(full)
     setSlotName(name)
     setTarget(full)
@@ -420,37 +420,8 @@ function AddSlotModal({
               Go
             </button>
           </div>
-          <div
-            className="mx-4 mb-3 max-h-[50vh] min-h-[260px] overflow-y-auto scrollbar-thin rounded-md"
-            style={{ border: '1px solid var(--border-default)' }}
-          >
-            {browse?.parent && (
-              <button
-                type="button"
-                onClick={() => loadDir(browse.parent!)}
-                className="block w-full truncate px-3 py-1.5 text-left text-xs"
-                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
-              >
-                ../
-              </button>
-            )}
-            {browse?.entries.map((e) => (
-              <button
-                key={e.name}
-                type="button"
-                onClick={() => e.isDir ? loadDir(`${browse.dir}/${e.name}`.replace(/\/+/g, '/')) : onPickFile(e.name)}
-                className="block w-full truncate px-3 py-1.5 text-left text-xs hover:opacity-80"
-                style={{
-                  color: e.isDir ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                }}
-              >
-                {e.isDir ? `${e.name}/` : e.name}
-              </button>
-            ))}
-            {browse && browse.entries.length === 0 && (
-              <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Empty directory.</div>
-            )}
+          <div className="mx-4 mb-3">
+            <FileBrowserList browse={browse} onNavigate={loadDir} onPickFile={onPickFile} />
           </div>
           {error && <div className="px-4 pb-2 text-xs" style={{ color: 'var(--danger)' }}>{error}</div>}
         </div>
@@ -819,42 +790,7 @@ function CopyFromModal({
                   Go
                 </button>
               </div>
-              <div
-                className="max-h-[40vh] min-h-[200px] overflow-y-auto scrollbar-thin rounded-md"
-                style={{ border: '1px solid var(--border-default)' }}
-              >
-                {browse?.parent && (
-                  <button
-                    type="button"
-                    onClick={() => loadDir(browse.parent!)}
-                    className="block w-full truncate px-3 py-1.5 text-left text-xs"
-                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
-                  >
-                    ../
-                  </button>
-                )}
-                {browse?.entries.map((e) => (
-                  <button
-                    key={e.name}
-                    type="button"
-                    onClick={() => {
-                      const full = `${browse.dir}/${e.name}`.replace(/\/+/g, '/')
-                      if (e.isDir) loadDir(full)
-                      else onLoadFile(full)
-                    }}
-                    className="block w-full truncate px-3 py-1.5 text-left text-xs hover:opacity-80"
-                    style={{
-                      color: e.isDir ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      fontFamily: 'var(--font-mono)',
-                    }}
-                  >
-                    {e.isDir ? `${e.name}/` : e.name}
-                  </button>
-                ))}
-                {browse && browse.entries.length === 0 && (
-                  <div className="px-3 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>Empty directory.</div>
-                )}
-              </div>
+              <FileBrowserList browse={browse} onNavigate={loadDir} onPickFile={onLoadFile} minHeight={200} maxHeightVh={40} />
               <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
                 Click a file to load it. Anything parseable as <code>KEY=VALUE</code> works.
               </div>

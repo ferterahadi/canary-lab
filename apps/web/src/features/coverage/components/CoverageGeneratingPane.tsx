@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { CoverageJobManifest } from '../../../shared/api/types'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '../../runs/components/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, StatusPill, useOpenAgentApp } from '../../runs/components/ExternalAgentCard'
+import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill, useOpenAgentApp } from '../../runs/components/ExternalAgentCard'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the
 // Coverage tab shows THIS and nothing else — never the ledger, never the empty
@@ -122,7 +122,7 @@ function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
         headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
         subtitle={job.externalConversationName}
         statusPill={
-          <StatusPill
+          <ExternalStatusPill
             label={job.kind === 'summary' ? 'Summarizing' : 'Mapping'}
             palette={pillPalette('var(--border-focus)')}
           />
