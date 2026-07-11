@@ -499,6 +499,21 @@ describe('buildHealPromptMap', () => {
     expect(JSON.stringify(healPrompt)).not.toContain('null')
   })
 
+  it('prefers the run-level playwright-mcp dir over a per-failure one', () => {
+    writeRunManifest(runDir, { repoPaths: [] })
+    fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), '{}\n')
+    fs.mkdirSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp'), { recursive: true })
+    fs.writeFileSync(path.join(runDir, 'failed', 'checkout-fails', 'playwright-mcp', 'snapshot.png'), 'png')
+    const mcpDir = path.join(runDir, 'playwright-mcp')
+    fs.mkdirSync(mcpDir, { recursive: true })
+    fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'png')
+
+    const healPrompt = buildHealPromptMap({ projectRoot, runDir })
+
+    const entry = healPrompt.resources.find((r) => r.id === 'playwright-mcp')
+    expect(entry?.path).toBe(`${mcpDir}/`)
+  })
+
   it('falls back to summary and test-mode boundaries when heal-index is unavailable', () => {
     writeRunManifest(runDir, { repoPaths: [] })
     fs.writeFileSync(path.join(runDir, 'e2e-summary.json'), '{}\n')
@@ -545,7 +560,7 @@ describe('buildOrchestratorHealPrompt', () => {
       projectRoot,
       runDir,
       promptPath: path.join(tmp, 'missing.md'),
-    })).toThrow(/Heal prompt template not found/)
+    })).toThrow(/Prompt template not found/)
   })
 
   it('returns a buildCyclePrompt that writes the rendered run-scoped prompt', () => {
@@ -565,6 +580,15 @@ describe('buildOrchestratorHealPrompt', () => {
     expect(promptBody).not.toContain('{{')
     // Returned prompt is the same content the orchestrator pty.write()s.
     expect(prompt).toBe(promptBody)
+  })
+
+  it('shows the cycle budget ("of N") — default AUTO_HEAL_MAX_CYCLES, overridable', () => {
+    // Regression: maxCycles was never threaded from the factory into the
+    // addendum, so the PTY agent saw "Cycle N." with no budget to pace against.
+    const dflt = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    expect(dflt({ cycle: 1, outputDir: path.join(runDir, 'out') })).toContain('Cycle 2 of 10.')
+    const capped = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir, maxCycles: 4 })
+    expect(capped({ cycle: 1, outputDir: path.join(runDir, 'out') })).toContain('Cycle 2 of 4.')
   })
 
   it('renders service-mode copy when manifest.repoPaths is non-empty', () => {
@@ -671,17 +695,27 @@ describe('buildOrchestratorHealPrompt', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).not.toContain('playwright-mcp/')
-    expect(prompt).not.toContain('console logs / DOM snapshots / network captures the Playwright MCP server')
+    expect(prompt).not.toContain('browser captures (console / DOM snapshots / network)')
   })
 
-  it('emits the playwright-mcp bullet when at least one failure dir has MCP artifacts', () => {
+  it('emits the playwright-mcp bullet when a legacy per-failure dir has MCP artifacts', () => {
     const mcpDir = path.join(runDir, 'failed', 'test-case-broken', 'playwright-mcp')
     fs.mkdirSync(mcpDir, { recursive: true })
     fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'fake')
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('playwright-mcp/')
-    expect(prompt).toContain('console logs / DOM snapshots / network captures the Playwright MCP server')
+    expect(prompt).toContain('browser captures (console / DOM snapshots / network)')
+  })
+
+  it('prefers the run-level playwright-mcp dir when it has artifacts', () => {
+    const mcpDir = path.join(runDir, 'playwright-mcp')
+    fs.mkdirSync(mcpDir, { recursive: true })
+    fs.writeFileSync(path.join(mcpDir, 'snapshot.png'), 'fake')
+    const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
+    const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
+    expect(prompt).toContain(`${mcpDir}/`)
+    expect(prompt).toContain('new MCP captures land here too')
   })
 
   it('treats playwright-mcp dirs containing only `_attribution.json` as empty', () => {
@@ -706,7 +740,7 @@ describe('buildOrchestratorHealPrompt', () => {
     const build = buildOrchestratorHealPrompt({ agent: 'claude', projectRoot, runDir })
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain('trace-extract/failure-summary.md')
-    expect(prompt).toContain('curated extract of the failing Playwright run')
+    expect(prompt).toContain('curated trace extract')
   })
 
   it('agent-agnostic: rendered prompt body is the same for claude and codex', () => {
@@ -745,7 +779,7 @@ describe('buildOrchestratorHealPrompt', () => {
       outputDir: path.join(runDir, 'out'),
       consecutiveSameFailures: 3,
     })
-    expect(prompt).toContain('Escalation: this is cycle 3 with the same failing set (test-a, test-b).')
+    expect(prompt).toContain('Escalation: cycle 3 — these tests have now failed 3 times in a row despite 2 fix attempts: test-a, test-b.')
     // The failedDir path the addendum embeds is the same one the static
     // template uses — confirms threading through buildHealAddendum.
     expect(prompt).toContain(`${path.join(runDir, 'failed')}/<slug>/trace-extract/snapshot-at-failure.txt`)
@@ -865,11 +899,12 @@ describe('auto-heal branch edge cases', () => {
     expect(map.resources.map((r) => r.id)).not.toContain('feature-docs')
   })
 
-  it('renderPromptTemplate drops a placeholder-only line whose key is absent from values', () => {
+  it('renderPromptTemplate keeps a placeholder-only line whose key is absent from values', () => {
     // Custom template with a placeholder-only line referencing a key that is
-    // NOT in the values map buildOrchestratorHealPrompt passes. The
-    // `values[m[1]] ?? ''` nullish fallback makes its length 0, so the line
-    // is dropped (covers the `?? ''` RHS branch).
+    // NOT in the values map buildOrchestratorHealPrompt passes. Only a KNOWN
+    // key resolving to '' drops its solo line; an unrecognized placeholder is
+    // left verbatim (line included) so an out-of-sync template degrades
+    // visibly instead of silently losing text.
     const runDir = path.join(tmp, 'run')
     fs.mkdirSync(runDir, { recursive: true })
     const templatePath = path.join(tmp, 'tmpl.md')
@@ -879,8 +914,7 @@ describe('auto-heal branch edge cases', () => {
         'Run dir: {{runDir}}',
         '{{notAKnownKey}}',
         // Mixed line (not placeholder-only) referencing an unknown key — kept,
-        // and the replace callback returns `match` for the missing key (the
-        // `?? match` RHS branch).
+        // and the replace callback returns `match` for the missing key.
         'mixed prefix {{alsoUnknown}} suffix',
         'tail line',
       ].join('\n'),
@@ -895,8 +929,8 @@ describe('auto-heal branch edge cases', () => {
     const prompt = build({ cycle: 0, outputDir: path.join(runDir, 'out') })
     expect(prompt).toContain(`Run dir: ${runDir}`)
     expect(prompt).toContain('tail line')
-    // The unknown-key placeholder line was dropped entirely.
-    expect(prompt).not.toContain('{{notAKnownKey}}')
+    // The unknown-key placeholder line is kept, left verbatim.
+    expect(prompt).toContain('{{notAKnownKey}}')
     // The mixed line is kept; the unknown placeholder is left verbatim.
     expect(prompt).toContain('mixed prefix {{alsoUnknown}} suffix')
   })

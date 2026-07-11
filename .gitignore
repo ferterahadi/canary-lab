@@ -7,6 +7,8 @@ node_modules/
 .env.*.local
 
 !templates/**/*.env
+# The Flight E2E fixture ships its (fake) env file — env capture needs it.
+!tools/fixtures/**/.env
 
 # Testing
 # Anchored to the repo root so it only ignores the vitest coverage-output dir —
@@ -45,6 +47,10 @@ results
 # Local-only agent notes
 CLAUDE.local.md
 AGENTS.local.md
+
+# Local-only skill: rebuild/restart the workspace UI (overrides the Tier-3
+# canary-apply hand-off on this machine only — never ships)
+.claude/skills/cl_apply-local/
 
 # Superpowers brainstorming scratch
 .superpowers/

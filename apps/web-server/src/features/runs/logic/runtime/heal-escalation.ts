@@ -15,9 +15,10 @@
 export const ESCALATION_THRESHOLD = 3
 
 export interface HealEscalation {
-  /** Same-failure streak that triggered this block (>= ESCALATION_THRESHOLD). */
+  /** Longest per-test consecutive-failure streak among the stuck tests
+   *  (>= ESCALATION_THRESHOLD). Field name kept for wire compatibility. */
   consecutiveSameFailures: number
-  /** The failing-test slugs this streak is stuck on, in summary order. */
+  /** The stuck failing-test slugs (per-test streak >= threshold), in summary order. */
   failingSet: string[]
   /** One-line framing: stuck N cycles, change tactic. */
   message: string
@@ -56,7 +57,7 @@ export function buildHealEscalation(input: BuildHealEscalationInput): HealEscala
   return {
     consecutiveSameFailures: input.consecutiveSameFailures,
     failingSet: input.slugs,
-    message: `Same failing set for ${input.consecutiveSameFailures} heal cycles (${input.slugs.join(', ')}). Your last ${priorAttempts} fix attempt${priorAttempts === 1 ? '' : 's'} didn't reduce the failure count — change tactic instead of doubling down on the same approach.`,
+    message: `These tests have failed ${input.consecutiveSameFailures} heal cycles in a row: ${input.slugs.join(', ')}. Your last ${priorAttempts} fix attempt${priorAttempts === 1 ? '' : 's'} didn't fix them — change tactic instead of doubling down on the same approach.`,
     readFirst: [snapshotPath, networkPath],
     tactics: [
       'Re-read the trace snapshot + failed-network for the FIRST failing test before editing — the trace usually shows the real failure mode (DNS, missing element, race) more clearly than the error message.',

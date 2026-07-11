@@ -1,6 +1,6 @@
 ---
 name: cl_add-sample-feature
-description: Use when creating or editing a sample feature under templates/project/features/ — feature.config.cjs, envsets, e2e specs — or when a template change doesn't show up in a scaffolded workspace.
+description: Use when creating or editing a sample feature under templates/project/features/ — feature.config.cjs, envsets, e2e specs — or when a template change doesn't show up in a scaffolded workspace (for general pre-claim verification checks use cl_verify-changes).
 ---
 
 # Authoring Canary Lab Sample Features
@@ -9,7 +9,7 @@ Sample features are the scaffold every consumer starts from, and they only ship 
 the build (`templates/project/` → `dist/templates/`, copied by
 `tools/prepare-assets.mjs`). Editing them without `smoke:pack` proves nothing.
 
-## The five existing samples (pick the closest as a model)
+## The four existing samples (pick the closest as a model)
 
 | Sample | Role |
 | --- | --- |
@@ -17,7 +17,6 @@ the build (`templates/project/` → `dist/templates/`, copied by
 | `broken_todo_api` | Intentionally failing — the heal-loop target |
 | `flaky_orders_api` | Intermittent failures |
 | `tricky_checkout_api` | Hard-to-diagnose failures |
-| `acme_cart_checkout` | Larger checkout flow |
 
 ## Anatomy
 
@@ -58,8 +57,9 @@ Spec rules:
 4. Tier-1 checks per `cl_verify-changes`, then **always finish with
    `npm run smoke:pack`** — it scaffolds a temp workspace and proves the template
    ships.
-5. Consumers pick up sample changes via `npx canary-lab upgrade` — mention
-   upgrade-worthiness in the changelog entry when releasing.
+5. Consumers sync scaffolded docs/skills via `npx canary-lab upgrade` (it lints
+   but does not overwrite their `features/`); new-feature templates only reach
+   NEW scaffolds — note upgrade-worthiness in the changelog when releasing.
 
 ## Common mistakes
 

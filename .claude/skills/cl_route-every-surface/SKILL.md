@@ -19,11 +19,11 @@ linked to.
 
 | Route it | Don't route it |
 |---|---|
-| Pages/views (coverage, cleanup) | Collision-confirm (fires off a live run event) |
+| Pages/views (coverage, cleanup, flights) | Collision-confirm (fires off a live run event) |
 | Selected run | Services / Runs-list / Portify-picker (transient pickers) |
 | Config / settings panels | Any modal that reacts to a momentary event you can't reconstruct |
 | Wizards (open-state, not per-step) | Confirmation prompts |
-| Verify-config, portify | |
+| Verification, flight-start, flight-new | |
 
 Pages always route. Dialogs route selectively. When unsure, ask: *if I paste this
 URL into a clean browser, does the dialog have everything it needs?* If it depends
@@ -47,7 +47,7 @@ needed for new routes.
 | Tier | Params | Channels | Use for |
 |---|---|---|---|
 | **Durable nav** | `view`, `feature` | URL + localStorage + cross-tab `storage` | top-level location shared across tabs |
-| **URL-only** | `run`, `dialog`, `wf` | URL only | run selection (two tabs may compare runs) + dialog open-state (a dialog open in one tab must NOT pop open in another) |
+| **URL-only** | `run`, `dialog`, `flight` | URL only | run selection (two tabs may compare runs) + dialog open-state (a dialog open in one tab must NOT pop open in another) + view qualifiers (`flight`) |
 
 A new dialog is almost always **URL-only** (the `dialog` param). Do not mirror
 dialog open-state to localStorage or broadcast it cross-tab.
@@ -58,14 +58,19 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ?view=coverage&feature=checkout                    → coverage page
 ?feature=checkout&run=7cvh                          → run selected in detail pane
 ?feature=checkout&dialog=config                     → Playwright settings
-?dialog=add-test                                    → Add-Test wizard
-?feature=checkout&dialog=portify&wf=wf_abc          → portify revisit (omit wf = start-new)
 ?feature=checkout&dialog=verification               → Verify-config dialog
+?feature=checkout&dialog=flight-start               → flight stage-entry launcher (feature-scoped)
+?dialog=flight-new                                  → new-flight launcher (intent + repo picker)
+?view=flights&flight=fl_abc                         → flight detail (omit flight = flights list)
 ```
 
-`RouteDialog = 'config' | 'portify' | 'add-test' | 'verification'`. `wf` only
-qualifies `dialog=portify` (present = revisit, absent = start-new); it is dropped
-for any other dialog. Unknown dialog values are ignored on read.
+`RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new'`.
+`flight` is the one live id-qualifier: it only qualifies `view=flights` (absent =
+the flights landing list), gated the same way in `persistView`/`readPersistedView`.
+`wf` (old portify-revisit id) and `task` (old evaluation-dialog id) are
+tombstoned — `persistView` force-deletes both on every write so no stale deep
+link carries them forward; never reuse either name for a new qualifier. Unknown
+dialog values are ignored on read.
 
 ## Checklist — adding a new page
 
@@ -80,8 +85,10 @@ for any other dialog. Unknown dialog values are ignored on read.
 ## Checklist — adding a new routed dialog
 
 1. **Add it to the enum** — `RouteDialog` + `DIALOGS` array in
-   `workspace-view-state.ts`. If it needs an id qualifier (like portify's `wf`),
-   reuse `wf` or add a param and gate it the same way.
+   `workspace-view-state.ts`. If it needs an id qualifier, follow the live
+   precedent — `flight` qualifying `view=flights` — add a param and gate it in
+   `persistView`/`readPersistedView` so it's dropped unless your dialog/view is
+   active. Don't reuse `wf` or `task` — both are tombstoned (see Gotchas).
 2. **Hydrate on mount in `App.tsx`** — seed the dialog's open-state from
    `PERSISTED_VIEW.dialog` in the relevant `useState` initializer.
 3. **Derive it into the route** — add it to the `routedDialog` ternary
@@ -112,8 +119,13 @@ for any other dialog. Unknown dialog values are ignored on read.
   until its run loads.
 - **Cross-tab scope** — `onViewChangedInOtherTab` emits the **durable tier only**
   (view/feature). Never push run/dialog through it.
-- **`wf` belongs to portify only** — `persistView` drops `wf` unless
-  `dialog === 'portify'`. If your dialog needs its own id, don't piggyback on `wf`.
+- **Qualifiers belong to their dialog/view only** — `persistView` drops `flight`
+  unless `view === 'flights'` (the live precedent to copy — same
+  drop-unless-active gate). `wf` (old portify-revisit id) and `task` (old
+  evaluation-dialog id) are tombstoned: `persistView` force-deletes both on
+  every write regardless of state, so stale deep links don't carry them
+  forward. If your dialog needs its own id, add a new param with the
+  flight-style gate; never reuse `wf` or `task`.
 
 ## Deliberately NOT done (don't "fix" these without a reason)
 

@@ -15,6 +15,7 @@ import {
   nextIterationNumber,
   parseJournalMarkdown,
   stripAnsi,
+  stuckSlugsFromJournal,
   truncateDiffForJournal,
   updateLatestPendingJournalOutcome,
   writeErrorFile,
@@ -99,6 +100,38 @@ describe('countConsecutiveSameFailures', () => {
   it('stops at the first differing trailing iteration', () => {
     // newest→oldest: a (match), then x (different) → streak = current(1) + 1 = 2.
     expect(countConsecutiveSameFailures(journal('x', 'a'), ['a'])).toBe(2)
+  })
+})
+
+describe('stuckSlugsFromJournal', () => {
+  function journal(...sets: string[]): string {
+    const file = path.join(tmpDir, 'diagnosis-journal.md')
+    const blocks = sets.map((s, i) => `## Iteration ${i + 1} — 2026-04-28T10:1${i}:00Z\n\n- failingTests: ${s}\n`)
+    fs.writeFileSync(file, blocks.join('\n'))
+    return file
+  }
+
+  it('returns empty when the current failing set is empty', () => {
+    expect(stuckSlugsFromJournal(journal('a'), [], 3)).toEqual({ stuck: [], maxStreak: 0 })
+  })
+
+  it('every streak is 1 without a journal', () => {
+    expect(stuckSlugsFromJournal(path.join(tmpDir, 'missing.md'), ['a'], 3))
+      .toEqual({ stuck: [], maxStreak: 1 })
+  })
+
+  it('flags a test that kept failing while siblings churned the set', () => {
+    // Iterations: {a,b,flaky} → {a,b} — the exact-set signature changed both
+    // times, but a and b have now failed 3 observations in a row.
+    const j = journal('a, b, flaky', 'a, b')
+    expect(stuckSlugsFromJournal(j, ['a', 'b', 'newcomer'], 3))
+      .toEqual({ stuck: ['a', 'b'], maxStreak: 3 })
+  })
+
+  it('a recovered-then-refailed test restarts its streak', () => {
+    // b failed, recovered (absent), failed again → streak 2, not 4.
+    const j = journal('b', 'a', 'a, b')
+    expect(stuckSlugsFromJournal(j, ['b'], 3)).toEqual({ stuck: [], maxStreak: 2 })
   })
 })
 
@@ -780,6 +813,75 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
         summary: { failed: [] },
       }),
     ).not.toThrow()
+  })
+})
+
+describe('writeHealIndex cross-run flake history', () => {
+  function mkRun(runsRoot: string, id: string, failed: string[], feature = 'demo'): void {
+    const dir = path.join(runsRoot, id)
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ feature }))
+    fs.writeFileSync(
+      path.join(dir, 'e2e-summary.json'),
+      JSON.stringify({ failed: failed.map((name) => ({ name })) }),
+    )
+  }
+
+  it('adds a per-test history line from prior sibling runs of the same feature', () => {
+    const runsRoot = path.join(tmpDir, 'runs')
+    mkRun(runsRoot, '2026-01-01T0001-aaa', ['a-test'])
+    mkRun(runsRoot, '2026-01-02T0001-bbb', [])
+    mkRun(runsRoot, '2026-01-03T0001-ccc', ['a-test'])
+    const currentDir = path.join(runsRoot, '2026-01-04T0001-ddd')
+    fs.mkdirSync(currentDir, { recursive: true })
+    const healIndexPath = path.join(currentDir, 'heal-index.md')
+
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'a-test' }, { name: 'b-test' }] },
+      healIndexPath,
+      journalPath: path.join(currentDir, 'diagnosis-journal.md'),
+    })
+
+    const index = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(index).toContain('failed in 2 of the last 3 runs of this feature (intermittent — possible flake)')
+    expect(index).toContain('failed in 0 of the last 3 runs of this feature (new — first failure in recent runs)')
+  })
+
+  it('only counts prior runs of the same feature and omits history when there are none', () => {
+    const runsRoot = path.join(tmpDir, 'runs')
+    mkRun(runsRoot, '2026-01-01T0001-aaa', ['a-test'], 'other-feature')
+    const currentDir = path.join(runsRoot, '2026-01-02T0001-bbb')
+    fs.mkdirSync(currentDir, { recursive: true })
+    const healIndexPath = path.join(currentDir, 'heal-index.md')
+
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'a-test' }] },
+      healIndexPath,
+      journalPath: path.join(currentDir, 'diagnosis-journal.md'),
+    })
+
+    expect(fs.readFileSync(healIndexPath, 'utf-8')).not.toContain('history:')
+  })
+
+  it('reads persistent for a test that failed every prior run', () => {
+    const runsRoot = path.join(tmpDir, 'runs')
+    mkRun(runsRoot, '2026-01-01T0001-aaa', ['a-test'])
+    mkRun(runsRoot, '2026-01-02T0001-bbb', ['a-test'])
+    const currentDir = path.join(runsRoot, '2026-01-03T0001-ccc')
+    fs.mkdirSync(currentDir, { recursive: true })
+    const healIndexPath = path.join(currentDir, 'heal-index.md')
+
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'a-test' }] },
+      healIndexPath,
+      journalPath: path.join(currentDir, 'diagnosis-journal.md'),
+    })
+
+    expect(fs.readFileSync(healIndexPath, 'utf-8'))
+      .toContain('failed in 2 of the last 2 runs of this feature (persistent)')
   })
 })
 

@@ -20,25 +20,17 @@ export interface ArtifactInfo {
   mtimeMs: number
 }
 
-// Resolve where MCP should write artifacts for a heal cycle. If exactly one
-// failure exists, scope the output dir to that failure's slug so attribution
-// is implicit. Otherwise use a shared per-run dir; the caller is responsible
-// for writing attribution alongside.
+// Resolve where MCP should write artifacts for a heal session. Always the
+// run-level dir: claude reads `--mcp-config` once at REPL boot and the
+// failing set changes across cycles, so a per-failure dir pinned from
+// cycle-1's slugs would misattribute every capture from cycle 2 on (the old
+// behavior). Per-failure dirs (`failed/<slug>/playwright-mcp/`) still exist
+// on disk for runs recorded before this change; readers check both.
 export function resolveMcpOutputDir(opts: {
   runDir: string
-  failedSlugs: readonly string[]
-}): { dir: string; perFailure: boolean; slug?: string } {
-  if (opts.failedSlugs.length === 1) {
-    const slug = opts.failedSlugs[0]
-    return {
-      dir: path.join(opts.runDir, 'failed', slug, 'playwright-mcp'),
-      perFailure: true,
-      slug,
-    }
-  }
+}): { dir: string } {
   return {
     dir: path.join(opts.runDir, 'playwright-mcp'),
-    perFailure: false,
   }
 }
 

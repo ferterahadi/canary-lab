@@ -406,7 +406,7 @@ describe('TestCasesColumn', () => {
       root.render(<TestCasesColumn feature="alpha beta" activeRunSummary={undefined} activeRunStatus="passed" />)
     })
 
-    expect(container.textContent).not.toContain('Export Evaluation')
+    expect(container.textContent).not.toContain('Review Evaluation')
   })
 
   it('hydrates selected run summary tests with parsed spec code when location still matches', async () => {

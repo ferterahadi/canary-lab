@@ -21,6 +21,7 @@ import {
   type DocsCollection,
 } from '../../../coverage/logic/coverage/docs-collection'
 import { withFingerprints } from '../../../coverage/logic/coverage/fingerprints'
+import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 
 // PRD summarization: turn a feature's source docs into structured requirements
 // with STABLE ids. Modeled on the evaluation-export agent pattern
@@ -28,8 +29,8 @@ import { withFingerprints } from '../../../coverage/logic/coverage/fingerprints'
 // spine is enforced by canary in code (reconcileRequirementIds), NOT trusted to
 // the agent, because renumbering breaks every inline @requirement annotation.
 
-const PRD_SUMMARY_TEMPLATE_PATH = path.join(__dirname, '../../../../../prompts/prd-summary.md')
-const PRD_SUMMARY_SCHEMA_PATH = path.join(__dirname, '../../../../../prompts/prd-summary.schema.json')
+const PRD_SUMMARY_TEMPLATE_PATH = promptPath('prd-summary.md')
+const PRD_SUMMARY_SCHEMA_PATH = promptPath('prd-summary.schema.json')
 // Idle (inactivity) window: the summary agent is killed only after this long
 // with NO activity, not on a fixed wall-clock deadline (see agent-idle-timer.ts).
 const PRD_SUMMARY_IDLE_TIMEOUT_MS = 5 * 60 * 1000
@@ -379,7 +380,6 @@ export function buildPrdSummaryPrompt(
   previousVariantDimension?: VariantDimension,
   templatePath: string = PRD_SUMMARY_TEMPLATE_PATH,
 ): string {
-  const template = fs.readFileSync(templatePath, 'utf-8').trim()
   // Agentic: list the resolvable file paths and make the agent READ them with its
   // tools, rather than inlining the bodies (which lets the model shortcut to a
   // one-shot answer and leaves the AgentSessionView timeline empty). The server
@@ -397,11 +397,10 @@ export function buildPrdSummaryPrompt(
   const previousDimensionJson = previousVariantDimension
     ? JSON.stringify(previousVariantDimension, null, 2)
     : '(none — infer the dimension from the documents, if any)'
-  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
-    if (key === 'docs') return docs
-    if (key === 'previousRequirements') return previousJson
-    if (key === 'previousVariantDimension') return previousDimensionJson
-    return match
+  return renderPromptTemplate(loadPromptTemplate(templatePath), {
+    docs,
+    previousRequirements: previousJson,
+    previousVariantDimension: previousDimensionJson,
   })
 }
 

@@ -1,6 +1,6 @@
 ---
 name: cl_ui-design-philosophy
-description: Use when building or restyling any Canary Lab web UI (apps/web) — a new panel, dialog, pill, card, or full-screen view. Captures the design language so new surfaces feel native instead of bolted on: reuse the token system, the established layout precedents, and the meaning-carries-the-style rule. No new component library.
+description: Use when building or restyling any Canary Lab web UI (apps/web) — a new panel, dialog, pill, card, or full-screen view. Captures the design language so new surfaces feel native instead of bolted on: reuse the token system, the established layout precedents, and the meaning-carries-the-style rule. No new component library. For critique-only requests ("review this design", "design feedback") use cl_design-feedback instead; terminal/CLI output styling is out of scope.
 ---
 
 # Canary Lab UI Design Philosophy
@@ -29,7 +29,7 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 | Full-screen workspace view | `CoverageLedgerPage`, `LogCleanupPage` (`fixed inset-0`, header bar + panes) |
 | Modal with tabs | `FeatureConfigEditor` (`.cl-modal-backdrop` + `.cl-modal` + `<nav>` tabs) |
 | Status-bar launcher | the `*Pill` components in `GlobalStatusBar` |
-| Background-task surface | the Portify pill + dialog (see `cl_async-task-ux`) |
+| Background-task surface | `FlightsPill` + `FlightPage` (`features/flights/components/`) (see `cl_async-task-ux`) |
 | Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + the agent timeline via `AgentSessionView`, always on) that OWNS the view while a job runs; not a banner over a dimmed result |
 | Live agent progress / CLI output | **`AgentSessionView`** — never a raw log `<pre>` |
 
@@ -70,7 +70,7 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
   to persist (which feature, which full-screen view, which sub-tab) lives in the URL
   (source of truth) + `localStorage`, NOT only React state — so a refresh restores
   it and a second tab reflects it. Broadcast cross-tab changes via `storage` events;
-  see `lib/workspace-view-state.ts`. Ephemeral UI (hover, transient filters) stays
+  see `shared/lib/workspace-view-state.ts`. Ephemeral UI (hover, transient filters) stays
   in React state.
 - **One owner for a long-lived lifecycle; don't split it across views.** A background
   job (or any cross-view live state) must be owned ONCE at the screen level — one

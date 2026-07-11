@@ -147,6 +147,22 @@ describe('GET /api/features', () => {
     expect(body[0].envs).toEqual([])
   })
 
+  it('passes group through when set, and omits the key when absent', async () => {
+    const groupedDir = path.join(featuresDir, 'grouped')
+    fs.mkdirSync(groupedDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(groupedDir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'grouped', description: 'd', group: 'checkout', envs: ['local'], featureDir: __dirname } }`,
+    )
+    writeFeature('ungrouped')
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{ name: string; group?: string }>
+    expect(body.find((f) => f.name === 'grouped')?.group).toBe('checkout')
+    const ungrouped = body.find((f) => f.name === 'ungrouped')!
+    expect('group' in ungrouped).toBe(false)
+  })
+
   it('returns [] when no features exist', async () => {
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/features' })

@@ -314,11 +314,15 @@ function RunOverviewTab({
   const [exportError, setExportError] = useState(false)
   const { startExport } = useEvaluationExports()
   const { gatePromo } = useMcpPromo()
+  // R38: run detail keeps only the "Review Evaluation" trigger — the export's
+  // progress/output is watched via the Flights pill (it blinks on an active
+  // export) and the flight's Evaluation Report stage, not inline here.
   const handleExportEvaluation = useCallback(async (mode: EvaluationExportMode) => {
     setExportMenuOpen(false)
     setExportError(false)
     gatePromo('export-evaluation', () => {
-      void Promise.resolve(startExport(manifest.runId, mode)).catch(() => setExportError(true))
+      void Promise.resolve(startExport(manifest.runId, mode))
+        .catch(() => setExportError(true))
     })
   }, [gatePromo, manifest.runId, startExport])
 
@@ -340,10 +344,11 @@ function RunOverviewTab({
                 onClick={() => setExportMenuOpen((open) => !open)}
                 aria-haspopup="menu"
                 aria-expanded={exportMenuOpen}
+                title="Produce the evaluation report and review it — per-test reasoning + verdicts, with video playback where the tests drive a browser. This is the run's deliverable."
                 className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium disabled:cursor-wait disabled:opacity-80"
                 style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
               >
-                {exportError ? 'Export failed' : 'Export Evaluation'}
+                {exportError ? 'Export failed' : '📊 Review Evaluation'}
                 <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>▾</span>
               </button>
               {exportMenuOpen && (

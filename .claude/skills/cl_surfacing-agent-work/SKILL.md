@@ -1,6 +1,6 @@
 ---
 name: cl_surfacing-agent-work
-description: Use when building or changing any UI/feature that shows an agent's progress, output, or "what it's doing" (live or historical), when choosing how to stream agent output, or when a user says an agent view "looks stuck" / "I can't see the output". Prevents designing an agent viewer before knowing what the agent actually produces — and promising a rich timeline an agent can't deliver.
+description: Use when building or changing any UI/feature that shows an agent's progress, output, or "what it's doing" (live or historical), when choosing how to stream agent output, or when a user says an agent view "looks stuck" / "I can't see the output". Prevents designing an agent viewer before knowing what the agent actually produces — and promising a rich timeline an agent can't deliver. Skip if the view is blank/stuck because the session-log path or resolution is wrong (CLAUDE_CONFIG_DIR/CODEX_HOME, missing JSONL) → cl_locate-agent-session-logs; this skill is for designing what the viewer shows and how output streams. Skip for non-agent UI styling → cl_ui-design-philosophy, and for generic "only updates after refresh" staleness → cl_live-state-sync.
 ---
 
 # Surfacing an Agent's Work (without overpromising)
@@ -40,7 +40,7 @@ agentic). The durable fix for a one-shot you want to *watch* is to make it agent
 | Transport | What it is | Good for | Cannot |
 | --- | --- | --- | --- |
 | **On-disk session JSONL** — `AgentSessionView` tails it (REST snapshot + `/ws/.../agent-session`, parsed by `agent-session-log.ts`) | The agent CLI's own session file; the parser emits **complete events only** | Agentic loops; historical replay; the structured rail (thinking/tool/result rows, model+session header) | **Token-stream a one-shot** — the assistant block only lands at *completion*, by which point the job is done and the view moves on, so you see just the prompt |
-| **stdout `--output-format=stream-json --include-partial-messages`** | The live token stream on stdout; parse deltas yourself (see `coverage/agent-stream.ts`) | Watching a one-shot write its answer in real time | Give you the structured tool/think rows for free — you render the text |
+| **stdout `--output-format=stream-json --include-partial-messages`** | The live token stream on stdout; parse deltas yourself (see `features/agent-sessions/logic/agent-stream.ts`) | Watching a one-shot write its answer in real time | Give you the structured tool/think rows for free — you render the text |
 
 Rule of thumb: **agentic loop → AgentSessionView (file tail). One-shot you want to
 *watch* → stream-json stdout → a live log.** They are not interchangeable; the file
@@ -84,6 +84,6 @@ it (see [[cl_ui-design-philosophy]] "One owner for a long-lived lifecycle" and
 
 ## Verify
 
-Stream parsing is pure + unit-tested (`coverage/agent-stream.test.ts`) so the logic
+Stream parsing is pure + unit-tested (`features/agent-sessions/logic/agent-stream.test.ts`) so the logic
 is checkable without a live agent; the actual wire shape is the user's `canary-apply`
 trial (never run it — see `cl_verify-changes`). Component behaviour is happy-dom-tested.

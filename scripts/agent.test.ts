@@ -41,7 +41,7 @@ describe('canary-lab agent install', () => {
 
     expect(refreshInstalled('all', { homeDir: home, log: (line) => lines.push(line) })).toBe(1)
 
-    expect(fs.readFileSync(skillPath, 'utf-8')).toContain('wait_for_heal_task')
+    expect(fs.readFileSync(skillPath, 'utf-8')).toContain('start_flight')
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(false)
     expect(fs.existsSync(path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin', '.mcp.json'))).toBe(false)
     expect(lines.join('\n')).toContain('Updated Codex skill')
@@ -63,32 +63,45 @@ describe('canary-lab agent install', () => {
 
   it('instructs agents to verify fixes with signal_run instead of start_run', () => {
     const assets = path.resolve(__dirname, '..', 'agent-integrations')
-    const skillPaths = [
-      path.join(assets, 'codex', 'skills', 'canary-lab', 'SKILL.md'),
-      path.join(assets, 'claude', 'skills', 'canary-lab', 'SKILL.md'),
-      path.join(assets, 'plugin', 'canary-lab', 'skills', 'canary-lab', 'SKILL.md'),
+    const mirrors = (skill: string) => [
+      path.join(assets, 'codex', 'skills', skill, 'SKILL.md'),
+      path.join(assets, 'claude', 'skills', skill, 'SKILL.md'),
+      path.join(assets, 'plugin', 'canary-lab', 'skills', skill, 'SKILL.md'),
     ]
 
-    for (const skillPath of skillPaths) {
+    // The run/heal loop rules live in the canary-lab-run skill since the split.
+    for (const skillPath of mirrors('canary-lab-run')) {
       const body = fs.readFileSync(skillPath, 'utf-8')
       expect(body).toContain('never call `start_run` to verify')
       expect(body).toContain('Workspace Bootstrap')
       expect(body).toContain('~/.canary-lab/workspaces.json')
       expect(body).toContain('/mcp/health')
-      expect(body).toContain('do not pass `--port`')
-      expect(body).toContain('Do not reflexively call `list_features` or `list_runs` after health')
-      expect(body).toContain('For random or new feature creation, call `create_feature` directly with a unique feature name')
       expect(body).toContain('context.healPrompt.startHere')
       expect(body).toContain('get_run_snapshot')
       expect(body).toContain('`signal_run` with `hypothesis` and `fixDescription`, then `wait_for_heal_task`')
       expect(body).toContain('Use `force_new` only when the user explicitly wants a separate concurrent run')
-	      expect(body).toContain('cancel_heal')
-	      expect(body).toContain('continued by default')
-	      expect(body).toContain('remaining-test mode')
-	      expect(body).toContain('failed tests first, then skipped tests, then pending/not-run tests')
-	      expect(body).toContain('do not tell the user no test filter exists')
-	    }
-	  })
+      expect(body).toContain('cancel_heal')
+      expect(body).toContain('continued by default')
+      expect(body).toContain('remaining-test mode')
+      expect(body).toContain('failed tests first, then skipped tests, then pending/not-run tests')
+      expect(body).toContain('do not tell the user no test filter exists')
+    }
+
+    // Authoring rules live in canary-lab-author.
+    for (const skillPath of mirrors('canary-lab-author')) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('Do not reflexively call `list_features` or `list_runs` after health')
+      expect(body).toContain('For random or new feature creation, call `create_feature` directly with a unique feature name')
+    }
+
+    // The flight entry point keeps the full bootstrap (incl. the --port note).
+    for (const skillPath of mirrors('canary-lab')) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('start_flight')
+      expect(body).toContain('respond_flight_checkpoint')
+      expect(body).toContain('do not pass `--port`')
+    }
+  })
 
   it('leaves up-to-date installed integrations untouched during refresh', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-refresh-current-'))

@@ -6,6 +6,7 @@ Run directory:
 Start here:
 - `{{healIndexPath}}` — first file to read when present. It lists failed tests, assertion errors, editable repos, and exact per-failure slice paths.
 - `{{summaryPath}}` — raw Playwright summary. Use only if `heal-index.md` is missing or incomplete.
+- If neither `heal-index.md` nor the summary exists or lists failures, read the newest `*.log` in the run directory, note the missing index in your hypothesis, and proceed from raw logs.
 
 Useful only when needed:
 {{traceExtractHint}}
@@ -24,6 +25,7 @@ Rules:
 - After fixing, write the per-run signal file:
   - Service/app fix → `{{restartSignal}}`
   - Test/config-only fix → `{{rerunSignal}}`
+  - If you changed BOTH app and test/config files, write ONLY the restart signal. Write exactly one signal file per cycle.
 - {{loggingRule}}
 - Signal body: `{"hypothesis":"<concise diagnosis of what's wrong>","fixDescription":"<concise summary of what the fix does>"}`. Both fields land in the audit journal. The runner detects which files you changed via git — do not list them.
 

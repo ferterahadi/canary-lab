@@ -25,10 +25,24 @@ export type AgentSessionSource =
   | { kind: 'portify'; workflowId: string; live?: boolean }
   | { kind: 'coverage'; jobId: string; live?: boolean }
   | { kind: 'evaluation'; taskId: string; live?: boolean }
+  | { kind: 'flight'; flightId: string; stage: string; live?: boolean }
+  | { kind: 'flight-plan'; taskId: string; live?: boolean }
 
 interface Props {
-  source: AgentSessionSource
+  /** Optional: a stage with only conductor output (no spawned agent) passes
+   *  `systemRows` alone and omits `source` — the same rail renders the system
+   *  rows without fetching or tailing any session log. */
+  source?: AgentSessionSource
+  /** Flight activity band (R66): the conductor's tagged `[TAG]` log lines,
+   *  rendered as distinct *system* rows at the head (`pre`) and tail (`post`)
+   *  of the same rail, so the conductor's system output and the agent's own
+   *  timeline read as one consolidated block. Other hosts omit it. When a
+   *  stage has system rows but no agent session, the block still renders them
+   *  instead of the empty "no session log" state. */
+  systemRows?: { pre: string[]; post: string[] }
 }
+
+const NO_SYSTEM_ROWS = { pre: [] as string[], post: [] as string[] }
 
 interface ViewState {
   agent: 'claude' | 'codex' | null
@@ -38,7 +52,7 @@ interface ViewState {
   events: AgentSessionEvent[]
 }
 
-export function AgentSessionView({ source }: Props) {
+export function AgentSessionView({ source, systemRows }: Props) {
   const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -47,14 +61,16 @@ export function AgentSessionView({ source }: Props) {
   const [showJumpLatest, setShowJumpLatest] = useState(false)
   // Stable key for the effect dependencies — destructured rather than the
   // whole object so a new prop reference each render doesn't restart the WS.
-  const sourceKey = useMemo(() => sourceCacheKey(source), [source])
+  const sourceKey = useMemo(() => (source ? sourceCacheKey(source) : null), [source])
 
   useEffect(() => {
     let cancelled = false
     let conn: { close(): void } | null = null
-    setLoading(true)
     setError(null)
     setState(null)
+    // No agent session for this stage — the block is system rows only.
+    if (!source) { setLoading(false); return }
+    setLoading(true)
 
     const applySnapshot = (snapshot: AgentSessionResponse | null): void => {
       if (cancelled) return
@@ -72,6 +88,8 @@ export function AgentSessionView({ source }: Props) {
       if (source.kind === 'portify') return api.getPortifyAgentSession(source.workflowId)
       if (source.kind === 'coverage') return api.getCoverageAgentSession(source.jobId)
       if (source.kind === 'evaluation') return api.getEvaluationAgentSession(source.taskId)
+      if (source.kind === 'flight') return api.getFlightAgentSession(source.flightId, source.stage)
+      if (source.kind === 'flight-plan') return api.getFlightPlanAgentSession(source.taskId)
       return api.getDraftAgentSession(source.draftId, source.stage)
     }
 
@@ -96,7 +114,11 @@ export function AgentSessionView({ source }: Props) {
                   ? { kind: 'coverage', jobId: source.jobId }
                   : source.kind === 'evaluation'
                     ? { kind: 'evaluation', taskId: source.taskId }
-                    : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+                    : source.kind === 'flight'
+                      ? { kind: 'flight', flightId: source.flightId, stage: source.stage }
+                      : source.kind === 'flight-plan'
+                        ? { kind: 'flight-plan', taskId: source.taskId }
+                        : { kind: 'draft', draftId: source.draftId, stage: source.stage },
           onSession: (session) => {
             if (cancelled) return
             setState((prev) => prev
@@ -164,24 +186,29 @@ export function AgentSessionView({ source }: Props) {
     setShowJumpLatest(false)
   }
 
-  if (error) {
+  // System rows keep the consolidated block alive even before (or without) an
+  // agent session — a stage with only conductor output still renders its rail.
+  const sys = systemRows ?? NO_SYSTEM_ROWS
+  const hasSystem = sys.pre.length > 0 || sys.post.length > 0
+
+  if (error && !hasSystem) {
     return (
       <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
         Failed to load session log: {error}
       </div>
     )
   }
-  if (loading) {
+  if (loading && !hasSystem) {
     return (
       <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
         Loading session…
       </div>
     )
   }
-  if (!state || (!state.sessionId && state.events.length === 0)) {
+  if ((!state || (!state.sessionId && state.events.length === 0)) && !hasSystem) {
     return (
       <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-        {source.live ? 'Waiting for agent output…' : 'No structured session log found.'}
+        {source?.live ? 'Waiting for agent output…' : 'No structured session log found.'}
       </div>
     )
   }
@@ -194,7 +221,7 @@ export function AgentSessionView({ source }: Props) {
         onScroll={onScroll}
         className="h-full min-h-0 flex-1 overflow-y-auto"
       >
-        {state.agent && state.sessionId && (
+        {state?.agent && state.sessionId && (
           <div className="agentts-head">
             <span className="agentts-statusdot" aria-hidden="true" />
             <span className="agentts-agent">{state.agent}</span>
@@ -217,8 +244,14 @@ export function AgentSessionView({ source }: Props) {
           </div>
         )}
         <ol className="agentts-rail">
-          {state.events.map((event: AgentSessionEvent, idx: number) => (
+          {sys.pre.map((line, idx) => (
+            <SystemRow key={`sys-pre-${idx}`} line={line} />
+          ))}
+          {(state?.events ?? []).map((event: AgentSessionEvent, idx: number) => (
             <EventRow key={idx} event={event} />
+          ))}
+          {sys.post.map((line, idx) => (
+            <SystemRow key={`sys-post-${idx}`} line={line} />
           ))}
         </ol>
       </div>
@@ -262,6 +295,8 @@ function sourceCacheKey(source: AgentSessionSource): string {
   if (source.kind === 'portify') return `portify:${source.workflowId}:${source.live ? '1' : '0'}`
   if (source.kind === 'coverage') return `coverage:${source.jobId}:${source.live ? '1' : '0'}`
   if (source.kind === 'evaluation') return `evaluation:${source.taskId}:${source.live ? '1' : '0'}`
+  if (source.kind === 'flight') return `flight:${source.flightId}:${source.stage}:${source.live ? '1' : '0'}`
+  if (source.kind === 'flight-plan') return `flight-plan:${source.taskId}:${source.live ? '1' : '0'}`
   return `draft:${source.draftId}:${source.stage}:${source.live ? '1' : '0'}`
 }
 
@@ -275,6 +310,27 @@ function EventRow({ event }: { event: AgentSessionEvent }) {
     <li className="agentts-row" data-kind={event.kind}>
       <NodeMarker event={event} />
       <EventBody event={event} />
+    </li>
+  )
+}
+
+// A conductor system line (`[TAG] text`) on the same rail as the agent events,
+// but visually its own lane: a tinted band, a boxy terminal node, and the tag
+// as a mono chip — so "system" reads apart from the agent's round colored nodes.
+export function SystemRow({ line }: { line: string }) {
+  const m = /^\[([\w-]+)\]\s?(.*)$/.exec(line)
+  const tag = m?.[1]
+  const text = m ? m[2] : line
+  return (
+    <li className="agentts-sysrow">
+      <span className="agentts-sysnode" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3.5 4.5l3 3-3 3" />
+          <path d="M8.5 11h4.5" />
+        </svg>
+      </span>
+      {tag && <span className="agentts-systag">{tag}</span>}
+      <span className="agentts-systext">{text}</span>
     </li>
   )
 }
@@ -490,6 +546,11 @@ const TIMELINE_CSS = `
 .agentts-row::before{content:'';position:absolute;left:7px;top:17px;bottom:-1px;width:1.5px;background:linear-gradient(180deg,var(--border-default),color-mix(in srgb,var(--border-default) 25%,transparent));border-radius:2px}
 .agentts-row:last-child::before{display:none}
 .agentts-node{position:absolute;left:0;top:2px;width:15px;height:15px;border-radius:50%;border:1.5px solid var(--border-default);display:grid;place-items:center;background:var(--bg-base);z-index:1}
+.agentts-sysrow{position:relative;margin:0 0 6px;padding:6px 11px 6px 30px;list-style:none;border-radius:var(--radius-md);background:color-mix(in srgb,var(--bg-elevated) 45%,transparent);border:1px solid var(--border-default);display:flex;align-items:baseline;gap:7px;animation:agentts-in .26s cubic-bezier(.22,1,.36,1) both}
+.agentts-sysnode{position:absolute;left:8px;top:6px;width:15px;height:15px;border-radius:4px;border:1.5px solid var(--border-default);display:grid;place-items:center;background:var(--bg-base);color:var(--text-secondary)}
+.agentts-sysnode svg{width:9px;height:9px}
+.agentts-systag{flex:none;font-family:var(--font-mono);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;padding:1px 5px}
+.agentts-systext{font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:var(--text-secondary);word-break:break-word;white-space:pre-wrap;min-width:0}
 .agentts-node svg{width:8.5px;height:8.5px}
 .agentts-rowhead{display:flex;align-items:center;gap:8px;min-height:15px}
 .agentts-label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600}

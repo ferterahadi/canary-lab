@@ -38,6 +38,7 @@ import {
   getFeatureRepoStatus,
   writeFeatureDoc,
   deleteFeatureDoc,
+  linkFeatureDoc,
   type EnvFileSource,
 } from '../src/features/config/logic/feature-authoring'
 import {
@@ -46,6 +47,7 @@ import {
   computeFeatureCoverage,
   listFeatureDocs,
 } from '../src/features/coverage/logic/coverage/service'
+import { deriveFeatureSlug } from '../../../shared/flights/types'
 import { CoverageJobRunStore } from '../src/features/coverage/logic/coverage/jobs/store'
 import { CoverageJobConflictError } from '../src/features/coverage/logic/coverage/jobs/runner'
 import {
@@ -256,6 +258,14 @@ export interface CanaryLabMcpDeps {
    *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
    *  the MCP surface never approves or gates on it (awareness, not enforcement). */
   dirtySpecStore?: DirtySpecStore
+  /** Flight (`canary-lab flight` pipeline) driven over MCP. Reuses the
+   *  flights REST routes via app.inject — same store + conductor as UI/CLI, so
+   *  a flight started here shows live in the web UI and vice versa. */
+  flightsRequest?: (opts: {
+    method: 'GET' | 'POST'
+    url: string
+    payload?: unknown
+  }) => Promise<{ statusCode: number; body: unknown }>
 }
 
 const CLIENT_KIND = z.enum(['claude', 'codex', 'claude-pty', 'codex-pty', 'other'])
@@ -277,15 +287,16 @@ const WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS = 60 * 60 * 1000
 // working — they just get a `still_waiting` to loop on sooner.
 const WAIT_FOR_HEAL_TASK_WINDOW_MS = 120 * 1000
 
-export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'portify', 'lifecycle', 'full'] as const
+export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'coverage', 'export', 'flight', 'portify', 'lifecycle', 'full'] as const
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
 // The default profile when a client connects without an explicit one (bare
 // `canary-lab mcp`, the registered Desktop/CLI invocation, a profile-less
 // /mcp request). `lifecycle` is the everyday end-to-end surface (repair +
-// author + verify + export) MINUS portify — the specialized, infrequent
-// port-injection workflow. Portify clients opt in with `--profile portify`
-// (or `full`), keeping the common surface leaner in tools + instructions.
+// verify + author + coverage + export + flight) MINUS portify — the
+// specialized, infrequent port-injection workflow. Portify clients opt in
+// with `--profile portify` (or `full`), keeping the common surface leaner in
+// tools + instructions.
 export const DEFAULT_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'lifecycle'
 
 export type CanaryLabMcpToolName =
@@ -325,6 +336,9 @@ export type CanaryLabMcpToolName =
   | 'start_external_draft'
   | 'update_external_draft_stage'
   | 'apply_external_draft'
+  | 'start_flight'
+  | 'get_flight'
+  | 'respond_flight_checkpoint'
   | 'get_heal_context'
   | 'get_failure_detail'
   | 'start_run'
@@ -378,36 +392,64 @@ const VERIFY_TOOLS = [
   'get_verification_result',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
+// Author = create/extend a feature, write specs, capture envsets, manage the
+// feature's repos. Docs/PRD/coverage live in `coverage`, evaluation archives in
+// `export`, and the conducted pipeline in `flight` — all four used to be one
+// array; the split keeps each skill/client surface lean while `lifecycle`/`full`
+// stay the same computed unions.
 const AUTHOR_TOOLS = [
   'list_features',
   'list_runs',
   'get_run',
   'get_run_snapshot',
   'create_feature',
-  'write_feature_doc',
-  'delete_feature_doc',
-  'get_feature_coverage',
-  'list_feature_docs',
-  'clear_prd_summary',
-  'start_external_summary',
-  'submit_external_summary',
-  'start_external_coverage',
-  'submit_external_coverage',
   'get_feature_envset_summary',
   'capture_feature_env_files',
   'write_envset',
   'delete_feature',
   'get_feature_repo_status',
   'checkout_feature_repo_branch',
+  'start_external_draft',
+  'update_external_draft_stage',
+  'apply_external_draft',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Coverage = feature docs → PRD summary → semantic coverage ledger (carved out
+// of the old author array; the tools are unchanged).
+const COVERAGE_TOOLS = [
+  'list_features',
+  'write_feature_doc',
+  'delete_feature_doc',
+  'list_feature_docs',
+  'clear_prd_summary',
+  'start_external_summary',
+  'submit_external_summary',
+  'start_external_coverage',
+  'submit_external_coverage',
+  'get_feature_coverage',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Export = evaluation archives for a terminal run (carved out of the old
+// author array). list_runs/get_run ride along to pick the run to export.
+const EXPORT_TOOLS = [
+  'list_features',
+  'list_runs',
+  'get_run',
   'start_external_evaluation_export',
   'submit_external_evaluation_export',
   'list_evaluation_exports',
   'get_evaluation_export',
   'download_evaluation_export',
   'delete_evaluation_export',
-  'start_external_draft',
-  'update_external_draft_stage',
-  'apply_external_draft',
+] as const satisfies readonly CanaryLabMcpToolName[]
+
+// Flight = the conducted end-to-end pipeline. write_feature_doc rides along so
+// the client can distill conversation docs at the prd-source checkpoint.
+const FLIGHT_TOOLS = [
+  'start_flight',
+  'get_flight',
+  'respond_flight_checkpoint',
+  'write_feature_doc',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 
 // Portify is a specialized, infrequent operation (make a feature's ports
@@ -443,6 +485,9 @@ const LIFECYCLE_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
     ...REPAIR_TOOLS,
     ...VERIFY_TOOLS,
     ...AUTHOR_TOOLS,
+    ...COVERAGE_TOOLS,
+    ...EXPORT_TOOLS,
+    ...FLIGHT_TOOLS,
     ...FULL_ONLY_TOOLS,
   ]),
 )
@@ -458,6 +503,9 @@ const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolNam
   repair: REPAIR_TOOLS,
   verify: VERIFY_TOOLS,
   author: AUTHOR_TOOLS,
+  coverage: COVERAGE_TOOLS,
+  export: EXPORT_TOOLS,
+  flight: FLIGHT_TOOLS,
   portify: PORTIFY_TOOLS,
   lifecycle: LIFECYCLE_TOOLS,
   full: FULL_TOOLS,
@@ -558,12 +606,18 @@ export function registerCanaryLabTools(
   }, async ({ runId, includeRaw }) => {
     const detail = deps.store.get(runId)
     if (!detail) return errorResult(`run not found: ${runId}`)
-    if (includeRaw) return asJsonResult(detail)
+    // Eval-review-first: a terminal run's next stop is the evaluation export —
+    // reviewing it (per-test reasoning + playback) IS the core canary loop.
+    const next = isTerminalRunStatus(detail.manifest.status)
+      ? { next: `Run is terminal (${detail.manifest.status}) — the next step is the evaluation export: start_external_evaluation_export(runId) to produce it (status preserved, even for a failed run), then get_evaluation_export / download_evaluation_export and point the user at reviewing evaluation.html.` }
+      : {}
+    if (includeRaw) return asJsonResult({ ...detail, ...next })
     const { lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents, ...core } = detail
     return asJsonResult({
       ...core,
       artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
       raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'], hint: 'call get_run with includeRaw:true to inline them' },
+      ...next,
     })
   })
 
@@ -763,16 +817,30 @@ export function registerCanaryLabTools(
 
   registerTool('write_feature_doc', {
     description:
-      'Write a prose doc (session, plan, notes) into a feature\'s docs/ dir. Create-or-replace (re-writing the same relPath overwrites); markdown only (.md/.markdown). Use for "add this plan/distillation to feature <name>".',
+      'Write a prose doc (session, plan, notes) into a feature\'s docs/ dir, OR link a LOCAL file in place via link_path (symlinked so the user\'s original stays the live source; copy fallback where symlinks aren\'t permitted). Create-or-replace (re-writing the same relPath overwrites); written docs are markdown only (.md/.markdown), linked docs may also be .txt. Use for "add this plan/distillation to feature <name>" or "use ~/Documents/prd.md as the requirements".',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
-      relPath: z.string().describe('Path relative to the feature docs/ dir, e.g. "notes.md" or "sessions/2026-05-28.md". A leading "docs/" is optional. Must end in .md or .markdown.'),
-      content: z.string().describe('Markdown document body.'),
+      relPath: z.string().optional().describe('Path relative to the feature docs/ dir, e.g. "notes.md" or "sessions/2026-05-28.md". A leading "docs/" is optional. Required with content; defaults to the target basename with link_path.'),
+      content: z.string().optional().describe('Markdown document body. Mutually exclusive with link_path.'),
+      link_path: z.string().optional().describe('Absolute or ~-relative path of a LOCAL doc to link into docs/ instead of writing content. Mutually exclusive with content.'),
     },
-  }, async ({ feature, relPath, content }) => {
+  }, async ({ feature, relPath, content, link_path }) => {
+    if ((content === undefined) === (link_path === undefined)) {
+      return errorResult('pass exactly one of content (write a doc) or link_path (link a local file)')
+    }
+    if (link_path !== undefined) {
+      const result = linkFeatureDoc(
+        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        { feature, targetPath: link_path, ...(relPath ? { relPath } : {}) },
+      )
+      if (!result.ok) return errorResult(result.error)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
+      return asJsonResult({ written: true, linked: result.linked, path: result.writtenPath, relativePath: result.relativePath })
+    }
+    if (!relPath) return errorResult('relPath is required with content')
     const result = writeFeatureDoc(
       { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
-      { feature, relPath, content },
+      { feature, relPath, content: content! },
     )
     if (!result.ok) return errorResult(result.error)
     // Docs feed the PRD summary; refresh the Docs rail + coverage headline live.
@@ -799,7 +867,7 @@ export function registerCanaryLabTools(
 
   registerTool('get_feature_coverage', {
     description:
-      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. DECOUPLED from test runs — measures test→requirement+path mapping, never whether a run passed. Use it to find untested/path-incomplete requirements and shallow tests. When the ledger is BLOCKED (state.coverage:"blocked") it carries a `next:` field with the recovery step; if it says no source doc exists, ASK THE USER to attach/paste the PRD in chat (never invent or pull one) before generating.',
+      'Get the Semantic Coverage Ledger: PRD requirements → mapped tests → gap type (untested / path-incomplete / covered) with a coverage % (covered ÷ total declared paths) and mapped % (requirements with ≥1 test), per-test strength (strong/solid/basic/shallow from assertion tiers), and docs-drift. coveragePct is claim-based — a tag claims the test→requirement+path mapping, regardless of run results. When the feature has a recorded run the ledger ALSO carries an additive proven axis (provenPct, totals.proven, per-requirement/path proven, provenRunId): covered = a tag claims it; proven = the covering test actually passed in the latest run. These fields are omitted when no run is recorded. Use it to find untested/path-incomplete requirements and shallow tests. When the ledger is BLOCKED (state.coverage:"blocked") it carries a `next:` field with the recovery step; if it says no source doc exists, ASK THE USER to attach/paste the PRD in chat (never invent or pull one) before generating.',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
@@ -837,7 +905,7 @@ export function registerCanaryLabTools(
 
   registerTool('clear_prd_summary', {
     description:
-      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary + its coverage sidecars (pending mappings, run-state) and strip the @req-*/@path-* tags from the specs (other tags kept; specs revert to pre-coverage shape). Source docs are untouched; the feature returns to the "no summary" state. Returns { removed, untagged } (untagged = specs whose tags were cleared).',
+      'Reset a feature\'s coverage to a blank slate: remove the generated PRD summary + its coverage sidecars (pending mappings, run-state) and strip the @req-*/@path-*/@variant-* tags from the specs (other tags kept; specs revert to pre-coverage shape). Source docs are untouched; the feature returns to the "no summary" state. Returns { removed, untagged } (untagged = specs whose tags were cleared).',
     inputSchema: { feature: z.string().describe('Existing feature name (from list_features).') },
   }, async ({ feature }) => {
     try {
@@ -999,14 +1067,20 @@ export function registerCanaryLabTools(
         },
         { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
       )
+      // Deterministic validation flags mappings (still applied — no review gate);
+      // surface only a count here, token-cheap. Details ride on each applied
+      // mapping's `issues` (flagMappingIssues in the coverage service).
+      const flagged = result.applied.filter((m) => m.issues?.length).length
       return asJsonResult({
         jobId: manifest.jobId,
         feature: manifest.feature,
         status: manifest.status,
         applied: result.applied.length,
+        ...(flagged ? { flagged } : {}),
         coveragePct: result.ledger.coveragePct,
+        ...(result.ledger.provenPct !== undefined ? { provenPct: result.ledger.provenPct } : {}),
         nextSteps: ['get_feature_coverage'],
-        next: `Wrote ${result.applied.length} covers tag(s). Call get_feature_coverage("${manifest.feature}") for the updated ledger.`,
+        next: `Wrote ${result.applied.length} covers tag(s)${flagged ? ` (${flagged} flagged by deterministic validation — sad-path/variant claims not evidenced in the test source)` : ''}. Call get_feature_coverage("${manifest.feature}") for the updated ledger.`,
       })
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
@@ -1152,8 +1226,8 @@ export function registerCanaryLabTools(
     return asJsonResult({
       task: evaluationExportTaskView(task),
       reportSchema: externalEvaluationReportSchema(detail),
-      runSnapshotVia: `get_run_snapshot("${runId}")`,
-      nextSteps: ['call get_run_snapshot(runId) if you need the run summary/failures while authoring', 'author structured evaluation wording', 'submit_external_evaluation_export'],
+      runSnapshotVia: `get_run("${runId}")`,
+      nextSteps: ['call get_run(runId) if you need the run summary/failures while authoring', 'author structured evaluation wording', 'submit_external_evaluation_export'],
     })
   })
 
@@ -1376,6 +1450,187 @@ export function registerCanaryLabTools(
       status: 'applied',
       written: applied.written,
     })
+  })
+
+  // ── Flight (`canary-lab flight` — conducted onboarding pipeline) ──────
+  const FLIGHT_DATA_INLINE_BUDGET = 8 * 1024 // ≈2K tokens — past this, review in the web UI
+  const flightView = (raw: unknown): Record<string, unknown> => {
+    const m = raw as {
+      flightId: string; feature: string; status: string; currentStage: string | null
+      pauseReason?: string
+      runVerdict?: string; error?: string; links?: unknown
+      stages?: Array<{ key: string; status: string; error?: string; skipReason?: string; checkpoint?: unknown }>
+    }
+    const waiting = (m.stages ?? []).find((s) => s.status === 'waiting-for-approval')
+    let checkpoint = waiting?.checkpoint as { data?: unknown } | undefined
+    if (checkpoint?.data !== undefined && JSON.stringify(checkpoint.data).length > FLIGHT_DATA_INLINE_BUDGET) {
+      checkpoint = { ...checkpoint, data: { omitted: true, reason: 'payload over the inline budget — review it in the web UI flight view, then respond here' } }
+    }
+    return {
+      flightId: m.flightId,
+      feature: m.feature,
+      status: m.status,
+      currentStage: m.currentStage,
+      ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
+      ...(m.runVerdict ? { runVerdict: m.runVerdict } : {}),
+      ...(m.error ? { error: m.error } : {}),
+      ...(m.links ? { links: m.links } : {}),
+      stages: (m.stages ?? []).map((s) => ({
+        key: s.key,
+        status: s.status,
+        ...(s.error ? { error: s.error } : {}),
+        ...(s.skipReason ? { skipReason: s.skipReason } : {}),
+      })),
+      ...(waiting && checkpoint ? { checkpoint: { stage: waiting.key, ...checkpoint } } : {}),
+    }
+  }
+  const flightNext = (view: Record<string, unknown>): string => {
+    if (view.status === 'waiting-for-approval') {
+      const cp = view.checkpoint as { stage?: string; kind?: string; options?: string[] } | undefined
+      const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint — call respond_flight_checkpoint(flightId, choice: one of ${JSON.stringify(cp?.options ?? [])}).`
+      if (cp?.kind === 'prd-source') {
+        return `${base} The Requirements stage ALWAYS pauses here so the human can add docs. BEFORE responding: if this conversation carries requirements, distill them with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md") — then respond "continue" (releases with the docs present) or pick a source to infer from.`
+      }
+      if (cp?.kind === 'config-approval') {
+        return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
+      }
+      if (cp?.kind === 'export-mode') {
+        return `${base} raw = fast report straight from run evidence; localized = an agent rewrites per-test reasoning (slower, more readable).`
+      }
+      return base
+    }
+    if (view.status === 'running') return 'Flight is running — re-call get_flight to follow it; it parks on checkpoints and settles to done/paused/failed.'
+    if (view.status === 'paused' && view.pauseReason === 'queued') return 'Flight is queued — it is waiting its turn behind another flight on the same repo(s) and starts automatically when that repo frees. No action needed; tell the user it is queued, not stuck. Only if they want it started early, re-call start_flight (it resumes a queued flight now).'
+    if (view.status === 'paused') return 'Flight is paused (a stage failed, the server restarted, or the user paused it). Fix the cause if needed, then start_flight on the same repos resumes it from the first open stage — its repos and intent are frozen, so re-call without new repoPaths/description (they are reused).'
+    if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive. Point the user at reviewing it now: unzip and open evaluation.html (per-test reasoning + verdicts; video playback where the tests drive a browser). Reviewing the evaluation IS the core loop, not an optional extra.'
+    return ''
+  }
+  const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
+
+  registerTool('start_flight', {
+    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Non-yolo checkpoint order: config-approval parks AFTER the feature is scaffolded (approve the real on-disk config), the Requirements/prd-source checkpoint ALWAYS parks (add docs, then "continue"), and export-mode picks raw vs localized before the terminal export. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A flight\'s repos and intent are FROZEN once it first starts: on redo / from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing a DIFFERENT repo set or description is rejected with type:"flight_frozen"; to change them the user deletes the flight in the web UI (there is no delete tool). A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early.',
+    inputSchema: {
+      repoPaths: z.array(z.string()).min(1).optional().describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them. REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s repos are frozen and the stored set is reused (a different set is rejected with flight_frozen).'),
+      description: z.string().optional().describe('What to test, e.g. "checkout flow". REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s intent is frozen and the stored value is reused (a different one is rejected with flight_frozen).'),
+      feature: z.string().optional().describe('Feature name; defaults to a slug of the first repo basename.'),
+      env: z.string().optional().describe('Envset name (default "local").'),
+      coverage_target: z.number().min(0).max(100).optional().describe('Coverage % the specs↔coverage loop must reach (default 100).'),
+      base: z.string().optional().describe('Base branch for diff-inferred requirements (auto-detected when omitted).'),
+      yolo: z.boolean().optional().describe('Skip every checkpoint except missing env secrets.'),
+      fresh: z.boolean().optional().describe('Do not resume a paused flight — start over.'),
+      redo: z.boolean().optional().describe('Restart the feature\'s existing flight from stage 1, discarding its stage evidence.'),
+      from_stage: z.string().optional().describe('Start at this stage instead of stage 1 (e.g. "specs-coverage", "run"). Prerequisite artifacts are checked; rejected with the missing one named.'),
+    },
+  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, fresh, redo, from_stage }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    // Repos + intent are frozen once a flight exists, so redo / from_stage /
+    // resume may OMIT repoPaths/description — but then we need `feature` to
+    // locate the record (there is no repo set to match on).
+    if ((repoPaths === undefined || repoPaths.length === 0) && !feature) {
+      return errorResult('start_flight needs repoPaths for a fresh start, or `feature` to redo / jump / resume an existing flight (its frozen repos + intent are reused).')
+    }
+    const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
+    const flights = ((list.body as { flights?: Array<{ flightId: string; feature?: string; status: string; repoPaths?: string[] }> }).flights ?? [])
+    const targets = new Set((repoPaths ?? []).map((p) => path.resolve(p)))
+    const latest = flights.find((f) =>
+      targets.size > 0
+        ? (f.repoPaths ?? []).some((p) => targets.has(path.resolve(p)))
+        : f.feature === feature,
+    )
+    if (latest && (latest.status === 'running' || latest.status === 'waiting-for-approval') && !redo && !from_stage) {
+      const current = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(latest.flightId)}` })
+      const view = flightView(current.body)
+      return asJsonResult({ ...view, note: 'a flight is already active for these repos — following it', next: flightNext(view) })
+    }
+    if (latest && latest.status === 'paused' && !fresh && !redo && !from_stage) {
+      const resumed = await deps.flightsRequest({ method: 'POST', url: `/api/flights/${encodeURIComponent(latest.flightId)}/resume` })
+      if (resumed.statusCode !== 200) return errorResult(`resume failed (${resumed.statusCode}): ${String((resumed.body as { error?: string }).error ?? '')}`)
+      const view = flightView(resumed.body)
+      return asJsonResult({ ...view, note: 'resumed the paused flight from its first open stage', next: flightNext(view) })
+    }
+    const hasRepos = repoPaths !== undefined && repoPaths.length > 0
+    const started = await deps.flightsRequest({
+      method: 'POST',
+      url: '/api/flights',
+      payload: {
+        // Repos + intent are frozen on the record: send them only when the
+        // caller actually provided them (a fresh start, or an explicit —
+        // matching — reuse). Omitting them on redo / jump lets the server
+        // reuse the stored values; a DIFFERENT value would 409 flight_frozen.
+        ...(hasRepos ? { repoPaths } : {}),
+        ...(description !== undefined ? { description } : {}),
+        feature: feature ?? (hasRepos ? deriveFeatureSlug(repoPaths[0]) : ''),
+        ...(env ? { env } : {}),
+        ...(coverage_target !== undefined ? { coverageTarget: coverage_target } : {}),
+        ...(base ? { base } : {}),
+        ...(yolo ? { yolo } : {}),
+        ...(redo ? { mode: 'redo' } : from_stage ? { mode: 'jump' } : {}),
+        ...(from_stage ? { fromStage: from_stage } : {}),
+      },
+    })
+    const startedBody = started.body as { error?: string; type?: string; options?: string[]; existingFlightId?: string; existingStatus?: string }
+    if (started.statusCode === 409 && startedBody.type === 'flight_exists_requires_choice') {
+      return asJsonResult({
+        type: 'flight_exists_requires_choice',
+        feature: feature ?? null,
+        existingFlightId: startedBody.existingFlightId,
+        existingStatus: startedBody.existingStatus,
+        options: startedBody.options,
+        next: 'This feature already has a flight record. Re-call start_flight with redo:true to restart from stage 1, or from_stage:"<stage>" to jump (prerequisites checked) — OMIT repoPaths/description so the frozen stored values are reused. A paused record resumes automatically without either flag.',
+      })
+    }
+    if (started.statusCode === 409 && startedBody.type === 'flight_frozen') {
+      return errorResult(`${String(startedBody.error ?? 'this flight\'s repos and intent are frozen')}. Re-call start_flight WITHOUT repoPaths/description (the stored values are reused), or delete the flight in the web UI to start fresh with different ones.`)
+    }
+    if (started.statusCode !== 201) {
+      return errorResult(`start_flight failed (${started.statusCode}): ${String(startedBody.error ?? '')}`)
+    }
+    const view = flightView(started.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
+  })
+
+  registerTool('get_flight', {
+    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses.',
+    inputSchema: {
+      flightId: z.string().optional().describe('Omit to list all flights (slim rows).'),
+    },
+  }, async ({ flightId }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    if (!flightId) {
+      const list = await deps.flightsRequest({ method: 'GET', url: '/api/flights' })
+      const rows = ((list.body as { flights?: Array<Record<string, unknown>> }).flights ?? []).map((f) => ({
+        flightId: f.flightId, feature: f.feature, status: f.status,
+        ...(f.pauseReason ? { pauseReason: f.pauseReason } : {}),
+        currentStage: f.currentStage, repoPaths: f.repoPaths,
+      }))
+      return asJsonResult({ flights: rows })
+    }
+    const resp = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(flightId)}` })
+    if (resp.statusCode !== 200) return errorResult(`flight not found: ${flightId}`)
+    const view = flightView(resp.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
+  })
+
+  registerTool('respond_flight_checkpoint', {
+    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). prd-source ALWAYS parks (Requirements pause by design): first add docs with write_feature_doc (content or link_path), then respond "continue" — or pick a source to infer from. export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
+    inputSchema: {
+      flightId: z.string(),
+      choice: z.string().optional().describe('One of the checkpoint\'s options.'),
+      values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
+      data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited config — written through to the feature\'s on-disk feature.config.cjs before validation.'),
+    },
+  }, async ({ flightId, choice, values, data }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const resp = await deps.flightsRequest({
+      method: 'POST',
+      url: `/api/flights/${encodeURIComponent(flightId)}/respond`,
+      payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}) } },
+    })
+    if (resp.statusCode !== 200) {
+      return errorResult(`respond failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
+    }
+    const view = flightView(resp.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
   })
 
   // ── Port-ification (make a feature's apps use injectable ports) ──────────
@@ -1836,7 +2091,7 @@ export function registerCanaryLabTools(
     if (!result.accepted) {
       if (result.reason === 'client-kind-not-allowed') {
         return errorResult(
-          `client-kind-not-allowed: heal claiming is restricted to Claude/Codex Desktop (this client is ${result.clientKind}). The run can still be run/verified; drive heal from Desktop or the web UI.`,
+          `client-kind-not-allowed: heal claiming is open to interactive Claude/Codex clients (Desktop or CLI); it is suppressed only for runner-spawned PTY agents Canary Lab launches itself (this client is ${result.clientKind}). The run can still be run/verified; drive heal from an interactive client or the web UI.`,
         )
       }
       return errorResult(`already-claimed by session ${result.currentSession.sessionId} (${result.currentSession.clientKind})`)

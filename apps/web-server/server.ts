@@ -32,6 +32,10 @@ import { portifyRoutes } from './src/features/portify/routes/portify'
 import { portifyStreamRoutes } from './src/features/portify/ws/portify-stream'
 import { PortifyRunStore } from './src/features/portify/logic/runtime/store'
 import { CoverageJobRunStore } from './src/features/coverage/logic/coverage/jobs/store'
+import { FlightRunStore } from './src/features/flights/logic/store'
+import { PlanFeaturesStore } from './src/features/flights/logic/plan-features'
+import { flightsRoutes } from './src/features/flights/routes/flights'
+import { buildFlightStageAdapters } from './src/features/flights/logic/stages'
 import { DirtySpecStore } from './src/features/runs/logic/dirty-specs/store'
 import { startDirtySpecWatcher } from './src/features/runs/logic/dirty-specs/watcher'
 import { createPortifyRunner } from './src/features/portify/logic/runtime/runner'
@@ -207,6 +211,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // show as live forever.
   const coverageJobStore = new CoverageJobRunStore(logsDir)
   coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
+  // Flight background jobs: a flight left 'running' belongs to a dead
+  // process — flip it to 'paused' (flights are resumable by design: the stage
+  // array records where to pick up) so it neither holds the repo-keyed
+  // single-flight lock nor shows as live forever.
+  const flightStore = new FlightRunStore(logsDir)
+  flightStore.reconcileInterrupted(() => new Date().toISOString())
+  // Plan-features agent tasks: a task left 'running' belongs to a dead
+  // process — flip it to 'failed' so the dialog offers "plan again" instead of
+  // polling a corpse. (Queued flights the launch parked are drained by the
+  // flights route registration below, once adapters exist to drive them.)
+  const planStore = new PlanFeaturesStore(logsDir)
+  planStore.reconcileInterrupted(() => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the
   // single source of truth both the UI feature list and the MCP run result read.
@@ -279,7 +295,31 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const activeEnvsets = new Map<string, BackupRecord[]>()
 
   await app.register(featuresRoutes, { featuresDir, dirtySpecStore })
-  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, workspaceEvents })
+  await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, flightStore, workspaceEvents })
+  await app.register(flightsRoutes, {
+    featuresDir,
+    logsDir,
+    projectRoot: opts.projectRoot,
+    flightStore,
+    planStore,
+    workspaceEvents,
+    adapters: buildFlightStageAdapters({
+      featuresDir,
+      logsDir,
+      projectRoot: opts.projectRoot,
+      workspaceEvents,
+      // Same-process HTTP reuse: stage adapters drive runs/portify/evaluation
+      // through their routes (admission, collision, store wiring live there).
+      inject: async (o) => {
+        const resp = await app.inject({
+          method: o.method,
+          url: o.url,
+          ...(o.payload !== undefined ? { payload: o.payload as Record<string, unknown> } : {}),
+        })
+        return { statusCode: resp.statusCode, json: () => resp.json() as unknown }
+      },
+    }),
+  })
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,
@@ -1290,6 +1330,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     workspaceEvents,
     dirtySpecStore,
+    // Flight over MCP: reuse the flights REST routes so the MCP surface
+    // shares the store + conductor (and single-flight guard) with the UI/CLI.
+    flightsRequest: async (o) => {
+      const resp = await app.inject({
+        method: o.method,
+        url: o.url,
+        ...(o.payload !== undefined ? { payload: o.payload as Record<string, unknown> } : {}),
+      })
+      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown
+      return { statusCode: resp.statusCode, body }
+    },
 	    startRun: async (feature, env, healAgent, isolation, executionType) => {
 	      const resp = await app.inject({
 	        method: 'POST',

@@ -1,10 +1,18 @@
 ---
 name: canary-lab
-description: Use when running, verifying, debugging, or healing Canary Lab features through Canary Lab MCP tools.
+description: Use when the user wants Canary Lab to take a product repo end to end — "test this app", "onboard this repo", "run a flight", "evaluate what I just built" — through the flight pipeline (start_flight / get_flight / respond_flight_checkpoint over MCP). One conducted background pipeline goes from bare repo(s) to a green, covered, healed run ending in an evaluation export. For a single capability use the focused skills instead — canary-lab-run (run + heal), canary-lab-verify (deployed-env verification), canary-lab-author (create feature + specs), canary-lab-coverage (PRD summary + coverage ledger), canary-lab-portify (concurrency-readiness), canary-lab-export (evaluation export).
 type: skill
 ---
 
-# Canary Lab
+# Canary Lab — Flight
+
+The server computes every stage verdict; this client only answers
+checkpoints. The flight is Canary Lab's front door: one command/tool takes
+one or more bare product repos to a green, healed, covered run that ends in
+an evaluation export. These tools arrive via the Canary Lab MCP server. If
+this client is already connected (the plugin connects with `full`), skip
+this step. To configure a connection manually: `npx canary-lab mcp --profile
+flight` (the composite `lifecycle`/`full` profiles carry the same tools).
 
 ## Workspace Bootstrap
 
@@ -13,28 +21,41 @@ Before calling Canary Lab MCP tools, make sure the workspace and UI server are a
 1. Read the user-level registry at `~/.canary-lab/workspaces.json`. On Windows, resolve it from the user's home directory, for example `%USERPROFILE%\.canary-lab\workspaces.json`.
 2. If the registry has exactly one workspace, use that workspace. If it has multiple workspaces, list their `name` and `path` values and ask which one to use.
 3. If the registry is missing or empty, ask the user to run `npx canary-lab setup` from the Canary Lab workspace.
-4. Check the MCP health endpoint `/mcp/health` on the UI's port. The port defaults to `7421`, but a project may pin its own in `canary-lab.config.json`; if `7421` does not respond, run `npx canary-lab mcp doctor` to discover the active URL.
+4. Check the MCP health endpoint: read `port` from the workspace's `canary-lab.config.json` (fallback `7421`), then `curl -s http://127.0.0.1:<port>/mcp/health` — success is a JSON response. If it does not respond, run `npx canary-lab mcp doctor` to discover the active URL.
 5. If the health check succeeds, confirm `projectRoot` matches the selected workspace. If it points at a different workspace, ask the user whether to stop the existing Canary Lab server before continuing.
-6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that. The port comes from `canary-lab.config.json` (default `7421`); do not pass `--port` (it was removed).
-7. Do not reflexively call `list_features` or `list_runs` after health. For random or new feature creation, call `create_feature` directly with a unique feature name. Use `list_features` only when you need to discover or choose an existing feature, and use `list_runs` only for run, heal, verification, or export workflows.
+6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up. The port comes from `canary-lab.config.json` (default `7421`); do not pass `--port` (it was removed).
 
-For random or new feature creation, call `create_feature` directly with a unique feature name. Do not call `list_features` just to avoid collisions; if the chosen name already exists, retry `create_feature` with a different unique name.
+## Flight (end-to-end pipeline)
 
-Use the Canary Lab MCP tools in this order:
+1. `start_flight(repoPaths, description)` runs ONE background pipeline from bare repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict — you only approve checkpoints; do not run the stages yourself or start a separate run/coverage pass alongside an active flight.
+2. Follow with `get_flight(flightId)` and do what its `next:` field says. On `waiting-for-approval`, call `respond_flight_checkpoint(flightId)` with `choice` (one of `checkpoint.options`), `values` (a missing-env KEY→value map), or `data` (`{ configSource }` for config-approval — the feature is already scaffolded, so this writes through to its REAL on-disk feature.config.cjs; `redraft` re-runs the repo scan). Before the terminal export, the `export-mode` checkpoint picks `raw` (fast report) vs `localized` (agent-rewritten reasoning). A checkpoint payload over the inline budget is omitted from the tool result — review it in the web UI flight view, then respond here.
+3. The `prd-source` checkpoint ALWAYS parks (the Requirements stage pauses by design). FIRST add requirements with `write_feature_doc` — distilled from this conversation (`content`) or linking a local file (`link_path`, symlinked so the user's original stays live) — then respond `continue`, or pick a source to infer from.
+4. ONE flight record per feature — never a silent second manifest. Re-calling `start_flight` follows an active flight and resumes a paused one from its first open stage; a settled one requires `redo: true` (restart from stage 1, discarding its stage evidence) or `from_stage: "<stage>"` (jump to a chosen stage — prerequisites are checked and a rejection names the missing artifact, e.g. no specs yet). The CLI equivalents are `--redo` and `--from-stage <key>`. `fresh: true` skips resuming a paused flight and starts over instead. `yolo: true` skips every checkpoint except missing env secrets (export defaults to raw).
+5. A flight's **repos and intent are frozen** once it first starts. On redo / `from_stage` / resume, **OMIT `repoPaths` and `description`** — the stored values are reused. Passing a DIFFERENT repo set or description is rejected with `type: "flight_frozen"` ("a flight's repos and intent are set when it first starts; delete the flight to start fresh with different ones"). There is no delete tool or CLI flag — the user deletes a flight in the web UI, then a fresh `start_flight` can pick new repos/intent.
+6. A flight parked `status: "paused"`, `pauseReason: "queued"` is **waiting its turn** behind another flight on the same repo(s) (a broad intent split into per-feature flights runs them sequentially). It **starts automatically** when that repo frees — narrate it as queued, not stuck, and do NOT ask the user to resume it. Only if they want it started early, re-calling `start_flight` resumes it now. (The other pause reasons — `user` / `stage-failed` / `restart` — are the resumable pauses that a re-call picks up.)
+7. On `done`, `links.evaluationZip` is the deliverable — point the user at opening the evaluation export (video playback where the tests drive a browser, plus the per-test reasoning in `evaluation.html`) as their immediate next step. Reviewing that export IS the core Canary Lab loop, not an optional extra.
 
-1. `list_features`
-2. `start_run` with `claim_heal: true`, a stable `session_id`, and `run_ref` when the user asks to rerun a specific run suffix such as `7cvh`
-3. if `start_run` returns `type: "repo_collision_requires_choice"`, another run uses the same app/repo — ask the user to run isolated in a per-run git worktree (concurrent) or queue until the other finishes, then re-call `start_run` with `isolation: "worktree"` or `isolation: "queue"`; if it returns `queued: true`, the run is parked (`queueReason`) and starts automatically — `wait_for_heal_task` still blocks until it starts
-4. if `start_run` returns an active run, continue it — but if it returns `type: "boot_session"` (or `executionType: "boot"`), the run is a held boot-only session with no tests and no heal task; do not claim heal or call `wait_for_heal_task`, just report services are up and that `abort_run` (confirm:true) stops them. A service that fails its readiness probe is marked failed (status `timeout`) but the session stays held — boot does not self-abort on a health-check failure; report which came up and which failed
-5. `wait_for_heal_task` — blocks a short bounded window; if it returns `type: "still_waiting"` (not terminal), call it again, looping until `needs_heal`/`passed`/`failed` (if it ever returns `type: "boot_session"`, report services are up and stop — do not wait again)
-6. when `needs_heal` is returned, treat the returned heal context as the compact first-stop packet: inspect `context.healPrompt.startHere` first (`context.healIndex`/`context.journal` are paths to `Read`; each `failedTests[]` has a `failureId` + pointer dirs), then use `context.healPrompt.resources`, current failures, and the checked-out source code; call `get_run_snapshot` only for verbose debugging. `context.healPrompt`/`context.nextSteps` ship on the first `needs_heal` only — on later cycles reuse them or call `get_heal_context` to re-fetch. If the same tests fail 3+ cycles, `context.escalation` appears — change tactic per its `readFirst`/`tactics`, don't repeat the last fix. A `needs_heal` task may instead be a **service that failed to boot**: `context.failedTests` is empty and `context.bootFailure` holds the service name + `logPath` (no tests ran) — `Read` the log, fix the service/app code, then `signal_run` `kind: "restart"`. When several tests fail, fan out one read-only sub-agent per failure (each calls `get_failure_detail(runId, failureId)` and reports a hypothesis + a concrete proposed patch; sub-agents don't touch the tree or signal), then apply the patches yourself serially — reconcile overlaps, re-test once, signal once
-7. `signal_run` **once** per cycle with `rerun` or `restart`, including `hypothesis` and `fixDescription`
-8. repeat from `wait_for_heal_task` (looping on `still_waiting`) until passed or terminal failure
+The same flight is drivable from the CLI (`npx canary-lab flight <repo...> "<what to test>"`), the web UI (Flights pill), and this MCP surface — all against one store, so progress and checkpoints stay in sync everywhere.
 
-If `start_run` says the active run is already claimed, stop and report the owning session instead of creating another run. Handle user interrupts explicitly: "pause", "intercept", or "pause and heal" means call `pause_run`; "stop heal" or "cancel repair" means call `cancel_heal`; "abort", "kill the run", or "stop everything" means call `abort_run` only with the required confirmation. Fix app/service code, not tests, unless the test is provably wrong. Keep the same `session_id` for the whole conversation. `heartbeat` is a low-level liveness refresh for long local repair stretches; `wait_for_heal_task`, `signal_run`, and `get_heal_context` usually refresh liveness without an explicit heartbeat call.
+## Follow loop
 
-`start_run` is the single entrypoint for start/resume/restart intent. With no `run_ref`/`force_new`, a healing run for the feature is continued by default; concurrent runs are allowed, so a same-app collision returns `repo_collision_requires_choice` (resolve with `isolation: "worktree"` or `"queue"`) and a run over the resource budget is `queued` and starts automatically. For requests like "rerun 7cvh", `start_run` resolves the run suffix and restarts that same failed/aborted run in remaining-test mode. Canary Lab reruns failed tests first, then skipped tests, then pending/not-run tests; do not tell the user no test filter exists. Prefer this rerun over `abort_run` + a fresh start: rerun re-runs only failed/skipped/pending, while a fresh run re-runs everything and is only worth it when prior passes are invalidated. The rerun already re-runs skipped + pending, so it is complete — do not `force_new` just to avoid "skipped" tests, and on a portified feature `force_new` spins a fresh per-run worktree and resets the heal journal to Iteration 1. After changing code or tests, never call `start_run` to verify. Verification means `signal_run` with `hypothesis` and `fixDescription`, then `wait_for_heal_task` on the same `runId`. Use `force_new` only when the user explicitly wants a separate concurrent run on the same feature.
+While `status` is `running`, re-call `get_flight(flightId)` (wait ~20s between
+calls). Stop states: `done`, `failed`, `paused` (when `pauseReason` is not
+`queued`). On `waiting-for-approval`, respond to the checkpoint instead of
+waiting.
 
-When reporting run results, use `result.counts.statusLine`, `result.counts.passed`, or `summary.passed`. Never compute passed count as `summary.total - summary.failed.length`. Tests absent from `passedNames`, `failed`, and `skippedNames` are not run, not passed. If a result carries `dirtyTests` (a test spec changed since the last green run), relay `result.dirtyTests.message` verbatim alongside the outcome — awareness only; never block, gate, re-run, or edit test files over it.
+| Status | Action |
+| --- | --- |
+| `running` | Wait ~20s, re-call `get_flight`. |
+| `waiting-for-approval` | Respond via `respond_flight_checkpoint`. |
+| `paused`, `pauseReason: "queued"` | Narrate as waiting — do NOT resume it. |
+| `paused`, other `pauseReason` | Re-call `start_flight` (OMIT `repoPaths` + `description`) to resume. |
+| `done` | Point the user at `links.evaluationZip`. |
+| `failed` | Report the failure; a re-call to `start_flight` resumes from the failed stage. |
 
-Read responses are slim by default to protect context, but the full data is one step away (never poll it in a wait loop): `get_run` omits the raw `lifecycleEvents`/`playwrightArtifacts`/`playbackEvents` — call it again with `includeRaw:true` to inline them; `get_run_snapshot` returns the heal-index and journal as paths to `Read`; `list_runs` returns the newest 20 (raise `limit`).
+## Guardrails
+
+- **On redo / `from_stage` / resume: OMIT `repoPaths` and `description`** — the flight's repos and intent are frozen after it first starts.
+- Flight tools take no `session_id` (only tools that declare `session_id` in their schema take one; `start_flight` / `get_flight` / `respond_flight_checkpoint` do not).
+- The flight conducts run/heal/coverage/portify itself. While a flight is active, do not drive those stages with the focused skills — answer the flight's checkpoints instead.
+- For one capability on its own (a run, a coverage pass, an export), use the matching focused skill: `canary-lab-run`, `canary-lab-verify`, `canary-lab-author`, `canary-lab-coverage`, `canary-lab-portify`, `canary-lab-export`.

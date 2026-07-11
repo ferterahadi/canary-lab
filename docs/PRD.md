@@ -1,10 +1,21 @@
 # Canary Lab — Product Requirements (reverse-engineered)
 
 > **Status**: reverse-engineered from the README, CHANGELOG, GUIDE, and code as of
-> v1.4.0. This captures the product intent implied by what's shipped so agents and
-> new contributors share the same picture. Correct anything that misreads the intent —
-> this document is the tie-breaker when a change is technically possible but
-> product-questionable.
+> v1.4.0; positioning refreshed for 1.6.0. This captures the product intent implied
+> by what's shipped so agents and new contributors share the same picture. Correct
+> anything that misreads the intent — this document is the tie-breaker when a change
+> is technically possible but product-questionable.
+
+## Positioning
+
+Canary Lab **augments Playwright and an LLM — it replaces neither.** Plain
+Playwright runs the tests; the agent writes the code and the fixes; Canary Lab
+owns the context around them (boot, isolation, coverage grounding, evidence,
+verdicts, the rendered evaluation). It is an **eval tool invoked after a feature
+is implemented**: build with your agent, then point Canary Lab at the result
+(`canary-lab flight`, or a run on an existing feature), then review the
+evaluation export — the human-facing proof with per-test reasoning and playback.
+That review step is the core usage loop, not an optional extra.
 
 ## Problem
 

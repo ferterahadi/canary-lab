@@ -63,6 +63,9 @@ export interface FeatureDirtyState {
 export interface Feature {
   name: string
   description?: string
+  /** Optional grouping label — features sharing a group render under one
+   *  section in the UI. Absent when the feature declares no group. */
+  group?: string
   repos: FeatureRepo[]
   envs: string[]
   /** A saved port overlay exists (features/<feature>/portify/) → boots
@@ -511,6 +514,13 @@ export interface FeatureDoc {
   absPath: string
   generated: boolean
   sizeBytes: number
+  /** A symlink to a doc that lives elsewhere (the user's original is the live
+   *  source). Absent for plain files. */
+  linked?: boolean
+  /** The symlink's target, when linked (shown in the docs UI tooltip). */
+  linkTarget?: string
+  /** A symlink whose target no longer exists — surfaced, never crashed on. */
+  broken?: boolean
 }
 
 export interface FeatureDocsListing {

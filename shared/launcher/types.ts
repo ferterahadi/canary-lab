@@ -102,6 +102,9 @@ export interface NgrokTunnel {
 export interface FeatureConfig {
   name: string
   description: string
+  /** Optional grouping label — features sharing a group render under one
+   *  section in the UI. */
+  group?: string
   envs: string[]
   repos?: RepoPrerequisite[]
   tunnels?: NgrokTunnel[]              // used by the tunnel env — one ngrok tab per entry

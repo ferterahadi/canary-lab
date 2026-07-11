@@ -120,6 +120,8 @@ Set `pathTypes` to the test paths the requirement implies:
 - `sad` — the unhappy / negative / error flow.
 - `edge` — boundary or extreme cases within a path.
 
+Always emit `pathTypes` on every requirement — use `[]` when no test path applies.
+
 Also propose a `strictnessLadder` — how a test could prove the requirement, weakest
 to strongest, climbing toward the real user-observable effect (domain-specific):
 - tier 1 — the app's own log / self-report ("it says it did").
@@ -136,6 +138,7 @@ PREVIOUS requirements (with ids) when regenerating.
 - A genuinely new requirement gets a NEW id (any unique string; the server normalizes it).
 - Do not renumber or reuse a previous id for a different requirement.
 - If unsure whether two match, keep the previous id (prefer continuity).
+- Previous entries with `"deprecated": true` were removed from the docs; do not re-emit them unless the current documents still state them.
 
 ## Previous requirements (reuse these ids for surviving requirements)
 
@@ -164,7 +167,7 @@ Read each of these files with your tools before answering:
 
 Return ONLY a JSON object of this shape (no prose, no markdown fences). Omit
 `variantDimension` (and every `variants`) entirely when the feature has no
-cross-cutting dimension:
+cross-cutting dimension. Every requirement object MUST include `id` and `kind`.
 
 {
   "variantDimension": { "name": "channel", "values": ["email", "whatsapp", "call", "line"] },
@@ -186,3 +189,5 @@ cross-cutting dimension:
     }
   ]
 }
+
+Your entire final message must be the JSON object — nothing before or after it.

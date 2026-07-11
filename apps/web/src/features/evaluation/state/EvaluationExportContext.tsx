@@ -6,14 +6,13 @@ import type { EvaluationExportMode, EvaluationExportTask } from '../../../shared
 
 interface EvaluationExportContextValue {
   tasks: EvaluationExportTask[]
-  latestTask: EvaluationExportTask | null
-  selectedTask: EvaluationExportTask | null
-  dialogOpen: boolean
   logsByTaskId: Record<string, string>
   startExport: (runId: string, mode: EvaluationExportMode) => Promise<EvaluationExportTask>
   taskForRun: (runId: string) => EvaluationExportTask | null
-  openTask: (taskId?: string) => void
-  closeDialog: () => void
+  taskById: (taskId: string) => EvaluationExportTask | null
+  /** Ensure a task's log stream is attached (no-op when already streaming) —
+   *  panels call this when they surface a task they didn't start. */
+  watchTask: (taskId: string) => void
   downloadTask: (taskId: string) => Promise<void>
   dismissTask: (taskId: string) => Promise<void>
 }
@@ -29,8 +28,6 @@ export interface EvaluationExportProviderProps {
 export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: EvaluationExportProviderProps) {
   const [tasksById, setTasksById] = useState<Record<string, EvaluationExportTask>>({})
   const [logsByTaskId, setLogsByTaskId] = useState<Record<string, string>>({})
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
-  const [dialogOpen, setDialogOpen] = useState(false)
   const connectionsRef = useRef<Record<string, EvaluationExportConnection>>({})
   const workspaceConnectionRef = useRef<WorkspaceEventsConnection | null>(null)
   const tasksByIdRef = useRef<Record<string, EvaluationExportTask>>({})
@@ -103,12 +100,6 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     setTasksById((current) => {
       const { [taskId]: _removed, ...rest } = current
       tasksByIdRef.current = rest
-      const remaining = Object.values(rest).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      setSelectedTaskId((selected) => {
-        if (selected && selected !== taskId) return selected
-        return remaining[0]?.taskId ?? null
-      })
-      setDialogOpen((open) => open && remaining.length > 0)
       return rest
     })
     setLogsByTaskId((current) => {
@@ -134,7 +125,6 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   ): Promise<EvaluationExportTask> => {
     const task = await api.startEvaluationExport(runId, mode)
     rememberTask(task)
-    setSelectedTaskId(task.taskId)
     appendLog(task.taskId, `[evaluation] queued ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
     subscribeTask(task.taskId)
     return task
@@ -186,25 +176,18 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     () => Object.values(tasksById).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [tasksById],
   )
-  const latestTask = tasks[0] ?? null
-  const selectedTask = selectedTaskId ? tasksById[selectedTaskId] ?? null : latestTask
 
   const taskForRun = useCallback((runId: string): EvaluationExportTask | null => (
     tasks.find((task) => task.runId === runId) ?? null
   ), [tasks])
 
-  const openTask = useCallback((taskId?: string): void => {
-    const nextTaskId = taskId ?? latestTask?.taskId ?? null
-    setSelectedTaskId(nextTaskId)
-    if (nextTaskId) {
-      if (!logsByTaskId[nextTaskId]) subscribeTask(nextTaskId)
-      setDialogOpen(true)
-    }
-  }, [latestTask?.taskId, logsByTaskId, subscribeTask])
+  const taskById = useCallback((taskId: string): EvaluationExportTask | null => (
+    tasksById[taskId] ?? null
+  ), [tasksById])
 
-  const closeDialog = useCallback((): void => {
-    setDialogOpen(false)
-  }, [])
+  const watchTask = useCallback((taskId: string): void => {
+    if (!logsByTaskId[taskId]) subscribeTask(taskId)
+  }, [logsByTaskId, subscribeTask])
 
   const downloadTask = useCallback(async (taskId: string): Promise<void> => {
     const task = tasksById[taskId]
@@ -224,17 +207,14 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
 
   const value = useMemo<EvaluationExportContextValue>(() => ({
     tasks,
-    latestTask,
-    selectedTask,
-    dialogOpen,
     logsByTaskId,
     startExport,
     taskForRun,
-    openTask,
-    closeDialog,
+    taskById,
+    watchTask,
     downloadTask,
     dismissTask,
-  }), [closeDialog, dialogOpen, dismissTask, downloadTask, latestTask, logsByTaskId, openTask, selectedTask, startExport, taskForRun, tasks])
+  }), [dismissTask, downloadTask, logsByTaskId, startExport, taskById, taskForRun, tasks, watchTask])
 
   return (
     <EvaluationExportContext.Provider value={value}>

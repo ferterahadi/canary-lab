@@ -7,6 +7,7 @@ import {
   extractTraceSummary,
   parseFailedActionIds,
   parseFirstFailedActionId,
+  parseRequestIds,
   stripSnapshotsCliBlock,
 } from './trace-enrichment'
 
@@ -70,6 +71,26 @@ describe('parseFailedActionIds', () => {
 
   it('returns empty array when no failed rows', () => {
     expect(parseFailedActionIds('   1. ok\n')).toEqual([])
+  })
+})
+
+describe('parseRequestIds', () => {
+  it('returns all failed request ordinals in order', () => {
+    const stdout = [
+      '   # Method Status URL                          Duration',
+      '─── ────── ────── ──────────────────────────── ────────',
+      '  7. POST   500    https://example.test/api/pay   120ms',
+      '  8. GET    404    https://example.test/api/x     50ms',
+    ].join('\n')
+    expect(parseRequestIds(stdout)).toEqual(['7', '8'])
+  })
+
+  it('dedupes repeated ordinals', () => {
+    const stdout = [
+      '  7. POST   500    https://example.test/api/pay   120ms',
+      '  7. POST   500    https://example.test/api/pay   120ms',
+    ].join('\n')
+    expect(parseRequestIds(stdout)).toEqual(['7'])
   })
 })
 
@@ -231,9 +252,73 @@ describe('extractTraceSummary', () => {
     expect(fs.readFileSync(path.join(outputDir, 'snapshot-before.txt'), 'utf-8'))
       .toBe('- button "Checkout" [ref=e1] before')
     expect(fs.readFileSync(path.join(outputDir, 'network-failed.txt'), 'utf-8'))
-      .toBe('GET https://example.test/api 500')
+      .toBe('GET https://example.test/api 500\n')
     expect(fs.readFileSync(path.join(outputDir, 'console-errors.txt'), 'utf-8'))
       .toBe('console.error boom')
+  })
+
+  it('appends per-request detail (headers + bodies) to network-failed.txt for failed requests with ordinals', async () => {
+    const traceZipPath = path.join(tmp, 'trace.zip')
+    fs.writeFileSync(traceZipPath, 'zip')
+    const outputDir = path.join(tmp, 'out')
+
+    const requestsTable = [
+      '   # Method Status URL                          Duration',
+      '─── ────── ────── ──────────────────────────── ────────',
+      '  7. POST   500    https://example.test/api/pay   120ms',
+    ].join('\n')
+
+    mockByCommand({
+      'trace open <zip>': () => ({ stdout: 'meta' }),
+      'trace actions': () => ({ stdout: '' }),
+      'trace actions --errors-only': () => ({ stdout: '' }),
+      'trace requests --failed': () => ({ stdout: requestsTable }),
+      'trace request 7': () => ({
+        stdout: 'POST https://example.test/api/pay\nRequest body:\n{"amount":100}\nResponse body:\n{"error":"card declined"}',
+      }),
+      'trace console --errors-only': () => ({ stdout: '' }),
+      'trace close': () => ({ stdout: 'closed' }),
+    })
+
+    await extractTraceSummary({ traceZipPath, outputDir, testName: 'pay fails' })
+
+    const network = fs.readFileSync(path.join(outputDir, 'network-failed.txt'), 'utf-8')
+    expect(network).toContain('https://example.test/api/pay   120ms')
+    expect(network).toContain('# Request 7 (headers + bodies)')
+    expect(network).toContain('{"error":"card declined"}')
+  })
+
+  it('truncates an oversized per-request detail block instead of writing it in full', async () => {
+    const traceZipPath = path.join(tmp, 'trace.zip')
+    fs.writeFileSync(traceZipPath, 'zip')
+    const outputDir = path.join(tmp, 'out')
+
+    const requestsTable = [
+      '   # Method Status URL                          Duration',
+      '─── ────── ────── ──────────────────────────── ────────',
+      '  7. POST   500    https://example.test/api/pay   120ms',
+    ].join('\n')
+    // > 16_384 bytes (REQUEST_DETAIL_MAX_BYTES) so capRequestDetail truncates.
+    const hugeBody = 'x'.repeat(20_000)
+
+    mockByCommand({
+      'trace open <zip>': () => ({ stdout: 'meta' }),
+      'trace actions': () => ({ stdout: '' }),
+      'trace actions --errors-only': () => ({ stdout: '' }),
+      'trace requests --failed': () => ({ stdout: requestsTable }),
+      'trace request 7': () => ({
+        stdout: `POST https://example.test/api/pay\nResponse body:\n${hugeBody}`,
+      }),
+      'trace console --errors-only': () => ({ stdout: '' }),
+      'trace close': () => ({ stdout: 'closed' }),
+    })
+
+    await extractTraceSummary({ traceZipPath, outputDir, testName: 'pay fails' })
+
+    const network = fs.readFileSync(path.join(outputDir, 'network-failed.txt'), 'utf-8')
+    expect(network).toContain('# Request 7 (headers + bodies)')
+    expect(network).toContain('… (truncated,')
+    expect(network).not.toContain(hugeBody)
   })
 
   it('writes failed-actions.txt with every ✗ action concatenated when there are multiple', async () => {

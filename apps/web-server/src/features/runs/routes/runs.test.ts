@@ -295,6 +295,30 @@ describe('POST /api/runs', () => {
     expect(registry.get('run-1')).toBe(stub)
   })
 
+  it('surfaces a branch-mismatch throw as a typed 409 with per-repo rows', async () => {
+    writeFeature('foo')
+    const branchMismatch = [
+      { name: 'app', path: '/repo', expected: 'feature/x', current: 'main', detached: false, isGitRepo: true },
+    ]
+    const { app } = await build({
+      startRun: async () => {
+        throw Object.assign(new Error('Repo branch check failed:\napp: expected feature/x, current main'), {
+          statusCode: 409,
+          branchMismatch,
+        })
+      },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/runs', payload: { feature: 'foo' } })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({
+      type: 'repo_branch_mismatch',
+      feature: 'foo',
+      repos: branchMismatch,
+    })
+    // Human message preserved for REST/MCP callers that don't parse the type.
+    expect(res.json().error).toContain('Repo branch check failed')
+  })
+
   it('400s when env is not in feature.envs', async () => {
     const dir = path.join(featuresDir, 'foo')
     fs.mkdirSync(dir, { recursive: true })

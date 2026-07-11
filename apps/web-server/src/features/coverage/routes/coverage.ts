@@ -11,7 +11,9 @@ import type { SummarizeAdapter } from '../../coverage/logic/coverage/prd-summary
 import { CoverageJobRunStore, type CoverageJobStore } from '../../coverage/logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../../coverage/logic/coverage/jobs/runner'
 import type { CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
-import { writeFeatureDoc, deleteFeatureDoc } from '../../config/logic/feature-authoring'
+import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc } from '../../config/logic/feature-authoring'
+import { reopenStages } from '../../flights/logic/conductor'
+import type { FlightStore } from '../../flights/logic/store'
 import { extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
 import { loadFeatures } from '../../config/logic/feature-loader'
 import {
@@ -29,6 +31,10 @@ export interface CoverageRouteDeps {
   /** Shared job store (so the WS layer + restart-reconcile see the same instance).
    *  Omitted in tests → a fresh file-backed store over logsDir. */
   coverageJobStore?: CoverageJobStore
+  /** Shared flight store — clearing a feature's PRD summary reopens the
+   *  matching flight's docs/prd-summary/specs-coverage stages so the flight
+   *  rail reflects the redo live (no-op when absent or the flight is active). */
+  flightStore?: FlightStore
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -128,6 +134,35 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     },
   )
 
+  // Link a LOCAL doc path into docs/ as a symlink (copy fallback) — the
+  // Requirements stage's "add local path" input and MCP write_feature_doc's
+  // link_path both land here (same lib), so the user's original stays the
+  // live source.
+  app.post<{ Params: { name: string }; Body: { path?: string; relPath?: string } | undefined }>(
+    '/api/features/:name/docs/link',
+    async (req, reply) => {
+      const targetPath = req.body?.path
+      if (typeof targetPath !== 'string' || targetPath.trim() === '') {
+        reply.code(400)
+        return { error: 'path is required' }
+      }
+      const result = linkFeatureDoc(
+        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        {
+          feature: req.params.name,
+          targetPath: targetPath.trim(),
+          ...(typeof req.body?.relPath === 'string' ? { relPath: req.body.relPath } : {}),
+        },
+      )
+      if (!result.ok) {
+        reply.code(result.error.includes('not found') ? 404 : 400)
+        return { error: result.error }
+      }
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
+      return { written: true, relativePath: result.relativePath, linked: result.linked }
+    },
+  )
+
   app.delete<{ Params: { name: string; relPath: string } }>(
     '/api/features/:name/docs/:relPath',
     async (req, reply) => {
@@ -153,6 +188,19 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       // tests panel (specs were un-tagged) on every client without a reload.
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: req.params.name })
+      // Coverage-redo backflow: the feature's flight (if any, and not active)
+      // reopens its requirements/authoring stages so the flight rail reflects
+      // the redo live instead of holding stale done evidence.
+      if (deps.flightStore) {
+        const record = deps.flightStore.latestForFeature(req.params.name)
+        if (record) {
+          reopenStages(record.flightId, ['docs', 'prd-summary', 'specs-coverage'], {
+            store: deps.flightStore,
+            adapters: {},
+            workspaceEvents: deps.workspaceEvents,
+          })
+        }
+      }
       return result
     } catch (err) {
       if (err instanceof FeatureNotFoundError) {

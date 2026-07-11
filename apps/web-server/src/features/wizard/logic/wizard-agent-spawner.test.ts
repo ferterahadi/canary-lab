@@ -13,9 +13,8 @@ import {
   createTeeSink,
   formatPlan,
   formatRepos,
-  loadTemplate,
-  substitute,
 } from './wizard-agent-spawner'
+import { loadPromptTemplate } from '../../../shared/prompts'
 
 let tmp: string
 
@@ -25,26 +24,6 @@ beforeEach(() => {
 
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true })
-})
-
-describe('substitute', () => {
-  it('replaces known placeholders', () => {
-    expect(substitute('hello {{name}}!', { name: 'world' })).toBe('hello world!')
-  })
-
-  it('replaces multiple placeholders', () => {
-    expect(substitute('{{a}} + {{b}} = {{c}}', { a: '1', b: '2', c: '3' })).toBe(
-      '1 + 2 = 3',
-    )
-  })
-
-  it('leaves unknown placeholders untouched', () => {
-    expect(substitute('hi {{unknown}}', { name: 'x' })).toBe('hi {{unknown}}')
-  })
-
-  it('handles empty replacements', () => {
-    expect(substitute('a={{x}}', { x: '' })).toBe('a=')
-  })
 })
 
 describe('formatRepos', () => {
@@ -75,9 +54,9 @@ describe('formatPlan', () => {
   })
 })
 
-describe('loadTemplate', () => {
+describe('stage template files', () => {
   it('reads stage 1 prompt template', () => {
-    const t = loadTemplate(STAGE1_TEMPLATE)
+    const t = loadPromptTemplate(STAGE1_TEMPLATE)
     expect(t).toContain('{{prdText}}')
     expect(t).toContain('{{repos}}')
     expect(t).toContain('<plan-output>')
@@ -90,7 +69,7 @@ describe('loadTemplate', () => {
   })
 
   it('reads stage 1 diff-only prompt template', () => {
-    const t = loadTemplate(STAGE1_DIFF_TEMPLATE)
+    const t = loadPromptTemplate(STAGE1_DIFF_TEMPLATE)
     expect(t).toContain('{{prdText}}')
     expect(t).toContain('{{repos}}')
     expect(t).toContain('<plan-output>')
@@ -98,13 +77,15 @@ describe('loadTemplate', () => {
     expect(t).toContain('Inferred from local diff (no PRD provided).')
     expect(t).toContain('plan-output marker not found')
     expect(t).toContain('Committed branch changes')
-    expect(t).toContain('Use available refs in this order')
-    expect(t.indexOf('local parent')).toBeLessThan(t.indexOf('origin/main'))
+    expect(t).toContain('Fall back to available refs in this order')
+    expect(t.indexOf('the local parent branch')).toBeLessThan(
+      t.indexOf('`merge-base` against `origin/main`'),
+    )
     expect(t).toContain('regression-safety-first')
   })
 
   it('reads stage 2 prompt template', () => {
-    const t = loadTemplate(STAGE2_TEMPLATE)
+    const t = loadPromptTemplate(STAGE2_TEMPLATE)
     expect(t).toContain('{{featureName}}')
     expect(t).toContain('{{plan}}')
     expect(t).toContain("test('<plan step>'")
@@ -154,7 +135,7 @@ describe('buildPlanPrompt', () => {
     const out = buildPlanPrompt({
       prdText: '',
       repos: [{ name: 'app', localPath: '/p/app' }],
-      template: loadTemplate(STAGE1_DIFF_TEMPLATE),
+      template: loadPromptTemplate(STAGE1_DIFF_TEMPLATE),
     })
     expect(out).toContain('- app (/p/app)')
     expect(out).toContain('diff-mode planning')

@@ -137,6 +137,35 @@ function fire(el: Element | null | undefined, kind: 'enter' | 'leave') {
   act(() => { el.dispatchEvent(new MouseEvent(type, { bubbles: true })) })
 }
 
+describe('CoverageLedgerPage — flight generating banner (R14)', () => {
+  it('says a flight is generating the ledger and opens the flight', async () => {
+    const onOpenFlight = vi.fn()
+    await act(async () => {
+      root.render(
+        <CoverageLedgerPage
+          feature="checkout"
+          onClose={() => {}}
+          generatingFlight={{ flightId: 'fl_1', stage: 'specs-coverage', stageStatus: 'running' }}
+          onOpenFlight={onOpenFlight}
+        />,
+      )
+    })
+    await act(async () => { await Promise.resolve() })
+    const banner = container.querySelector('[data-testid="coverage-flight-generating"]')
+    expect(banner?.textContent).toContain('Test authoring & coverage is running')
+    expect(banner?.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('generating')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="coverage-open-flight"]')?.click()
+    })
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_1')
+  })
+
+  it('renders no banner when no flight is generating', async () => {
+    await mount()
+    expect(container.querySelector('[data-testid="coverage-flight-generating"]')).toBeNull()
+  })
+})
+
 describe('CoverageLedgerPage', () => {
   it('renders requirements, tests, and the coverage breakdown', async () => {
     await mount()

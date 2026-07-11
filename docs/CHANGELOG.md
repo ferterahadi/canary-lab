@@ -15,6 +15,30 @@ Each entry is tagged with the area it touches:
 
 ---
 
+## Unreleased
+
+- **[General]** **Flight is now the front door — the whole experience rethought around 7 user-facing steps** (Repo Scan → Feature Setup → Requirements → Test Authoring & Coverage → Parallel Readiness → Test Run → Evaluation Report).
+  - **Start a flight from the UI with two inputs.** The "+ New" button opens the flight launcher: describe what to test (documents you reference by path are linked in automatically) and pick one or more repos (known workspace repos plus any path). The feature name derives from the first repo. For a feature that never flew, every "Start from" step renders locked — step entry unlocks after the first flight.
+  - **Feature Setup approves the real config.** The config-approval checkpoint now parks AFTER the feature is scaffolded, against the on-disk `feature.config.cjs`: edit the start command and Playwright settings (workers / retries / video / trace) right on the stage, or open **Advanced setup** (the full config editor) — both write the same document and stay live-synced. Approve proceeds to the boot proof; Redraft re-runs the repo scan. (The old raw-textarea approval and its Reject option are gone.)
+  - **Requirements always pauses.** The flight stops once for your docs — add files, or link a local PRD by path (symlinked, so your original stays the live source; broken links are surfaced, never crash the list). Answer `continue` to release. Paths mentioned in your intent (e.g. `~/Documents/prd.md`) are linked in automatically.
+  - **Pick the evaluation flavor.** Before the terminal export, a checkpoint asks `raw` (fast report) vs `localized` (an agent rewrites per-test reasoning). `--yolo` exports raw.
+  - **Pause, stop, start over — always in reach.** A new user pause parks the flight resumably (in-flight agent work stops safely; the run keeps its own lifecycle and controls); Stop aborts (and aborts the flight's run); Start over redoes the same record from step 1. Intent and repos are editable on the Repo Scan stage while the flight is paused/stopped — a repo change restarts from Repo Scan by design.
+  - **One row per feature.** The Flights pill and landing list now show every workspace feature 1:1 — never-flown features appear with a greyed rail and open the launcher. A toast pops when any flight parks on a checkpoint (or pauses on a failure), clicking straight through to it. Coverage's "Redo from the start" now reopens the matching flight's Requirements/Authoring steps live.
+  - **The wizards are absorbed.** The Add Test wizard is gone — a flight's Test Authoring stage owns spec authoring (MCP external authoring is unchanged). The portify workflow view survives only as an embedded surface (the Parallel Readiness drill-through, run-collision recovery, benchmark) — its route and config-editor launcher are removed.
+  - Run stage facts now list the booted services and carry the run's own controls (stop / cancel repair / restart). `write_feature_doc` (MCP) gains `link_path` to link local docs in place.
+  - **Repos and intent freeze once a flight starts.** Redo, jump-to-stage, and resume all reuse the flight's stored repos + description everywhere (UI, CLI, MCP); passing a different set is rejected (`flight_frozen`). To start fresh with different repos/intent, **delete the flight** (new `DELETE /api/flights/:id`, web-UI only — no CLI command or MCP tool) — allowed only when it is not active (stop it first). The feature and its on-disk artifacts stay; the row returns to "not flown".
+  - **One broad intent → several flights, run in sequence.** The launcher can split a wide description into N proposed features (an agent judges one-vs-many); confirm, and it creates one flight per feature — the first runs, the rest **queue** (`paused`, `pauseReason: "queued"`) and auto-start one at a time as the shared repos free. Queued flights read as waiting, not stuck. (Web-UI flow; not on the CLI or MCP.)
+  - **Group features under one accordion.** `feature.config.cjs` gains an optional `group: "<name>"` — same-group features collapse together in the pill's feature list.
+
+- **[General]** **Flight — `npx canary-lab flight <repo...> "<what to test>"`.** One command takes a bare product repo to a green, covered, healed run that ends in an evaluation archive. A server-side conductor chains the existing stages — repo scout (an agent drafts `feature.config.cjs` and detects env files), scaffold, env capture proven by a dry-run boot, docs/PRD (drop a doc or infer from repo docs / diff vs base branch), a specs↔coverage loop to the coverage target, portify, run + auto-heal, evaluation export — and canary computes every stage verdict; the agent only proposes.
+  - Typed, resumable checkpoints: config approval, PRD source, portify apply, non-green run (rerun vs export-as-is), and missing env secrets (never skipped, even with `--yolo`). A crash or failed stage pauses the flight; the next `flight` resumes from the first open stage (`--fresh` starts over).
+  - Re-entry safe: a repo that already has a feature parks on a rerun / enhance / new choice — never a silent duplicate. `flight` also creates the workspace and boots the server when needed.
+  - The command was briefly named `fly` during development; `fly` still works as a hidden deprecated alias that forwards to `flight` with a one-line notice.
+  - New **Flights** pill in the top bar (live active count) and a routed flight view (`?view=flights&flight=<id>`) with a per-stage rail, harness evidence, checkpoint controls, and the stage agent's live timeline.
+  - MCP parity: `start_flight` / `get_flight` / `respond_flight_checkpoint` (author/lifecycle/full profiles) drive the same flight store; external clients can feed conversation-distilled docs via `write_feature_doc` before the PRD stage.
+
+---
+
 ## 1.5.1 — 2026-07-03
 
 - **[Test Runner]** Small run-detail UI update: journal updates refresh while a run is open, and the heal-agent terminal stays visible during active auto-heal cycles.

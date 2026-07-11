@@ -7,18 +7,24 @@ import { FeatureConfigEditor } from './features/config/components/FeatureConfigE
 import { ResizablePanels } from './shared/ui/ResizablePanels'
 import { VerticalSplit } from './shared/ui/VerticalSplit'
 import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
-import { AddTestWizard } from './features/wizard/components/AddTestWizard'
 import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
+import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
 import { PortifyWizard } from './features/portify/components/PortifyWizard'
 import { LogCleanupPage } from './features/logs/components/LogCleanupPage'
 import { CoverageLedgerPage } from './features/coverage/components/CoverageLedgerPage'
+import { FlightPage } from './features/flights/components/FlightPage'
+import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
 import type { RepoCollisionChoice } from './shared/api/client'
 import * as api from './shared/api/client'
 import { connectWorkspaceEvents } from './features/runs/api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
-import { useWizardDrafts } from './features/wizard/state/WizardDraftContext'
-import { useEvaluationExports } from './features/evaluation/state/EvaluationExportContext'
+import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
+import { STAGE_LABEL } from './features/flights/components/stage-meta'
+import type { RepoOption } from './features/flights/components/RepoMultiPicker'
+import { ToastHost, type ToastItem } from './features/config/components/atoms'
+import { AGGREGATE_TOAST_ID, attentionKey, flightNeedsAttention } from './features/flights/state/flight-toasts'
 import type { Feature, VersionStatus } from './shared/api/types'
+import type { FlightIndexEntry } from './shared/api/client'
 import { readPersistedView, persistView, onViewChangedInOtherTab } from './shared/lib/workspace-view-state'
 
 // R12: hydrate the open view + selected feature from the URL/localStorage so a
@@ -45,22 +51,38 @@ export function App() {
   const [journalRefreshKeys, setJournalRefreshKeys] = useState<Record<string, number>>({})
   const [specTotalTests, setSpecTotalTests] = useState(0)
   const [collisionPrompt, setCollisionPrompt] = useState<{ feature: string; env?: string; mode?: 'test' | 'boot'; info: RepoCollisionChoice; portsConfigured?: boolean } | null>(null)
-  // Port-ification wizard target: 'new' starts a fresh workflow for a feature;
-  // 'revisit' reopens an in-flight workflow (from the status bar) by id.
-  // R24: hydrate from the URL — `wf` present = revisit, absent = start-new.
+  // A run-start failure that isn't a collision (404 feature gone, 400 bad env,
+  // 5xx server error, network) — surfaced as a dialog so the Run button never
+  // fails silently. Holds the params so the dialog's Retry can replay it.
+  const [startError, setStartError] = useState<{ feature: string; env?: string; mode: 'test' | 'boot'; error: unknown } | null>(null)
+  // Port-ification workflow view — an EMBEDDED surface only since R50 (the
+  // flight's Parallel Readiness drill-through, collision recovery, benchmark):
+  // 'new' starts a fresh workflow for a feature; 'revisit' reopens one by id.
+  // Deliberately unrouted — flight is the one GUI entry point.
   const [portifyTarget, setPortifyTarget] = useState<
     { kind: 'new'; feature: string } | { kind: 'revisit'; workflowId: string } | null
-  >(() => {
-    if (PERSISTED_VIEW.dialog !== 'portify') return null
-    if (PERSISTED_VIEW.wf) return { kind: 'revisit', workflowId: PERSISTED_VIEW.wf }
-    if (PERSISTED_VIEW.feature) return { kind: 'new', feature: PERSISTED_VIEW.feature }
-    return null
-  })
+  >(null)
   // R24: the Verify-config dialog (in the runs column) is route-driven too.
   const [verifyOpen, setVerifyOpen] = useState(PERSISTED_VIEW.dialog === 'verification')
   // Top-level view: the normal workspace, or a full-screen page (cleanup /
-  // coverage). Hydrated from the URL/localStorage (R12) so it survives refresh.
-  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage'>(PERSISTED_VIEW.view)
+  // coverage / flights). Hydrated from the URL/localStorage (R12) so it
+  // survives refresh.
+  const [view, setView] = useState<'workspace' | 'cleanup' | 'coverage' | 'flights'>(PERSISTED_VIEW.view)
+  // Flight surface: the flight list feeds the status-bar pill; the
+  // selected flight id qualifies ?view=flights so a deep link / refresh
+  // re-opens the exact flight (cl_route-every-surface).
+  const [flights, setFlights] = useState<FlightIndexEntry[]>([])
+  const [selectedFlightId, setSelectedFlightId] = useState<string | null>(PERSISTED_VIEW.flight)
+  const [flightsRefreshKey, setFlightsRefreshKey] = useState(0)
+  // R25: the flight stage-entry launcher — routed (dialog=flight-start,
+  // qualified by the durable feature param) so a deep link / refresh reopens it.
+  const [flightStartFor, setFlightStartFor] = useState<string | null>(
+    PERSISTED_VIEW.dialog === 'flight-start' ? PERSISTED_VIEW.feature : null,
+  )
+  // R40: the new-flight launcher (intent + repo picker, no feature yet) — the
+  // "+ New" action; routed as dialog=flight-new (cold-load coherent: it needs
+  // only the features list).
+  const [flightStartNew, setFlightStartNew] = useState<boolean>(PERSISTED_VIEW.dialog === 'flight-new')
   // Current-vs-latest version + self-update job state. Sourced from the server,
   // refetched on every `version-changed` event (registry check resolved, or the
   // update job advanced) so the footer indicator updates live.
@@ -82,12 +104,39 @@ export function App() {
   // is lost — exactly the "only updates after a refresh" failure mode.
   const allRunsRef = useRef(allRuns)
   useEffect(() => { allRunsRef.current = allRuns }, [allRuns])
+  // Same identity-stability trick for the flights index — openActivity reads
+  // it via ref so the callback (a prop of the status bar + flight page)
+  // doesn't churn on every flights poll.
+  const flightsRef = useRef(flights)
+  useEffect(() => { flightsRef.current = flights }, [flights])
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
-  const { wizardOpen, closeWizard, startNewWizard } = useWizardDrafts()
-  // R24: the evaluation export dialog's open-state lives in EvaluationExportContext
-  // (mounted in the status bar). Read it here — above the persist effect — so the
-  // route serializes it, and seed it from the URL on first load below.
-  const { dialogOpen: evaluationOpen, selectedTask: evaluationTask, openTask: openEvaluationTask } = useEvaluationExports()
+  // R26: per-feature live activity (runs / portify / authoring) — the one
+  // instance behind the Flights pill and the flights landing list. Clicking an
+  // activity-only row opens the activity's REAL surface.
+  const featureActivity = useFeatureActivity()
+  const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
+    if (activity.kind === 'running' && activity.runId) {
+      pendingRunSelectionRef.current = null
+      setSelectedFeature(feature)
+      setSelectedRunId(activity.runId)
+      setView('workspace')
+    } else if (activity.kind === 'exporting') {
+      // R29/R38: the export lives in the flight's Evaluation Report stage when
+      // the feature has a flight record; run detail no longer hosts an inline
+      // panel, so a flightless export is watched from the flights view (the
+      // pill blinks; the list shows the exporting row).
+      const flight = flightsRef.current.find((f) => f.feature === feature)
+      setSelectedFlightId(flight ? flight.flightId : null)
+      setView('flights')
+    } else if (activity.kind === 'portifying' && activity.workflowId) {
+      setPortifyTarget({ kind: 'revisit', workflowId: activity.workflowId })
+    } else if (activity.kind === 'authoring') {
+      // R36: authoring used to open the AddTestWizard's Accept/Reject step —
+      // jarring when the user only wants to watch. Route to the flights view.
+      setSelectedFlightId(null)
+      setView('flights')
+    }
+  }, [])
 
   // R12/R24: persist the full route (view + feature + selected run + open routed
   // dialog) to the URL on every change so a refresh / deep link restores it. The
@@ -95,21 +144,10 @@ export function App() {
   // Dialog precedence follows z-order: the full-screen overlays (portify > config
   // > wizard) sit above the in-column verify dialog, so the topmost open one owns
   // the URL.
-  const routedDialog = portifyTarget ? 'portify' : configFor ? 'config' : wizardOpen ? 'add-test' : verifyOpen ? 'verification' : evaluationOpen ? 'evaluation' : null
-  const routedWf = portifyTarget?.kind === 'revisit' ? portifyTarget.workflowId : null
-  const routedTask = evaluationOpen ? evaluationTask?.taskId ?? null : null
+  const routedDialog = configFor ? 'config' : flightStartFor ? 'flight-start' : flightStartNew ? 'flight-new' : verifyOpen ? 'verification' : null
   useEffect(() => {
-    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, wf: routedWf, task: routedTask })
-  }, [view, selectedFeature, selectedRunId, routedDialog, routedWf, routedTask])
-
-  // R24: the Add-Test wizard and the evaluation export dialog keep their open-state
-  // in a context, not PERSISTED_VIEW-seeded local state — so reopen them from the
-  // URL on first load.
-  useEffect(() => {
-    if (PERSISTED_VIEW.dialog === 'add-test') startNewWizard()
-    if (PERSISTED_VIEW.dialog === 'evaluation') openEvaluationTask(PERSISTED_VIEW.task ?? undefined)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    persistView({ view, feature: selectedFeature, run: selectedRunId, dialog: routedDialog, flight: selectedFlightId })
+  }, [view, selectedFeature, selectedRunId, routedDialog, selectedFlightId])
 
   useEffect(() => onViewChangedInOtherTab((s) => {
     setView(s.view)
@@ -201,7 +239,9 @@ export function App() {
         setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision, portsConfigured })
         return
       }
-      /* other errors surfaced via UI */
+      // Any other failure (feature gone, bad env, server/boot error, network):
+      // show it so the Run button never dead-ends silently.
+      setStartError({ feature: selectedFeature, env, mode, error: err })
     }
   }, [selectedFeature, startRunAction])
 
@@ -215,8 +255,33 @@ export function App() {
         pendingRunSelectionRef.current = runId
         setSelectedRunId(runId)
       }
-    } catch { /* surfaced via UI */ }
+    } catch (err) {
+      setStartError({ feature: prompt.feature, env: prompt.env, mode: prompt.mode ?? 'test', error: err })
+    }
   }, [collisionPrompt, startRunAction])
+
+  // Branch-mismatch recovery (from the RunStartErrorDialog). Both throw on
+  // failure so the dialog surfaces it inline and stays open; on success they
+  // clear the error and replay the original start. handleStartRun's own catch
+  // re-populates startError if the replay hits a fresh failure.
+  const switchBranchesAndRun = useCallback(async (): Promise<void> => {
+    const se = startError
+    const mismatch = se && api.asBranchMismatch(se.error)
+    if (!se || !mismatch) return
+    for (const repo of mismatch.repos) {
+      await api.checkoutRepoBranch(se.feature, repo.name, repo.expected)
+    }
+    setStartError(null)
+    await handleStartRun(se.env, se.mode)
+  }, [startError, handleStartRun])
+
+  const pinCurrentAndRun = useCallback(async (): Promise<void> => {
+    const se = startError
+    if (!se) return
+    await api.pinFeatureBranchesToCurrent(se.feature)
+    setStartError(null)
+    await handleStartRun(se.env, se.mode)
+  }, [startError, handleStartRun])
 
   const handleStartVerification = useCallback(async (input: {
     configId?: string
@@ -253,6 +318,124 @@ export function App() {
   const refreshVersion = useCallback((): void => {
     api.getVersionStatus().then(setVersionStatus).catch(() => {})
   }, [])
+
+  const refreshFlights = useCallback((): void => {
+    api.listFlights().then(setFlights).catch(() => {})
+  }, [])
+
+  // Initial flights load (feeds the pill + landing list before any event fires).
+  useEffect(() => { refreshFlights() }, [refreshFlights])
+
+  // R14 (canary-first-flight): artifact surfaces (coverage ledger) render live
+  // "a flight is generating this" state off the flights index. The
+  // `flights-changed` broadcast is best-effort, so while any flight is active
+  // back it with a gentle poll (cl_live-state-sync) — self-limiting: the
+  // interval exists only while a flight is running/parked.
+  const anyFlightActive = flights.some((f) => f.status === 'running' || f.status === 'waiting-for-approval')
+  useEffect(() => {
+    if (!anyFlightActive) return
+    const id = setInterval(refreshFlights, 5000)
+    return () => clearInterval(id)
+  }, [anyFlightActive, refreshFlights])
+
+  // R14: the coverage ledger's content is generated by a flight's docs /
+  // prd-summary / specs-coverage stages — hand the ledger that fact so it can
+  // say "generating" instead of sitting silently empty while a flight works.
+  const coverageGeneratingFlight = useMemo(() => {
+    if (!selectedFeature) return null
+    const flight = flights.find((f) =>
+      (f.status === 'running' || f.status === 'waiting-for-approval') && f.feature === selectedFeature)
+    const stageKey = flight?.currentStage
+    if (!flight || !stageKey) return null
+    if (stageKey !== 'docs' && stageKey !== 'prd-summary' && stageKey !== 'specs-coverage') return null
+    const stageStatus = flight.stages?.find((s) => s.key === stageKey)?.status ?? 'running'
+    return { flightId: flight.flightId, stage: stageKey, stageStatus }
+  }, [flights, selectedFeature])
+
+  // R40: the new-flight dialog's repo picker offers every repo the workspace
+  // already knows (flattened from the features' configs, deduped by path).
+  const knownRepos = useMemo<RepoOption[]>(() => {
+    const seen = new Map<string, RepoOption>()
+    for (const f of features) {
+      for (const r of f.repos ?? []) {
+        const p = r.localPath
+        if (typeof p === 'string' && p.length > 0 && !seen.has(p)) {
+          seen.set(p, { label: r.name || p.split(/[\\/]/).pop() || p, path: p })
+        }
+      }
+    }
+    return [...seen.values()]
+  }, [features])
+
+  // R51/R68: attention toasts — diff flight statuses on every index refresh and
+  // toast a flight the moment it starts needing the user (waiting-for-approval,
+  // or a non-user / non-queue pause). These are STICKY (never auto-dismiss) so a
+  // laptop-sleep-reconnect nag isn't gone by the time the user looks. R68 fixes:
+  //  - the seed pass no longer swallows already-waiting flights: on first load,
+  //    if N flights already need input, fire ONE aggregate sticky toast (a storm
+  //    of per-flight toasts on boot would be noise);
+  //  - a flight FIRST SEEN in an attention state after seed fires its own toast
+  //    (the old code skipped `was === undefined`, so a reconnect that revealed a
+  //    freshly-parked flight never toasted);
+  //  - queued flights never toast (they wait on capacity, not the user).
+  // An individual flight's toast is suppressed only while THAT flight's detail is
+  // on screen; the aggregate + other flights' toasts still show.
+  const [toasts, setToasts] = useState<ToastItem[]>([])
+  const dismissToast = useCallback((id: string) => setToasts((t) => t.filter((x) => x.id !== id)), [])
+  const prevFlightKeyRef = useRef<Map<string, string> | null>(null)
+  const openFlight = useCallback((flightId: string) => {
+    setSelectedFlightId(flightId)
+    setView('flights')
+  }, [])
+  useEffect(() => {
+    const prev = prevFlightKeyRef.current
+    prevFlightKeyRef.current = new Map(flights.map((f) => [f.flightId, attentionKey(f)]))
+
+    // Seed pass (first index load): don't fire a per-flight toast for every
+    // already-parked flight — collapse them into a single aggregate sticky
+    // toast so a fresh page never opens under a wall of notifications.
+    if (prev === null) {
+      const waiting = flights.filter(flightNeedsAttention)
+      if (waiting.length > 0) {
+        setToasts((t) => [
+          ...t.filter((x) => x.id !== AGGREGATE_TOAST_ID),
+          {
+            id: AGGREGATE_TOAST_ID,
+            title: `${waiting.length} flight${waiting.length === 1 ? '' : 's'} need your input`,
+            body: 'Open the flights view to respond',
+            sticky: true,
+            onClick: () => setView('flights'),
+          },
+        ])
+      }
+      return
+    }
+
+    for (const f of flights) {
+      // A flight that is first seen (post-seed) already in an attention state,
+      // or that transitions into one, both qualify. Skip when the attention key
+      // is unchanged (already toasted) and when the flight no longer needs input.
+      const was = prev.get(f.flightId)
+      if (was === attentionKey(f)) continue
+      if (!flightNeedsAttention(f)) continue
+      // Suppress only while THIS flight's detail is on screen.
+      if (view === 'flights' && selectedFlightId === f.flightId) continue
+      const stageLabel = f.currentStage ? STAGE_LABEL[f.currentStage] ?? f.currentStage : null
+      const isCheckpoint = f.status === 'waiting-for-approval'
+      setToasts((t) => [
+        ...t.filter((x) => x.id !== f.flightId),
+        {
+          id: f.flightId,
+          title: isCheckpoint ? `${f.feature} needs input` : `${f.feature} paused`,
+          body: isCheckpoint
+            ? (stageLabel ? `${stageLabel} is waiting for you` : 'A checkpoint is waiting for you')
+            : (stageLabel ? `${stageLabel} failed — open to resume` : 'A stage failed — open to resume'),
+          sticky: true,
+          onClick: () => openFlight(f.flightId),
+        },
+      ])
+    }
+  }, [flights, view, selectedFlightId, openFlight])
 
   // Initial version check on mount.
   useEffect(() => { refreshVersion() }, [refreshVersion])
@@ -300,6 +483,10 @@ export function App() {
           if (event.type === 'version-changed') {
             refreshVersion()
           }
+          if (event.type === 'flights-changed') {
+            refreshFlights()
+            setFlightsRefreshKey((key) => key + 1)
+          }
         },
         // The bus has no replay, so any mutation that happened while the socket
         // was down (e.g. across a canary-apply server restart) was never
@@ -316,13 +503,15 @@ export function App() {
             setJournalRefreshKeys((keys) => ({ ...keys, [currentRunId]: (keys[currentRunId] ?? 0) + 1 }))
           }
           refreshVersion()
+          refreshFlights()
+          setFlightsRefreshKey((key) => key + 1)
         },
       })
     } catch {
       // Initial REST load and direct UI callbacks still keep the page usable.
     }
     return () => conn?.close()
-  }, [refreshFeatures, refreshVersion])
+  }, [refreshFeatures, refreshVersion, refreshFlights])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
@@ -350,9 +539,8 @@ export function App() {
           coverageRefreshKey={coverageRefreshKey}
           portsRefreshKey={portsRefreshKey}
           versionStatus={versionStatus}
-          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
-          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
+          onStartNewFlight={() => setFlightStartNew(true)}
         />
       ),
     },
@@ -410,16 +598,23 @@ export function App() {
       <GlobalStatusBar
         activeRunDetail={activeRunDetail}
         features={features}
+        onOpenCleanup={() => setView('cleanup')}
+        flights={flights}
+        activity={featureActivity}
+        onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
+        flightsPickerOpen={view === 'flights' && !selectedFlightId}
+        onFlightsPickerOpenChange={(open) => {
+          if (open) { setSelectedFlightId(null); setView('flights') }
+          else setView('workspace')
+        }}
+        onOpenActivity={openActivity}
+        onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
         onNavigateToRun={(feature, runId) => {
           pendingRunSelectionRef.current = null
           setSelectedFeature(feature)
           setSelectedRunId(runId)
           setView('workspace')
         }}
-        onOpenCleanup={() => setView('cleanup')}
-        onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
-        onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
-        onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
@@ -437,17 +632,56 @@ export function App() {
               }}
             />
           : view === 'coverage' && selectedFeature
-          ? <CoverageLedgerPage feature={selectedFeature} onClose={() => setView('workspace')} coverageRefreshKey={coverageRefreshKey} />
+          ? <CoverageLedgerPage
+              feature={selectedFeature}
+              onClose={() => setView('workspace')}
+              coverageRefreshKey={coverageRefreshKey}
+              generatingFlight={coverageGeneratingFlight}
+              onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
+            />
+          : view === 'flights' && selectedFlightId
+          ? <FlightPage
+              flightId={selectedFlightId}
+              refreshKey={flightsRefreshKey}
+              activity={featureActivity}
+              onOpenConfig={(feature) => setConfigFor(feature)}
+              configRefreshKey={reposRefreshKey}
+              docsRefreshKey={coverageRefreshKey}
+              onSelectFlight={setSelectedFlightId}
+              onClose={() => { setSelectedFlightId(null); setView('workspace') }}
+              onOpenRun={(feature, runId) => {
+                pendingRunSelectionRef.current = null
+                setSelectedFeature(feature)
+                setSelectedRunId(runId)
+                setView('workspace')
+              }}
+              onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
+              onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+              onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
+            />
           : <ResizablePanels panels={panels} />}
       </div>
+      <ToastHost toasts={toasts} onDismiss={dismissToast} />
+      {(flightStartFor !== null || flightStartNew) && (
+        <FlightStartDialog
+          feature={flightStartNew ? null : flightStartFor}
+          knownRepos={knownRepos}
+          onClose={() => { setFlightStartFor(null); setFlightStartNew(false) }}
+          onOpenFlight={(flightId) => {
+            setFlightStartFor(null)
+            setFlightStartNew(false)
+            setSelectedFlightId(flightId)
+            setView('flights')
+            refreshFlights()
+          }}
+        />
+      )}
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
           initialTab="playwright"
           portsRefreshKey={portsRefreshKey}
           reposRefreshKey={reposRefreshKey}
-          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
-          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)
@@ -472,13 +706,6 @@ export function App() {
           }}
         />
       )}
-      {wizardOpen && (
-        <AddTestWizard
-          features={features}
-          onClose={closeWizard}
-          onAcceptedFeature={(feature) => refreshFeatures(feature)}
-        />
-      )}
       {collisionPrompt && (
         <CollisionConfirmDialog
           info={collisionPrompt.info}
@@ -487,6 +714,20 @@ export function App() {
           onPortify={() => { const f = collisionPrompt.feature; setCollisionPrompt(null); setPortifyTarget({ kind: 'new', feature: f }) }}
           onChoose={resolveCollision}
           onCancel={() => setCollisionPrompt(null)}
+        />
+      )}
+      {startError && (
+        <RunStartErrorDialog
+          error={startError.error}
+          feature={startError.feature}
+          onRetry={() => {
+            const { env, mode } = startError
+            setStartError(null)
+            void handleStartRun(env, mode)
+          }}
+          onSwitchBranches={switchBranchesAndRun}
+          onPinCurrent={pinCurrentAndRun}
+          onClose={() => setStartError(null)}
         />
       )}
       {portifyTarget && (

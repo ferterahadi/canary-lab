@@ -15,6 +15,8 @@ For each mapped test, also state which path(s) it exercises:
 - `sad` — the unhappy / negative / error flow (invalid input, failure, denial).
 - `edge` — a boundary or extreme case within a path.
 
+Always include `pathTypes` on every mapping.
+
 ## Variants
 
 {{variantInstructions}}
@@ -44,7 +46,9 @@ mappings. This is read-only analysis: do not edit any file.
 ## Output
 
 Return ONLY a JSON object of this shape (no prose, no markdown fences). Omit any
-test you cannot confidently map:
+test you cannot confidently map. `confidence` is your 0–1 certainty that the
+mapping is correct (how sure you are the test verifies that requirement, not how
+good the test is):
 
 {
   "mappings": [
@@ -54,7 +58,9 @@ test you cannot confidently map:
       "pathTypes": ["happy"],
       "variants": ["email"],
       "rationale": "one short sentence on why this test verifies that requirement",
-      "confidence": 0.0
+      "confidence": 0.9
     }
   ]
 }
+
+Your entire final message must be the JSON object — nothing before or after it.

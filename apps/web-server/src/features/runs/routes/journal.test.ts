@@ -232,6 +232,14 @@ describe('DELETE /api/journal/:iteration', () => {
     expect(res.statusCode).toBe(400)
   })
 
+  it('deletes from the legacy root journal without a run and does not publish (no runId to report)', async () => {
+    const { app, publish } = await buildWithWorkspaceEvents()
+    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1' })
+    expect(res.statusCode).toBe(204)
+    expect(fs.readFileSync(journalPath, 'utf-8')).not.toContain('## Iteration 1')
+    expect(publish).not.toHaveBeenCalled()
+  })
+
   it('400s when deleting without a run and no legacy journal is configured', async () => {
     const app = await buildWithoutLegacyJournal()
     const res = await app.inject({ method: 'DELETE', url: '/api/journal/1' })

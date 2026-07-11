@@ -1,9 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import { buildHealAddendum, type HealMode } from './heal-prompt-builder'
+import { AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
 import { readManifest } from './manifest'
 import { buildRunPaths } from './run-paths'
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'
+import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 import {
   resolveAgentBinary,
@@ -50,7 +52,7 @@ export function readPriorSessionId(sessionIdPath: string): string | null {
   return readPriorSessionIdFromValue(raw)
 }
 
-const HEAL_PROMPT_TEMPLATE_PATH = path.join(__dirname, '../../../../../prompts/heal-agent.md')
+const HEAL_PROMPT_TEMPLATE_PATH = promptPath('heal-agent.md')
 
 // Per-mode copy for the four placeholders in `prompts/heal-agent.md`.
 //
@@ -92,30 +94,6 @@ export function detectHealMode(manifestPath: string): HealMode {
   return repoPaths.length > 0 ? 'service' : 'test'
 }
 
-function loadPromptTemplate(promptPath: string = HEAL_PROMPT_TEMPLATE_PATH): string {
-  if (!fs.existsSync(promptPath)) {
-    throw new Error(
-      `Heal prompt template not found at ${promptPath}. Rebuild or reinstall canary-lab.`,
-    )
-  }
-  return fs.readFileSync(promptPath, 'utf-8').trim()
-}
-
-function renderPromptTemplate(template: string, values: Record<string, string>): string {
-  // Drop any line that holds nothing but a single placeholder that resolves
-  // to empty — otherwise the empty bullet sits between live bullets and
-  // breaks the markdown list. Lines that mix a placeholder with other text
-  // (e.g. `- {{failedDir}}/<slug>/foo`) are left alone.
-  const placeholderOnlyLine = /^[ \t]*\{\{(\w+)\}\}[ \t]*$/
-  const lines = template.split('\n')
-  const kept: string[] = []
-  for (const line of lines) {
-    const m = line.match(placeholderOnlyLine)
-    if (m && (values[m[1]] ?? '').length === 0) continue
-    kept.push(line.replace(/\{\{(\w+)\}\}/g, (match, key: string) => values[key] ?? match))
-  }
-  return kept.join('\n')
-}
 
 // Build a transient `--mcp-config` argument for `claude`. Writes the MCP
 // servers JSON (registering `@playwright/mcp` with `--output-dir <outputDir>`
@@ -286,6 +264,9 @@ export interface OrchestratorAutoHealFactoryOptions {
   personalWikiPath?: string | null
   /** Override prompt template path resolution (tests). */
   promptPath?: string
+  /** Cycle budget shown to the agent ("Cycle N of M"). Defaults to
+   *  AUTO_HEAL_MAX_CYCLES — must match the orchestrator's actual cap. */
+  maxCycles?: number
 }
 
 export interface BuildHealCyclePromptArgs {
@@ -300,6 +281,14 @@ export interface BuildHealCyclePromptArgs {
    * the right moment (>= 3 = two prior fix attempts on the same set failed).
    */
   consecutiveSameFailures?: number
+  /**
+   * Flake-tolerant stuck set from `HealCycleState.stuckSlugs(ESCALATION_THRESHOLD)`
+   * — currently failing tests that have failed >= threshold observations in a
+   * row regardless of churn elsewhere in the set. Preferred escalation trigger.
+   */
+  stuckSlugs?: string[]
+  /** `HealCycleState.snapshot().maxSlugStreak` — for escalation phrasing. */
+  maxSlugStreak?: number
 }
 
 export type BuildHealCyclePrompt = (args: BuildHealCyclePromptArgs) => string
@@ -386,7 +375,13 @@ export function buildHealPromptMap(opts: HealPromptMapOptions): HealPromptMap {
       useWhen: 'Use for UI failures when the trace extract exists; it summarizes failing actions, snapshots, failed network, and console errors.',
     })
   }
-  if (hasAnyFailureWithNonEmptyDir(paths.failedDir, 'playwright-mcp')) {
+  if (nonEmptyDir(path.join(opts.runDir, 'playwright-mcp'))) {
+    resources.push({
+      id: 'playwright-mcp',
+      path: `${opts.runDir}/playwright-mcp/`,
+      useWhen: 'Use when Playwright MCP artifacts exist and the trace summary plus service logs are not enough.',
+    })
+  } else if (hasAnyFailureWithNonEmptyDir(paths.failedDir, 'playwright-mcp')) {
     resources.push({
       id: 'playwright-mcp',
       path: `${paths.failedDir}/<slug>/playwright-mcp/`,
@@ -455,12 +450,12 @@ export function buildOrchestratorHealPrompt(
 ): BuildHealCyclePrompt {
   // Eagerly load the packaged template so a missing asset surfaces at config
   // time, not on the first heal cycle.
-  const promptTemplate = loadPromptTemplate(opts.promptPath)
+  const promptTemplate = loadPromptTemplate(opts.promptPath ?? HEAL_PROMPT_TEMPLATE_PATH)
   const promptFile = path.join(opts.runDir, 'heal-prompt.md')
   const paths = buildRunPaths(opts.runDir)
   const runDirRel = path.relative(opts.projectRoot, opts.runDir) || opts.runDir
 
-  return ({ cycle, userGuidance, priorAgentSessionContext, consecutiveSameFailures }) => {
+  return ({ cycle, userGuidance, priorAgentSessionContext, consecutiveSameFailures, stuckSlugs, maxSlugStreak }) => {
     // Re-detect per cycle: the manifest is written by the orchestrator before
     // the first heal cycle, and re-reading on each cycle keeps us correct if
     // a later iteration extends the manifest.
@@ -489,11 +484,14 @@ export function buildOrchestratorHealPrompt(
       mode,
       summaryPath: paths.summaryPath,
       journalPath: paths.diagnosisJournalPath,
-      // Plumb the stuck-cycle counter and per-run failedDir through so the
+      // Plumb the stuck-cycle counters and per-run failedDir through so the
       // escalation block in `buildHealAddendum` can fire with concrete
       // `<failedDir>/<slug>/trace-extract/...` paths when the agent is stuck.
       consecutiveSameFailures,
+      stuckSlugs,
+      maxSlugStreak,
       failedDir: paths.failedDir,
+      maxCycles: opts.maxCycles ?? AUTO_HEAL_MAX_CYCLES,
     })
     const guidance = userGuidance?.trim()
       ? `User guidance for this restarted heal cycle:\n\n${userGuidance.trim()}`
@@ -532,12 +530,29 @@ function featureDocsDir(manifestPath: string): string | null {
 // empty string collapses cleanly.
 export function renderTraceExtractHint(failedDir: string): string {
   if (!hasAnyFailureWith(failedDir, 'trace-extract/failure-summary.md')) return ''
-  return `- \`${failedDir}/<slug>/trace-extract/failure-summary.md\` — curated extract of the failing Playwright run. Read this FIRST for any UI failure: failing action with selector + error, accessibility snapshot at the failure moment, failed network, console errors. For deeper drill-down, every supporting file is in the SAME directory (\`failing-action.txt\`, \`failed-actions.txt\`, \`snapshot-at-failure.txt\`, \`snapshot-before.txt\`, \`actions.txt\`, \`network-failed.txt\`, \`console-errors.txt\`, \`metadata.txt\`) — use the \`Read\` tool on them directly. Do NOT invoke the \`playwright trace\` CLI; everything you need is already on disk.`
+  return `- \`${failedDir}/<slug>/trace-extract/failure-summary.md\` — curated trace extract: failing action, page snapshot at failure, failed network, console errors. Read this FIRST for any UI failure; full drill-down files sit in the same directory. Do NOT invoke the \`playwright trace\` CLI — everything is already on disk.`
 }
 
 export function renderPlaywrightMcpHint(failedDir: string): string {
-  if (!hasAnyFailureWithNonEmptyDir(failedDir, 'playwright-mcp')) return ''
-  return `- \`${failedDir}/<slug>/playwright-mcp/\` — console logs / DOM snapshots / network captures the Playwright MCP server recorded from a re-execution of this failure. Inspect when the trace summary plus service log together still don't explain the bug, or when you need to re-drive the page.`
+  // Current runs write to the run-level dir; runs recorded before the
+  // per-failure→run-level change may have per-slug dirs instead. Hint at
+  // whichever actually has content.
+  const runLevelDir = path.join(path.dirname(failedDir), 'playwright-mcp')
+  if (nonEmptyDir(runLevelDir)) {
+    return `- \`${runLevelDir}/\` — browser captures (console / DOM snapshots / network) recorded by your own earlier Playwright MCP calls in this run. Inspect when the trace summary plus service log still don't explain the bug; new MCP captures land here too.`
+  }
+  if (hasAnyFailureWithNonEmptyDir(failedDir, 'playwright-mcp')) {
+    return `- \`${failedDir}/<slug>/playwright-mcp/\` — browser captures (console / DOM snapshots / network) recorded by your own earlier Playwright MCP calls in this run. Inspect when the trace summary plus service log still don't explain the bug.`
+  }
+  return ''
+}
+
+function nonEmptyDir(dir: string): boolean {
+  try {
+    return fs.readdirSync(dir).filter((f) => !f.startsWith('_')).length > 0
+  } catch {
+    return false
+  }
 }
 
 function hasAnyFailureWith(failedDir: string, relPath: string): boolean {

@@ -123,6 +123,21 @@ describe('git-repo helpers', () => {
     })).rejects.toThrow('expected feature/demo, current main')
   })
 
+  it('attaches structured branchMismatch rows to the thrown error', async () => {
+    const repo = tmpRepo()
+    const err = await validateConfiguredRepoBranches({
+      name: 'demo',
+      description: 'd',
+      envs: [],
+      featureDir: repo,
+      repos: [{ name: 'app', localPath: repo, branch: 'feature/demo' }],
+    }).catch((e: unknown) => e as { statusCode?: number; branchMismatch?: unknown })
+    expect(err.statusCode).toBe(409)
+    expect(err.branchMismatch).toEqual([
+      { name: 'app', path: repo, expected: 'feature/demo', current: 'main', detached: false, isGitRepo: true },
+    ])
+  })
+
   it('collects branch snapshots for valid configured repos only', async () => {
     const repo = tmpRepo()
     const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-plain-'))

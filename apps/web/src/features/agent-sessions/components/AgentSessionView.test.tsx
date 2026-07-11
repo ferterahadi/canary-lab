@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { Markdown } from './AgentSessionView'
+import { Markdown, SystemRow } from './AgentSessionView'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -47,5 +47,42 @@ describe('Markdown (agent session prose)', () => {
   it('does not render raw HTML embedded in the markdown', () => {
     render('Hello <img src=x onerror="alert(1)"> world')
     expect(container.querySelector('img')).toBeNull()
+  })
+})
+
+describe('SystemRow (flight conductor line on the agent rail)', () => {
+  let container: HTMLDivElement
+  let root: Root
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    container.remove()
+  })
+
+  const render = (line: string): void => {
+    act(() => root.render(<SystemRow line={line} />))
+  }
+
+  it('splits `[TAG] text` into a distinct tag chip and the message', () => {
+    render('[BOOT-VERIFY] all services ready')
+    const row = container.querySelector('.agentts-sysrow')
+    expect(row).not.toBeNull()
+    // The tag rides its own chip so system reads apart from the agent rows.
+    expect(container.querySelector('.agentts-systag')?.textContent).toBe('BOOT-VERIFY')
+    expect(container.querySelector('.agentts-systext')?.textContent).toBe('all services ready')
+    // Boxy terminal node marks it as system, not an agent event.
+    expect(container.querySelector('.agentts-sysnode')).not.toBeNull()
+  })
+
+  it('renders an untagged line verbatim with no chip', () => {
+    render('plain conductor note')
+    expect(container.querySelector('.agentts-systag')).toBeNull()
+    expect(container.querySelector('.agentts-systext')?.textContent).toBe('plain conductor note')
   })
 })

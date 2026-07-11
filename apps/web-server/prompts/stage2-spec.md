@@ -75,7 +75,9 @@ The feature's `.env` slot is integral. Canary Lab copies it into the feature dir
 
 `envsets/envsets.config.json` must use the current Canary Lab envset schema with top-level `appRoots`, `slots`, and `feature` objects. Do not use the stale `{ "envsets": { ... } }` shape. For a feature-owned env file, use a slot named `{{featureName}}.env` and target `$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}/.env`.
 
-Envsets are named runtime environments, not source filename buckets. If repo inspection finds different env values for different runtime modes, create one envset per environment, such as `envsets/dev/` and `envsets/prod/`, and keep the same slot names across those envsets. Treat filename markers like `prod-mode`, `staging`, or similar as environment clues, not as final slot names. Normalize copied files to the target filenames Canary Lab applies: `env` for dev values can become `envsets/dev/.env`, `env.prod-mode` for prod values can become `envsets/prod/.env`, `foo.env.dev` can become `envsets/dev/foo.env.dev`, and `foo.env.dev.prod-mode` can become `envsets/prod/foo.env.dev`.
+Envsets are named runtime environments, not source filename buckets. Always emit `envsets/local/{{featureName}}.env` (the required minimum) and keep `local` in `envs`. Create additional envsets (`dev/`, `prod/`) only IN ADDITION, when repo inspection finds distinct runtime-mode values. When you do, keep the same slot names across those envsets. Treat filename markers like `prod-mode`, `staging`, or similar as environment clues, not as final slot names.
+
+Rule: a filename carrying an explicit runtime-mode marker (e.g. a `-mode` suffix like `prod-mode`) picks the envset directory for that marker and the marker is stripped to form the slot name; a filename with no such marker is the default/dev source and keeps its own name as the slot (normalizing a bare `env` to `.env`) — the same slot name is reused across envsets for the same underlying value. Normalize copied files to the target filenames Canary Lab applies: `env` for dev values can become `envsets/dev/.env`, `env.prod-mode` for prod values can become `envsets/prod/.env`, `foo.env.dev` can become `envsets/dev/foo.env.dev`, and `foo.env.dev.prod-mode` can become `envsets/prod/foo.env.dev`.
 
 Example envset config shape:
 
@@ -90,7 +92,7 @@ Example envset config shape:
   },
   "feature": {
     "slots": ["{{featureName}}.env"],
-    "testCommand": "yarn test:e2e",
+    "testCommand": "npx playwright test",
     "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/{{featureName}}"
   }
 }
@@ -179,6 +181,8 @@ Resolve every concrete value referenced by `actions` in this order. Stop at the 
 4. **A generated value** (e.g., `crypto.randomUUID()`) only when the test requires uniqueness per run. Choose obviously synthetic shapes.
 
 Never invent realistic-looking literals (`alice@example.com`, `Acme Corp`, `+1-555-0100`). If you cannot resolve a value through the four rules above, emit a clearly-named placeholder constant with `// TODO: provide <value> — <why>` and continue. Do not fabricate.
+
+If repo inspection finds no surface for a plan action, still emit the test with the closest real locator and a `// TODO:` naming the mismatch — do not silently drop the plan item (every item must map to one test).
 
 ## Preconditions and shared setup
 

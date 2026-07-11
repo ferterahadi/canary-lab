@@ -166,14 +166,12 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
       data-mcp-health-menu
       role="dialog"
       aria-label="MCP connection tools"
-      className="fixed z-[80] overflow-hidden rounded-md border shadow-2xl"
+      className="cl-popover fixed z-[80] overflow-hidden"
       style={{
         top: position.top,
         left: position.left,
         width: position.width,
         maxHeight: 'min(440px, calc(100vh - 64px))',
-        borderColor: 'var(--border-default)',
-        background: 'color-mix(in srgb, var(--bg-elevated) 94%, black)',
         color: 'var(--text-primary)',
       }}
     >

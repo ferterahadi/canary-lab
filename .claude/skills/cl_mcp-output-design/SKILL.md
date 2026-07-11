@@ -1,6 +1,6 @@
 ---
 name: cl_mcp-output-design
-description: Project-specific corrections about Canary Lab MCP tool OUTPUT design — what and how much a tool returns into the agent's context. Learned conventions for sizing/shaping agent-facing payloads. Consult before adding or reshaping any MCP tool result.
+description: Use when adding or reshaping what any Canary Lab MCP tool returns into the agent's context — sizing an inline payload, choosing between inline content and a file path. Project-specific learned corrections, not general MCP guidance.
 ---
 
 # MCP output design — learned conventions

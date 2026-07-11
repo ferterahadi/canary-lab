@@ -1,6 +1,6 @@
 ---
 name: cl_sync-agent-surfaces
-description: Use after changing run-loop semantics — collision/queue choices, boot sessions, heal claims, signal/rerun rules, pass-count rules — or when auditing whether MCP instructions, tool results, and the shipped SKILL.md files still agree.
+description: Use after changing run-loop semantics — collision/queue choices, boot sessions, heal claims, signal/rerun rules, pass-count rules — or when auditing whether MCP instructions (INSTRUCTIONS_BY_PROFILE in apps/web-server/mcp/server.ts), tool-result shapes (apps/web-server/mcp/tools.ts), and the shipped agent-integrations/*/skills/canary-lab/SKILL.md files still agree. Skip for pure tool add/remove/rename/profile-move work with no semantic change → cl_add-mcp-tool.
 ---
 
 # Syncing Canary Lab's Agent-Facing Surfaces
@@ -16,8 +16,8 @@ Keep-in-Sync Invariants](../../../docs/ARCHITECTURE.md#keep-in-sync-invariants).
 | --- | --- | --- |
 | 1 | Profile instructions (`INSTRUCTIONS_BY_PROFILE`) | `apps/web-server/mcp/server.ts` |
 | 2 | Tool-result steering (`healWaitNext`, `bootSessionValue`, collision/queued result shapes) | `apps/web-server/mcp/tools.ts` |
-| 3 | Claude skill (full 14-step run loop + authoring) | `agent-integrations/claude/skills/canary-lab/SKILL.md` |
-| 4 | Codex skill (identical to #3 except `client_kind: "codex-cli"`/`"codex-desktop"`) | `agent-integrations/codex/skills/canary-lab/SKILL.md` |
+| 3 | Claude skill (full run loop + authoring) | `agent-integrations/claude/skills/canary-lab/SKILL.md` |
+| 4 | Codex skill (identical body to #3; differs only in frontmatter — Codex-addressed `description` wording, and only the Claude skill carries `type: skill`. Neither skill passes `client_kind`; the bridge auto-detects it from the connection) | `agent-integrations/codex/skills/canary-lab/SKILL.md` |
 | 5 | Plugin skill (deliberately condensed loop) | `agent-integrations/plugin/canary-lab/skills/canary-lab/SKILL.md` |
 
 **Condensation rule for #5**: keep the run-loop steps, guardrails, and pass-count
@@ -30,7 +30,9 @@ rules; drop authoring/export detail. Do not paste the full Claude skill in.
 - Queueing: `queued: true` + `queueReason`; `wait_for_heal_task` still blocks.
 - Boot-only sessions: `type: "boot_session"` / `executionType: "boot"` → no heal
   claim, no waiting, `abort_run` (confirm) stops services.
-- Heal-claim policy: desktop-only; `claimSuppressed: true` for CLI clients.
+- Heal-claim policy: denylist — only runner-spawned PTY agents (`claude-pty`/
+  `codex-pty`) get `claimSuppressed: true`; interactive Claude/Codex clients
+  (Desktop or CLI) can claim.
 - Waiting: block on `wait_for_heal_task`; never poll `get_run_snapshot`/`get_run`.
 - Verification after a fix: `signal_run` (with `hypothesis` + `fixDescription`),
   never a fresh `start_run`.
@@ -46,8 +48,8 @@ rules; drop authoring/export detail. Do not paste the full Claude skill in.
    `grep -rn '<keyword>' apps/web-server/mcp/server.ts apps/web-server/mcp/tools.ts agent-integrations/`
    (useful keywords: `repo_collision_requires_choice`, `boot_session`, `queued`,
    `claimSuppressed`, `statusLine`, `wait_for_heal_task`, `isolation`).
-3. Update each hit; for #4 preserve the codex `client_kind` values, for #5 apply the
-   condensation rule.
+3. Update each hit; for #4 preserve the codex frontmatter (Codex-addressed
+   `description` wording + no `type` field), for #5 apply the condensation rule.
 4. Tick a 5-row checklist in your working notes — a surface with zero grep hits for
    a semantic that should appear there is a *finding*, not a pass.
 5. Verify: `npx vitest run apps/web-server/mcp` and read the three SKILL.md diffs
@@ -59,4 +61,4 @@ rules; drop authoring/export detail. Do not paste the full Claude skill in.
 | --- | --- |
 | Updating instructions but not tool results (or vice versa) | Skill-less clients follow results, skill-carrying clients follow prose — they diverge |
 | Copying the Claude skill verbatim into the plugin skill | Plugin skill balloons; the condensation was intentional |
-| Forgetting the codex variant "because it's identical" | It's identical *except* client kinds — a verbatim copy breaks claim detection |
+| Copying the Claude skill file verbatim over the codex one | Bodies match, but the frontmatter differs (Codex-addressed description; `type: skill` is Claude-only) — a whole-file copy clobbers it |

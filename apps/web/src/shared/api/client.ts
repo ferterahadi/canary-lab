@@ -4,6 +4,15 @@
 
 import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
 import type {
+  FlightCheckpointResponse as FlightCheckpointResponseT,
+  FlightEntryOptions as FlightEntryOptionsT,
+  FlightIndexEntry as FlightIndexEntryT,
+  FlightManifest as FlightManifestT,
+  FlightStageKey as FlightStageKeyT,
+  PlannedFeature as PlannedFeatureT,
+  PlanFeaturesTask as PlanFeaturesTaskT,
+} from '../../../../../shared/flights/types'
+import type {
   AuditList,
   Feature,
   FeatureTests,
@@ -1412,6 +1421,48 @@ export function asRepoCollision(err: unknown): RepoCollisionChoice | null {
   return null
 }
 
+// One drifted repo from a start-time branch check: pinned `expected` vs the
+// `current` checkout (null when not a git repo; `detached` = detached HEAD).
+export interface RepoBranchMismatchRow {
+  name: string
+  path: string
+  expected: string
+  current: string | null
+  detached: boolean
+  isGitRepo: boolean
+}
+
+export interface RepoBranchMismatch {
+  type: 'repo_branch_mismatch'
+  feature: string
+  repos: RepoBranchMismatchRow[]
+  error: string
+}
+
+/** Returns the branch-mismatch payload when `err` is the 409 raised because the
+ *  feature's repos aren't on their configured branch, else null. */
+export function asBranchMismatch(err: unknown): RepoBranchMismatch | null {
+  if (err instanceof ApiError && err.status === 409 && err.body && typeof err.body === 'object'
+    && (err.body as { type?: string }).type === 'repo_branch_mismatch') {
+    return err.body as RepoBranchMismatch
+  }
+  return null
+}
+
+// Re-pin every repo's configured branch to whatever it's currently checked out
+// on (the inverse of checkoutRepoBranch). Future runs then test those branches.
+export function pinFeatureBranchesToCurrent(
+  feature: string,
+  opts?: ClientOptions,
+): Promise<{ name: string; pins: Array<{ name: string; branch: string }> }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/pin-current-branches`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
 export function startRun(
   feature: string,
   opts?: ClientOptions & { env?: string; isolation?: 'worktree' | 'queue'; mode?: 'test' | 'boot' },
@@ -1764,4 +1815,243 @@ export function listJournal(
   if (query.run) params.set('run', query.run)
   const qs = params.toString() ? `?${params.toString()}` : ''
   return request<JournalEntry[]>(`${baseUrl}/api/journal${qs}`, { method: 'GET' }, fetchImpl)
+}
+
+// ─── Flight (`canary-lab flight` pipeline) ────────────────────────────────
+// Manifest shapes live in the repo-shared model — the server conductor and this
+// client read the same JSON.
+
+export type {
+  FlightManifest,
+  FlightIndexEntry,
+  FlightStage,
+  FlightStageKey,
+  FlightStageStatus,
+  FlightStatus,
+  FlightPauseReason,
+  FlightCheckpoint,
+  FlightCheckpointResponse,
+  FlightEntryOptions,
+  FlightStageEntryOption,
+  SpecsCoveragePass,
+  SpecsCoverageProgress,
+  PlannedFeature,
+  PlanFeaturesTask,
+  PlanFeaturesTaskStatus,
+} from '../../../../../shared/flights/types'
+export { deriveFeatureSlug } from '../../../../../shared/flights/types'
+
+/** Stage-entry menu for one feature: latest flight record, per-stage
+ *  allowed/blocked verdicts (server-computed), and the start-form prefill. */
+export function getFlightEntryOptions(
+  feature: string,
+  env?: string,
+  opts?: ClientOptions,
+): Promise<FlightEntryOptionsT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  const params = new URLSearchParams({ feature })
+  if (env) params.set('env', env)
+  return request<FlightEntryOptionsT>(
+    `${baseUrl}/api/flights/entry?${params.toString()}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export interface StartFlightBody {
+  feature: string
+  /** Omit on continue/redo/jump — repos are frozen; the server reuses the
+   *  stored set and 409s (`flight_frozen`) on a differing one. */
+  repoPaths?: string[]
+  /** Omit on continue/redo/jump — intent is frozen like the repos. */
+  description?: string
+  env?: string
+  coverageTarget?: number
+  /** Required when the feature already has a flight record. */
+  mode?: 'continue' | 'redo' | 'jump'
+  /** Stage to start at (mode "jump", or fresh stage entry). */
+  fromStage?: FlightStageKeyT
+}
+
+/** Start / continue / redo / jump a flight (POST /api/flights, non-blocking —
+ *  the 201 manifest is the just-kicked conductor's snapshot). */
+export function startFlight(body: StartFlightBody, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    fetchImpl,
+  )
+}
+
+export function listFlights(opts?: ClientOptions): Promise<FlightIndexEntryT[]> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ flights: FlightIndexEntryT[] }>(`${baseUrl}/api/flights`, { method: 'GET' }, fetchImpl)
+    .then((r) => r.flights)
+}
+
+export function getFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+export function respondFlightCheckpoint(
+  flightId: string,
+  response: FlightCheckpointResponseT,
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/respond`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response }) },
+    fetchImpl,
+  )
+}
+
+export function resumeFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/resume`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+export function abortFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/abort`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** User-initiated pause: parks the flight resumable (pauseReason "user") and
+ *  cancels the in-flight stage work server-side. */
+export function pauseFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/pause`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** "Start over" — restart the record from stage 1 with its own stored args. */
+export function redoFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/redo`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** Delete a NON-ACTIVE flight record (repos + intent are frozen — deletion is
+ *  the escape hatch). 409 while the flight is active; the feature stays. */
+export function deleteFlight(flightId: string, opts?: ClientOptions): Promise<{ deleted: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ deleted: boolean }>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}`,
+    { method: 'DELETE' },
+    fetchImpl,
+  )
+}
+
+/** Link a LOCAL doc path into a feature's docs/ (symlink, copy fallback). */
+export function linkFeatureDocPath(
+  feature: string,
+  targetPath: string,
+  opts?: ClientOptions,
+): Promise<{ written: boolean; relativePath: string; linked: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ written: boolean; relativePath: string; linked: boolean }>(
+    `${baseUrl}/api/features/${encodeURIComponent(feature)}/docs/link`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: targetPath }) },
+    fetchImpl,
+  )
+}
+
+/** Snapshot of a flight stage's agent session (stage = sidecar dir name:
+ *  scout, prd-summary, specs-1, coverage-1). 404 → null (no agent ran). */
+export async function getFlightAgentSession(
+  flightId: string,
+  stage: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/agent-session?stage=${encodeURIComponent(stage)}`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
+}
+
+// ─── Plan features (pre-flight intent breakdown, R54) ─────────────────────
+
+/** Kick the breakdown agent: judges whether the intent is one feature or
+ *  several. 202 with the task record; attach-or-start server-side (same repo
+ *  set + description reattaches to the running task). */
+export function planFeatures(
+  body: { repoPaths: string[]; description: string },
+  opts?: ClientOptions,
+): Promise<PlanFeaturesTaskT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PlanFeaturesTaskT>(
+    `${baseUrl}/api/flights/plan-features`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    fetchImpl,
+  )
+}
+
+export function getPlanFeaturesTask(taskId: string, opts?: ClientOptions): Promise<PlanFeaturesTaskT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PlanFeaturesTaskT>(
+    `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+/** Launch the confirmed proposal: one flight per feature — the first starts
+ *  now, the rest park `queued` and drain sequentially. 409 type
+ *  `feature_name_conflicts` lists names already in use (nothing created). */
+export function launchPlannedFeatures(
+  taskId: string,
+  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean },
+  opts?: ClientOptions,
+): Promise<{ flightIds: string[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ flightIds: string[] }>(
+    `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/launch`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
+    fetchImpl,
+  )
+}
+
+/** Snapshot of the breakdown agent's session. 404 → null (not spawned yet). */
+export async function getFlightPlanAgentSession(
+  taskId: string,
+  opts?: ClientOptions,
+): Promise<AgentSessionResponse | null> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  try {
+    return await request<AgentSessionResponse>(
+      `${baseUrl}/api/flights/plan-features/${encodeURIComponent(taskId)}/agent-session`,
+      { method: 'GET' },
+      fetchImpl,
+    )
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null
+    throw err
+  }
 }

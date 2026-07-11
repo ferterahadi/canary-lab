@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
-import { useWizardDrafts } from '../../features/wizard/state/WizardDraftContext'
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor } from '../../features/config/components/FeatureConfigEditor'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { SettingsModal } from '../../features/config/components/SettingsModal'
+import { ChevronRightIcon } from '../../features/config/components/atoms'
 import { Tooltip } from '../ui/Tooltip'
+import { readGroupOpen, writeGroupOpen } from '../../features/flights/lib/group-open-state'
 
 interface Props {
   features: Feature[]
@@ -26,12 +27,11 @@ interface Props {
   /** Incremented by App when a portify overlay is saved → the open Ports tab
    *  refetches its config doc so the rewritten slots show without a tab switch. */
   portsRefreshKey?: number
-  /** Opens the port-ification wizard for a feature (Service tab entry). */
-  onStartPortify?: (feature: string) => void
-  /** Reopens a past/active port-ification workflow (Ports-tab history). */
-  onOpenPortify?: (workflowId: string) => void
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
+  /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
+   *  Flight is the only GUI path to a new feature (R40/R50). */
+  onStartNewFlight?: () => void
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
@@ -48,6 +48,58 @@ function coverageHeadlineColor(headline: string | null | undefined): string | un
   return undefined
 }
 
+// R55: the features column groups features that declare a `group` under one
+// collapsible accordion, mirroring the flights picker's disclosure treatment.
+// Open-state persists per group in localStorage (its own key; same shape as the
+// flights picker's map). Default OPEN.
+const FEATURE_GROUPS_OPEN_STORAGE_KEY = 'cl-feature-groups-open'
+
+/** Attention rank for a feature row — worst floats to the top (0 = needs the
+ *  human most). An active run outranks a dirty-tests flag outranks a resting
+ *  row; groups order by their worst member so a group with a running/dirty
+ *  feature sorts above a calm one. */
+function featureRowRank(
+  f: Feature,
+  activeRunFeature: string | null | undefined,
+): number {
+  if (activeRunFeature && f.name === activeRunFeature) return 0
+  if (f.dirty?.status === 'dirty') return 1
+  return 2
+}
+
+export interface FeatureGroupSection {
+  group: string
+  features: Feature[]
+  /** The worst (lowest) row rank in the group — orders the sections. */
+  worstRank: number
+}
+
+/** Split features into the flat top-level bucket (no group) + one section per
+ *  group (R55). Rows keep their incoming order within each section; sections
+ *  order by their worst member, then group name. A blank/whitespace group is
+ *  treated as ungrouped. */
+export function groupFeatures(
+  features: Feature[],
+  activeRunFeature: string | null | undefined,
+): { ungrouped: Feature[]; groups: FeatureGroupSection[] } {
+  const ungrouped: Feature[] = []
+  const byGroup = new Map<string, Feature[]>()
+  for (const f of features) {
+    const group = f.group?.trim()
+    if (!group) { ungrouped.push(f); continue }
+    const bucket = byGroup.get(group) ?? []
+    bucket.push(f)
+    byGroup.set(group, bucket)
+  }
+  const groups: FeatureGroupSection[] = [...byGroup.entries()].map(([group, groupFeatures]) => ({
+    group,
+    features: groupFeatures,
+    worstRank: Math.min(...groupFeatures.map((f) => featureRowRank(f, activeRunFeature))),
+  }))
+  groups.sort((a, b) => a.worstRank - b.worstRank || a.group.localeCompare(b.group))
+  return { ungrouped, groups }
+}
+
 export function FeaturesColumn({
   features,
   selectedFeature,
@@ -58,12 +110,10 @@ export function FeaturesColumn({
   onFeaturesChanged,
   coverageRefreshKey,
   portsRefreshKey,
-  onStartPortify,
-  onOpenPortify,
   onOpenCoverage,
+  onStartNewFlight,
   versionStatus,
 }: Props) {
-  const { startNewWizard } = useWizardDrafts()
   const { gatePromo } = useMcpPromo()
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -87,6 +137,11 @@ export function FeaturesColumn({
     return () => { alive = false }
   }, [featureKey, onOpenCoverage, features.length, coverageRefreshKey])
 
+  // R55: features declaring a `group` collapse under an accordion; the rest
+  // stay flat. Sections order worst-first (a group with a running/dirty
+  // feature above a calm one).
+  const { ungrouped, groups } = groupFeatures(features, activeRunFeature)
+
   return (
     <div className="cl-panel flex h-full flex-col">
       <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
@@ -96,117 +151,51 @@ export function FeaturesColumn({
         </div>
         <button
           type="button"
-          onClick={() => gatePromo('create-feature', startNewWizard)}
+          onClick={() => gatePromo('create-feature', () => onStartNewFlight?.())}
           className="cl-button shrink-0 whitespace-nowrap px-2.5 py-1"
-          title="Add a new feature"
+          title="Start a flight on new repos"
         >
           + New
         </button>
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-2 py-2">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin px-2 py-2" style={{ scrollbarGutter: 'stable' }}>
         {features.length === 0 ? (
           <div className="px-2 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>No features detected.</div>
         ) : (
-          <ul className="flex flex-col gap-1">
-            {features.map((f) => {
-              const isSelected = f.name === selectedFeature
-              const isDirty = f.dirty?.status === 'dirty'
-              const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
-              const runState = isActive
-                ? (activeRunExecutionType === 'boot'
-                    ? 'booted'
-                    : activeRunStatus === 'healing' ? 'healing' : 'running')
-                : null
-              return (
-                <li
-                  key={f.name}
-                  className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
-                  style={{
-                    color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                    fontWeight: isSelected ? 500 : 400,
-                  }}
-                  title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
-                >
-                  {isDirty && (
-                    <Tooltip label="Test files modified — review in the status bar">
-                      <span
-                        aria-label="Tests modified"
-                        data-testid={`dirty-badge-${f.name}`}
-                        className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] font-semibold leading-none"
-                        style={{
-                          color: 'var(--danger)',
-                          background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
-                          border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
-                        }}
-                      >
-                        !
-                      </span>
-                    </Tooltip>
-                  )}
-                  {f.portified && (
-                    <Tooltip label="Portified">
-                      <span
-                        aria-label="Portified"
-                        data-testid={`portified-badge-${f.name}`}
-                        className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] leading-none"
-                        style={{
-                          color: 'rgb(52,211,153)',
-                          background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
-                          border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
-                        }}
-                      >
-                        ⇄
-                      </span>
-                    </Tooltip>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => onSelectFeature(f.name)}
-                    title={f.name}
-                    className="min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
-                    style={{ color: 'inherit', fontWeight: 'inherit' }}
-                  >
-                    {f.name}
-                  </button>
-                  {runState && (
-                    <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
-                  )}
-                  {onOpenCoverage && (
-                    <Tooltip label="Coverage">
-                      <button
-                        type="button"
-                        onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
-                        aria-label={`Open coverage for ${f.name}`}
-                        data-testid={`coverage-action-${f.name}`}
-                        data-headline={coverageHeadlines[f.name] ?? ''}
-                        className="feature-row__cog cl-icon-button mr-0.5 h-7 w-7 shrink-0 self-center"
-                        style={{ color: coverageHeadlineColor(coverageHeadlines[f.name]) }}
-                      >
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <circle cx="12" cy="12" r="9" />
-                          <circle cx="12" cy="12" r="4.5" />
-                          <circle cx="12" cy="12" r="0.6" fill="currentColor" />
-                        </svg>
-                      </button>
-                    </Tooltip>
-                  )}
-                  <Tooltip label="Config">
-                    <button
-                      type="button"
-                      onClick={() => setConfigFor(f.name)}
-                      aria-label={`Configure ${f.name}`}
-                      className="feature-row__cog cl-icon-button mr-1.5 h-7 w-7 shrink-0 self-center"
-                    >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <circle cx="12" cy="12" r="3" />
-                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-                    </svg>
-                    </button>
-                  </Tooltip>
-                </li>
-              )
-            })}
-          </ul>
+          <div className="flex flex-col gap-1">
+            {ungrouped.length > 0 && (
+              <ul className="flex flex-col gap-1">
+                {ungrouped.map((f) => (
+                  <FeatureRow
+                    key={f.name}
+                    feature={f}
+                    selectedFeature={selectedFeature}
+                    activeRunFeature={activeRunFeature}
+                    activeRunStatus={activeRunStatus}
+                    activeRunExecutionType={activeRunExecutionType}
+                    coverageHeadline={coverageHeadlines[f.name]}
+                    onSelectFeature={onSelectFeature}
+                    onOpenCoverage={onOpenCoverage}
+                    onConfigure={setConfigFor}
+                  />
+                ))}
+              </ul>
+            )}
+            {groups.map((section) => (
+              <FeatureGroupAccordion
+                key={section.group}
+                section={section}
+                selectedFeature={selectedFeature}
+                activeRunFeature={activeRunFeature}
+                activeRunStatus={activeRunStatus}
+                activeRunExecutionType={activeRunExecutionType}
+                coverageHeadlines={coverageHeadlines}
+                onSelectFeature={onSelectFeature}
+                onOpenCoverage={onOpenCoverage}
+                onConfigure={setConfigFor}
+              />
+            ))}
+          </div>
         )}
       </div>
       <div className="cl-panel-footer flex items-center justify-between p-2">
@@ -234,8 +223,6 @@ export function FeaturesColumn({
           feature={configFor}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
           portsRefreshKey={portsRefreshKey}
-          onStartPortify={onStartPortify}
-          onOpenPortify={(workflowId) => { setConfigFor(null); onOpenPortify?.(workflowId) }}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)
@@ -248,5 +235,197 @@ export function FeaturesColumn({
         />
       )}
     </div>
+  )
+}
+
+/** One feature `<li>` — extracted so the flat top-level list and the group
+ *  accordions render the identical row (R55). Same markup + testids as before
+ *  the accordion split. */
+function FeatureRow({
+  feature: f,
+  selectedFeature,
+  activeRunFeature,
+  activeRunStatus,
+  activeRunExecutionType,
+  coverageHeadline,
+  onSelectFeature,
+  onOpenCoverage,
+  onConfigure,
+}: {
+  feature: Feature
+  selectedFeature: string | null
+  activeRunFeature?: string | null
+  activeRunStatus?: RunStatus | null
+  activeRunExecutionType?: ExecutionType | null
+  coverageHeadline?: string | null
+  onSelectFeature: (name: string) => void
+  onOpenCoverage?: (feature: string) => void
+  onConfigure: (feature: string) => void
+}) {
+  const isSelected = f.name === selectedFeature
+  const isDirty = f.dirty?.status === 'dirty'
+  const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
+  const runState = isActive
+    ? (activeRunExecutionType === 'boot'
+        ? 'booted'
+        : activeRunStatus === 'healing' ? 'healing' : 'running')
+    : null
+  return (
+    <li
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
+      style={{
+        color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+        fontWeight: isSelected ? 500 : 400,
+      }}
+      title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
+    >
+      {isDirty && (
+        <Tooltip label="Test files modified — review in the status bar">
+          <span
+            aria-label="Tests modified"
+            data-testid={`dirty-badge-${f.name}`}
+            className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] font-semibold leading-none"
+            style={{
+              color: 'var(--danger)',
+              background: 'color-mix(in srgb, var(--danger) 14%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--danger) 35%, transparent)',
+            }}
+          >
+            !
+          </span>
+        </Tooltip>
+      )}
+      {f.portified && (
+        <Tooltip label="Portified">
+          <span
+            aria-label="Portified"
+            data-testid={`portified-badge-${f.name}`}
+            className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] leading-none"
+            style={{
+              color: 'rgb(52,211,153)',
+              background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
+              border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
+            }}
+          >
+            ⇄
+          </span>
+        </Tooltip>
+      )}
+      <button
+        type="button"
+        onClick={() => onSelectFeature(f.name)}
+        title={f.name}
+        className="min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
+        style={{ color: 'inherit', fontWeight: 'inherit' }}
+      >
+        {f.name}
+      </button>
+      {runState && (
+        <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
+      )}
+      {onOpenCoverage && (
+        <Tooltip label="Coverage">
+          <button
+            type="button"
+            onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
+            aria-label={`Open coverage for ${f.name}`}
+            data-testid={`coverage-action-${f.name}`}
+            data-headline={coverageHeadline ?? ''}
+            className="feature-row__cog cl-icon-button mr-0.5 h-7 w-7 shrink-0 self-center"
+            style={{ color: coverageHeadlineColor(coverageHeadline) }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <circle cx="12" cy="12" r="4.5" />
+              <circle cx="12" cy="12" r="0.6" fill="currentColor" />
+            </svg>
+          </button>
+        </Tooltip>
+      )}
+      <Tooltip label="Config">
+        <button
+          type="button"
+          onClick={() => onConfigure(f.name)}
+          aria-label={`Configure ${f.name}`}
+          className="feature-row__cog cl-icon-button mr-1.5 h-7 w-7 shrink-0 self-center"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+      </Tooltip>
+    </li>
+  )
+}
+
+/** A collapsible feature-group section (R55): chevron + group name + count;
+ *  the group's rows render under the disclosure. Open-state persists per group
+ *  in localStorage (own key), default OPEN — mirrors the flights picker's
+ *  disclosure. */
+function FeatureGroupAccordion({
+  section,
+  selectedFeature,
+  activeRunFeature,
+  activeRunStatus,
+  activeRunExecutionType,
+  coverageHeadlines,
+  onSelectFeature,
+  onOpenCoverage,
+  onConfigure,
+}: {
+  section: FeatureGroupSection
+  selectedFeature: string | null
+  activeRunFeature?: string | null
+  activeRunStatus?: RunStatus | null
+  activeRunExecutionType?: ExecutionType | null
+  coverageHeadlines: Record<string, string | null>
+  onSelectFeature: (name: string) => void
+  onOpenCoverage?: (feature: string) => void
+  onConfigure: (feature: string) => void
+}) {
+  const { group } = section
+  const [open, setOpen] = useState(() => readGroupOpen(FEATURE_GROUPS_OPEN_STORAGE_KEY, group))
+  const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(FEATURE_GROUPS_OPEN_STORAGE_KEY, group, next); return next })
+  return (
+    <section data-testid={`feature-group-${group}`}>
+      <button
+        type="button"
+        onClick={toggle}
+        aria-expanded={open}
+        data-testid={`feature-group-toggle-${group}`}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+      >
+        <span
+          aria-hidden="true"
+          className="inline-flex shrink-0 transition-transform duration-150"
+          style={{ color: 'var(--text-muted)', transform: open ? 'rotate(90deg)' : 'none' }}
+        >
+          <ChevronRightIcon />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+          {group}
+        </span>
+        <span className="cl-count-chip shrink-0">{section.features.length}</span>
+      </button>
+      {open && (
+        <ul className="mt-1 flex flex-col gap-1 pl-4">
+          {section.features.map((f) => (
+            <FeatureRow
+              key={f.name}
+              feature={f}
+              selectedFeature={selectedFeature}
+              activeRunFeature={activeRunFeature}
+              activeRunStatus={activeRunStatus}
+              activeRunExecutionType={activeRunExecutionType}
+              coverageHeadline={coverageHeadlines[f.name]}
+              onSelectFeature={onSelectFeature}
+              onOpenCoverage={onOpenCoverage}
+              onConfigure={onConfigure}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }

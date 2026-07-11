@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, wf: null, task: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -166,45 +166,47 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
 
-  it('round-trips the add-test dialog with no feature', () => {
-    persistView(view({ dialog: 'add-test' }))
-    expect(readPersistedView()).toEqual(view({ dialog: 'add-test' }))
-  })
-
   it('round-trips the feature-scoped verification dialog', () => {
     persistView(view({ feature: 'checkout', dialog: 'verification' }))
     expect(window.location.search).toContain('dialog=verification')
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'verification' }))
   })
 
-  it('round-trips a portify revisit (dialog + wf qualifier)', () => {
-    persistView(view({ feature: 'checkout', dialog: 'portify', wf: 'wf_abc' }))
-    expect(window.location.search).toContain('dialog=portify')
-    expect(window.location.search).toContain('wf=wf_abc')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'portify', wf: 'wf_abc' }))
+  it('round-trips the feature-scoped flight-start dialog (URL-only, not mirrored)', () => {
+    persistView(view({ feature: 'checkout', dialog: 'flight-start' }))
+    expect(window.location.search).toContain('dialog=flight-start')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'flight-start' }))
+    expect(localStorage.getItem(KEY)).not.toContain('flight-start')
   })
 
-  it('treats a portify dialog with no wf as start-new (wf omitted)', () => {
-    persistView(view({ feature: 'checkout', dialog: 'portify', wf: null }))
+  it('round-trips the new-flight launcher dialog (R40 — no feature qualifier needed)', () => {
+    persistView(view({ dialog: 'flight-new' }))
+    expect(window.location.search).toContain('dialog=flight-new')
+    expect(readPersistedView()).toEqual(view({ dialog: 'flight-new' }))
+    expect(localStorage.getItem(KEY)).not.toContain('flight-new')
+  })
+
+  it('R50: ignores the retired add-test / portify dialogs in stale deep links', () => {
+    window.history.replaceState(null, '', '/?dialog=add-test')
+    expect(readPersistedView()).toEqual(view({}))
+    window.history.replaceState(null, '', '/?dialog=portify&wf=wf_abc&feature=checkout')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
+  })
+
+  it('R50: clears a stale wf param on the next persist', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&wf=wf_abc')
+    persistView(view({ feature: 'checkout' }))
     expect(window.location.search).not.toContain('wf=')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'portify' }))
   })
 
-  it('drops a stray wf when the dialog is not portify', () => {
-    persistView(view({ feature: 'checkout', dialog: 'config', wf: 'wf_abc' }))
-    expect(window.location.search).not.toContain('wf=')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
+  it('R29: ignores the retired evaluation dialog in a stale deep link', () => {
+    window.history.replaceState(null, '', '/?dialog=evaluation&task=task_abc&feature=checkout')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
   })
 
-  it('round-trips an evaluation export dialog (dialog + task qualifier)', () => {
-    persistView(view({ feature: 'checkout', dialog: 'evaluation', task: 'task_abc' }))
-    expect(window.location.search).toContain('dialog=evaluation')
-    expect(window.location.search).toContain('task=task_abc')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'evaluation', task: 'task_abc' }))
-  })
-
-  it('drops a stray task when the dialog is not evaluation', () => {
-    persistView(view({ feature: 'checkout', dialog: 'config', task: 'task_abc' }))
+  it('R29: clears a stale task param on the next persist', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&task=task_abc')
+    persistView(view({ feature: 'checkout', dialog: 'config' }))
     expect(window.location.search).not.toContain('task=')
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
@@ -226,18 +228,30 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(window.location.search).toContain('feature=checkout')
   })
 
-  it('reads the task param when dialog=evaluation', () => {
-    window.history.replaceState(null, '', '/?dialog=evaluation&task=eval-task-abc&feature=checkout')
+  it('round-trips the flight id when view=flights (deep-linked flight detail)', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123' }))
+    expect(window.location.search).toContain('view=flights')
+    expect(window.location.search).toContain('flight=fl_abc123')
     const state = readPersistedView()
-    expect(state.dialog).toBe('evaluation')
-    expect(state.task).toBe('eval-task-abc')
-    expect(state.feature).toBe('checkout')
+    expect(state.view).toBe('flights')
+    expect(state.flight).toBe('fl_abc123')
   })
 
-  it('returns null task when dialog=evaluation but task param is absent (|| null branch)', () => {
-    window.history.replaceState(null, '', '/?dialog=evaluation&feature=checkout')
-    const state = readPersistedView()
-    expect(state.dialog).toBe('evaluation')
-    expect(state.task).toBeNull()
+  it('drops a flight param found in the URL when the view is not flights (line 76 false branch)', () => {
+    window.history.replaceState(null, '', '/?view=coverage&feature=checkout&flight=fl_stale')
+    expect(readPersistedView()).toEqual(view({ view: 'coverage', feature: 'checkout' }))
+  })
+
+  it('returns null flight when view=flights but the URL has no flight param (line 76 || fallback)', () => {
+    window.history.replaceState(null, '', '/?view=flights')
+    expect(readPersistedView()).toEqual(view({ view: 'flights' }))
+  })
+
+  it('drops the flight param outside the flights view and keeps it out of localStorage', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123' }))
+    persistView(view({ view: 'workspace', feature: 'checkout', flight: 'fl_abc123' }))
+    expect(window.location.search).not.toContain('flight=')
+    persistView(view({ view: 'flights', flight: 'fl_abc123' }))
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'flights', feature: null })
   })
 })

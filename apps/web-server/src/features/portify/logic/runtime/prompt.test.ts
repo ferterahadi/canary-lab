@@ -1,12 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { applyTemplate, buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt } from './prompt'
-
-describe('applyTemplate', () => {
-  it('substitutes known placeholders and leaves unknown ones intact', () => {
-    expect(applyTemplate('a {{x}} b {{y}}', { x: '1' })).toBe('a 1 b {{y}}')
-  })
-})
+import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt } from './prompt'
 
 const feature: FeatureConfig = {
   name: 'cns',

@@ -14,6 +14,8 @@ export type AgentSessionSocketSource =
   | { kind: 'portify'; workflowId: string }
   | { kind: 'coverage'; jobId: string }
   | { kind: 'evaluation'; taskId: string }
+  | { kind: 'flight'; flightId: string; stage: string }
+  | { kind: 'flight-plan'; taskId: string }
 
 export interface AgentSessionSocketMessage {
   type: 'session' | 'event' | 'error' | 'done'
@@ -55,6 +57,12 @@ function urlFor(base: string, source: AgentSessionSocketSource): string {
   }
   if (source.kind === 'evaluation') {
     return `${base}/ws/evaluation-exports/${encodeURIComponent(source.taskId)}/agent-session`
+  }
+  if (source.kind === 'flight') {
+    return `${base}/ws/flights/${encodeURIComponent(source.flightId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
+  }
+  if (source.kind === 'flight-plan') {
+    return `${base}/ws/flight-plans/${encodeURIComponent(source.taskId)}/agent-session`
   }
   return `${base}/ws/draft/${encodeURIComponent(source.draftId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
 }

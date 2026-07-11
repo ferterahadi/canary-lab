@@ -263,6 +263,55 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
   })
 })
 
+describe('applyExternalCoverageMappings — deterministic validation flags (issues channel)', () => {
+  it('still applies a flagged @path-sad mapping, attaching issues (flag, never drop)', async () => {
+    const dir = writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      // 'shared' has no negative assertion → the sad claim is suspicious.
+      mappings: [{ testName: 'shared', requirements: ['R1'], pathTypes: ['sad'], source: 'agent' }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toHaveLength(1)
+    expect(result.applied[0].issues).toEqual(['@path-sad claimed but test has no negative assertion (toThrow/rejects/.not/error-status)'])
+    // The tag is still written exactly as before — flagging changes nothing else.
+    const spec = fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')
+    expect(spec).toContain('@req-R1')
+    expect(spec).toContain('@path-sad')
+  })
+
+  it('flags a variant claim whose value never appears in the test source', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), JSON.stringify({
+      requirements: [{ id: 'R1', title: 'Create', text: 'user can create', pathTypes: ['happy'] }],
+      variantDimension: { name: 'channel', values: ['email', 'sms'] },
+      docsHash: 'h', sourceDocs: [], generatedAt: '2026-01-01T00:00:00Z',
+    }))
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      // Body is `async () => {}` — 'email' appears nowhere in it.
+      mappings: [{ testName: 'shared', requirements: ['R1'], variants: ['email'], source: 'agent' }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toHaveLength(1)
+    expect(result.applied[0].issues).toEqual(["@variant-email claimed but 'email' not found in test source"])
+    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@variant-email')
+  })
+
+  it('attaches no issues field for a clean mapping', async () => {
+    writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    const result = applyExternalCoverageMappings({
+      featuresDir, logsDir, feature: 'checkout',
+      mappings: [{ testName: 'shared', requirements: ['R1'], pathTypes: ['happy'], source: 'agent' }],
+      now: '2026-01-01T00:00:00Z',
+    })
+    expect(result.applied).toHaveLength(1)
+    expect(result.applied[0].issues).toBeUndefined()
+  })
+})
+
 describe('collectTests — duplicate name merge (service.ts unionList)', () => {
   it('keeps existing requirements unchanged when duplicate has none (unionList b=undefined path)', async () => {
     // a.spec.ts returns requirements=['R1']; b.spec.ts returns no requirements.
@@ -310,6 +359,98 @@ describe('collectTests — duplicate name merge (service.ts unionList)', () => {
     const sharedTest = ledger.tests.find((t) => t.name === 'shared')
     expect(sharedTest?.requirements).toContain('R1')
     expect(sharedTest?.requirements).toContain('R2')
+  })
+})
+
+describe('runCoverageEngine — engineInputs null-guard fallbacks (service.ts line 358)', () => {
+  it('defaults bodySource/assertions to empty when the extractor omits them', async () => {
+    // The real extractor always sets bodySource (required string) and assertions
+    // defaults to []; only a non-standard extractor result can hit the `?? []` /
+    // `?? ''` fallbacks in engineInputs. Mock extractTestsFromSource to omit both.
+    const dir = writeFeature('checkout')
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    vi.mocked(extractTestsFromSource).mockReturnValueOnce({
+      file: path.join(dir, 'e2e', 'a.spec.ts'),
+      tests: [{
+        name: 'shared',
+        line: 1,
+        // bodySource/assertions intentionally omitted from the extractor result.
+      } as unknown as ReturnType<typeof extractTestsFromSource>['tests'][number]],
+    })
+
+    const result = await runCoverageEngine({ featuresDir, feature: 'checkout', logsDir, now: '2026-01-01T00:00:00Z' })
+    // No throw despite the missing fields — the ?? [] / ?? '' fallbacks kicked in.
+    expect(result.feature).toBe('checkout')
+  })
+})
+
+describe('computeFeatureCoverage — proven axis (readLatestRunOutcomes join)', () => {
+  it('leaves tests unjoined when the feature has no recorded run (outcomes null branch)', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+    // No runs/index.json written at all → readLatestRunOutcomes returns null.
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    expect(ledger.provenRunId).toBeUndefined()
+    expect(ledger.requirements[0].proven).toBeUndefined()
+  })
+
+  it('joins a matching run outcome onto its test (lastRun found branch) and threads provenRunId', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    fs.mkdirSync(path.join(logsDir, 'runs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'index.json'),
+      JSON.stringify([{ runId: 'r1', feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }]),
+    )
+    fs.mkdirSync(path.join(logsDir, 'runs', 'r1'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'r1', 'e2e-summary.json'),
+      JSON.stringify({ passedNames: ['test-case-shared'], failed: [] }),
+    )
+
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    expect(ledger.provenRunId).toBe('r1')
+    const t = ledger.tests.find((t) => t.name === 'shared')
+    expect(t?.lastRun).toEqual({ runId: 'r1', passed: true })
+    expect(ledger.requirements[0].proven).toBe(true)
+  })
+
+  it('leaves lastRun unset for a test the run never touched (lastRun undefined branch)', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    // A run exists for the feature, but its summary never mentions this test
+    // (renamed/skipped) → lastRunOutcomeForTitle returns undefined → t.lastRun untouched.
+    fs.mkdirSync(path.join(logsDir, 'runs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'index.json'),
+      JSON.stringify([{ runId: 'r1', feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }]),
+    )
+    fs.mkdirSync(path.join(logsDir, 'runs', 'r1'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'r1', 'e2e-summary.json'),
+      JSON.stringify({ passedNames: [], failed: [] }),
+    )
+
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    expect(ledger.provenRunId).toBe('r1')
+    const t = ledger.tests.find((t) => t.name === 'shared')
+    expect(t?.lastRun).toBeUndefined()
+    expect(ledger.requirements[0].proven).toBe(false)
   })
 })
 

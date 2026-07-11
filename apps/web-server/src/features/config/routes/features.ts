@@ -45,6 +45,9 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
     return features.map((f) => ({
       name: f.name,
       description: f.description,
+      // Optional grouping label — omit the key entirely when unset so older
+      // payloads and grouped ones stay distinguishable.
+      ...(f.group !== undefined ? { group: f.group } : {}),
       repos: (f.repos ?? []).map((r) => ({ name: r.name, localPath: r.localPath })),
       envs: f.envs ?? [],
       // A saved port overlay exists → the feature boots concurrently. Surfaced

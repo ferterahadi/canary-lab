@@ -92,7 +92,7 @@ This draft was selected for diff-mode planning because the user context is empty
 
 For each selected repository:
 
-1. **Pick a base ref.** Use available refs in this order: the local parent branch, then the nearest defensible local parent (justified from `git log`), then `merge-base` against `origin/main`, then `origin/master`, then `main`, then `master`.
+1. **Pick a base ref.** Start with `git merge-base HEAD origin/main` (then `origin/master`, `main`, `master`); only prefer a different local branch when `git log` clearly shows this branch forked from it. Fall back to available refs in this order: the local parent branch, then the nearest defensible local parent (justified from `git log`), then `merge-base` against `origin/main`, then `origin/master`, then `main`, then `master`.
 2. **Collect the full change.** Committed branch changes since that base, plus staged and unstaged worktree changes. Treat the union as the change under review.
 3. **Gather local intent signals** before reading the code diff. These are your only substitute for a PRD:
    - **Branch name** (already provided in the repo summary).

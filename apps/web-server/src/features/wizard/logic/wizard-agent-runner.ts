@@ -12,12 +12,12 @@ import {
   buildPlanPrompt,
   buildSpecPrompt,
   createTeeSink,
-  loadTemplate,
   type WizardAgentKind,
 } from './wizard-agent-spawner'
 import { WIZARD_PLAN_MODELS, WIZARD_SPEC_MODELS, modelFor } from '../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../agent-sessions/logic/agent-producer'
 import { runAgentProcess } from '../../agent-sessions/logic/agent-process'
+import { loadPromptTemplate } from '../../../shared/prompts'
 
 // Headless driver for the wizard agents (the Portify model). Spawns the agent
 // CLI directly, tees stdout/stderr to the agent log, and returns the final
@@ -111,7 +111,7 @@ export function spawnPlanAgent(
     const prompt = buildPlanPrompt({
       prdText: input.prdText,
       repos: input.repos,
-      template: templatePath ? loadTemplate(templatePath) : undefined,
+      template: templatePath ? loadPromptTemplate(templatePath) : undefined,
     })
     const args = buildWizardArgs(input.agent, prompt, {
       pinSessionId: input.pinSessionId,
@@ -141,7 +141,7 @@ export function spawnSpecAgent(
       featureName: input.featureName,
       plan: input.plan,
       repos: input.repos,
-      template: deps.specTemplate ? loadTemplate(deps.specTemplate) : undefined,
+      template: deps.specTemplate ? loadPromptTemplate(deps.specTemplate) : undefined,
     })
     const args = buildWizardArgs(input.agent, prompt, {
       resumeSessionId: input.resumeSessionId,

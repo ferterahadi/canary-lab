@@ -431,6 +431,64 @@ body {
   outline: none;
 }
 
+/* Branch choice cards in the run-start branch-mismatch dialog — the whole card
+   is a button. Two variants: neutral (secondary choice) and -rec (the
+   recommended choice, tinted with the accent wash). */
+.cl-branch-option {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.cl-branch-option:hover:not(:disabled),
+.cl-branch-option:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.cl-branch-option-rec {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.cl-branch-option-rec:hover:not(:disabled),
+.cl-branch-option-rec:focus-visible {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: var(--accent);
+}
+
+/* Trailing "pick this" chevron — muted at rest, leans in on hover. */
+.cl-branch-chevron {
+  color: var(--text-muted);
+  opacity: 0.6;
+  transition: color 120ms ease, opacity 120ms ease, transform 120ms ease;
+}
+
+.cl-branch-option:hover .cl-branch-chevron {
+  color: var(--text-secondary);
+  opacity: 1;
+  transform: translateX(1px);
+}
+
+.cl-branch-option-rec:hover .cl-branch-chevron {
+  color: var(--accent);
+}
+
+/* Small uppercase accent badge (e.g. "Recommended"). */
+.cl-badge-accent {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 .cl-sort-th {
   transition: color 120ms ease;
 }
