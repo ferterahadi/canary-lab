@@ -74,6 +74,21 @@ describe('startFlight', () => {
     expect(calls).toEqual([...FLIGHT_STAGE_KEYS])
   })
 
+  it('surfaces the flight group on the index entry (R69: ledger/pill group pre-scaffold)', async () => {
+    const grouped = startFlight(
+      { ...args(), opts: { ...OPTS, group: 'Auth' } },
+      deps(allDone()),
+    )
+    await grouped.completion
+    expect(store.list().find((e) => e.flightId === grouped.manifest.flightId)?.group).toBe('Auth')
+
+    // A flight with no group leaves the field off entirely (not '' / undefined key).
+    const plain = startFlight({ ...args('/repo/plain'), feature: 'plain' }, deps(allDone()))
+    await plain.completion
+    const plainEntry = store.list().find((e) => e.flightId === plain.manifest.flightId)!
+    expect('group' in plainEntry).toBe(false)
+  })
+
   it('persists stage evidence computed by the adapter', async () => {
     const adapters = allDone()
     adapters.similarity = { run: async () => ({ kind: 'done', evidence: { scanned: 3 } }) }

@@ -9,6 +9,7 @@ import { SettingsModal } from '../../features/config/components/SettingsModal'
 import { ChevronRightIcon } from '../../features/config/components/atoms'
 import { Tooltip } from '../ui/Tooltip'
 import { readGroupOpen, writeGroupOpen } from '../../features/flights/lib/group-open-state'
+import { FlightStatusChip } from '../../features/flights/components/FlightsPill'
 
 interface Props {
   features: Feature[]
@@ -32,6 +33,9 @@ interface Props {
   /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
    *  Flight is the only GUI path to a new feature (R40/R50). */
   onStartNewFlight?: () => void
+  /** Opens the routed flight view — a pending (pre-scaffold) placeholder row
+   *  has no feature dir to select, so clicking it resumes its flight instead. */
+  onOpenFlight?: (flightId: string) => void
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
@@ -64,6 +68,9 @@ function featureRowRank(
 ): number {
   if (activeRunFeature && f.name === activeRunFeature) return 0
   if (f.dirty?.status === 'dirty') return 1
+  // A pending placeholder parked on approval needs the human — it ranks with
+  // dirty; otherwise it rests with a settled feature so the column stays calm.
+  if (f.pending) return f.pending.status === 'waiting-for-approval' ? 1 : 2
   return 2
 }
 
@@ -112,6 +119,7 @@ export function FeaturesColumn({
   portsRefreshKey,
   onOpenCoverage,
   onStartNewFlight,
+  onOpenFlight,
   versionStatus,
 }: Props) {
   const { gatePromo } = useMcpPromo()
@@ -176,6 +184,7 @@ export function FeaturesColumn({
                     coverageHeadline={coverageHeadlines[f.name]}
                     onSelectFeature={onSelectFeature}
                     onOpenCoverage={onOpenCoverage}
+                    onOpenFlight={onOpenFlight}
                     onConfigure={setConfigFor}
                   />
                 ))}
@@ -192,6 +201,7 @@ export function FeaturesColumn({
                 coverageHeadlines={coverageHeadlines}
                 onSelectFeature={onSelectFeature}
                 onOpenCoverage={onOpenCoverage}
+                onOpenFlight={onOpenFlight}
                 onConfigure={setConfigFor}
               />
             ))}
@@ -250,6 +260,7 @@ function FeatureRow({
   coverageHeadline,
   onSelectFeature,
   onOpenCoverage,
+  onOpenFlight,
   onConfigure,
 }: {
   feature: Feature
@@ -260,8 +271,13 @@ function FeatureRow({
   coverageHeadline?: string | null
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
+  onOpenFlight?: (flightId: string) => void
   onConfigure: (feature: string) => void
 }) {
+  // A pending placeholder (First-Flight batch, pre-scaffold) has no feature dir
+  // to select or configure — render it muted with its flight's status chip;
+  // clicking the row resumes the flight.
+  if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
   const isDirty = f.dirty?.status === 'dirty'
   const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
@@ -372,6 +388,7 @@ function FeatureGroupAccordion({
   coverageHeadlines,
   onSelectFeature,
   onOpenCoverage,
+  onOpenFlight,
   onConfigure,
 }: {
   section: FeatureGroupSection
@@ -382,6 +399,7 @@ function FeatureGroupAccordion({
   coverageHeadlines: Record<string, string | null>
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
+  onOpenFlight?: (flightId: string) => void
   onConfigure: (feature: string) => void
 }) {
   const { group } = section
@@ -421,11 +439,48 @@ function FeatureGroupAccordion({
               coverageHeadline={coverageHeadlines[f.name]}
               onSelectFeature={onSelectFeature}
               onOpenCoverage={onOpenCoverage}
+              onOpenFlight={onOpenFlight}
               onConfigure={onConfigure}
             />
           ))}
         </ul>
       )}
     </section>
+  )
+}
+
+/** A placeholder row for a First-Flight batch feature whose flight is queued or
+ *  running but hasn't scaffolded `feature.config.cjs` yet (R69). Muted and
+ *  cog-less — there's no config/coverage to open — it carries the flight's live
+ *  status chip and resumes the flight on click, so a just-launched batch shows
+ *  in the ledger immediately and the user can pick up from where they left off. */
+function PendingFeatureRow({
+  feature: f,
+  onOpenFlight,
+}: {
+  feature: Feature
+  onOpenFlight?: (flightId: string) => void
+}) {
+  const pending = f.pending
+  if (!pending) return null
+  return (
+    <li
+      className="feature-row group cl-list-row text-sm"
+      data-testid={`pending-feature-${f.name}`}
+      style={{ color: 'var(--text-muted)' }}
+    >
+      <button
+        type="button"
+        onClick={() => onOpenFlight?.(pending.flightId)}
+        title={`${f.name} — setting up; open the flight`}
+        className="min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
+        style={{ color: 'inherit' }}
+      >
+        {f.name}
+      </button>
+      <span className="mr-1.5 shrink-0 self-center">
+        <FlightStatusChip flight={pending} />
+      </span>
+    </li>
   )
 }

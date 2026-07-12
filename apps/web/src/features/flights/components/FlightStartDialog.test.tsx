@@ -416,6 +416,51 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     expect(byTestId('repo-multi-picker')).toBeNull()
   })
 
+  it('keeps in-progress proposal edits when the parent re-renders (poll/WS tick with a fresh onOpenFlight)', async () => {
+    mocks.planFeatures.mockResolvedValue({
+      taskId: 't2',
+      status: 'done',
+      repoPaths: ['/repo/shop'],
+      description: 'test everything',
+      result: {
+        split: true,
+        features: [
+          { name: 'checkout', description: 'the checkout flow', group: 'shop' },
+          { name: 'catalog', description: 'browsing + search', group: 'shop' },
+        ],
+      },
+    })
+    const knownRepos = [{ label: 'shop', path: '/repo/shop' }]
+    const onClose = vi.fn()
+    // Render directly (not the `render` helper) so we control onOpenFlight's identity.
+    await act(async () => {
+      root.render(<FlightStartDialog feature={null} onClose={onClose} onOpenFlight={vi.fn()} knownRepos={knownRepos} />)
+    })
+    await flush()
+    setValue(container.querySelector('textarea')!, 'test everything')
+    await addRepo('/repo/shop')
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    // Proposal seeded from the plan.
+    expect((byTestId('flight-proposal-group') as HTMLInputElement).value).toBe('shop')
+
+    // User edits the group + a feature name.
+    setValue(byTestId('flight-proposal-group') as HTMLInputElement, 'TEST')
+    click(byTestId('flight-proposal-edit-0')!)
+    setValue(container.querySelector('input[aria-label="Feature name"]') as HTMLInputElement, 'renamed')
+    expect((byTestId('flight-proposal-group') as HTMLInputElement).value).toBe('TEST')
+    expect((container.querySelector('input[aria-label="Feature name"]') as HTMLInputElement).value).toBe('renamed')
+
+    // The parent re-renders with a FRESH onOpenFlight arrow (App re-renders every
+    // few seconds on poll/WS). The settle effect must NOT re-seed the proposal.
+    await act(async () => {
+      root.render(<FlightStartDialog feature={null} onClose={onClose} onOpenFlight={vi.fn()} knownRepos={knownRepos} />)
+    })
+    await flush()
+    expect((byTestId('flight-proposal-group') as HTMLInputElement).value).toBe('TEST')
+    expect((container.querySelector('input[aria-label="Feature name"]') as HTMLInputElement).value).toBe('renamed')
+  })
+
   it('adds a repo through the shared folder picker', async () => {
     await render({ feature: null })
     await addRepo('/somewhere/new-repo')

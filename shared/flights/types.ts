@@ -165,6 +165,10 @@ export interface FlightIndexEntry {
   flightId: string
   feature: string
   repoPaths: string[]
+  /** Grouping label from the flight's options (`opts.group`) — lets the ledger
+   *  and pill group a flight's still-pre-scaffold feature without fetching the
+   *  full manifest. Absent when the flight declares no group. */
+  group?: string
   status: FlightStatus
   /** Present while status is `paused` — lets the pill/toast tell a user pause
    *  from a stage failure without fetching the full manifest. */

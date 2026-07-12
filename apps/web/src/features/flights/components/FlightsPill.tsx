@@ -250,7 +250,10 @@ export function groupPickerRows(rows: FeatureActivityRow[], features: FeatureRef
   const ungrouped: FeatureActivityRow[] = []
   const byGroup = new Map<string, FeatureActivityRow[]>()
   for (const row of rows) {
-    const group = groupOf.get(row.feature)
+    // Prefer the workspace feature's group; fall back to the flight's own group
+    // so a still-pre-scaffold feature (First-Flight batch, not yet in the
+    // features list) still lands in its section instead of the flat bucket.
+    const group = groupOf.get(row.feature) || row.flight?.group?.trim() || undefined
     if (!group) { ungrouped.push(row); continue }
     const bucket = byGroup.get(group) ?? []
     bucket.push(row)

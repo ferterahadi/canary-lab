@@ -49,6 +49,7 @@ function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
     flightId: m.flightId,
     feature: m.feature,
     repoPaths: m.repoPaths,
+    ...(m.opts.group ? { group: m.opts.group } : {}),
     status: m.status,
     ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
     currentStage: m.currentStage,

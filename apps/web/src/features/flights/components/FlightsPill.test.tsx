@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightIndexEntry, PlanFeaturesTask } from '../../../shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
-import { FlightsPill, featureChipState } from './FlightsPill'
+import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows } from './FlightsPill'
 
 const preFlight = (over: Partial<PlanFeaturesTask>): PlanFeaturesTask => ({
   taskId: 'fp_1',
@@ -258,5 +258,35 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     expect(rows[1]?.getAttribute('data-testid')).toBe('not-flown-aaa-never-flown')
     // A never-flown feature does not light the pill.
     expect(container.querySelector('[data-testid="flights-pill-count"]')).toBeTruthy() // the waiting flight does
+  })
+})
+
+describe('groupPickerRows group fallback (R69)', () => {
+  it('groups a pre-scaffold flight by its own group when the feature list has none', () => {
+    // First-Flight batch: the flight carries `group`, but the feature isn't in
+    // the workspace features list yet (its config.cjs is unscaffolded).
+    const rows = featureActivityRows(
+      [
+        flight({ flightId: 'a', id: 'a', feature: 'login', group: 'Auth', status: 'paused' }),
+        flight({ flightId: 'b', id: 'b', feature: 'signup', group: 'Auth', status: 'running' }),
+      ],
+      new Map(),
+      [], // no workspace features yet
+    )
+    const { ungrouped, groups } = groupPickerRows(rows, [])
+    expect(ungrouped).toEqual([])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].group).toBe('Auth')
+    expect(groups[0].rows.map((r) => r.feature).sort()).toEqual(['login', 'signup'])
+  })
+
+  it('prefers the workspace feature group over the flight group when both exist', () => {
+    const rows = featureActivityRows(
+      [flight({ feature: 'checkout', group: 'StaleFlightGroup', status: 'running' })],
+      new Map(),
+      [{ name: 'checkout', group: 'Shop' }],
+    )
+    const { groups } = groupPickerRows(rows, [{ name: 'checkout', group: 'Shop' }])
+    expect(groups.map((g) => g.group)).toEqual(['Shop'])
   })
 })

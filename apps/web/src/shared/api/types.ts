@@ -18,6 +18,11 @@ import type {
   VerificationTarget,
 } from '../../../../../shared/verification'
 import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
+import type {
+  FlightPauseReason,
+  FlightStageKey,
+  FlightStatus,
+} from '../../../../../shared/flights/types'
 export type {
   DisplayStatus,
   RunBootFailure,
@@ -60,9 +65,26 @@ export interface FeatureDirtyState {
   specs: DirtySpecSummary[]
 }
 
+/** Client-only placeholder marker — the server NEVER sets this. Present when a
+ *  ledger row stands in for a First-Flight batch flight that hasn't scaffolded
+ *  its `feature.config.cjs` yet: the flight record exists (queued/running) but
+ *  the feature is not on disk. The ledger renders such a row muted, cog-less,
+ *  and clicking it opens the flight. Synthesized by `derivePendingFeatures`;
+ *  replaced by the real feature (dedup by name) once scaffold writes the config
+ *  and the `feature-created` event refetches the list. */
+export interface FeaturePending {
+  flightId: string
+  status: FlightStatus
+  currentStage: FlightStageKey | null
+  pauseReason?: FlightPauseReason
+}
+
 export interface Feature {
   name: string
   description?: string
+  /** Set only on synthesized placeholder rows — see FeaturePending. Absent on
+   *  every real feature the server returns. */
+  pending?: FeaturePending
   /** Optional grouping label — features sharing a group render under one
    *  section in the UI. Absent when the feature declares no group. */
   group?: string

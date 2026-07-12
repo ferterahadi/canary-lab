@@ -145,6 +145,10 @@ export function FlightStartDialog({
   const [conflicts, setConflicts] = useState<string[]>([])
   const autoLaunched = useRef(false)
   const resumeAttached = useRef(false)
+  // Seed the editable proposal from the settled plan exactly once. Without this,
+  // a bare parent re-render (poll/WS) re-fires the settle effect below and
+  // clobbers the user's in-progress name/group/intent edits.
+  const proposalSeeded = useRef(false)
 
   const newFlight = resolvedFeature === null
 
@@ -207,6 +211,8 @@ export function FlightStartDialog({
     // Several features, or a single one whose name clashed → the human decides
     // (confirm the split / rename). Show the proposal.
     if (features.length > 1 || conflicted) {
+      if (proposalSeeded.current) return
+      proposalSeeded.current = true
       setProposal(features)
       setSharedGroup(features.find((f) => f.group)?.group ?? '')
       if (conflicted) setConflicts(planTask.conflicts ?? [])
@@ -223,6 +229,8 @@ export function FlightStartDialog({
       .catch((err: unknown) => {
         autoLaunched.current = false
         applyLaunchFailure(err)
+        if (proposalSeeded.current) return
+        proposalSeeded.current = true
         setProposal(features)
         setSharedGroup(features[0]?.group ?? '')
         setPhase('proposal')

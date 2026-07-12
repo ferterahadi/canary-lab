@@ -258,6 +258,61 @@ describe('FeaturesColumn grouping (R55)', () => {
   })
 })
 
+describe('FeaturesColumn pending placeholders (R69)', () => {
+  const pendingFeature = (name: string, group?: string) => ({
+    name,
+    repos: [],
+    envs: [],
+    ...(group ? { group } : {}),
+    pending: { flightId: `fl_${name}`, status: 'paused' as const, currentStage: null, pauseReason: 'queued' as const },
+  })
+
+  it('renders a cog-less placeholder row that opens the flight on click', () => {
+    const onOpenFlight = vi.fn()
+    const onSelectFeature = vi.fn()
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[pendingFeature('login')]}
+          selectedFeature={null}
+          onSelectFeature={onSelectFeature}
+          onOpenFlight={onOpenFlight}
+        />,
+      )
+    })
+    const row = container.querySelector<HTMLLIElement>('[data-testid="pending-feature-login"]')
+    expect(row).toBeTruthy()
+    // Placeholder rows have no config/coverage cogs — there's nothing on disk yet.
+    expect(row?.querySelector('[aria-label^="Configure"]')).toBeNull()
+    // The queued flight's status chip rides along.
+    expect(row?.textContent).toContain('queued')
+    act(() => {
+      row?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_login')
+    // Clicking a placeholder never selects a (non-existent) feature.
+    expect(onSelectFeature).not.toHaveBeenCalled()
+  })
+
+  it('places placeholders inside their group section alongside real features', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[pendingFeature('signup', 'Auth'), pendingFeature('login', 'Auth')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+    const section = container.querySelector('[data-testid="feature-group-Auth"]')
+    expect(section).toBeTruthy()
+    expect(section?.querySelector('[data-testid="pending-feature-login"]')).toBeTruthy()
+    expect(section?.querySelector('[data-testid="pending-feature-signup"]')).toBeTruthy()
+    // Count chip reflects the whole batch.
+    expect(container.querySelector('[data-testid="feature-group-toggle-Auth"]')?.textContent).toContain('2')
+  })
+})
+
 function featureRow(name: string): HTMLLIElement {
   const row = [...container.querySelectorAll('li.feature-row')]
     .find((li) => li.textContent?.includes(name))

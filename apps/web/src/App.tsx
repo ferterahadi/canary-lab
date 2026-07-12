@@ -19,6 +19,7 @@ import * as api from './shared/api/client'
 import { connectWorkspaceEvents } from './features/runs/api/workspace-socket'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
+import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import { STAGE_LABEL } from './features/flights/components/stage-meta'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { ToastHost, type ToastItem } from './features/config/components/atoms'
@@ -542,6 +543,22 @@ export function App() {
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
 
+  // R69: a First-Flight batch launch mints its flights before scaffolding their
+  // feature dirs, so the ledger would show nothing until each flight reaches
+  // scaffold. Derive placeholder rows from the (already-live) flights list so
+  // the whole batch — with its group — appears in the Features column the
+  // instant "Start N flights" fires; each stub swaps for the real feature once
+  // scaffold writes the config and `feature-created` refetches the list.
+  const featuresWithPending = useMemo(() => {
+    const pending = derivePendingFeatures(flights, features)
+    return pending.length ? [...features, ...pending] : features
+  }, [features, flights])
+
+  const openFlight = useCallback((flightId: string): void => {
+    setSelectedFlightId(flightId)
+    setView('flights')
+  }, [])
+
   const panels = [
     {
       id: 'features',
@@ -551,7 +568,7 @@ export function App() {
       collapseButtonY: 'top' as const,
       content: (
         <FeaturesColumn
-          features={features}
+          features={featuresWithPending}
           selectedFeature={selectedFeature}
           activeRunFeature={globalActiveRunEntry?.feature ?? null}
           activeRunStatus={globalActiveRunEntry?.status ?? null}
@@ -567,6 +584,7 @@ export function App() {
           versionStatus={versionStatus}
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
           onStartNewFlight={() => setFlightStartNew(true)}
+          onOpenFlight={openFlight}
         />
       ),
     },
@@ -630,7 +648,7 @@ export function App() {
         preFlights={preFlights}
         onOpenPreFlight={(taskId) => { setResumePlanTaskId(taskId); setFlightStartNew(true) }}
         activity={featureActivity}
-        onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
+        onOpenFlight={openFlight}
         flightsPickerOpen={view === 'flights' && !selectedFlightId}
         onFlightsPickerOpenChange={(open) => {
           if (open) { setSelectedFlightId(null); setView('flights') }
@@ -666,7 +684,7 @@ export function App() {
               onClose={() => setView('workspace')}
               coverageRefreshKey={coverageRefreshKey}
               generatingFlight={coverageGeneratingFlight}
-              onOpenFlight={(flightId) => { setSelectedFlightId(flightId); setView('flights') }}
+              onOpenFlight={openFlight}
             />
           : view === 'flights' && selectedFlightId
           ? <FlightPage
