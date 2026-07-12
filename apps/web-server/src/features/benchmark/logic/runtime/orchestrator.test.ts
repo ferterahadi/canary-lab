@@ -39,7 +39,10 @@ describe('BenchmarkOrchestrator.run', () => {
         return { sabotageSha: 'a1b2c3d', diff: 'D' }
       },
       writeDiff: (d) => calls.push(`diff:${d}`),
-      setupArms: async (sha) => calls.push(`setup:${sha}`),
+      setupArms: async (sha) => {
+        calls.push(`setup:${sha}`)
+        return {}
+      },
       runRace: async ({ onResult, onIterationComplete }) => {
         onResult({ arm: 'A', iteration: 1, healed: true, healCycles: 2, wallClockMs: 100 })
         onResult({ arm: 'B', iteration: 1, healed: false, healCycles: 5, wallClockMs: 200 })
@@ -76,7 +79,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => persisted.push(structuredClone(m)),
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async ({ onArmStart }) => {
         onArmStart('A', 1, 'run-A')
         onArmStart('B', 1, 'run-B')
@@ -125,7 +128,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => { final = m },
       sabotage: async () => ({ sabotageSha: 'a1b2c3d', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => '2026-06-03T02:00:00.000Z',
       isAborted: () => true,
@@ -142,7 +145,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: () => {},
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => { raceRan = true; return REPORT },
       now: () => 't',
       isAborted: () => true,
@@ -158,7 +161,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: () => {},
       sabotage: async () => { throw new Error('child killed') },
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => 't',
       isAborted: () => true,
@@ -176,7 +179,10 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: () => {},
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => { abortNow = true },
+      setupArms: async () => {
+        abortNow = true
+        return {}
+      },
       runRace: async () => { raceRan = true; return REPORT },
       now: () => 't',
       isAborted: () => abortNow,
@@ -199,7 +205,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => persisted.push(structuredClone(m)),
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async ({ onArmStart, onResult, onIterationComplete }) => {
         inRace = true
         onArmStart('A', 1, 'run-A')
@@ -227,7 +233,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => { final = m },
       sabotage: async () => { throw 'plain string failure' },
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => 't',
     })
@@ -246,7 +252,7 @@ describe('BenchmarkOrchestrator.run', () => {
         throw new Error('could not break it')
       },
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => '2026-06-03T02:00:00.000Z',
       cleanup: async () => {
@@ -268,7 +274,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => { final = m },
       sabotage: async () => ({ sabotageSha: 'a1b2c3d', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => { throw new SabotageNoopError('broke no test') },
       now: () => '2026-06-03T02:00:00.000Z',
     })

@@ -108,6 +108,7 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
     ctx: {
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
+      signal: new AbortController().signal,
       appendLog: () => {},
       setProgress: (progress) => { progressLog.push(progress) },
       patchFlight: (patch) => {
@@ -209,6 +210,28 @@ describe('context helpers', () => {
       const result = await defaultSpawnAgent({ prompt: 'x', cwd: tmpDir, stageDir })
       expect(result.text).toBe('partial answer')
     })
+
+    it('throws StageCancelledError immediately when the signal is already aborted (never spawns)', async () => {
+      const stageDir = path.join(tmpDir, 'stage-pre-aborted')
+      fs.mkdirSync(stageDir, { recursive: true })
+      const controller = new AbortController()
+      controller.abort()
+      await expect(
+        defaultSpawnAgent({ prompt: 'x', cwd: tmpDir, stageDir, signal: controller.signal }),
+      ).rejects.toThrow('agent spawn cancelled by flight pause/abort')
+      // Never spawned — no agent-session ref was ever written.
+      expect(fs.existsSync(path.join(stageDir, 'agent-session.json'))).toBe(false)
+    })
+
+    it('throws StageCancelledError when the signal is aborted mid-flight (SIGTERMs the agent)', async () => {
+      process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript('sleep 5')
+      const stageDir = path.join(tmpDir, 'stage-abort-midflight')
+      fs.mkdirSync(stageDir, { recursive: true })
+      const controller = new AbortController()
+      const result = defaultSpawnAgent({ prompt: 'x', cwd: tmpDir, stageDir, signal: controller.signal })
+      controller.abort()
+      await expect(result).rejects.toThrow('agent spawn cancelled by flight pause/abort')
+    })
   })
 
   describe('extractJson', () => {
@@ -240,6 +263,28 @@ describe('context helpers', () => {
         { what: 'thing', timeoutMs: 5000, intervalMs: 1 },
       )
       expect(value).toBe(2)
+    })
+
+    it('throws StageCancelledError immediately when the signal is already aborted', async () => {
+      const controller = new AbortController()
+      controller.abort()
+      await expect(
+        pollUntil(async () => 'x', () => true, { what: 'thing', timeoutMs: 5000, signal: controller.signal }),
+      ).rejects.toThrow('thing cancelled by flight pause/abort')
+    })
+
+    it('cancels the interval wait immediately when the signal aborts mid-wait', async () => {
+      const controller = new AbortController()
+      const promise = pollUntil(
+        async () => 'pending',
+        () => false, // never settles on its own
+        { what: 'thing', timeoutMs: 10_000, intervalMs: 10_000, signal: controller.signal },
+      )
+      // Let the poll loop reach its interval wait (setTimeout + abort listener
+      // registered) before aborting — well short of the 10s interval/timeout.
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      controller.abort()
+      await expect(promise).rejects.toThrow('thing cancelled by flight pause/abort')
     })
   })
 })
@@ -681,6 +726,40 @@ describe('scaffold stage', () => {
     const { ctx } = ctxFor(m)
     const outcome = await scaffoldStage(deps()).run(ctx)
     expect(outcome.kind).toBe('failed')
+  })
+
+  it('approve fails when feature.config.cjs disappeared while parked', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    fs.rmSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'))
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve' })
+    expect(outcome).toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('feature.config.cjs disappeared from'),
+    })
+  })
+
+  it('a "reject" choice fails the stage (legacy clients — no longer offered)', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'reject' })
+    expect(outcome).toMatchObject({ kind: 'failed', error: 'config rejected at the approval checkpoint' })
+  })
+
+  it('an entirely missing choice re-parks on the same checkpoint', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, {})
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'config-approval' } })
   })
 })
 
@@ -1246,6 +1325,79 @@ describe('docs stage', () => {
     setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'use-repo-docs' })
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'description-only' } })
+  })
+
+  it('userDocs skips a dangling symlink instead of throwing (statSync follows the link)', async () => {
+    const docsDir = path.join(featuresDir, 'checkout', 'docs')
+    fs.symlinkSync(path.join(tmpDir, 'does-not-exist.md'), path.join(docsDir, 'dangling.md'))
+    const outcome = await docsStage(deps()).run(ctxFor(manifest()).ctx)
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'prd-source', data: { docs: [] } },
+    })
+  })
+
+  it('intentDocPaths ignores an intent-referenced path that does not exist on disk', async () => {
+    const bogus = path.join(tmpDir, 'never-created.md')
+    const m = manifest({ description: `test checkout, refer to ${bogus}` })
+    const parked = await docsStage(deps()).run(ctxFor(m).ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect((parked.checkpoint.data as { linked: string[] }).linked).toEqual([])
+  })
+
+  it('expands a "~"-prefixed intent doc path before linking it', async () => {
+    const originalHome = process.env.HOME
+    process.env.HOME = tmpDir
+    try {
+      const prdPath = path.join(tmpDir, 'home-prd.md')
+      fs.writeFileSync(prdPath, '# Home PRD\nthe checkout flow')
+      const m = manifest({ description: 'test checkout, refer to ~/home-prd.md' })
+      const parked = await docsStage(deps()).run(ctxFor(m).ctx)
+      if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+      expect((parked.checkpoint.data as { linked: string[] }).linked).toEqual([path.join('docs', 'home-prd.md')])
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME
+      else process.env.HOME = originalHome
+    }
+  })
+
+  it('logs (and skips) when linking an intent doc fails — e.g. the flight points at an unknown feature', async () => {
+    const prdPath = path.join(tmpDir, 'external-prd-ghost.md')
+    fs.writeFileSync(prdPath, '# External PRD\nthe checkout flow')
+    const m = manifest({ feature: 'ghost-feature', description: `refer to ${prdPath}` })
+    const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'prd-source', data: { linked: [] } },
+    })
+  })
+
+  it('logs "copied" instead of "linked" when the symlink write falls back to a copy', async () => {
+    const prdPath = path.join(tmpDir, 'external-prd-copy.md')
+    fs.writeFileSync(prdPath, '# External PRD copy\nthe checkout flow')
+    const symlinkSpy = vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+      throw new Error('EPERM: symlinks unavailable')
+    })
+    try {
+      const m = manifest({ description: `refer to ${prdPath}` })
+      const parked = await docsStage(deps()).run(ctxFor(m).ctx)
+      if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+      expect((parked.checkpoint.data as { linked: string[] }).linked).toEqual([path.join('docs', 'external-prd-copy.md')])
+      const dest = path.join(featuresDir, 'checkout', 'docs', 'external-prd-copy.md')
+      expect(fs.lstatSync(dest).isSymbolicLink()).toBe(false)
+      expect(fs.readFileSync(dest, 'utf-8')).toContain('External PRD copy')
+    } finally {
+      symlinkSpy.mockRestore()
+    }
+  })
+
+  it('yolo with both existing docs AND an intent-linked doc reports "intent-linked" as the source', async () => {
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'prd.md'), '# PRD\nreal doc')
+    const prdPath = path.join(tmpDir, 'external-prd-yolo.md')
+    fs.writeFileSync(prdPath, '# External PRD\nthe checkout flow')
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true }, description: `refer to ${prdPath}` })
+    const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'intent-linked' } })
   })
 })
 
@@ -2176,6 +2328,93 @@ describe('run + heal stages', () => {
     const outcome = await adapter.onCheckpointResponse!(ctx, {})
     expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'run-failed' } })
   })
+
+  it('run() re-attaches to an already-linked runId instead of starting a new run (resume after restart)', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-existing') {
+        return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 1, services: [] } } }
+      }
+      return undefined // a POST /api/runs here would mean it double-started
+    }, calls)
+    const m = manifest({ links: { runId: 'run-existing' } })
+    const outcome = await runStage(deps({ inject })).run(ctxFor(m).ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-existing', status: 'passed', healCycles: 1 } })
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('run() falls through to starting fresh when the previously-linked run no longer exists', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-vanished') return { statusCode: 200, body: {} } // no manifest
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-new' } }
+      if (call.method === 'GET' && call.url === '/api/runs/run-new') {
+        return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0, services: [] } } }
+      }
+      return undefined
+    })
+    const m = manifest({ links: { runId: 'run-vanished' } })
+    const { ctx, current } = ctxFor(m)
+    const outcome = await runStage(deps({ inject })).run(ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-new', status: 'passed' } })
+    expect(current().links?.runId).toBe('run-new')
+  })
+
+  describe('interrupt (abort hook)', () => {
+    it('does nothing on a non-abort interrupt (pause keeps the run alive)', async () => {
+      const calls: InjectCall[] = []
+      const inject = makeInject(() => undefined, calls)
+      const adapter = runStage(deps({ inject }))
+      const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+      await adapter.interrupt!(ctx, 'pause')
+      expect(calls).toHaveLength(0)
+    })
+
+    it('does nothing on abort when the flight never linked a run', async () => {
+      const calls: InjectCall[] = []
+      const inject = makeInject(() => undefined, calls)
+      const adapter = runStage(deps({ inject }))
+      const { ctx } = ctxFor(manifest())
+      await adapter.interrupt!(ctx, 'abort')
+      expect(calls).toHaveLength(0)
+    })
+
+    it('does nothing on abort when the linked run has already vanished', async () => {
+      const calls: InjectCall[] = []
+      const inject = makeInject((call) => {
+        if (call.method === 'GET') return { statusCode: 200, body: {} } // no manifest
+        return undefined
+      }, calls)
+      const adapter = runStage(deps({ inject }))
+      const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+      await adapter.interrupt!(ctx, 'abort')
+      expect(calls.some((c) => c.url.endsWith('/abort'))).toBe(false)
+    })
+
+    it('does nothing on abort when the linked run is already terminal', async () => {
+      const calls: InjectCall[] = []
+      const inject = makeInject((call) => {
+        if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'passed', services: [] } } }
+        return undefined
+      }, calls)
+      const adapter = runStage(deps({ inject }))
+      const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+      await adapter.interrupt!(ctx, 'abort')
+      expect(calls.some((c) => c.url.endsWith('/abort'))).toBe(false)
+    })
+
+    it('aborts the linked run when it is still active', async () => {
+      const calls: InjectCall[] = []
+      const inject = makeInject((call) => {
+        if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'running', services: [] } } }
+        if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }
+        return undefined
+      }, calls)
+      const adapter = runStage(deps({ inject }))
+      const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+      await adapter.interrupt!(ctx, 'abort')
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs/run-1/abort')).toBe(true)
+    })
+  })
 })
 
 describe('evaluation-export stage', () => {
@@ -2378,5 +2617,22 @@ describe('evaluation-export stage', () => {
     })
     const outcome = await evaluationExportStage(deps({ inject })).run(ctxFor(yoloRun({ runId: 'run-1' })).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no archive at') })
+  })
+
+  it('onCheckpointResponse fails cleanly when there is no run to export (state without a runId)', async () => {
+    const adapter = evaluationExportStage(deps())
+    const { ctx } = ctxFor(manifest()) // no links.runId at all
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'raw' })
+    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no run to export') })
+  })
+
+  it('onCheckpointResponse re-parks on export-mode when the response carries no choice at all', async () => {
+    const adapter = evaluationExportStage(deps())
+    const { ctx, setStage } = ctxFor(manifest({ links: { runId: 'run-1' } }))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('evaluation-export', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, {})
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'export-mode' } })
   })
 })

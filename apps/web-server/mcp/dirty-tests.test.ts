@@ -26,6 +26,9 @@ function dirtyRecord(feature: string): DirtySpecRecord {
     lastGreenHashes: {},
     runStartHashes: {},
     approvedHashes: {},
+    lastGreenTestHashes: {},
+    runStartTestHashes: {},
+    approvedTestHashes: {},
     message: '⚠️ Tests have been modified, please review.',
     since: 't0',
   }
@@ -37,7 +40,7 @@ function makeDeps(run: RunDetail, dirty?: DirtySpecRecord): CanaryLabMcpDeps {
     broker: {} as ExternalHealBroker,
     featuresDir: '/tmp/features',
     projectRoot: '/tmp',
-    startRun: async () => ({ runId: 'r' }),
+    startRun: async () => ({ kind: 'started', runId: 'r' }),
     dirtySpecStore: dirty
       ? ({ get: () => dirty } as unknown as DirtySpecStore)
       : ({ get: () => null } as unknown as DirtySpecStore),

@@ -4,8 +4,12 @@ import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const spawnMock = vi.fn(() => ({ unref: vi.fn() }))
-const spawnSyncMock = vi.fn(() => ({ status: 1 }))
+const spawnMock = vi.fn((_command: string, _args: readonly string[], _options?: unknown) => ({
+  unref: vi.fn(),
+}))
+const spawnSyncMock = vi.fn(
+  (_command: string, _args: readonly string[], _options?: unknown) => ({ status: 1 }),
+)
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
   return { ...actual, spawn: spawnMock, spawnSync: spawnSyncMock }

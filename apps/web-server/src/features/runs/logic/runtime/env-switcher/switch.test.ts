@@ -199,6 +199,26 @@ describe('backup / applySet / restore round-trip', () => {
     applySet(path.join(root, 'envsets'), 'local', [{ slot: 'app.env', targetPath }])
     expect(fs.readFileSync(targetPath, 'utf-8')).toBe('PORT=${port.api}')
   })
+
+  it('applySet skips a slot whose source file is absent from the set', () => {
+    const root = mkTmp()
+    const setDir = path.join(root, 'envsets', 'local')
+    fs.mkdirSync(setDir, { recursive: true })
+    // No 'missing.env' written into setDir.
+    const targetPath = path.join(root, 'missing.env')
+    applySet(path.join(root, 'envsets'), 'local', [{ slot: 'missing.env', targetPath }])
+    expect(fs.existsSync(targetPath)).toBe(false)
+  })
+
+  it('restore skips a record whose backup file no longer exists', () => {
+    const root = mkTmp()
+    const originalPath = path.join(root, 'a.env')
+    fs.writeFileSync(originalPath, 'CURRENT')
+    const backupPath = path.join(root, 'a.env.bak.999') // never created
+    restore([{ originalPath, backupPath }])
+    expect(fs.readFileSync(originalPath, 'utf-8')).toBe('CURRENT')
+    expect(fs.existsSync(backupPath)).toBe(false)
+  })
 })
 
 function seedFeature(root: string, featureName: string, sets: Record<string, Record<string, string>>) {
@@ -364,6 +384,60 @@ describe('main (switch orchestration)', () => {
     expect(spawn).toHaveBeenCalledOnce()
   })
 
+  it('interactive mode: empty answer defaults to choice "1"', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    const { featureDir } = seedFeature(root, 'feat', {
+      local: { 'feat.env': 'LOCAL=1' },
+      staging: { 'feat.env': 'STAGING=1' },
+    })
+    const target = path.join(featureDir, '.env')
+    fs.writeFileSync(target, 'OLD')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as any)
+
+    // Pressing enter with no input -> answer === '' -> defaults to '1' -> first
+    // set alphabetically ("local").
+    createInterface.mockImplementation(() => ({
+      question: (_q: string, cb: (a: string) => void) => cb(''),
+      close: () => {},
+    }))
+    const child: any = new EventEmitter()
+    spawn.mockImplementation(() => child)
+
+    await main(['feat'])
+
+    expect(fs.readFileSync(target, 'utf-8')).toBe('LOCAL=1')
+    expect(spawn).toHaveBeenCalledOnce()
+  })
+
+  it('interactive mode: re-prompts on a numeric answer outside the set range', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    const { featureDir } = seedFeature(root, 'feat', {
+      local: { 'feat.env': 'LOCAL=1' },
+    })
+    const target = path.join(featureDir, '.env')
+    fs.writeFileSync(target, 'OLD')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as any)
+
+    // Only one set exists ("local" = choice 1); "5" is numeric but out of range,
+    // exercising the `asNumber <= envSets.length` false arm distinctly from the
+    // NaN case already covered above.
+    const answers = ['5', 'local']
+    createInterface.mockImplementation(() => ({
+      question: (_q: string, cb: (a: string) => void) => cb(answers.shift()!),
+      close: () => {},
+    }))
+    const child: any = new EventEmitter()
+    spawn.mockImplementation(() => child)
+
+    await main(['feat'])
+    expect(answers).toHaveLength(0)
+    expect(spawn).toHaveBeenCalledOnce()
+  })
+
   it('interactive mode: empty envsets dir exits 1', async () => {
     const root = mkTmp()
     vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
@@ -382,6 +456,28 @@ describe('main (switch orchestration)', () => {
 
     await main(['feat', '--revert'])
 
+    const messages = logSpy.mock.calls.map((c) => String(c[0]))
+    expect(messages.some((m) => m.includes('No backup files found'))).toBe(true)
+  })
+
+  it('--revert skips a target whose directory does not exist on disk', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    const envSetsDir = path.join(root, 'features', 'feat', 'envsets')
+    fs.mkdirSync(envSetsDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(envSetsDir, 'envsets.config.json'),
+      JSON.stringify({
+        appRoots: {},
+        slots: { 'feat.env': { target: '$CANARY_LAB_PROJECT_ROOT/never-created-dir/.env' } },
+        feature: { slots: ['feat.env'], testCommand: 'echo hi', testCwd: '$CANARY_LAB_PROJECT_ROOT' },
+      }),
+    )
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['feat', '--revert'])
+
+    expect(fs.existsSync(path.join(root, 'never-created-dir'))).toBe(false)
     const messages = logSpy.mock.calls.map((c) => String(c[0]))
     expect(messages.some((m) => m.includes('No backup files found'))).toBe(true)
   })
@@ -412,6 +508,36 @@ describe('main (switch orchestration)', () => {
     expect(fs.readFileSync(target, 'utf-8')).toBe('LOCAL=1')
 
     expect(() => child.emit('close', 2)).toThrow('__exit__2')
+    expect(fs.readFileSync(target, 'utf-8')).toBe('OLD')
+
+    exitSpy.mockRestore()
+  })
+
+  it('interactive mode: child close with no exit code defaults to 0 (nullish coalescing)', async () => {
+    const root = mkTmp()
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', root)
+    const { featureDir } = seedFeature(root, 'feat', {
+      local: { 'feat.env': 'LOCAL=1' },
+    })
+    const target = path.join(featureDir, '.env')
+    fs.writeFileSync(target, 'OLD')
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    vi.spyOn(process.stdout, 'write').mockImplementation((() => true) as any)
+
+    createInterface.mockImplementation(() => ({
+      question: (_q: string, cb: (a: string) => void) => cb('1'),
+      close: () => {},
+    }))
+    const child: any = new EventEmitter()
+    spawn.mockImplementation(() => child)
+
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__${code}`)
+    }) as never)
+
+    await main(['feat'])
+    // No code argument passed -> `code ?? 0` falls back to 0.
+    expect(() => child.emit('close')).toThrow('__exit__0')
     expect(fs.readFileSync(target, 'utf-8')).toBe('OLD')
 
     exitSpy.mockRestore()

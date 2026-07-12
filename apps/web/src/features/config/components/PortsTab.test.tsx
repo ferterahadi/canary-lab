@@ -48,22 +48,27 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(checkPathExists).mockReset().mockResolvedValue({ exists: true })
   vi.mocked(getFeatureConfigDoc).mockReset()
-  vi.mocked(getGitRemote).mockReset().mockResolvedValue({})
+  vi.mocked(getGitRemote).mockReset().mockResolvedValue({ cloneUrl: null })
   vi.mocked(getRepoGitStatus).mockReset().mockResolvedValue({
+    path: '/Users/dev/Documents/my-backend',
+    expectedBranch: null,
     isGitRepo: false,
     currentBranch: null,
+    detached: false,
     dirty: false,
     dirtyFiles: [],
     localBranches: [],
     remoteBranches: [],
   })
-  vi.mocked(removePortifyOverlay).mockReset().mockResolvedValue({ name: 'cns_exactly_once_fallback', portified: false })
+  vi.mocked(removePortifyOverlay)
+    .mockReset()
+    .mockResolvedValue({ name: 'cns_exactly_once_fallback', portified: false, reverted: true })
 })
 
 afterEach(() => {

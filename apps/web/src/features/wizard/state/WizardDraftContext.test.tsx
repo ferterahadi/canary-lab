@@ -289,12 +289,12 @@ describe('WizardDraftProvider', () => {
 
     const created = await act(async () => captured.value!.startDraft({
       prdText: 'checkout',
-      prdDocuments: [{ name: 'prd.md', text: 'PRD' }],
+      prdDocuments: [{ filename: 'prd.md', contentType: 'text/markdown', characters: 3, text: 'PRD' }],
       repos: [{ name: 'app', localPath: '/app' }],
     }))
 
     expect(created.activeAgentStage).toBeUndefined()
-    expect(created.prdDocuments).toEqual([{ name: 'prd.md', text: 'PRD' }])
+    expect(created.prdDocuments).toEqual([{ filename: 'prd.md', contentType: 'text/markdown', characters: 3, text: 'PRD' }])
   })
 
   it('opens a fresh wizard and ignores startup list failures', async () => {

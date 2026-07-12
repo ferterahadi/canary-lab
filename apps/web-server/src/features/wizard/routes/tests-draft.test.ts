@@ -66,6 +66,7 @@ import {
   runSpecStage,
   selectPlanTemplate,
   testsDraftRoutes,
+  type PlanAgentInput,
   type TestsDraftRouteDeps,
 } from './tests-draft'
 import {
@@ -124,7 +125,7 @@ describe('POST /api/tests/draft', () => {
   })
 
   it('starts diff-only planning when no documents or notes are provided', async () => {
-    const spawnPlanAgent = vi.fn(async () => '<plan-output>[]</plan-output>')
+    const spawnPlanAgent = vi.fn<(input: PlanAgentInput) => Promise<string>>(async () => '<plan-output>[]</plan-output>')
     const deps = makeDeps({ spawnPlanAgent })
     const app = await makeApp(deps)
     const r = await app.inject({
@@ -144,7 +145,7 @@ describe('POST /api/tests/draft', () => {
   })
 
   it('keeps context planning when notes are provided', async () => {
-    const spawnPlanAgent = vi.fn(async () => '<plan-output>[]</plan-output>')
+    const spawnPlanAgent = vi.fn<(input: PlanAgentInput) => Promise<string>>(async () => '<plan-output>[]</plan-output>')
     const deps = makeDeps({ spawnPlanAgent })
     const app = await makeApp(deps)
     const r = await app.inject({
@@ -164,7 +165,7 @@ describe('POST /api/tests/draft', () => {
   })
 
   it('keeps context planning when documents are provided', async () => {
-    const spawnPlanAgent = vi.fn(async () => '<plan-output>[]</plan-output>')
+    const spawnPlanAgent = vi.fn<(input: PlanAgentInput) => Promise<string>>(async () => '<plan-output>[]</plan-output>')
     const deps = makeDeps({ spawnPlanAgent })
     const app = await makeApp(deps)
     const r = await app.inject({
@@ -2083,11 +2084,10 @@ describe('helper-level branches', () => {
       prdText: 'X',
       repos: [{ name: 'app', localPath: '/p' }],
       featureName: 'nogen',
-      intentSummary: 'a summary',
     })
     transition(logsDir, id, 'planning')
     transition(logsDir, id, 'plan-ready', { plan: [] })
-    transition(logsDir, id, 'generating')
+    transition(logsDir, id, 'generating', { intentSummary: 'a summary' })
     transition(logsDir, id, 'spec-ready')
     // Intentionally do NOT create the generated/ directory.
     expect(fs.existsSync(draftPaths(logsDir, id).generatedDir)).toBe(false)

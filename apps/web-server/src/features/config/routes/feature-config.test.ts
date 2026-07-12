@@ -1715,3 +1715,659 @@ describe('envset CRUD + envs sync', () => {
     }
   })
 })
+
+describe('config file not found on disk (declared featureDir mismatch)', () => {
+  // findExistingConfig looks under the feature's *declared* featureDir (a field
+  // inside feature.config.cjs), not the folder loadFeatures scanned it from.
+  // Pointing featureDir elsewhere — with no config file there — deterministically
+  // reaches the "config file not found" 404 without deleting anything mid-request.
+  it('GET config-doc 404s when the declared featureDir has no config file', async () => {
+    const bogusDir = path.join(tmpDir, 'ghost-config-doc')
+    buildFeature('nocfg-get', {
+      config: `module.exports = { config: { name: 'nocfg-get', description: 'd', envs: [], repos: [], featureDir: ${JSON.stringify(bogusDir)} } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/nocfg-get/config-doc' })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('config file not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('PUT config-doc 404s when the declared featureDir has no config file', async () => {
+    const bogusDir = path.join(tmpDir, 'ghost-config-doc-put')
+    buildFeature('nocfg-put', {
+      config: `module.exports = { config: { name: 'nocfg-put', description: 'd', envs: [], repos: [], featureDir: ${JSON.stringify(bogusDir)} } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/features/nocfg-put/config-doc',
+        payload: { value: { name: 'nocfg-put' } },
+      })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('config file not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('POST envsets creates the env dir but skips config sync when featureDir has no config file', async () => {
+    const bogusDir = path.join(tmpDir, 'ghost-envset-sync')
+    buildFeature('nocfg-env', {
+      config: `module.exports = { config: { name: 'nocfg-env', description: 'd', envs: [], repos: [], featureDir: ${JSON.stringify(bogusDir)} } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/nocfg-env/envsets',
+        payload: { env: 'local' },
+      })
+      expect(r.statusCode).toBe(201)
+      // Env folder created under the (bogus) declared featureDir...
+      expect(fs.existsSync(path.join(bogusDir, 'envsets', 'local', 'feature.env'))).toBe(true)
+      // ...but syncEnvsInConfig finds no config file there and returns early
+      // (no throw, nothing written) — the request still succeeds.
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('pin-current-branches error branches', () => {
+  it('404 for unknown feature', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/missing/pin-current-branches' })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('feature not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('404 when the declared featureDir has no config file', async () => {
+    const bogusDir = path.join(tmpDir, 'ghost-pin')
+    buildFeature('nocfg-pin', {
+      config: `module.exports = { config: { name: 'nocfg-pin', description: 'd', envs: [], repos: [], featureDir: ${JSON.stringify(bogusDir)} } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/nocfg-pin/pin-current-branches' })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('config file not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('409 when a configured repo is not a git repository', async () => {
+    const notGit = path.join(tmpDir, 'not-a-repo')
+    fs.mkdirSync(notGit, { recursive: true })
+    buildFeature('pin-notgit', {
+      config: `module.exports = { config: { name: 'pin-notgit', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(notGit)} }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/pin-notgit/pin-current-branches' })
+      expect(r.statusCode).toBe(409)
+      expect(r.json().error).toContain('no branch to pin')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when the config has no editable repos array', async () => {
+    buildFeature('pin-norepos', {
+      config: `module.exports = { config: { name: 'pin-norepos', description: 'd', envs: [], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/pin-norepos/pin-current-branches' })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('config has no editable repos array')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('skips repos with no localPath to pin, and raw config entries with no matching pin', async () => {
+    const repo = buildGitRepo('pin-mixed-repo')
+    buildFeature('pin-mixed', {
+      config: `module.exports = { config: { name: 'pin-mixed', description: 'd', envs: [], repos: [{ name: 'good', localPath: ${JSON.stringify(repo)} }, { name: 'nopath' }, 'junk-entry'], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/pin-mixed/pin-current-branches' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toMatchObject({ name: 'pin-mixed', pins: [{ name: 'good', branch: 'main' }] })
+      const onDisk = fs.readFileSync(path.join(featuresDir, 'pin-mixed', 'feature.config.cjs'), 'utf-8')
+      expect(onDisk).toContain("branch: 'main'")
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('repo checkout endpoint error branches', () => {
+  it('404 for unknown feature', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/missing/repos/app/checkout',
+        payload: { branch: 'main' },
+      })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('feature not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('404 for unknown repo', async () => {
+    buildFeature('checkout-norepo', {
+      config: `module.exports = { config: { name: 'checkout-norepo', description: 'd', envs: [], repos: [], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout-norepo/repos/missing/checkout',
+        payload: { branch: 'main' },
+      })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('repo not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when branch is missing from the request body', async () => {
+    const repo = buildGitRepo('checkout-nobranch-repo')
+    buildFeature('checkout-nobranch', {
+      config: `module.exports = { config: { name: 'checkout-nobranch', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout-nobranch/repos/app/checkout',
+        payload: {},
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('branch required')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when branch is whitespace only', async () => {
+    const repo = buildGitRepo('checkout-wsbranch-repo')
+    buildFeature('checkout-wsbranch', {
+      config: `module.exports = { config: { name: 'checkout-wsbranch', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout-wsbranch/repos/app/checkout',
+        payload: { branch: '   ' },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('branch required')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('500s (default status) when the repo has no localPath to resolve', async () => {
+    buildFeature('checkout-nolocalpath', {
+      config: `module.exports = { config: { name: 'checkout-nolocalpath', description: 'd', envs: [], repos: [{ name: 'app' }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout-nolocalpath/repos/app/checkout',
+        payload: { branch: 'main' },
+      })
+      // checkoutBranch throws a plain TypeError (no .statusCode) when localPath
+      // is undefined — exercises the ternary's `: 500` default branch.
+      expect(r.statusCode).toBe(500)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('repo git-status endpoint error + branch-less branches', () => {
+  it('404 for unknown feature', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/missing/repos/app/git' })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('feature not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('404 for unknown repo', async () => {
+    buildFeature('git-norepo', {
+      config: `module.exports = { config: { name: 'git-norepo', description: 'd', envs: [], repos: [], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/git-norepo/repos/missing/git' })
+      expect(r.statusCode).toBe(404)
+      expect(r.json().error).toBe('repo not found')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('expectedBranch is null when the repo has no configured branch', async () => {
+    const repo = buildGitRepo('git-nobranch-repo')
+    buildFeature('git-nobranch', {
+      config: `module.exports = { config: { name: 'git-nobranch', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/git-nobranch/repos/app/git' })
+      expect(r.statusCode).toBe(200)
+      expect(r.json().expectedBranch).toBeNull()
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('envsets create — additional branches', () => {
+  it('400 when env name resolves outside the envsets dir', async () => {
+    buildFeature('env-traverse')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/env-traverse/envsets',
+        payload: { env: '..' },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('invalid env name')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when no request body is sent', async () => {
+    buildFeature('env-nobody')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/env-nobody/envsets' })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('skips non-file entries when seeding a new env from an existing one', async () => {
+    const dir = buildFeature('env-seed-skip-dir', {
+      envsets: { local: { 'feature.env': 'A=1\n' } },
+    })
+    // A subdirectory inside the source env — must be skipped, only files copied.
+    fs.mkdirSync(path.join(dir, 'envsets', 'local', 'a-subdir'), { recursive: true })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/env-seed-skip-dir/envsets',
+        payload: { env: 'staging' },
+      })
+      expect(r.statusCode).toBe(201)
+      const stagingDir = path.join(featuresDir, 'env-seed-skip-dir', 'envsets', 'staging')
+      expect(fs.existsSync(path.join(stagingDir, 'feature.env'))).toBe(true)
+      expect(fs.existsSync(path.join(stagingDir, 'a-subdir'))).toBe(false)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('envsets GET — slot entries branch coverage', () => {
+  it('skips non-object slot entries and object slots missing description/target', async () => {
+    buildFeature('slots-weird', {
+      envsets: { local: { 'app.env': 'A=1' } },
+      envsetsConfig: JSON.stringify({ slots: { 'app.env': {}, 'other.env': 'not-an-object' } }),
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/features/slots-weird/envsets' })
+      expect(r.statusCode).toBe(200)
+      const body = r.json() as { slotDescriptions: Record<string, string>; slotTargets: Record<string, string> }
+      expect(body.slotDescriptions).toEqual({})
+      expect(body.slotTargets).toEqual({})
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('envset slot management — additional branches', () => {
+  it('falls back to sourcePath when target is whitespace-only', async () => {
+    buildFeature('alpha-ws-target', { envsets: { local: { 'feature.env': '' } } })
+    const seedFile = path.join(tmpDir, 'seed-ws.env')
+    fs.writeFileSync(seedFile, '')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/alpha-ws-target/envsets/slots',
+        payload: { sourcePath: seedFile, slotName: 'ws.env', target: '   ' },
+      })
+      expect(r.statusCode).toBe(201)
+      const cfg = JSON.parse(
+        fs.readFileSync(path.join(featuresDir, 'alpha-ws-target', 'envsets', 'envsets.config.json'), 'utf-8'),
+      ) as { slots: Record<string, { target: string }> }
+      expect(cfg.slots['ws.env'].target).toBe(seedFile)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE 204s as a no-op when the envsets dir does not exist at all', async () => {
+    buildFeature('slot-del-nodir')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/slot-del-nodir/envsets/slots/whatever.env',
+      })
+      expect(r.statusCode).toBe(204)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('DELETE skips envs that never had the slot file in the first place', async () => {
+    buildFeature('slot-del-partial', {
+      envsets: {
+        local: { 'extra.env': 'A=1' },
+        // 'prod' never had extra.env — fs.existsSync(slotPath) is false there.
+        prod: { 'feature.env': '' },
+      },
+      envsetsConfig: JSON.stringify({
+        slots: { 'extra.env': { description: '' } },
+        feature: { slots: ['extra.env'] },
+      }),
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'DELETE',
+        url: '/api/features/slot-del-partial/envsets/slots/extra.env',
+      })
+      expect(r.statusCode).toBe(204)
+      expect(fs.existsSync(path.join(featuresDir, 'slot-del-partial', 'envsets', 'local', 'extra.env'))).toBe(false)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('GET /api/fs/read-dotenv — tilde expansion', () => {
+  it('expands ~/ before checking existence', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: '/api/fs/read-dotenv?path=~/__cl_test_does_not_exist__.env',
+      })
+      expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('GET /api/fs/browse — additional branches', () => {
+  it('resolves a relative dir against home (falls back when not found)', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: '/api/fs/browse?dir=__cl_relative_nonexistent__',
+      })
+      expect(r.statusCode).toBe(200)
+      expect((r.json() as { dir: string }).dir).toBe(os.homedir())
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('parent is null at the filesystem root', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/fs/browse?dir=/' })
+      expect(r.statusCode).toBe(200)
+      expect((r.json() as { dir: string; parent: string | null }).parent).toBeNull()
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('GET /api/workspace/dirs — additional branches', () => {
+  it('resolves a relative at against home', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: '/api/workspace/dirs?at=__cl_relative_nonexistent__',
+      })
+      expect(r.statusCode).toBe(200)
+      expect((r.json() as { absolute: string }).absolute).toBe(os.homedir())
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('parent is null at the filesystem root', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/workspace/dirs?at=/' })
+      expect(r.statusCode).toBe(200)
+      expect((r.json() as { parent: string | null }).parent).toBeNull()
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('GET /api/workspace/git-remote — origin block with a non-url line first', () => {
+  it('skips non-url lines before finding the url= line', async () => {
+    const repoDir = path.join(tmpDir, 'reordered-remote')
+    fs.mkdirSync(path.join(repoDir, '.git'), { recursive: true })
+    fs.writeFileSync(
+      path.join(repoDir, '.git', 'config'),
+      `[core]\n\trepositoryformatversion = 0\n[remote "origin"]\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\turl = git@github.com:org/reordered.git\n`,
+    )
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/workspace/git-remote?path=${encodeURIComponent(repoDir)}`,
+      })
+      expect(r.statusCode).toBe(200)
+      expect(r.json()).toEqual({ cloneUrl: 'git@github.com:org/reordered.git' })
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('GET /api/workspace/git-status — error branches', () => {
+  it('400 when path missing', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'GET', url: '/api/workspace/git-status' })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('path query required')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when path is relative', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'GET',
+        url: '/api/workspace/git-status?path=relative/path',
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('path must be absolute or start with ~')
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('POST /api/workspace/checkout — error branches', () => {
+  it('400 when branch missing (path present)', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/checkout',
+        payload: { path: tmpDir },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('path and branch required')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when path missing (branch present)', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/checkout',
+        payload: { branch: 'main' },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('path and branch required')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('400 when path is relative', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/checkout',
+        payload: { path: 'relative/path', branch: 'main' },
+      })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('path must be absolute or start with ~')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('409 when the target repo is dirty (propagates checkoutBranch statusCode)', async () => {
+    const repo = buildGitRepo('workspace-checkout-dirty')
+    fs.writeFileSync(path.join(repo, 'dirty.txt'), 'dirty\n')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/checkout',
+        payload: { path: repo, branch: 'feature/demo' },
+      })
+      expect(r.statusCode).toBe(409)
+      expect(r.json().error).toContain('uncommitted changes')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('500s (default status) when branch is not a string', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/checkout',
+        payload: { path: tmpDir, branch: 123 },
+      })
+      // branch.trim() throws a plain TypeError (no .statusCode) before
+      // checkoutBranch even runs — exercises the ternary's `: 500` default.
+      expect(r.statusCode).toBe(500)
+    } finally {
+      await app.close()
+    }
+  })
+})
+
+describe('POST /api/workspace/clone — additional branches', () => {
+  it('400 when no request body is sent at all', async () => {
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/workspace/clone' })
+      expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('500 with "unknown error" fallback when git clone fails silently (no stderr)', async () => {
+    const fakeBin = path.join(tmpDir, 'fakebin-silent')
+    fs.mkdirSync(fakeBin, { recursive: true })
+    const fakeGit = path.join(fakeBin, 'git')
+    fs.writeFileSync(fakeGit, '#!/bin/sh\nexit 1\n')
+    fs.chmodSync(fakeGit, 0o755)
+    const origPath = process.env.PATH
+    process.env.PATH = `${fakeBin}:${origPath ?? ''}`
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/clone',
+        payload: { cloneUrl: 'git@x:o/r.git', parentDir: tmpDir, repoName: 'silent-fail' },
+      })
+      expect(r.statusCode).toBe(500)
+      expect((r.json() as { error: string }).error).toBe('git clone failed: unknown error')
+    } finally {
+      process.env.PATH = origPath
+      await app.close()
+    }
+  })
+
+  it('500 when the git binary cannot be found on PATH (spawn error event)', async () => {
+    const emptyBin = path.join(tmpDir, 'empty-bin')
+    fs.mkdirSync(emptyBin, { recursive: true })
+    const origPath = process.env.PATH
+    process.env.PATH = emptyBin // no git binary anywhere on this PATH
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/clone',
+        payload: { cloneUrl: 'git@x:o/r.git', parentDir: tmpDir, repoName: 'no-git-binary' },
+      })
+      expect(r.statusCode).toBe(500)
+      expect((r.json() as { error: string }).error).toContain('git clone failed')
+    } finally {
+      process.env.PATH = origPath
+      await app.close()
+    }
+  })
+})

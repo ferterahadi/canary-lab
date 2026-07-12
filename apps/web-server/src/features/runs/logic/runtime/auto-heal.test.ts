@@ -15,6 +15,7 @@ import {
   renderTraceExtractHint,
   resolveAgentBinary,
   type AgentResolveDeps,
+  type HealAgent,
 } from './auto-heal'
 
 import { renderPersonalWikiMap } from '../../../../../../../shared/runtime/personal-wiki'

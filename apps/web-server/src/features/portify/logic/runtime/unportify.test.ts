@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import { stripPortSlots, revertPortification } from './unportify'
 import { writeOverlay, overlayDir } from './overlay'
+import type { ConfigValue } from '../../../config/logic/config-ast'
 
 let tmpDir: string
 beforeEach(() => {
@@ -18,7 +19,10 @@ afterEach(() => {
 describe('stripPortSlots', () => {
   it('returns null for non-object values', () => {
     expect(stripPortSlots(null)).toBeNull()
-    expect(stripPortSlots(undefined)).toBeNull()
+    // `undefined` is outside ConfigValue's contract (it mirrors JSON, which has
+    // no `undefined`) but the guard is defensive against a JS caller passing one
+    // anyway — exercise it explicitly with a cast past the type.
+    expect(stripPortSlots(undefined as unknown as ConfigValue)).toBeNull()
     expect(stripPortSlots('string')).toBeNull()
     expect(stripPortSlots([])).toBeNull()
   })

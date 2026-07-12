@@ -103,21 +103,21 @@ describe('service status updates', () => {
       manifestPath,
       makeManifest({
         services: [
-          { name: 'api', safeName: 'api', status: 'starting' },
-          { name: 'web', safeName: 'web', status: 'starting' },
+          { name: 'api', safeName: 'api', command: 'go run', cwd: '/x', logPath: '/x/api.log', status: 'starting' },
+          { name: 'web', safeName: 'web', command: 'npm start', cwd: '/y', logPath: '/y/web.log', status: 'starting' },
         ],
       }),
     )
-    const next = updateServiceStatus(manifestPath, 'api', 'healthy')
-    expect(next?.services.find((s) => s.safeName === 'api')?.status).toBe('healthy')
+    const next = updateServiceStatus(manifestPath, 'api', 'ready')
+    expect(next?.services.find((s) => s.safeName === 'api')?.status).toBe('ready')
     expect(next?.services.find((s) => s.safeName === 'web')?.status).toBe('starting')
     expect(readManifest(manifestPath)?.services.find((s) => s.safeName === 'api')?.status).toBe(
-      'healthy',
+      'ready',
     )
   })
 
   it('updateServiceStatus returns null when manifest is missing', () => {
-    expect(updateServiceStatus(path.join(tmpDir, 'nope.json'), 'api', 'healthy')).toBeNull()
+    expect(updateServiceStatus(path.join(tmpDir, 'nope.json'), 'api', 'ready')).toBeNull()
   })
 
 })

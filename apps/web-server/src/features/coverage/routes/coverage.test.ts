@@ -330,7 +330,8 @@ describe('coverage routes', () => {
       path.join(staleFeatureDir, 'feature.config.cjs.bak'),
     )
 
-    const states = (await app.inject({ method: 'GET', url: '/api/coverage/states' })).json() as Array<{
+    const statesRes = await app.inject({ method: 'GET', url: '/api/coverage/states' })
+    const states = statesRes.json() as Array<{
       feature: string
       headline: string | null
       summary: string | null
@@ -341,7 +342,7 @@ describe('coverage routes', () => {
     // ghost-feature may or may not appear — what matters is: if it appears,
     // headline must be null (computation failed); and the rest of the features
     // must still return without a 500.
-    expect(states.statusCode).toBeUndefined() // array, not an error object
+    expect(statesRes.statusCode).toBe(200) // 200 with an array body, not an error object
     const entry = states.find((s) => s.feature === 'ghost-feature')
     if (entry) {
       expect(entry.headline).toBeNull()
@@ -717,6 +718,33 @@ describe('coverage-redo backflow into the flight record', () => {
     }
   })
 
+  it('is a no-op reopen when flightStore is present but no flight exists for the feature (line 196 false branch)', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\ncart' })
+    const flightStore = new FlightRunStore(logsDir)
+    // No flight saved for 'checkout' — latestForFeature() returns null, so the
+    // `if (record)` guard must skip reopenStages entirely without throwing.
+
+    const backflowApp = Fastify()
+    await backflowApp.register(coverageRoutes, {
+      featuresDir,
+      logsDir,
+      projectRoot: tmpDir,
+      flightStore,
+      workspaceEvents: { publish: (e) => events.push(e) },
+    })
+    await backflowApp.ready()
+    try {
+      const res = await backflowApp.inject({ method: 'DELETE', url: '/api/features/checkout/prd-summary' })
+      expect(res.statusCode).toBe(200)
+      // Still un-tags docs + notifies clients — just skips the flight-reopen path.
+      expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
+      expect(events).toContainEqual({ type: 'tests-changed', feature: 'checkout' })
+      expect(events.some((e) => e.type === 'flights-changed')).toBe(false)
+    } finally {
+      await backflowApp.close()
+    }
+  })
+
   it('leaves an ACTIVE flight untouched (the running conductor owns it)', async () => {
     writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\ncart' })
     const flightStore = new FlightRunStore(logsDir)
@@ -781,6 +809,26 @@ describe('POST /api/features/:name/docs/link + symlink-aware listing', () => {
     expect(list.statusCode).toBe(200)
     const docs = (list.json() as { docs: Array<Record<string, unknown>> }).docs
     expect(docs.find((d) => d.relPath === 'gone.md')).toMatchObject({ linked: true, broken: true })
+  })
+
+  it('links a local path using an explicit relPath override (line 154 true branch)', async () => {
+    writeFeature('checkout', SPEC)
+    const target = path.join(tmpDir, 'external-prd.md')
+    fs.writeFileSync(target, '# External')
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/docs/link',
+      payload: { path: target, relPath: 'renamed-prd.md' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as { relativePath: string }).relativePath).toContain('renamed-prd.md')
+
+    const list = await app.inject({ method: 'GET', url: '/api/features/checkout/docs' })
+    const docs = (list.json() as { docs: Array<Record<string, unknown>> }).docs
+    // The default basename ('external-prd.md') must NOT be used — the explicit
+    // relPath took over the doc's name inside docs/.
+    expect(docs.find((d) => d.relPath === 'renamed-prd.md')).toBeTruthy()
+    expect(docs.find((d) => d.relPath === 'external-prd.md')).toBeUndefined()
   })
 
   it('validates the body and maps lib failures to 400/404', async () => {

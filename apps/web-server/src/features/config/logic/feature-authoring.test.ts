@@ -658,6 +658,47 @@ describe('linkFeatureDoc', () => {
     expect(res).toMatchObject({ ok: true, linked: true })
     expect(fs.readFileSync(path.join(featureDir, 'docs', 'prd.md'), 'utf8')).toBe('linked now')
   })
+
+  it('rejects an explicit relPath with a disallowed extension (allowTxt error branch)', () => {
+    writeFeatureConfig('link_bad_relpath')
+    const target = path.join(tmpDir, 'external.md')
+    fs.writeFileSync(target, '# External')
+    const res = linkFeatureDoc(ctx(), { feature: 'link_bad_relpath', targetPath: target, relPath: 'notes.bin' })
+    expect(res).toEqual({ ok: false, error: 'relPath must end in .md, .markdown or .txt' })
+  })
+
+  it('rejects an explicit relPath that escapes the docs directory', () => {
+    const featureDir = writeFeatureConfig('link_escape')
+    const target = path.join(tmpDir, 'external.md')
+    fs.writeFileSync(target, '# External')
+    const res = linkFeatureDoc(ctx(), { feature: 'link_escape', targetPath: target, relPath: '../escape.md' })
+    expect(res).toEqual({ ok: false, error: 'relPath must not escape the docs directory' })
+    expect(fs.existsSync(path.join(featureDir, 'escape.md'))).toBe(false)
+  })
+
+  it('rejects linking a target that already lives inside the docs directory', () => {
+    const featureDir = writeFeatureConfig('link_self')
+    const docsDir = path.join(featureDir, 'docs')
+    fs.mkdirSync(docsDir, { recursive: true })
+    const alreadyInDocs = path.join(docsDir, 'existing.md')
+    fs.writeFileSync(alreadyInDocs, '# Already here')
+    const res = linkFeatureDoc(ctx(), { feature: 'link_self', targetPath: alreadyInDocs })
+    expect(res).toEqual({ ok: false, error: 'target is already inside the docs directory' })
+  })
+
+  it('falls back to copying when symlinkSync fails (e.g. no symlink permission) and reports linked: false', () => {
+    const featureDir = writeFeatureConfig('link_no_symlink')
+    const target = path.join(tmpDir, 'external-copy.md')
+    fs.writeFileSync(target, '# Copied content')
+    vi.spyOn(fs, 'symlinkSync').mockImplementation(() => {
+      throw new Error('EPERM: operation not permitted, symlink')
+    })
+    const res = linkFeatureDoc(ctx(), { feature: 'link_no_symlink', targetPath: target })
+    expect(res).toMatchObject({ ok: true, linked: false })
+    const dest = path.join(featureDir, 'docs', 'external-copy.md')
+    expect(fs.lstatSync(dest).isSymbolicLink()).toBe(false)
+    expect(fs.readFileSync(dest, 'utf8')).toBe('# Copied content')
+  })
 })
 
 describe('symlink-aware doc write/delete', () => {

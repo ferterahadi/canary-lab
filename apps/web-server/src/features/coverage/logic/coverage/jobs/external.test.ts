@@ -163,7 +163,7 @@ describe('submitExternalCoverage', () => {
         featuresDir,
         logsDir,
         jobId: started.manifest.jobId,
-        mappings: [{ testName: 'create makes a new todo item', requirements: ['R1'], pathTypes: ['happy'] }],
+        mappings: [{ testName: 'create makes a new todo item', requirements: ['R1'], pathTypes: ['happy'], source: 'agent' }],
       },
       { store, workspaceEvents: publisher },
     )
@@ -194,8 +194,8 @@ describe('submitExternalCoverage', () => {
         logsDir,
         jobId: started.manifest.jobId,
         mappings: [
-          { testName: 'create makes a new todo item', requirements: ['R999'] }, // unknown id → dropped
-          { testName: 'no such test', requirements: ['R1'] }, // unknown test → dropped
+          { testName: 'create makes a new todo item', requirements: ['R999'], source: 'agent' }, // unknown id → dropped
+          { testName: 'no such test', requirements: ['R1'], source: 'agent' }, // unknown test → dropped
         ],
       },
       { store },
@@ -219,7 +219,7 @@ describe('submitExternalCoverage', () => {
         featuresDir,
         logsDir,
         jobId: started.manifest.jobId,
-        mappings: [{ testName: 'create makes a new todo item', requirements: ['R1'] }],
+        mappings: [{ testName: 'create makes a new todo item', requirements: ['R1'], source: 'agent' }],
       },
       { store },
     )

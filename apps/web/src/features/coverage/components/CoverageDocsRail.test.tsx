@@ -54,7 +54,7 @@ beforeEach(() => {
   vi.mocked(api.listFeatureDocs).mockResolvedValue(structuredClone(LISTING))
   vi.mocked(api.importFeatureDoc).mockResolvedValue({ written: true, relativePath: 'features/checkout/docs/x.md' })
   vi.mocked(api.deleteFeatureDoc).mockResolvedValue({ deleted: true })
-  vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'] })
+  vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'], untagged: [] })
   vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'auto' })
 })
 

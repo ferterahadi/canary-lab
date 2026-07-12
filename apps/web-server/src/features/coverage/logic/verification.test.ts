@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
+import type { RunSummaryFailedEntry } from '../../runs/logic/run-store'
 import {
   buildVerificationDiagnostics,
   createVerificationConfig,
@@ -408,7 +409,7 @@ describe('verification diagnostics', () => {
               snippet: 'status was 503',
             },
             traceSummaryFile: 'traces/checkout/summary.md',
-          },
+          } as RunSummaryFailedEntry & { traceSummaryFile: string },
         ],
       },
       playwrightArtifacts: [
@@ -519,7 +520,7 @@ describe('verification diagnostics', () => {
           {
             name: 'unmatched endpoint',
             traceSummaryFile: 'traces/checkout/summary.md',
-          },
+          } as RunSummaryFailedEntry & { traceSummaryFile: string },
         ],
       },
     }, runDir)

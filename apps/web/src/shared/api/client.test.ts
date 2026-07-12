@@ -120,6 +120,16 @@ import {
   resumeFlight,
   abortFlight,
   getFlightAgentSession,
+  pinFeatureBranchesToCurrent,
+  pauseFlight,
+  redoFlight,
+  deleteFlight,
+  linkFeatureDocPath,
+  planFeatures,
+  getPlanFeaturesTask,
+  listPlanFeatures,
+  launchPlannedFeatures,
+  getFlightPlanAgentSession,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -1591,12 +1601,12 @@ describe('api client', () => {
   it('respondFlightCheckpoint POSTs the checkpoint response and returns the updated manifest', async () => {
     const manifest = { id: 'fl_1', status: 'running' }
     const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
-    const result = await respondFlightCheckpoint('fl_1', { approved: true }, { baseUrl: 'http://x', fetchImpl })
+    const result = await respondFlightCheckpoint('fl_1', { choice: 'approved' }, { baseUrl: 'http://x', fetchImpl })
     expect(result).toEqual(manifest)
     const [url, init] = fetchImpl.mock.calls[0]
     expect(url).toBe('http://x/api/flights/fl_1/respond')
     expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({ response: { approved: true } })
+    expect(JSON.parse(init.body as string)).toEqual({ response: { choice: 'approved' } })
   })
 
   it('resumeFlight POSTs to the resume endpoint and returns the updated manifest', async () => {
@@ -1640,6 +1650,156 @@ describe('api client', () => {
   it('getFlightAgentSession rethrows non-404 errors', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
     await expect(getFlightAgentSession('fl_1', 'scout', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 500,
+    })
+  })
+
+  it('pinFeatureBranchesToCurrent POSTs to the pin-current-branches endpoint', async () => {
+    const result = { name: 'feat-a', pins: [{ name: 'repo/b', branch: 'main' }] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(result))
+    expect(await pinFeatureBranchesToCurrent('feat/a', { baseUrl: 'http://x', fetchImpl })).toEqual(result)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/features/feat%2Fa/pin-current-branches',
+      { method: 'POST' },
+    )
+  })
+
+  it('pauseFlight POSTs to the pause endpoint and returns the updated manifest', async () => {
+    const manifest = { id: 'fl_1', status: 'paused' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    const result = await pauseFlight('fl_1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/pause',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    )
+  })
+
+  it('redoFlight POSTs to the redo endpoint and returns the updated manifest', async () => {
+    const manifest = { id: 'fl_1', status: 'running' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    const result = await redoFlight('fl_1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/redo',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    )
+  })
+
+  it('deleteFlight DELETEs the flight and returns the deleted flag', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ deleted: true }))
+    const result = await deleteFlight('fl_1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ deleted: true })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1',
+      { method: 'DELETE' },
+    )
+  })
+
+  it('linkFeatureDocPath POSTs the target path and returns the link result', async () => {
+    const linkResult = { written: true, relativePath: 'docs/notes.md', linked: true }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(linkResult))
+    const result = await linkFeatureDocPath('feat/a', '/abs/notes.md', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(linkResult)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/features/feat%2Fa/docs/link')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ path: '/abs/notes.md' })
+  })
+
+  it('planFeatures POSTs the repo paths and description and returns the task', async () => {
+    const task = {
+      taskId: 't1',
+      repoPaths: ['/repo/a'],
+      description: 'add feature x',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(task))
+    const result = await planFeatures(
+      { repoPaths: ['/repo/a'], description: 'add feature x' },
+      { baseUrl: 'http://x', fetchImpl },
+    )
+    expect(result).toEqual(task)
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/flights/plan-features')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({ repoPaths: ['/repo/a'], description: 'add feature x' })
+  })
+
+  it('getPlanFeaturesTask GETs the task by id', async () => {
+    const task = {
+      taskId: 't1',
+      repoPaths: ['/repo/a'],
+      description: 'add feature x',
+      status: 'done',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(task))
+    const result = await getPlanFeaturesTask('t1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(task)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/plan-features/t1',
+      { method: 'GET' },
+    )
+  })
+
+  it('listPlanFeatures GETs the pending pre-flight tasks', async () => {
+    const tasks = [{
+      taskId: 't1',
+      repoPaths: ['/repo/a'],
+      description: 'add feature x',
+      status: 'done',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }]
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ tasks }))
+    const result = await listPlanFeatures({ baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ tasks })
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/plan-features',
+      { method: 'GET' },
+    )
+  })
+
+  it('launchPlannedFeatures POSTs the confirmed proposal and returns the created flight ids', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ flightIds: ['fl_1', 'fl_2'] }))
+    const body = {
+      features: [{ name: 'feat-a', description: 'first' }, { name: 'feat-b', description: 'second' }],
+      env: 'staging',
+      coverageTarget: 80,
+      yolo: true,
+    }
+    const result = await launchPlannedFeatures('t1', body, { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual({ flightIds: ['fl_1', 'fl_2'] })
+    const [url, init] = fetchImpl.mock.calls[0]
+    expect(url).toBe('http://x/api/flights/plan-features/t1/launch')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual(body)
+  })
+
+  it('getFlightPlanAgentSession returns the session on 200', async () => {
+    const session = { sessionId: 's1', entries: [] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(session))
+    const result = await getFlightPlanAgentSession('t1', { baseUrl: 'http://x', fetchImpl })
+    expect(result).toEqual(session)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/plan-features/t1/agent-session',
+      { method: 'GET' },
+    )
+  })
+
+  it('getFlightPlanAgentSession returns null on 404 (not spawned yet)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found' }))
+    await expect(getFlightPlanAgentSession('t1', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+  })
+
+  it('getFlightPlanAgentSession rethrows non-404 errors', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
+    await expect(getFlightPlanAgentSession('t1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({
       name: 'ApiError',
       status: 500,
     })

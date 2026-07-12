@@ -173,7 +173,7 @@ describe('createServer + RunOrchestrator.runFullCycle integration', () => {
       autoHeal: {
         agent: 'claude',
         maxCycles: 1,
-        buildCommand: () => 'fake-heal',
+        buildSpawnCommand: () => 'fake-heal',
       },
     })
     lastOrch = orch

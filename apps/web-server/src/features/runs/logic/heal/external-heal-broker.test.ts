@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { ExternalHealBroker, type ExternalHealBrokerDeps } from './external-heal-broker'
+import { ExternalHealBroker, type ExternalHealBrokerDeps, type ExternalHealAuditEntry } from './external-heal-broker'
 import type { ExternalHealSession } from '../runtime/manifest'
 import type { RunStoreEvent } from '../run-store'
 
 interface Captured {
   events: RunStoreEvent[]
   manifestPatches: Array<{ runId: string; externalHealSession?: ExternalHealSession; healMode?: string }>
-  audit: Array<{ runId: string; entry: Record<string, unknown> }>
+  audit: Array<{ runId: string; entry: ExternalHealAuditEntry }>
 }
 
 function makeDeps(now = () => new Date('2026-05-18T10:00:00.000Z').getTime()): {
@@ -118,6 +118,7 @@ describe('ExternalHealBroker.claim', () => {
     expect(res.accepted).toBe(false)
     if (res.accepted) throw new Error('unreachable')
     expect(res.reason).toBe('already-claimed')
+    if (res.reason !== 'already-claimed') throw new Error('unreachable')
     expect(res.currentSession.sessionId).toBe('sess-A')
     expect(captured.audit.some((a) => a.entry.action === 'claim-rejected')).toBe(true)
   })

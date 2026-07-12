@@ -34,7 +34,7 @@ export function deriveRunViewModel(
   transient: TransientAction | null = null,
 ): RunViewModel {
   const detail = isRunDetail(input) ? input : null
-  const manifest = detail?.manifest ?? input ?? undefined
+  const manifest = isRunDetail(input) ? input.manifest : (input ?? undefined)
   const status = manifest?.status ?? 'aborted'
   const executionType = manifest?.executionType ?? 'run'
   const lifecycle = detail?.manifest.lifecycle
@@ -106,6 +106,7 @@ function fallbackHeadline(status: RunStatus, executionType: ExecutionType = 'run
     case 'passed': return 'Run passed'
     case 'failed': return 'Run failed'
     case 'aborted': return 'Run aborted'
+    case 'queued': return 'Queued — will start when capacity frees'
   }
 }
 

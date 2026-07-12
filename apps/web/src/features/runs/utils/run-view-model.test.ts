@@ -178,10 +178,11 @@ describe('deriveRunViewModel', () => {
     ['failed', 'Run failed', 'error'],
     ['aborted', 'Run aborted', 'warning'],
   ] satisfies Array<[RunStatus, string, string]>)('falls back for %s runs without lifecycle events', (status, headline, severity) => {
+    const phase = status === 'running' ? 'running-tests' : status === 'healing' ? 'agent-healing' : status
     const withLifecycle = deriveRunViewModel(detail({
       status,
       lifecycle: {
-        phase: status === 'running' ? 'running-tests' : status,
+        phase,
         headline,
         updatedAt: '2026-05-08T00:00:03.000Z',
       },
@@ -193,7 +194,7 @@ describe('deriveRunViewModel', () => {
     expect(withLifecycle.headline).toBe(headline)
     expect(withLifecycle.recoveryTimeline).toEqual([
       {
-        phase: status === 'running' ? 'running-tests' : status,
+        phase,
         headline,
         updatedAt: '2026-05-08T00:00:03.000Z',
         severity,

@@ -115,10 +115,6 @@ export default defineConfig({
         'apps/web-server/src/features/wizard/logic/wizard-agent-runner.ts',
         'apps/web-server/src/features/evaluation/logic/test-review-export.ts',
         'apps/web-server/src/shared/open-browser-spawner.ts',
-        // Pure re-export shim — the underlying implementation lives in
-        // shared/lib/dotenv-edit and is exercised through the routes that
-        // import this module.
-        'apps/web-server/src/features/config/logic/dotenv-edit.ts',
         // The benchmark runner is the I/O wiring behind the (separately tested)
         // BenchmarkOrchestrator/Race: it spawns the sabotage subprocess, creates
         // git worktrees, and drives real RunOrchestrators per arm. Same category
@@ -126,7 +122,6 @@ export default defineConfig({
         // unit-coverable without a real git repo + agent CLIs + TTY.
         'apps/web-server/src/features/benchmark/logic/runtime/runner.ts',
         'apps/web-server/src/features/runs/logic/runtime/pty-spawner.ts',
-        'apps/web-server/src/features/**/logic/runtime/**/types.ts',
         // Race-condition and defence-in-depth guards: the uncovered branches
         // here are intentional closed-check / path-traversal / subprocess-timer
         // guards that can't be exercised deterministically through public APIs.
@@ -138,8 +133,6 @@ export default defineConfig({
         // Keeping the redundant guard is the point; it can't be covered
         // without removing the security check, so the file stays excluded.
         'apps/web-server/src/features/wizard/logic/draft-file-resolver.ts',
-        // Type-only module (no executable code) — v8 reports it as 0/0/0/0.
-        'apps/web/src/shared/api/types.ts',
         'apps/web/dist/**',
         'dist/**',
         'templates/**',

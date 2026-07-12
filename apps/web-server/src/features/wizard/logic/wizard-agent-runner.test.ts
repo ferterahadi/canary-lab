@@ -200,4 +200,246 @@ describe('wizard agent runner (headless)', () => {
     expect(spawn.args()).not.toContain('must-not-be-used')
     fs.rmSync(tmp, { recursive: true, force: true })
   })
+
+  it('wraps a synchronous spawn throw as a rejection before any process exists', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const run = spawnPlanAgent({
+      spawnImpl: (() => {
+        throw new Error('spawn EMFILE')
+      }) as never,
+      resolveBinary: () => null,
+      planTemplate: writePlanTemplate(tmp),
+    })({
+      draftId: 'd-throw',
+      agent: 'claude',
+      prdText: 'Login',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    await expect(run).rejects.toThrow(/wizard agent spawn failed: spawn EMFILE/)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('wraps a child "error" event as a rejection and clears the lease', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const registry = new WizardAgentRegistry()
+    const run = spawnPlanAgent({
+      spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
+      registry,
+      planTemplate: writePlanTemplate(tmp),
+    })({
+      draftId: 'd-err',
+      agent: 'claude',
+      prdText: 'Login',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    expect(registry.has('d-err')).toBe(true)
+    child.emit('error', new Error('ENOENT'))
+    await expect(run).rejects.toThrow(/wizard agent spawn failed: ENOENT/)
+    expect(registry.has('d-err')).toBe(false)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('loads the real plan template off disk when no template override is given', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const run = spawnPlanAgent({
+      spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
+    })({
+      draftId: 'd-real-plan-template',
+      agent: 'claude',
+      prdText: 'Login flow PRD text',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    child.emitData('<plan-output>[]</plan-output>')
+    child.close(0)
+    await expect(run).resolves.toContain('<plan-output>[]</plan-output>')
+    // the real stage1-plan.md template on disk got loaded + rendered, not a test fixture
+    expect(spawn.args().some((a) => a.includes('Login flow PRD text'))).toBe(true)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('loads the real spec template off disk when no template override is given', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const run = spawnSpecAgent({
+      spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
+    })({
+      draftId: 'd-real-spec-template',
+      agent: 'claude',
+      featureName: 'checkout-flow',
+      plan: [],
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+      pinSessionId: 'spec-sess-1',
+    })
+
+    child.emitData('<file path="x.ts">x</file>')
+    child.close(0)
+    await expect(run).resolves.toContain('<file path="x.ts">')
+    // the real stage2-spec.md template on disk got loaded + rendered, not a test fixture
+    expect(spawn.args().some((a) => a.includes('checkout-flow'))).toBe(true)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('spawns the codex binary for a plan agent with no claude session id', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const run = spawnPlanAgent({
+      spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
+      codexBin: '/usr/local/bin/codex',
+      planTemplate: writePlanTemplate(tmp),
+    })({
+      draftId: 'd-codex-plan',
+      agent: 'codex',
+      prdText: 'Login',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+      pinSessionId: 'should-be-ignored-for-codex',
+    })
+
+    child.emitData('codex plain answer text')
+    child.close(0)
+    await expect(run).resolves.toContain('codex plain answer text')
+    expect(spawn.bin()).toBe('/usr/local/bin/codex')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('spawns the codex binary for a spec agent with no claude session id', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const run = spawnSpecAgent({
+      spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
+      codexBin: '/usr/local/bin/codex',
+      specTemplate: writeSpecTemplate(tmp),
+    })({
+      draftId: 'd-codex-spec',
+      agent: 'codex',
+      featureName: 'login',
+      plan: [],
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+      resumeSessionId: 'ignored-resume',
+      pinSessionId: 'ignored-pin',
+    })
+
+    child.emitData('codex spec answer')
+    child.close(0)
+    await expect(run).resolves.toContain('codex spec answer')
+    expect(spawn.bin()).toBe('/usr/local/bin/codex')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('falls back to the pinned session id when spec generation has no resume id yet', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const run = spawnSpecAgent({
+      spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
+      specTemplate: writeSpecTemplate(tmp),
+    })({
+      draftId: 'd-pin-fallback',
+      agent: 'claude',
+      featureName: 'login',
+      plan: [],
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+      pinSessionId: 'pinned-only-session',
+    })
+
+    child.emitData('<file path="x.ts">x</file>')
+    child.close(0)
+    await expect(run).resolves.toContain('<file path="x.ts">')
+    expect(spawn.args()).toContain('--session-id')
+    expect(spawn.args()).toContain('pinned-only-session')
+    expect(spawn.args()).not.toContain('--resume')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('falls back to the real node spawn and surfaces ENOENT when spawnImpl is not overridden (plan)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const nonExistentBin = path.join(tmp, 'definitely-does-not-exist-canary-lab-test-bin')
+    const run = spawnPlanAgent({
+      resolveBinary: () => nonExistentBin,
+      planTemplate: writePlanTemplate(tmp),
+    })({
+      draftId: 'd-real-spawn-plan',
+      agent: 'claude',
+      prdText: 'Login',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    await expect(run).rejects.toThrow(/wizard agent spawn failed:/)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('defaults to the bare "codex" binary when no codexBin override is given', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const child = new FakeChild()
+    const spawn = fakeSpawn(child)
+    const run = spawnPlanAgent({
+      spawnImpl: spawn.impl as never,
+      resolveBinary: () => null,
+      planTemplate: writePlanTemplate(tmp),
+    })({
+      draftId: 'd-codex-default-bin',
+      agent: 'codex',
+      prdText: 'Login',
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    child.emitData('codex default bin answer')
+    child.close(0)
+    await expect(run).resolves.toContain('codex default bin answer')
+    expect(spawn.bin()).toBe('codex')
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('falls back to the real node spawn and surfaces ENOENT when spawnImpl is not overridden (spec)', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-runner-'))
+    const nonExistentBin = path.join(tmp, 'definitely-does-not-exist-canary-lab-test-bin')
+    const run = spawnSpecAgent({
+      resolveBinary: () => nonExistentBin,
+      specTemplate: writeSpecTemplate(tmp),
+    })({
+      draftId: 'd-real-spawn-spec',
+      agent: 'claude',
+      featureName: 'login',
+      plan: [],
+      repos: [{ name: 'app', localPath: '/app' }],
+      draftDir: tmp,
+      agentLogPath: path.join(tmp, 'agent.log'),
+    })
+
+    await expect(run).rejects.toThrow(/wizard agent spawn failed:/)
+    fs.rmSync(tmp, { recursive: true, force: true })
+  })
 })

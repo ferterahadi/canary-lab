@@ -18,11 +18,13 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(listWorkspaceDirs).mockReset().mockResolvedValue({
+    root: '/Users/dev/Documents/my-backend',
+    at: '',
     absolute: '/Users/dev/Documents/my-backend',
     parent: '/Users/dev/Documents',
     dirs: ['apps'],

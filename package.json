@@ -62,6 +62,9 @@
   "scripts": {
     "build": "node tools/gen-agents-md.mjs && node tools/clean-dist.mjs && tsc -p tsconfig.build.json && node tools/prepare-assets.mjs && vite build --config apps/web/vite.config.ts",
     "typecheck": "tsc -p tsconfig.build.json --noEmit",
+    "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit",
+    "typecheck:server": "tsc -p tsconfig.web-server.json --noEmit",
+    "typecheck:all": "npm run typecheck && npm run typecheck:web && npm run typecheck:server",
     "gen:agents": "node tools/gen-agents-md.mjs",
     "test": "vitest run",
     "test:watch": "vitest",

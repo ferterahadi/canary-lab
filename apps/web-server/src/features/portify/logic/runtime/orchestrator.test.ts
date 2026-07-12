@@ -63,7 +63,6 @@ describe('PortifyOrchestrator', () => {
 
   it('fails and cleans up after exhausting attempts', async () => {
     const { deps } = makeDeps({
-      maxAttempts: 2,
       manifest: baseManifest(2),
       verify: async () => ({ ok: false, instances: [], failureDetail: 'nope' }),
     })
@@ -76,7 +75,7 @@ describe('PortifyOrchestrator', () => {
     const checkTestsUntouched = vi.fn()
       .mockResolvedValueOnce({ ok: false, offending: ['e2e/api.spec.ts'] })
       .mockResolvedValueOnce({ ok: true, offending: [] })
-    const runAgent = vi.fn(async () => {})
+    const runAgent = vi.fn(async (_attempt: number, _failureDetail?: string) => {})
     const { deps } = makeDeps({ checkTestsUntouched, runAgent })
     const m = await new PortifyOrchestrator(deps).run()
     expect(m.status).toBe('ready-to-save')

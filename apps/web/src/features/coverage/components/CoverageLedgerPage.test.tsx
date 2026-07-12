@@ -347,7 +347,7 @@ describe('CoverageLedgerPage', () => {
   })
 
   it('shows the dedicated Generating screen while a job runs, not the ledger (R13)', async () => {
-    let resolveJob: ((m: import('../../../shared/api/types').CoverageJobManifest) => void) | null = null
+    let resolveJob: (m: import('../../../shared/api/types').CoverageJobManifest) => void = () => {}
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
@@ -361,11 +361,11 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
     expect(container.querySelector('[data-testid="generating-phases"]')).toBeTruthy()
     // Avoid leaking the pending getCoverageJob promise.
-    resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
+    resolveJob({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
 
   it('puts the Tests pane (3rd column) in a loading state while generating — skeleton cards, no real test cases', async () => {
-    let resolveJob: ((m: import('../../../shared/api/types').CoverageJobManifest) => void) | null = null
+    let resolveJob: (m: import('../../../shared/api/types').CoverageJobManifest) => void = () => {}
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
@@ -383,7 +383,7 @@ describe('CoverageLedgerPage', () => {
     expect(container.querySelector('[data-testid="test-adds item"]')).toBeNull()
     expect(container.querySelector('[data-testid="orphan-tests-note"]')).toBeNull()
     // Avoid leaking the pending getCoverageJob promise.
-    resolveJob?.({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
+    resolveJob({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done', startedAt: 'now', log: 'done' })
   })
 
   it('re-lists the rail docs when generation completes so the generated PRD doc appears (items 1+2)', async () => {
@@ -414,7 +414,7 @@ describe('CoverageLedgerPage', () => {
     vi.mocked(api.listCoverageJobs).mockResolvedValue([
       { jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' },
     ])
-    let resolveJob: ((m: import('../../../shared/api/types').CoverageJobManifest) => void) | null = null
+    let resolveJob: (m: import('../../../shared/api/types').CoverageJobManifest) => void = () => {}
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
     await mount()
     await act(async () => { await Promise.resolve(); await Promise.resolve() })
@@ -422,7 +422,7 @@ describe('CoverageLedgerPage', () => {
     expect(api.listCoverageJobs).toHaveBeenCalledWith('checkout')
     expect(container.querySelector('[data-testid="coverage-generating"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="prd-pane"]')).toBeNull()
-    resolveJob?.({ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', log: 'done' })
+    resolveJob({ jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'done', startedAt: '2026-01-01T00:00:01Z', log: 'done' })
   })
 
   it('self-heals a wedged poll: a hung getCoverageJob never leaves the Generating screen stuck', async () => {

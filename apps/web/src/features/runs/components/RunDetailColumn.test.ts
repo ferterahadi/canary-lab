@@ -126,7 +126,6 @@ describe('service labels', () => {
       expectedBranch: 'release/2.8.2',
       detached: false,
       dirty: false,
-      dirtyFiles: [],
     })).toEqual({
       primary: 'my-backend',
       branch: 'release/2.8.2',

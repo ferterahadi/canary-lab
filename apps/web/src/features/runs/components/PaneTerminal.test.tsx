@@ -128,6 +128,7 @@ beforeEach(() => {
   ;(globalThis as { ResizeObserver: typeof ResizeObserver }).ResizeObserver = class {
     callback: ResizeObserverCallback
     observe = vi.fn()
+    unobserve = vi.fn()
     disconnect = vi.fn()
     constructor(callback: ResizeObserverCallback) {
       this.callback = callback

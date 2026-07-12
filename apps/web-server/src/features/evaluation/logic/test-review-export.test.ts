@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import { __testReviewExportInternals, buildEvaluationLlmPrompt, buildTestReviewPacket, createAssertionExport, createAssertionHtml, createEvaluationExport, createEvaluationHtml, evaluationCodexArgs } from './test-review-export'
-import type { RunDetail } from '../../runs/logic/run-store'
+import type { RunDetail, PlaywrightPlaybackEvent } from '../../runs/logic/run-store'
 import type { CoverageLedger } from '../../../../../../shared/coverage/types'
 
 function coverageLedgerFor(testTitle: string): CoverageLedger {
@@ -14,7 +14,7 @@ function coverageLedgerFor(testTitle: string): CoverageLedger {
       { requirement: { id: 'R1', title: 'Checkout', text: 'x', pathTypes: ['happy'] }, annotatedTestNames: [testTitle], pathCoverage: [{ path: 'happy', covered: true }], gapType: 'covered', coverageStatus: 'covered' },
     ],
     tests: [{ name: testTitle, requirements: ['R1'], pathTypes: ['happy'], strength: 'solid' }],
-    totals: { total: 1, covered: 1, pathIncomplete: 0, untested: 0, orphanTests: 0 },
+    totals: { total: 1, covered: 1, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
     coveragePct: 100,
     mappedPct: 100,
     orphanRequirementIds: [],
@@ -314,8 +314,8 @@ test('same title', async ({ page }) => {
     const body = await createAssertionHtml({
       ...detail({ featureDir, eventLocation: `${spec}:${first}`, title: 'same title' }),
       playbackEvents: [
-        detail({ featureDir, eventLocation: `${spec}:${first}`, title: 'same title' }).playbackEvents[0],
-        detail({ featureDir, eventLocation: `${spec}:${second}`, title: 'same title' }).playbackEvents[0],
+        testEndEvent(detail({ featureDir, eventLocation: `${spec}:${first}`, title: 'same title' })),
+        testEndEvent(detail({ featureDir, eventLocation: `${spec}:${second}`, title: 'same title' })),
       ],
     })
 
@@ -365,10 +365,15 @@ test('<script>alert("checkout")</script>', async ({ page }) => {
   it('falls back to computed totals and unknown assertions when no summary or source match is available', () => {
     const failed = detail({ featureDir: path.join(tmpDir, 'missing-feature'), title: 'missing source' })
     failed.summary = undefined
-    failed.playbackEvents[0].status = 'failed'
-    failed.playbackEvents[0].passed = false
-    failed.playbackEvents[0].durationMs = undefined
-    failed.playbackEvents[0].test.location = 'unparseable-location'
+    const failedEvent = testEndEvent(failed)
+    failedEvent.status = 'failed'
+    failedEvent.passed = false
+    // Real Playwright reporter output can omit durationMs (e.g. a crashed worker);
+    // the production code guards with `typeof durationMs === 'number'` (see
+    // test-review-export.ts) even though the type declares it required, so this
+    // narrow cast reproduces that real-world shape rather than the type's promise.
+    ;(failedEvent as { durationMs?: number }).durationMs = undefined
+    failedEvent.test.location = 'unparseable-location'
     failed.manifest.endedAt = undefined
 
     const packet = buildTestReviewPacket(failed)
@@ -665,8 +670,8 @@ test('second shared helper', async ({ page }) => {
           passedNames: ['test-case-static-template-title'],
         }),
         playbackEvents: [
-          detail({ featureDir, eventLocation: `${spec}:${firstLine}`, title: 'static template title' }).playbackEvents[0],
-          detail({ featureDir, eventLocation: `${spec}:${secondLine}`, title: 'second shared helper' }).playbackEvents[0],
+          testEndEvent(detail({ featureDir, eventLocation: `${spec}:${firstLine}`, title: 'static template title' })),
+          testEndEvent(detail({ featureDir, eventLocation: `${spec}:${secondLine}`, title: 'second shared helper' })),
         ],
       })
 
@@ -795,9 +800,10 @@ function expectOneNested(page) {
     })
     failed.manifest.status = 'failed'
     failed.summary = { complete: true, total: 1, passed: 0, failed: [{ name: 'test-case-' }] }
-    failed.playbackEvents![0].status = 'failed'
-    failed.playbackEvents![0].passed = false
-    failed.playbackEvents![0].durationMs = undefined
+    const flowEvent = testEndEvent(failed)
+    flowEvent.status = 'failed'
+    flowEvent.passed = false
+    ;(flowEvent as { durationMs?: number }).durationMs = undefined
 
     const exported = await createAssertionExport(failed)
     const html = exported.html
@@ -1118,9 +1124,10 @@ ${steps}
 
     const failed = detail({ featureDir: tmpDir, title: 'fails checkout' })
     failed.manifest.status = 'failed'
-    failed.summary = { complete: true, total: 1, passed: 0, failed: [{ name: 'test-case-fails-checkout', error: 'boom' }] }
-    failed.playbackEvents![0].status = 'failed'
-    failed.playbackEvents![0].passed = false
+    failed.summary = { complete: true, total: 1, passed: 0, failed: [{ name: 'test-case-fails-checkout', error: { message: 'boom' } }] }
+    const failedEventForPrompt = testEndEvent(failed)
+    failedEventForPrompt.status = 'failed'
+    failedEventForPrompt.passed = false
     const failedPacket = buildTestReviewPacket(failed)
     const promptTemplate = path.join(tmpDir, 'prompt.md')
     fs.writeFileSync(promptTemplate, '{{evidence}}\n{{textSlots}}\n{{sourceHtmlSection}}\n{{unknown}}')
@@ -1276,6 +1283,17 @@ function detail(opts: {
       },
     ],
   }
+}
+
+// `detail()` always sets a `test-end` playback event, but `RunDetail.playbackEvents`
+// is optional and `PlaywrightPlaybackEvent` is a discriminated union — fixtures that
+// read/mutate `.status`/`.passed`/`.durationMs`/`.test.location` (fields only present
+// on the `test-end` variant) need the array + element narrowed at the call site.
+function testEndEvent(detail: RunDetail, index = 0): Extract<PlaywrightPlaybackEvent, { type: 'test-end' }> {
+  const event = detail.playbackEvents?.[index]
+  if (!event) throw new Error(`expected detail.playbackEvents[${index}] to be set`)
+  if (event.type !== 'test-end') throw new Error(`expected a test-end event at index ${index}, got "${event.type}"`)
+  return event
 }
 
 function lineOf(source: string, needle: string): number {

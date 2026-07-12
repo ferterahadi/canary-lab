@@ -257,9 +257,10 @@ describe('run overview', () => {
     vi.mocked(useEvaluationExports).mockReturnValue({ startExport, taskForRun: () => null } as unknown as ReturnType<typeof useEvaluationExports>)
     vi.mocked(useRun).mockReturnValue({
       detail: runDetail({ status: 'passed' }),
-      indexed: undefined,
       transient: null,
       status: 'passed',
+      displayStatus: 'passed',
+      error: null,
     })
     gatePromo.mockImplementation((_action, _continueAction) => {})
 
@@ -300,9 +301,10 @@ describe('run overview', () => {
     const { useRun } = await import('../state/RunsContext')
     vi.mocked(useRun).mockReturnValue({
       detail: runDetail({ env: 'beta' }),
-      indexed: undefined,
       transient: null,
       status: 'passed',
+      displayStatus: 'passed',
+      error: null,
     })
 
     await act(async () => {
@@ -317,9 +319,10 @@ describe('run overview', () => {
     const { useRun } = await import('../state/RunsContext')
     vi.mocked(useRun).mockReturnValue({
       detail: runDetail({ healMode: 'auto', healAgent: 'codex' }),
-      indexed: undefined,
       transient: null,
       status: 'passed',
+      displayStatus: 'passed',
+      error: null,
     })
 
     await act(async () => {
@@ -344,9 +347,10 @@ describe('run overview', () => {
           activeCycle: 1,
         },
       }),
-      indexed: undefined,
       transient: null,
       status: 'healing',
+      displayStatus: 'healing',
+      error: null,
     })
 
     await act(async () => {
@@ -382,9 +386,10 @@ describe('run overview', () => {
           activeCycle: 1,
         },
       }),
-      indexed: undefined,
       transient: null,
       status: 'healing',
+      displayStatus: 'healing',
+      error: null,
     })
 
     await act(async () => {
@@ -414,6 +419,7 @@ describe('run overview', () => {
 
 function runDetail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
   return {
+    runId: 'run-1',
     manifest: {
       runId: 'run-1',
       executionType: 'run',

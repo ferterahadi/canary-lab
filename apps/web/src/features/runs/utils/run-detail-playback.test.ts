@@ -117,15 +117,16 @@ describe('playbackTests', () => {
       {
         type: 'test-begin',
         time: '2026-01-01T00:00:00.000Z',
-        test: { name: 'legacy checkout', title: 'legacy checkout' },
+        test: { name: 'legacy checkout', title: 'legacy checkout', location: '' },
       },
       {
         type: 'test-end',
         time: '2026-01-01T00:00:03.000Z',
-        test: { name: 'legacy checkout', title: 'legacy checkout' },
+        test: { name: 'legacy checkout', title: 'legacy checkout', location: '' },
         status: 'passed',
         passed: true,
         durationMs: 3000,
+        retry: 0,
       },
     ]
 

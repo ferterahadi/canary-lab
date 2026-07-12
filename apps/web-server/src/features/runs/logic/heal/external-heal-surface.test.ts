@@ -28,9 +28,8 @@ function detailFor(runId: string): RunDetail {
       repoBranches: [{ name: 'app', path: '/repo/app', branch: 'main', detached: false, dirty: false }],
       lifecycle: {
         phase: 'waiting-for-signal',
+        headline: 'Waiting for heal signal',
         updatedAt: '2026-05-25T08:01:00.000Z',
-        message: 'Waiting for heal signal',
-        severity: 'info',
       },
     },
     summary: {
@@ -167,13 +166,12 @@ describe('buildExternalHealContext', () => {
         bootFailure,
         lifecycle: {
           phase: 'waiting-for-signal',
+          headline: 'Waiting for heal signal',
           updatedAt: '2026-05-25T08:01:00.000Z',
-          message: 'Waiting for heal signal',
-          severity: 'info',
         },
       },
       // A boot failure means Playwright never ran — no summary.
-      summary: null,
+      summary: undefined,
       playwrightArtifacts: [],
     }
     fs.writeFileSync(paths.manifestPath, JSON.stringify(detail.manifest))
@@ -508,7 +506,7 @@ describe('buildExternalFailureDetail', () => {
         healCycles: 1,
         services: [],
         repoBranches: [],
-        lifecycle: { phase: 'waiting-for-signal', updatedAt: '2026-05-25T08:01:00.000Z', message: 'Waiting', severity: 'info' },
+        lifecycle: { phase: 'waiting-for-signal', headline: 'Waiting', updatedAt: '2026-05-25T08:01:00.000Z' },
       },
       summary: {
         complete: false,
@@ -551,7 +549,7 @@ describe('buildExternalFailureDetail', () => {
         healCycles: 0,
         services: [],
         repoBranches: [],
-        lifecycle: { phase: 'waiting-for-signal', updatedAt: '2026-05-25T08:00:00.000Z', message: 'Waiting', severity: 'info' },
+        lifecycle: { phase: 'waiting-for-signal', headline: 'Waiting', updatedAt: '2026-05-25T08:00:00.000Z' },
       },
       // summary is undefined → detail.summary?.failed is undefined → ?? [] fires.
       summary: undefined,

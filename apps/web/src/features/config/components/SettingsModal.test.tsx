@@ -36,6 +36,8 @@ beforeEach(() => {
   vi.mocked(api.putProjectConfig).mockReset()
   vi.mocked(api.changeProjectPort).mockReset()
   vi.mocked(api.listWorkspaceDirs).mockReset().mockResolvedValue({
+    root: '/tmp/wiki',
+    at: '',
     absolute: '/tmp/wiki',
     parent: '/tmp',
     dirs: [],

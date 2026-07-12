@@ -126,7 +126,7 @@ describe('renderEvent', () => {
       level: 'INFO',
       message: 'Signal accepted: .rerun',
     })
-    expect(renderEvent('signal-ignored', { kind: 'heal', body: {}, reason: 'already healing' })).toEqual({
+    expect(renderEvent('signal-ignored', { kind: 'heal', reason: 'already healing' })).toEqual({
       level: 'WARN',
       message: 'Signal ignored: .heal (already healing)',
     })

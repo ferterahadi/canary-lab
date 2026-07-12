@@ -257,15 +257,15 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
   })
 
   it('R54: submit plans first — the breakdown agent owns the dialog; closing keeps it in the background', async () => {
-    mocks.planFeatures.mockResolvedValue({ taskId: 't1', status: 'running', repoPaths: ['/repo/Oddle Shop'], description: 'test the checkout flow' })
-    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Oddle Shop' }] })
+    mocks.planFeatures.mockResolvedValue({ taskId: 't1', status: 'running', repoPaths: ['/repo/Acme Shop'], description: 'test the checkout flow' })
+    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Acme Shop' }] })
     const textarea = container.querySelector('textarea')!
     setValue(textarea, 'test the checkout flow')
-    await addRepo('/repo/Oddle Shop')
+    await addRepo('/repo/Acme Shop')
     expect(byTestId('flight-start-submit')?.textContent).toBe('Plan flight →')
     click(byTestId('flight-start-submit')!)
     await flush()
-    expect(mocks.planFeatures).toHaveBeenCalledWith({ repoPaths: ['/repo/Oddle Shop'], description: 'test the checkout flow' })
+    expect(mocks.planFeatures).toHaveBeenCalledWith({ repoPaths: ['/repo/Acme Shop'], description: 'test the checkout flow' })
     expect(mocks.startFlight).not.toHaveBeenCalled()
     // The planning view: live agent timeline. While it's thinking there is no
     // skip button (don't invite bailing on the default) and no footer close
@@ -277,11 +277,11 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
   })
 
   it('R54: planning failure surfaces the single-flight recovery', async () => {
-    mocks.planFeatures.mockResolvedValue({ taskId: 't1', status: 'failed', repoPaths: ['/repo/Oddle Shop'], description: 'test the checkout flow', error: 'agent crashed' })
+    mocks.planFeatures.mockResolvedValue({ taskId: 't1', status: 'failed', repoPaths: ['/repo/Acme Shop'], description: 'test the checkout flow', error: 'agent crashed' })
     mocks.startFlight.mockResolvedValue({ flightId: 'fl_new' })
-    const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Oddle Shop' }] })
+    const { onOpenFlight } = await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Acme Shop' }] })
     setValue(container.querySelector('textarea')!, 'test the checkout flow')
-    await addRepo('/repo/Oddle Shop')
+    await addRepo('/repo/Acme Shop')
     click(byTestId('flight-start-submit')!)
     await flush()
     // Failed → the background hint is gone; the single-flight recovery appears.
@@ -291,8 +291,8 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     click(skip)
     await flush()
     expect(mocks.startFlight).toHaveBeenCalledWith({
-      feature: 'oddle-shop',
-      repoPaths: ['/repo/Oddle Shop'],
+      feature: 'acme-shop',
+      repoPaths: ['/repo/Acme Shop'],
       description: 'test the checkout flow',
     })
     expect(onOpenFlight).toHaveBeenCalledWith('fl_new')

@@ -160,6 +160,19 @@ const LIFECYCLE_TOOLS = uniqueSorted([
 
 const FULL_TOOLS = uniqueSorted([...LIFECYCLE_TOOLS, ...PORTIFY_TOOLS])
 
+// The SDK's callTool() return type is a union of the normal tool-result shape
+// and a legacy/task shape that only carries an index signature; TS collapses
+// `.content` across that union to `unknown`, and `unknown?.[0]` then reports
+// as unindexable `{}` at every call site. Centralize the one cast here instead
+// of repeating it ~40 times.
+type ToolCallResult = Awaited<ReturnType<Client['callTool']>>
+
+function toolText(result: ToolCallResult): string {
+  const content = (result as { content?: unknown }).content
+  const first = Array.isArray(content) ? (content[0] as { type?: string; text?: string } | undefined) : undefined
+  return first?.text ?? ''
+}
+
 async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
   const client = new Client(
     { name: 'canary-lab-smoke', version: '0.0.1' },
@@ -190,7 +203,7 @@ async function createMcpHarness(opts: {
     broker,
     featuresDir: opts.featuresDir,
     projectRoot: opts.projectRoot,
-    startRun: opts.startRun ?? (async () => ({ runId: 'new-run' })),
+    startRun: opts.startRun ?? (async () => ({ kind: 'started', runId: 'new-run' })),
     restartExternalRun: opts.restartExternalRun,
     startVerification: opts.startVerification,
   })
@@ -341,7 +354,7 @@ describe('MCP HTTP server (smoke)', () => {
       // tools/call list_features — returns the templates/project scaffold as a
       // TOON table; decode it back to rows before asserting.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
-      const text = (result.content?.[0] as { type: string; text: string } | undefined)?.text ?? ''
+      const text = toolText(result)
       const features = decode(text) as Array<{ name: string }>
       const featureNames = features.map((f) => f.name).sort()
       expect(featureNames).toContain('broken_todo_api')
@@ -363,7 +376,7 @@ describe('MCP HTTP server (smoke)', () => {
       client = await connectClient(address, '/mcp?profile=full')
 
       const result = await client.callTool({ name: 'list_portify_status', arguments: {} })
-      const text = (result.content?.[0] as { type: string; text: string } | undefined)?.text ?? ''
+      const text = toolText(result)
       const parsed = JSON.parse(text) as {
         features: Array<{ feature: string; portified: boolean }>
         summary: { total: number; portified: number; notPortified: number }
@@ -453,7 +466,7 @@ describe('MCP HTTP server (smoke)', () => {
           repos: [{ name: 'api', localPath: repoDir, branch: 'main' }],
         },
       })
-      const createdBody = JSON.parse((created.content?.[0] as { text: string }).text)
+      const createdBody = JSON.parse(toolText(created))
       expect(createdBody).toMatchObject({
         feature: 'checkout_flow',
         nextSteps: expect.arrayContaining(['capture_feature_env_files', 'start_external_draft', 'apply_external_draft']),
@@ -468,7 +481,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_feature_coverage',
         arguments: { feature: 'checkout_flow' },
       })
-      const blockedBody = JSON.parse((blockedCoverage.content?.[0] as { text: string }).text)
+      const blockedBody = JSON.parse(toolText(blockedCoverage))
       expect(blockedBody.state.coverage).toBe('blocked')
       expect(blockedBody.next).toMatch(/attach or paste the PRD/i)
       expect(blockedBody.next).toContain('checkout_flow')
@@ -483,7 +496,7 @@ describe('MCP HTTP server (smoke)', () => {
           ],
         },
       })
-      const capturedBody = JSON.parse((captured.content?.[0] as { text: string }).text)
+      const capturedBody = JSON.parse(toolText(captured))
       expect(capturedBody.captured).toHaveLength(2)
       expect(capturedBody.captured[0].preview).toContainEqual({ key: 'API_KEY', value: '********' })
       expect(fs.readFileSync(path.join(featureDir, 'envsets', 'local', 'api.env.dev'), 'utf8')).toContain('API_KEY=secret')
@@ -492,7 +505,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_feature_envset_summary',
         arguments: { feature: 'checkout_flow' },
       })
-      const summaryBody = JSON.parse((summary.content?.[0] as { text: string }).text)
+      const summaryBody = JSON.parse(toolText(summary))
       expect(summaryBody.envs.map((env: { name: string }) => env.name)).toEqual(['local', 'staging'])
       expect(JSON.stringify(summaryBody)).not.toContain('secret')
 
@@ -506,7 +519,7 @@ describe('MCP HTTP server (smoke)', () => {
           external_session_url: 'codex://session/sess-author-1',
         },
       })
-      const draftBody = JSON.parse((draft.content?.[0] as { text: string }).text)
+      const draftBody = JSON.parse(toolText(draft))
       expect(draftBody).toMatchObject({
         feature: 'checkout_flow',
         producer: 'external',
@@ -533,7 +546,7 @@ describe('MCP HTTP server (smoke)', () => {
           }],
         },
       })
-      expect(JSON.parse((applied.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(applied))).toMatchObject({
         status: 'applied',
         feature: 'checkout_flow',
       })
@@ -582,7 +595,7 @@ describe('MCP HTTP server (smoke)', () => {
           conversation_name: 'Export this into evaluation',
         },
       })
-      const exportBody = JSON.parse((exportTask.content?.[0] as { text: string }).text)
+      const exportBody = JSON.parse(toolText(exportTask))
       expect(exportBody).toMatchObject({
         task: { producer: 'external', status: 'running', language: 'English' },
         reportSchema: {
@@ -608,7 +621,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
       expect(rejectedMarkdown.isError).toBe(true)
-      expect((rejectedMarkdown.content?.[0] as { text: string }).text).toBe('submit textSlots[] or rewrite')
+      expect(toolText(rejectedMarkdown)).toBe('submit textSlots[] or rewrite')
 
       const submittedExport = await client.callTool({
         name: 'submit_external_evaluation_export',
@@ -621,7 +634,7 @@ describe('MCP HTTP server (smoke)', () => {
           ),
         },
       })
-      const submittedBody = JSON.parse((submittedExport.content?.[0] as { text: string }).text)
+      const submittedBody = JSON.parse(toolText(submittedExport))
       expect(submittedBody).toMatchObject({
         status: 'completed',
         downloadReady: true,
@@ -638,7 +651,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_evaluation_export',
         arguments: { taskId: exportBody.task.taskId },
       })
-      expect(JSON.parse((fetchedExport.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(fetchedExport))).toMatchObject({
         producer: 'external',
         status: 'completed',
         downloadReady: true,
@@ -647,7 +660,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'download_evaluation_export',
         arguments: { taskId: exportBody.task.taskId },
       })
-      const downloadBody = JSON.parse((download.content?.[0] as { text: string }).text)
+      const downloadBody = JSON.parse(toolText(download))
       expect(downloadBody.filename).toMatch(/checkout_flow-author-eval-run\.zip$/)
       const archiveText = Buffer.from(downloadBody.archiveBase64, 'base64').toString('latin1')
       expect(archiveText).toContain('evaluation.html')
@@ -784,7 +797,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_heal_context',
         arguments: { runId: 'context-map', session_id: 'sess-context' },
       })
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
 
       expect(body).toMatchObject({
         runId: 'context-map',
@@ -846,7 +859,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_run_snapshot',
         arguments: { runId: 'context-map' },
       })
-      const snapshot = JSON.parse((snapshotResult.content?.[0] as { text: string }).text)
+      const snapshot = JSON.parse(toolText(snapshotResult))
       expect(snapshot).toMatchObject({
         runId: 'context-map',
         summary: {
@@ -898,10 +911,10 @@ describe('MCP HTTP server (smoke)', () => {
       }
 
       // get_run: slim by default — raw arrays are absent, the omission is announced.
-      const slim = JSON.parse(((await client.callTool({
+      const slim = JSON.parse(toolText(await client.callTool({
         name: 'get_run',
         arguments: { runId: 'run-1' },
-      })).content?.[0] as { text: string }).text)
+      })))
       expect(slim).toMatchObject({ runId: 'run-1' })
       expect(slim).not.toHaveProperty('lifecycleEvents')
       expect(slim).not.toHaveProperty('playwrightArtifacts')
@@ -909,19 +922,19 @@ describe('MCP HTTP server (smoke)', () => {
       expect(slim.raw.omitted).toContain('lifecycleEvents')
 
       // includeRaw:true returns the full RunDetail (no `raw` envelope marker).
-      const full = JSON.parse(((await client.callTool({
+      const full = JSON.parse(toolText(await client.callTool({
         name: 'get_run',
         arguments: { runId: 'run-1', includeRaw: true },
-      })).content?.[0] as { text: string }).text)
+      })))
       expect(full).toMatchObject({ runId: 'run-1' })
       expect(full).not.toHaveProperty('raw')
 
       // list_runs: newest-first, capped by limit. Returned as a TOON table —
       // a `[N]{col,...}:` header (runId is the first column) then one row each.
-      const limitedText = ((await client.callTool({
+      const limitedText = toolText(await client.callTool({
         name: 'list_runs',
         arguments: { feature: 'broken_todo_api', limit: 2 },
-      })).content?.[0] as { text: string }).text
+      }))
       const limitedLines = limitedText.trim().split('\n')
       expect(limitedLines[0]).toMatch(/^\[2\]\{runId,/)
       expect(limitedLines).toHaveLength(3) // header + 2 rows
@@ -976,7 +989,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_failure_detail',
         arguments: { runId: 'failure-detail', failureId: 'test-2' },
       })
-      const okBody = JSON.parse((ok.content?.[0] as { text: string }).text)
+      const okBody = JSON.parse(toolText(ok))
       expect(okBody).toMatchObject({
         runId: 'failure-detail',
         failureId: 'test-2',
@@ -993,7 +1006,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { runId: 'failure-detail', failureId: 'no-such-test' },
       })
       expect(missing.isError).toBe(true)
-      expect((missing.content?.[0] as { text: string }).text).toContain('failure not found')
+      expect(toolText(missing)).toContain('failure not found')
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -1030,7 +1043,7 @@ describe('MCP HTTP server (smoke)', () => {
       })
       expect(result.isError).not.toBe(true)
 
-      const signalBody = JSON.parse((result.content?.[0] as { text: string }).text) as { nextSteps?: string[]; runId?: string }
+      const signalBody = JSON.parse(toolText(result)) as { nextSteps?: string[]; runId?: string }
       expect(signalBody.nextSteps).toContain('wait_for_heal_task')
       expect(signalBody.runId).toBe('journal-run')
 
@@ -1164,13 +1177,13 @@ describe('MCP HTTP server (smoke)', () => {
           targetUrls: { 'api-server': 'https://api.example.com' },
         },
       })
-      const createdBody = JSON.parse((created.content?.[0] as { text: string }).text) as { id: string }
+      const createdBody = JSON.parse(toolText(created)) as { id: string }
 
       const listed = await client.callTool({
         name: 'list_verification_configs',
         arguments: { featureId: 'checkout' },
       })
-      expect(JSON.parse((listed.content?.[0] as { text: string }).text)).toHaveLength(1)
+      expect(JSON.parse(toolText(listed))).toHaveLength(1)
 
       const updated = await client.callTool({
         name: 'update_verification_config',
@@ -1182,7 +1195,7 @@ describe('MCP HTTP server (smoke)', () => {
           targetUrls: { 'api-server': 'https://beta.example.com' },
         },
       })
-      expect(JSON.parse((updated.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(updated))).toMatchObject({
         id: createdBody.id,
         name: 'Beta',
       })
@@ -1195,7 +1208,7 @@ describe('MCP HTTP server (smoke)', () => {
           targetUrls: { 'api-server': 'https://api.example.com' },
         },
       })
-      expect(JSON.parse((executed.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(executed))).toMatchObject({
         executionId: 'verify-run-1',
         executionType: 'verify',
         status: 'running',
@@ -1230,7 +1243,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_verification_result',
         arguments: { executionId: 'verify-run-1' },
       })
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(result))).toMatchObject({
         executionId: 'verify-run-1',
         executionType: 'verify',
         status: 'failed',
@@ -1282,7 +1295,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-needs-heal', session_id: 'sess-1', timeout_ms: 1000 },
       })
-      const needsHealBody = JSON.parse((needsHeal.content?.[0] as { text: string }).text)
+      const needsHealBody = JSON.parse(toolText(needsHeal))
       expect(needsHealBody).toMatchObject({
         type: 'needs_heal',
         runId: 'wait-needs-heal',
@@ -1306,7 +1319,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-needs-heal', session_id: 'sess-1', timeout_ms: 1000 },
       })
-      const repeatBody = JSON.parse((repeatHeal.content?.[0] as { text: string }).text)
+      const repeatBody = JSON.parse(toolText(repeatHeal))
       expect(repeatBody).toMatchObject({ type: 'needs_heal', cycle: 2 })
       expect(repeatBody.context).not.toHaveProperty('healPrompt')
       expect(repeatBody.context).not.toHaveProperty('nextSteps')
@@ -1316,7 +1329,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'get_heal_context',
         arguments: { runId: 'wait-needs-heal', session_id: 'sess-1' },
       })
-      const refetchBody = JSON.parse((refetch.content?.[0] as { text: string }).text)
+      const refetchBody = JSON.parse(toolText(refetch))
       expect(refetchBody.healPrompt).toBeDefined()
       expect(refetchBody.nextSteps?.length).toBeGreaterThan(0)
 
@@ -1332,7 +1345,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-passed', session_id: 'sess-1', timeout_ms: 1000 },
       })
-      expect(JSON.parse((passed.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(passed))).toMatchObject({
         type: 'passed',
         runId: 'wait-passed',
       })
@@ -1367,7 +1380,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-failed', session_id: 'sess-1', timeout_ms: 1000 },
       })
-      const failedBody = JSON.parse((failed.content?.[0] as { text: string }).text)
+      const failedBody = JSON.parse(toolText(failed))
       expect(failedBody).toMatchObject({
         type: 'failed',
         runId: 'wait-failed',
@@ -1425,7 +1438,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-timeout', session_id: 'sess-timeout', timeout_ms: 10 },
       })
-      const stillWaitingBody = JSON.parse((stillWaiting.content?.[0] as { text: string }).text)
+      const stillWaitingBody = JSON.parse(toolText(stillWaiting))
       expect(stillWaitingBody).toMatchObject({
         type: 'still_waiting',
         runId: 'wait-timeout',
@@ -1471,7 +1484,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { runId: 'wait-claim', session_id: 'sess-claude', timeout_ms: 1000 },
       })
 
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       expect(body).toMatchObject({
         type: 'needs_heal',
         runId: 'wait-claim',
@@ -1531,7 +1544,7 @@ describe('MCP HTTP server (smoke)', () => {
           conversation_name: 'resume existing run',
         },
       })
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       expect(body).toMatchObject({
         runId: 'reuse-active',
         reused: true,
@@ -1560,7 +1573,7 @@ describe('MCP HTTP server (smoke)', () => {
       featuresDir,
       startRun: async (...args) => {
         calls.push(args)
-        return { runId: 'new-run' }
+        return { kind: 'started', runId: 'new-run' }
       },
     })
     let client: Client | null = null
@@ -1581,7 +1594,7 @@ describe('MCP HTTP server (smoke)', () => {
           conversation_name: 'pty fresh start',
         },
       })
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       expect(body).toMatchObject({ runId: 'new-run', reused: false, claimed: false, claimSuppressed: true })
       expect(body.nextSteps ?? []).not.toContain('wait_for_heal_task')
       // The run is still external-origin (claimable:false) — it must NOT fall
@@ -1611,7 +1624,7 @@ describe('MCP HTTP server (smoke)', () => {
       featuresDir,
       startRun: async (...args) => {
         calls.push(args)
-        return { runId: 'new-run' }
+        return { kind: 'started', runId: 'new-run' }
       },
     })
     let client: Client | null = null
@@ -1628,7 +1641,7 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'claude',
         },
       })
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       expect(body).toMatchObject({ runId: 'new-run', reused: false, claimed: true })
       expect(body.claimSuppressed).toBeUndefined()
       expect(calls).toHaveLength(1)
@@ -1683,7 +1696,7 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'claude-pty',
         },
       })
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       // Not refused (no claim_not_allowed): the run restarts into external mode.
       expect(body).toMatchObject({
         runId: '2026-05-19T0841-7cvh',
@@ -1737,7 +1750,7 @@ describe('MCP HTTP server (smoke)', () => {
           conversation_name: 'pty should not claim',
         },
       })
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       expect(body).toMatchObject({
         runId: 'suppress-active',
         reused: true,
@@ -1795,7 +1808,7 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'claude',
         },
       })
-      expect(JSON.parse((collision.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(collision))).toMatchObject({
         type: 'repo_collision_requires_choice',
         conflictingRunId: 'busy-run',
         options: ['worktree', 'queue'],
@@ -1856,7 +1869,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(result))).toMatchObject({
         runId: 'older-waiting-heal',
         reused: true,
         status: 'healing',
@@ -1915,7 +1928,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-	      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+	      expect(JSON.parse(toolText(result))).toMatchObject({
 	        runId: '2026-05-19T0841-7cvh',
 	        reused: true,
 	        restarted: true,
@@ -1929,7 +1942,7 @@ describe('MCP HTTP server (smoke)', () => {
 	        },
 	        claimed: true,
 	      })
-      const restartBody = JSON.parse((result.content?.[0] as { text: string }).text) as { nextSteps?: string[] }
+      const restartBody = JSON.parse(toolText(result)) as { nextSteps?: string[] }
       expect(restartBody.nextSteps).toContain('wait_for_heal_task')
       expect(restarted).toEqual([{ runId: '2026-05-19T0841-7cvh', sessionId: 'sess-restart' }])
     } finally {
@@ -1971,7 +1984,7 @@ describe('MCP HTTP server (smoke)', () => {
           client_kind: 'claude',
         },
       })
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       expect(body).toMatchObject({
         type: 'boot_session',
         executionType: 'boot',
@@ -2015,7 +2028,7 @@ describe('MCP HTTP server (smoke)', () => {
         name: 'wait_for_heal_task',
         arguments: { runId: 'wait-boot', session_id: 'sess-boot', timeout_ms: 600000 },
       })
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(result))).toMatchObject({
         type: 'boot_session',
         runId: 'wait-boot',
         executionType: 'boot',
@@ -2066,7 +2079,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-      const body = JSON.parse((result.content?.[0] as { text: string }).text)
+      const body = JSON.parse(toolText(result))
       expect(body).toMatchObject({
         type: 'ambiguous_run_ref',
         run_ref: '7cvh',
@@ -2092,7 +2105,7 @@ describe('MCP HTTP server (smoke)', () => {
       featuresDir,
       startRun: async (feature) => {
         starts.push(feature)
-        return { runId: 'fresh-run' }
+        return { kind: 'started', runId: 'fresh-run' }
       },
     })
     let client: Client | null = null
@@ -2115,7 +2128,7 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
 
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(result))).toMatchObject({
         runId: 'fresh-run',
         reused: false,
         claimed: true,
@@ -2138,7 +2151,7 @@ describe('MCP HTTP server (smoke)', () => {
       featuresDir,
       startRun: async (feature, env, healAgent, isolation, executionType) => {
         calls.push({ feature, env, healAgent, isolation, executionType })
-        return { kind: 'started', runId: 'boot-run' } as never
+        return { kind: 'started', runId: 'boot-run' }
       },
     })
     let client: Client | null = null
@@ -2152,7 +2165,7 @@ describe('MCP HTTP server (smoke)', () => {
         arguments: { feature: 'example_todo_api', env: 'local' },
       })
 
-      expect(JSON.parse((result.content?.[0] as { text: string }).text)).toMatchObject({
+      expect(JSON.parse(toolText(result))).toMatchObject({
         runId: 'boot-run',
         booted: true,
       })

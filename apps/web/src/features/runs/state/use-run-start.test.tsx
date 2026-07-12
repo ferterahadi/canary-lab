@@ -2,7 +2,7 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { useRunStart, type UseRunStart, type UseRunStartDeps } from './use-run-start'
 
 const mocks = vi.hoisted(() => ({
@@ -28,9 +28,9 @@ function Harness(props: UseRunStartDeps) {
 
 let container: HTMLDivElement
 let root: Root
-let startRun: ReturnType<typeof vi.fn>
-let startVerification: ReturnType<typeof vi.fn>
-let onRunStarted: ReturnType<typeof vi.fn>
+let startRun: Mock<UseRunStartDeps['startRun']>
+let startVerification: Mock<UseRunStartDeps['startVerification']>
+let onRunStarted: Mock<UseRunStartDeps['onRunStarted']>
 
 function mount(over: Partial<UseRunStartDeps> = {}) {
   const deps: UseRunStartDeps = {
@@ -48,9 +48,9 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  startRun = vi.fn().mockResolvedValue('run-1')
-  startVerification = vi.fn().mockResolvedValue('verify-1')
-  onRunStarted = vi.fn()
+  startRun = vi.fn<UseRunStartDeps['startRun']>().mockResolvedValue('run-1')
+  startVerification = vi.fn<UseRunStartDeps['startVerification']>().mockResolvedValue('verify-1')
+  onRunStarted = vi.fn<UseRunStartDeps['onRunStarted']>()
   mocks.asRepoCollision.mockReset().mockReturnValue(null)
   mocks.asBranchMismatch.mockReset().mockReturnValue(null)
   mocks.benchmarkPreflight.mockReset().mockResolvedValue({ portsConfigured: true })

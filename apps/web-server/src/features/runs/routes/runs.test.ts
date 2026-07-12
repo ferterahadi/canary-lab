@@ -1,13 +1,19 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { runsRoutes } from './runs'
+import { runsRoutes, type ExternalHealAgentRequest } from './runs'
 import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../../runs/logic/run-store'
-import { readManifest, readRunsIndex, writeManifest, writeRunsIndex } from '../../runs/logic/runtime/manifest'
+import type { ClaimInput } from '../../runs/logic/heal/external-heal-broker'
+import { readManifest, readRunsIndex, writeManifest, writeRunsIndex, type RunManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { launchEditorDir } from '../../../shared/editor-launch'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
+import type { ExecutionType } from '../../../../../../shared/verification'
+
+vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
 let tmpDir: string
 let logsDir: string
@@ -55,6 +61,48 @@ function writeFeature(name: string): void {
   )
 }
 
+function writeFeatureWithRepos(name: string, repos: Array<{ name: string; localPath: string }>): void {
+  const dir = path.join(featuresDir, name)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(
+    path.join(dir, 'feature.config.cjs'),
+    `module.exports = { config: { name: ${JSON.stringify(name)}, description: 'd', envs: [], repos: ${JSON.stringify(repos)}, featureDir: __dirname } }`,
+  )
+}
+
+function gitInit(dir: string): void {
+  const opts = { cwd: dir, stdio: 'ignore' as const }
+  execFileSync('git', ['init', '-q'], opts)
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], opts)
+  execFileSync('git', ['config', 'user.name', 'Test'], opts)
+  execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'init'], opts)
+}
+
+function addGitWorktree(sourceRepo: string, worktreePath: string): void {
+  fs.mkdirSync(path.dirname(worktreePath), { recursive: true })
+  execFileSync('git', ['worktree', 'add', '-q', '--detach', worktreePath], { cwd: sourceRepo, stdio: 'ignore' })
+}
+
+// Sets up 3 features exercising every branch of featureRepoRoots(): one with
+// a real git repo (root resolves), one with no `repos` field at all (the
+// `feature.repos ?? []` fallback), and one whose repo path doesn't exist on
+// disk (getGitRoot resolves to null, root stays unadded). Also creates two
+// real worktrees under the logs dir: one following the `runs/<id>/worktrees`
+// convention (ownerKind 'run') and one that doesn't (ownerKind 'unknown').
+function setupWorktreeFixtures(): { sourceRepo: string; runWorktree: string; miscWorktree: string } {
+  const sourceRepo = path.join(tmpDir, 'source-repo')
+  fs.mkdirSync(sourceRepo, { recursive: true })
+  gitInit(sourceRepo)
+  writeFeatureWithRepos('foo', [{ name: 'app', localPath: sourceRepo }])
+  writeFeature('bare')
+  writeFeatureWithRepos('ghostrepo', [{ name: 'x', localPath: path.join(tmpDir, 'does-not-exist') }])
+  const runWorktree = path.join(logsDir, 'runs', 'wt-run-1', 'worktrees', 'app')
+  addGitWorktree(sourceRepo, runWorktree)
+  const miscWorktree = path.join(logsDir, 'misc', 'app2')
+  addGitWorktree(sourceRepo, miscWorktree)
+  return { sourceRepo, runWorktree, miscWorktree }
+}
+
 async function build(opts: {
 	  startRun?: Parameters<typeof runsRoutes>[1]['startRun']
 	  cancelQueuedRun?: (runId: string) => boolean
@@ -63,6 +111,7 @@ async function build(opts: {
 	  restartRun?: (runId: string) => Promise<RestartRunResult>
   projectRoot?: string
   events?: WorkspaceEvent[]
+  isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
 } = {}) {
   const registry = createRegistry()
   const store = new RunStore(logsDir, registry)
@@ -76,6 +125,7 @@ async function build(opts: {
 	    cancelQueuedRun: opts.cancelQueuedRun,
 	    restartHeal: opts.restartHeal,
     restartRun: opts.restartRun,
+    isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
 	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
 	  })
   return { app, registry, store }
@@ -481,7 +531,7 @@ describe('POST /api/runs', () => {
         status: 'healing',
       },
     ])
-    const startRun = vi.fn(async () => makeStub('new-run'))
+    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: makeStub('new-run') }))
     const claim = vi.fn(() => ({
       accepted: true as const,
       session: {
@@ -531,7 +581,13 @@ describe('POST /api/runs', () => {
   it('starts a runner PTY healAgent as external-origin with claimable:false (claim suppressed)', async () => {
     writeFeature('foo')
     const stub = makeStub('new-run')
-    const startRun = vi.fn(async () => ({ kind: 'started' as const, orch: stub }))
+    const startRun = vi.fn(async (
+      _feature: string,
+      _env?: string,
+      _healAgent?: ExternalHealAgentRequest,
+      _isolation?: 'worktree' | 'queue',
+      _executionType?: ExecutionType,
+    ) => ({ kind: 'started' as const, orch: stub }))
     const { app } = await build({ startRun })
 
     const res = await app.inject({
@@ -1014,5 +1070,523 @@ describe('cleanup routes', () => {
     registry.set('r-active', makeStub('r-active'))
     const res = await app.inject({ method: 'POST', url: '/api/runs/r-active/trim' })
     expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ error: 'run is still active; abort it first' })
+  })
+
+  it('POST trim defaults freedBytes to 0 when the store result omits it', async () => {
+    // TrimResult.freedBytes is typed optional ("present when ok") — this
+    // exercises the route's own `?? 0` fallback for that documented-but-
+    // never-actually-omitted-by-the-real-store case.
+    writeManifestForRun('r-trim-nofreed', 'foo', 'passed')
+    writeRunsIndex(logsDir, [{ runId: 'r-trim-nofreed', feature: 'foo', startedAt: 'now', status: 'passed' }])
+    const { app, store } = await build()
+    vi.spyOn(store, 'trimArtifacts').mockReturnValue({ ok: true })
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r-trim-nofreed/trim' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ freedBytes: 0 })
+  })
+
+  it('POST trim 409s with the stale-active message when the manifest is active but no orchestrator is registered', async () => {
+    // Same "orphaned active manifest" situation exercised for DELETE — no
+    // registry entry, but the persisted status is still active.
+    writeManifestForRun('r-stale', 'foo', 'running')
+    writeRunsIndex(logsDir, [{ runId: 'r-stale', feature: 'foo', startedAt: 'now', status: 'running' }])
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r-stale/trim' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ error: 'run is still active; reap or abort first' })
+  })
+})
+
+describe('GET /api/runs/:runId/verification-report', () => {
+  it('404s when the run is unknown', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/ghost/verification-report' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ error: 'run not found' })
+  })
+
+  it('409s when the run is not a verification execution (defaults executionType to "run")', async () => {
+    // No executionType field at all on the manifest — exercises the `??
+    // 'run'` default explicitly, distinct from a manifest that sets it.
+    writeManifestForRun('r1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/verification-report' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ error: 'run is not a verification execution' })
+  })
+
+  it('200s with verification:null when a verify execution has no verification field yet', async () => {
+    // Exercises the `?? null` fallback distinct from the "populated" case
+    // below — a verify execution whose manifest hasn't had `verification`
+    // attached yet (e.g. very early in the run).
+    const dir = runDirFor(logsDir, 'r-verify-empty')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-verify-empty',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+      executionType: 'verify',
+    })
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-verify-empty/verification-report' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({
+      runId: 'r-verify-empty',
+      executionType: 'verify',
+      status: 'running',
+      verification: null,
+    })
+  })
+
+  it('200s with the verification payload for a verify execution', async () => {
+    const dir = runDirFor(logsDir, 'r-verify')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'r-verify',
+      feature: 'foo',
+      startedAt: 'now',
+      status: 'passed',
+      healCycles: 0,
+      services: [],
+      executionType: 'verify',
+      verification: {
+        playwrightEnvsetId: 'envset-1',
+        targetUrls: { web: 'https://example.test' },
+        targets: [],
+      },
+    })
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r-verify/verification-report' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({
+      runId: 'r-verify',
+      executionType: 'verify',
+      status: 'passed',
+      verification: {
+        playwrightEnvsetId: 'envset-1',
+        targetUrls: { web: 'https://example.test' },
+        targets: [],
+      },
+    })
+  })
+})
+
+describe('healAgent request-body validation', () => {
+  it('400s when healAgent is not an object', async () => {
+    writeFeature('foo')
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'foo', healAgent: 'not-an-object' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'healAgent must be an object' })
+  })
+
+  it('starts normally when healAgent is an object with no "kind" field', async () => {
+    writeFeature('foo')
+    const stub = makeStub('run-nokind')
+    const startRun = vi.fn(async (
+      _feature: string,
+      _env?: string,
+      _healAgent?: ExternalHealAgentRequest,
+      _isolation?: 'worktree' | 'queue',
+      _executionType?: ExecutionType,
+    ) => ({ kind: 'started' as const, orch: stub }))
+    const { app } = await build({ startRun })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'foo', healAgent: { sessionId: 'no-kind-here' } },
+    })
+    expect(res.statusCode).toBe(201)
+    expect(res.json()).toEqual({ runId: 'run-nokind' })
+    // healAgent parsed to null → passed through as undefined to the factory.
+    expect(startRun.mock.calls[0][2]).toBeUndefined()
+  })
+
+  it('400s when healAgent.kind is set but not "external"', async () => {
+    writeFeature('foo')
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'foo', healAgent: { kind: 'internal' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'healAgent.kind must be "external" when overriding from the request body' })
+  })
+
+  it('400s when kind="external" but sessionId is missing', async () => {
+    writeFeature('foo')
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'foo', healAgent: { kind: 'external', clientKind: 'claude' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: 'healAgent.sessionId is required when kind="external"' })
+  })
+
+  it('400s when kind="external" but clientKind is invalid', async () => {
+    writeFeature('foo')
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: { feature: 'foo', healAgent: { kind: 'external', sessionId: 's1', clientKind: 'not-a-real-client' } },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json().error).toContain('healAgent.clientKind must be one of')
+  })
+
+  it('threads healAgent.clientVersion through to broker.claim on the reuse path', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local'], featureDir: __dirname } }`,
+    )
+    const runDir = runDirFor(logsDir, 'active-cv')
+    fs.mkdirSync(runDir, { recursive: true })
+    writeManifest(path.join(runDir, 'manifest.json'), {
+      runId: 'active-cv',
+      feature: 'foo',
+      featureDir: dir,
+      env: 'local',
+      startedAt: '2026-05-19T00:00:00.000Z',
+      status: 'healing',
+      healCycles: 1,
+      services: [],
+    })
+    writeRunsIndex(logsDir, [
+      { runId: 'active-cv', feature: 'foo', startedAt: '2026-05-19T00:00:00.000Z', status: 'healing' },
+    ])
+    // A runner-PTY client (claim suppressed) so this test also covers the
+    // claimSuppressed:true branch of the *reused-run* response, distinct
+    // from the already-tested claimSuppressed branch of the fresh-start
+    // response.
+    const claim = vi.fn((_runId: string, input: ClaimInput) => ({
+      accepted: false as const,
+      reason: 'client-kind-not-allowed' as const,
+      clientKind: input.clientKind,
+    }))
+    const { app } = await build({ broker: { claim } })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        env: 'local',
+        healAgent: { kind: 'external', sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion: '9.9.9' },
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ runId: 'active-cv', reused: true, claimSuppressed: true, claimed: false })
+    expect(claim).toHaveBeenCalledWith('active-cv', { sessionId: 'sess-cv', clientKind: 'claude-pty', clientVersion: '9.9.9' })
+  })
+})
+
+describe('POST /api/runs — active-run priority selection', () => {
+  it('prefers waiting-for-signal, then healing, then a stale manifest — skipping env-mismatched and dangling index entries', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local','other'], featureDir: __dirname } }`,
+    )
+
+    function manifestFor(runId: string, over: Partial<RunManifest>): void {
+      const rd = runDirFor(logsDir, runId)
+      fs.mkdirSync(rd, { recursive: true })
+      writeManifest(path.join(rd, 'manifest.json'), {
+        runId,
+        feature: 'foo',
+        featureDir: dir,
+        env: 'local',
+        startedAt: '2026-06-01T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+        ...over,
+      })
+    }
+
+    // Priority 0: parked waiting for an external signal.
+    manifestFor('r-waiting', {
+      lifecycle: { phase: 'waiting-for-signal', headline: 'w', updatedAt: '2026-06-01T00:00:01.000Z' },
+    })
+    // Priority 1 (two of these — forces the startedAt tie-break comparator
+    // both ways as the sort orders them relative to each other).
+    manifestFor('r-mid-a', { startedAt: '2026-06-01T00:00:05.000Z' })
+    manifestFor('r-mid-b', { startedAt: '2026-06-01T00:00:03.000Z' })
+    // Priority 2: the index still says "healing", but the manifest itself
+    // has drifted to a non-active status with no waiting-for-signal
+    // lifecycle — the lowest priority tier.
+    manifestFor('r-stale', { status: 'running' })
+    // Wrong env — filtered out before priority is ever considered.
+    manifestFor('r-wrong-env', { env: 'other' })
+
+    writeRunsIndex(logsDir, [
+      { runId: 'r-waiting', feature: 'foo', startedAt: '2026-06-01T00:00:01.000Z', status: 'healing' },
+      { runId: 'r-mid-a', feature: 'foo', startedAt: '2026-06-01T00:00:05.000Z', status: 'healing' },
+      { runId: 'r-mid-b', feature: 'foo', startedAt: '2026-06-01T00:00:03.000Z', status: 'healing' },
+      { runId: 'r-stale', feature: 'foo', startedAt: '2026-06-01T00:00:02.000Z', status: 'healing' },
+      { runId: 'r-wrong-env', feature: 'foo', startedAt: '2026-06-01T00:00:09.000Z', status: 'healing' },
+      // Dangling: indexed as healing but no manifest.json on disk at all.
+      { runId: 'r-ghost', feature: 'foo', startedAt: '2026-06-01T00:00:08.000Z', status: 'healing' },
+    ])
+
+    // No broker configured — exercises the `deps.broker?.claim` short-circuit
+    // (claim stays null) on the reuse path.
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        env: 'local',
+        healAgent: { kind: 'external', sessionId: 'sess-p', clientKind: 'claude' },
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ runId: 'r-waiting', reused: true, claimed: false })
+    expect(res.json().claimSuppressed).toBeUndefined()
+    expect(res.json().ignoredForceNew).toBeUndefined()
+  })
+})
+
+describe('POST /api/runs — active-run priority selection, exact startedAt tie', () => {
+  it('resolves a same-priority, identical-startedAt tie deterministically (comparator returns 0)', async () => {
+    // Distinct from the r-mid-a/r-mid-b case above, which has different
+    // startedAt values and so only exercises the `<` / `>` arms of the
+    // nested ternary. Here startedAt is byte-identical on both candidates,
+    // forcing the `=== ` (return 0) arm.
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local'], featureDir: __dirname } }`,
+    )
+    function manifestFor(runId: string): void {
+      const rd = runDirFor(logsDir, runId)
+      fs.mkdirSync(rd, { recursive: true })
+      writeManifest(path.join(rd, 'manifest.json'), {
+        runId,
+        feature: 'foo',
+        featureDir: dir,
+        env: 'local',
+        startedAt: '2026-06-01T00:00:00.000Z',
+        status: 'healing',
+        healCycles: 1,
+        services: [],
+      })
+    }
+    manifestFor('r-tie-a')
+    manifestFor('r-tie-b')
+    writeRunsIndex(logsDir, [
+      { runId: 'r-tie-a', feature: 'foo', startedAt: '2026-06-01T00:00:00.000Z', status: 'healing' },
+      { runId: 'r-tie-b', feature: 'foo', startedAt: '2026-06-01T00:00:00.000Z', status: 'healing' },
+    ])
+    const { app } = await build()
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        env: 'local',
+        healAgent: { kind: 'external', sessionId: 'sess-tie', clientKind: 'claude' },
+      },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ reused: true })
+    expect(['r-tie-a', 'r-tie-b']).toContain(res.json().runId)
+  })
+})
+
+describe('POST /api/runs/:runId/restart — default reason', () => {
+  it('409s with reason=not-restartable when restartRun is not configured at all', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/restart' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'not-restartable' })
+  })
+})
+
+describe('POST /api/runs/:runId/agent-input — unexpected interject failure reason', () => {
+  it('409s directly (without attempting restartHeal) when interjectHealAgent fails for a reason other than no-agent-running', async () => {
+    // OrchestratorInterjectResult's type only declares 'no-agent-running' as
+    // a failure reason; this exercises the route's defensive fallback for an
+    // orchestrator implementation that returns something else.
+    const stub: OrchestratorLike = {
+      runId: 'ai5',
+      stop: async () => { /* noop */ },
+      pauseAndHeal: async () => ({ ok: true, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true }),
+      interjectHealAgent: async () => ({ ok: false, reason: 'unexpected-reason' }) as unknown as { ok: false, reason: 'no-agent-running' },
+    }
+    let restartHealCalled = false
+    const { app, registry } = await build({
+      restartHeal: async () => { restartHealCalled = true; return { ok: true } },
+    })
+    registry.set('ai5', stub)
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs/ai5/agent-input',
+      payload: { data: 'hi' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toEqual({ reason: 'unexpected-reason' })
+    expect(restartHealCalled).toBe(false)
+  })
+})
+
+describe('cleanup/worktrees routes (real git worktrees)', () => {
+  it('GET lists worktrees classified by owner, with `active` computed via isWorktreeOwnerActive', async () => {
+    const { runWorktree, miscWorktree } = setupWorktreeFixtures()
+    const { app } = await build({
+      isWorktreeOwnerActive: (kind, id) => kind === 'run' && id === 'wt-run-1',
+    })
+
+    const res = await app.inject({ method: 'GET', url: '/api/cleanup/worktrees' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as { worktrees: Array<{ path: string; ownerKind: string; ownerId: string | null; active: boolean }> }
+    const run = body.worktrees.find((w) => w.path === runWorktree)
+    const misc = body.worktrees.find((w) => w.path === miscWorktree)
+    expect(run).toMatchObject({ ownerKind: 'run', ownerId: 'wt-run-1', active: true })
+    expect(misc).toMatchObject({ ownerKind: 'unknown', ownerId: null, active: false })
+  })
+
+  describe('POST /api/cleanup/worktrees/open', () => {
+    it('400s when path is missing', async () => {
+      const { app } = await build()
+      const res = await app.inject({ method: 'POST', url: '/api/cleanup/worktrees/open', payload: {} })
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({ error: 'path is required' })
+    })
+
+    it('400s when path is outside the logs directory', async () => {
+      const { app } = await build()
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/cleanup/worktrees/open',
+        payload: { path: path.join(tmpDir, 'outside') },
+      })
+      expect(res.statusCode).toBe(400)
+      expect(res.json()).toEqual({ error: 'path must be inside the logs directory' })
+    })
+
+    it('404s when the directory does not exist on disk', async () => {
+      const { app } = await build()
+      const target = path.join(logsDir, 'runs', 'ghost', 'worktrees', 'app')
+      const res = await app.inject({ method: 'POST', url: '/api/cleanup/worktrees/open', payload: { path: target } })
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toEqual({ error: 'worktree directory not found' })
+    })
+
+    it('200s opened:true and resolves the editor via loadProjectConfig when projectRoot is set', async () => {
+      vi.mocked(launchEditorDir).mockReturnValueOnce('cursor')
+      const target = path.join(logsDir, 'runs', 'r1', 'worktrees', 'app')
+      fs.mkdirSync(target, { recursive: true })
+      // tmpDir has no canary-lab.config.json → loadProjectConfig falls back
+      // to its own default ('auto'), proving the projectRoot branch ran.
+      const { app } = await build({ projectRoot: tmpDir })
+      const res = await app.inject({ method: 'POST', url: '/api/cleanup/worktrees/open', payload: { path: target } })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: true, path: target, editor: 'cursor' })
+      expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', target)
+    })
+
+    it('200s opened:false with err.message when launchEditorDir throws a real Error', async () => {
+      vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw new Error('editor binary not found') })
+      const target = path.join(logsDir, 'runs', 'r2b', 'worktrees', 'app')
+      fs.mkdirSync(target, { recursive: true })
+      const { app } = await build()
+      const res = await app.inject({ method: 'POST', url: '/api/cleanup/worktrees/open', payload: { path: target } })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: false, path: target, error: 'editor binary not found' })
+    })
+
+    it('200s opened:false with a stringified error when launchEditorDir throws a non-Error value', async () => {
+      vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw 'spawn exploded' })
+      const target = path.join(logsDir, 'runs', 'r2', 'worktrees', 'app')
+      fs.mkdirSync(target, { recursive: true })
+      const { app } = await build()
+      const res = await app.inject({ method: 'POST', url: '/api/cleanup/worktrees/open', payload: { path: target } })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ opened: false, path: target, error: 'spawn exploded' })
+    })
+  })
+
+  describe('DELETE /api/cleanup/worktrees', () => {
+    it('400s when path is missing', async () => {
+      const { app } = await build()
+      const res = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: {} })
+      expect(res.statusCode).toBe(400)
+    })
+
+    it('400s when path is outside the logs directory', async () => {
+      const { app } = await build()
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/cleanup/worktrees',
+        payload: { path: path.join(tmpDir, 'outside') },
+      })
+      expect(res.statusCode).toBe(400)
+    })
+
+    it('404s when no worktree entry matches the path', async () => {
+      setupWorktreeFixtures()
+      const { app } = await build()
+      const res = await app.inject({
+        method: 'DELETE',
+        url: '/api/cleanup/worktrees',
+        payload: { path: path.join(logsDir, 'runs', 'nope', 'worktrees', 'app') },
+      })
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toEqual({ error: 'worktree not found' })
+    })
+
+    it('409s and leaves the worktree in place when it belongs to an active run', async () => {
+      const { runWorktree } = setupWorktreeFixtures()
+      const { app } = await build({ isWorktreeOwnerActive: () => true })
+      const res = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: runWorktree } })
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toEqual({ error: 'worktree belongs to an active run — abort it first' })
+      expect(fs.existsSync(runWorktree)).toBe(true)
+    })
+
+    it('200s, removes the worktree via git, and returns freedBytes', async () => {
+      const { runWorktree } = setupWorktreeFixtures()
+      fs.writeFileSync(path.join(runWorktree, 'data.bin'), Buffer.alloc(64))
+      const { app } = await build({ isWorktreeOwnerActive: () => false })
+      const res = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: runWorktree } })
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { removed: boolean; freedBytes: number }
+      expect(body.removed).toBe(true)
+      expect(body.freedBytes).toBeGreaterThan(0)
+      expect(fs.existsSync(runWorktree)).toBe(false)
+    })
+
+    it('200s removing a worktree with no run/benchmark owner without consulting isWorktreeOwnerActive', async () => {
+      // ownerKind 'unknown' short-circuits the `active` ternary to `false`
+      // directly — distinct from the ownerKind 'run' cases above, which both
+      // route through deps.isWorktreeOwnerActive?.(...).
+      const { miscWorktree } = setupWorktreeFixtures()
+      const isWorktreeOwnerActive = vi.fn(() => true)
+      const { app } = await build({ isWorktreeOwnerActive })
+      const res = await app.inject({ method: 'DELETE', url: '/api/cleanup/worktrees', payload: { path: miscWorktree } })
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ removed: true })
+      expect(isWorktreeOwnerActive).not.toHaveBeenCalled()
+      expect(fs.existsSync(miscWorktree)).toBe(false)
+    })
   })
 })

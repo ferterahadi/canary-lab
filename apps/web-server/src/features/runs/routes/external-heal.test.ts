@@ -46,9 +46,8 @@ function manifestForRun(runId: string, status: RunStatus = 'running'): RunManife
     ],
     lifecycle: {
       phase: 'running-tests',
+      headline: 'Running tests',
       updatedAt: '2026-05-18T10:00:05.000Z',
-      message: 'Running tests',
-      severity: 'info',
     },
   }
 }

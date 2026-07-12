@@ -160,8 +160,9 @@ describe('coverage/states — ?? null fallback branch (lines 196-198)', () => {
       feature: 'checkout',
       requirements: [],
       tests: [],
-      totals: { total: 0, verified: 0, partial: 0, failing: 0, untested: 0 },
+      totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
       coveragePct: 0,
+      mappedPct: 0,
       orphanRequirementIds: [],
       orphanTestNames: [],
       // state intentionally omitted — headline/summary/coverage will all be undefined

@@ -9,7 +9,8 @@ import type { StageAdapters } from '../logic/conductor'
 import type { FlightAgentSpawner } from '../logic/stages/context'
 import { FLIGHT_STAGE_KEYS } from '../logic/types'
 import type { FlightIndexEntry, FlightManifest } from '../logic/types'
-import type { PlanFeaturesTask } from '../../../../../../shared/flights/types'
+import type { PlanFeaturesTask, PlannedFeature } from '../../../../../../shared/flights/types'
+import { PlanFeaturesStore, startPlanFeatures, normalizePlanResult } from '../logic/plan-features'
 
 let tmpDir: string
 let repoDir: string
@@ -115,6 +116,12 @@ const startBody = (over: Record<string, unknown> = {}) => ({
   repoPaths: [repoDir],
   description: 'checkout flow',
   ...over,
+})
+
+const planText = (features: unknown) => `\`\`\`json\n${JSON.stringify({ split: Array.isArray(features) && (features as unknown[]).length > 1, features })}\n\`\`\``
+
+const agentReturning = (text: string | (() => string)): FlightAgentSpawner => async () => ({
+  text: typeof text === 'function' ? text() : text,
 })
 
 async function waitForStatus(flightId: string, statuses: string[], timeoutMs = 3000): Promise<Record<string, unknown>> {
@@ -303,6 +310,53 @@ describe('flights routes', () => {
     const abort = await app.inject({ method: 'POST', url: '/api/flights/fl_x/abort' })
     expect(abort.statusCode).toBe(409)
     expect(abort.json()).toMatchObject({ error: 'boom' })
+
+    const pause = await app.inject({ method: 'POST', url: '/api/flights/fl_x/pause' })
+    expect(pause.statusCode).toBe(409)
+    expect(pause.json()).toMatchObject({ error: 'boom' })
+
+    const redo = await app.inject({ method: 'POST', url: '/api/flights/fl_x/redo' })
+    expect(redo.statusCode).toBe(409)
+    expect(redo.json()).toMatchObject({ error: 'boom' })
+
+    const del = await app.inject({ method: 'DELETE', url: '/api/flights/fl_x' })
+    expect(del.statusCode).toBe(409)
+    expect(del.json()).toMatchObject({ error: 'boom' })
+  })
+
+  it('404s a redo for an unknown flight (real "not found" Error)', async () => {
+    app = await buildApp(allDone())
+    const resp = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/redo' })
+    expect(resp.statusCode).toBe(404)
+    expect(resp.json()).toMatchObject({ error: 'flight not found: fl_nope' })
+  })
+
+  it('400s when repoPaths contains a non-string entry', async () => {
+    app = await buildApp(allDone())
+    const resp = await app.inject({
+      method: 'POST',
+      url: '/api/flights',
+      body: startBody({ repoPaths: [repoDir, 123] }),
+    })
+    expect(resp.statusCode).toBe(400)
+    expect(resp.json()).toMatchObject({ error: 'repoPaths must be a string array' })
+  })
+
+  it('degrades gracefully when the feature config directory cannot be read (loadFeatures throws)', async () => {
+    // featuresDir is a FILE, not a directory — loadFeatures's fs.readdirSync
+    // throws ENOTDIR, which the entry route's best-effort try/catch must
+    // swallow rather than 500ing the whole menu.
+    fs.writeFileSync(path.join(tmpDir, 'features'), 'not a directory')
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    await waitForStatus((started.json() as { flightId: string }).flightId, ['done'])
+
+    const resp = await app.inject({ method: 'GET', url: '/api/flights/entry?feature=checkout' })
+    expect(resp.statusCode).toBe(200)
+    const body = resp.json() as { prefill: { repoPaths: string[] } }
+    // config load failed → falls back to the manifest's repoPaths, not a
+    // config-derived prefill.
+    expect(body.prefill.repoPaths).toEqual([repoDir])
   })
 
   describe('agent-session', () => {
@@ -424,6 +478,44 @@ describe('flight entry modes (continue / redo / jump)', () => {
     expect(jump.statusCode).toBe(400)
     expect((jump.json() as { error: string }).error).toMatch(/use --from-stage run/)
   })
+
+  it('rejects a jump to run when no PRD summary exists (prd-summary prerequisite)', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'checkout')
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api.env'), 'PORT=0\n')
+    app = await buildApp(allDone())
+    const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'run' }) })
+    expect(jump.statusCode).toBe(400)
+    const body = jump.json() as { type: string; error: string }
+    expect(body.type).toBe('stage_entry_rejected')
+    expect(body.error).toMatch(/_prd-summary\.json/)
+  })
+
+  it('rejects a jump to run when no specs exist under e2e/ (specs-coverage prerequisite)', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'checkout')
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api.env'), 'PORT=0\n')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), '{}')
+    app = await buildApp(allDone())
+    const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'run' }) })
+    expect(jump.statusCode).toBe(400)
+    const body = jump.json() as { type: string; error: string }
+    expect(body.type).toBe('stage_entry_rejected')
+    expect(body.error).toMatch(/no specs under e2e\//)
+  })
+
+  it('accepts a jump to env-capture with only the scaffold prerequisite met', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'checkout')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
+    app = await buildApp(allDone())
+    const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'env-capture' }) })
+    expect(jump.statusCode).toBe(201)
+    await waitForStatus((jump.json() as { flightId: string }).flightId, ['done'])
+  })
 })
 
 describe('flight entry options (GET /api/flights/entry)', () => {
@@ -518,12 +610,17 @@ describe('flight entry options (GET /api/flights/entry)', () => {
 
   it('flags an active flight (attach, don’t start) and continue for a paused one', async () => {
     writeFeatureConfig('checkout')
-    let gate: (() => void) | null = null
+    // A plain `let` here gets narrowed to `never` by TS's control-flow
+    // analysis after the `while` loop below, because the only assignment it
+    // sees in this function's flow graph is the `null` initializer — the
+    // reassignment inside the nested `run` closure lives in a separate flow
+    // graph. Boxing it in an object sidesteps that narrowing.
+    const gateBox: { gate: (() => void) | null } = { gate: null }
     let fail = true
     const adapters = allDone()
     adapters.docs = {
       run: async () => {
-        await new Promise<void>((resolve) => { gate = resolve })
+        await new Promise<void>((resolve) => { gateBox.gate = resolve })
         return fail ? { kind: 'failed', error: 'no docs' } : { kind: 'done' }
       },
     }
@@ -533,7 +630,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     // The docs adapter parks on the gate — wait until the conductor reaches it
     // so "active" is observed mid-stage, not at the pre-drive instant.
     const deadline = Date.now() + 3000
-    while (gate === null) {
+    while (gateBox.gate === null) {
       if (Date.now() > deadline) throw new Error('docs adapter never started')
       await new Promise((r) => setTimeout(r, 10))
     }
@@ -542,7 +639,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(whileActive.body.active).toBe(true)
     expect(whileActive.body.canContinue).toBe(false)
 
-    gate!()
+    gateBox.gate!()
     await waitForStatus(flightId, ['paused'])
     fail = false
 
@@ -688,12 +785,6 @@ describe('GET /api/flights collapses to latest-per-feature (R67)', () => {
 })
 
 describe('plan-features (R54)', () => {
-  const planText = (features: unknown) => `\`\`\`json\n${JSON.stringify({ split: Array.isArray(features) && (features as unknown[]).length > 1, features })}\n\`\`\``
-
-  const agentReturning = (text: string | (() => string)): FlightAgentSpawner => async () => ({
-    text: typeof text === 'function' ? text() : text,
-  })
-
   async function planAndWait(instance: FastifyInstance, body?: Record<string, unknown>): Promise<PlanFeaturesTask> {
     const res = await instance.inject({
       method: 'POST',
@@ -788,6 +879,47 @@ describe('plan-features (R54)', () => {
     expect((list.json() as { flights: Array<{ feature: string }> }).flights.map((f) => f.feature)).toEqual(['checkout'])
   })
 
+  it('launch parks every sibling queued when the repo is already busy with an unrelated active flight', async () => {
+    // The repo-name conflict pre-check only looks at FEATURE-name collisions;
+    // a repo already flying under a DIFFERENT feature name slips past it and
+    // is caught by startFlight's own single-flight guard instead — which
+    // executePlannedLaunch swallows (FlightConflictError) and parks queued,
+    // rather than rethrowing.
+    const gateBox: { gate: (() => void) | null } = { gate: null }
+    const busyAdapters = allDone()
+    busyAdapters.scout = {
+      run: async () => { await new Promise<void>((resolve) => { gateBox.gate = resolve }); return { kind: 'done' as const } },
+    }
+    app = await buildApp(busyAdapters, undefined, agentReturning(planText([
+      { name: 'other-one', description: 'test other one' },
+      { name: 'other-two', description: 'test other two' },
+    ])))
+    const busy = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const busyId = (busy.json() as { flightId: string }).flightId
+    const deadline0 = Date.now() + 3000
+    while (gateBox.gate === null) {
+      if (Date.now() > deadline0) throw new Error('busy flight never started')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+
+    const task = await planAndWait(app)
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+    expect(launched.statusCode).toBe(201)
+    const { flightIds } = launched.json() as { flightIds: string[] }
+    expect(flightIds).toHaveLength(2)
+    const list = await app.inject({ method: 'GET', url: '/api/flights' })
+    const flights = (list.json() as { flights: Array<{ feature: string; status: string; pauseReason?: string }> }).flights
+    expect(flights.find((f) => f.feature === 'other-one')).toMatchObject({ status: 'paused', pauseReason: 'queued' })
+    expect(flights.find((f) => f.feature === 'other-two')).toMatchObject({ status: 'paused', pauseReason: 'queued' })
+
+    gateBox.gate!()
+    await waitForStatus(busyId, ['done'])
+  })
+
   it('a single-feature plan auto-launches server-side (no proposal, no /launch call)', async () => {
     app = await buildApp(allDone(), undefined, agentReturning(planText([
       { name: 'solo-feature', description: 'test the whole thing' },
@@ -843,6 +975,345 @@ describe('plan-features (R54)', () => {
     expect((second.json() as { taskId: string }).taskId).toBe((first.json() as { taskId: string }).taskId)
     expect(spawns).toBe(1)
     release!()
+  })
+
+  it('defaults an undefined plan-features POST body to {} and 400s on missing repoPaths', async () => {
+    app = await buildApp(allDone())
+    const resp = await app.inject({ method: 'POST', url: '/api/flights/plan-features' })
+    expect(resp.statusCode).toBe(400)
+    expect(resp.json()).toMatchObject({ error: 'repoPaths (non-empty string array) is required' })
+  })
+
+  it('validates the plan-features start payload', async () => {
+    app = await buildApp(allDone())
+    for (const body of [
+      {},
+      { repoPaths: [], description: 'test everything' },
+      { repoPaths: [repoDir, 123], description: 'test everything' },
+      { repoPaths: [repoDir] },
+      { repoPaths: [repoDir], description: '  ' },
+    ]) {
+      const resp = await app.inject({ method: 'POST', url: '/api/flights/plan-features', body })
+      expect(resp.statusCode).toBe(400)
+    }
+  })
+
+  it('400s a repo path that does not exist', async () => {
+    app = await buildApp(allDone())
+    const resp = await app.inject({
+      method: 'POST',
+      url: '/api/flights/plan-features',
+      body: { repoPaths: [path.join(tmpDir, 'nope')], description: 'test everything' },
+    })
+    expect(resp.statusCode).toBe(400)
+    expect(resp.json()).toMatchObject({ error: expect.stringContaining('repo path does not exist') })
+  })
+
+  it('404s GET plan-features/:taskId for an unknown task', async () => {
+    app = await buildApp(allDone())
+    const resp = await app.inject({ method: 'GET', url: '/api/flights/plan-features/fp_nope' })
+    expect(resp.statusCode).toBe(404)
+    expect(resp.json()).toMatchObject({ error: 'plan task not found: fp_nope' })
+  })
+
+  describe('agent-session', () => {
+    it('404s when no agent-session ref exists for the plan task', async () => {
+      app = await buildApp(allDone(), undefined, agentReturning(planText([
+        { name: 'alpha', description: 'test alpha' },
+        { name: 'beta', description: 'test beta' },
+      ])))
+      const task = await planAndWait(app)
+      const resp = await app.inject({ method: 'GET', url: `/api/flights/plan-features/${task.taskId}/agent-session` })
+      expect(resp.statusCode).toBe(404)
+      expect(resp.json()).toEqual({ reason: 'no-session' })
+    })
+
+    it('returns the agent session when a ref is on disk for the plan task', async () => {
+      const planStore = new PlanFeaturesStore(tmpDir)
+      app = await buildApp(allDone(), undefined, agentReturning(planText([
+        { name: 'alpha', description: 'test alpha' },
+        { name: 'beta', description: 'test beta' },
+      ])))
+      const task = await planAndWait(app)
+      const recordDir = planStore.recordDir(task.taskId)
+      const logPath = path.join(recordDir, 'session.jsonl')
+      fs.writeFileSync(logPath, `${JSON.stringify({ type: 'assistant', message: { model: 'claude-x' } })}\n`)
+      fs.writeFileSync(
+        path.join(recordDir, 'agent-session.json'),
+        JSON.stringify({ agent: 'claude', sessionId: 'sess-1', logPath }),
+      )
+
+      const resp = await app.inject({ method: 'GET', url: `/api/flights/plan-features/${task.taskId}/agent-session` })
+      expect(resp.statusCode).toBe(200)
+      const body = resp.json() as { agent: string; sessionId: string; model?: string }
+      expect(body.agent).toBe('claude')
+      expect(body.sessionId).toBe('sess-1')
+      expect(body.model).toBe('claude-x')
+    })
+  })
+
+  describe('launch validation', () => {
+    it('404s launch for an unknown task', async () => {
+      app = await buildApp(allDone())
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/flights/plan-features/fp_nope/launch',
+        body: { features: [{ name: 'x', description: 'd' }] },
+      })
+      expect(resp.statusCode).toBe(404)
+      expect(resp.json()).toMatchObject({ error: 'plan task not found: fp_nope' })
+    })
+
+    it('400s when features is missing or empty (including an undefined body)', async () => {
+      app = await buildApp(allDone(), undefined, agentReturning(planText([
+        { name: 'alpha', description: 'test alpha' },
+        { name: 'beta', description: 'test beta' },
+      ])))
+      const task = await planAndWait(app)
+      const undefinedBody = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+      })
+      expect(undefinedBody.statusCode).toBe(400)
+      expect(undefinedBody.json()).toMatchObject({ error: 'features (non-empty array) is required' })
+
+      const missing = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+        body: {},
+      })
+      expect(missing.statusCode).toBe(400)
+      expect(missing.json()).toMatchObject({ error: 'features (non-empty array) is required' })
+
+      const empty = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+        body: { features: [] },
+      })
+      expect(empty.statusCode).toBe(400)
+    })
+
+    it('400s when a feature entry has no derivable slug name (name omitted) or no description', async () => {
+      app = await buildApp(allDone(), undefined, agentReturning(planText([
+        { name: 'alpha', description: 'test alpha' },
+        { name: 'beta', description: 'test beta' },
+      ])))
+      const task = await planAndWait(app)
+      // name key entirely absent (not just empty) — exercises the `f?.name`
+      // nullish-coalescing fallback distinct from an explicit empty string.
+      const noNameKey = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+        body: { features: [{ description: 'has a description, no name field' }] },
+      })
+      expect(noNameKey.statusCode).toBe(400)
+      expect(noNameKey.json()).toMatchObject({ error: 'every feature needs a slug name and a description' })
+
+      const noName = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+        body: { features: [{ name: '', description: 'has a description' }] },
+      })
+      expect(noName.statusCode).toBe(400)
+      expect(noName.json()).toMatchObject({ error: 'every feature needs a slug name and a description' })
+
+      const noDescription = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+        body: { features: [{ name: 'named-thing' }] },
+      })
+      expect(noDescription.statusCode).toBe(400)
+      expect(noDescription.json()).toMatchObject({ error: 'every feature needs a slug name and a description' })
+    })
+
+    it('400s duplicate feature names in the launch body', async () => {
+      app = await buildApp(allDone(), undefined, agentReturning(planText([
+        { name: 'alpha', description: 'test alpha' },
+        { name: 'beta', description: 'test beta' },
+      ])))
+      const task = await planAndWait(app)
+      const resp = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+        body: {
+          features: [
+            { name: 'dup', description: 'first' },
+            { name: 'dup', description: 'second' },
+          ],
+        },
+      })
+      expect(resp.statusCode).toBe(400)
+      expect(resp.json()).toMatchObject({ error: 'feature names must be unique' })
+    })
+
+    it('carries a group through to the launched flight opts', async () => {
+      app = await buildApp(allDone(), undefined, agentReturning(planText([
+        { name: 'alpha', description: 'test alpha' },
+        { name: 'beta', description: 'test beta' },
+      ])))
+      const task = await planAndWait(app)
+      const launched = await app.inject({
+        method: 'POST',
+        url: `/api/flights/plan-features/${task.taskId}/launch`,
+        body: { features: [{ name: 'grouped-one', description: 'test grouped', group: 'My Shop' }] },
+      })
+      expect(launched.statusCode).toBe(201)
+      const { flightIds } = launched.json() as { flightIds: string[] }
+      const flight = await app.inject({ method: 'GET', url: `/api/flights/${flightIds[0]}` })
+      expect((flight.json() as { opts: { group?: string } }).opts.group).toBe('my-shop')
+    })
+  })
+
+  it('a non-conflict error during single-feature auto-launch leaves the already-settled task alone', async () => {
+    // The plan settles `done` before autoLaunch runs; if autoLaunch throws a
+    // non-conflict error (executePlannedLaunch rethrows it — flights.ts), the
+    // outer catch's settle() call finds the task no longer `running` and
+    // refuses to resurrect it (plan-features.ts's "don't overwrite" guard) —
+    // so the task stays `done`, not `failed`.
+    app = await buildApp(allDone(), saveThrowsStore(new Error('disk broken')), agentReturning(planText([
+      { name: 'solo-thing', description: 'test the whole thing' },
+    ])))
+    const task = await planAndWait(app)
+    expect(task.status).toBe('done')
+    expect(task.launchedFlightIds).toBeUndefined()
+    expect(task.conflicts).toBeUndefined()
+  })
+
+  it('a plan agent spawn throwing a non-Error value fails the task via String(err)', async () => {
+    app = await buildApp(allDone(), undefined, async () => {
+      throw 'agent crashed'
+    })
+    const task = await planAndWait(app)
+    expect(task.status).toBe('failed')
+    expect(task.error).toBe('agent crashed')
+  })
+})
+
+describe('plan-features.ts direct unit coverage (paths no route surface reaches)', () => {
+  it('normalizePlanResult rejects zero features, a missing description, and duplicate names', () => {
+    expect(() => normalizePlanResult({ split: false, features: [] })).toThrow(/no features/)
+    expect(() =>
+      normalizePlanResult({ split: false, features: [{ name: 'x' } as PlannedFeature] }),
+    ).toThrow(/has no description/)
+    expect(() =>
+      normalizePlanResult({
+        split: true,
+        features: [
+          { name: 'dup', description: 'd1' },
+          { name: 'dup', description: 'd2' },
+        ],
+      }),
+    ).toThrow(/duplicate feature names/)
+  })
+
+  it('normalizePlanResult falls back to "feature" when the name key is entirely absent', () => {
+    // Exercises the `f?.name ?? ''` nullish fallback distinct from an
+    // explicit empty-string name (deriveFeatureSlug('') → 'feature').
+    const result = normalizePlanResult({
+      split: false,
+      features: [{ description: 'no name field at all' } as PlannedFeature],
+    })
+    expect(result.features).toEqual([{ name: 'feature', description: 'no name field at all' }])
+  })
+
+  it('reconcileInterrupted fails an orphaned running plan task on boot', () => {
+    const store = new PlanFeaturesStore(tmpDir)
+    store.save({
+      taskId: 'fp_orphan',
+      repoPaths: [repoDir],
+      description: 'orphaned',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    })
+    store.reconcileInterrupted(() => '2026-01-02T00:00:00Z')
+    const after = store.get('fp_orphan')!
+    expect(after.status).toBe('failed')
+    expect(after.error).toMatch(/Interrupted by server restart/)
+  })
+
+  it('a client /launch that wins the race is not overwritten by the server auto-launch', async () => {
+    const store = new PlanFeaturesStore(tmpDir)
+    let capturedStatus: string | undefined
+    const task = startPlanFeatures(
+      { repoPaths: [repoDir], description: 'race test' },
+      store,
+      {
+        logsDir: tmpDir,
+        spawnAgent: async () => ({ text: planText([{ name: 'race-one', description: 'test race' }]) }),
+        autoLaunch: (settled) => {
+          // Simulate a concurrent client POST /launch beating the server's
+          // own auto-launch and flipping status before this callback returns.
+          store.save({ ...settled, status: 'launched', launchedFlightIds: ['fl_client'], updatedAt: '2026-01-01T00:00:01Z' })
+          capturedStatus = store.get(settled.taskId)?.status
+          return { launched: true, flightIds: ['fl_server_would_have_made'] }
+        },
+      },
+    )
+    const deadline = Date.now() + 3000
+    while (store.get(task.taskId)?.status === 'running') {
+      if (Date.now() > deadline) throw new Error('plan task never settled')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(capturedStatus).toBe('launched')
+    // The guard refused to resurrect/overwrite — the client's write wins.
+    const final = store.get(task.taskId)!
+    expect(final.status).toBe('launched')
+    expect(final.launchedFlightIds).toEqual(['fl_client'])
+  })
+
+  it('settle() no-ops (does not resurrect) when the record file vanishes before the agent resolves', async () => {
+    // Exercises the `!cur` half of settle()'s `!cur || cur.status !== 'running'`
+    // guard, distinct from the `status !== 'running'` half already covered by
+    // the non-conflict-auto-launch test above.
+    const store = new PlanFeaturesStore(tmpDir)
+    let release: (() => void) | null = null
+    const task = startPlanFeatures(
+      { repoPaths: [repoDir], description: 'vanishing record' },
+      store,
+      {
+        logsDir: tmpDir,
+        spawnAgent: async () => {
+          await new Promise<void>((resolve) => { release = resolve })
+          return { text: planText([{ name: 'ghost-one', description: 'test ghost' }]) }
+        },
+      },
+    )
+    // Delete the on-disk record while the agent is still "running" — settle()
+    // must find no current record and bail out rather than writing one back.
+    fs.rmSync(path.join(store.recordDir(task.taskId), 'plan.json'), { force: true })
+    release!()
+    // Give the detached runPlanAgent a beat to reach settle().
+    await new Promise((r) => setTimeout(r, 50))
+    expect(store.get(task.taskId)).toBeNull()
+  })
+
+  it('the post-autoLaunch save is skipped when the record vanishes during autoLaunch (line-196 !cur guard)', async () => {
+    // Distinct from the race test above (which hits `cur.status !== 'done'`):
+    // here the record disappears entirely between the `done` settle and the
+    // post-autoLaunch re-read, exercising the `!cur` half of that guard.
+    const store = new PlanFeaturesStore(tmpDir)
+    const task = startPlanFeatures(
+      { repoPaths: [repoDir], description: 'vanishing during autolaunch' },
+      store,
+      {
+        logsDir: tmpDir,
+        spawnAgent: async () => ({ text: planText([{ name: 'solo-ghost', description: 'test solo ghost' }]) }),
+        autoLaunch: (settled) => {
+          fs.rmSync(path.join(store.recordDir(settled.taskId), 'plan.json'), { force: true })
+          return { launched: true, flightIds: ['fl_would_have_made'] }
+        },
+      },
+    )
+    const deadline = Date.now() + 3000
+    for (;;) {
+      if (store.get(task.taskId) === null) break
+      if (Date.now() > deadline) throw new Error('record never vanished / task never settled')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    // Stayed gone — the guard refused to write a 'launched' record back onto
+    // a deleted task.
+    expect(store.get(task.taskId)).toBeNull()
   })
 })
 

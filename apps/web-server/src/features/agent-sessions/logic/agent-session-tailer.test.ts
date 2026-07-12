@@ -279,6 +279,100 @@ describe('tailAgentSession', () => {
     handle.close()
     expect(true).toBe(true)
   })
+
+  it('does not read the file if onReady closes the tailer before the first flush', async () => {
+    const logPath = path.join(tmp, 's.jsonl')
+    const events: AgentEvent[] = []
+    let handle: ReturnType<typeof tailAgentSession> | undefined
+    let readyCalled = false
+    handle = tailAgentSession({
+      ref: { agent: 'claude', sessionId: 's', logPath },
+      onEvent: (e) => events.push(e),
+      onReady: () => {
+        readyCalled = true
+        handle?.close()
+      },
+      pollIntervalMs: 5,
+    })
+    // The file doesn't exist yet, so the constructor's synchronous tryResolve
+    // schedules a poll and returns before onReady can fire. Write it now so
+    // the next poll tick discovers it and calls onReady asynchronously,
+    // after `handle` is assigned.
+    fs.writeFileSync(logPath, claudeLine('first') + '\n', 'utf-8')
+    await until(() => readyCalled)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(events).toHaveLength(0)
+  })
+
+  it('is a no-op when the extra post-ready flush finds no new bytes', async () => {
+    const logPath = path.join(tmp, 's.jsonl')
+    fs.writeFileSync(logPath, claudeLine('only') + '\n', 'utf-8')
+    const events: AgentEvent[] = []
+    const handle = tailAgentSession({
+      ref: { agent: 'claude', sessionId: 's', logPath },
+      onEvent: (e) => events.push(e),
+    })
+    await until(() => events.length === 1)
+    // Wait past the ~100ms extra post-ready flush; no bytes were appended
+    // since the initial read, so it must no-op instead of re-emitting.
+    await new Promise((r) => setTimeout(r, 180))
+    handle.close()
+    expect(events).toHaveLength(1)
+  })
+
+  it('does not start watching if discoverRef closes the tailer while resolving', async () => {
+    const missingPath = path.join(tmp, 'missing.jsonl')
+    const realPath = path.join(tmp, 'real.jsonl')
+    fs.writeFileSync(realPath, claudeLine('hi') + '\n', 'utf-8')
+    const events: AgentEvent[] = []
+    let handle: ReturnType<typeof tailAgentSession> | undefined
+    let discoverCalls = 0
+    handle = tailAgentSession({
+      ref: { agent: 'claude', sessionId: '', logPath: missingPath },
+      onEvent: (e) => events.push(e),
+      discoverRef: () => {
+        discoverCalls += 1
+        // First call: nothing found yet, so the constructor's synchronous
+        // tryResolve schedules a poll and returns `handle` before this
+        // callback can close it. The second call (from that poll tick)
+        // closes mid-resolution but still hands back a ref whose file
+        // exists, so tryResolve reaches startWatching() while closed.
+        if (discoverCalls === 1) return null
+        handle?.close()
+        return { agent: 'claude' as const, sessionId: 's', logPath: realPath }
+      },
+      pollIntervalMs: 5,
+    })
+    await until(() => discoverCalls >= 2)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(events).toHaveLength(0)
+  })
+
+  it('a stale poll scheduled just before close() is a no-op once it fires', async () => {
+    const missingPath = path.join(tmp, 'missing.jsonl')
+    const events: AgentEvent[] = []
+    let handle: ReturnType<typeof tailAgentSession> | undefined
+    let discoverCalls = 0
+    handle = tailAgentSession({
+      ref: { agent: 'codex', sessionId: '', logPath: missingPath },
+      onEvent: (e) => events.push(e),
+      discoverRef: () => {
+        discoverCalls += 1
+        // The second discovery attempt (from the first poll tick) closes
+        // the tailer, but tryResolve's tail end still schedules another
+        // poll timer with no closed-check in between. That stale timer
+        // should no-op instead of calling discoverRef a third time.
+        if (discoverCalls === 2) handle?.close()
+        return null
+      },
+      pollIntervalMs: 5,
+      pollMaxAttempts: 100,
+    })
+    await until(() => discoverCalls >= 2)
+    await new Promise((r) => setTimeout(r, 50))
+    expect(discoverCalls).toBe(2)
+    expect(events).toHaveLength(0)
+  })
 })
 
 describe('locatorForAgentInDir', () => {

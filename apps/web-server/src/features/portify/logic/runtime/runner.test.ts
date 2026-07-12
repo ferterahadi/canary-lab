@@ -281,7 +281,7 @@ describe('createPortifyRunner (integration)', () => {
     // (the floated revise + waitForStatus) use the real store.
     vi.spyOn(store, 'get')
       .mockReturnValueOnce(real)
-      .mockReturnValueOnce(undefined)
+      .mockReturnValueOnce(null)
       .mockImplementation(realGet)
 
     const flipped = await runner.revise(workflowId, 'tweak ports')
@@ -1110,6 +1110,7 @@ describe('createPortifyRunner (branch coverage)', () => {
       )
       const err = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
         .catch((e: unknown) => e as Error & { statusCode: number })
+      if (!(err instanceof Error)) throw new Error('expected startExternalPortify to reject with an Error')
       expect(err.message).toBe('git exploded')
       expect(err.statusCode).toBe(409)
     })
@@ -1123,6 +1124,7 @@ describe('createPortifyRunner (branch coverage)', () => {
       )
       const err = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
         .catch((e: unknown) => e as Error & { statusCode: number })
+      if (!(err instanceof Error)) throw new Error('expected startExternalPortify to reject with an Error')
       expect(err.message).toBe('failed to set up the external port-ification worktree')
       expect(err.statusCode).toBe(409)
     })
@@ -1137,8 +1139,8 @@ describe('createPortifyRunner (branch coverage)', () => {
       const real = store.get(result.workflowId)!
       const realGet = store.get.bind(store)
       vi.spyOn(store, 'get')
-        .mockReturnValueOnce(real)      // line 471: existence guard
-        .mockReturnValueOnce(undefined) // line 487: fallback taken → returns `m`
+        .mockReturnValueOnce(real) // line 471: existence guard
+        .mockReturnValueOnce(null) // line 487: fallback taken → returns `m`
         .mockImplementation(realGet)
 
       const returned = await runner.submitExternalPortify(result.workflowId)

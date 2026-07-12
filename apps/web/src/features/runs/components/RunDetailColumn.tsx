@@ -455,7 +455,7 @@ function healAgentOverviewLabel(manifest: RunManifest): string | null {
   return null
 }
 
-function externalHealClientLabel(kind: RunManifest['externalHealSession']['clientKind']): string {
+function externalHealClientLabel(kind: NonNullable<RunManifest['externalHealSession']>['clientKind']): string {
   switch (kind) {
     case 'claude': return 'Claude'
     case 'codex': return 'Codex'

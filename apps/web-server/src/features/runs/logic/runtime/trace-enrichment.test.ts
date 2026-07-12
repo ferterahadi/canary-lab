@@ -530,7 +530,16 @@ type CliResult = { stdout: string; error?: never } | { error: string; stdout?: s
  * coverage instead of silently returning empty output.
  */
 function mockByCommand(handlers: Record<string, () => CliResult>): void {
-  execFileMock.mockImplementation(((_node, args, _opts, callback) => {
+  // Mirrors the `as unknown as typeof execFile` pattern used above (see the
+  // real-`execFile` delegation in the fixture test): `typeof execFile` is a
+  // multi-overload signature with a `__promisify__` marker, which a plain
+  // arrow function can never structurally satisfy for a direct `as` cast.
+  const impl = (
+    _node: string,
+    args: readonly string[] | null | undefined,
+    _opts: unknown,
+    callback: (error: Error | null, stdout: string, stderr: string) => void,
+  ): void => {
     const argList = (args as readonly string[]) ?? []
     // Drop the leading cli.js path; keep the playwright subcommand + flags.
     const cmd = argList.slice(1).map((a) => (a.endsWith('.zip') ? '<zip>' : a)).join(' ')
@@ -539,6 +548,6 @@ function mockByCommand(handlers: Record<string, () => CliResult>): void {
     const r = handler()
     if ('error' in r) callback(new Error(r.error), r.stdout ?? '', '')
     else callback(null, r.stdout, '')
-    return undefined
-  }) as typeof execFile)
+  }
+  execFileMock.mockImplementation(impl as unknown as typeof execFile)
 }

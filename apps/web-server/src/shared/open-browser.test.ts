@@ -96,3 +96,29 @@ describe('openBrowser', () => {
     expect(openBrowser('http://x', { platform: 'linux' })).toBe(false)
   })
 })
+
+describe('defaultOpenBrowserSpawner', () => {
+  // The module-level vi.mock() above replaces `defaultOpenBrowserSpawner`
+  // for the rest of this file, so pull the real, unmocked implementation
+  // via importActual to exercise the genuine `spawn(...)` delegation on
+  // line 10 of open-browser-spawner.ts. `node -e` is a deterministic,
+  // always-present command (see features.test.ts / playwright-list.test.ts
+  // for the same pattern) — no real browser is launched.
+  it('delegates to child_process.spawn and returns a real ChildProcess', async () => {
+    const { defaultOpenBrowserSpawner } =
+      await vi.importActual<typeof import('./open-browser-spawner')>('./open-browser-spawner')
+
+    const child = defaultOpenBrowserSpawner('node', ['-e', 'process.exit(0)'], {
+      stdio: 'ignore',
+    })
+
+    expect(typeof child.pid).toBe('number')
+    expect(child.pid).toBeGreaterThan(0)
+
+    const [code] = await new Promise<[number | null]>((resolve, reject) => {
+      child.once('exit', (exitCode) => resolve([exitCode]))
+      child.once('error', reject)
+    })
+    expect(code).toBe(0)
+  })
+})

@@ -286,7 +286,17 @@ describe('startDirtySpecWatcher', () => {
     const { store, recompute } = fakeStore()
     let e2eListener: ((event: string, filename: string | null) => void) | undefined
     const realWatch = fs.watch.bind(fs)
-    const spy = vi.spyOn(fs, 'watch').mockImplementation(((...args: Parameters<typeof fs.watch>) => {
+    // startDirtySpecWatcher always calls fs.watch with the 3-arg overload
+    // (path, options, listener) — see watcher.ts. `Parameters<typeof fs.watch>`
+    // resolves to the last overload (the 2-arg `(path, listener)` form), which
+    // is too narrow for the 3-tuple destructure below, so the tuple is spelled
+    // out explicitly to match the overload actually in use.
+    type WatchArgs = [
+      target: fs.PathLike,
+      options: fs.WatchOptions | BufferEncoding | null | undefined,
+      listener: fs.WatchListener<string> | undefined,
+    ]
+    const spy = vi.spyOn(fs, 'watch').mockImplementation(((...args: WatchArgs) => {
       const [target, , listener] = args
       if (typeof target === 'string' && target.endsWith(path.join('alpha', 'e2e')) && typeof listener === 'function') {
         e2eListener = listener as (event: string, filename: string | null) => void

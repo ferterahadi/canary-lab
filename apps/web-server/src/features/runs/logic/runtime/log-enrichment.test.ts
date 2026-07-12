@@ -28,6 +28,7 @@ import {
   HEAL_INDEX_PATH as REAL_HEAL_INDEX,
   LOGS_DIR as REAL_LOGS,
   MANIFEST_PATH as REAL_MANIFEST,
+  ROOT,
   SUMMARY_PATH as REAL_SUMMARY,
 } from './paths'
 
@@ -101,6 +102,13 @@ describe('countConsecutiveSameFailures', () => {
     // newest→oldest: a (match), then x (different) → streak = current(1) + 1 = 2.
     expect(countConsecutiveSameFailures(journal('x', 'a'), ['a'])).toBe(2)
   })
+
+  it('stops (does not count) at a trailing iteration with no failingTests field', () => {
+    // The newest iteration has an explicitly empty failingTests value (the
+    // journal append happened before the summary was ready) — the walk
+    // breaks immediately, same as a missing journal entirely.
+    expect(countConsecutiveSameFailures(journal('x', ''), ['a'])).toBe(1)
+  })
 })
 
 describe('stuckSlugsFromJournal', () => {
@@ -133,6 +141,15 @@ describe('stuckSlugsFromJournal', () => {
     const j = journal('b', 'a', 'a, b')
     expect(stuckSlugsFromJournal(j, ['b'], 3)).toEqual({ stuck: [], maxStreak: 2 })
   })
+
+  it('treats an iteration with no failingTests field as an empty prior set', () => {
+    // Iteration 1 never got a failingTests line at all (not even empty) —
+    // `e.failingTests ?? ''` must fall back so the map/split/filter chain
+    // still runs instead of throwing.
+    const file = path.join(tmpDir, 'diagnosis-journal.md')
+    fs.writeFileSync(file, `## Iteration 1 — t1\n\n- hypothesis: no failingTests here\n- signal: .restart\n- outcome: pending\n`)
+    expect(stuckSlugsFromJournal(file, ['a'], 2)).toEqual({ stuck: [], maxStreak: 1 })
+  })
 })
 
 describe('nextIterationNumber', () => {
@@ -147,6 +164,17 @@ describe('nextIterationNumber', () => {
       `## Iteration 3 — t\n\n- hypothesis: x\n- signal: .restart\n- outcome: pending\n`,
     )
     expect(nextIterationNumber(file)).toBe(4)
+  })
+
+  it('ignores an out-of-order lower iteration number after a higher one', () => {
+    // Entries aren't guaranteed ascending on disk — the reduce must keep the
+    // running max rather than trusting array order.
+    const file = path.join(tmpDir, 'j.md')
+    fs.writeFileSync(
+      file,
+      `## Iteration 5 — t1\n\n- hypothesis: first\n\n## Iteration 2 — t2\n\n- hypothesis: second\n`,
+    )
+    expect(nextIterationNumber(file)).toBe(6)
   })
 })
 
@@ -366,6 +394,64 @@ describe('appendJournalIteration', () => {
     expect(fs.existsSync(patchFile)).toBe(true)
     expect(fs.readFileSync(patchFile, 'utf-8')).toContain(huge)
   })
+
+  it('omits the `Full diff:` pointer when the patch file write fails', () => {
+    const journalPath = path.join(tmpDir, 'j.md')
+    const manifestPath = path.join(tmpDir, 'm.json')
+    const summaryPath = path.join(tmpDir, 's.json')
+    fs.writeFileSync(manifestPath, '{}')
+    fs.writeFileSync(summaryPath, '{}')
+    // Occupy the path writeFullDiffPatch needs as a directory with a plain
+    // file, so its mkdirSync(..., { recursive: true }) throws (ENOTDIR) and
+    // it returns null instead of a patch path.
+    fs.writeFileSync(path.join(tmpDir, 'diffs'), 'blocking file')
+
+    const huge = `diff --git a/a.ts b/a.ts\n${'+added line\n'.repeat(2000)}`
+    appendJournalIteration({
+      signal: '.restart',
+      hypothesis: 'broken',
+      diffContent: huge,
+      journalPath,
+      manifestPath,
+      summaryPath,
+    })
+
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    expect(body).toMatch(/\.\.\. \(truncated, \d+ more bytes\)/)
+    expect(body).not.toContain('Full diff:')
+  })
+
+  it('uses the real default manifest/summary/journal paths when none are provided', () => {
+    let createdLogs = false
+    if (!fs.existsSync(REAL_LOGS)) {
+      fs.mkdirSync(REAL_LOGS, { recursive: true })
+      createdLogs = true
+    }
+    const priorManifest = fs.existsSync(REAL_MANIFEST) ? fs.readFileSync(REAL_MANIFEST, 'utf-8') : null
+    const priorSummary = fs.existsSync(REAL_SUMMARY) ? fs.readFileSync(REAL_SUMMARY, 'utf-8') : null
+    const priorJournal = fs.existsSync(REAL_JOURNAL) ? fs.readFileSync(REAL_JOURNAL, 'utf-8') : null
+    const prevEnv = process.env.CANARY_LAB_SUMMARY_PATH
+    delete process.env.CANARY_LAB_SUMMARY_PATH // force getSummaryPath() to fall back to SUMMARY_PATH
+    fs.writeFileSync(REAL_MANIFEST, JSON.stringify({ feature: 'default-path-feature' }))
+    fs.writeFileSync(REAL_SUMMARY, JSON.stringify({ failed: [{ name: 'default-path-test' }] }))
+    try {
+      appendJournalIteration({ signal: '.restart', hypothesis: 'default paths used' })
+      const body = fs.readFileSync(REAL_JOURNAL, 'utf-8')
+      expect(body).toContain('- feature: default-path-feature')
+      expect(body).toContain('- failingTests: default-path-test')
+      expect(body).toContain('- hypothesis: default paths used')
+    } finally {
+      if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
+      else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv
+      if (priorManifest !== null) fs.writeFileSync(REAL_MANIFEST, priorManifest)
+      else { try { fs.unlinkSync(REAL_MANIFEST) } catch { /* ignore */ } }
+      if (priorSummary !== null) fs.writeFileSync(REAL_SUMMARY, priorSummary)
+      else { try { fs.unlinkSync(REAL_SUMMARY) } catch { /* ignore */ } }
+      if (priorJournal !== null) fs.writeFileSync(REAL_JOURNAL, priorJournal)
+      else { try { fs.unlinkSync(REAL_JOURNAL) } catch { /* ignore */ } }
+      if (createdLogs) { try { fs.rmdirSync(REAL_LOGS) } catch { /* ignore */ } }
+    }
+  })
 })
 
 describe('writeFullDiffPatch', () => {
@@ -376,6 +462,21 @@ describe('writeFullDiffPatch', () => {
     const file = path.join(tmpDir, 'diffs', 'iteration-3.patch')
     expect(fs.existsSync(file)).toBe(true)
     expect(fs.readFileSync(file, 'utf-8').endsWith('\n')).toBe(true)
+  })
+
+  it('does not append an extra newline when the diff already ends with one', () => {
+    const journalPath = path.join(tmpDir, 'diagnosis-journal.md')
+    const diff = 'diff --git a/x b/x\n+y\n'
+    writeFullDiffPatch(journalPath, 7, diff)
+    const file = path.join(tmpDir, 'diffs', 'iteration-7.patch')
+    expect(fs.readFileSync(file, 'utf-8')).toBe(diff)
+  })
+
+  it('returns null when the diffs directory cannot be created', () => {
+    const journalPath = path.join(tmpDir, 'diagnosis-journal.md')
+    // Occupy the target directory path with a plain file so mkdirSync throws.
+    fs.writeFileSync(path.join(tmpDir, 'diffs'), 'blocking file')
+    expect(writeFullDiffPatch(journalPath, 1, 'diff content')).toBeNull()
   })
 })
 
@@ -397,6 +498,20 @@ describe('writeErrorFile', () => {
     expect(writeErrorFile('a-test', undefined, tmpDir)).toBeNull()
     expect(writeErrorFile('a-test', { message: '   ' }, tmpDir)).toBeNull()
   })
+
+  it('writes a snippet-only body when message is absent', () => {
+    const rel = writeErrorFile('a-test', { snippet: 'await expect(page).toHaveURL(...)' }, tmpDir)
+    expect(rel).not.toBeNull()
+    const body = fs.readFileSync(path.join(tmpDir, 'a-test', 'error.txt'), 'utf-8')
+    expect(body).toContain('--- snippet ---')
+    expect(body).toContain('await expect(page).toHaveURL(...)')
+  })
+
+  it('returns null when the target directory cannot be created', () => {
+    const blockedDir = path.join(tmpDir, 'blocked')
+    fs.writeFileSync(blockedDir, 'occupied') // a file, not a directory
+    expect(writeErrorFile('a-test', { message: 'boom' }, blockedDir)).toBeNull()
+  })
 })
 
 describe('truncateDiffForJournal', () => {
@@ -417,6 +532,16 @@ describe('truncateDiffForJournal', () => {
     const truncated = truncateDiffForJournal(text, 10)
     expect(truncated).toMatch(/\.\.\. \(truncated, \d+ more bytes\)$/)
     expect(truncated.length).toBeLessThan(text.length + 40)
+  })
+
+  it('keeps the head byte-for-byte when the truncation point falls before any newline', () => {
+    // A single huge line has no '\n' within the head window at all, so
+    // lastIndexOf('\n') is -1 and the head must be used unmodified rather
+    // than sliced back to a (nonexistent) prior line boundary.
+    const huge = 'x'.repeat(500)
+    const truncated = truncateDiffForJournal(huge, 100)
+    expect(truncated.startsWith('x'.repeat(100))).toBe(true)
+    expect(truncated).toMatch(/\.\.\. \(truncated, \d+ more bytes\)$/)
   })
 })
 
@@ -441,6 +566,10 @@ describe('classifyJournalOutcome', () => {
       { failed: [{ name: 'a' }] },
       { failed: [{ name: 'a' }, { name: 'b' }] },
     )).toBe('regression')
+  })
+
+  it('treats a summary object with no `failed` field as zero failures', () => {
+    expect(classifyJournalOutcome({}, {})).toBe('all_passed')
   })
 })
 
@@ -493,6 +622,33 @@ describe('updateLatestPendingJournalOutcome', () => {
       runId: 'run-a',
       outcome: 'all_passed',
     })).toBe(false)
+  })
+
+  it('skips a newer non-matching section and updates the next matching one', () => {
+    // The newest section belongs to a different run — the scan must `continue`
+    // past it instead of stopping, then find and update the older match.
+    const journalPath = path.join(tmpDir, 'j.md')
+    fs.writeFileSync(journalPath, `## Iteration 1 — t1
+
+- run: run-a
+- outcome: pending
+
+## Iteration 2 — t2
+
+- run: run-b
+- outcome: pending
+`)
+
+    expect(updateLatestPendingJournalOutcome({
+      journalPath,
+      runId: 'run-a',
+      outcome: 'all_passed',
+    })).toBe(true)
+
+    const body = fs.readFileSync(journalPath, 'utf-8')
+    expect(body).toContain('- run: run-a\n- outcome: all_passed')
+    // The skipped (non-matching, newer) section is untouched.
+    expect(body).toContain('- run: run-b\n- outcome: pending')
   })
 })
 
@@ -718,6 +874,127 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
     expect(body).toContain('logs/runs/X/failed/big-test/svc-web.log (1.2 KB)')
   })
 
+  it('renders MB-scale sizes once a slice/log crosses the 1 MB boundary', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: {
+        failed: [
+          {
+            name: 'huge-test',
+            sliceMeta: [
+              {
+                path: 'logs/runs/X/failed/huge-test/svc-api.log',
+                bytes: 2 * 1024 * 1024,
+                fullLog: 'logs/runs/X/svc-api.log',
+                fullLogBytes: 5 * 1024 * 1024,
+                windowBytes: 5 * 1024 * 1024,
+                capped: true,
+              },
+            ],
+          },
+        ],
+      },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('logs/runs/X/failed/huge-test/svc-api.log (2.0 MB, capped from a 5.0 MB window)')
+    expect(body).toContain('full service log logs/runs/X/svc-api.log (5.0 MB)')
+  })
+
+  it('renders "(no error)" when the error message strips to nothing', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [{ name: 'blank-error-test', error: { message: '   ' } }] },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('- error: (no error)')
+  })
+
+  it('falls back to the raw featureDir when it equals ROOT (relative path is empty)', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureDir: ROOT },
+      summary: { failed: [] },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain(`Feature: ${ROOT}`)
+  })
+
+  it('derives journalPath from summaryPath when parsed.journalPath is omitted', () => {
+    const runDir = path.join(tmpDir, 'derived-run')
+    fs.mkdirSync(runDir, { recursive: true })
+    const summaryPath = path.join(runDir, 'e2e-summary.json')
+    const healIndexPath = path.join(runDir, 'heal-index.md')
+    const derivedJournalPath = path.join(runDir, 'diagnosis-journal.md')
+    fs.writeFileSync(derivedJournalPath, `## Iteration 1 — t1
+
+- hypothesis: derived-path-test
+- signal: .restart
+- outcome: pending
+`)
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [] },
+      summaryPath,
+      healIndexPath,
+      // journalPath intentionally omitted — must derive from summaryPath.
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('derived-path-test')
+  })
+
+  it('returns without writing when called with no args and the summary file is missing', () => {
+    const prevEnv = process.env.CANARY_LAB_SUMMARY_PATH
+    const missingSummary = path.join(tmpDir, 'no-such-summary.json')
+    process.env.CANARY_LAB_SUMMARY_PATH = missingSummary
+    try {
+      writeHealIndex()
+      expect(fs.existsSync(path.join(tmpDir, 'heal-index.md'))).toBe(false)
+    } finally {
+      if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
+      else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv
+    }
+  })
+
+  it('treats a summary object with no `failed` field as zero failures', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({ manifest: {}, summary: {}, healIndexPath })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('No failures. Nothing to heal.')
+  })
+
+  it('renders a non-string failed-entry name as empty when deriving slugs (no cross-run history)', () => {
+    // A malformed entry (no `name` at all) must not throw when the slug list
+    // is derived for flake-history lookup — it normalizes to '' and is
+    // filtered out, leaving the slugs list empty even though `feature` is set.
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [({} as unknown as { name: string })] },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).not.toContain('history:')
+    expect(body).toContain('- **undefined**')
+  })
+
+  it('treats a non-string failed-entry name as empty when building the failure-delta currentSlugs list', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: { failed: [({} as unknown as { name: string }), { name: 't4' }] },
+      previousFailingSlugs: ['t4'],
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toContain('## Failure delta vs previous cycle')
+    expect(body).toContain('- still failing (1): t4')
+  })
+
   it('falls back to the bare logFiles list when sliceMeta is absent', () => {
     const healIndexPath = path.join(tmpDir, 'heal-index.md')
     writeHealIndex({
@@ -882,6 +1159,77 @@ describe('writeHealIndex cross-run flake history', () => {
 
     expect(fs.readFileSync(healIndexPath, 'utf-8'))
       .toContain('failed in 2 of the last 2 runs of this feature (persistent)')
+  })
+
+  it('uses singular "run" wording when exactly one prior run is inspected', () => {
+    const runsRoot = path.join(tmpDir, 'runs')
+    mkRun(runsRoot, '2026-04-01T0001-aaa', ['a-test'])
+    const currentDir = path.join(runsRoot, '2026-04-02T0001-bbb')
+    fs.mkdirSync(currentDir, { recursive: true })
+    const healIndexPath = path.join(currentDir, 'heal-index.md')
+
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'a-test' }] },
+      healIndexPath,
+      journalPath: path.join(currentDir, 'diagnosis-journal.md'),
+    })
+
+    expect(fs.readFileSync(healIndexPath, 'utf-8'))
+      .toContain('failed in 1 of the last 1 run of this feature (persistent)')
+  })
+
+  it('caps cross-run inspection at FLAKE_HISTORY_RUN_LIMIT (5) even with more sibling runs', () => {
+    const runsRoot = path.join(tmpDir, 'runs')
+    // 6 prior runs, all matching feature, all failing 'a-test'. Only the 5
+    // lexicographically-newest may be inspected.
+    for (let i = 1; i <= 6; i++) {
+      mkRun(runsRoot, `2026-05-0${i}T0001-aaa`, ['a-test'])
+    }
+    const currentDir = path.join(runsRoot, '2026-05-07T0001-zzz')
+    fs.mkdirSync(currentDir, { recursive: true })
+    const healIndexPath = path.join(currentDir, 'heal-index.md')
+
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'a-test' }] },
+      healIndexPath,
+      journalPath: path.join(currentDir, 'diagnosis-journal.md'),
+    })
+
+    // If the limit weren't enforced this would read "6 of the last 6".
+    expect(fs.readFileSync(healIndexPath, 'utf-8'))
+      .toContain('failed in 5 of the last 5 runs of this feature (persistent)')
+  })
+
+  it('tolerates a prior run summary with a non-array `failed` field and non-string names', () => {
+    const runsRoot = path.join(tmpDir, 'runs')
+    const dirA = path.join(runsRoot, '2026-06-01T0001-aaa')
+    fs.mkdirSync(dirA, { recursive: true })
+    fs.writeFileSync(path.join(dirA, 'manifest.json'), JSON.stringify({ feature: 'demo' }))
+    fs.writeFileSync(path.join(dirA, 'e2e-summary.json'), JSON.stringify({})) // no `failed` field at all
+
+    const dirB = path.join(runsRoot, '2026-06-02T0001-bbb')
+    fs.mkdirSync(dirB, { recursive: true })
+    fs.writeFileSync(path.join(dirB, 'manifest.json'), JSON.stringify({ feature: 'demo' }))
+    fs.writeFileSync(path.join(dirB, 'e2e-summary.json'), JSON.stringify({ failed: [{ name: 123 }] })) // non-string name
+
+    const currentDir = path.join(runsRoot, '2026-06-03T0001-ccc')
+    fs.mkdirSync(currentDir, { recursive: true })
+    const healIndexPath = path.join(currentDir, 'heal-index.md')
+
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'a-test' }] },
+      healIndexPath,
+      journalPath: path.join(currentDir, 'diagnosis-journal.md'),
+    })
+
+    // Both prior runs parse without throwing and both count as "inspected",
+    // but neither ever matches 'a-test' as failed (one had no `failed` array,
+    // the other's only entry had a non-string name that never equals the slug).
+    expect(fs.readFileSync(healIndexPath, 'utf-8'))
+      .toContain('failed in 0 of the last 2 runs of this feature (new — first failure in recent runs)')
   })
 })
 
@@ -1186,6 +1534,18 @@ describe('writeFailureSlices + writeHealIndex (smoke)', () => {
     const r = writeFailureSlices('slug', [path.join(tmpDir, 'missing.log')])
     expect(r.logFiles).toEqual([])
   })
+
+  it('writeFailureSlices writes matched slices to disk and reports byte counts', () => {
+    const log = path.join(tmpDir, 'svc-api.log')
+    fs.writeFileSync(log, '<a-test>BODY TEXT</a-test>')
+    const failedDir = path.join(tmpDir, 'failed')
+    const r = writeFailureSlices('a-test', [log], failedDir)
+    const svcFile = path.join(failedDir, 'a-test', 'svc-api.log')
+    expect(fs.readFileSync(svcFile, 'utf-8')).toBe('BODY TEXT')
+    expect(r.logFiles).toHaveLength(1)
+    expect(Object.keys(r.bytesByPath)).toHaveLength(1)
+    expect(Object.values(r.bytesByPath)[0]).toBe(Buffer.byteLength('BODY TEXT', 'utf-8'))
+  })
 })
 
 describe('stripAnsi', () => {
@@ -1296,6 +1656,69 @@ describe('enrichSummaryWithLogs', () => {
       )
       expect(healIndex).toContain('run-local')
       expect(healIndex).toContain(path.join('logs', 'runs', runId, 'diagnosis-journal.md'))
+    } finally {
+      if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
+      else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv
+      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  })
+
+  it('merges legacy manifest.serviceLogs with current manifest.services logPaths', () => {
+    const runId = `test-legacy-${Date.now()}`
+    const runDir = path.join(REAL_LOGS, 'runs', runId)
+    fs.mkdirSync(runDir, { recursive: true })
+    const summaryPath = path.join(runDir, 'e2e-summary.json')
+    const manifestPath = path.join(runDir, 'manifest.json')
+    const legacyLog = path.join(runDir, 'svc-legacy.log')
+    const currentLog = path.join(runDir, 'svc-current.log')
+    fs.writeFileSync(legacyLog, '<a-test>FROM_LEGACY</a-test>')
+    fs.writeFileSync(currentLog, '<b-test>FROM_CURRENT</b-test>')
+    fs.writeFileSync(summaryPath, JSON.stringify({ failed: [{ name: 'a-test' }, { name: 'b-test' }] }))
+    fs.writeFileSync(manifestPath, JSON.stringify({
+      serviceLogs: [legacyLog],
+      services: [{ logPath: currentLog }],
+    }))
+
+    const prevEnv = process.env.CANARY_LAB_SUMMARY_PATH
+    process.env.CANARY_LAB_SUMMARY_PATH = summaryPath
+    try {
+      const result = enrichSummaryWithLogs()
+      expect(result).not.toBeNull()
+      const failed = result!.summary.failed!
+      expect(failed[0].logFiles?.[0]).toContain('svc-legacy')
+      expect(failed[1].logFiles?.[0]).toContain('svc-current')
+    } finally {
+      if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
+      else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv
+      try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  })
+
+  it('falls back to an empty slice map for a failed entry whose name matched no slug', () => {
+    // An entry with a blank name is excluded from the extracted `slugs` list
+    // (filtered as non-positive-length) but still walked when rewriting
+    // `summary.failed` — its lookup into `recordsBySlug` must fall back to {}
+    // instead of throwing.
+    const runId = `test-blank-name-${Date.now()}`
+    const runDir = path.join(REAL_LOGS, 'runs', runId)
+    fs.mkdirSync(runDir, { recursive: true })
+    const summaryPath = path.join(runDir, 'e2e-summary.json')
+    const manifestPath = path.join(runDir, 'manifest.json')
+    const svcLog = path.join(runDir, 'svc-api.log')
+    fs.writeFileSync(svcLog, '<a-test>BODY</a-test>')
+    fs.writeFileSync(summaryPath, JSON.stringify({ failed: [{ name: 'a-test' }, { name: '' }] }))
+    fs.writeFileSync(manifestPath, JSON.stringify({ services: [{ logPath: svcLog }] }))
+
+    const prevEnv = process.env.CANARY_LAB_SUMMARY_PATH
+    process.env.CANARY_LAB_SUMMARY_PATH = summaryPath
+    try {
+      const result = enrichSummaryWithLogs()
+      expect(result).not.toBeNull()
+      const failed = result!.summary.failed!
+      expect(failed[0].logFiles?.[0]).toContain('svc-api')
+      expect(failed[1].name).toBe('')
+      expect(failed[1].logFiles).toBeUndefined()
+      expect(failed[1].sliceMeta).toBeUndefined()
     } finally {
       if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
       else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv

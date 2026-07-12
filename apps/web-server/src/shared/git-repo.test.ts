@@ -132,6 +132,7 @@ describe('git-repo helpers', () => {
       featureDir: repo,
       repos: [{ name: 'app', localPath: repo, branch: 'feature/demo' }],
     }).catch((e: unknown) => e as { statusCode?: number; branchMismatch?: unknown })
+    if (!err) throw new Error('expected validateConfiguredRepoBranches to reject')
     expect(err.statusCode).toBe(409)
     expect(err.branchMismatch).toEqual([
       { name: 'app', path: repo, expected: 'feature/demo', current: 'main', detached: false, isGitRepo: true },

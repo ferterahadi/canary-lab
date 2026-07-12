@@ -170,6 +170,21 @@ describe('startFlight', () => {
     expect(store.list().filter((e) => e.feature === args().feature)).toHaveLength(1)
   })
 
+  it('re-invoking an existing record with fromStage but no explicit mode implies "jump"', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+
+    // No `mode` passed — fromStage alone implies 'jump'. fromStage 'similarity'
+    // needs no validator (stage 1 is a plain entry), so this exercises the
+    // implied-jump path end to end on the SAME record.
+    const rerun = startFlight({ ...args(), fromStage: 'similarity' as const }, deps(allDone()))
+    expect(rerun.manifest.flightId).toBe(manifest.flightId)
+    await rerun.completion
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+    expect(store.list().filter((e) => e.feature === args().feature)).toHaveLength(1)
+  })
+
   it('jump starts at fromStage with earlier stages skipped, gated by validateStageEntry', async () => {
     const calls: FlightStageKey[] = []
     const adapters = allDone(calls)
@@ -239,6 +254,73 @@ describe('startFlight', () => {
     expect(() =>
       startFlight({ ...args(), fromStage: 'docs' as const }, deps(allDone())),
     ).toThrow(/stage entry is not supported/)
+  })
+
+  it('rejects an unknown fromStage key before consulting the validator', () => {
+    expect(() =>
+      startFlight(
+        { ...args(), fromStage: 'not-a-real-stage' as unknown as FlightStageKey },
+        deps(allDone()),
+      ),
+    ).toThrow(/unknown stage: not-a-real-stage/)
+  })
+
+  it('fromStage "similarity" is a plain stage-1 start — no validator required', async () => {
+    const { manifest, completion } = startFlight(
+      { ...args(), fromStage: 'similarity' as const },
+      deps(allDone()), // no validateStageEntry wired at all
+    )
+    expect(manifest.currentStage).toBe('similarity')
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+  })
+
+  it('rejects a re-invoke of an active flight for the SAME feature even with a disjoint repo set', async () => {
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
+    }
+    const first = startFlight(args('/repo/a'), deps(adapters))
+    await first.completion
+    expect(store.get(first.manifest.flightId)!.status).toBe('waiting-for-approval')
+
+    // /repo/b does not intersect /repo/a, so the repo-keyed lock (activeForRepos)
+    // does not fire — the feature-keyed check is what must catch this.
+    let err: unknown
+    try {
+      startFlight(args('/repo/b'), deps(allDone()))
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(FlightConflictError)
+    expect((err as FlightConflictError).existingFlightId).toBe(first.manifest.flightId)
+    expect((err as FlightConflictError).repoPaths).toEqual(['/repo/a'])
+  })
+
+  it('mode "continue" on a record that is not paused re-raises the three-way choice', async () => {
+    const { completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(store.list().find((e) => e.feature === 'checkout')!.status).toBe('done')
+    expect(() => startFlight({ ...args(), mode: 'continue' as const }, deps(allDone()))).toThrow(
+      FlightExistsError,
+    )
+  })
+
+  it('mode "jump" without a fromStage is rejected', async () => {
+    const { completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect(() => startFlight({ ...args(), mode: 'jump' as const }, deps(allDone()))).toThrow(
+      /jump requires fromStage/,
+    )
+  })
+
+  it('a fresh record (no existing flight) still requires a real description', () => {
+    expect(() =>
+      startFlight(
+        { feature: 'brand-new', repoPaths: ['/repo/new'], description: '   ', opts: OPTS },
+        deps(allDone()),
+      ),
+    ).toThrow(/a description is required to start one/)
   })
 })
 
@@ -750,6 +832,92 @@ describe('pauseFlight', () => {
     expect(calls).toEqual(['similarity', 'scout'])
   })
 
+  it('persists a skipped outcome that settled during the pause, but never advances', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    const d = deps(adapters)
+    adapters.docs = {
+      run: async (ctx) => {
+        calls.push(ctx.manifest().currentStage as FlightStageKey)
+        pauseFlight('fl-1', d)
+        return { kind: 'skipped', reason: 'no docs needed' } satisfies StageOutcome
+      },
+    }
+    const { manifest, completion } = startFlight(args(), d)
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('paused')
+    // Work that finished, finished — the skip verdict persisted…
+    expect(final.stages.find((s) => s.key === 'docs')!).toMatchObject({
+      status: 'skipped',
+      skipReason: 'no docs needed',
+    })
+    expect(final.stages.find((s) => s.key === 'docs')!.checkpoint).toBeUndefined()
+    // …but nothing after docs ran.
+    expect(calls.at(-1)).toBe('docs')
+    expect(calls).not.toContain('prd-summary')
+  })
+
+  it('the drive loop stops itself if the flight is found paused at the top of a later iteration (defensive re-check)', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    const d = deps(adapters)
+    let pausedOnce = false
+    // Simulate the flight being paused by another process exactly in the gap
+    // between one stage settling and the next one starting — the store's own
+    // "changed" event (fired synchronously by the save that marks `similarity`
+    // done) is the only hook available in-process to land exactly there.
+    const listener = (e: { kind: string }) => {
+      if (pausedOnce || e.kind !== 'changed') return
+      const m = store.get('fl-1')
+      if (m?.status === 'running' && m.stages.find((s) => s.key === 'similarity')?.status === 'done') {
+        pausedOnce = true
+        pauseFlight('fl-1', d)
+      }
+    }
+    store.onEvent(listener)
+    const { manifest, completion } = startFlight(args(), d)
+    await completion
+    store.offEvent(listener)
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('paused')
+    // similarity settled done; scout never started — the loop noticed the
+    // pause at the top of its next iteration instead of starting scout.
+    expect(final.stages.find((s) => s.key === 'similarity')!.status).toBe('done')
+    expect(final.stages.find((s) => s.key === 'scout')!.status).toBe('pending')
+    expect(calls).toEqual(['similarity'])
+  })
+
+  it('the drive loop also stops itself if the flight is found aborted at the top of a later iteration (defensive re-check)', async () => {
+    const calls: FlightStageKey[] = []
+    const adapters = allDone(calls)
+    const d = deps(adapters)
+    let abortedOnce = false
+    // Same defensive-recheck scenario as the paused case above, but landing
+    // an abortFlight() in the gap between one stage settling and the next
+    // one starting — the loop's top-of-iteration guard must catch 'aborted'
+    // too, not just 'paused'.
+    const listener = (e: { kind: string }) => {
+      if (abortedOnce || e.kind !== 'changed') return
+      const m = store.get('fl-1')
+      if (m?.status === 'running' && m.stages.find((s) => s.key === 'similarity')?.status === 'done') {
+        abortedOnce = true
+        abortFlight('fl-1', d)
+      }
+    }
+    store.onEvent(listener)
+    const { manifest, completion } = startFlight(args(), d)
+    await completion
+    store.offEvent(listener)
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('aborted')
+    // similarity settled done; scout never started — the loop noticed the
+    // abort at the top of its next iteration instead of starting scout.
+    expect(final.stages.find((s) => s.key === 'similarity')!.status).toBe('done')
+    expect(final.stages.find((s) => s.key === 'scout')!.status).toBe('pending')
+    expect(calls).toEqual(['similarity'])
+  })
+
   it('aborts the stage context signal so in-flight agent work stops promptly', async () => {
     let sawAbort = false
     const adapters = allDone()
@@ -796,12 +964,22 @@ describe('pauseFlight', () => {
 
   it('calls the open stage adapter interrupt hook with "pause" (best-effort)', async () => {
     const interrupts: string[] = []
+    let seenFlightId: string | undefined
     const adapters = allDone()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}), // hangs
-      interrupt: async (_ctx, kind) => {
+      interrupt: async (ctx, kind) => {
         interrupts.push(kind)
+        // ctx.manifest() re-reads the record fresh from the store — confirm
+        // it resolves to the live (still-present) flight, not a stale value.
+        seenFlightId = ctx.manifest().flightId
+        // interruptStage's ctx wires appendLog/setProgress/patchFlight as
+        // deliberate no-ops (interrupt is teardown, not stage work) — calling
+        // them must be harmless rather than throwing or erroring.
+        ctx.appendLog('interrupt log line')
+        ctx.setProgress({ note: 'interrupting' })
+        ctx.patchFlight({ feature: 'should-not-apply' })
       },
     }
     startFlight(args(), d)
@@ -809,6 +987,36 @@ describe('pauseFlight', () => {
     pauseFlight('fl-1', d)
     await new Promise((r) => setTimeout(r, 10))
     expect(interrupts).toEqual(['pause'])
+    expect(seenFlightId).toBe('fl-1')
+    // Confirmed no-ops: the patchFlight call during interrupt left the
+    // manifest's feature field untouched.
+    expect(store.get('fl-1')!.feature).toBe('checkout')
+  })
+
+  it('interrupt ctx.manifest() throws if the flight record is gone by the time the hook reads it (best-effort, swallowed)', async () => {
+    let caught: unknown
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: () => new Promise(() => {}), // hangs, interrupted by pause
+      interrupt: async (ctx) => {
+        // The record disappears (e.g. deleted out-of-band) between pause
+        // kicking off the interrupt and the adapter reading it back.
+        store.remove('fl-1')
+        try {
+          ctx.manifest()
+        } catch (e) {
+          caught = e
+        }
+      },
+    }
+    const { manifest } = startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+    // pauseFlight itself must not throw even though the interrupt hook's
+    // manifest() read fails — interrupt is best-effort.
+    expect(() => pauseFlight(manifest.flightId, d)).not.toThrow()
+    expect(caught).toBeInstanceOf(Error)
+    expect((caught as Error).message).toBe(`flight not found: ${manifest.flightId}`)
   })
 
   it('refuses to pause a non-active flight', async () => {
@@ -829,6 +1037,45 @@ describe('pauseFlight', () => {
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('done')
     expect(final.pauseReason).toBeUndefined()
+  })
+
+  it('a stale, superseded drive loop settling late does not corrupt a record a newer drive already finished', async () => {
+    const adapters = allDone()
+    const d = deps(adapters)
+    let releaseStale: () => void = () => {}
+    const staleGate = new Promise<void>((r) => (releaseStale = r))
+    let scoutRuns = 0
+    adapters.scout = {
+      run: async () => {
+        scoutRuns += 1
+        if (scoutRuns === 1) {
+          // The FIRST (stale) drive's stage settles late — after pause/resume
+          // has already handed the flight to a second, newer drive loop, and
+          // that second loop has itself already run to completion.
+          await staleGate
+          return { kind: 'done' } satisfies StageOutcome
+        }
+        return { kind: 'done' } satisfies StageOutcome
+      },
+    }
+    const { manifest, completion: staleCompletion } = startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+
+    pauseFlight(manifest.flightId, d) // aborts the stale drive's controller; scout flips back to pending
+    const { completion: freshCompletion } = resumeFlight(manifest.flightId, d) // registers a NEW controller for the same flightId
+    await freshCompletion // the fresh drive re-runs scout (2nd invocation, resolves immediately) through to done
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+
+    releaseStale() // now let the stale drive's original scout invocation settle
+    await staleCompletion // must resolve cleanly — its own cleanup must not throw or hang
+
+    // The stale drive's late 'done' redundantly re-marks scout done (a no-op
+    // in effect) but must not resurrect/park the already-finished flight, and
+    // its finally-block cleanup (registry entry already replaced, then
+    // already deleted, by the fresh drive) must complete without error.
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('done')
+    expect(final.stages.every((s) => s.status === 'done')).toBe(true)
   })
 })
 
@@ -1001,6 +1248,43 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
     await new Promise((r) => setTimeout(r, 30))
     expect(store.latestForFeature('next-up')!.status).toBe('done')
   })
+
+  it('a queued entry whose resumeFlight throws (raced with a manual start) is skipped in favor of the next queued flight', async () => {
+    const adapters = allDone()
+    const first = enqueueFlight({ ...args(), feature: 'f-one' }, deps(adapters))
+    const second = enqueueFlight({ ...args(), feature: 'f-two' }, deps(adapters))
+
+    // A store whose `get` reports the first queued flight as already
+    // "running" (simulating a manual start that raced the drain), so
+    // resumeFlight's own status guard throws for it — the underlying record
+    // is untouched.
+    const racingStore: FlightStore = {
+      list: (...a) => store.list(...a),
+      get: (id: string) => {
+        const m = store.get(id)
+        return id === first.flightId && m ? { ...m, status: 'running' as const } : m
+      },
+      activeForRepos: (...a) => store.activeForRepos(...a),
+      latestForRepos: (...a) => store.latestForRepos(...a),
+      latestForFeature: (...a) => store.latestForFeature(...a),
+      save: (...a) => store.save(...a),
+      remove: (...a) => store.remove(...a),
+      flightDir: (...a) => store.flightDir(...a),
+      reconcileInterrupted: (...a) => store.reconcileInterrupted(...a),
+      onEvent: (...a) => store.onEvent(...a),
+      offEvent: (...a) => store.offEvent(...a),
+    }
+    const d: FlightConductorDeps = { store: racingStore, adapters, now, newFlightId: ids }
+
+    drainQueuedFlights(d)
+    await new Promise((r) => setTimeout(r, 30))
+
+    // f-one's resumeFlight threw ("not paused") — its real record was never
+    // touched, so it stays queued; the drain moved on to f-two instead.
+    expect(store.get(first.flightId)!.status).toBe('paused')
+    expect(store.get(first.flightId)!.pauseReason).toBe('queued')
+    expect(store.get(second.flightId)!.status).toBe('done')
+  })
 })
 
 describe('redoFlight', () => {
@@ -1021,6 +1305,10 @@ describe('redoFlight', () => {
     const { manifest } = startFlight(args(), deps(adapters))
     await new Promise((r) => setTimeout(r, 10))
     expect(() => redoFlight(manifest.flightId, deps(allDone()))).toThrow(/pause or abort/)
+  })
+
+  it('refuses to redo an unknown flight id', () => {
+    expect(() => redoFlight('nope', deps(allDone()))).toThrow(/flight not found: nope/)
   })
 })
 

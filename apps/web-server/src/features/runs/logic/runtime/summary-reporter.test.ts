@@ -453,7 +453,7 @@ describe('SummaryReporter', () => {
     reporter.onTestBegin(mkTest('Brand new test', '/specs/new.spec.ts', 3))
 
     const out = readSummary()
-    expect(out.failed.map((f) => f.name)).toEqual(['test-case-keep-me'])
+    expect(out.failed.map((f: { name: string }) => f.name)).toEqual(['test-case-keep-me'])
     expect(out.skippedNames).toEqual(['test-case-skipped-once'])
     expect(out.passedNames).toEqual([])
   })
@@ -965,7 +965,7 @@ describe('SummaryReporter', () => {
     await reporter.onEnd({} as any)
 
     expect(traceMocks.extractTraceSummary).toHaveBeenCalledTimes(2)
-    expect(readSummary().failed.map((entry) => entry.traceSummaryFile)).toEqual([
+    expect(readSummary().failed.map((entry: { traceSummaryFile?: string }) => entry.traceSummaryFile)).toEqual([
       undefined,
       path.join('failed', 'different-test', 'trace-extract', 'failure-summary.md'),
     ])

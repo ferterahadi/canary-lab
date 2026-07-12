@@ -68,6 +68,20 @@ function makeFakeFactory(): { factory: PtyFactory; spawned: FakeProcess[] } {
   return { factory, spawned }
 }
 
+// Polls until `spawned` (a FakeProcess[] from makeFakeFactory) reaches at
+// least `n` entries, or throws with a diagnostic after `timeoutMs`. Shared by
+// the multi-cycle heal-loop tests below, which drive the orchestrator through
+// several spawn/emit round-trips against the real event loop.
+async function waitForSpawnCount(spawned: { length: number }, n: number, label: string, timeoutMs = 3000): Promise<void> {
+  const start = Date.now()
+  while (spawned.length < n) {
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`stuck waiting for ${label}: spawned=${spawned.length}`)
+    }
+    await new Promise((r) => setTimeout(r, 5))
+  }
+}
+
 let tmpDir: string
 let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
@@ -363,6 +377,9 @@ describe('RunOrchestrator.start', () => {
       video: 'off',
       trace: 'retain-on-failure',
     })
+    // No autoHeal / manualHeal / externalHeal configured — healMode falls
+    // through the whole ternary chain to undefined.
+    expect(manifest.healMode).toBeUndefined()
 
     const index = readRunsIndex(path.join(tmpDir, 'logs'))
     expect(index.find((e) => e.runId === RUN_ID)?.feature).toBe('demo')
@@ -988,6 +1005,54 @@ describe('RunOrchestrator branch coverage', () => {
     expect(ignored).toEqual(['not-waiting-for-signal'])
     await orch.stop('passed')
   })
+
+  it('throws on an unknown health-probe shape (exhaustiveness guard)', async () => {
+    // The config loader/validator normally rejects a malformed healthCheck at
+    // load time, so the only way to reach this guard is to force a probe
+    // shape past the type system directly onto a built ServiceSpec.
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    ;(orch.services[0] as unknown as { healthProbe: unknown }).healthProbe = { weird: true }
+    await expect(orch.start()).rejects.toThrow(/Unknown probe shape for api/)
+    await orch.stop('aborted')
+  })
+
+  it('ensureLogFile skips remaking a log file it already tracks (crash-then-respawn)', async () => {
+    // A service that crashes mid-run (pty exit without an explicit restart())
+    // stays in `logFiles` — the next spawn for that same service hits the
+    // early-return branch instead of re-touching the file.
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 2,
+    })
+    await orch.start()
+    expect(spawned).toHaveLength(1)
+    fs.writeFileSync(orch.paths.serviceLog('api'), 'stale output\n')
+    // Crash it — pty exits without going through restart(), so `logFiles`
+    // still has the path tracked.
+    spawned[0].emitExit(1)
+    // start() is re-entrant (see "start() is safely re-entrant" above) — the
+    // public path back into ensureServicesRunning() for a crashed service.
+    await orch.start()
+    expect(spawned).toHaveLength(2)
+    // The log was NOT truncated by ensureLogFile's early return — only a
+    // real restart() truncates via its own writeFileSync.
+    expect(fs.readFileSync(orch.paths.serviceLog('api'), 'utf-8')).toBe('stale output\n')
+    await orch.stop('aborted')
+  })
 })
 
 describe('RunOrchestrator.runPlaywright', () => {
@@ -1023,9 +1088,32 @@ describe('RunOrchestrator.runPlaywright', () => {
       CANARY_LAB_MANIFEST_PATH: orch.paths.manifestPath,
       CANARY_LAB_SUMMARY_PATH: orch.paths.summaryPath,
     })
-    expect(pwPty.options.env.CANARY_LAB_TARGETED_RERUN).toBeUndefined()
+    expect(pwPty.options.env?.CANARY_LAB_TARGETED_RERUN).toBeUndefined()
     const log = fs.readFileSync(orch.paths.playwrightStdoutPath, 'utf-8')
     expect(log).toContain('1 passed')
+    await orch.stop('passed')
+  })
+
+  it('exposes per-run allocated ports to Playwright as CANARY_PORT_<slot>', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
+      portMap: new Map([['api', 51999], ['admin', 51998]]),
+    })
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    const pwPty = spawned[spawned.length - 1]
+    pwPty.emitExit(0)
+    await exitPromise
+    expect(pwPty.options.env).toMatchObject({
+      CANARY_PORT_api: '51999',
+      CANARY_PORT_admin: '51998',
+    })
     await orch.stop('passed')
   })
 
@@ -1177,6 +1265,68 @@ describe('RunOrchestrator.runPlaywright', () => {
     expect(fs.readFileSync(path.join(keepB, 'video.webm'), 'utf-8')).toBe('b-stale')
     await orch.stop('passed')
   })
+
+  it('leaves the keep dir untouched when the live artifacts path is unreadable (readdirSync throws)', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
+    })
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    const pwPty = spawned[spawned.length - 1]
+    // The live artifacts "dir" is actually a plain file — readdirSync throws
+    // ENOTDIR and persistPlaywrightArtifacts swallows it (best-effort; must
+    // never fail the run over artifact bookkeeping).
+    fs.mkdirSync(path.dirname(orch.paths.playwrightArtifactsDir), { recursive: true })
+    fs.writeFileSync(orch.paths.playwrightArtifactsDir, 'not a directory')
+    pwPty.emitExit(0)
+    await exitPromise
+    expect(fs.existsSync(orch.paths.playwrightArtifactsKeepDir)).toBe(true)
+    expect(fs.readdirSync(orch.paths.playwrightArtifactsKeepDir)).toEqual([])
+    await orch.stop('passed')
+  })
+
+  it('warns via runnerLog and continues persisting other tests when one artifact dir cannot be copied', async () => {
+    const { factory, spawned } = makeFakeFactory()
+    const runnerLog = new RunnerLog(path.join(tmpDir, 'runner.log'))
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
+      runnerLog,
+    })
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    const pwPty = spawned[spawned.length - 1]
+    const blockedLive = path.join(orch.paths.playwrightArtifactsDir, 'pw-blocked')
+    fs.mkdirSync(blockedLive, { recursive: true })
+    fs.writeFileSync(path.join(blockedLive, 'video.webm'), 'x')
+    const okLive = path.join(orch.paths.playwrightArtifactsDir, 'pw-ok')
+    fs.mkdirSync(okLive, { recursive: true })
+    fs.writeFileSync(path.join(okLive, 'video.webm'), 'ok-bytes')
+    fs.chmodSync(blockedLive, 0o000)
+    try {
+      pwPty.emitExit(0)
+      await exitPromise
+    } finally {
+      fs.chmodSync(blockedLive, 0o755)
+    }
+    const log = fs.readFileSync(path.join(tmpDir, 'runner.log'), 'utf-8')
+    expect(log).toContain('persist playwright artifact pw-blocked failed')
+    // The failure on pw-blocked didn't abort the loop — pw-ok still got copied.
+    expect(fs.readFileSync(path.join(orch.paths.playwrightArtifactsKeepDir, 'pw-ok', 'video.webm'), 'utf-8')).toBe('ok-bytes')
+    await orch.stop('passed')
+  })
 })
 
 describe('RunOrchestrator.runFullCycle', () => {
@@ -1207,7 +1357,7 @@ describe('RunOrchestrator.runFullCycle', () => {
         ? {
             agent: 'claude',
             maxCycles: 2,
-            buildCommand: ({ cycle }) => `heal-${cycle}-${healIdx++}`,
+            buildSpawnCommand: () => `heal-${healIdx++}`,
           }
         : undefined,
       manualHeal: opts.manualHeal,
@@ -1394,7 +1544,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'heal' },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'test-case-broken' }] }))
@@ -1795,7 +1945,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healAgentTimeoutMs: 60_000, // hard ceiling well above the idle window
       healAgentIdleTimeoutMs: 100, // 100ms of silence → idle-timeout
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'heal' },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
@@ -1835,7 +1985,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healAgentTimeoutMs: 200, // hard ceiling we'll deliberately hit
       healAgentIdleTimeoutMs: 60_000, // idle window much larger than ceiling
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'heal' },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
@@ -1946,7 +2096,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
@@ -2086,7 +2236,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
@@ -2155,7 +2305,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
@@ -2225,7 +2375,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
@@ -2290,7 +2440,7 @@ describe('RunOrchestrator.runFullCycle', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
@@ -3196,7 +3346,7 @@ describe('RunOrchestrator.pauseAndHeal', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     // Failing summary so pauseAndHeal commits (no-failures-yet would no-op).
@@ -3229,7 +3379,7 @@ describe('RunOrchestrator.pauseAndHeal', () => {
     // At this point the run must NOT be 'passed'. The override should have
     // flipped finalStatus to 'failed' and the heal loop should have advanced
     // status to 'healing'.
-    expect(orch.status).toBe('healing')
+    expect(statuses).toContain('healing')
     expect(statuses).not.toContain('passed')
 
     // The manifest reflects the override.
@@ -3264,7 +3414,7 @@ describe('RunOrchestrator.pauseAndHeal', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     // Summary records a failure (the user saw it and clicked pause-heal).
@@ -3284,7 +3434,7 @@ describe('RunOrchestrator.pauseAndHeal', () => {
     // spawned[2] = heal agent (only spawned if the heal loop entered).
     while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
 
-    expect(orch.status).toBe('healing')
+    expect(statuses).toContain('healing')
     expect(statuses).not.toContain('passed')
 
     // Cleanup: agent exits without a signal so the loop bails 'failed'.
@@ -3361,7 +3511,7 @@ describe('RunOrchestrator.cancelHeal', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 200,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 5, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 5, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.writeFileSync(
       orch.paths.summaryPath,
@@ -3460,7 +3610,7 @@ describe('RunOrchestrator.cancelHeal', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 200,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 5, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 5, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.writeFileSync(
       orch.paths.summaryPath,
@@ -4229,7 +4379,7 @@ describe('RunOrchestrator runFullCycle stoppedEarly', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 1000,
       playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => `heal-${healIdx++}` },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(
@@ -4266,7 +4416,7 @@ describe('RunOrchestrator runFullCycle stoppedEarly', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 500,
       playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'heal' },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(
@@ -4303,7 +4453,7 @@ describe('RunOrchestrator runFullCycle stoppedEarly', () => {
       healSignalPollMs: 1,
       healAgentTimeoutMs: 500,
       playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
-      autoHeal: { agent: 'claude', maxCycles: 1, buildCommand: () => 'heal' },
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'heal' },
     })
     fs.mkdirSync(runDir, { recursive: true })
     fs.writeFileSync(

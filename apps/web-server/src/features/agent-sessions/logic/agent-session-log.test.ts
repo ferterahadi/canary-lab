@@ -1477,7 +1477,7 @@ describe('buildFullSessionTranscript', () => {
 
   it('returns a non-empty transcript when events are provided', () => {
     const ref = { agent: 'claude' as const, sessionId: 'sid-t', logPath: '/fake/t.jsonl' }
-    const events = [{ kind: 'user-message' as const, text: 'ping' }]
+    const events = [{ kind: 'user-message' as const, timestamp: '2026-05-11T01:23:45.000Z', text: 'ping' }]
     const result = buildFullSessionTranscript(ref, events)
     expect(result).toContain('claude session sid-t')
     expect(result).toContain('ping')
@@ -1496,7 +1496,7 @@ describe('writeFullSessionTranscript', () => {
     // when logPath has no .jsonl extension, base = ref.logPath and transcript is written to
     // <logPath>.transcript.txt.
     const logNoExt = path.join(homeDir, 'session-log')
-    const events = [{ kind: 'user-message' as const, text: 'no-ext test' }]
+    const events = [{ kind: 'user-message' as const, timestamp: '2026-05-11T01:23:45.000Z', text: 'no-ext test' }]
     const result = writeFullSessionTranscript({ agent: 'claude', sessionId: 'sid-ne', logPath: logNoExt }, events)
     expect(result).toBe(`${logNoExt}.transcript.txt`)
     if (result) expect(fs.existsSync(result)).toBe(true)
@@ -1509,7 +1509,7 @@ describe('writeFullSessionTranscript — catch branch (line 521)', () => {
     // (otherwise line 512 `if (!transcript) return null` fires first and the catch is never reached).
     // Then point logPath at a directory that doesn't exist → writeFileSync throws → catch returns null.
     const missingParent = path.join(homeDir, 'no-such-dir', 'claude.jsonl')
-    const events = [{ kind: 'user-message' as const, text: 'hello' }]
+    const events = [{ kind: 'user-message' as const, timestamp: '2026-05-11T01:23:45.000Z', text: 'hello' }]
     const result = writeFullSessionTranscript(
       { agent: 'claude', sessionId: 'sid', logPath: missingParent },
       events,
