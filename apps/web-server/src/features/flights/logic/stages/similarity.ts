@@ -26,17 +26,11 @@ interface Match {
   repo: string
 }
 
-function findMatch(deps: FlightStageDeps, repoPaths: string[], log: (m: string) => void): { match: Match | null; scanned: number } {
+function findMatch(deps: FlightStageDeps, repoPaths: string[]): { match: Match | null; scanned: number } {
   const targets = new Set(repoPaths.map(real))
-  let features: ReturnType<typeof loadFeatures> = []
-  try {
-    features = loadFeatures(deps.featuresDir)
-  } catch (err) {
-    // A broken unrelated feature config must not ground the flight — scan what
-    // loads and say so. loadFeatures only re-throws real Error instances
-    // (its own healthCheck-validation guard); everything else it swallows.
-    log(`[similarity] feature scan degraded: ${(err as Error).message}\n`)
-  }
+  // loadFeatures itself skips (and console.errors) any feature with a broken
+  // healthCheck config, so a bad unrelated feature never grounds this scan.
+  const features = loadFeatures(deps.featuresDir)
   for (const feature of features) {
     for (const repo of feature.repos ?? []) {
       if (targets.has(real(repo.localPath))) {
@@ -67,7 +61,7 @@ export function similarityStage(deps: FlightStageDeps): StageAdapter {
   return {
     async run(ctx) {
       const m = ctx.manifest()
-      const { match, scanned } = findMatch(deps, m.repoPaths, ctx.appendLog)
+      const { match, scanned } = findMatch(deps, m.repoPaths)
       if (!match) return { kind: 'done', evidence: { scanned, match: null } }
       if (m.opts.plannedSplit) {
         // A confirmed plan-features batch deliberately creates N distinct

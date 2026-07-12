@@ -376,7 +376,7 @@ describe('similarity stage', () => {
     expect(outcome).toMatchObject({ kind: 'done', evidence: { match: null } })
   })
 
-  it('degrades gracefully when a feature scan hits a broken config (logs, does not throw)', async () => {
+  it('degrades gracefully when a feature scan hits a broken config (skips it, does not throw)', async () => {
     const dir = path.join(featuresDir, 'broken')
     fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(
@@ -393,11 +393,8 @@ describe('similarity stage', () => {
         '',
       ].join('\n'),
     )
-    const logs: string[] = []
-    const { ctx } = ctxFor(manifest())
-    const outcome = await similarityStage(deps()).run({ ...ctx, appendLog: (m) => logs.push(m) })
+    const outcome = await similarityStage(deps()).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { match: null } })
-    expect(logs.some((l) => l.includes('feature scan degraded'))).toBe(true)
   })
 })
 
