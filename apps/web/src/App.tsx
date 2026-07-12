@@ -406,7 +406,11 @@ export function App() {
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const dismissToast = useCallback((id: string) => setToasts((t) => t.filter((x) => x.id !== id)), [])
   const prevFlightKeyRef = useRef<Map<string, string> | null>(null)
-  const openFlight = useCallback((flightId: string) => {
+  // Accepts null so it satisfies GlobalStatusBar's onOpenFlight (string | null —
+  // null opens the flights picker with no flight selected); a null id is a
+  // no-op for the feature-ledger / coverage callers that only ever pass a real
+  // flight id.
+  const openFlight = useCallback((flightId: string | null) => {
     setSelectedFlightId(flightId)
     setView('flights')
   }, [])
@@ -553,11 +557,6 @@ export function App() {
     const pending = derivePendingFeatures(flights, features)
     return pending.length ? [...features, ...pending] : features
   }, [features, flights])
-
-  const openFlight = useCallback((flightId: string): void => {
-    setSelectedFlightId(flightId)
-    setView('flights')
-  }, [])
 
   const panels = [
     {
