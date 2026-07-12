@@ -6,11 +6,13 @@ import { EventEmitter } from 'events'
 import net from 'net'
 import {
   coerceProbe,
+  coerceTcpPort,
   enabledForEnv,
   resolvePath,
   normalizeStartCommand,
   isHealthy,
   isTcpListening,
+  isValidTcpPort,
   resolveHealthProbe,
   validateHealthCheck,
 } from './startup'
@@ -300,6 +302,19 @@ describe('validateHealthCheck', () => {
     expect(() => validateHealthCheck({ tcp: { port: 0 } }, ctx)).toThrow(/tcp\.port/)
   })
 
+  it('accepts a tcp probe whose port is a ${port.<slot>} token', () => {
+    expect(() => validateHealthCheck({ tcp: { port: '${port.api}' } }, ctx)).not.toThrow()
+  })
+
+  it('accepts a tcp probe whose port is a numeric string', () => {
+    expect(() => validateHealthCheck({ tcp: { port: '3000' } }, ctx)).not.toThrow()
+  })
+
+  it('rejects a tcp probe whose port is a non-numeric non-token string', () => {
+    expect(() => validateHealthCheck({ tcp: { port: 'abc' } }, ctx)).toThrow(/tcp\.port/)
+    expect(() => validateHealthCheck({ tcp: { port: '' } }, ctx)).toThrow(/tcp\.port/)
+  })
+
   it('rejects legacy probes with missing url', () => {
     expect(() => validateHealthCheck({ url: '' }, ctx)).toThrow(/legacy healthCheck\.url/)
   })
@@ -319,6 +334,34 @@ describe('validateHealthCheck', () => {
     expect(caught?.message).toMatch(/Feature "F"/)
     expect(caught?.message).toMatch(/command "C"/)
     expect(caught?.message).toMatch(/env "local"/)
+  })
+})
+
+describe('isValidTcpPort', () => {
+  it('accepts positive numbers and numeric strings', () => {
+    expect(isValidTcpPort(3000)).toBe(true)
+    expect(isValidTcpPort('3000')).toBe(true)
+  })
+  it('accepts ${...} token strings (resolved at boot)', () => {
+    expect(isValidTcpPort('${port.api}')).toBe(true)
+    expect(isValidTcpPort('http://x:${port.api}')).toBe(true)
+  })
+  it('rejects non-positive, empty, and non-numeric non-token strings', () => {
+    expect(isValidTcpPort(0)).toBe(false)
+    expect(isValidTcpPort(-1)).toBe(false)
+    expect(isValidTcpPort('')).toBe(false)
+    expect(isValidTcpPort('abc')).toBe(false)
+    expect(isValidTcpPort(undefined)).toBe(false)
+  })
+})
+
+describe('coerceTcpPort', () => {
+  it('passes numbers through and parses numeric strings', () => {
+    expect(coerceTcpPort(3000)).toBe(3000)
+    expect(coerceTcpPort('51234')).toBe(51234) // after ${port.<slot>} interpolation
+  })
+  it('yields NaN for an unresolved/garbage value', () => {
+    expect(Number.isNaN(coerceTcpPort('${port.api}'))).toBe(true)
   })
 })
 

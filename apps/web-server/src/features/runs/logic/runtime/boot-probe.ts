@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { ServiceSpec } from './orchestrator'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
-import { isHealthy, isTcpListening } from './launcher/startup'
+import { coerceTcpPort, isHealthy, isTcpListening } from './launcher/startup'
 import { compressLogByTemplate } from './log-template'
 
 // Standalone "boot these services, wait for health, then tear down" primitive,
@@ -204,7 +204,7 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
       (isHttp ? probe.http.deadlineMs : probe.tcp.deadlineMs) ?? fallbackDeadline
     const attempt = isHttp
       ? () => healthCheck(probe.http.url, probe.http.timeoutMs)
-      : () => isTcpListening(probe.tcp.port, probe.tcp.host ?? '127.0.0.1', probe.tcp.timeoutMs)
+      : () => isTcpListening(coerceTcpPort(probe.tcp.port), probe.tcp.host ?? '127.0.0.1', probe.tcp.timeoutMs)
     const detail = isHttp ? `url=${probe.http.url}` : `port=${probe.tcp.port}`
 
     const deadline = Date.now() + deadlineMs

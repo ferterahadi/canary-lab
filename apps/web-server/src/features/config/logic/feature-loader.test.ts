@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -48,7 +48,7 @@ describe('loadFeatures', () => {
     expect(loadFeatures(path.join(tmpDir, 'features'))).toEqual([])
   })
 
-  it('rethrows validation errors for invalid healthCheck', () => {
+  it('skips (does not crash) on an invalid healthCheck and logs the reason', () => {
     writeFeature(
       'broken-hc',
       `module.exports = { config: {
@@ -59,7 +59,17 @@ describe('loadFeatures', () => {
         repos: [{ name: 'r', localPath: __dirname, startCommands: [{ name: 'svc', command: 'echo', healthCheck: { type: 'http' } }] }],
       } }`,
     )
-    expect(() => loadFeatures(path.join(tmpDir, 'features'))).toThrow(/healthCheck/)
+    // A sibling valid feature must still load — one bad config can't brick the workspace.
+    writeFeature(
+      'good',
+      `module.exports = { config: { name: 'good', description: 'd', envs: [], featureDir: __dirname, repos: [] } }`,
+    )
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const features = loadFeatures(path.join(tmpDir, 'features'))
+    expect(features.map((f) => f.name)).toContain('good')
+    expect(features.map((f) => f.name)).not.toContain('broken-hc')
+    expect(spy).toHaveBeenCalledWith(expect.stringMatching(/Skipping feature "broken-hc"/))
+    spy.mockRestore()
   })
 
   it('defaults healOnFailureThreshold to 2 when the config omits it', () => {

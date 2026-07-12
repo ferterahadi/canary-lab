@@ -135,8 +135,8 @@ function validateProbe(
     }
   } else if (hasTcp) {
     const p = (raw as { tcp: TcpProbe }).tcp
-    if (!p || typeof p !== 'object' || typeof p.port !== 'number' || !Number.isFinite(p.port) || p.port <= 0) {
-      throw makeProbeError(ctx, envName, 'tcp.port must be a positive number')
+    if (!p || typeof p !== 'object' || !isValidTcpPort(p.port)) {
+      throw makeProbeError(ctx, envName, 'tcp.port must be a positive number or a ${port.<slot>} token')
     }
   } else {
     // Legacy bare-url shape — accepted for back-compat. Sanity-check the url.
@@ -159,6 +159,31 @@ function makeProbeError(
     + `  http: { url: 'http://localhost:3000', timeoutMs?: 1500 }\n`
     + `  tcp:  { port: 3000, host?: '127.0.0.1', timeoutMs?: 1500 }`,
   )
+}
+
+/**
+ * A tcp probe `port` is valid at load time when it is either a positive finite
+ * number, a string that parses to one (e.g. `'3000'`), or a `${...}`-bearing
+ * token string (e.g. `'${port.api}'`) that is interpolated to the run's
+ * allocated port at boot — mirroring how `http.url` accepts `${port.<slot>}`.
+ * Empty strings and non-numeric non-token strings are rejected.
+ */
+export function isValidTcpPort(port: unknown): port is number | string {
+  if (typeof port === 'number') return Number.isFinite(port) && port > 0
+  if (typeof port !== 'string' || port.length === 0) return false
+  if (port.includes('${')) return true // token — resolved + re-checked at boot
+  const n = Number(port)
+  return Number.isFinite(n) && n > 0
+}
+
+/**
+ * Coerce a resolved tcp probe port (a literal number, or a numeric string left
+ * after `${port.<slot>}` interpolation at boot) to a number for the socket
+ * layer. Returns `NaN` for an unresolved/garbage value, which surfaces as a
+ * failed readiness probe rather than a hard crash.
+ */
+export function coerceTcpPort(port: number | string): number {
+  return typeof port === 'number' ? port : Number(port)
 }
 
 /**

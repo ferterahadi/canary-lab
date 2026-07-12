@@ -24,7 +24,13 @@ export interface HttpProbe {
 
 /** TCP-port-listening readiness probe — waits for `host:port` to accept connections. */
 export interface TcpProbe {
-  port: number
+  /**
+   * The listening port. A literal number, or a `${port.<slot>}` token (or any
+   * `${...}`-bearing string) that is interpolated to the run's allocated port
+   * at boot — the same tokens `http.url` accepts. Coerced to a number before
+   * the socket connect via `coerceTcpPort`.
+   */
+  port: number | string
   /** Defaults to 127.0.0.1. */
   host?: string
   /** Per-attempt timeout (ms). Defaults to 1500. */

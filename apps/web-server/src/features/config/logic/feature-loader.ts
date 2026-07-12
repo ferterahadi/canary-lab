@@ -42,9 +42,15 @@ export function loadFeatures(featuresDir: string): FeatureConfig[] {
         out.push(cfg)
       }
     } catch (err) {
-      // Re-throw validation errors so the user sees them; swallow truly
-      // malformed configs (syntax errors, etc.) the same as before.
-      if (err instanceof Error && err.message.includes('healthCheck')) throw err
+      // A single malformed feature must not brick the whole workspace — one bad
+      // generated config would otherwise take down `canary-lab ui` for every
+      // feature. Surface healthCheck/validation errors loudly on the console
+      // (the same place the user launched the UI) and skip just that feature,
+      // so it is visibly unavailable rather than crashing the server. Truly
+      // malformed configs (syntax errors, etc.) are skipped quietly as before.
+      if (err instanceof Error && err.message.includes('healthCheck')) {
+        console.error(`[canary-lab] Skipping feature "${dir}" — invalid feature.config: ${err.message}`)
+      }
       /* skip malformed config */
     }
   }

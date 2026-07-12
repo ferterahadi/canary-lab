@@ -14,9 +14,9 @@ If you cannot determine how a repo boots, still return the JSON with your best s
 The configSource must be CommonJS shaped exactly `const config = {...}\nmodule.exports = { config }` with:
 - name: {{featureJson}}, description: {{descriptionJson}}, envs: [{{envJson}}], featureDir: __dirname
 - repos: one entry per repo above: { name, localPath (the absolute path above), branch: the output of `git -C <repo> branch --show-current`; omit when empty/detached, startCommands: [...] }
-- each startCommand: { command, name, ports: [{ name: '<slot>', env: 'PORT' }] when the service reads a port env var, healthCheck: { http: { url: 'http://localhost:${port.<slot>}/<ready-path>' } } or { tcp: { port } } }
+- each startCommand: { command, name, ports: [{ name: '<slot>', env: 'PORT' }] when the service reads a port env var, healthCheck: { http: { url: 'http://localhost:${port.<slot>}/<ready-path>' } } or { tcp: { port: '${port.<slot>}' } } }
 - envFiles: [] when the app reads no env files.
-- ALWAYS declare a port slot and reference it via ${port.<slot>} in the healthCheck URL — never hardcode the port number in the URL — so concurrent runs don't clash.
+- ALWAYS declare a port slot and reference it via ${port.<slot>} in the healthCheck — in the http url AND in tcp.port (which takes the token string `'${port.<slot>}'`, not a bare number) — never hardcode a port number, so concurrent runs don't clash.
 - If the service reads its port from an env var other than PORT, set that var name in ports[].env. If it only takes the port as a command-line flag, interpolate the slot into the command itself (e.g. `go run . -port ${port.api}`) — ${port.<slot>} resolves anywhere in the config, not just health checks.
 - Use healthCheck.http for anything that serves HTTP (a /health, /ready, or the root path); use healthCheck.tcp for a service that listens but doesn't speak HTTP. Every long-running service needs one or the other — the harness proves boot with it.
 - pick the dev/start command a developer would actually use (prefer the repo's own script/task runner: package.json scripts, Makefile targets, `go run .`); use the shortest command that boots the service ready for E2E.

@@ -11,6 +11,7 @@ import {
   type HealSignalKind,
 } from '../../../../../../../shared/run-state'
 import {
+  coerceTcpPort,
   enabledForEnv,
   isHealthy,
   isTcpListening,
@@ -910,7 +911,7 @@ export class RunOrchestrator extends EventEmitter {
     }
     if ('tcp' in probe) {
       await this.pollUntilReady(svc, 'tcp', () => isTcpListening(
-        probe.tcp.port,
+        coerceTcpPort(probe.tcp.port),
         probe.tcp.host ?? '127.0.0.1',
         probe.tcp.timeoutMs,
       ))

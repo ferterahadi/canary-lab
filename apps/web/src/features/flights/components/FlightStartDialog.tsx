@@ -463,7 +463,7 @@ export function FlightStartDialog({
     <Modal
       open
       onClose={onClose}
-      height={formView ? 'min(760px, calc(100vh - 2rem))' : undefined}
+      height={formView ? 'min(608px, calc(100vh - 2rem))' : undefined}
       footer={formView ? formFooter : undefined}
       icon={
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
