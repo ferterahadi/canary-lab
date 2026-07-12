@@ -21,6 +21,7 @@ import { TemplatedInput } from './TemplatedInput'
 import { useEditableSlice } from './useEditableSlice'
 import { useRuns } from '../../runs/state/RunsContext'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
+import { useInvalidationKey } from '../../../shared/state/invalidation'
 
 /** Derive a repo's display name from its localPath basename, falling back
  *  to the cloneUrl basename (strip `.git`). Returns '' if neither yields one. */
@@ -259,7 +260,10 @@ interface Slice {
   rootEnvs: string[] // top-level envs[] used for the per-env health-check editor
 }
 
-export function ReposTab({ feature, refreshKey }: { feature: string; refreshKey?: number }) {
+export function ReposTab({ feature }: { feature: string }) {
+  // Each repo's git-status row refetches on `features-changed` (an MCP/other-tab
+  // branch checkout) so it shows live.
+  const refreshKey = useInvalidationKey('repos')
   const { runs } = useRuns()
   const activeRun = runs.some((run) =>
     run.feature === feature && isActiveRunStatus(run.status))

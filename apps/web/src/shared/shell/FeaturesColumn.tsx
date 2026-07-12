@@ -10,6 +10,7 @@ import { ChevronRightIcon } from '../../features/config/components/atoms'
 import { Tooltip } from '../ui/Tooltip'
 import { readGroupOpen, writeGroupOpen } from '../../features/flights/lib/group-open-state'
 import { FlightStatusChip } from '../../features/flights/components/FlightsPill'
+import { useInvalidationKey } from '../state/invalidation'
 
 interface Props {
   features: Feature[]
@@ -23,11 +24,6 @@ interface Props {
   activeRunExecutionType?: ExecutionType | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
-  /** Incremented by App when a coverage job finishes → re-fetches headlines. */
-  coverageRefreshKey?: number
-  /** Incremented by App when a portify overlay is saved → the open Ports tab
-   *  refetches its config doc so the rewritten slots show without a tab switch. */
-  portsRefreshKey?: number
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
   /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
@@ -115,14 +111,14 @@ export function FeaturesColumn({
   activeRunExecutionType,
   onSelectFeature,
   onFeaturesChanged,
-  coverageRefreshKey,
-  portsRefreshKey,
   onOpenCoverage,
   onStartNewFlight,
   onOpenFlight,
   versionStatus,
 }: Props) {
   const { gatePromo } = useMcpPromo()
+  // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
+  const coverageRefreshKey = useInvalidationKey('coverage')
   const [configFor, setConfigFor] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
@@ -232,7 +228,6 @@ export function FeaturesColumn({
         <FeatureConfigEditor
           feature={configFor}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
-          portsRefreshKey={portsRefreshKey}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)

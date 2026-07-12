@@ -15,6 +15,7 @@ import { RunRow } from '../../runs/components/RunRow'
 import { clientLabel } from '../../runs/components/external-client-branding'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel } from './FlightStagePanels'
+import { useInvalidationKey } from '../../../shared/state/invalidation'
 import type { FeatureActivity } from '../state/feature-activity'
 import {
   FactsGrid,
@@ -72,20 +73,16 @@ export interface FlightDrillThroughs {
 
 export function FlightPage({
   flightId,
-  refreshKey,
   onSelectFlight,
   onClose,
   activity,
   onStartFlight,
   onOpenConfig,
-  configRefreshKey,
-  docsRefreshKey,
   onOpenRun,
   onOpenCoverage,
   onOpenPortify,
 }: {
   flightId: string
-  refreshKey: number
   /** Back to the flights picker (null clears the selected flight). */
   onSelectFlight: (flightId: string | null) => void
   onClose: () => void
@@ -95,11 +92,12 @@ export function FlightPage({
   onStartFlight?: (feature: string) => void
   /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup. */
   onOpenConfig?: (feature: string) => void
-  /** Bumped on features-changed → the setup digest refetches (two-way sync). */
-  configRefreshKey?: number
-  /** Bumped on coverage-changed → the Requirements docs list refetches. */
-  docsRefreshKey?: number
 } & FlightDrillThroughs) {
+  // The flight detail refetches on `flights-changed`; the setup digest on
+  // `features-changed` (repos); the Requirements docs list on `coverage-changed`.
+  const refreshKey = useInvalidationKey('flights')
+  const configRefreshKey = useInvalidationKey('repos')
+  const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
       <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />

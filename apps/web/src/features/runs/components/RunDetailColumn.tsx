@@ -30,6 +30,7 @@ import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from 
 import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
 import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
 import { useRun } from '../state/RunsContext'
+import { useInvalidationKey } from '../../../shared/state/invalidation'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { useMcpPromo } from '../../../shared/shell/McpPromoContext'
 import { deriveRunViewModel, type RunViewModel } from '../utils/run-view-model'
@@ -51,13 +52,14 @@ export function RunDetailColumn({
   runId,
   onOpenPlaywrightSettings,
   totalTests,
-  journalRefreshKey = 0,
 }: {
   runId: string | null
   onOpenPlaywrightSettings?: (feature: string) => void
   totalTests?: number
-  journalRefreshKey?: number
 }) {
+  // The journal refetches on `journal-changed` for THIS run (scoped so a bump
+  // for another run doesn't reload it).
+  const journalRefreshKey = useInvalidationKey('journal', runId ?? undefined)
   const [tab, setTab] = useState<Tab>('overview')
   const [serviceIdx, setServiceIdx] = useState(0)
   const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')

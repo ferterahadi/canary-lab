@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightManifest } from '../../../shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import { InvalidationProvider } from '../../../shared/state/invalidation'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -132,10 +133,18 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
   }
 }
 
-async function render(flightId: string, refreshKey = 0) {
+// FlightPage reads its refetch keys from the invalidation bus now, not a prop.
+// The old tests bumped a `refreshKey` prop to force a re-fetch; here a unique
+// remount key per call remounts FlightPage, which re-runs its fetch effect —
+// the same observable effect, without a prop lever.
+let renderSeq = 0
+async function render(flightId: string, extraProps: Record<string, unknown> = {}) {
+  renderSeq += 1
   await act(async () => {
     root.render(
-      <FlightPage flightId={flightId} refreshKey={refreshKey} onSelectFlight={vi.fn()} onClose={vi.fn()} />,
+      <InvalidationProvider>
+        <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
+      </InvalidationProvider>,
     )
   })
 }
@@ -215,34 +224,26 @@ describe('FlightPage', () => {
     expect(mocks.resumeFlight).toHaveBeenCalledWith('fl_1')
 
     mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
-    await render('fl_1', 1)
+    await render('fl_1')
     expect(container.querySelector('[data-testid="flight-abort"]')).toBeTruthy()
   })
 
   it('R25: a settled flight offers the stage-entry launcher; an active one does not', async () => {
     const onStartFlight = vi.fn()
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done' }))
-    await act(async () => {
-      root.render(
-        <FlightPage flightId="fl_1" refreshKey={0} onSelectFlight={vi.fn()} onClose={vi.fn()} onStartFlight={onStartFlight} />,
-      )
-    })
+    await render('fl_1', { onStartFlight })
     const refly = container.querySelector<HTMLButtonElement>('[data-testid="flight-refly"]')
     expect(refly).toBeTruthy()
     await act(async () => { refly?.click() })
     expect(onStartFlight).toHaveBeenCalledWith('checkout')
 
     mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
-    await act(async () => {
-      root.render(
-        <FlightPage flightId="fl_1" refreshKey={1} onSelectFlight={vi.fn()} onClose={vi.fn()} onStartFlight={onStartFlight} />,
-      )
-    })
+    await render('fl_1', { onStartFlight })
     expect(container.querySelector('[data-testid="flight-refly"]')).toBeNull()
 
     // No handler wired → no button (the launcher is App-owned and optional).
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done' }))
-    await render('fl_1', 2)
+    await render('fl_1')
     expect(container.querySelector('[data-testid="flight-refly"]')).toBeNull()
   })
 
@@ -262,11 +263,7 @@ describe('FlightPage', () => {
 describe('stage summary + drill-through (R6)', () => {
   async function renderWithDrill(m: FlightManifest, drill: { onOpenRun?: ReturnType<typeof vi.fn>; onOpenCoverage?: ReturnType<typeof vi.fn>; onOpenPortify?: ReturnType<typeof vi.fn> }) {
     mocks.getFlight.mockResolvedValue(m)
-    await act(async () => {
-      root.render(
-        <FlightPage flightId="fl_1" refreshKey={0} onSelectFlight={vi.fn()} onClose={vi.fn()} {...drill} />,
-      )
-    })
+    await render('fl_1', { ...drill })
   }
 
   it('run stage shows the harness state line and drills through to the run detail', async () => {
@@ -659,7 +656,7 @@ describe('trailer model (R14–R18)', () => {
         ...(key === 'prd-summary' ? { evidence: { requirementCount: 5 } } : {}),
       })),
     }))
-    await render('fl_1', 1)
+    await render('fl_1')
     await act(async () => {
       // R33: prd-summary folds into the Requirements (docs) row.
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click()
@@ -867,11 +864,7 @@ describe('detail redesign (R53–R68)', () => {
   it('R62: the header has no back button; delete confirms once then deletes and returns to the list', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: doneStages() }))
     const onSelectFlight = vi.fn()
-    await act(async () => {
-      root.render(
-        <FlightPage flightId="fl_1" refreshKey={0} onSelectFlight={onSelectFlight} onClose={vi.fn()} />,
-      )
-    })
+    await render('fl_1', { onSelectFlight })
     expect(container.querySelector('[aria-label="All flights"]')).toBeNull()
     const del = container.querySelector<HTMLButtonElement>('[data-testid="flight-delete"]')
     expect(del).toBeTruthy()
@@ -895,11 +888,7 @@ describe('detail redesign (R53–R68)', () => {
     mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' }, summary: { total: 8, passed: 8, failed: [] } })
     const activity = new Map([['checkout', { kind: 'running' as const, runId: 'run-live' }]])
     const onOpenRun = vi.fn()
-    await act(async () => {
-      root.render(
-        <FlightPage flightId="fl_1" refreshKey={0} onSelectFlight={vi.fn()} onClose={vi.fn()} activity={activity} onOpenRun={onOpenRun} />,
-      )
-    })
+    await render('fl_1', { activity, onOpenRun })
     const runRail = container.querySelector('[data-testid="stage-rail-run"]')
     expect(runRail?.textContent).toContain('▸')
     expect(runRail?.textContent).not.toContain('✓')

@@ -12,6 +12,15 @@ import {
   type ParsedConfigDoc,
 } from '../../../shared/api/client'
 import { PortsTab } from './PortsTab'
+import { InvalidationProvider, useInvalidation } from '../../../shared/state/invalidation'
+
+// Captures the bus dispatch so a test can bump a topic the way the WS handler
+// does — the leaf reads its refetch key from context now, not a prop.
+let capturedInvalidate: ((topic: 'ports', scope?: string) => void) | null = null
+function CaptureInvalidate() {
+  capturedInvalidate = useInvalidation().invalidate
+  return null
+}
 
 vi.mock('../../../shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
@@ -137,7 +146,7 @@ describe('PortsTab', () => {
     expect(container.textContent).toContain('copied ✓')
   })
 
-  it('refetches the config doc when portsRefreshKey changes (re-run Portify rewrote the slots)', async () => {
+  it('refetches the config doc when the ports topic is invalidated (re-run Portify rewrote the slots)', async () => {
     // Before re-run: one slot named "api". After re-run the overlay rewrote the
     // slots, but `portified` stays true, so only the bumped key signals the change.
     const before = docWithPorts()
@@ -155,16 +164,20 @@ describe('PortsTab', () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValueOnce(before).mockResolvedValueOnce(after)
 
     await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" portified portsRefreshKey={0} />)
+      root.render(
+        <InvalidationProvider>
+          <CaptureInvalidate />
+          <PortsTab feature="cns_exactly_once_fallback" portified />
+        </InvalidationProvider>,
+      )
     })
     expect(container.textContent).toContain('${port.api}')
     expect(getFeatureConfigDoc).toHaveBeenCalledTimes(1)
 
-    // Same feature, same portified=true — only the key changes, as it would after
-    // an in-place re-run save. The slots must reload without a tab switch.
-    await act(async () => {
-      root.render(<PortsTab feature="cns_exactly_once_fallback" portified portsRefreshKey={1} />)
-    })
+    // Same feature, same portified=true — only the ports topic is invalidated, as
+    // it would be after an in-place re-run save. The slots must reload without a
+    // tab switch.
+    await act(async () => { capturedInvalidate?.('ports') })
     expect(getFeatureConfigDoc).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('${port.gateway}')
     expect(container.textContent).not.toContain('${port.api}')

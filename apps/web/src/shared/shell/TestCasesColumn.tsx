@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as api from '../api/client'
+import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, FeatureSpecFile, RunStatus } from '../api/types'
 import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../../features/runs/utils/test-step-status'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
@@ -14,14 +15,16 @@ interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
   activeRunStatus: RunStatus | undefined
-  refreshKey?: number
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
    *  affected — only those test cards get the red "modified" treatment. */
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0, onTotalTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, onTotalTestsChange, dirtySpecs = [] }: Props) {
+  // The spec list refetches when a `tests-changed` event fires for the selected
+  // feature (App gates the invalidation to the visible feature).
+  const refreshKey = useInvalidationKey('tests')
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)

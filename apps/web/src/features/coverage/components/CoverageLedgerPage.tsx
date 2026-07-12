@@ -18,14 +18,11 @@ import { CoverageGeneratingPane } from './CoverageGeneratingPane'
 import { ShikiCode } from '../../../shared/ui/TestCodeBlock'
 import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
+import { useInvalidationKey } from '../../../shared/state/invalidation'
 
 interface Props {
   feature: string
   onClose: () => void
-  // Bumped by App.tsx on every `coverage-changed` workspace event. Lets an OPEN
-  // ledger re-attach to a job that started after it opened — e.g. an external
-  // agent was summoned to map coverage — without a manual refresh (cl_ws-driven-state).
-  coverageRefreshKey?: number
   // R14 (canary-first-flight): a flight's docs/prd-summary/specs-coverage stage
   // is generating THIS ledger right now (derived in App from the WS-driven
   // flights index) — render it as an explicit generating state, never a
@@ -83,7 +80,11 @@ interface Hovered {
   key: string
 }
 
-export function CoverageLedgerPage({ feature, onClose, coverageRefreshKey = 0, generatingFlight = null, onOpenFlight }: Props) {
+export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, onOpenFlight }: Props) {
+  // Re-attach to a coverage job that started after the ledger opened (an
+  // external agent mapping coverage) without a manual refresh — bumps on every
+  // `coverage-changed` workspace event (cl_ws-driven-state).
+  const coverageRefreshKey = useInvalidationKey('coverage')
   const [ledger, setLedger] = useState<CoverageLedger | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

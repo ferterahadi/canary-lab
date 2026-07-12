@@ -4,6 +4,7 @@ import type { ConfigValue } from '../../../shared/api/client'
 import { ConfirmModal, TrashIcon } from './atoms'
 import { usePortify } from '../../portify/state/PortifyContext'
 import { latestSavedWorkflowId } from '../../portify/state/portify-state'
+import { useInvalidationKey } from '../../../shared/state/invalidation'
 import {
   deriveRepoName,
   parseRepo,
@@ -21,7 +22,6 @@ import {
 export function PortsTab({
   feature,
   portified = false,
-  portsRefreshKey,
   onStartPortify,
   onOpenPortify,
 }: {
@@ -30,14 +30,14 @@ export function PortsTab({
    *  (the `overlayExists` check, via /api/features), NOT the declared-slot
    *  count. This is what "Portified" means: a verified overlay is on disk. */
   portified?: boolean
-  /** Bumped by App when a portify overlay is saved. Added to the load deps so
-   *  the slot table refetches the rewritten config doc in place — without it the
-   *  tab kept the pre-portify slots until a remount (tab switch / refresh). */
-  portsRefreshKey?: number
   onStartPortify?: (feature: string) => void
   /** Reopen a past/active port-ification workflow (by id) in the wizard. */
   onOpenPortify?: (workflowId: string) => void
 }) {
+  // Bumped when a portify overlay is saved so the slot table refetches the
+  // rewritten config doc in place — without it the tab kept the pre-portify
+  // slots until a remount (tab switch / refresh).
+  const portsRefreshKey = useInvalidationKey('ports')
   // Read-only: this tab no longer writes config, so a plain fetch replaces the
   // editable-slice + SaveBar. Refetches when portsRefreshKey is bumped (a portify
   // save / removal rewrote the slots) so the table reflects it without a remount.
