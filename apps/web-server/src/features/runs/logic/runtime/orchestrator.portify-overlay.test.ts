@@ -215,6 +215,144 @@ describe('portified run: fail loud, never boot un-portified', () => {
     expect(spawned).toHaveLength(0)
     await orch.stop('aborted')
   })
+
+  it('aborts when the saved overlay becomes unreadable after construction (missing patch file)', async () => {
+    // overlayExists() at construction time only checks meta.json — it's
+    // still true here. Before start() actually reads the overlay back, the
+    // patch file vanishes (e.g. a concurrent cleanup) — readOverlay() then
+    // returns null and the run must refuse to boot un-portified.
+    await saveOverlay()
+    const handle = await makeWorktree()
+    fs.rmSync(path.join(overlayDir(featureDir), 'api.patch'), { force: true })
+
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    await expect(orch.start()).rejects.toThrow(/missing or corrupt.*re-run Portify/i)
+    expect(spawned).toHaveLength(0)
+    await orch.stop('aborted')
+  })
+})
+
+describe('portified run: apply failure reverses already-applied overlays', () => {
+  it('reverses repo A after repo B fails to apply (conflict) and aborts loud, never booting', async () => {
+    // Two portified repos, applied in meta order (api, worker). api's
+    // overlay applies cleanly; worker's worktree has ALREADY diverged on
+    // the exact patched line (simulating stray drift) so its 3-way apply
+    // conflicts. The orchestrator must reverse api's already-applied
+    // overlay before throwing — it must never boot a half-portified run.
+    const repoRootB = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-port-b-')))
+    cleanup.push(repoRootB)
+    fs.writeFileSync(path.join(repoRootB, 'app.js'), BASE)
+    await runGit(repoRootB, ['init', '-q'])
+    await runGit(repoRootB, ['config', 'user.email', 't@t'])
+    await runGit(repoRootB, ['config', 'user.name', 'test'])
+    await runGit(repoRootB, ['add', '-A'])
+    await runGit(repoRootB, ['commit', '-q', '-m', 'init', '--no-verify'])
+
+    const patchA = await capturePortPatch()
+    const baseA = (await runGit(repoRoot, ['rev-parse', 'HEAD'])).stdout.trim()
+    const touchedA = await captureTouchedFiles(repoRoot, baseA, ['app.js'])
+
+    const fileB = path.join(repoRootB, 'app.js')
+    fs.writeFileSync(fileB, PORTED)
+    const patchB = await diffContentSinceSnapshot(repoRootB, 'HEAD')
+    fs.writeFileSync(fileB, BASE)
+    const baseB = (await runGit(repoRootB, ['rev-parse', 'HEAD'])).stdout.trim()
+    const touchedB = await captureTouchedFiles(repoRootB, baseB, ['app.js'])
+
+    writeOverlay(featureDir, {
+      featureName: 'demo',
+      agent: 'claude',
+      capturedAt: '2026-06-14T00:00:00.000Z',
+      repos: [
+        { name: 'api', baseSha: baseA, patch: patchA, touchedFiles: touchedA },
+        { name: 'worker', baseSha: baseB, patch: patchB, touchedFiles: touchedB },
+      ],
+    })
+
+    const handleA = await makeWorktree()
+    const handleB = await addWorktree({ repoName: 'worker', localPath: repoRootB, worktreesDir: path.join(runDir, 'worktrees') })
+    cleanup.push(handleB.worktreeRoot)
+
+    // worker's worktree already diverged on the exact patched line. Staged
+    // (not just written) so `git apply --3way` reconstructs a real 3-way
+    // merge against the index instead of bailing with a plain index
+    // mismatch — that's what turns this into a genuine conflict outcome.
+    fs.writeFileSync(
+      path.join(handleB.worktreeRoot, 'app.js'),
+      PORTED.replace('Number(process.env.PORT)', 'Number(process.env.OTHER_PORT)'),
+    )
+    await runGit(handleB.worktreeRoot, ['add', 'app.js'])
+
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: {
+        name: 'demo',
+        description: 'demo',
+        envs: ['local'],
+        featureDir,
+        repos: [
+          { name: 'api', localPath: repoRoot, startCommands: [{ command: 'serve', name: 'api', healthCheck: { url: 'http://x' } }] },
+          { name: 'worker', localPath: repoRootB, startCommands: [{ command: 'serve', name: 'worker', healthCheck: { url: 'http://y' } }] },
+        ],
+      },
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      worktrees: [handleA, handleB],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    await expect(orch.start()).rejects.toThrow(/failed to apply the saved port overlay for "worker".*conflicts/i)
+    // api applied first, then got reversed because worker failed.
+    expect(wtApp(handleA)).toBe(BASE)
+    expect(spawned).toHaveLength(0)
+    await orch.stop('aborted')
+  })
+
+  it('reports a plain error (not a conflict) when the saved patch is corrupt', async () => {
+    await saveOverlay()
+    const handle = await makeWorktree()
+    // Overwrite the saved patch with garbage that isn't a valid unified
+    // diff — both the plain and --3way `git apply` attempts fail without
+    // producing any unmerged-file markers, so applyOverlay reports `error`
+    // (not `conflict`).
+    fs.writeFileSync(path.join(overlayDir(featureDir), 'api.patch'), 'not a real patch\nnonsense\n')
+
+    const { factory, spawned } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    let caught: Error | undefined
+    try {
+      await orch.start()
+    } catch (err) {
+      caught = err as Error
+    }
+    expect(caught?.message).toMatch(/failed to apply the saved port overlay for "api"/i)
+    // An `error` outcome (corrupt patch, no unmerged files) reports the raw
+    // git detail directly — it must NOT be mislabeled as a `conflict`.
+    expect(caught?.message).not.toMatch(/conflicts in/i)
+    expect(spawned).toHaveLength(0)
+    await orch.stop('aborted')
+  })
 })
 
 describe('non-portified run is unaffected', () => {

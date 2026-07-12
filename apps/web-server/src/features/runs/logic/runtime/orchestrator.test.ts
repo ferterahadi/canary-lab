@@ -2466,6 +2466,79 @@ describe('RunOrchestrator.runFullCycle', () => {
     await orch.stop('failed')
   }, 15000)
 
+  it('excludes a nested service-repo subtree from the feature-dir diff', async () => {
+    // featureDir IS the workspace repo root here; the "api" service repo
+    // lives nested inside it as its OWN git repo. snapshotFeatureRepos must
+    // recognize the nesting (isPathInside) and exclude that subtree from the
+    // feature-dir-level diff pathspec so an edit inside it isn't reported
+    // twice (once via its own snapshot, once via the feature-dir scan).
+    const featureDir = tmpDir
+    execFileSync('git', ['init', '-q'], { cwd: featureDir })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: featureDir })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: featureDir })
+    fs.writeFileSync(path.join(featureDir, 'e2e-helper.ts'), '// initial helper\n')
+    execFileSync('git', ['add', 'e2e-helper.ts'], { cwd: featureDir })
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: featureDir })
+
+    const serviceRepo = path.join(featureDir, 'services', 'api')
+    fs.mkdirSync(serviceRepo, { recursive: true })
+    execFileSync('git', ['init', '-q'], { cwd: serviceRepo })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: serviceRepo })
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: serviceRepo })
+    fs.writeFileSync(path.join(serviceRepo, 'main.ts'), '// initial\n')
+    execFileSync('git', ['add', 'main.ts'], { cwd: serviceRepo })
+    execFileSync('git', ['commit', '-q', '-m', 'init'], { cwd: serviceRepo })
+
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let healIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature({
+        featureDir,
+        repos: [
+          {
+            name: 'api',
+            localPath: serviceRepo,
+            startCommands: [{ command: 'echo hi', name: 'api', healthCheck: { url: 'http://x' } }],
+          },
+        ],
+      }),
+      runId: RUN_ID,
+      runDir,
+      env: 'local',
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: featureDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => `heal-${healIdx++}` },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Agent edits ONLY the nested service repo.
+    fs.writeFileSync(path.join(serviceRepo, 'main.ts'), '// edited\n')
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({ hypothesis: 'fix', fixDescription: 'd' }))
+    f.spawned[2].emitExit(0)
+    while (f.spawned.length < 5) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[4].emitExit(1)
+    await promise
+
+    const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
+    const fixFileLine = journal.split('\n').find((l) => l.startsWith('- fix.file:'))!
+    // Reported exactly once — the feature-dir-level diff excluded the nested
+    // service-repo subtree instead of double-counting it.
+    expect(fixFileLine.match(/main\.ts/g)?.length).toBe(1)
+    expect(fixFileLine).toContain(path.join(serviceRepo, 'main.ts'))
+    await orch.stop('failed')
+  }, 15000)
+
   it('honors .rerun signal (rerun-only path)', async () => {
     const f = makeFakeFactory()
     const orch = bootForFullCycle({ spawned: f, pwExitCodes: [1, 0], autoHeal: true })

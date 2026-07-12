@@ -107,32 +107,19 @@ export default defineConfig({
         // routes/logic modules — features, tests-draft, config-ast, ast-extractor,
         // auto-heal — ARE gated.) Only the runs orchestrator is excluded; the
         // portify/benchmark orchestrators stay gated.
-        'apps/web-server/src/features/runs/logic/runtime/orchestrator.ts',
-        'apps/web-server/src/features/runs/logic/runtime/log-enrichment.ts',
-        'apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts',
-        'apps/web-server/src/features/config/routes/feature-config.ts',
-        'apps/web-server/src/features/runs/routes/runs.ts',
-        'apps/web-server/src/features/wizard/logic/wizard-agent-runner.ts',
-        'apps/web-server/src/features/evaluation/logic/test-review-export.ts',
-        'apps/web-server/src/shared/open-browser-spawner.ts',
         // The benchmark runner is the I/O wiring behind the (separately tested)
         // BenchmarkOrchestrator/Race: it spawns the sabotage subprocess, creates
         // git worktrees, and drives real RunOrchestrators per arm. Same category
         // as runtime/orchestrator.ts above — exercised by behavior tests, not
         // unit-coverable without a real git repo + agent CLIs + TTY.
-        'apps/web-server/src/features/benchmark/logic/runtime/runner.ts',
-        'apps/web-server/src/features/runs/logic/runtime/pty-spawner.ts',
         // Race-condition and defence-in-depth guards: the uncovered branches
         // here are intentional closed-check / path-traversal / subprocess-timer
         // guards that can't be exercised deterministically through public APIs.
-        'apps/web-server/src/features/agent-sessions/logic/agent-session-tailer.ts',
-        'apps/web-server/src/features/runs/logic/playwright-list.ts',
         // Path-traversal hardening: the `outside-draft` return + the
         // `endsWith(sep)` branch are intentional defence-in-depth that the
         // earlier `..`/absolute-path rejection already makes unreachable.
         // Keeping the redundant guard is the point; it can't be covered
         // without removing the security check, so the file stays excluded.
-        'apps/web-server/src/features/wizard/logic/draft-file-resolver.ts',
         'apps/web/dist/**',
         'dist/**',
         'templates/**',
