@@ -99,27 +99,6 @@ export default defineConfig({
         // WebSocket transport glue (thin I/O), incl. the shared workspace stream.
         'apps/web-server/src/features/**/ws/**',
         'apps/web-server/src/shared/ws/**',
-        // Integration-heavy run orchestration + the heaviest route handlers are
-        // covered by dedicated behavior tests, but under the strict 100% gate
-        // their defensive glue has branches that can't be exercised
-        // deterministically: subprocess spawn/error events, git operations,
-        // SIGINT/readline handlers, and fs/disk race guards. (The lighter
-        // routes/logic modules — features, tests-draft, config-ast, ast-extractor,
-        // auto-heal — ARE gated.) Only the runs orchestrator is excluded; the
-        // portify/benchmark orchestrators stay gated.
-        // The benchmark runner is the I/O wiring behind the (separately tested)
-        // BenchmarkOrchestrator/Race: it spawns the sabotage subprocess, creates
-        // git worktrees, and drives real RunOrchestrators per arm. Same category
-        // as runtime/orchestrator.ts above — exercised by behavior tests, not
-        // unit-coverable without a real git repo + agent CLIs + TTY.
-        // Race-condition and defence-in-depth guards: the uncovered branches
-        // here are intentional closed-check / path-traversal / subprocess-timer
-        // guards that can't be exercised deterministically through public APIs.
-        // Path-traversal hardening: the `outside-draft` return + the
-        // `endsWith(sep)` branch are intentional defence-in-depth that the
-        // earlier `..`/absolute-path rejection already makes unreachable.
-        // Keeping the redundant guard is the point; it can't be covered
-        // without removing the security check, so the file stays excluded.
         'apps/web/dist/**',
         'dist/**',
         'templates/**',

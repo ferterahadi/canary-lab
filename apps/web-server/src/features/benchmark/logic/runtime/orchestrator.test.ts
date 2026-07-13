@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BenchmarkOrchestrator } from './orchestrator'
+import { BenchmarkOrchestrator, type BenchmarkOrchestratorDeps } from './orchestrator'
 import { SabotageNoopError } from './race'
 import type { BenchmarkManifest } from './types'
 import type { BenchmarkReport } from './report'
@@ -119,6 +119,25 @@ describe('BenchmarkOrchestrator.run', () => {
     await orch.run()
     expect(final?.arms.find((a) => a.arm === 'A')?.worktreePath).toBe('/wt/arm-A')
     expect(final?.arms.find((a) => a.arm === 'B')?.worktreePath).toBeUndefined()
+  })
+
+  it('tolerates setupArms returning nothing (no arm gets a worktree path)', async () => {
+    let final: BenchmarkManifest | undefined
+    const orch = new BenchmarkOrchestrator({
+      manifest: makeManifest({
+        arms: [{ arm: 'A', mode: 'harness', runIds: [] }],
+      }),
+      persist: (m) => { final = m },
+      sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
+      writeDiff: () => {},
+      // setupArms is typed non-nullable, but the `?? {}` fallback defends
+      // against a nullish resolve — force that here via a cast to exercise it.
+      setupArms: (async () => undefined) as BenchmarkOrchestratorDeps['setupArms'],
+      runRace: async () => REPORT,
+      now: () => 't',
+    })
+    await orch.run()
+    expect(final?.arms.find((a) => a.arm === 'A')?.worktreePath).toBeUndefined()
   })
 
   it('marks the run aborted (not done) when isAborted() is true', async () => {
