@@ -12,6 +12,7 @@ import {
   type ServiceSpec,
 } from './orchestrator'
 import * as sessionLog from '../../../agent-sessions/logic/agent-session-log'
+import * as featureLoader from '../../../config/logic/feature-loader'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'
@@ -4636,5 +4637,797 @@ describe('RunOrchestrator integration smoke', () => {
     expect(eventLog.at(-1)).toBe('run-complete')
     expect(fs.existsSync(orch.paths.manifestPath)).toBe(true)
     expect(fs.existsSync(path.join(runDir, 'svc-api.log'))).toBe(true)
+  })
+})
+
+describe('module-helper edge branches', () => {
+  function writeSpec(featureDir: string, name: string, body: string): string {
+    const dir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, name)
+    fs.writeFileSync(file, body)
+    return file
+  }
+
+  it('defaultHealPrompt echoes guidance and prior-session flags when supplied', async () => {
+    const { defaultHealPrompt } = await import('./orchestrator')
+    const out = defaultHealPrompt({
+      cycle: 3,
+      outputDir: '/out',
+      userGuidance: 'look here',
+      priorAgentSessionContext: 'previous claude session context',
+    })
+    expect(out).toContain('cycle=3')
+    expect(out).toContain('guidance="look here"')
+    expect(out).toContain('prior-session=true')
+  })
+
+  it('extractFailedLocations returns [] when failed is not an array', async () => {
+    const { extractFailedLocations } = await import('./orchestrator')
+    expect(extractFailedLocations({})).toEqual([])
+    expect(extractFailedLocations({ failed: 'nope' as unknown as [] })).toEqual([])
+  })
+
+  it('computeVerificationPlan sanitizes malformed knownTests entries and dedupes failedFirst', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'known-sanitize')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const result = computeVerificationPlan(featureDir, {
+      passedNames: [],
+      knownTests: [
+        null,
+        'string-entry',
+        { name: 123, title: 'bad name' },
+        { name: '', title: 'empty name' },
+        { name: 'test-a', title: 456 },
+        { name: 'test-b', title: '' },
+        { name: 'test-dup', title: 'Dup' },
+        { name: 'test-dup', title: 'Dup second wins-ignored' },
+        { name: 'test-pending', title: 'Pending one', titlePath: ['grp', '', 7, 'Pending one'] },
+        { name: 'test-failed', title: 'Failed one', location: `${featureDir}/e2e/spec.ts:5` },
+      ],
+      // Duplicate failed slug proves uniqueByName dedupes failedFirst.
+      failed: [{ name: 'test-failed' }, { name: 'test-failed' }],
+    })
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.failedFirst.map((t) => t.name)).toEqual(['test-failed'])
+    expect(result.pending.map((t) => t.name)).toEqual(['test-dup', 'test-pending'])
+    // titlePath filtered down to string, non-empty parts only.
+    const pendingWithPath = result.pending.find((t) => t.name === 'test-pending')!
+    expect(pendingWithPath.titlePath).toEqual(['grp', 'Pending one'])
+    if (result.selection.kind !== 'grep') return
+    expect(result.selection.grep).toContain('Failed one')
+  })
+
+  it('computeVerificationPlan falls back to full-suite when a failed slug is absent from knownTests', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'known-missing')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const result = computeVerificationPlan(featureDir, {
+      knownTests: [{ name: 'test-known', title: 'Known' }],
+      failed: [{ name: 'test-not-in-inventory' }],
+    })
+    expect(result.kind).toBe('full-suite')
+    if (result.kind !== 'full-suite') return
+    expect(result.reason).toContain('could not match')
+    expect(result.total).toBe(1)
+  })
+
+  it('computeVerificationPlan targets summary-provided failed locations when the AST is unavailable', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'no-ast-targeted')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const result = computeVerificationPlan(featureDir, {
+      total: 5,
+      failed: [
+        { name: 'a', location: 'e2e/a.spec.ts:10' },
+        { name: 'b', location: 'e2e/b.spec.ts:20' },
+      ],
+    })
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    if (result.selection.kind !== 'targets') return
+    expect(result.selection.targets).toEqual(['e2e/a.spec.ts:10', 'e2e/b.spec.ts:20'])
+    expect(result.selection.reason).toContain('full Playwright inventory is unavailable')
+  })
+
+  it('computeVerificationPlan falls back to full-suite when summary locations are incomplete', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'no-ast-fullsuite')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const result = computeVerificationPlan(featureDir, {
+      failed: [
+        { name: 'a' },
+        { name: 'b', location: 'e2e/b.spec.ts:20' },
+      ],
+    })
+    expect(result.kind).toBe('full-suite')
+    if (result.kind !== 'full-suite') return
+    expect(result.reason).toContain('without a complete safe selector set')
+  })
+
+  it('computeVerificationPlan drops AST-missing failed slugs into a full-suite rerun', async () => {
+    const { computeVerificationPlan } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'ast-dropped')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'a.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('still here', async () => {})\n",
+    )
+    const result = computeVerificationPlan(featureDir, {
+      // Failed slug for a test that no longer exists in the AST.
+      failed: [{ name: 'test-case-renamed-away', location: `${featureDir}/e2e/a.spec.ts:2` }],
+    })
+    expect(result.kind).toBe('full-suite')
+    if (result.kind !== 'full-suite') return
+    expect(result.reason).toContain('could not safely target')
+  })
+
+  it('computeRerunTargetsOrdered skips unparseable specs but still targets the parseable ones', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'partial-parse')
+    fs.mkdirSync(featureDir, { recursive: true })
+    // A syntactically-broken spec that yields zero tests is skipped.
+    writeSpec(featureDir, 'broken.spec.ts', 'this is (((not valid typescript at all <<<\n')
+    const good = writeSpec(featureDir, 'good.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('good one', async () => {})\n",
+    )
+    const result = computeRerunTargetsOrdered(featureDir, { failed: [{ name: 'test-case-good-one', location: `${good}:2` }] })
+    expect(result.kind).toBe('targeted')
+    if (result.kind !== 'targeted') return
+    expect(result.failedFirst).toEqual([`${good}:2`])
+  })
+
+  it('computeRerunTargetsOrdered returns extraction-failed when every spec fails to parse', async () => {
+    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const featureDir = path.join(tmpDir, 'features', 'all-broken')
+    fs.mkdirSync(featureDir, { recursive: true })
+    writeSpec(featureDir, 'broken.spec.ts', 'nope ((( <<< not valid\n')
+    const result = computeRerunTargetsOrdered(featureDir, { failed: [{ name: 'x' }] })
+    expect(result.kind).toBe('extraction-failed')
+  })
+
+  it('computeNonPassedTargets skips unparseable specs and reports extraction-failed when all fail', async () => {
+    const { computeNonPassedTargets } = await import('./orchestrator')
+    const partialDir = path.join(tmpDir, 'features', 'npt-partial')
+    fs.mkdirSync(partialDir, { recursive: true })
+    writeSpec(partialDir, 'broken.spec.ts', 'this ((( is <<< broken\n')
+    const good = writeSpec(partialDir, 'good.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('one', async () => {})\n" +
+      "test('two', async () => {})\n",
+    )
+    const partial = computeNonPassedTargets(partialDir, { passedNames: ['test-case-one'] })
+    expect(partial.kind).toBe('targeted')
+    if (partial.kind === 'targeted') expect(partial.locations).toEqual([`${good}:3`])
+
+    const allBrokenDir = path.join(tmpDir, 'features', 'npt-all-broken')
+    fs.mkdirSync(allBrokenDir, { recursive: true })
+    writeSpec(allBrokenDir, 'broken.spec.ts', 'still ((( broken <<<\n')
+    expect(computeNonPassedTargets(allBrokenDir, { passedNames: ['x'] }).kind).toBe('extraction-failed')
+  })
+
+  it('readLatestHealOnFailureThreshold falls back to the in-memory threshold when the loader throws', async () => {
+    const { readLatestHealOnFailureThreshold } = await import('./orchestrator')
+    const spy = vi.spyOn(featureLoader, 'loadFeatures').mockImplementation(() => {
+      throw new Error('disk exploded')
+    })
+    try {
+      const feature = makeFeature({ healOnFailureThreshold: 9 })
+      expect(readLatestHealOnFailureThreshold(feature)).toBe(9)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})
+
+describe('RunOrchestrator.writeToHealAgent', () => {
+  it('no-ops with no chunk / no live pty, forwards to the live REPL, and swallows write errors', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 60_000,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: () => 'live-agent',
+        buildCyclePrompt: () => 'prompt',
+      },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+
+    // No agent pty yet → early return on the null-pty guard.
+    orch.writeToHealAgent('before-spawn')
+
+    const promise = orch.restartHealFromFailure('go')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    const agent = f.spawned[0]
+
+    // Empty chunk → early return (nothing written).
+    orch.writeToHealAgent('')
+    expect(agent.writes).toEqual([])
+
+    // Live pty → forwarded verbatim.
+    orch.writeToHealAgent('keystrokes')
+    expect(agent.writes).toContain('keystrokes')
+
+    // A pty that throws mid-write must not surface the error.
+    const livePty = (orch as unknown as { healAgentPty: { write: (c: string) => void } }).healAgentPty
+    livePty.write = () => { throw new Error('pty closed') }
+    expect(() => orch.writeToHealAgent('after-close')).not.toThrow()
+
+    f.spawned[0].emitExit(0)
+    await promise
+    await orch.stop('failed')
+  })
+})
+
+describe('RunOrchestrator.interjectHealAgent error path', () => {
+  it('returns no-agent-running when the live REPL write throws', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 60_000,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: () => 'live-agent',
+        buildCyclePrompt: () => 'prompt',
+      },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+
+    const promise = orch.restartHealFromFailure('go')
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    const livePty = (orch as unknown as { healAgentPty: { write: (c: string) => void } }).healAgentPty
+    livePty.write = () => { throw new Error('pty closed') }
+
+    const result = await orch.interjectHealAgent('nudge')
+    expect(result).toEqual({ ok: false, reason: 'no-agent-running' })
+
+    f.spawned[0].emitExit(0)
+    await promise
+    await orch.stop('failed')
+  })
+})
+
+describe('RunOrchestrator.runHealAgent cycle-2 write failure', () => {
+  it('returns pty-died when the re-prompt write to the live REPL throws on cycle 2', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1, repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      autoHeal: {
+        agent: 'claude',
+        buildSpawnCommand: () => 'live-agent',
+        buildCyclePrompt: () => 'cycle prompt',
+      },
+    })
+    await orch.start()
+
+    const first = orch.runHealAgent({ cycle: 1, failedSlugs: ['a'] })
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    fs.writeFileSync(orch.paths.rerunSignal, '{}')
+    expect(await first).toMatchObject({ reason: 'signal' })
+
+    // Make the live REPL's stdin write throw so cycle 2's re-prompt fails.
+    const livePty = (orch as unknown as { healAgentPty: { write: (c: string) => void } }).healAgentPty
+    livePty.write = () => { throw new Error('pty gone') }
+    const second = await orch.runHealAgent({ cycle: 2, failedSlugs: ['a'] })
+    expect(second).toEqual({ exitCode: 1, signal: null, reason: 'pty-died' })
+
+    await orch.stop('failed')
+  })
+})
+
+describe('RunOrchestrator heal-agent spawn failures', () => {
+  it('surfaces + propagates a build-spawn-command error and never leaves a heal pty', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: () => { throw new Error('cannot build command') },
+      },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+    const chunks: string[] = []
+    orch.on('agent-output', (e) => chunks.push(e.chunk))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    await expect(promise).rejects.toThrow('cannot build command')
+    expect(chunks.join('')).toContain('Failed to build heal-agent spawn command: cannot build command')
+    await orch.stop('failed')
+  })
+
+  it('surfaces + propagates a pty-factory spawn error for the heal agent', async () => {
+    const base = makeFakeFactory()
+    const factory: PtyFactory = (opts) => {
+      if (opts.command === 'HEAL_SPAWN') throw new Error('spawn refused')
+      return base.factory(opts)
+    }
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 1,
+        buildSpawnCommand: () => 'HEAL_SPAWN',
+      },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+    const chunks: string[] = []
+    orch.on('agent-output', (e) => chunks.push(e.chunk))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    base.spawned[1].emitExit(1)
+    await expect(promise).rejects.toThrow('spawn refused')
+    expect(chunks.join('')).toContain('Failed to spawn heal agent: spawn refused')
+    await orch.stop('failed')
+  })
+})
+
+describe('RunOrchestrator.restartTerminalRun terminal branches', () => {
+  it('returns passed immediately when every known test already passed', async () => {
+    const f = makeFakeFactory()
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const runnerLog = new RunnerLog(path.join(tmpDir, 'runner.log'))
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ featureDir, repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      runnerLog,
+      playwrightSpawner: () => { throw new Error('playwright must not run when all tests already passed') },
+    })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      total: 2,
+      passed: 2,
+      passedNames: ['test-a', 'test-b'],
+      knownTests: [
+        { name: 'test-a', title: 'A', location: `${featureDir}/e2e/spec.ts:10` },
+        { name: 'test-b', title: 'B', location: `${featureDir}/e2e/spec.ts:20` },
+      ],
+    }))
+
+    const status = await orch.restartTerminalRun('please re-verify')
+    expect(status).toBe('passed')
+    expect(f.spawned).toHaveLength(0)
+    expect(fs.readFileSync(path.join(tmpDir, 'runner.log'), 'utf-8')).toContain('Terminal run restart guidance: please re-verify')
+    expect(readManifest(orch.paths.manifestPath)?.status).toBe('passed')
+    await orch.stop('passed')
+  })
+
+  it('runs the full suite when the plan is all-passed but there is no passing evidence', async () => {
+    const f = makeFakeFactory()
+    const featureDir = path.join(tmpDir, 'features', 'demo-empty-evidence')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ featureDir, repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'pw-full', cwd: tmpDir }),
+    })
+    // Empty summary → all-passed plan (nothing to target) with NO passing evidence.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({}))
+    const chunks: string[] = []
+    orch.on('playwright-output', (e) => chunks.push(e.chunk))
+
+    const promise = orch.restartTerminalRun()
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    // The full suite runs with no targeting.
+    expect(f.spawned[0].options.command).toBe('pw-full')
+    expect(f.spawned[0].options.env?.CANARY_LAB_TARGETED_RERUN).toBeUndefined()
+    f.spawned[0].emitExit(0)
+    const status = await promise
+    expect(status).toBe('passed')
+    expect(chunks.join('')).toContain('running the full Playwright suite')
+    const events = fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')
+    expect(events).toContain('Full restart rerun selected')
+    await orch.stop('passed')
+  })
+
+  it('routes a boot failure into a failed terminal run without launching Playwright', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => false,
+      delay: async () => undefined,
+      healthDeadlineMs: 5,
+      healthPollIntervalMs: 1,
+      playwrightSpawner: () => { throw new Error('playwright must not run on boot failure') },
+    })
+    const status = await orch.restartTerminalRun()
+    expect(status).toBe('failed')
+    // Only the service pty — Playwright never spawned.
+    expect(f.spawned).toHaveLength(1)
+    expect(readManifest(orch.paths.manifestPath)?.bootFailure).toMatchObject({ service: 'api' })
+    await orch.stop('failed')
+  })
+})
+
+describe('RunOrchestrator.runVerification', () => {
+  it('runs Playwright observationally and reports passed', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'pw-verify', cwd: tmpDir }),
+      executionType: 'run',
+    })
+    const promise = orch.runVerification()
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    // No service ever booted — verification does not start services.
+    expect(f.spawned).toHaveLength(1)
+    expect(f.spawned[0].options.command).toBe('pw-verify')
+    f.spawned[0].emitExit(0)
+    const status = await promise
+    expect(status).toBe('passed')
+    const events = fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')
+    expect(events).toContain('Verify is observational only')
+    await orch.stop('passed')
+  })
+
+  it('keeps status aborted when the run is stopped while Playwright is in flight', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'pw-verify', cwd: tmpDir }),
+    })
+    const promise = orch.runVerification()
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    await orch.stop('aborted')
+    f.spawned[0].emitExit(0)
+    const status = await promise
+    expect(status).toBe('aborted')
+  })
+})
+
+describe('RunOrchestrator.bootOnly', () => {
+  it('boots services, holds them, and records the services-ready phase', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      executionType: 'boot',
+    })
+    await orch.bootOnly()
+    expect(f.spawned).toHaveLength(1)
+    expect(readManifest(orch.paths.manifestPath)?.lifecycle).toMatchObject({
+      phase: 'services-ready',
+    })
+    await orch.stop('aborted')
+  })
+
+  it('returns early without recording services-ready when aborted mid-boot', async () => {
+    const f = makeFakeFactory()
+    let resolveHealth!: (ok: boolean) => void
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => new Promise<boolean>((resolve) => { resolveHealth = resolve }),
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      executionType: 'boot',
+    })
+    const promise = orch.bootOnly()
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    await orch.stop('aborted')
+    resolveHealth(true)
+    await promise
+    // stop() wrote the terminal phase; services-ready was skipped by the abort guard.
+    expect(readManifest(orch.paths.manifestPath)?.lifecycle?.phase).not.toBe('services-ready')
+  })
+})
+
+describe('RunOrchestrator boot failure during a heal restart', () => {
+  it('auto-heal: a service that fails health on restart records a heal-wait and loops', async () => {
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let servicesHealthy = true
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1 }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => servicesHealthy,
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healthDeadlineMs: 15,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 60_000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: {
+        agent: 'claude',
+        maxCycles: 5,
+        buildSpawnCommand: () => 'live-agent',
+        buildCyclePrompt: () => 'prompt',
+      },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1) // pw fails → heal loop, agent spawns at idx 2
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+
+    // The service will fail health after the restart the signal triggers.
+    servicesHealthy = false
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({ hypothesis: 'restart it' }))
+
+    // Wait for the heal-wait lifecycle event proving the boot-failure branch ran.
+    const start = Date.now()
+    while (!fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8').includes('Service still down')) {
+      if (Date.now() - start > 6000) throw new Error('never recorded boot-failure heal wait')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    const events = fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')
+    expect(events).toContain('Service still down: api')
+
+    await orch.stop('failed')
+    await promise
+  }, 15000)
+
+  it('manual-heal: a service that fails health on restart records a heal-wait and loops', async () => {
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    let servicesHealthy = true
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => servicesHealthy,
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healthDeadlineMs: 15,
+      healSignalPollMs: 1,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      manualHeal: true,
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a', location: 'e2e/a.spec.ts:2' }], total: 1, passed: 0 }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1) // pw fails → manual heal loop waits for a signal
+
+    while (readManifest(orch.paths.manifestPath)?.lifecycle?.phase !== 'waiting-for-signal') {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    servicesHealthy = false
+    fs.writeFileSync(orch.paths.restartSignal, JSON.stringify({ hypothesis: 'user restart' }))
+
+    const start = Date.now()
+    while (!fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8').includes('Service still down')) {
+      if (Date.now() - start > 6000) throw new Error('never recorded boot-failure heal wait')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    expect(fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')).toContain('Service still down: api')
+
+    await orch.stop('aborted')
+    await promise
+  }, 15000)
+})
+
+describe('RunOrchestrator misc branches', () => {
+  it('records the Playwright process signal in the exit lifecycle detail', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+    })
+    await orch.start()
+    const exitPromise = orch.runPlaywright()
+    const pwPty = f.spawned[f.spawned.length - 1]
+    pwPty.emitExit(143, 15)
+    await exitPromise
+    const events = fs.readFileSync(orch.paths.lifecycleEventsPath, 'utf-8')
+    expect(events).toContain('Process signal: 15')
+    await orch.stop('failed')
+  })
+
+  it('runPlaywright with an empty rerun target array is treated as a full run', async () => {
+    const f = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+    })
+    await orch.start()
+    const exitPromise = orch.runPlaywright([])
+    const pwPty = f.spawned[f.spawned.length - 1]
+    // Empty targets normalize to undefined selection → no targeted-rerun marker.
+    expect(pwPty.options.env?.CANARY_LAB_TARGETED_RERUN).toBeUndefined()
+    pwPty.emitExit(0)
+    await exitPromise
+    await orch.stop('passed')
+  })
+
+  it('auto-heal finishes passed from the pending branch when the summary already shows all tests passed', async () => {
+    const f = makeFakeFactory()
+    const featureDir = path.join(tmpDir, 'features', 'demo')
+    fs.mkdirSync(featureDir, { recursive: true })
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ featureDir, repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: 'pw', cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'live-agent', buildCyclePrompt: () => 'p' },
+    })
+    // No failed slugs but a non-zero exit forces the heal loop; the pending
+    // branch then sees an all-passed plan WITH passing evidence and finalizes
+    // the run as passed without spawning a heal agent.
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({
+      knownTests: [{ name: 'test-t', title: 'T' }],
+      passedNames: ['test-t'],
+      passed: 1,
+      total: 1,
+      failed: [],
+    }))
+
+    const promise = orch.runFullCycle()
+    while (f.spawned.length < 1) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[0].emitExit(1) // Playwright exits non-zero → heal loop entered
+    const status = await promise
+    expect(status).toBe('passed')
+    // No heal agent (idx 1) was ever spawned — the pending branch short-circuited.
+    expect(f.spawned).toHaveLength(1)
+    await orch.stop('passed')
+  })
+
+  it('auto-heal warns when the signal body carries non-string hypothesis/fixDescription fields', async () => {
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 1000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'live-agent', buildCyclePrompt: () => 'p' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }], total: 1, passed: 0 }))
+    const chunks: string[] = []
+    orch.on('agent-output', (e) => chunks.push(e.chunk))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1)
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Malformed body: both fields are numbers, not strings.
+    fs.writeFileSync(orch.paths.rerunSignal, JSON.stringify({ hypothesis: 123, fixDescription: 456 }))
+    f.spawned[2].emitExit(0)
+    while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[3].emitExit(1) // rerun still fails; maxCycles=1 → loop ends
+    const status = await promise
+    expect(status).toBe('failed')
+    const emitted = chunks.join('')
+    expect(emitted).toContain('Signal body field `hypothesis` was not a string')
+    expect(emitted).toContain('Signal body field `fixDescription` was not a string')
+    await orch.stop('failed')
+  }, 15000)
+
+  it('honours a relocated signals dir and writes the external heal session into the manifest', async () => {
+    const f = makeFakeFactory()
+    const signalsDir = path.join(tmpDir, 'custom-signals')
+    const externalHealSession = {
+      clientKind: 'claude' as const,
+      sessionId: 'sess-123',
+      conversationName: 'Fix checkout',
+      claimedAt: '2026-01-01T00:00:00.000Z',
+      lastHeartbeatAt: '2026-01-01T00:00:05.000Z',
+      status: 'waiting' as const,
+      cycleCount: 0,
+    }
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ repos: [] }),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      signalsDir,
+      externalHeal: true,
+      externalHealSession,
+    })
+    expect(orch.paths.signalsDir).toBe(signalsDir)
+    await orch.start()
+    const manifest = readManifest(orch.paths.manifestPath)!
+    expect(manifest.healMode).toBe('external')
+    expect(manifest.externalHealSession).toEqual(externalHealSession)
+    await orch.stop('aborted')
   })
 })

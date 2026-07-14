@@ -614,12 +614,21 @@ function findActiveRunForFeature(
     if (env && detail.manifest.env !== env) continue
     candidates.push({ detail, startedAt: entry.startedAt })
   }
-  candidates.sort((a, b) => {
-    const priorityDiff = activeRunPriority(a.detail) - activeRunPriority(b.detail)
-    if (priorityDiff !== 0) return priorityDiff
-    return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
-  })
+  candidates.sort(compareActiveRuns)
   return candidates[0]?.detail ?? null
+}
+
+/** Orders active-run candidates: lower `activeRunPriority` first, then newest
+ *  `startedAt` first. Exported for direct unit testing — in the route the input
+ *  always arrives pre-sorted newest-first, so the `startedAt > 0` arm is only
+ *  reachable by feeding an unsorted list here. */
+export function compareActiveRuns(
+  a: { detail: RunDetail; startedAt: string },
+  b: { detail: RunDetail; startedAt: string },
+): number {
+  const priorityDiff = activeRunPriority(a.detail) - activeRunPriority(b.detail)
+  if (priorityDiff !== 0) return priorityDiff
+  return a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0
 }
 
 function activeRunPriority(detail: RunDetail): number {

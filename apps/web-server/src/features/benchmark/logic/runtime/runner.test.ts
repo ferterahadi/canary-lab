@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PtyFactory, PtyHandle } from '../../../runs/logic/runtime/pty-spawner'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
 import { runGit } from '../../../../shared/git-repo'
+import * as gitRepoMod from '../../../../shared/git-repo'
+import * as repoWorktreeMod from '../../../runs/logic/runtime/repo-worktree'
 import { createBenchmarkRunner, type BenchmarkRunnerDeps } from './runner'
 import { BenchmarkRunStore } from './store'
 import type { StartBenchmarkInput } from './types'
@@ -364,6 +366,55 @@ describe('createBenchmarkRunner', () => {
       expect(store.get(benchmarkId)!.error).toMatch(/no-cheat violation/)
       expect(rmock.instances).toHaveLength(0)
     })
+
+    it('errors when the freeze commit itself fails (nonzero git exit)', async () => {
+      // The agent edits code (staged diff is non-empty, so freeze reaches the
+      // commit) but the `git commit` returns nonzero — a real failure mode
+      // (e.g. a corrupt index). Every other git call (status pre-flight, add,
+      // staged-diff) passes through to real git; only the commit is forced to
+      // fail, so we exercise the `if (commit.code !== 0)` throw specifically.
+      const { appRepo, logsDir } = await flatFixture()
+      const realRunGit = (
+        await vi.importActual<typeof import('../../../../shared/git-repo')>('../../../../shared/git-repo')
+      ).runGit
+      const spy = vi.spyOn(gitRepoMod, 'runGit').mockImplementation(async (dir, args) =>
+        args.includes('commit') ? { code: 1, stdout: '', stderr: 'commit blew up' } : realRunGit(dir, args),
+      )
+      try {
+        const { store, deps } = makeDeps({ logsDir, loadFeatures: () => [feat({ featureDir: appRepo, repos: [{ name: 'app', localPath: appRepo }] })] })
+        const { startBenchmark } = createBenchmarkRunner(deps)
+        const { benchmarkId } = await startBenchmark({ feature: 'bench-feat', agent: 'claude', iterations: 1, ...OFF_BY_ONE })
+        expect(await waitForStatus(store, benchmarkId, ['error', 'invalid', 'done', 'aborted'])).toBe('error')
+        expect(store.get(benchmarkId)!.error).toMatch(/freeze commit failed/)
+        expect(store.get(benchmarkId)!.error).toContain('commit blew up')
+        // Freeze failed before any arm was set up.
+        expect(rmock.instances).toHaveLength(0)
+      } finally {
+        spy.mockRestore()
+      }
+    })
+
+    it('surfaces the freeze commit stdout when the failure has no stderr', async () => {
+      // Same failure path, but the failing commit wrote to stdout with an empty
+      // stderr — exercises the `commit.stderr || commit.stdout` fallback arm of
+      // the thrown message.
+      const { appRepo, logsDir } = await flatFixture()
+      const realRunGit = (
+        await vi.importActual<typeof import('../../../../shared/git-repo')>('../../../../shared/git-repo')
+      ).runGit
+      const spy = vi.spyOn(gitRepoMod, 'runGit').mockImplementation(async (dir, args) =>
+        args.includes('commit') ? { code: 1, stdout: 'nothing to commit on stdout', stderr: '' } : realRunGit(dir, args),
+      )
+      try {
+        const { store, deps } = makeDeps({ logsDir, loadFeatures: () => [feat({ featureDir: appRepo, repos: [{ name: 'app', localPath: appRepo }] })] })
+        const { startBenchmark } = createBenchmarkRunner(deps)
+        const { benchmarkId } = await startBenchmark({ feature: 'bench-feat', agent: 'claude', iterations: 1, ...OFF_BY_ONE })
+        expect(await waitForStatus(store, benchmarkId, ['error', 'invalid', 'done', 'aborted'])).toBe('error')
+        expect(store.get(benchmarkId)!.error).toContain('nothing to commit on stdout')
+      } finally {
+        spy.mockRestore()
+      }
+    })
   })
 
   describe('full pipeline', () => {
@@ -447,6 +498,38 @@ describe('createBenchmarkRunner', () => {
       // The crashed arm's orchestrator was still told to stop('aborted') from
       // the catch branch (not the normal status-based stop call).
       expect(rmock.instances[0].stop).toHaveBeenCalledWith('aborted')
+    })
+
+    it('resetArms skips an arm whose worktree handle has no root', async () => {
+      // Force arm-B's worktree handle to report an empty worktreeRoot. Between
+      // iterations, resetArms must skip it via `if (!root) continue` rather than
+      // shelling `git reset` with an empty cwd — which would reject, bubble out
+      // of the race, and finalize the benchmark as 'error'. Reaching 'done' (with
+      // both arms still having run both iterations) proves the guard held.
+      const { appRepo, logsDir } = await flatFixture()
+      const realAddWorktree = (
+        await vi.importActual<typeof import('../../../runs/logic/runtime/repo-worktree')>('../../../runs/logic/runtime/repo-worktree')
+      ).addWorktree
+      const spy = vi.spyOn(repoWorktreeMod, 'addWorktree').mockImplementation(async (opts) => {
+        const handle = await realAddWorktree(opts)
+        return opts.worktreesDir.includes(`${path.sep}arm-B`) ? { ...handle, worktreeRoot: '' } : handle
+      })
+      // 2 iterations x 2 arms: iteration 1 has exactly one pass + one fail, so
+      // the no-op-sabotage guard (both-arms-passed-unhealed) never trips.
+      rmock.statusQueue = ['passed', 'failed', 'passed', 'failed']
+      try {
+        const { store, deps } = makeDeps({
+          logsDir,
+          loadFeatures: () => [feat({ featureDir: appRepo, envs: undefined, repos: [{ name: 'app', localPath: appRepo }] })],
+        })
+        const { startBenchmark } = createBenchmarkRunner(deps)
+        const { benchmarkId } = await startBenchmark({ feature: 'bench-feat', agent: 'claude', iterations: 2, ...OFF_BY_ONE })
+        expect(await waitForStatus(store, benchmarkId, ['done', 'error', 'invalid', 'aborted'], 15000)).toBe('done')
+        // Both arms ran both iterations — the guard skipped only the reset.
+        expect(rmock.instances).toHaveLength(4)
+      } finally {
+        spy.mockRestore()
+      }
     })
   })
 

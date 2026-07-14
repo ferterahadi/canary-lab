@@ -4,7 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { runsRoutes, type ExternalHealAgentRequest } from './runs'
+import { runsRoutes, compareActiveRuns, type ExternalHealAgentRequest } from './runs'
 import { createRegistry, RunStore, type OrchestratorLike, type RestartHealResult, type RestartRunResult } from '../../runs/logic/run-store'
 import type { ClaimInput } from '../../runs/logic/heal/external-heal-broker'
 import { readManifest, readRunsIndex, writeManifest, writeRunsIndex, type RunManifest } from '../../runs/logic/runtime/manifest'
@@ -1588,5 +1588,39 @@ describe('cleanup/worktrees routes (real git worktrees)', () => {
       expect(isWorktreeOwnerActive).not.toHaveBeenCalled()
       expect(fs.existsSync(miscWorktree)).toBe(false)
     })
+  })
+})
+
+describe('compareActiveRuns ordering', () => {
+  const mk = (startedAt: string, opts: { phase?: string; status?: string } = {}) =>
+    ({
+      startedAt,
+      detail: {
+        manifest: {
+          ...(opts.phase ? { lifecycle: { phase: opts.phase } } : {}),
+          status: opts.status ?? 'healing',
+        },
+      },
+    }) as Parameters<typeof compareActiveRuns>[0]
+
+  it('orders a lower-priority run (waiting-for-signal) ahead of a healing one', () => {
+    const waiting = mk('t', { phase: 'waiting-for-signal' })
+    const healing = mk('t', { status: 'healing' })
+    expect(compareActiveRuns(waiting, healing)).toBeLessThan(0)
+    expect(compareActiveRuns(healing, waiting)).toBeGreaterThan(0)
+  })
+
+  it('sends a non-active status to the lowest priority bucket', () => {
+    const healing = mk('t', { status: 'healing' })
+    const other = mk('t', { status: 'passed' })
+    expect(compareActiveRuns(healing, other)).toBeLessThan(0)
+  })
+
+  it('at equal priority, orders newest startedAt first in both directions and ties to 0', () => {
+    const newer = mk('2026-01-02T00:00:00.000Z')
+    const older = mk('2026-01-01T00:00:00.000Z')
+    expect(compareActiveRuns(older, newer)).toBe(1) // a < b → a sorts after b
+    expect(compareActiveRuns(newer, older)).toBe(-1) // a > b → a sorts before b
+    expect(compareActiveRuns(newer, mk('2026-01-02T00:00:00.000Z'))).toBe(0) // tie
   })
 })

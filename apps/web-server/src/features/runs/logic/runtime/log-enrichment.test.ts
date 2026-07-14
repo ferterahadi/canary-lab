@@ -71,6 +71,29 @@ describe('parseJournalMarkdown', () => {
   it('returns empty array for non-journal text', () => {
     expect(parseJournalMarkdown('not a journal')).toEqual([])
   })
+
+  it('sets fix.description without a preceding fix.file and ignores unrecognized field keys', () => {
+    // fix.description arrives with no fix.file before it, so `current.fix` is
+    // still undefined and the parser must seed a fresh `{}` for it. A field
+    // line whose key matches none of the known fields (customKey) must be
+    // silently dropped rather than attached to the entry.
+    const md = `## Iteration 1 — 2026-04-28T10:15:00Z
+
+- hypothesis: broke
+- fix.description: only a description, no fix.file here
+- customKey: this key is not recognized
+- signal: .restart
+- outcome: pending
+`
+    const entries = parseJournalMarkdown(md)
+    expect(entries).toHaveLength(1)
+    // fix seeded from scratch — no file field, only the description.
+    expect(entries[0].fix).toEqual({ description: 'only a description, no fix.file here' })
+    expect(entries[0].hypothesis).toBe('broke')
+    expect(entries[0].signal).toBe('.restart')
+    // The unrecognized field produced no property on the entry.
+    expect((entries[0] as Record<string, unknown>).customKey).toBeUndefined()
+  })
 })
 
 describe('countConsecutiveSameFailures', () => {

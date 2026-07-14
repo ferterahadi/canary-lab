@@ -1,10 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
+import * as gitRepo from '../../../shared/git-repo'
+import * as configAst from '../../config/logic/config-ast'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
 import { writeOverlay, overlayExists } from '../../portify/logic/runtime/overlay'
 
@@ -1851,6 +1853,31 @@ describe('pin-current-branches error branches', () => {
       await app.close()
     }
   })
+
+  it('400 when writeFeatureConfig throws while re-pinning', async () => {
+    const repo = buildGitRepo('pin-writefail-repo')
+    buildFeature('pin-writefail', {
+      config: `module.exports = { config: { name: 'pin-writefail', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    // The parsed config is always a plain object here, so writeFeatureConfig
+    // can't fail on its own — force it to throw (e.g. a recast/print failure on
+    // an exotic source) to exercise the 400 catch arm.
+    const spy = vi.spyOn(configAst, 'writeFeatureConfig').mockImplementation(() => {
+      throw new Error('recast exploded')
+    })
+    const app = await makeApp()
+    try {
+      const r = await app.inject({ method: 'POST', url: '/api/features/pin-writefail/pin-current-branches' })
+      expect(r.statusCode).toBe(400)
+      expect(r.json().error).toBe('recast exploded')
+      // The config file is left untouched (write never landed).
+      const onDisk = fs.readFileSync(path.join(featuresDir, 'pin-writefail', 'feature.config.cjs'), 'utf-8')
+      expect(onDisk).not.toContain("branch: 'main'")
+    } finally {
+      spy.mockRestore()
+      await app.close()
+    }
+  })
 })
 
 describe('repo checkout endpoint error branches', () => {
@@ -1940,6 +1967,29 @@ describe('repo checkout endpoint error branches', () => {
       // is undefined — exercises the ternary's `: 500` default branch.
       expect(r.statusCode).toBe(500)
     } finally {
+      await app.close()
+    }
+  })
+
+  it('500 with String(err) when checkoutBranch rejects a non-Error value', async () => {
+    const repo = buildGitRepo('checkout-nonerror-repo')
+    buildFeature('checkout-nonerror', {
+      config: `module.exports = { config: { name: 'checkout-nonerror', description: 'd', envs: [], repos: [{ name: 'app', localPath: ${JSON.stringify(repo)} }], featureDir: __dirname } }`,
+    })
+    // A rejected non-Error (a bare string) drives the `String(err)` arm of the
+    // catch's `err instanceof Error ? err.message : String(err)`.
+    const spy = vi.spyOn(gitRepo, 'checkoutBranch').mockRejectedValue('plain string failure')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout-nonerror/repos/app/checkout',
+        payload: { branch: 'feature/demo' },
+      })
+      expect(r.statusCode).toBe(500)
+      expect(r.json().error).toBe('plain string failure')
+    } finally {
+      spy.mockRestore()
       await app.close()
     }
   })
@@ -2312,6 +2362,26 @@ describe('POST /api/workspace/checkout — error branches', () => {
       // checkoutBranch even runs — exercises the ternary's `: 500` default.
       expect(r.statusCode).toBe(500)
     } finally {
+      await app.close()
+    }
+  })
+
+  it('500 with String(err) when checkoutBranch rejects a non-Error value', async () => {
+    const repo = buildGitRepo('ws-checkout-nonerror-repo')
+    // A rejected non-Error (a bare string) drives the `String(err)` arm of the
+    // catch's `err instanceof Error ? err.message : String(err)`.
+    const spy = vi.spyOn(gitRepo, 'checkoutBranch').mockRejectedValue('ws string failure')
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/workspace/checkout',
+        payload: { path: repo, branch: 'feature/demo' },
+      })
+      expect(r.statusCode).toBe(500)
+      expect(r.json().error).toBe('ws string failure')
+    } finally {
+      spy.mockRestore()
       await app.close()
     }
   })

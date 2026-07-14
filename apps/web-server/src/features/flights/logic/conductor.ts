@@ -218,7 +218,7 @@ function sameRepoSet(a: string[], b: string[]): boolean {
 
 /** Fresh stage array; with `fromStage`, everything before it is pre-skipped
  *  (the stage-entry path — prerequisites were validated by the caller). */
-function freshStages(fromStage?: FlightStageKey, now?: () => string): FlightStage[] {
+function freshStages(fromStage: FlightStageKey | undefined, now: () => string): FlightStage[] {
   const startIdx = fromStage ? FLIGHT_STAGE_KEYS.indexOf(fromStage) : 0
   return FLIGHT_STAGE_KEYS.map((key, i) =>
     i < startIdx
@@ -226,7 +226,7 @@ function freshStages(fromStage?: FlightStageKey, now?: () => string): FlightStag
           key,
           status: 'skipped' as const,
           skipReason: 'stage-entry',
-          ...(now ? { endedAt: now() } : {}),
+          endedAt: now(),
         }
       : { key, status: 'pending' as const },
   )

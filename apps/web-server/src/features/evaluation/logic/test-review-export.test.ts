@@ -1,4 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { EventEmitter } from 'events'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -1242,6 +1243,513 @@ ${steps}
     const [helperStmt, valueStmt] = functionSrc.statements
     expect(__testReviewExportInternals.functionLikeBody(helperStmt)).toBeDefined()
     expect(__testReviewExportInternals.functionLikeBody(valueStmt)).toBeUndefined()
+  })
+})
+
+describe('test review export — additional branch coverage', () => {
+  it('grades an unrecognized matcher as unknown with the last-resort rationale', () => {
+    const featureDir = path.join(tmpDir, 'unknown-matcher')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'unknown.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('unrecognized matcher', async ({ page }) => {
+  await expect(page.locator('.thing')).toBeWibble()
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('unrecognized")}`,
+      title: 'unrecognized matcher',
+    }))
+
+    expect(packet.tests[0].assertions).toContainEqual(expect.objectContaining({
+      kind: 'direct',
+      label: 'toBeWibble',
+      quality: 'unknown',
+      rationale: 'Static analysis could not confidently classify this assertion.',
+    }))
+  })
+
+  it('skips imports whose module specifier is not a string literal', () => {
+    const featureDir = path.join(tmpDir, 'numeric-import')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'numeric.spec.ts')
+    // A malformed numeric module specifier — TS error-recovery keeps the import
+    // node with a non-string-literal specifier, exercising the guard in both the
+    // relative-import and external-import readers rather than throwing.
+    const specSource = `import brokenDefault from 123
+import { test, expect } from '@playwright/test'
+
+test('handles a numeric import specifier', async ({ page }) => {
+  await expect(page.getByText('Ready')).toBeVisible()
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('handles a numeric")}`,
+      title: 'handles a numeric import specifier',
+    }))
+
+    expect(packet.tests[0].testBody).toContain("page.getByText('Ready')")
+    expect(packet.tests[0].externalImports).toContain("import { test, expect } from '@playwright/test'")
+    expect(packet.tests[0].externalImports.some((imp) => imp.includes('123'))).toBe(false)
+  })
+
+  it('renders coverage strength with the shallow default and unmapped requirements', async () => {
+    const featureDir = path.join(tmpDir, 'cov-defaults')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'cov.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('covered scenario', async ({ page }) => {
+  await expect(page.getByText('Done')).toBeVisible()
+})
+`
+    fs.writeFileSync(spec, specSource)
+    // A test-coverage entry with no strength and no mapped requirements exercises
+    // the `strength ?? 'shallow'` default and the empty-requirements branch.
+    const ledger: CoverageLedger = {
+      feature: 'checkout',
+      requirements: [],
+      tests: [{ name: 'covered scenario', requirements: [], pathTypes: [] }],
+      totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+      coveragePct: 0,
+      mappedPct: 0,
+      orphanRequirementIds: [],
+      orphanTestNames: [],
+    }
+    const html = await createEvaluationHtml(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('covered scenario'")}`,
+      title: 'covered scenario',
+    }), { coverage: ledger })
+
+    expect(html).toContain('Coverage strength')
+    expect(html).toContain('Shallow')
+    expect(html).toContain('unmapped')
+  })
+
+  it('falls back to the title-cased feature name when the narrative omits a feature title', async () => {
+    const html = await createEvaluationHtml(detail({ featureDir: tmpDir, feature: 'checkout_flow' }), {
+      narrative: {
+        summary: 'Summary without a feature title.',
+        cases: [{
+          title: 'Case one',
+          whatWasChecked: 'Checked.',
+          whyItMatters: 'Matters.',
+          confidence: 'Confidence.',
+        }],
+      },
+    })
+
+    expect(html).toContain('<h1 id="evaluation-report">Checkout Flow</h1>')
+    expect(html).toContain('Summary without a feature title.')
+  })
+
+  it('walks try/catch, if/else, loops, and multi-declarator statements into flow steps', () => {
+    const featureDir = path.join(tmpDir, 'control-flow')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'flow.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('rich control flow', async ({ page }) => {
+  await expect(page.locator('.anchor')).toBeVisible()
+  try {
+    await page.goto('/try')
+  } catch (err) {
+    await page.goto('/catch')
+  }
+  if (Date.now() > 0) {
+    await page.goto('/then')
+  } else {
+    await page.goto('/else')
+  }
+  if (Date.now() > 0) {
+    await page.goto('/lonely-then')
+  }
+  for (let i = 0; i < 2; i += 1) {
+    await page.goto('/loop')
+  }
+  const first = makeFirst(), second = makeSecond()
+  void first
+  void second
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('rich control flow'")}`,
+      title: 'rich control flow',
+    }))
+    const nodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
+    const details = nodes.map((n) => n.detail ?? '')
+
+    // Each control-flow container surfaces its inner steps rather than collapsing.
+    expect(details.some((d) => d.includes('/try'))).toBe(true)
+    expect(details.some((d) => d.includes('/catch'))).toBe(true)
+    expect(details.some((d) => d.includes('/then'))).toBe(true)
+    expect(details.some((d) => d.includes('/else'))).toBe(true)
+    expect(details.some((d) => d.includes('/lonely-then'))).toBe(true)
+    expect(details.some((d) => d.includes('/loop'))).toBe(true)
+    // The multi-declarator statement with calls survives as one meaningful step.
+    expect(details.some((d) => d.includes('makeFirst'))).toBe(true)
+  })
+
+  it('falls back to raw line splitting when the test body is not a parseable block', () => {
+    // A comment-only body produces a function declaration with no block body, so
+    // the statement extractor drops to line-splitting and skips blank lines.
+    const nodes = __testReviewExportInternals.flowNodesForTest({
+      name: 'test-case-comment-only',
+      title: 'comment only body',
+      status: 'passed',
+      testBody: '// first note\n\n// second note',
+      helperCalls: [],
+      helperDefinitions: [],
+      externalImports: [],
+      assertions: [],
+    })
+    const details = nodes.map((n) => n.detail ?? '')
+
+    expect(details.some((d) => d.includes('first note'))).toBe(true)
+    expect(details.some((d) => d.includes('second note'))).toBe(true)
+    // start + 2 non-blank statements + end.
+    expect(nodes.length).toBe(4)
+  })
+
+  it('labels shared helper flow steps by their nested assertion count', () => {
+    const featureDir = path.join(tmpDir, 'nested-counts')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'nested.spec.ts')
+    // A leading direct assertion keeps `assertions` non-empty (so the empty
+    // no-static-assertion fallback isn't added), and the non-`expect`-prefixed
+    // helpers resolve to helper flow nodes whose detail reflects nested counts.
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('nested counts', async ({ page }) => {
+  await expect(page.locator('.anchor')).toBeVisible()
+  await stepZero(page)
+  await stepOne(page)
+  await stepTwo(page)
+})
+
+function stepZero(page) {
+  return page.goto('/noop')
+}
+
+function stepOne(page) {
+  expect(page.locator('.a')).toBeVisible()
+}
+
+function stepTwo(page) {
+  expect(page.locator('.a')).toBeVisible()
+  expect(page.locator('.b')).toHaveText('x')
+}
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('nested counts'")}`,
+      title: 'nested counts',
+    }))
+    const nodes = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
+    const details = nodes.map((n) => n.detail ?? '')
+
+    expect(details).toContain('1 nested assertion')
+    expect(details).toContain('2 nested assertions')
+    // A zero-assertion helper falls back to the inlined call statement.
+    expect(details.some((d) => d.includes('stepZero(page)'))).toBe(true)
+  })
+
+  it('skips helper dependencies that resolve to no definition', () => {
+    const featureDir = path.join(tmpDir, 'phantom-dep')
+    const helperDir = path.join(featureDir, 'e2e', 'helpers')
+    fs.mkdirSync(helperDir, { recursive: true })
+    fs.writeFileSync(path.join(helperDir, 'sibling.ts'), `export function somethingElse(page) { return page }\n`)
+    fs.writeFileSync(path.join(helperDir, 'outer.ts'), `import { phantom } from './sibling'
+
+export function outer(page) {
+  return phantom(page)
+}
+`)
+    const spec = path.join(featureDir, 'e2e', 'phantom.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+import { outer } from './helpers/outer'
+
+test('phantom dependency', async ({ page }) => {
+  await expect(page.locator('.x')).toBeVisible()
+  outer(page)
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('phantom dependency'")}`,
+      title: 'phantom dependency',
+    }))
+    const outerDef = packet.tests[0].helperDefinitions.find((h) => h.name === 'outer')
+
+    expect(outerDef).toBeDefined()
+    // `phantom` is imported from a real sibling that doesn't define it, so it
+    // resolves to no dependency and is dropped rather than pushed or throwing.
+    expect(outerDef?.dependencies).toEqual([])
+  })
+
+  it('ignores non-test-end playback events when building the packet', async () => {
+    const base = detail({ featureDir: tmpDir })
+    const endEvent = testEndEvent(base)
+    const withBegin: RunDetail = {
+      ...base,
+      playbackEvents: [
+        { type: 'test-begin', time: '2026-01-01T00:00:00.000Z', test: { name: endEvent.test.name, title: endEvent.test.title, location: endEvent.test.location } },
+        endEvent,
+      ],
+    }
+    const html = await createEvaluationHtml(withBegin)
+
+    expect(html).toContain('1. Passes checkout')
+    // The test-begin event must not create a second test case.
+    expect(html).not.toContain('2. Passes checkout')
+  })
+
+  it('covers remaining internal helper branches', () => {
+    const packet = buildTestReviewPacket(detail({ featureDir: tmpDir }))
+    const internals = __testReviewExportInternals
+
+    // parseEvaluationTextSlotRewrite: braces present but invalid JSON → catch → undefined.
+    expect(internals.parseEvaluationTextSlotRewrite('{ not valid json }')).toBeUndefined()
+
+    // readableAction reaches the keyword fallbacks only when no call identifier
+    // is present in the statement text.
+    expect(internals.readableAction('please click the primary button', packet.tests[0])).toBe('Click the relevant control')
+    expect(internals.readableAction('fill the email field', packet.tests[0])).toBe('Enter the required value')
+    expect(internals.readableAction('waitForURL after submit', packet.tests[0])).toBe('Wait for the expected page')
+
+    // readableActionName: empty identifier → generic step wording.
+    expect(internals.readableActionName('', 'plain statement')).toBe('Run the next step')
+
+    // displayWord singular/plural id normalization via a non-create verb.
+    expect(internals.actionFromIdentifier('toggleIds')).toBe('toggle identifiers')
+    expect(internals.actionFromIdentifier('toggleId')).toBe('toggle identifier')
+
+    // renderAssertionHtml: helperSnippet present but helperName absent → empty code.
+    expect(internals.renderAssertionHtml({
+      kind: 'helper',
+      label: 'anon',
+      quality: 'strict',
+      rationale: 'Uses toHaveText matcher.',
+      snippet: 'anon(page)',
+      helperSnippet: 'function anon() {}',
+    })).toContain('helper: <code></code>')
+
+    // functionLikeBody: VariableDeclaration (function + non-function) and a node
+    // that is none of the handled kinds.
+    const src = ts.createSourceFile('h.ts', 'const arrow = () => 1\nconst num = 5\nplainCall()', ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const [arrowStmt, numStmt, exprStmt] = src.statements
+    const arrowDecl = (arrowStmt as ts.VariableStatement).declarationList.declarations[0]
+    const numDecl = (numStmt as ts.VariableStatement).declarationList.declarations[0]
+    expect(internals.functionLikeBody(arrowDecl)).toBeDefined()
+    expect(internals.functionLikeBody(numDecl)).toBeUndefined()
+    expect(internals.functionLikeBody(exprStmt)).toBeUndefined()
+  })
+})
+
+describe('evaluation rewrite agent + highlight fallback (isolated module mocks)', () => {
+  let spawnCalls: Array<{ command: string; args: string[]; child: FakeChild }>
+  let availableAgents: string[]
+  let idleHandlers: { onIdle?: (ms: number) => void; onTick?: (ms: number) => void }
+
+  beforeEach(() => {
+    vi.resetModules()
+    spawnCalls = []
+    availableAgents = []
+    idleHandlers = {}
+  })
+
+  afterEach(() => {
+    vi.doUnmock('shiki')
+    vi.doUnmock('child_process')
+    vi.doUnmock('../../runs/logic/runtime/auto-heal')
+    vi.doUnmock('../../agent-sessions/logic/agent-binary')
+    vi.doUnmock('../../agent-sessions/logic/agent-idle-timer')
+    vi.resetModules()
+    vi.restoreAllMocks()
+  })
+
+  class FakeChild extends EventEmitter {
+    stdout = new EventEmitter()
+    stderr = new EventEmitter()
+    stdinText = ''
+    stdin = { end: (text = '') => { this.stdinText += text } }
+    killed: string[] = []
+
+    kill(signal: string): void { this.killed.push(signal) }
+
+    close(code: number | null, signal: string | null = null): void { this.emit('close', code, signal) }
+  }
+
+  function mockAgentModules(onSpawn?: (ctx: { command: string; args: string[]; child: FakeChild }) => void): void {
+    vi.doMock('../../runs/logic/runtime/auto-heal', () => ({
+      pickAvailableHealAgent: (preferred?: string) => {
+        if (preferred === 'claude' || preferred === 'codex') return availableAgents.includes(preferred) ? preferred : null
+        return availableAgents[0] ?? null
+      },
+    }))
+    // Prevent path resolution so spawn receives bare agent names.
+    vi.doMock('../../agent-sessions/logic/agent-binary', () => ({
+      resolveAgentBinary: (agent: string) => agent,
+      isAgentKind: (cmd: string) => cmd === 'claude' || cmd === 'codex',
+    }))
+    // Capture the idle callbacks the spawn primitive wires up so the test can
+    // drive idle-timeout and progress-tick behavior deterministically.
+    vi.doMock('../../agent-sessions/logic/agent-idle-timer', () => ({
+      startIdleTimer: (opts: { onIdle?: (ms: number) => void; onTick?: (ms: number) => void }) => {
+        idleHandlers = { onIdle: opts.onIdle, onTick: opts.onTick }
+        return { bump() {}, stop() {} }
+      },
+    }))
+    vi.doMock('child_process', () => ({
+      spawn: (command: string, args: string[]) => {
+        const child = new FakeChild()
+        spawnCalls.push({ command, args, child })
+        setTimeout(() => onSpawn?.({ command, args, child }), 0)
+        return child
+      },
+    }))
+  }
+
+  const rewriteJson = JSON.stringify({
+    summary: 's',
+    cases: [{ title: 't', whatWasChecked: 'w', whyItMatters: 'm', confidence: 'c' }],
+  })
+
+  it('surfaces the pinned claude session ref to onSession', async () => {
+    availableAgents = ['claude']
+    const sessions: Array<{ agent: string; sessionId: string }> = []
+    mockAgentModules(({ child }) => {
+      child.stdout.emit('data', `${JSON.stringify({ type: 'result', result: rewriteJson })}\n`)
+      child.close(0)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir, { onSession: (s) => sessions.push(s) })
+
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0].agent).toBe('claude')
+    expect(sessions[0].sessionId).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('surfaces an empty codex session ref to onSession', async () => {
+    availableAgents = ['codex']
+    const sessions: Array<{ agent: string; sessionId: string }> = []
+    mockAgentModules(({ args, child }) => {
+      const outputPath = args[args.indexOf('--output-last-message') + 1]
+      fs.writeFileSync(outputPath, JSON.stringify({ slots: [{ id: 'summary', text: 'localized' }] }))
+      child.close(0)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'codex', tmpDir, { onSession: (s) => sessions.push(s) })
+
+    expect(sessions[0]).toEqual({ agent: 'codex', sessionId: '' })
+  })
+
+  it('rejects and kills the child when the evaluation agent goes idle', async () => {
+    availableAgents = ['claude']
+    mockAgentModules(({ child }) => {
+      idleHandlers.onIdle?.(300000)
+      child.close(null, 'SIGTERM')
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir))
+      .rejects.toThrow(/idle for \d+ms/)
+    expect(spawnCalls[0].child.killed).toContain('SIGTERM')
+  })
+
+  it('emits a progress note once the idle window passes the threshold', async () => {
+    availableAgents = ['codex']
+    const onOutput = vi.fn()
+    mockAgentModules(({ args, child }) => {
+      idleHandlers.onTick?.(4000)   // below threshold → no note
+      idleHandlers.onTick?.(15000)  // above threshold → progress note
+      const outputPath = args[args.indexOf('--output-last-message') + 1]
+      fs.writeFileSync(outputPath, JSON.stringify({ slots: [{ id: 'summary', text: 'localized' }] }))
+      child.close(0)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'codex', tmpDir, { onOutput })
+
+    const notes = onOutput.mock.calls
+      .map((call) => call[0])
+      .filter((text): text is string => typeof text === 'string' && text.includes('still running'))
+    expect(notes).toHaveLength(1)
+    expect(notes[0]).toContain('15s idle')
+  })
+
+  it('ignores a successful close that arrives after an abort', async () => {
+    availableAgents = ['claude']
+    const controller = new AbortController()
+    mockAgentModules(({ child }) => {
+      controller.abort()
+      child.stdout.emit('data', `${JSON.stringify({ type: 'result', result: rewriteJson })}\n`)
+      child.close(0)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir, { signal: controller.signal }))
+      .rejects.toThrow('evaluation rewrite cancelled')
+  })
+
+  it('ignores a failing close that arrives after an abort', async () => {
+    availableAgents = ['claude']
+    const controller = new AbortController()
+    mockAgentModules(({ child }) => {
+      controller.abort()
+      child.stderr.emit('data', 'boom')
+      child.close(2)
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir, { signal: controller.signal }))
+      .rejects.toThrow('evaluation rewrite cancelled')
+  })
+
+  it('wraps a process-error rejection from the agent runner', async () => {
+    availableAgents = ['claude']
+    mockAgentModules(({ child }) => {
+      child.emit('error', new Error('spawn failed to launch'))
+    })
+    const { generateEvaluationRewriteWithAgent } = await import('./test-review-export')
+
+    await expect(generateEvaluationRewriteWithAgent(detail({ featureDir: tmpDir }), 'claude', tmpDir))
+      .rejects.toThrow('evaluation rewrite agent failed: spawn failed to launch')
+  })
+
+  it('falls back to a plain code block when syntax highlighting throws', async () => {
+    vi.doMock('shiki', () => ({ codeToHtml: () => { throw new Error('highlighter unavailable') } }))
+    const featureDir = path.join(tmpDir, 'shiki-fallback')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    const spec = path.join(featureDir, 'e2e', 'fallback.spec.ts')
+    const specSource = `import { test, expect } from '@playwright/test'
+
+test('fallback highlight', async ({ page }) => {
+  await expect(page.getByText('Ready')).toBeVisible()
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const { createEvaluationHtml: createHtml } = await import('./test-review-export')
+    const html = await createHtml(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('fallback highlight'")}`,
+      title: 'fallback highlight',
+    }))
+
+    expect(html).toContain('fallback-code')
+    expect(html).not.toContain('class="shiki"')
   })
 })
 
