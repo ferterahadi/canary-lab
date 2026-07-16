@@ -963,7 +963,7 @@ describe('detail redesign (R53–R68)', () => {
     expect(activitySection.textContent).not.toContain('raw agent chatter')
   })
 
-  it('R66: a live agent stage renders the activity expanded with no toggle', async () => {
+  it('R66: a live agent stage renders the activity expanded, collapsible via the always-present toggle', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'scout',
@@ -974,7 +974,11 @@ describe('detail redesign (R53–R68)', () => {
       })),
     }))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="stage-details-toggle"]')).toBeNull()
+    // The toggle is always present now (collapsible in any state) and open by
+    // default while live.
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
+    expect(toggle).not.toBeNull()
+    expect(toggle!.getAttribute('aria-expanded')).toBe('true')
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
     // One block: the system line rides the agent timeline, no standalone log pane.
     expect(activitySection.querySelector('[data-testid="stage-log"]')).toBeNull()
@@ -982,6 +986,10 @@ describe('detail redesign (R53–R68)', () => {
     expect(pre).toContain('spawning agent…')
     const asv = activitySection.querySelector('[data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-stage')).toBe('scout')
+    // Collapsing hides the timeline while live.
+    await act(async () => { toggle!.click() })
+    expect(toggle!.getAttribute('aria-expanded')).toBe('false')
+    expect(activitySection.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
   it('R66: an agentless stage uses the SAME block — its system lines as rows, no agent timeline', async () => {

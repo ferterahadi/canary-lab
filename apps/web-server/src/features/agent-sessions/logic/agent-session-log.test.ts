@@ -1527,6 +1527,22 @@ describe('writeWorkflowAgentRef + resolveWorkflowAgentRef', () => {
     expect(resolveWorkflowAgentRef(workflowDir(), homeDir)).toBeNull()
   })
 
+  it('creates the sidecar dir when it does not exist yet (orphaned-session regression)', () => {
+    // Flight per-stage dirs (flightDir/<stage>) are NOT pre-created by the store,
+    // so the ref write must mkdir first — otherwise it ENOENTs, the catch swallows
+    // it, and the agent's session is orphaned (blank Activity rail despite a run).
+    const stageDir = path.join(workflowDir(), 'scout') // nested, does not exist
+    expect(fs.existsSync(stageDir)).toBe(false)
+    const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-cwd-')))
+    writeWorkflowAgentRef(stageDir, { agent: 'claude', cwd, sessionId: 'sid-scout', spawnedAt: '2026-05-11T01:00:00.000Z' }, homeDir)
+    expect(fs.existsSync(path.join(stageDir, 'agent-session.json'))).toBe(true)
+    expect(resolveWorkflowAgentRef(stageDir, homeDir)).toEqual({
+      agent: 'claude',
+      sessionId: 'sid-scout',
+      logPath: claudeSessionLogPath(cwd, 'sid-scout', homeDir),
+    })
+  })
+
   it('writes a claude ref and resolves it by session id once the log exists', () => {
     const dir = workflowDir()
     const cwd = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wf-cwd-')))

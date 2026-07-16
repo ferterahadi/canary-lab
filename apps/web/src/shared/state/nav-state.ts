@@ -28,6 +28,9 @@ export interface NavState {
   flightStartFor: string | null
   /** The new-flight launcher — intent + repo picker (routed ?dialog=flight-new). */
   flightStartNew: boolean
+  /** The external authoring draft whose dialog is open (routed ?dialog=draft),
+   *  by draft id. */
+  draftFor: string | null
   /** The pre-flight a pill row reopened the new-flight dialog onto. */
   resumePlanTaskId: string | null
   /** The embedded portify workflow, if open. */
@@ -45,16 +48,18 @@ export function initialNavState(persisted: PersistedView): NavState {
     verifyOpen: persisted.dialog === 'verification',
     flightStartFor: persisted.dialog === 'flight-start' ? persisted.feature : null,
     flightStartNew: persisted.dialog === 'flight-new',
+    draftFor: persisted.dialog === 'draft' ? persisted.draft : null,
     resumePlanTaskId: null,
     portifyTarget: null,
   }
 }
 
 /** Which routed dialog owns the URL. Precedence follows z-order: the full-screen
- *  overlays (config > flight-start > flight-new) sit above the in-column verify
- *  dialog, so the topmost open one wins. */
+ *  overlays (config > draft > flight-start > flight-new) sit above the in-column
+ *  verify dialog, so the topmost open one wins. */
 export function routedDialog(state: NavState): RouteDialog | null {
   if (state.configFor) return 'config'
+  if (state.draftFor) return 'draft'
   if (state.flightStartFor) return 'flight-start'
   if (state.flightStartNew) return 'flight-new'
   if (state.verifyOpen) return 'verification'
@@ -69,6 +74,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     run: state.run,
     dialog: routedDialog(state),
     flight: state.flight,
+    draft: state.draftFor,
   }
 }
 
@@ -80,6 +86,7 @@ export type ActivityTarget =
   | { kind: 'run'; feature: string; runId: string }
   | { kind: 'flight'; flightId: string | null }
   | { kind: 'portify'; workflowId: string }
+  | { kind: 'draft'; draftId: string }
 
 export function resolveActivityTarget(
   feature: string,
@@ -98,9 +105,12 @@ export function resolveActivityTarget(
   if (activity.kind === 'portifying' && activity.workflowId) {
     return { kind: 'portify', workflowId: activity.workflowId }
   }
-  if (activity.kind === 'authoring') {
-    // R36: route to the flights view (watching), not the authoring accept/reject step.
-    return { kind: 'flight', flightId: null }
+  if (activity.kind === 'authoring' && activity.draftId) {
+    // The authoring verb is always an external MCP draft — open its own routed
+    // dialog (the live agent session + cleanup controls). Routing to the flights
+    // view (the old R36 behavior) dead-ended: from the picker it just reopened
+    // the picker, and there was no draft surface mounted at all.
+    return { kind: 'draft', draftId: activity.draftId }
   }
   return null
 }

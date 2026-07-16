@@ -10,6 +10,7 @@ import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
 import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
 import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
 import { PortifyWizard } from './features/portify/components/PortifyWizard'
+import { DraftDialog } from './features/wizard/components/DraftDialog'
 import { LogCleanupPage } from './features/logs/components/LogCleanupPage'
 import { CoverageLedgerPage } from './features/coverage/components/CoverageLedgerPage'
 import { FlightPage } from './features/flights/components/FlightPage'
@@ -42,6 +43,7 @@ export function App() {
     verifyOpen, setVerifyOpen,
     flightStartFor, setFlightStartFor,
     flightStartNew, setFlightStartNew,
+    draftFor, setDraftFor,
     resumePlanTaskId, setResumePlanTaskId,
     portifyTarget, setPortifyTarget,
     openFlight, navigateToRun, selectStartedRun,
@@ -85,8 +87,9 @@ export function App() {
     if (!target) return
     if (target.kind === 'run') navigateToRun(target.feature, target.runId)
     else if (target.kind === 'flight') openFlight(target.flightId)
+    else if (target.kind === 'draft') setDraftFor(target.draftId)
     else setPortifyTarget({ kind: 'revisit', workflowId: target.workflowId })
-  }, [navigateToRun, openFlight, setPortifyTarget, flightsRef])
+  }, [navigateToRun, openFlight, setPortifyTarget, setDraftFor, flightsRef])
 
   // Column 3 lists runs scoped to the currently-selected feature. Boot-only
   // sessions are excluded — they're not test runs and live in the global
@@ -436,6 +439,9 @@ export function App() {
             invalidate('ports')
           }}
         />
+      )}
+      {draftFor && (
+        <DraftDialog draftId={draftFor} onClose={() => setDraftFor(null)} />
       )}
     </div>
   )

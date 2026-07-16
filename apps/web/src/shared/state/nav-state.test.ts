@@ -18,6 +18,7 @@ const base: NavState = {
   verifyOpen: false,
   flightStartFor: null,
   flightStartNew: false,
+  draftFor: null,
   resumePlanTaskId: null,
   portifyTarget: null,
 }
@@ -28,6 +29,7 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   run: null,
   dialog: null,
   flight: null,
+  draft: null,
   ...over,
 })
 
@@ -52,6 +54,10 @@ describe('initialNavState', () => {
     expect(initialNavState(persisted({ dialog: 'verification' })).verifyOpen).toBe(true)
     expect(initialNavState(persisted({ dialog: 'flight-new' })).flightStartNew).toBe(true)
   })
+
+  it('opens the draft dialog on the persisted draft id', () => {
+    expect(initialNavState(persisted({ dialog: 'draft', draft: 'dr_9' })).draftFor).toBe('dr_9')
+  })
 })
 
 describe('routedDialog precedence (z-order)', () => {
@@ -59,8 +65,12 @@ describe('routedDialog precedence (z-order)', () => {
     expect(routedDialog(base)).toBeNull()
   })
 
-  it('config outranks flight-start, flight-new and verify', () => {
-    expect(routedDialog({ ...base, configFor: 'x', flightStartFor: 'y', flightStartNew: true, verifyOpen: true })).toBe('config')
+  it('config outranks draft, flight-start, flight-new and verify', () => {
+    expect(routedDialog({ ...base, configFor: 'x', draftFor: 'dr_9', flightStartFor: 'y', flightStartNew: true, verifyOpen: true })).toBe('config')
+  })
+
+  it('draft outranks flight-start, flight-new and verify', () => {
+    expect(routedDialog({ ...base, draftFor: 'dr_9', flightStartFor: 'y', flightStartNew: true, verifyOpen: true })).toBe('draft')
   })
 
   it('flight-start outranks flight-new and verify', () => {
@@ -79,7 +89,12 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1' })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null })
+  })
+
+  it('projects the open draft id + dialog=draft', () => {
+    const s: NavState = { ...base, draftFor: 'dr_9' }
+    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9' })
   })
 })
 
@@ -110,8 +125,12 @@ describe('resolveActivityTarget', () => {
       .toEqual({ kind: 'portify', workflowId: 'wf_1' })
   })
 
-  it('authoring → the flights landing', () => {
-    expect(resolveActivityTarget('checkout', { kind: 'authoring' }, flights))
-      .toEqual({ kind: 'flight', flightId: null })
+  it('authoring → the draft dialog for its draftId', () => {
+    expect(resolveActivityTarget('checkout', { kind: 'authoring', draftId: 'dr_9' }, flights))
+      .toEqual({ kind: 'draft', draftId: 'dr_9' })
+  })
+
+  it('authoring with no draftId → no target', () => {
+    expect(resolveActivityTarget('checkout', { kind: 'authoring' }, flights)).toBeNull()
   })
 })

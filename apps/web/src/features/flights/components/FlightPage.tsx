@@ -586,7 +586,16 @@ function StageActivity({
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const lines = log.split('\n').filter((l) => l.trim() !== '')
   const hasSource = source !== undefined
-  if (lines.length === 0 && !hasSource && leadingSystemRows.length === 0) return null
+  // A stage that hasn't started (pending — neither live nor settled) has no
+  // activity to show. Suppress the whole rail when there's nothing real yet,
+  // even for an agent stage whose `source` exists but has no session: otherwise
+  // pending agent stages render an empty "No structured session log found" band
+  // while pending agentless stages render nothing — the same waiting stage, two
+  // different empty states. Once it's live or settled the rail always shows
+  // (the live timeline, or the settled disclosure).
+  const pending = !live && !settled
+  const nothingYet = lines.length === 0 && leadingSystemRows.length === 0
+  if (nothingYet && (!hasSource || pending)) return null
   const open = userToggled ?? !settled
 
   const isTagged = (l: string): boolean => /^\[[\w-]+\]/.test(l)
@@ -620,23 +629,25 @@ function StageActivity({
       style={{ borderColor: 'var(--border-default)', background: 'color-mix(in srgb, var(--bg-elevated) 22%, transparent)' }}
     >
       {/* R66: the boundary between the stage's detail (above) and its activity.
-          One labelled bar for every stage; the toggle rides it once settled. */}
+          One labelled bar for every stage; the toggle always rides it so the
+          rail is collapsible in any state (default open while live / a fresh
+          spawn, collapsed once settled — overridable per stage). */}
       <div className="flex items-center gap-2.5 px-3 py-2">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
-          Activity
-        </span>
-        <span className="h-px flex-1" style={{ borderTop: '1px dashed var(--border-default)' }} />
-        {settled && (
-          <button
-            type="button"
-            data-testid="stage-details-toggle"
-            aria-expanded={open}
-            onClick={() => setUserToggled(!open)}
-            className="cl-button px-2 py-0.5 text-[11px]"
-          >
+        <button
+          type="button"
+          data-testid="stage-details-toggle"
+          aria-expanded={open}
+          onClick={() => setUserToggled(!open)}
+          className="flex flex-1 items-center gap-2.5 text-left"
+        >
+          <span className="text-[10px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+            Activity
+          </span>
+          <span className="h-px flex-1" style={{ borderTop: '1px dashed var(--border-default)' }} />
+          <span className="cl-button px-2 py-0.5 text-[11px]">
             {open ? '▾ Hide' : '▸ Show'}
-          </button>
-        )}
+          </span>
+        </button>
       </div>
       {open && (
         <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">

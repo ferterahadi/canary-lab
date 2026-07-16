@@ -353,7 +353,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     expect(byTestId('flight-proposal-view')).toBeTruthy()
     expect(byTestId('flight-proposal-card-0')).toBeTruthy()
     expect(byTestId('flight-proposal-card-2')).toBeTruthy()
-    expect(byTestId('flight-proposal-token-warning')?.textContent).toContain('3× the usual token cost')
+    expect(byTestId('flight-proposal-token-warning')).toBeFalsy()
     expect((byTestId('flight-proposal-group') as HTMLInputElement).value).toBe('shop')
     click(byTestId('flight-proposal-confirm')!)
     await flush()

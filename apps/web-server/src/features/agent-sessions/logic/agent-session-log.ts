@@ -364,6 +364,13 @@ export function writeWorkflowAgentRef(
             },
           }
         : { activeAgent: 'codex' as const, codexDiscovery: { cwd: realpathOrSelf(opts.cwd), spawnedAt: opts.spawnedAt } }
+    // Create the sidecar dir first: a flight's per-stage dir (flightDir/<stage>)
+    // is NOT pre-created by the store, so without this the write ENOENTs and the
+    // catch below swallows it — the agent's session is orphaned (its JSONL still
+    // lands in ~/.claude/projects, but no ref points the UI at it → a blank
+    // Activity rail even though the agent ran). Idempotent for callers whose dir
+    // already exists (benchmark, coverage).
+    fs.mkdirSync(dir, { recursive: true })
     fs.writeFileSync(path.join(dir, 'agent-session.json'), JSON.stringify(file, null, 2))
   } catch {
     /* best-effort — the surface falls back to its empty state */

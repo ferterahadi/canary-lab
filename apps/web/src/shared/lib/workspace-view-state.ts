@@ -29,7 +29,10 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // AddTestWizard was deleted outright, and the portify workflow view survives
 // only as an EMBEDDED surface (flight drill-through, collision recovery,
 // benchmark), opened ephemerally, never by URL.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new'
+// `draft` reopens a live external authoring draft (an MCP agent authoring a
+// feature's specs) by its `draft` id qualifier — the draft record is
+// server-persisted (GET /api/tests/draft), so a cold load rebuilds it.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new' | 'draft'
 
 export interface PersistedView {
   view: WorkspaceView
@@ -41,6 +44,9 @@ export interface PersistedView {
   /** Flight id qualifier for `view: 'flights'` — which flight detail to open
    *  (URL only; absent = the flights landing list). */
   flight: string | null
+  /** Draft id qualifier for `dialog: 'draft'` — which authoring draft to reopen
+   *  (URL only; dropped unless the draft dialog is the open one). */
+  draft: string | null
 }
 
 /** The cross-tab/localStorage-mirrored subset — the durable nav tier only. */
@@ -48,7 +54,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-new']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-new', 'draft']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)
@@ -63,7 +69,7 @@ function setOrDelete(params: URLSearchParams, key: string, value: string | null)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog are never mirrored there). */
@@ -77,10 +83,12 @@ export function readPersistedView(): PersistedView {
     const dialog = parseDialog(params.get('dialog'))
     // `flight` only qualifies the flights view — dropped elsewhere.
     const flight = v === 'flights' ? params.get('flight') || null : null
+    // `draft` only qualifies the draft dialog — dropped elsewhere.
+    const draft = dialog === 'draft' ? params.get('draft') || null : null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight }
-    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, draft }
+    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null, draft }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -110,6 +118,8 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'task', null)
     // `flight` only qualifies the flights view — drop it otherwise.
     setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
+    // `draft` only qualifies the draft dialog — drop it otherwise.
+    setOrDelete(params, 'draft', state.dialog === 'draft' ? state.draft : null)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)

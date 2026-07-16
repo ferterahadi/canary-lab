@@ -150,7 +150,7 @@ export function FeaturesColumn({
     <div className="cl-panel flex h-full flex-col">
       <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="cl-kicker">Features</span>
+          <span className="cl-kicker">Suites</span>
           {features.length > 0 && <span className="cl-count-chip">{features.length}</span>}
         </div>
         <button

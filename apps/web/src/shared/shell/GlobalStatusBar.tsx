@@ -169,7 +169,11 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             indicator so an active run/boot/benchmark is never hidden. Each pill
             self-guards its own visibility. */}
         <div
-          className="flex min-w-0 items-center gap-2 overflow-hidden"
+          // py/-my pair: the cluster stays overflow-hidden for the collapse
+          // animation, but reserves vertical room so a pill's top-right overlay
+          // attention dot (StatusPill overlayDot, pinned at -top-1) isn't clipped
+          // by that same overflow. The negative margin cancels the layout effect.
+          className="flex min-w-0 items-center gap-2 overflow-hidden py-1.5 -my-1.5"
           aria-hidden={!actionsExpanded}
           style={{
             maxWidth: actionsExpanded ? 800 : 0,

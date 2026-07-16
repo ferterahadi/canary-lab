@@ -556,7 +556,9 @@ const GROUPS_OPEN_STORAGE_KEY = 'cl-flight-groups-open'
 
 /** A collapsible group section (R55): chevron + group name + count + a tiny
  *  worst-state chip; rows render under the disclosure. Open-state persists per
- *  group in localStorage, default OPEN. */
+ *  group in localStorage; the picker's resting default is COLLAPSED (the list
+ *  can be long — the worst-state summary chip carries what each group needs
+ *  without expanding it), and an explicit user toggle is remembered. */
 function PickerGroupSection({
   section,
   onPick,
@@ -569,7 +571,7 @@ function PickerGroupSection({
   onStartFlight: (feature: string) => void
 }) {
   const group = section.group!
-  const [open, setOpen] = useState(() => readGroupOpen(GROUPS_OPEN_STORAGE_KEY, group))
+  const [open, setOpen] = useState(() => readGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, false))
   const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, next); return next })
   // The worst row drives the section's summary chip (same comparator).
   const worst = section.rows.reduce((acc, r) =>

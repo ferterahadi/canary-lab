@@ -28,6 +28,7 @@ export interface WorkspaceNavigation {
   verifyOpen: boolean
   flightStartFor: string | null
   flightStartNew: boolean
+  draftFor: string | null
   resumePlanTaskId: string | null
   portifyTarget: PortifyTarget | null
   routedDialog: RouteDialog | null
@@ -39,6 +40,8 @@ export interface WorkspaceNavigation {
   setVerifyOpen: (open: boolean) => void
   setFlightStartFor: (f: string | null) => void
   setFlightStartNew: (open: boolean) => void
+  /** Open (id) / close (null) the external authoring-draft dialog. */
+  setDraftFor: (id: string | null) => void
   setResumePlanTaskId: (id: string | null) => void
   setPortifyTarget: (t: PortifyTarget | null) => void
   /** Open a flight's detail (null = the flights landing list). */
@@ -63,6 +66,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
   const [flightStartFor, setFlightStartFor] = useState<string | null>(SEED.flightStartFor)
   const [flightStartNew, setFlightStartNew] = useState<boolean>(SEED.flightStartNew)
+  const [draftFor, setDraftFor] = useState<string | null>(SEED.draftFor)
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
 
@@ -81,6 +85,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     verifyOpen,
     flightStartFor,
     flightStartNew,
+    draftFor,
     resumePlanTaskId,
     portifyTarget,
   }
@@ -92,8 +97,11 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     persistView(navToPersistedView(state))
     // Intentionally keyed on the primitive fields, not the freshly-built `state`
     // object (new identity every render).
+    // draftFor is listed explicitly: the `dialog` value stays 'draft' when the
+    // open draft changes id-to-id, so keying on `dialog` alone would leave the
+    // URL's `draft` param stale.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -127,6 +135,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     verifyOpen,
     flightStartFor,
     flightStartNew,
+    draftFor,
     resumePlanTaskId,
     portifyTarget,
     routedDialog: dialog,
@@ -138,6 +147,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setVerifyOpen,
     setFlightStartFor,
     setFlightStartNew,
+    setDraftFor,
     setResumePlanTaskId,
     setPortifyTarget,
     openFlight,
