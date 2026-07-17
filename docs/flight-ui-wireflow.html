@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flight UI — wireflow board</title>
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --border: #e0e2e7; --border-strong: #cfd3da;
+  --text: #101114; --text-2: #4b5060; --text-3: #7c8394;
+  --accent: #1f56ec; --amber: #b45309; --green: #15803d; --red: #dc2626;
+  --sans: 'Geist', -apple-system, system-ui, sans-serif;
+  --mono: 'Geist Mono', ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { background: var(--bg); font-family: var(--sans); color: var(--text); overflow: auto; }
+/* dot-grid canvas */
+.canvas {
+  position: relative; width: 3400px; height: 2200px;
+  background-image: radial-gradient(circle, #d4d7dd 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.wires { position: absolute; inset: 0; width: 3400px; height: 2200px; z-index: 1; pointer-events: none; }
+.wires path { fill: none; stroke-width: 1.6; }
+.wires .nav { stroke: #1f56ec; }
+.wires .sec { stroke: #64748b; }
+.wires .back { stroke: #94a3b8; stroke-dasharray: 5 4; }
+.wires .attn { stroke: #d97706; }
+.wires .live { stroke: #0d9488; stroke-dasharray: 2 3; stroke-width: 1.3; }
+.wires text { font-family: var(--mono); font-size: 11px; fill: #3f4350; }
+.wires text.nav { fill: #1f56ec; stroke: none; }
+.wires text.attn { fill: #b45309; stroke: none; }
+.wires text.back { fill: #7c8394; stroke: none; }
+.wires text.live { fill: #0f766e; stroke: none; }
+/* board cards */
+.bd { position: absolute; z-index: 2; }
+.bd-title { font-weight: 600; font-size: 14px; margin-bottom: 2px; letter-spacing: -0.01em; }
+.bd-url { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-bottom: 7px; }
+.bd-note { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-top: 7px; line-height: 1.55; }
+.bd-note b { color: var(--text-2); font-weight: 600; }
+.stub { border: 1.5px dashed var(--border-strong); border-radius: 10px; background: rgba(255,255,255,.75); padding: 10px 14px; }
+.stub .bd-title { font-size: 12.5px; margin: 0 0 1px; }
+.stub .bd-url { margin: 0; }
+/* legend */
+.legend { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; box-shadow: 0 1px 3px rgba(16,17,20,.06); }
+.legend h1 { font-size: 16px; letter-spacing: -0.015em; margin-bottom: 2px; }
+.legend .sub { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-bottom: 8px; }
+.legend .row { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--text-2); margin-top: 4px; }
+.legend .sw { width: 26px; height: 0; border-top: 2px solid; flex-shrink: 0; }
+/* ── dark UI mockups (same vocabulary as the app) ── */
+.mock { background: #0b0f14; border: 1px solid #232a33; border-radius: 10px; color: #c9d1d9; font-size: 12px; overflow: hidden; font-family: var(--sans); line-height: 1.45; box-shadow: 0 2px 8px rgba(16,17,20,.10); }
+.mk-row { display: flex; align-items: center; gap: 8px; }
+.mk-head { padding: 10px 14px; border-bottom: 1px solid #232a33; display: flex; align-items: center; gap: 10px; }
+.mk-title { font-weight: 600; font-size: 13px; color: #e6edf3; }
+.mk-sub { font-family: var(--mono); font-size: 10px; color: #8b949e; }
+.mk-sp { flex: 1; }
+.mk-btn { border: 1px solid #2d3644; border-radius: 6px; padding: 3px 10px; font-size: 11px; color: #c9d1d9; background: #131923; white-space: nowrap; }
+.mk-btn.blue { color: #38bdf8; } .mk-btn.red { color: #f87171; } .mk-btn.amber { color: #fbbf24; } .mk-btn.green { color: #34d399; }
+.mk-btn.sm { padding: 1px 7px; font-size: 10px; }
+.mk-chip { border: 1px solid rgba(251,191,36,.45); color: #fbbf24; border-radius: 4px; padding: 1px 7px; font-size: 10px; font-weight: 500; white-space: nowrap; }
+.mk-chip.green { border-color: rgba(52,211,153,.45); color: #34d399; }
+.mk-chip.blue { border-color: rgba(56,189,248,.45); color: #38bdf8; }
+.mk-chip.gray { border-color: #2d3644; color: #8b949e; }
+.mk-body { display: flex; }
+.mk-rail { width: 190px; flex-shrink: 0; border-right: 1px solid #232a33; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+.mk-stage { display: flex; gap: 8px; padding: 4px 8px; border-radius: 5px; align-items: center; }
+.mk-stage.sel { background: #1a2230; }
+.mk-ic { width: 12px; text-align: center; font-weight: 700; font-family: var(--mono); flex-shrink: 0; }
+.c-done { color: #34d399; } .c-run { color: #38bdf8; } .c-wait { color: #fbbf24; } .c-fail { color: #f87171; } .c-pend { color: #6b7280; }
+.mk-main { flex: 1; padding: 12px 16px; min-width: 0; }
+.mk-strip { display: flex; gap: 18px; padding: 6px 14px; border-bottom: 1px solid #232a33; font-family: var(--mono); font-size: 10px; color: #8b949e; }
+.mk-strip b { color: #c9d1d9; font-weight: 500; }
+.mk-cp { border: 1px solid rgba(251,191,36,.45); border-radius: 8px; padding: 9px 11px; margin-top: 10px; }
+.mk-cp-label { font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: .08em; color: #fbbf24; text-transform: uppercase; margin-bottom: 5px; }
+.mk-line { color: #9aa4b2; font-size: 11.5px; margin: 5px 0; }
+.mk-panelrow { padding: 8px 12px; border-bottom: 1px solid #1c232d; display: flex; align-items: center; gap: 10px; }
+.mk-panelrow:last-child { border-bottom: 0; }
+.mk-minirail { display: inline-flex; gap: 2px; }
+.mk-minirail i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; background: #2d3644; }
+.mk-minirail i.d { background: #34d399; } .mk-minirail i.r { background: #38bdf8; } .mk-minirail i.w { background: #fbbf24; }
+.mk-input { border: 1px solid #2d3644; background: #0e131a; border-radius: 6px; padding: 5px 9px; color: #8b949e; font-family: var(--mono); font-size: 10.5px; flex: 1; }
+.mk-lbl { font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; margin: 9px 0 4px; }
+.mk-toast { border: 1px solid #2d3644; border-left: 3px solid #fbbf24; background: #131923; border-radius: 8px; padding: 8px 11px; margin: 6px 0; }
+.mk-toast .t { font-weight: 600; font-size: 12px; color: #e6edf3; }
+.mk-toast .b { font-size: 11px; color: #9aa4b2; }
+.mk-foot { border-top: 1px solid #232a33; padding: 7px 12px; font-family: var(--mono); font-size: 9.5px; color: #8b949e; line-height: 1.6; }
+.mk-foot b { color: #c9d1d9; font-weight: 500; }
+/* checkpoint gallery rows */
+.cp-row { display: grid; grid-template-columns: 150px 1fr; gap: 10px; padding: 7px 12px; border-bottom: 1px solid #1c232d; align-items: baseline; }
+.cp-row:last-child { border-bottom: 0; }
+.cp-kind { font-family: var(--mono); font-size: 10px; color: #fbbf24; font-weight: 600; }
+.cp-opts { font-size: 10.5px; color: #9aa4b2; }
+.cp-opts b { color: #c9d1d9; font-weight: 600; }
+/* micro-state strips */
+.states { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; align-items: center; }
+.states b { font-family: var(--mono); font-size: 9px; color: var(--text-3); font-weight: 600; text-transform: uppercase; letter-spacing: .07em; margin-right: 2px; }
+.states i { font-style: normal; font-family: var(--mono); font-size: 9px; color: var(--text-2); border: 1px solid var(--border-strong); background: #fff; border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+.states i.hl { color: var(--amber); border-color: #e7c88a; background: #fdf6e7; }
+.states i.err { color: var(--red); border-color: #f2b8b5; background: #fdf1f0; }
+/* light figure card (svg panels) */
+.fig-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; box-shadow: 0 1px 3px rgba(16,17,20,.06); }
+.fig-card svg { display: block; width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+  <!-- ═══════════ wires (behind cards) ═══════════ -->
+  <svg class="wires" viewBox="0 0 3400 2200" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="mN" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#1f56ec"/></marker>
+      <marker id="mS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#64748b"/></marker>
+      <marker id="mB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#94a3b8"/></marker>
+      <marker id="mA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#d97706"/></marker>
+    </defs>
+
+    <!-- pill → picker -->
+    <path class="sec" d="M375,355 H465" marker-end="url(#mS)"/>
+    <text x="385" y="346">click</text>
+
+    <!-- toasts → flight page (attention) -->
+    <path class="attn" d="M405,635 C 1000,780 1500,570 1895,470" marker-end="url(#mA)"/>
+    <text class="attn" x="1050" y="700">flight toast — opens that flight</text>
+    <!-- aggregate toast → picker -->
+    <path class="attn" d="M405,600 C 430,550 440,490 465,455" marker-end="url(#mA)"/>
+    <text class="attn" x="322" y="540">aggregate</text>
+
+    <!-- features column → start dialog / flight -->
+    <path class="sec" d="M375,905 C 700,890 950,650 1145,540" marker-end="url(#mS)"/>
+    <text x="620" y="852">"+ New" — new-flight mode</text>
+    <path class="sec" d="M375,960 C 1000,1030 1600,720 1895,560" marker-end="url(#mS)"/>
+    <text x="1200" y="996">feature chip — opens the feature's flight</text>
+
+    <!-- picker → flight (over the start dialog) -->
+    <path class="nav" d="M1035,230 C 1350,55 1700,70 1895,175" marker-end="url(#mN)"/>
+    <text class="nav" x="1330" y="86">flight row →</text>
+    <!-- picker → start dialog -->
+    <path class="sec" d="M1035,420 C 1090,420 1100,400 1145,380" marker-end="url(#mS)"/>
+    <text x="1040" y="452">not-flown row</text>
+    <!-- picker → run detail (activity row, long) -->
+    <path class="sec" d="M1035,505 C 1900,970 2500,400 2815,205" marker-end="url(#mS)"/>
+    <text x="1750" y="760">activity-only row — routed by kind (run / portify / draft / flight)</text>
+    <!-- picker → draft dialog (authoring activity) -->
+    <path class="sec" d="M700,555 V635" marker-end="url(#mS)"/>
+    <text x="710" y="605">authoring activity → draft</text>
+
+    <!-- start dialog → flight -->
+    <path class="nav" d="M1775,330 H1895" marker-end="url(#mN)"/>
+    <text class="nav" x="1782" y="320">Start / Continue</text>
+    <!-- plan panel → flight -->
+    <path class="nav" d="M1775,830 C 1850,830 1870,600 1898,500" marker-end="url(#mN)"/>
+    <text class="nav" x="1800" y="700">Start N flights</text>
+    <!-- start dialog ↔ plan panel -->
+    <path class="sec" d="M1460,635 V695" marker-end="url(#mS)"/>
+    <text x="1470" y="672">"Plan flight →"</text>
+    <!-- flight → start dialog (repeat a step, dashed) -->
+    <path class="back" d="M1895,650 C 1840,660 1810,620 1778,590" marker-end="url(#mB)"/>
+    <text class="back" x="1690" y="676">Repeat a step…</text>
+
+    <!-- flight → workspace stub (Close) -->
+    <path class="back" d="M2100,65 C 2000,30 1830,32 1685,42" marker-end="url(#mB)"/>
+    <text class="back" x="1830" y="24">Close — flight keeps working</text>
+    <!-- flight → picker (delete, dashed) -->
+    <path class="back" d="M1900,760 C 1300,1030 800,760 745,548" marker-end="url(#mB)"/>
+    <text class="back" x="1090" y="925">Delete flight / "All flights" ↩</text>
+
+    <!-- flight → 5 targets -->
+    <path class="nav" d="M2685,200 H2815" marker-end="url(#mN)"/>
+    <text class="nav" x="2694" y="190">Open run detail → · run cards</text>
+    <path class="nav" d="M2685,300 C 2740,300 2760,330 2815,345" marker-end="url(#mN)"/>
+    <text class="nav" x="2694" y="292">Open coverage ledger →</text>
+    <path class="nav" d="M2685,420 C 2740,430 2760,480 2815,505" marker-end="url(#mN)"/>
+    <text class="nav" x="2694" y="412">Open portify workflow →</text>
+    <path class="nav" d="M2685,540 C 2745,570 2760,640 2815,672" marker-end="url(#mN)"/>
+    <text class="nav" x="2694" y="534">⚙ Advanced setup</text>
+    <path class="nav" d="M2685,660 C 2750,720 2760,800 2815,838" marker-end="url(#mN)"/>
+    <text class="nav" x="2690" y="708">⬇ Download evaluation (.zip)</text>
+
+    <!-- flight → checkpoint gallery -->
+    <path class="sec" d="M2290,795 V865" marker-end="url(#mS)"/>
+    <text x="2300" y="842">any stage can park a checkpoint — full gallery ↓</text>
+    <!-- checkpoint gallery → pipeline jump -->
+    <path class="sec" d="M1900,1120 C 1840,1170 1820,1330 1800,1490" marker-end="url(#mS)"/>
+    <text x="1808" y="1300">jump targets ↓</text>
+    <!-- lifecycle ← flight controls -->
+    <path class="sec" d="M1900,720 C 1400,900 1100,950 1005,1090" marker-end="url(#mS)"/>
+    <text x="1170" y="960">⏸ Pause · Continue · ⏹ Stop · ↺ Start over — state machine ↓</text>
+
+    <!-- live-sync wires (teal dotted): what updates without clicks -->
+    <path class="live" d="M1760,1085 C 1850,1050 1980,940 2100,835" marker-end="url(#mS)"/>
+    <text class="live" x="1908" y="852">flights-changed + 2s poll → manifest</text>
+    <path class="live" d="M1150,1085 C 650,1075 430,700 375,435" marker-end="url(#mS)"/>
+    <text class="live" x="500" y="1058">props: flights · preFlights · activity → pill + picker</text>
+    <path class="live" d="M1150,1130 C 700,1120 480,930 400,795" marker-end="url(#mS)"/>
+    <text class="live" x="430" y="884">every flights refresh → toast diff</text>
+  </svg>
+
+  <!-- ═══════════ legend ═══════════ -->
+  <div class="bd legend" style="left:60px; top:28px; width:350px">
+    <h1>Flight UI — wireflow board</h1>
+    <div class="sub">canary-lab · release/1.6.0 · traced 2026-07-16/17</div>
+    <div class="row"><span class="sw" style="border-color:#1f56ec"></span> navigates (primary journey)</div>
+    <div class="row"><span class="sw" style="border-color:#64748b"></span> navigates (secondary)</div>
+    <div class="row"><span class="sw" style="border-color:#94a3b8; border-top-style:dashed"></span> back / close / escape hatch</div>
+    <div class="row"><span class="sw" style="border-color:#d97706"></span> attention pulls you back in</div>
+    <div class="row"><span class="sw" style="border-color:#0d9488; border-top-style:dotted"></span> stays live without clicks (WS / poll)</div>
+    <div class="row" style="margin-top:8px">status: <span style="color:#15803d">✓ done</span> · <span style="color:#1f56ec">▸ generating</span> · <span style="color:#b45309">? needs you</span> · <span style="color:#dc2626">✕ failed</span> · ↷ skipped</div>
+  </div>
+
+  <!-- workspace stub -->
+  <div class="bd stub" style="left:1450px; top:22px; width:235px">
+    <div class="bd-title">Workspace view</div>
+    <div class="bd-url">?view=workspace — the default screen</div>
+  </div>
+
+  <!-- ═══════════ Flights pill ═══════════ -->
+  <div class="bd" style="left:60px; top:280px; width:315px">
+    <div class="bd-title">Flights pill</div>
+    <div class="bd-url">global status bar — always visible</div>
+    <div class="mock" style="padding:10px 12px">
+      <div class="mk-row"><span class="mk-btn">Flights</span><span class="mk-btn">Flights · 2 active</span></div>
+      <div class="mk-row" style="margin-top:8px"><span class="mk-btn amber" style="position:relative">Flights · approval needed<span style="position:absolute;top:-4px;right:-4px;width:8px;height:8px;border-radius:50%;background:#fbbf24"></span></span></div>
+      <div class="mk-foot">label states — amber dot = a human is the blocker</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ Toasts ═══════════ -->
+  <div class="bd" style="left:60px; top:560px; width:345px">
+    <div class="bd-title">Sticky toasts</div>
+    <div class="bd-url">fired on checkpoint / pause · never auto-dismiss</div>
+    <div class="mk-toast"><div class="t">3 flights need your input</div><div class="b">Open the flights view to respond</div></div>
+    <div class="mk-toast"><div class="t">multi-channel-send needs input</div><div class="b">Existing feature found is waiting for you</div></div>
+    <div class="bd-note">suppressed only while that flight's page is on screen · queued flights never toast</div>
+    <div class="states"><b>variants</b><i class="hl">«f» needs input — stage is waiting</i><i class="hl">«f» paused — open to resume</i><i class="hl">N flights need your input</i></div>
+  </div>
+
+  <!-- ═══════════ Features column ═══════════ -->
+  <div class="bd" style="left:60px; top:850px; width:315px">
+    <div class="bd-title">Features column</div>
+    <div class="bd-url">workspace view — left column</div>
+    <div class="mock">
+      <div class="mk-head"><span class="mk-title">Features</span><span class="mk-sp"></span><span class="mk-btn blue">+ New</span></div>
+      <div class="mk-panelrow">multi-channel-send<span class="mk-sp"></span><span class="mk-chip">needs approval</span></div>
+      <div class="mk-foot"><b>+ New</b> starts a flight on new repos · a feature's status chip opens its flight</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ Flights picker ═══════════ -->
+  <div class="bd" style="left:470px; top:150px; width:565px">
+    <div class="bd-title">Flights picker</div>
+    <div class="bd-url">?view=flights — slide-over, one row per feature</div>
+    <div class="mock">
+      <div class="mk-head"><span class="mk-title">Flights</span><span class="mk-sp"></span><span class="mk-btn">Close</span></div>
+      <div class="mk-panelrow"><span class="mk-ic c-run">▸</span><div style="min-width:0"><div>Plan: "test the whole gateway"</div><div class="mk-sub">pre-flight — breaking the intent into features…</div></div><span class="mk-sp"></span><span class="mk-chip blue">planning</span></div>
+      <div class="mk-panelrow"><div>multi-channel-send</div><span class="mk-sp"></span><span class="mk-minirail"><i class="d"></i><i class="d"></i><i class="d"></i><i class="w"></i><i></i><i></i><i></i><i></i></span><span class="mk-chip">needs approval</span><span style="color:#8b949e">→</span></div>
+      <div class="mk-panelrow"><div style="min-width:0"><div>cns_batch_queue</div><div class="mk-sub">activity only — exporting evaluation…</div></div><span class="mk-sp"></span><span class="mk-minirail"><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="d"></i><i class="r"></i></span><span class="mk-chip blue">active</span></div>
+      <div class="mk-panelrow"><div style="min-width:0"><div>checkout_flow</div><div class="mk-sub">not flown yet</div></div><span class="mk-sp"></span><span class="mk-btn blue sm">Start a flight</span></div>
+      <div class="mk-foot">group headers collapse locally (localStorage) · mini-rail cells are tooltips, not links · <b>Close → workspace view</b> · empty state shows the CLI one-liner</div>
+    </div>
+    <div class="states"><b>states</b><i>empty → CLI hint</i><i>rows (1 per feature)</i><i>group collapsed</i><i class="hl">amber dot on pill while any row needs you</i></div>
+  </div>
+
+  <!-- ═══════════ Draft dialog ═══════════ -->
+  <div class="bd" style="left:470px; top:640px; width:360px">
+    <div class="bd-title">Draft dialog</div>
+    <div class="bd-url">?dialog=draft&amp;draft=&lt;id&gt; — routed, refresh-safe</div>
+    <div class="mock">
+      <div class="mk-head"><span class="mk-title">Draft — multi-channel-send</span><span class="mk-sp"></span><span class="mk-chip blue">authoring</span></div>
+      <div class="mk-foot">an external client authors specs edit-in-place (start / update / apply_external_draft) · dialog shows the draft's stage + live agent view · Apply → specs land in the feature</div>
+    </div>
+    <div class="states"><b>states</b><i>in progress</i><i>applied</i></div>
+  </div>
+
+  <!-- ═══════════ Start-flight dialog ═══════════ -->
+  <div class="bd" style="left:1150px; top:110px; width:625px">
+    <div class="bd-title">Start-flight dialog</div>
+    <div class="bd-url">?dialog=flight-new (new) · ?dialog=flight-start&amp;feature=&lt;f&gt; (re-fly)</div>
+    <div class="mock">
+      <div class="mk-head"><span class="mk-title">Start a flight</span><span class="mk-sp"></span><span class="mk-btn">Cancel</span></div>
+      <div style="padding:11px 14px">
+        <div class="mk-lbl" style="margin-top:0">1 · What should this flight test?</div>
+        <div class="mk-row"><span class="mk-input">e.g. the checkout flow end to end — refer to ~/Documents/prd.md</span></div>
+        <div class="mk-lbl">2 · Repos <span style="text-transform:none;letter-spacing:0">(hidden once a record froze them)</span></div>
+        <div class="mk-row"><span class="mk-btn sm">~/Documents/mighty-cns</span><span class="mk-btn sm">Remove</span><span class="mk-btn sm">Add repo</span></div>
+        <div class="mk-lbl">3 · Start from <span style="text-transform:none;letter-spacing:0">(server decides which rows are clickable)</span></div>
+        <div class="mk-row" style="margin-bottom:4px"><span class="mk-btn blue sm">Continue where it left off</span><span class="mk-sub">only if canContinue</span></div>
+        <div class="mk-row"><span class="mk-btn sm">▸ The full flight — 10 steps, fully automated</span><span class="mk-sub">or jump to one stage</span></div>
+        <div class="mk-row" style="margin-top:10px"><span class="mk-sp"></span><span class="mk-btn blue">Plan flight →</span></div>
+      </div>
+      <div class="mk-foot">primary label flips: <b>Plan flight →</b> (new) · <b>Continue flight</b> · <b>Start flight</b> · 409 name collision flips the dialog into feature-scoped mode · already flying → <b>Open the running flight →</b></div>
+    </div>
+    <div class="states"><b>states</b><i>form · new</i><i>form · feature-scoped</i><i>frozen intent (read-only quote)</i><i>planning… (live agent)</i><i>proposal · N cards</i><i class="hl">proposal · conflict cards forced open</i><i class="err">plan failed → single-flight escape</i><i class="err">409 → flips feature-scoped</i><i>already flying → open active</i><i>busy "Starting…"</i></div>
+  </div>
+
+  <!-- ═══════════ Plan panel (planning + proposal states) ═══════════ -->
+  <div class="bd" style="left:1150px; top:700px; width:625px">
+    <div class="bd-title">Pre-flight planning states</div>
+    <div class="bd-url">same dialog — after "Plan flight →"</div>
+    <div class="mock">
+      <div class="mk-panelrow"><span class="mk-ic c-run">▸</span><div style="min-width:0"><div>Planning…</div><div class="mk-sub">live agent view — "Close anytime, planning waits for you in the Flights pill"</div></div></div>
+      <div class="mk-panelrow"><div style="min-width:0"><div>Proposal: 3 features</div><div class="mk-sub">group input · per-card pencil edit (name + intent) · conflicts forced open</div></div><span class="mk-sp"></span><span class="mk-btn blue sm">Start 3 flights</span></div>
+      <div class="mk-foot">1 feature → auto-launch · N features → first runs, rest queue (paused/queued, auto-drain) · plan fails → <b>Start a single flight</b> escape hatch</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ Flight page (hub) ═══════════ -->
+  <div class="bd" style="left:1900px; top:60px; width:785px">
+    <div class="bd-title">Flight page — the hub</div>
+    <div class="bd-url">?view=flights&amp;flight=&lt;id&gt; — routed, refresh-safe, deep-linkable</div>
+    <div class="mock">
+      <div class="mk-head">
+        <div style="min-width:0">
+          <div class="mk-title">🕊️ multi-channel-send</div>
+          <div class="mk-row" style="margin-top:3px"><span class="mk-chip">needs approval</span><span class="mk-sub">~/Documents/mighty-cns · "Test sending a notification…"</span></div>
+        </div>
+        <span class="mk-sp"></span>
+        <span class="mk-btn">⏸ Pause</span><span class="mk-btn red">⏹ Stop</span><span class="mk-btn">Close</span>
+      </div>
+      <div class="mk-strip"><span>ELAPSED <b>1m 57s</b></span><span>COVERAGE <b>—</b></span><span>RUN <b>—</b></span><span>DOCS <b>—</b></span><span>REPORT <b>—</b></span></div>
+      <div class="mk-body">
+        <div class="mk-rail">
+          <div class="mk-stage sel"><span class="mk-ic c-wait">?</span>Existing feature found</div>
+          <div class="mk-stage"><span class="mk-ic c-pend">·</span>Repo scan</div>
+          <div class="mk-stage"><span class="mk-ic c-pend">·</span>Feature setup</div>
+          <div class="mk-stage"><span class="mk-ic c-pend">·</span>Requirements</div>
+          <div class="mk-stage"><span class="mk-ic c-pend">·</span>Test authoring &amp; coverage</div>
+          <div class="mk-stage"><span class="mk-ic c-pend">·</span>Parallel readiness</div>
+          <div class="mk-stage"><span class="mk-ic c-pend">·</span>Test Run</div>
+          <div class="mk-stage"><span class="mk-ic c-pend">·</span>Evaluation Report</div>
+        </div>
+        <div class="mk-main">
+          <div class="mk-row"><b style="color:#e6edf3;font-size:13px">Existing feature found</b><span class="mk-chip">? needs approval</span></div>
+          <div class="mk-line">Feature "cns_batch_queue_resilience" already targets ~/Documents/mighty-cns…</div>
+          <div class="mk-cp">
+            <div class="mk-cp-label">⏸ similarity-choice</div>
+            <div class="mk-line">Rerun it, enhance it with this flight's docs/specs delta, or create a new feature?</div>
+            <div class="mk-row" style="margin-top:7px"><span class="mk-btn blue sm">rerun</span><span class="mk-btn sm">enhance</span><span class="mk-btn sm">new</span></div>
+          </div>
+          <div class="mk-lbl" style="margin-top:12px">Activity ···································· ▸ Show</div>
+          <div class="mk-sub">one rail per stage: conductor lines + the agent's live timeline</div>
+        </div>
+      </div>
+      <div class="mk-foot">
+        <b>controls stay on this page (server actions):</b> ⏸ Pause → paused/user, run keeps living · Continue → resumes first open stage · ⏹ Stop → terminal, kills run, frees queue · ↺ Start over → same record from stage 1 · <b>Delete flight → back to picker</b> · rail click = in-page stage select · stage rows merge pairs: Feature setup = scaffold+env · Requirements = docs+prd · Test Run = run+heal
+      </div>
+    </div>
+    <div class="states"><b>states</b><i>loading "Loading flight…"</i><i class="err">load error → "All flights" ↩</i><i>active: ⏸ Pause + ⏹ Stop</i><i class="hl">paused: Continue + ↺ Start over</i><i>settled: Repeat a step… + ↺ + Delete</i><i class="hl">confirm: "Really start over?" / "Really delete?"</i><i>busy: Restarting… / Deleting…</i><i class="err">download failed — retry</i></div>
+  </div>
+
+  <!-- ═══════════ Checkpoint gallery ═══════════ -->
+  <div class="bd" style="left:1900px; top:865px; width:785px">
+    <div class="bd-title">Checkpoint gallery — every pause, every option</div>
+    <div class="bd-url">stage parks → amber ? on rail · pill dot · sticky toast · respond stays on the flight page</div>
+    <div class="mock">
+      <div class="cp-row"><span class="cp-kind">similarity-choice</span><span class="cp-opts"><b>rerun</b> jump→Test Run (7 skipped, nothing authored) · <b>enhance</b> jump→Requirements (config/env reused, delta authored) · <b>new</b> full pipeline, fresh feature</span></div>
+      <div class="cp-row"><span class="cp-kind">config-approval</span><span class="cp-opts"><b>approve</b> re-reads your on-disk edits, validates · <b>redraft</b> rewind→Repo scan</span></div>
+      <div class="cp-row"><span class="cp-kind">missing-env</span><span class="cp-opts"><b>Submit values</b> KEY=value → written, re-runs · <b>waive</b> capture what exists · <b>retry</b> — survives --yolo (never guesses secrets)</span></div>
+      <div class="cp-row"><span class="cp-kind">prd-source</span><span class="cp-opts">always pauses · <b>continue</b> accept docs · <b>use-repo-docs</b> · <b>infer-from-diff</b> · <b>description-only</b> · <b>retry</b></span></div>
+      <div class="cp-row"><span class="cp-kind">coverage-stuck</span><span class="cp-opts">5 passes below target · <b>accept-partial</b> settle at current % · <b>retry</b> another 5-pass loop</span></div>
+      <div class="cp-row"><span class="cp-kind">portify-apply</span><span class="cp-opts">edits proposed, double-boot verified · <b>apply</b> save overlay · <b>cancel</b> stage fails, flight parks</span></div>
+      <div class="cp-row"><span class="cp-kind">run-failed</span><span class="cp-opts">run ended failed/aborted · <b>rerun</b> brand-new test run (NOT the similarity rerun) · <b>export-as-is</b></span></div>
+      <div class="cp-row"><span class="cp-kind">export-mode</span><span class="cp-opts"><b>raw</b> fast report from evidence · <b>localized</b> agent rewrites per-test reasoning (slower)</span></div>
+      <div class="mk-foot">re-park rule: an unrecognized choice (or a config parse error on approve) re-parks the SAME checkpoint · double-responds are race-guarded · responding flips the stage back to running synchronously</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ drill-through targets ═══════════ -->
+  <div class="bd" style="left:2820px; top:130px; width:445px">
+    <div class="bd-title">Run detail</div>
+    <div class="bd-url">?view=workspace&amp;feature=&lt;f&gt;&amp;run=&lt;id&gt;</div>
+    <div class="mock"><div class="mk-panelrow"><span class="mk-ic c-run">▸</span>run 7cvh<span class="mk-sp"></span><span class="mk-chip blue">healing</span></div>
+    <div class="mk-foot">the real run surface: output, services, heal journal, external panel · run-stage controls hit the same endpoints: <b>Cancel repair · ⏹ Stop run · ▸ Restart run</b></div></div>
+  </div>
+  <div class="bd" style="left:2820px; top:315px; width:445px">
+    <div class="bd-title">Coverage ledger</div>
+    <div class="bd-url">?view=coverage&amp;feature=&lt;f&gt;</div>
+    <div class="mock"><div class="mk-foot">requirements ↔ specs mapping, gaps by kind, docs rail (same folder the flight's Requirements panel manages)</div></div>
+  </div>
+  <div class="bd" style="left:2820px; top:480px; width:445px">
+    <div class="bd-title">Portify wizard</div>
+    <div class="bd-url">embedded — deliberately not routed</div>
+    <div class="mock"><div class="mk-foot">the concurrency-readiness workflow: proposed edits, double-boot proof, save/cancel</div></div>
+  </div>
+  <div class="bd" style="left:2820px; top:645px; width:445px">
+    <div class="bd-title">Feature config editor</div>
+    <div class="bd-url">?dialog=config&amp;feature=&lt;f&gt;</div>
+    <div class="mock"><div class="mk-foot">full editor over the same on-disk feature.config.cjs the Feature-setup panel edits — two lenses, one document, live both ways</div></div>
+  </div>
+  <div class="bd" style="left:2820px; top:812px; width:445px">
+    <div class="bd-title">Evaluation .zip</div>
+    <div class="bd-url">file download — no navigation</div>
+    <div class="mock"><div class="mk-foot">the scored report archive · "Download failed — retry" on error</div></div>
+  </div>
+
+  <!-- ═══════════ live-sync panel ═══════════ -->
+  <div class="bd" style="left:1150px; top:1060px; width:625px">
+    <div class="bd-title">How screens stay live — no clicks needed</div>
+    <div class="bd-url">ws /ws/workspace · invalidation bus · reconnect resync (use-workspace-data.ts)</div>
+    <div class="mock">
+      <div class="cp-row"><span class="cp-kind" style="color:#2dd4bf">flights index</span><span class="cp-opts">WS <b>flights-changed</b> → refetch · 5s backstop poll while any flight active · reconnect resync · post-launch refetch — feeds pill, picker, toasts</span></div>
+      <div class="cp-row"><span class="cp-kind" style="color:#2dd4bf">pre-flights</span><span class="cp-opts">WS <b>pre-flight-changed</b> · 2.5s poll while planning</span></div>
+      <div class="cp-row"><span class="cp-kind" style="color:#2dd4bf">activity map</span><span class="cp-opts">derived, no own channel — runs / portify / draft / export WS stores · precedence: running &gt; exporting &gt; portifying &gt; authoring</span></div>
+      <div class="cp-row"><span class="cp-kind" style="color:#2dd4bf">flight page</span><span class="cp-opts"><b>flights-changed</b> + 2s manifest poll while active · <b>features-changed</b> → setup panel · <b>coverage-changed</b> → docs panel · 5s run/journal polls</span></div>
+      <div class="cp-row"><span class="cp-kind" style="color:#2dd4bf">start dialog</span><span class="cp-opts">1.5s plan-task poll only (no WS) — discovers auto-launch and opens the flight</span></div>
+      <div class="cp-row"><span class="cp-kind" style="color:#2dd4bf">toasts</span><span class="cp-opts">diff on every flights refresh: seed → one aggregate · transition into attention → per-flight sticky</span></div>
+      <div class="mk-foot">server side: every flight mutation broadcasts <b>flights-changed</b> (10 emit sites in conductor.ts) — no mutation leaves the UI stale</div>
+    </div>
+  </div>
+
+  <!-- ═══════════ lifecycle panel ═══════════ -->
+  <div class="bd fig-card" style="left:60px; top:1090px; width:975px">
+    <div class="bd-title">Flight lifecycle — who moves the state</div>
+    <div class="bd-url">conductor.ts · pause is a bookmark, stop is a verdict, close is just a door</div>
+    <svg viewBox="0 0 1040 300" xmlns="http://www.w3.org/2000/svg" font-family="Geist Mono, monospace">
+      <defs><marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#64748b"/></marker></defs>
+      <style>
+        .st rect { rx:8; fill:#fff; stroke:#d4d4d8; }
+        .st text { font-size:12.5px; font-weight:600; fill:#09090b; font-family:'Geist',sans-serif; }
+        .st .sub { font-size:9px; font-weight:400; fill:#71717a; font-family:'Geist Mono',monospace; }
+        .st.run rect { stroke:#0ea5e9; fill:#f0f9ff; }
+        .st.wait rect { stroke:#ca8a04; fill:#fefce8; }
+        .st.pause rect { stroke:#ca8a04; }
+        .st.done rect { stroke:#16a34a; fill:#f0fdf4; }
+        .st.abort rect { stroke:#dc2626; fill:#fef2f2; }
+        .e { stroke:#64748b; stroke-width:1.1; fill:none; }
+        .l { font-size:9.5px; fill:#52525b; }
+      </style>
+      <g class="st run"><rect x="410" y="30" width="200" height="54"/><text x="428" y="54">running</text><text class="sub" x="428" y="70">drive loop advancing stages</text></g>
+      <g class="st wait"><rect x="40" y="30" width="250" height="54"/><text x="58" y="54">waiting-for-approval</text><text class="sub" x="58" y="70">a checkpoint parked a stage</text></g>
+      <g class="st pause"><rect x="410" y="170" width="200" height="70"/><text x="428" y="194">paused</text><text class="sub" x="428" y="210">reason: user | stage-failed |</text><text class="sub" x="428" y="223">restart | queued</text></g>
+      <g class="st done"><rect x="800" y="30" width="180" height="54"/><text x="818" y="54">done</text><text class="sub" x="818" y="70">all stages settled</text></g>
+      <g class="st abort"><rect x="800" y="170" width="180" height="54"/><text x="818" y="194">aborted</text><text class="sub" x="818" y="210">terminal — Stop pressed</text></g>
+      <path class="e" d="M410,48 H290" marker-end="url(#a2)"/><text class="l" x="308" y="42">stage parks a checkpoint</text>
+      <path class="e" d="M290,72 H410" marker-end="url(#a2)"/><text class="l" x="302" y="86">respond (choice / values)</text>
+      <path class="e" d="M480,84 V170" marker-end="url(#a2)"/><text class="l" x="356" y="130">⏸ Pause · stage fails ·</text><text class="l" x="356" y="142">server restart · queued</text>
+      <path class="e" d="M545,170 V84" marker-end="url(#a2)"/><text class="l" x="556" y="132">Continue (auto for queued)</text>
+      <path class="e" d="M610,57 H800" marker-end="url(#a2)"/><text class="l" x="660" y="50">last stage done</text>
+      <path class="e" d="M610,64 C700,64 720,180 800,190" marker-end="url(#a2)"/><text class="l" x="676" y="140">⏹ Stop</text>
+      <path class="e" d="M610,222 H800" marker-end="url(#a2)"/><text class="l" x="660" y="216">⏹ Stop (while paused)</text>
+      <path class="e" d="M890,84 C890,130 700,120 610,60 " stroke-dasharray="4 3" marker-end="url(#a2)"/><text class="l" x="700" y="108">↺ Start over / jump (resets record)</text>
+      <path class="e" d="M890,224 C890,275 660,268 560,240" stroke-dasharray="4 3" marker-end="url(#a2)"/><text class="l" x="656" y="268">↺ Start over / jump</text>
+    </svg>
+  </div>
+
+  <!-- ═══════════ pipeline jump panel ═══════════ -->
+  <div class="bd fig-card" style="left:1150px; top:1490px; width:1535px">
+    <div class="bd-title">similarity-choice jump targets — rerun / enhance / new</div>
+    <div class="bd-url">similarity.ts:47-100 → conductor.ts jump handling · auto: plan-split→new, --yolo→rerun</div>
+    <svg viewBox="0 0 1080 250" xmlns="http://www.w3.org/2000/svg" font-family="Geist Mono, monospace">
+      <defs>
+        <marker id="a3b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#1f56ec"/></marker>
+        <marker id="a3g" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#16a34a"/></marker>
+        <marker id="a3o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#ca8a04"/></marker>
+      </defs>
+      <style>
+        .pg rect { rx:6; fill:#fff; stroke:#d4d4d8; }
+        .pg.q rect { stroke:#ca8a04; fill:#fefce8; }
+        .pg text { font-size:10px; fill:#09090b; font-weight:500; font-family:'Geist',sans-serif; }
+        .jl { font-size:10.5px; font-weight:600; }
+      </style>
+      <g class="pg q"><rect x="16" y="110" width="90" height="34"/><text x="24" y="131">similarity ?</text></g>
+      <g class="pg"><rect x="112" y="110" width="90" height="34"/><text x="120" y="131">scout</text></g>
+      <g class="pg"><rect x="208" y="110" width="90" height="34"/><text x="216" y="131">scaffold</text></g>
+      <g class="pg"><rect x="304" y="110" width="90" height="34"/><text x="312" y="131">env-capture</text></g>
+      <g class="pg"><rect x="400" y="110" width="90" height="34"/><text x="408" y="131">docs</text></g>
+      <g class="pg"><rect x="496" y="110" width="90" height="34"/><text x="504" y="131">prd-summary</text></g>
+      <g class="pg"><rect x="592" y="110" width="98" height="34"/><text x="600" y="131">specs-coverage</text></g>
+      <g class="pg"><rect x="696" y="110" width="80" height="34"/><text x="704" y="131">portify</text></g>
+      <g class="pg"><rect x="782" y="110" width="70" height="34"/><text x="790" y="131">run</text></g>
+      <g class="pg"><rect x="858" y="110" width="70" height="34"/><text x="866" y="131">heal</text></g>
+      <g class="pg"><rect x="934" y="110" width="120" height="34"/><text x="942" y="131">evaluation-export</text></g>
+      <path d="M61,144 C61,180 90,184 112,168 C120,162 130,152 140,144" fill="none" stroke="#16a34a" stroke-width="1.4" marker-end="url(#a3g)"/>
+      <text class="jl" x="70" y="196" fill="#16a34a">new → full pipeline from scout (fresh feature, free name)</text>
+      <path d="M61,110 C120,50 330,50 430,104" fill="none" stroke="#ca8a04" stroke-width="1.4" marker-end="url(#a3o)"/>
+      <text class="jl" x="470" y="52" fill="#ca8a04">enhance → jump to docs · skips scout/scaffold/env (config + envset reused)</text>
+      <path d="M40,110 C80,8 640,2 800,104" fill="none" stroke="#1f56ec" stroke-width="1.4" marker-end="url(#a3b)"/>
+      <text class="jl" x="330" y="16" fill="#1f56ec">rerun → jump straight to run · 7 stages skipped, nothing authored</text>
+      <text x="112" y="230" font-size="9.5" fill="#71717a">rerun skips: scout · scaffold · env-capture · docs · prd-summary · specs-coverage · portify&#160;&#160;&#160;&#160;|&#160;&#160;&#160;&#160;enhance skips: scout · scaffold · env-capture&#160;&#160;&#160;&#160;|&#160;&#160;&#160;&#160;both re-point the flight at the matched feature</text>
+    </svg>
+  </div>
+
+  <!-- ═══════════ stage status machine ═══════════ -->
+  <div class="bd fig-card" style="left:60px; top:1490px; width:975px">
+    <div class="bd-title">Every stage runs this status machine</div>
+    <div class="bd-url">conductor.ts drive loop · stage-meta.tsx fold rules — the rail icon is this state: · ▸ ? ✓ ✕ ↷</div>
+    <svg viewBox="0 0 1040 390" xmlns="http://www.w3.org/2000/svg" font-family="Geist Mono, monospace">
+      <defs><marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 1 L 9 5 L 0 9 z" fill="#64748b"/></marker></defs>
+      <style>
+        .sg rect { rx:8; fill:#fff; stroke:#d4d4d8; }
+        .sg text { font-size:12.5px; font-weight:600; fill:#09090b; font-family:'Geist',sans-serif; }
+        .sg .sub { font-size:9px; font-weight:400; fill:#71717a; font-family:'Geist Mono',monospace; }
+        .sg.run rect { stroke:#0ea5e9; fill:#f0f9ff; }
+        .sg.wait rect { stroke:#ca8a04; fill:#fefce8; }
+        .sg.done rect { stroke:#16a34a; fill:#f0fdf4; }
+        .sg.fail rect { stroke:#dc2626; fill:#fef2f2; }
+        .sg.skip rect { stroke:#94a3b8; stroke-dasharray:4 3; }
+        .e { stroke:#64748b; stroke-width:1.1; fill:none; }
+        .l { font-size:9.5px; fill:#52525b; }
+        .note { font-size:9.5px; fill:#71717a; }
+      </style>
+      <g class="sg"><rect x="40" y="150" width="150" height="52"/><text x="58" y="174">· pending</text><text class="sub" x="58" y="190">waiting for earlier stages</text></g>
+      <g class="sg run"><rect x="330" y="150" width="170" height="52"/><text x="348" y="174">▸ running</text><text class="sub" x="348" y="190">adapter + agent working</text></g>
+      <g class="sg wait"><rect x="300" y="20" width="230" height="52"/><text x="318" y="44">? waiting-for-approval</text><text class="sub" x="318" y="60">checkpoint parked — amber</text></g>
+      <g class="sg done"><rect x="660" y="60" width="150" height="52"/><text x="678" y="84">✓ done</text><text class="sub" x="678" y="100">evidence recorded</text></g>
+      <g class="sg fail"><rect x="660" y="200" width="150" height="52"/><text x="678" y="224">✕ failed</text><text class="sub" x="678" y="240">flight parks paused</text></g>
+      <g class="sg skip"><rect x="40" y="290" width="220" height="44"/><text x="58" y="312">↷ skipped</text><text class="sub" x="58" y="326">rerun/enhance/jump pre-marked</text></g>
+      <path class="e" d="M190,168 H330" marker-end="url(#a4)"/><text class="l" x="204" y="160">drive enters the stage</text>
+      <path class="e" d="M330,192 H190" marker-end="url(#a4)"/><text class="l" x="196" y="216">⏸ Pause rewinds the open stage</text>
+      <path class="e" d="M400,150 V72" marker-end="url(#a4)"/><text class="l" x="270" y="115" text-anchor="end" transform="translate(130,0)">checkpoint parks</text>
+      <path class="e" d="M460,72 V150" marker-end="url(#a4)"/><text class="l" x="470" y="115">respond → re-runs</text>
+      <path class="e" d="M500,166 C 570,140 600,110 660,92" marker-end="url(#a4)"/><text class="l" x="540" y="118">adapter settles</text>
+      <path class="e" d="M500,192 C 570,200 600,215 660,224" marker-end="url(#a4)"/><text class="l" x="560" y="228">error</text>
+      <path class="e" d="M660,244 C 420,320 240,270 130,204" stroke-dasharray="4 3" marker-end="url(#a4)"/><text class="l" x="330" y="282">Continue retries — failed flips back to pending</text>
+      <path class="e" d="M115,202 V290" marker-end="url(#a4)"/><text class="l" x="124" y="252">similarity choice / stage jump</text>
+      <text class="note" x="40" y="362">merged rows (Test Run = run+heal · Feature setup = scaffold+env-capture · Requirements = docs+prd-summary) show ONE status — precedence: running &gt; needs-approval &gt; failed &gt; primary</text>
+      <text class="note" x="40" y="378">similarity row hidden unless needs-approval / failed · auto-selected stage: needs-approval → running → first failed → last done (your explicit click wins)</text>
+    </svg>
+  </div>
+
+  <!-- footer note -->
+  <div class="bd" style="left:60px; top:1960px; width:975px; font-family:var(--mono); font-size:10.5px; color:var(--text-3); line-height:1.7">
+    Companion reference (full tables, file:line refs, URL schema): 2026-07-16-flight-ui-map.html · canary-first-flight R69/R70 v3 · generated 2026-07-17
+  </div>
+
+</div>
+</body>
+</html>

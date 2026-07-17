@@ -139,6 +139,8 @@ export function executePlannedLaunch(
     env: string
     coverageTarget: number
     yolo: boolean
+    /** Absent = autopilot on (R71/W4). */
+    autopilot?: boolean
   },
   deps: PlannedLaunchDeps,
 ): PlanAutoLaunchOutcome {
@@ -155,6 +157,7 @@ export function executePlannedLaunch(
     env: args.env,
     coverageTarget: args.coverageTarget,
     yolo: args.yolo,
+    ...(args.autopilot === false ? { autopilot: false } : {}),
     // The proposal step already answered "new feature over this repo?" for
     // every sibling — similarity must not re-ask (or yolo-rerun the first).
     plannedSplit: true,
@@ -289,6 +292,8 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           coverageTarget?: number
           base?: string
           yolo?: boolean
+          /** Absent = on; only an explicit false opts out (R71/W4). */
+          autopilot?: boolean
           /** continue | redo | jump — required when the feature already has a
            *  flight record (409 flight_exists_requires_choice otherwise). */
           mode?: string
@@ -355,6 +360,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       coverageTarget,
       ...(body.base ? { base: body.base } : {}),
       yolo: body.yolo === true,
+      ...(body.autopilot === false ? { autopilot: false } : {}),
     }
 
     try {
@@ -475,7 +481,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
   // and launch creates one flight per feature — the first running, the rest
   // parked `queued` for the conductor's sequential drain.
 
-  app.post<{ Body: { repoPaths?: string[]; description?: string } | undefined }>(
+  app.post<{ Body: { repoPaths?: string[]; description?: string; autopilot?: boolean } | undefined }>(
     '/api/flights/plan-features',
     async (req, reply) => {
       const body = req.body ?? {}
@@ -498,7 +504,11 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         }
       }
       const task = startPlanFeatures(
-        { repoPaths: resolved, description: body.description.trim() },
+        {
+          repoPaths: resolved,
+          description: body.description.trim(),
+          ...(body.autopilot === false ? { autopilot: false } : {}),
+        },
         planStore,
         {
           logsDir: deps.logsDir,
@@ -506,9 +516,17 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           workspaceEvents: deps.workspaceEvents,
           // A single-feature plan launches itself — even if the dialog is
           // closed (backgrounded). Multi-feature is left for the proposal.
+          // The task carries the dialog's autopilot choice (R71/W4).
           autoLaunch: (settled) =>
             executePlannedLaunch(
-              { repoPaths: settled.repoPaths, features: settled.result!.features, env: 'local', coverageTarget: 100, yolo: false },
+              {
+                repoPaths: settled.repoPaths,
+                features: settled.result!.features,
+                env: 'local',
+                coverageTarget: 100,
+                yolo: false,
+                ...(settled.autopilot === false ? { autopilot: false } : {}),
+              },
               { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
             ),
         },
@@ -565,6 +583,8 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           env?: string
           coverageTarget?: number
           yolo?: boolean
+          /** Absent = the task's stored choice; explicit false opts out. */
+          autopilot?: boolean
         }
       | undefined
   }>('/api/flights/plan-features/:taskId/launch', async (req, reply) => {
@@ -606,6 +626,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         env: body.env ?? 'local',
         coverageTarget: body.coverageTarget ?? 100,
         yolo: body.yolo === true,
+        ...((body.autopilot ?? task.autopilot) === false ? { autopilot: false } : {}),
       },
       { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
     )

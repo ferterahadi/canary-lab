@@ -4,7 +4,7 @@ import {
   runAgentProcess,
   buildClaudeAgenticArgs,
 } from '../../../agent-sessions/logic/agent-process'
-import { recoverClaudeFinalText } from '../../../agent-sessions/logic/agent-stream'
+import { recoverClaudeAssistantText } from '../../../agent-sessions/logic/agent-stream'
 import {
   claudeSessionLogPath,
   writeWorkflowAgentRef,
@@ -114,7 +114,11 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
   try {
     const result = await handle.done
     if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
-    const text = recoverClaudeFinalText(result.stdout)
+    // Flight agents are parsed for structured output (extractJson), never shown
+    // — so recover EVERY assistant turn, not just the final message. A scout
+    // that emits the config JSON then signs off with prose in a later turn must
+    // not lose the JSON to that trailing turn (the display view tails the JSONL).
+    const text = recoverClaudeAssistantText(result.stdout)
     if (result.code !== 0 && !text.trim()) {
       throw new Error(`agent exited with code ${result.code ?? 'null'}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
     }
@@ -127,10 +131,20 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
 /** Pull the first JSON object out of an agent's final answer — fenced
  *  (```json … ```) or bare. Throws with a short excerpt when unparseable. */
 export function extractJson<T>(text: string): T {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
-  const candidates = [fenced?.[1], text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)]
+  const candidates: string[] = []
+  // Every ```json … ``` (or bare ```) fence, LAST first — when a transcript
+  // carries several, the agent's real answer is the final fence; earlier ones
+  // are usually reasoning/examples. A trailing prose turn adds no fence, so the
+  // config fence from an earlier turn still wins.
+  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/g
+  for (let m = fenceRe.exec(text); m !== null; m = fenceRe.exec(text)) {
+    if (m[1]?.trim()) candidates.unshift(m[1])
+  }
+  // Bare object slice as a last resort.
+  const first = text.indexOf('{')
+  const last = text.lastIndexOf('}')
+  if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1))
   for (const candidate of candidates) {
-    if (!candidate || !candidate.trim()) continue
     try {
       return JSON.parse(candidate.trim()) as T
     } catch {

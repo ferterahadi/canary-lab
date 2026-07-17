@@ -15,7 +15,7 @@ import { Chip } from '../../../shared/ui/StatusChip'
 export const STAGE_LABEL: Record<FlightStageKey, string> = {
   'similarity': 'Existing feature found',
   'scout': 'Repo scan',
-  'scaffold': 'Feature setup',
+  'scaffold': 'Suite setup',
   'env-capture': 'Environment snapshot',
   'docs': 'Docs extraction',
   'prd-summary': 'Requirements summary',
@@ -37,7 +37,7 @@ export function stageLabel(key: string): string {
 export const STAGE_BLURB: Record<FlightStageKey, string> = {
   'similarity': 'Runs every step below, start to finish.',
   'scout': 'Scans your repo to learn its stack, structure, and how it boots.',
-  'scaffold': 'Creates the feature in your workspace with a config and boot command.',
+  'scaffold': 'Creates the test suite in your workspace with a config and boot command.',
   'env-capture': 'Captures the environment variables the app needs to start.',
   'docs': 'Gathers the requirement docs (PRD, specs) that describe the feature.',
   'prd-summary': 'Distills those docs into a short, testable requirements summary.',
@@ -95,6 +95,71 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
   )
 }
 
+// ─── Checkpoint display vocabulary (R71/W3) ─────────────────────────────────
+// Server checkpoint kinds and option KEYS stay canonical (MCP/CLI/four-surface
+// parity — respond_flight_checkpoint still takes the raw key). This map is the
+// display layer only: outcome language for card titles and option buttons,
+// mirroring the STAGE_LABEL pattern. An unmapped kind/option falls back to its
+// raw key, so new server checkpoints degrade readable, never blank.
+
+const CHECKPOINT_TITLE: Record<string, string> = {
+  'similarity-choice': 'Existing feature found — what should this flight do?',
+  'config-approval': 'Approve the drafted config?',
+  'missing-env': 'Environment values needed',
+  'prd-source': 'Where should requirements come from?',
+  'coverage-stuck': 'Coverage stopped short of the target',
+  'portify-apply': 'Apply the parallel-readiness edits?',
+  'run-failed': 'The test run did not pass',
+  'export-mode': 'How should the report be built?',
+}
+
+const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
+  'similarity-choice': {
+    'rerun': 'Run existing tests',
+    'enhance': 'Update it, then run',
+    'new': 'Start a fresh feature',
+  },
+  'config-approval': {
+    'approve': 'Approve config',
+    'redraft': 'Redraft from a fresh scan',
+  },
+  'missing-env': {
+    'retry': 'Re-check the files',
+    'waive': 'Capture only what exists',
+  },
+  'prd-source': {
+    'continue': 'Use the docs present',
+    'use-repo-docs': 'Copy repo docs in',
+    'infer-from-diff': 'Infer from git diff',
+    'description-only': 'From the intent alone',
+    'retry': 'Re-check docs',
+  },
+  'coverage-stuck': {
+    'accept-partial': 'Accept current coverage',
+    'retry': 'Try another round of passes',
+  },
+  'portify-apply': {
+    'apply': 'Apply the edits',
+    'cancel': 'Reject them (stage fails)',
+  },
+  'run-failed': {
+    'rerun': 'Start a new run',
+    'export-as-is': 'Export the report as-is',
+  },
+  'export-mode': {
+    'raw': 'Fast report from evidence',
+    'localized': 'Agent-rewritten reasoning (slower)',
+  },
+}
+
+export function checkpointTitle(kind: string): string {
+  return CHECKPOINT_TITLE[kind] ?? kind
+}
+
+export function checkpointOptionLabel(kind: string, option: string): string {
+  return CHECKPOINT_OPTION_LABEL[kind]?.[option] ?? option
+}
+
 function num(ev: Record<string, unknown>, key: string): number | null {
   return typeof ev[key] === 'number' ? (ev[key] as number) : null
 }
@@ -146,7 +211,7 @@ const FOLDED_KEYS = new Set<string>(Object.values(STAGE_COMPANION))
 /** Merged label where the pair reads as one outcome the individual stage
  *  labels don't cover (the stage-entry menu still names each stage alone). */
 const MERGED_LABEL: Partial<Record<FlightStageKey, string>> = {
-  'scaffold': 'Feature setup',
+  'scaffold': 'Suite setup',
   'docs': 'Requirements',
 }
 
@@ -204,10 +269,6 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`
 }
 
-function baseName(p: string): string {
-  return p.split('/').pop() ?? p
-}
-
 /** Boot-proof fact from the env-capture evidence (rendered on the merged
  *  Feature setup row — R32). */
 function bootCheckFacts(envEv: Record<string, unknown>): StageFact[] {
@@ -246,21 +307,18 @@ export function stageFacts(
         ? [{ label: 'Matches', value: match.feature }]
         : []
     }
-    case 'scout': {
-      // R57: repos + intent render as the RepoScanPanel's cards; the facts keep
-      // only what the scan itself discovered.
-      const envFiles = Array.isArray(ev.envFiles) ? (ev.envFiles as unknown[]).filter((f): f is string => typeof f === 'string') : []
-      return envFiles.length > 0
-        ? [{ label: 'Env files', value: envFiles.map(baseName).join(', '), mono: true, title: envFiles.join('\n') }]
-        : []
-    }
+    case 'scout':
+      // R72c: everything the scan surfaces is per-repo and lives on the
+      // RepoScanPanel's cards (name · location · env files) under the one
+      // global intent — no facts left at the stage level.
+      return []
     case 'scaffold': {
       // R32: the merged Feature setup row — identity + the env/boot proof from
       // the folded env-capture companion. The config digest (run command,
       // ports, Playwright) renders beside these from the live feature config.
       const dir = str(ev, 'featureDir')
       return [
-        { label: 'Feature', value: flight.feature },
+        { label: 'Suite', value: flight.feature },
         ...(ev.reused ? [{ label: 'Setup', value: 'Reused existing', tone: 'good' as const }] : []),
         ...(dir ? [{ label: 'Location', value: dir.split('/').slice(-2).join('/'), mono: true, title: dir }] : []),
         ...bootCheckFacts(cev),
@@ -419,7 +477,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     const cev = (companion?.evidence ?? {}) as Record<string, unknown>
     const captured = num(cev, 'captured')
     const verb = ev.reused ? 'reused' : 'created'
-    return `Feature "${flight.feature}" ${verb} — env captured${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''}, dry-run boot passed.`
+    return `Suite "${flight.feature}" ${verb} — env captured${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''}, dry-run boot passed.`
   }
   if (companionDone && key === 'docs') {
     const cev = (companion?.evidence ?? {}) as Record<string, unknown>
@@ -441,16 +499,19 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       }
       return `No duplicate found${scanned != null ? ` (${scanned} feature${scanned === 1 ? '' : 's'} scanned)` : ''} — proceeding fresh.`
     }
-    case 'scout':
+    case 'scout': {
+      const repos = flight.repoPaths.length
+      const envFiles = Array.isArray(ev.envFiles) ? ev.envFiles.length : 0
       return running
-        ? 'Agent is reading the repo to draft the feature config…'
-        : 'Feature config drafted from the repo.'
+        ? `Inspecting ${plural(repos, 'repo')} to learn how it boots and which environment files it uses…`
+        : `Scanned ${plural(repos, 'repo')} — suite configuration drafted, ${plural(envFiles, 'environment file')} detected.`
+    }
     case 'scaffold':
       return running
-        ? 'Creating the feature in the workspace…'
+        ? 'Creating the suite in the workspace…'
         : ev.reused
-          ? `Feature "${flight.feature}" already existed — reused.`
-          : `Feature "${flight.feature}" created in the workspace.`
+          ? `Suite "${flight.feature}" already existed — reused.`
+          : `Suite "${flight.feature}" created in the workspace.`
     case 'env-capture': {
       if (running) return 'Capturing env files and boot-testing the config…'
       const captured = num(ev, 'captured')

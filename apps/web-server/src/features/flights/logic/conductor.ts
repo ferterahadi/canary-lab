@@ -604,6 +604,26 @@ export function abortFlight(flightId: string, deps: FlightConductorDeps): Flight
   return manifest
 }
 
+/** R71/W4: checkpoint kind → its safe default. A kind is auto-answered only
+ *  when the mapped choice is actually among the checkpoint's options — the
+ *  docs stage omits `continue` when no docs exist, so prd-source parks exactly
+ *  then. similarity-choice and missing-env have no entry: no safe default
+ *  exists (a wrong guess re-points the flight / invents secrets). */
+const AUTOPILOT_CHOICE: Record<string, string> = {
+  'config-approval': 'approve',
+  'prd-source': 'continue',
+  'coverage-stuck': 'accept-partial',
+  'portify-apply': 'apply',
+  'run-failed': 'export-as-is',
+  'export-mode': 'raw',
+}
+
+function autopilotChoice(opts: FlightOptions, checkpoint: FlightCheckpoint): string | null {
+  if (opts.autopilot === false || opts.yolo) return null // yolo has its own per-adapter skips
+  const choice = AUTOPILOT_CHOICE[checkpoint.kind]
+  return choice !== undefined && (checkpoint.options ?? []).includes(choice) ? choice : null
+}
+
 interface DriveOpts {
   /** Response for the stage the loop is re-entering after a checkpoint. */
   checkpointResponse?: FlightCheckpointResponse
@@ -636,6 +656,9 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
   }
 
   let pendingResponse = opts.checkpointResponse
+  // R71/W4: stage:kind pairs already auto-answered this drive — the loop-guard
+  // that turns a would-be infinite approve→re-park cycle into a human park.
+  const autoAnswered = new Set<string>()
   const controller = new AbortController()
   driveControllers.set(flightId, controller)
 
@@ -800,6 +823,19 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         continue
       }
       if (outcome.kind === 'checkpoint') {
+        // R71/W4 autopilot: a checkpoint whose safe default is among its
+        // options answers itself — logged, recorded on the stage, and guarded
+        // so a RE-parked checkpoint (config parse error, unrecognized choice)
+        // is never auto-answered twice: the second park reaches the human.
+        const auto = autopilotChoice(read().opts, outcome.checkpoint)
+        const autoKey = `${stage.key}:${outcome.checkpoint.kind}`
+        if (auto && !autoAnswered.has(autoKey)) {
+          autoAnswered.add(autoKey)
+          ctx.appendLog(`[autopilot] ${outcome.checkpoint.kind}: answered "${auto}" — use ↺ Start over (or the stage's own controls) to choose differently\n`)
+          patchStage(stage.key, { checkpoint: outcome.checkpoint, checkpointResponse: { choice: auto } })
+          pendingResponse = { choice: auto }
+          continue
+        }
         patchStage(stage.key, { status: 'waiting-for-approval', checkpoint: outcome.checkpoint })
         const cur = read()
         save({ ...cur, status: 'waiting-for-approval', updatedAt: now() })

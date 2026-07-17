@@ -135,6 +135,12 @@ export function FlightStartDialog({
   // control once flown), collapsible to get it out of the way.
   const [showSteps, setShowSteps] = useState(true)
 
+  // R71/W4: autopilot rides every launch path (plan, single-flight escape,
+  // proposal confirm, feature-scoped start). Default ON; the body carries the
+  // field only on an explicit opt-out (absent = on, server-side too).
+  const [autopilot, setAutopilot] = useState(true)
+  const autopilotBody = autopilot ? {} : { autopilot: false as const }
+
   // R54 plan flow state. Resuming a backgrounded pre-flight opens straight in
   // the planning view (the resume effect attaches the task; the settle effect
   // then promotes it to the proposal or into the launched flight).
@@ -290,7 +296,7 @@ export function FlightStartDialog({
     if (busy) return
     setBusy(true)
     setStartError(null)
-    api.planFeatures({ repoPaths, description: description.trim() })
+    api.planFeatures({ repoPaths, description: description.trim(), ...autopilotBody })
       .then((task) => {
         setPlanTask(task)
         setPhase('planning')
@@ -308,6 +314,7 @@ export function FlightStartDialog({
       feature: derivedFeature ?? 'feature',
       repoPaths,
       description: description.trim(),
+      ...autopilotBody,
     })
       .then((manifest) => onOpenFlight(manifest.flightId))
       .catch(openFlightFail)
@@ -323,7 +330,7 @@ export function FlightStartDialog({
       ...f,
       ...(sharedGroup.trim() ? { group: sharedGroup.trim() } : {}),
     }))
-    api.launchPlannedFeatures(planTask.taskId, { features })
+    api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody })
       .then(({ flightIds }) => onOpenFlight(flightIds[0]))
       .catch(applyLaunchFailure)
   }
@@ -346,6 +353,7 @@ export function FlightStartDialog({
         : picked === 'similarity'
           ? (hasRecord ? { mode: 'redo' as const } : {})
           : { ...(hasRecord ? { mode: 'jump' as const } : {}), fromStage: picked }),
+      ...autopilotBody,
     }
     api.startFlight(body)
       .then((manifest) => onOpenFlight(manifest.flightId))
@@ -575,6 +583,28 @@ export function FlightStartDialog({
                 {stageMenu}
               </Step>
             </div>
+
+            {/* R71/W4: autopilot — on by default; the flight asks only where a
+                wrong guess would do damage (secrets, duplicate feature). */}
+            <label
+              data-testid="flight-autopilot-toggle"
+              className="flex cursor-pointer items-start gap-2.5 rounded border px-3 py-2"
+              style={{ borderColor: 'var(--border-default)' }}
+            >
+              <input
+                type="checkbox"
+                data-testid="flight-autopilot-checkbox"
+                checked={autopilot}
+                onChange={(e) => setAutopilot(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[12px] font-medium">Autopilot — ask only when required</span>
+                <span className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                  Safe checkpoints answer themselves (each decision is logged on its stage); the flight still stops for missing secrets or a duplicate feature.
+                </span>
+              </span>
+            </label>
 
             {hasRecord && (
               <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>

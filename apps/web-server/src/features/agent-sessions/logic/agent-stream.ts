@@ -9,7 +9,10 @@
 // concatenated assistant text, then to the raw stdout, so a schema drift
 // degrades to "use whatever we got" rather than throwing.
 
-export function recoverClaudeFinalText(stdout: string): string {
+/** One pass over stream-json stdout: the terminal result text (if any) and
+ *  every assistant text block, in order across ALL turns. Both recover* helpers
+ *  read from this so they can't drift apart. */
+function collectClaudeText(stdout: string): { resultText: string | null; assistant: string[] } {
   let resultText: string | null = null
   const assistant: string[] = []
   for (const line of stdout.split('\n')) {
@@ -33,5 +36,22 @@ export function recoverClaudeFinalText(stdout: string): string {
       }
     }
   }
+  return { resultText, assistant }
+}
+
+export function recoverClaudeFinalText(stdout: string): string {
+  const { resultText, assistant } = collectClaudeText(stdout)
   return resultText ?? (assistant.join('') || stdout)
+}
+
+// Every assistant turn's text joined, NOT just the final message. For callers
+// that parse structured output (a ```json fence) out of the transcript: an
+// agent that answers with the JSON in one turn and then signs off with prose in
+// a later turn would otherwise lose the JSON — recoverClaudeFinalText returns
+// only that trailing prose. Joining all turns keeps the earlier answer intact.
+export function recoverClaudeAssistantText(stdout: string): string {
+  const { resultText, assistant } = collectClaudeText(stdout)
+  // Fold the terminal result in too (it may hold text no assistant block did).
+  const parts = resultText && !assistant.includes(resultText) ? [...assistant, resultText] : assistant
+  return parts.join('\n') || stdout
 }

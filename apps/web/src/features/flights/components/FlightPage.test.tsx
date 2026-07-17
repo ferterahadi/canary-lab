@@ -215,7 +215,7 @@ describe('FlightPage', () => {
     })
   })
 
-  it('a paused flight offers Resume; an active one offers Abort', async () => {
+  it('a paused flight offers Continue as the header primary; an active one keeps Stop in the ⋯ menu', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', error: 'boot failed' }))
     mocks.resumeFlight.mockResolvedValue(manifest())
     await render('fl_1')
@@ -225,25 +225,60 @@ describe('FlightPage', () => {
 
     mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="flight-abort"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="flight-abort"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-abort"]')?.textContent).toContain('Stop flight')
   })
 
-  it('R25: a settled flight offers the stage-entry launcher; an active one does not', async () => {
+  it('R73: a failed stage renders the shared error card (detail only; recovery is the header primary)', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'stage-failed',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scout'
+          ? ('failed' as const)
+          : key === 'similarity'
+            ? ('done' as const)
+            : ('pending' as const),
+        ...(key === 'scout' ? { error: 'agent did not return parseable JSON (got: leftover chatter)' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    // The failed stage auto-selects, so its error card is on screen.
+    expect(container.querySelector('[data-testid="stage-error"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="stage-error-title"]')?.textContent).toContain('failed')
+    expect(container.querySelector('[data-testid="stage-error-detail"]')?.textContent).toContain('parseable JSON')
+    // No second Continue in the card — recovery lives on the header primary only.
+    expect(container.querySelector('[data-testid="stage-error-retry"]')).toBeNull()
+    expect(container.querySelector('[data-testid="flight-resume"]')).toBeTruthy()
+  })
+
+  it('R25/R71: the stage-entry launcher rides the ⋯ menu on done and IS the header primary on failed', async () => {
     const onStartFlight = vi.fn()
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done' }))
     await render('fl_1', { onStartFlight })
+    expect(container.querySelector('[data-testid="flight-refly"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
     const refly = container.querySelector<HTMLButtonElement>('[data-testid="flight-refly"]')
     expect(refly).toBeTruthy()
     await act(async () => { refly?.click() })
     expect(onStartFlight).toHaveBeenCalledWith('checkout')
 
+    // failed → re-flying is the obvious next action, so it takes the primary slot.
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'failed' }))
+    await render('fl_1', { onStartFlight })
+    expect(container.querySelector('[data-testid="flight-refly"]')?.className).toContain('cl-button-primary')
+
     mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
     await render('fl_1', { onStartFlight })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
     expect(container.querySelector('[data-testid="flight-refly"]')).toBeNull()
 
-    // No handler wired → no button (the launcher is App-owned and optional).
+    // No handler wired → no entry anywhere (the launcher is App-owned and optional).
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done' }))
     await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
     expect(container.querySelector('[data-testid="flight-refly"]')).toBeNull()
   })
 
@@ -390,7 +425,7 @@ describe('trailer model (R14–R18)', () => {
     mocks.getFlight.mockResolvedValue(manifest())
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel readiness')
-    expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('Feature setup')
+    expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('Suite setup')
     expect(container.querySelector('[data-testid="stage-rail-docs"]')?.textContent).toContain('Requirements')
     expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Evaluation Report')
     // Run + heal are one user step; similarity never shows unless it needs a
@@ -495,12 +530,12 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="specs-pass-live"]')).toBeNull()
   })
 
-  it('R17: the status chip lives in its own slot, not inside the title', async () => {
+  it('R72: the status chip rides the title line, right of the name', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })) }))
     await render('fl_1')
     const title = container.querySelector('h1')
-    expect(title?.textContent).not.toContain('done')
-    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('done')
+    expect(title?.textContent).toContain('checkout')
+    expect(title?.querySelector('[data-testid="flight-status"]')?.textContent).toBe('done')
   })
 
   it('R14/R16: a generating stage leads with a live state line', async () => {
@@ -512,7 +547,7 @@ describe('trailer model (R14–R18)', () => {
       })),
     }))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Creating the feature in the workspace…')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Creating the suite in the workspace…')
     expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('generating')
   })
 
@@ -708,7 +743,7 @@ describe('trailer model (R14–R18)', () => {
     })
     // Pair-settled state line speaks the whole step.
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
-      .toBe('Feature "checkout" created — env captured (2 files), dry-run boot passed.')
+      .toBe('Suite "checkout" created — env captured (2 files), dry-run boot passed.')
     const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
     expect(facts).toContain('checkout')
     expect(facts).toContain('2 files')
@@ -780,12 +815,28 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click()
     })
-    // R57: repos + intent moved from scout facts into the read-only RepoScanPanel.
-    expect(container.querySelector('[data-testid="repo-card-shop"]')?.textContent).toContain('/repo/shop')
-    expect(container.querySelector('[data-testid="repo-card-api"]')?.textContent).toContain('/repo/api')
+    // R72c: the intent card is distinct from the rearranged repo evidence.
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
+      .toBe('Scanned 2 repos — suite configuration drafted, 1 environment file detected.')
+    expect(container.querySelector('[data-testid="flight-intent-card"]')?.textContent).toContain('Flight input')
+    expect(container.querySelector('[data-testid="flight-intent-card"]')?.textContent).toContain('Intent · what to test')
     expect(container.querySelector('[data-testid="flight-intent"]')?.textContent).toContain('checkout flow')
-    const scoutFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(scoutFacts).toContain('.env')
+    expect(container.querySelector('[data-testid="repo-scan-output"]')).toBeNull()
+    const intentCard = container.querySelector<HTMLElement>('[data-testid="flight-intent-card"]')
+    const repoScanCard = container.querySelector<HTMLElement>('[data-testid="repo-scan-card"]')
+    expect(repoScanCard?.textContent).toContain('Repos · 2 scanned')
+    expect(repoScanCard?.className).toBe(intentCard?.className)
+    // R73: the panel fills a fixed 76ch column so the repo cards and a failed
+    // stage's error card line up as one column (no shrink-wrap asymmetry).
+    expect(container.querySelector('[data-testid="repo-scan-panel"]')?.className).toContain('max-w-[76ch]')
+    const shopCard = container.querySelector('[data-testid="repo-card-shop"]')?.textContent ?? ''
+    expect(shopCard).toContain('/repo/shop')
+    expect(shopCard).toContain('.env')
+    const apiCard = container.querySelector('[data-testid="repo-card-api"]')?.textContent ?? ''
+    expect(apiCard).toContain('/repo/api')
+    expect(apiCard).not.toContain('.env')
+    expect(container.querySelector('[data-testid="stage-facts"]')).toBeNull()
+    expect(container.querySelector('header')?.textContent).not.toContain('/repo/shop')
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click()
@@ -820,10 +871,17 @@ describe('trailer model (R14–R18)', () => {
   })
 })
 
-describe('flight controls (R48)', () => {
-  it('an active flight offers Pause + Stop; pause posts and refetches', async () => {
+describe('flight controls (R48/R71)', () => {
+  const openMenu = async () => {
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
+  }
+
+  it('an active flight keeps Pause + Stop flight in the ⋯ menu; pause posts and refetches', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
     await render('fl_1')
+    // R71/W1: 2-button ceiling — nothing but the ⋯ menu while running.
+    expect(container.querySelector('[data-testid="flight-pause"]')).toBeNull()
+    await openMenu()
     expect(container.querySelector('[data-testid="flight-pause"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="flight-abort"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="flight-start-over"]')).toBeNull()
@@ -834,10 +892,23 @@ describe('flight controls (R48)', () => {
     expect(mocks.pauseFlight).toHaveBeenCalledWith('fl_1')
   })
 
-  it('a paused flight offers Continue + Start over; start over confirms once then redoes', async () => {
+  it('Stop flight confirms once inside the menu, then aborts', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
+    await render('fl_1')
+    await openMenu()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-abort"]')?.click() })
+    // First click arms in place; nothing fired yet.
+    expect(mocks.abortFlight).not.toHaveBeenCalled()
+    mocks.abortFlight.mockResolvedValue(manifest({ status: 'aborted' }))
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-abort-confirm"]')?.click() })
+    expect(mocks.abortFlight).toHaveBeenCalledWith('fl_1')
+  })
+
+  it('a paused flight offers Continue (primary) + Start over in the menu; start over confirms once then redoes', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user', currentStage: 'docs' }))
     await render('fl_1')
     expect(container.querySelector('[data-testid="flight-resume"]')?.textContent).toBe('Continue')
+    await openMenu()
     expect(container.querySelector('[data-testid="flight-pause"]')).toBeNull()
     const startOver = container.querySelector<HTMLButtonElement>('[data-testid="flight-start-over"]')
     expect(startOver).toBeTruthy()
@@ -851,6 +922,167 @@ describe('flight controls (R48)', () => {
     expect(mocks.redoFlight).toHaveBeenCalledWith('fl_1')
   })
 
+  it('R71/W1: the breadcrumb goes back to the picker; Escape closes to the workspace', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
+    const onSelectFlight = vi.fn()
+    const onClose = vi.fn()
+    await render('fl_1', { onSelectFlight, onClose })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-breadcrumb"]')?.click() })
+    expect(onSelectFlight).toHaveBeenCalledWith(null)
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('R71/W1: a parked flight leads with Respond → (primary); clicking returns selection to the parked stage', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'waiting-for-approval',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'docs' ? ('waiting-for-approval' as const) : key === 'similarity' ? ('done' as const) : ('pending' as const),
+        ...(key === 'docs' ? { checkpoint: { kind: 'prd-source', message: 'Docs?', options: ['continue', 'retry'] } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    // Park the selection elsewhere first, then Respond → returns to the ask.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    expect(container.querySelector('[data-testid="checkpoint-controls"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-primary-respond"]')?.click() })
+    expect(container.querySelector('[data-testid="checkpoint-controls"]')).toBeTruthy()
+  })
+
+  it('R71/W1: a rejected control action surfaces on the inline error line, not silently', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user' }))
+    mocks.resumeFlight.mockRejectedValue(new Error('server unreachable'))
+    await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-resume"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-action-error"]')?.textContent).toContain('server unreachable')
+  })
+})
+
+describe('rail follow mode (R71/W2)', () => {
+  const runningStages = () => FLIGHT_STAGE_KEYS.map((key) => ({
+    key,
+    status: key === 'scout' ? ('running' as const) : ('pending' as const),
+  }))
+
+  it('a manual rail pick parks follow-mode and shows Resume following; the chip restores auto-select', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
+    await render('fl_1')
+    // Following by default: the auto-picked stage is the running scout.
+    expect(container.querySelector('[data-testid="rail-following"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('aria-current')).toBe('true')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    expect(container.querySelector('[data-testid="rail-following"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-rail-run"]')?.getAttribute('aria-current')).toBe('true')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="rail-resume-follow"]')?.click() })
+    expect(container.querySelector('[data-testid="rail-following"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('aria-current')).toBe('true')
+  })
+
+  it('switching flights resets a parked selection back to follow-mode', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
+    // Fixed key: the component must survive the flightId change WITHOUT a
+    // remount — the reset effect is what's under test.
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <FlightPage key="fixed" flightId="fl_1" onSelectFlight={vi.fn()} onClose={vi.fn()} />
+        </InvalidationProvider>,
+      )
+    })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click() })
+    expect(container.querySelector('[data-testid="rail-resume-follow"]')).toBeTruthy()
+    mocks.getFlight.mockResolvedValue(manifest({ flightId: 'fl_2', stages: runningStages() }))
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <FlightPage key="fixed" flightId="fl_2" onSelectFlight={vi.fn()} onClose={vi.fn()} />
+        </InvalidationProvider>,
+      )
+    })
+    expect(container.querySelector('[data-testid="rail-following"]')).toBeTruthy()
+  })
+
+  it('rail and stage-header tooltips speak the STAGE_BLURB, not internal keys', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
+    await render('fl_1')
+    const title = container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('title')
+    expect(title).toContain('Scans your repo')
+    expect(title).not.toBe('scout')
+  })
+})
+
+describe('checkpoint display language (R71/W3)', () => {
+  const parkedOn = (key: string, checkpoint: Record<string, unknown>) => manifest({
+    status: 'waiting-for-approval',
+    stages: FLIGHT_STAGE_KEYS.map((k) => ({
+      key: k,
+      status: k === key ? ('waiting-for-approval' as const) : ('done' as const),
+      ...(k === key ? { checkpoint } : {}),
+    })),
+  })
+
+  it('renders outcome language + a Recommended tag; the POSTed key stays raw', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('similarity', {
+      kind: 'similarity-choice', message: 'checkout already targets this repo.', options: ['rerun', 'enhance', 'new'],
+    }))
+    mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="checkpoint-title"]')?.textContent).toContain('Existing feature found')
+    const first = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-choice-rerun"]')
+    expect(first?.textContent).toContain('Run existing tests')
+    expect(first?.textContent).toContain('Recommended')
+    expect(container.querySelector('[data-testid="checkpoint-choice-enhance"]')?.textContent).toBe('Update it, then run')
+    // No folding at exactly 3 options.
+    expect(container.querySelector('[data-testid="checkpoint-more-options"]')).toBeNull()
+    await act(async () => { first?.click() })
+    expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'rerun' })
+  })
+
+  it('folds a 4+-option checkpoint behind More options', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source', message: 'Docs?', options: ['continue', 'use-repo-docs', 'infer-from-diff', 'description-only', 'retry'],
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="checkpoint-choice-continue"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="checkpoint-choice-use-repo-docs"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-more-options"]')?.click() })
+    expect(container.querySelector('[data-testid="checkpoint-choice-use-repo-docs"]')?.textContent).toBe('Copy repo docs in')
+    expect(container.querySelector('[data-testid="checkpoint-more-options"]')).toBeNull()
+  })
+
+  it('an unmapped kind/option degrades to its raw key, never blank', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('scout', {
+      kind: 'future-kind', message: 'New question.', options: ['yes-do-it'],
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="checkpoint-title"]')?.textContent).toBe('future-kind')
+    expect(container.querySelector('[data-testid="checkpoint-choice-yes-do-it"]')?.textContent).toContain('yes-do-it')
+  })
+})
+
+describe('summary strip (R71/W5)', () => {
+  it('strip items jump to their stage; elapsed shows while running', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:02:00Z',
+      runVerdict: 'passed',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'evaluation-export' ? ('running' as const) : ('done' as const),
+        ...(key === 'docs' ? { evidence: { docs: ['prd.md'] } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    // R71/W5 regression: elapsed used to hide exactly while running.
+    expect(container.querySelector('[data-testid="strip-elapsed"]')?.textContent).toContain('Elapsed so far')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="strip-run"]')?.click() })
+    expect(container.querySelector('[data-testid="stage-rail-run"]')?.getAttribute('aria-current')).toBe('true')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="strip-docs"]')?.click() })
+    expect(container.querySelector('[data-testid="stage-rail-docs"]')?.getAttribute('aria-current')).toBe('true')
+  })
+
   it('the paused status chip explains WHO paused it (pauseReason tooltip)', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user', currentStage: 'docs' }))
     await render('fl_1')
@@ -861,11 +1093,12 @@ describe('flight controls (R48)', () => {
 describe('detail redesign (R53–R68)', () => {
   const doneStages = () => FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
 
-  it('R62: the header has no back button; delete confirms once then deletes and returns to the list', async () => {
+  it('R62/R71: no standalone back button (breadcrumb only); delete confirms once in the menu then returns to the list', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: doneStages() }))
     const onSelectFlight = vi.fn()
     await render('fl_1', { onSelectFlight })
     expect(container.querySelector('[aria-label="All flights"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
     const del = container.querySelector<HTMLButtonElement>('[data-testid="flight-delete"]')
     expect(del).toBeTruthy()
     await act(async () => { del!.click() })

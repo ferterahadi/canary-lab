@@ -1508,7 +1508,7 @@ export function registerCanaryLabTools(
   const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
 
   registerTool('start_flight', {
-    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Non-yolo checkpoint order: config-approval parks AFTER the feature is scaffolded (approve the real on-disk config), the Requirements/prd-source checkpoint ALWAYS parks (add docs, then "continue"), and export-mode picks raw vs localized before the terminal export. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A flight\'s repos and intent are FROZEN once it first starts: on redo / from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing a DIFFERENT repo set or description is rejected with type:"flight_frozen"; to change them the user deletes the flight in the web UI (there is no delete tool). A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early.',
+    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Autopilot is ON by default: checkpoints with a safe default answer themselves — config-approval→approve (the scaffolded on-disk config), prd-source→continue (only when requirement docs already exist), coverage-stuck→accept-partial, portify-apply→apply, run-failed→export-as-is, export-mode→raw — each decision logged [autopilot] on its stage. The flight still parks on similarity-choice and missing-env (no safe default), on prd-source when NO docs exist yet, and on any RE-parked checkpoint (e.g. a config parse error after an auto-approve). Pass autopilot:false to be asked at every checkpoint — do that when you plan to distill THIS conversation into requirement docs at the prd-source stop. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A flight\'s repos and intent are FROZEN once it first starts: on redo / from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing a DIFFERENT repo set or description is rejected with type:"flight_frozen"; to change them the user deletes the flight in the web UI (there is no delete tool). A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early.',
     inputSchema: {
       repoPaths: z.array(z.string()).min(1).optional().describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them. REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s repos are frozen and the stored set is reused (a different set is rejected with flight_frozen).'),
       description: z.string().optional().describe('What to test, e.g. "checkout flow". REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s intent is frozen and the stored value is reused (a different one is rejected with flight_frozen).'),
@@ -1517,11 +1517,12 @@ export function registerCanaryLabTools(
       coverage_target: z.number().min(0).max(100).optional().describe('Coverage % the specs↔coverage loop must reach (default 100).'),
       base: z.string().optional().describe('Base branch for diff-inferred requirements (auto-detected when omitted).'),
       yolo: z.boolean().optional().describe('Skip every checkpoint except missing env secrets.'),
+      autopilot: z.boolean().optional().describe('Default true: safe checkpoints answer themselves (logged [autopilot]); similarity-choice, missing-env, docs-less prd-source, and re-parked checkpoints still park. Pass false to be asked at every checkpoint (e.g. to add conversation docs at the prd-source stop).'),
       fresh: z.boolean().optional().describe('Do not resume a paused flight — start over.'),
       redo: z.boolean().optional().describe('Restart the feature\'s existing flight from stage 1, discarding its stage evidence.'),
       from_stage: z.string().optional().describe('Start at this stage instead of stage 1 (e.g. "specs-coverage", "run"). Prerequisite artifacts are checked; rejected with the missing one named.'),
     },
-  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, fresh, redo, from_stage }) => {
+  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, autopilot, fresh, redo, from_stage }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
     // Repos + intent are frozen once a flight exists, so redo / from_stage /
     // resume may OMIT repoPaths/description — but then we need `feature` to
@@ -1564,6 +1565,7 @@ export function registerCanaryLabTools(
         ...(coverage_target !== undefined ? { coverageTarget: coverage_target } : {}),
         ...(base ? { base } : {}),
         ...(yolo ? { yolo } : {}),
+        ...(autopilot === false ? { autopilot: false } : {}),
         ...(redo ? { mode: 'redo' } : from_stage ? { mode: 'jump' } : {}),
         ...(from_stage ? { fromStage: from_stage } : {}),
       },
@@ -1612,7 +1614,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('respond_flight_checkpoint', {
-    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). prd-source ALWAYS parks (Requirements pause by design): first add docs with write_feature_doc (content or link_path), then respond "continue" — or pick a source to infer from. export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
+    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, a docs-less prd-source, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. At a prd-source park: first add docs with write_feature_doc (content or link_path), then respond "continue" — or pick a source to infer from. export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
     inputSchema: {
       flightId: z.string(),
       choice: z.string().optional().describe('One of the checkpoint\'s options.'),

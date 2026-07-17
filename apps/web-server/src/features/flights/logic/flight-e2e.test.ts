@@ -259,15 +259,14 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
 
     const resumed = respondToFlightCheckpoint(manifest.flightId, { choice: 'rerun' }, second.deps)
     await resumed.completion
-    // Non-yolo flights park once more before the terminal stage: the
-    // export-mode choice (raw vs localized).
-    const preExport = store.get(manifest.flightId)!
-    expect(preExport.status).toBe('waiting-for-approval')
-    expect(preExport.stages.find((s) => s.key === 'evaluation-export')!.checkpoint?.kind).toBe('export-mode')
-    const exported = respondToFlightCheckpoint(manifest.flightId, { choice: 'raw' }, second.deps)
-    await exported.completion
+    // R71/W4: autopilot (default on) answers the export-mode checkpoint with
+    // "raw" — after the one human decision (similarity), the rerun path runs
+    // to the archive without a second park, and the decision is on the log.
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('done')
+    const exportStage = final.stages.find((s) => s.key === 'evaluation-export')!
+    expect(exportStage.checkpointResponse).toEqual({ choice: 'raw' })
+    expect(exportStage.log).toContain('[autopilot] export-mode')
     expect(final.feature).toBe('first-flight-app') // re-pointed at the existing feature
     expect(final.links?.evaluationZip).toBeTruthy()
     // Authoring stages were skipped — no agent ran on the rerun path.

@@ -1871,6 +1871,8 @@ export interface StartFlightBody {
   mode?: 'continue' | 'redo' | 'jump'
   /** Stage to start at (mode "jump", or fresh stage entry). */
   fromStage?: FlightStageKeyT
+  /** Absent = autopilot on; explicit false asks at every checkpoint (R71/W4). */
+  autopilot?: boolean
 }
 
 /** Start / continue / redo / jump a flight (POST /api/flights, non-blocking —
@@ -2002,7 +2004,7 @@ export async function getFlightAgentSession(
  *  several. 202 with the task record; attach-or-start server-side (same repo
  *  set + description reattaches to the running task). */
 export function planFeatures(
-  body: { repoPaths: string[]; description: string },
+  body: { repoPaths: string[]; description: string; autopilot?: boolean },
   opts?: ClientOptions,
 ): Promise<PlanFeaturesTaskT> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -2039,7 +2041,7 @@ export function listPlanFeatures(opts?: ClientOptions): Promise<{ tasks: PlanFea
  *  `feature_name_conflicts` lists names already in use (nothing created). */
 export function launchPlannedFeatures(
   taskId: string,
-  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean },
+  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean; autopilot?: boolean },
   opts?: ClientOptions,
 ): Promise<{ flightIds: string[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

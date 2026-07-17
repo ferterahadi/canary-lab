@@ -10,42 +10,100 @@ import { FactsGrid, StageStatusChip, type StageFact } from './stage-meta'
 // config-doc API, docs/ via the docs API), so edits here and edits there are
 // the same write and stay live-synced through the existing WorkspaceEvents.
 
-// ─── Repo Scan: the flight's inputs, read-only (R57) ─────────────────────────
-// Repos + intent are FROZEN once the flight starts (server-enforced across
-// UI/MCP/CLI) — this panel presents them as the flight's charter: the intent
-// as a quote, one card per repo. The escape hatch is deleting the flight.
+// ─── Repo Scan: intent then repos (R72c) ─────────────────────────────────────
+// Keep the user-authored intent distinct from the repos the agent inspected.
+// Env files and locations remain per-repo facts. Read-only: repos + intent
+// freeze when the flight first starts.
 
 function repoBaseName(p: string): string {
   return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p
 }
 
-export function RepoScanPanel({ flight }: { flight: FlightManifest }) {
+const REPO_SCAN_CARD_CLASS = 'w-full rounded border px-3 py-2.5'
+const REPO_SCAN_CARD_STYLE = { borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }
+const REPO_SCAN_KICKER_CLASS = 'mb-1 text-[9.5px] font-semibold uppercase tracking-[0.11em]'
+
+export function RepoScanPanel({
+  flight,
+  envFiles = [],
+}: {
+  flight: FlightManifest
+  envFiles?: string[]
+}) {
+  // Attribute each scanned env file to the repo that contains it.
+  const envsFor = (repo: string): string[] =>
+    envFiles
+      .filter((f) => f === repo || f.startsWith(repo.replace(/[\\/]+$/, '') + '/'))
+      .map((f) => f.slice(repo.replace(/[\\/]+$/, '').length + 1) || repoBaseName(f))
+  const claimed = new Set(flight.repoPaths.flatMap((r) => envFiles.filter((f) => f.startsWith(r.replace(/[\\/]+$/, '') + '/'))))
+  const orphans = envFiles.filter((f) => !claimed.has(f))
+
   return (
-    <section data-testid="repo-scan-panel" className="flex flex-col gap-2">
-      <blockquote
-        data-testid="flight-intent"
-        className="m-0 rounded border-l-2 px-3 py-2 text-[12.5px] leading-relaxed"
-        style={{ borderColor: 'rgb(56, 189, 248)', background: 'var(--bg-surface)', color: 'var(--text-primary)' }}
+    <section
+      data-testid="repo-scan-panel"
+      className="flex w-full max-w-[76ch] flex-col gap-2.5"
+      title="Repos and intent are set when the flight first starts — delete the flight to test different ones."
+    >
+      <div
+        data-testid="flight-intent-card"
+        className={REPO_SCAN_CARD_CLASS}
+        style={REPO_SCAN_CARD_STYLE}
       >
-        “{flight.description}”
-      </blockquote>
-      <div className="flex flex-wrap gap-1.5">
-        {flight.repoPaths.map((p) => (
-          <div
-            key={p}
-            data-testid={`repo-card-${repoBaseName(p)}`}
-            className="flex min-w-0 flex-col gap-0.5 rounded border px-2.5 py-1.5"
-            style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
-          >
-            <span className="text-[11.5px] font-medium">{repoBaseName(p)}</span>
-            <span className="max-w-[340px] truncate text-[10px]" title={p} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-              {p}
-            </span>
-          </div>
-        ))}
+        <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          Flight input
+        </div>
+        <h3 className="mb-1.5 text-[12.5px] font-semibold">Intent · what to test</h3>
+        <p
+          data-testid="flight-intent"
+          className="m-0 max-w-[76ch] text-[12px] leading-relaxed"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {flight.description}
+        </p>
       </div>
-      <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-        Repos and intent are set when the flight first starts. To test different ones, delete this flight and start fresh.
+
+      <div
+        data-testid="repo-scan-card"
+        className={REPO_SCAN_CARD_CLASS}
+        style={REPO_SCAN_CARD_STYLE}
+      >
+        <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          {flight.repoPaths.length === 1 ? 'Repo · scanned' : `Repos · ${flight.repoPaths.length} scanned`}
+        </div>
+        <div className="flex flex-col">
+          {flight.repoPaths.map((p, index) => {
+            const envs = envsFor(p)
+            return (
+              <div
+                key={p}
+                data-testid={`repo-card-${repoBaseName(p)}`}
+                className={`flex min-w-0 flex-col gap-1 ${index > 0 ? 'mt-2 border-t pt-2' : ''}`}
+                style={index > 0 ? { borderColor: 'var(--border-default)' } : undefined}
+              >
+                <span className="text-[12.5px] font-semibold">{repoBaseName(p)}</span>
+                <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
+                  <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Location</span>
+                  <span className="max-w-[340px] truncate text-[10px]" title={p} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                    {p}
+                  </span>
+                  {envs.length > 0 && (
+                    <>
+                      <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Env</span>
+                      <span className="max-w-[340px] truncate text-[10px]" title={envs.join('\n')} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                        {envs.join(' · ')}
+                      </span>
+                    </>
+                  )}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+        {orphans.length > 0 && (
+          <div className="mt-2 border-t pt-2 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} title={orphans.join('\n')}>
+            env outside repos: {orphans.map(repoBaseName).join(' · ')}
+          </div>
+        )}
       </div>
     </section>
   )

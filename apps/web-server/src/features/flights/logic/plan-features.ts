@@ -129,7 +129,7 @@ export function normalizePlanResult(raw: PlanFeaturesResult): PlanFeaturesResult
  *  as-is (the dialog re-opening mid-plan attaches instead of double-spawning);
  *  otherwise a new task is created and the agent kicked off detached. */
 export function startPlanFeatures(
-  args: { repoPaths: string[]; description: string },
+  args: { repoPaths: string[]; description: string; autopilot?: boolean },
   store: PlanFeaturesStore,
   deps: PlanFeaturesDeps,
 ): PlanFeaturesTask {
@@ -148,6 +148,7 @@ export function startPlanFeatures(
     taskId: `fp_${crypto.randomBytes(6).toString('hex')}`,
     repoPaths: args.repoPaths,
     description: args.description,
+    ...(args.autopilot === false ? { autopilot: false } : {}),
     status: 'running',
     createdAt: now(),
     updatedAt: now(),

@@ -119,6 +119,15 @@ export interface FlightOptions {
   base?: string
   /** Skip every checkpoint except missing-env. */
   yolo: boolean
+  /** R71/W4 autopilot: checkpoints with a safe default answer themselves
+   *  (config-approval→approve, prd-source→continue when docs exist,
+   *  coverage-stuck→accept-partial, portify-apply→apply,
+   *  run-failed→export-as-is, export-mode→raw); similarity-choice and
+   *  missing-env always park. Absent = ON (default for new flights); set
+   *  `false` to be asked at every checkpoint. Milder than yolo: every
+   *  auto-answer is logged `[autopilot]` on the stage, and a re-parked
+   *  checkpoint (e.g. a config parse error) is never auto-answered twice. */
+  autopilot?: boolean
   /** Grouping label the scaffold writes into feature.config.cjs (`group:`) —
    *  set by the plan-features launch so sibling features render together. */
   group?: string
@@ -279,6 +288,10 @@ export interface PlanFeaturesTask {
   taskId: string
   repoPaths: string[]
   description: string
+  /** Rider from the new-flight dialog's toggle — carried so the launch (auto
+   *  or proposal-confirmed) starts its flights with the user's choice. Absent
+   *  = autopilot on. */
+  autopilot?: boolean
   status: PlanFeaturesTaskStatus
   result?: PlanFeaturesResult
   error?: string

@@ -1344,3 +1344,132 @@ describe('reopenStages', () => {
     expect(reopenStages(manifest.flightId, [], deps(allDone()))).toBeNull()
   })
 })
+
+describe('autopilot (R71/W4)', () => {
+  type Kind = import('./types').FlightCheckpointKind
+
+  const AUTO: Array<[Kind, string]> = [
+    ['config-approval', 'approve'],
+    ['prd-source', 'continue'],
+    ['coverage-stuck', 'accept-partial'],
+    ['portify-apply', 'apply'],
+    ['run-failed', 'export-as-is'],
+    ['export-mode', 'raw'],
+  ]
+
+  const parkThenDone = (kind: Kind, options: string[], responses: unknown[]): StageAdapter => ({
+    run: async () => ({ kind: 'checkpoint', checkpoint: { kind, message: 'q?', options } }),
+    onCheckpointResponse: async (_ctx, response) => {
+      responses.push(response)
+      return { kind: 'done' }
+    },
+  })
+
+  it.each(AUTO)('auto-answers %s with "%s", records + logs it, and the flight completes', async (kind, choice) => {
+    const responses: unknown[] = []
+    const adapters = allDone()
+    adapters.docs = parkThenDone(kind, [choice, 'other'], responses)
+    const { manifest, completion } = startFlight(args(`/repo/auto-${kind}`), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('done')
+    expect(responses).toEqual([{ choice }])
+    const docs = final.stages.find((s) => s.key === 'docs')!
+    expect(docs.checkpointResponse).toEqual({ choice })
+    expect(docs.log).toContain(`[autopilot] ${kind}: answered "${choice}"`)
+  })
+
+  it('similarity-choice and missing-env always park — no safe default exists', async () => {
+    const cases: Array<[Kind, string[]]> = [
+      ['similarity-choice', ['rerun', 'enhance', 'new']],
+      ['missing-env', ['retry', 'waive']],
+    ]
+    for (const [kind, options] of cases) {
+      const adapters = allDone()
+      adapters.docs = {
+        run: async () => ({ kind: 'checkpoint', checkpoint: { kind, message: 'q?', options } }),
+      }
+      const { manifest, completion } = startFlight(
+        { ...args(`/repo/park-${kind}`), feature: `f-${kind}` },
+        deps(adapters),
+      )
+      await completion
+      const final = store.get(manifest.flightId)!
+      expect(final.status).toBe('waiting-for-approval')
+      expect(final.stages.find((s) => s.key === 'docs')!.log ?? '').not.toContain('[autopilot]')
+    }
+  })
+
+  it('prd-source parks when "continue" is not offered (the no-docs case)', async () => {
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({
+        kind: 'checkpoint',
+        checkpoint: {
+          kind: 'prd-source',
+          message: 'no docs yet',
+          options: ['use-repo-docs', 'infer-from-diff', 'description-only', 'retry'],
+        },
+      }),
+    }
+    const { manifest, completion } = startFlight(args('/repo/no-docs'), deps(adapters))
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+  })
+
+  it('opts.autopilot === false parks every checkpoint (opt-out)', async () => {
+    const responses: unknown[] = []
+    const adapters = allDone()
+    adapters.docs = parkThenDone('config-approval', ['approve', 'redraft'], responses)
+    const { manifest, completion } = startFlight(
+      { ...args('/repo/opt-out'), opts: { ...OPTS, autopilot: false } },
+      deps(adapters),
+    )
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+    expect(responses).toEqual([])
+  })
+
+  it('yolo flights are exempt — a checkpoint an adapter parks under yolo reaches the human', async () => {
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({
+        kind: 'checkpoint',
+        checkpoint: { kind: 'config-approval', message: 'q?', options: ['approve', 'redraft'] },
+      }),
+    }
+    const { manifest, completion } = startFlight(
+      { ...args('/repo/yolo'), opts: { ...OPTS, yolo: true } },
+      deps(adapters),
+    )
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+  })
+
+  it('a RE-parked checkpoint reaches the human — never auto-answered twice', async () => {
+    const responses: unknown[] = []
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({
+        kind: 'checkpoint',
+        checkpoint: { kind: 'config-approval', message: 'q?', options: ['approve', 'redraft'] },
+      }),
+      // The approve failed (config parse error) — same checkpoint re-parks.
+      onCheckpointResponse: async (_ctx, response) => {
+        responses.push(response)
+        return {
+          kind: 'checkpoint',
+          checkpoint: { kind: 'config-approval', message: 'parse error — fix and approve', options: ['approve', 'redraft'], data: { error: 'bad cjs' } },
+        }
+      },
+    }
+    const { manifest, completion } = startFlight(args('/repo/re-park'), deps(adapters))
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('waiting-for-approval')
+    expect(responses).toEqual([{ choice: 'approve' }])
+    const log = final.stages.find((s) => s.key === 'docs')!.log ?? ''
+    expect(log.match(/\[autopilot\]/g)?.length).toBe(1)
+    expect(final.stages.find((s) => s.key === 'docs')!.checkpoint?.message).toContain('parse error')
+  })
+})

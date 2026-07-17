@@ -1,4 +1,14 @@
-You are onboarding product repo(s) into a Canary Lab E2E workspace. Inspect the repo(s) below and draft the feature config that boots them for testing. Look wherever the stack actually declares how to run: package.json scripts and lockfiles (Node), go.mod + cmd/ layout (Go), pyproject.toml/requirements.txt (Python), Cargo.toml (Rust), Makefiles, Procfiles, docker-compose files, READMEs, and .env* files. Do not assume Node — a repo with no package.json still boots (e.g. `go run .`).
+You are onboarding product repo(s) into a Canary Lab E2E workspace. Inspect the repo(s) below and draft the feature config that boots them for testing. Look wherever the stack actually declares how to run: package.json scripts and lockfiles (Node), go.mod + cmd/ layout (Go), pyproject.toml/requirements.txt (Python), Cargo.toml (Rust), pom.xml/build.gradle (JVM), *.csproj (.NET), Gemfile (Ruby), Makefiles, Procfiles, docker-compose files, and READMEs. Do not assume Node — a repo with no package.json still boots (e.g. `go run .`, `./mvnw spring-boot:run`).
+
+An "env file" is whatever file THIS repo reads its local config/secrets from — it is NOT only `.env`. Detect it per stack, do not assume `.env`:
+- Node / Vite / Next: `.env`, `.env.local`, `.env.development`, `.env.*`
+- JVM / Spring: `src/main/resources/application.properties` / `application.yml` and profile variants like `application-local.properties` / `application-local.yml`
+- .NET: `appsettings.json`, `appsettings.Development.json`, `appsettings.*.json`
+- Ruby / Rails: `config/database.yml`, `config/secrets.yml`, `config/credentials/*`, and `.env*` if `dotenv` is present
+- Python: `.env`, or a settings module / `*.ini` / `*.cfg` the app reads
+- Generic: any tracked `*.local.*`, `*.example`/`*.sample` (report the real file the example implies), or a path the boot command/README points at
+
+Report the actual file(s) the app reads at boot for the chosen start command — the real path, not the `.example`. When a repo genuinely reads none, return `[]`.
 
 Repos (one feature spans all of them):
 {{repoPaths}}
