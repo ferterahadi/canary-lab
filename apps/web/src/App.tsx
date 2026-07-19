@@ -18,6 +18,7 @@ import { FlightStartDialog } from './features/flights/components/FlightStartDial
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
+import { useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { ToastHost } from './features/config/components/atoms'
@@ -80,6 +81,9 @@ export function App() {
   // instance behind the Flights pill and the flights landing list. Clicking an
   // activity-only row opens the activity's REAL surface.
   const featureActivity = useFeatureActivity()
+  // Evidence-derived stage rails for flightless picker rows — one instance,
+  // same ownership rule as featureActivity (the pill stays presentational).
+  const derivedStages = useDerivedFeatureStages(features)
   // Clicking a live activity row opens the activity's REAL surface. The routing
   // decision is the pure `resolveActivityTarget`; App maps the target to nav.
   const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
@@ -300,6 +304,7 @@ export function App() {
         preFlights={preFlights}
         onOpenPreFlight={(taskId) => { setResumePlanTaskId(taskId); setFlightStartNew(true) }}
         activity={featureActivity}
+        derivedStages={derivedStages}
         onOpenFlight={openFlight}
         flightsPickerOpen={view === 'flights' && !selectedFlightId}
         onFlightsPickerOpenChange={(open) => {

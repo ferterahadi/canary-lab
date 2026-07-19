@@ -714,6 +714,7 @@ describe('trailer model (R14–R18)', () => {
           repos: [{
             name: 'shop',
             localPath: '/repo/shop',
+            branch: 'develop',
             startCommands: [{ name: 'api', command: 'npm run dev', ports: [{ name: 'api', env: 'PORT' }] }],
           }],
         },
@@ -748,15 +749,21 @@ describe('trailer model (R14–R18)', () => {
     expect(facts).toContain('checkout')
     expect(facts).toContain('2 files')
     expect(facts).toContain('api healthy')
-    // R43: the editable setup panel — run command as an input writing the real
-    // config doc, ports labeled with their env, Playwright as per-setting rows.
+    // R43: the editable setup panel — service name, branch and run command as
+    // inputs writing the real config doc, Playwright as per-setting rows.
+    // Port slots do NOT surface here — ports are Parallel readiness' concept.
     const panel = container.querySelector('[data-testid="feature-setup-panel"]')
     expect(panel).toBeTruthy()
     const commandInput = panel?.querySelector<HTMLInputElement>('[data-testid="setup-command-api"]')
     expect(commandInput?.value).toBe('npm run dev')
-    expect(panel?.textContent).toContain('api → PORT')
+    expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-service-name-api"]')?.value).toBe('api')
+    expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-branch-api"]')?.value).toBe('develop')
+    expect(panel?.textContent).toContain('/repo/shop')
+    expect(panel?.textContent).not.toContain('api → PORT')
     expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-pw-workers"]')?.value).toBe('2')
     expect(panel?.querySelector<HTMLSelectElement>('[data-testid="setup-pw-video"]')?.value).toBe('on')
+    // Screenshot renders Playwright's real default when the config omits it.
+    expect(panel?.querySelector<HTMLSelectElement>('[data-testid="setup-pw-screenshot"]')?.value).toBe('off')
     // An edit writes through to the SAME on-disk doc Advanced setup edits.
     mocks.putFeatureConfigDoc.mockResolvedValue({})
     await act(async () => {

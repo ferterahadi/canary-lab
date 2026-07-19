@@ -79,6 +79,17 @@ export interface FeaturePending {
   pauseReason?: FlightPauseReason
 }
 
+/** Server-derived on-disk stage artifacts (see web-server stage-evidence.ts —
+ *  the shape must match what /api/features emits). */
+export interface FeatureStageEvidence {
+  /** A captured envset exists (env-capture stage artifact). */
+  envCapture: boolean
+  /** docs/_prd-summary.json exists (prd-summary stage artifact). */
+  prdSummary: boolean
+  /** At least one authored spec under e2e/ (specs-coverage stage artifact). */
+  specs: boolean
+}
+
 export interface Feature {
   name: string
   description?: string
@@ -94,6 +105,10 @@ export interface Feature {
    *  concurrently. Drives the "Portified" badge. Optional: absent in older
    *  payloads. */
   portified?: boolean
+  /** On-disk stage artifacts — feeds the picker's evidence-derived stage rail
+   *  for features with no flight record. Optional: absent in older payloads
+   *  (the rail then falls back to all-pending / "not flown"). */
+  evidence?: FeatureStageEvidence
   /** Test-file integrity. 'dirty' when a spec changed since the last green (or
    *  run-start) and wasn't approved/committed. Drives the red cue. Optional:
    *  absent in older payloads / when integrity tracking is off. */

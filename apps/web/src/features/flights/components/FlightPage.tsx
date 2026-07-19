@@ -575,6 +575,16 @@ function StageDetail({
         <h2 className="text-[13px] font-semibold" title={STAGE_BLURB[stage.key]}>{row.label}</h2>
         <StageStatusChip status={row.status} />
         <div className="flex-1" />
+        {stage.key === 'scaffold' && stage.status !== 'pending' && onOpenConfig && (
+          <button
+            type="button"
+            data-testid="feature-setup-advanced"
+            onClick={() => onOpenConfig(flight.feature)}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+          >
+            ⚙ Advanced setup
+          </button>
+        )}
         {stage.key === 'evaluation-export' && <DownloadEvaluationAction flight={flight} stage={stage} />}
         {drillThrough && (
           <button
@@ -590,7 +600,7 @@ function StageDetail({
       </div>
 
       {/* Where are we — one plain sentence, always present. */}
-      <div data-testid="stage-state-line" className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+      <div data-testid="stage-state-line" className="max-w-[76ch] text-[12px]" style={{ color: 'var(--text-secondary)' }}>
         {stageStateLine(stage, flight, companion ?? undefined)}
       </div>
 
@@ -609,13 +619,13 @@ function StageDetail({
       )}
 
       {/* Suite setup (R43): the editable digest over the REAL on-disk config
-          — same doc Advanced setup (FeatureConfigEditor) edits, live both ways. */}
+          — same doc Advanced setup (FeatureConfigEditor) edits, live both
+          ways. The Advanced setup button rides the stage header above. */}
       {stage.key === 'scaffold' && stage.status !== 'pending' && (
         <FeatureSetupPanel
           feature={flight.feature}
           editable={flight.status !== 'running'}
           refreshKey={configRefreshKey}
-          onOpenConfig={onOpenConfig}
         />
       )}
 
@@ -876,7 +886,7 @@ function FlightMenu({
           label: 'Delete flight…',
           confirmLabel: 'Really delete?',
           tone: 'var(--danger)',
-          title: 'Delete this flight record — the feature stays and reads as not flown',
+          title: 'Delete this flight record — the feature stays and reads as idle (its rail keeps the evidence-derived progress)',
           testId: 'flight-delete',
           fire: () => onAction(() => api.deleteFlight(id), onDeleted),
         }]
@@ -1369,7 +1379,7 @@ function CheckpointControls({
   return (
     <section
       data-testid="checkpoint-controls"
-      className="flex flex-col gap-2.5 rounded border p-3"
+      className="flex w-full max-w-[76ch] flex-col gap-2.5 rounded border p-3"
       style={{ borderColor: 'color-mix(in srgb, rgb(251, 191, 36) 45%, var(--border-default))' }}
     >
       <div className="flex items-center gap-2">

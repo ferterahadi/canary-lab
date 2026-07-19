@@ -238,6 +238,67 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     expect(onStartFlight).toHaveBeenCalledWith('menu-management')
   })
 
+  it('a flightless feature with evidence-derived progress reads "idle" with its completed squares lit', () => {
+    const stages = [
+      { key: 'similarity', status: 'done' }, { key: 'scout', status: 'done' },
+      { key: 'scaffold', status: 'done' }, { key: 'env-capture', status: 'done' },
+      { key: 'docs', status: 'pending' }, { key: 'prd-summary', status: 'pending' },
+      { key: 'specs-coverage', status: 'pending' }, { key: 'portify', status: 'pending' },
+      { key: 'run', status: 'done' }, { key: 'heal', status: 'done' },
+      { key: 'evaluation-export', status: 'pending' },
+    ] as const
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[]}
+          features={[{ name: 'todo-api', stages: [...stages] }]}
+          onOpenFlight={vi.fn()}
+          onStartFlight={vi.fn()}
+        />,
+      )
+    })
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Flights"]')!.click()
+    })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="not-flown-todo-api"]')
+    expect(row).toBeTruthy()
+    // The chip stays a flight-status reporter: no flight record → "idle", the
+    // rail (not the chip) carries the progress story.
+    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('idle')
+    const railCell = (key: string) => row!.querySelector(`[data-testid="stage-mini-cell-${key}"]`) as HTMLElement | null
+    expect(railCell('scaffold')?.style.background).toContain('52, 211, 153') // Suite setup done (green)
+    expect(railCell('run')?.style.background).toContain('52, 211, 153') // latest run green
+    expect(railCell('specs-coverage')?.style.background).toContain('var(--border-default)') // no artifact → pending
+  })
+
+  it('idle ranks above not flown, and the chip splits on evidence', () => {
+    const lit = [{ key: 'scout', status: 'done' }] as Array<{ key: 'scout'; status: 'done' }>
+    expect(featureChipState(null, undefined, lit).label).toBe('idle')
+    expect(featureChipState(null, undefined, [{ key: 'scout', status: 'pending' }]).label).toBe('not flown')
+    expect(featureChipState(null, undefined, undefined).label).toBe('not flown')
+    expect(featureChipState(null, undefined, lit).rank).toBeLessThan(featureChipState(null).rank)
+  })
+
+  it('an activity-only row keeps its evidence squares lit under the running overlay', () => {
+    const activity = new Map<string, FeatureActivity>([['pay', { kind: 'portifying', workflowId: 'wf9' }]])
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[]}
+          activity={activity}
+          features={[{ name: 'pay', stages: [{ key: 'scout', status: 'done' }, { key: 'scaffold', status: 'done' }, { key: 'env-capture', status: 'done' }] }]}
+          onOpenFlight={vi.fn()}
+          onOpenActivity={vi.fn()}
+        />,
+      )
+    })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="activity-open-pay"]')
+    const cell = (key: string) => row?.querySelector(`[data-testid="stage-mini-cell-${key}"]`) as HTMLElement | null
+    expect(cell('portify')?.style.background).toContain('56, 189, 248') // live job (sky)
+    expect(cell('scaffold')?.style.background).toContain('52, 211, 153') // evidence stays lit (green)
+  })
+
   it('never duplicates a feature that already has a flight row, and not-flown rows sink to the bottom', () => {
     act(() => {
       root.render(

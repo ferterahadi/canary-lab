@@ -14,6 +14,7 @@ import { DirtyReviewDialog } from '../../features/runs/components/DirtyReviewDia
 import { BenchmarkPill } from '../../features/benchmark/components/BenchmarkPill'
 import { CleanupPill } from '../../features/logs/components/CleanupPill'
 import { FlightsPill } from '../../features/flights/components/FlightsPill'
+import type { DerivedStage } from '../../features/flights/lib/derived-stages'
 import type { FeatureActivity } from '../../features/flights/state/feature-activity'
 import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
 
@@ -32,6 +33,10 @@ interface Props {
   /** Per-feature live activity (runs / portify / authoring) — App owns the
    *  one useFeatureActivity instance; the pill stays presentational. */
   activity?: Map<string, FeatureActivity>
+  /** Per-feature evidence-derived stage rails for flightless picker rows —
+   *  App owns the one useDerivedFeatureStages instance (same ownership rule
+   *  as `activity`). */
+  derivedStages?: Map<string, DerivedStage[]>
   /** Open the routed flight detail view (null = the flights picker). */
   onOpenFlight?: (flightId: string | null) => void
   /** Picker open-state, driven off the route (`view=flights` + no flight) so it's
@@ -64,7 +69,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -230,7 +235,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             flights={flights}
             preFlights={preFlights}
             activity={activity}
-            features={features.map((f) => ({ name: f.name, group: f.group }))}
+            features={features.map((f) => ({ name: f.name, group: f.group, stages: derivedStages.get(f.name) }))}
             open={flightsPickerOpen}
             onOpenChange={onFlightsPickerOpenChange}
             onStartFlight={(feature) => onStartFlight?.(feature)}

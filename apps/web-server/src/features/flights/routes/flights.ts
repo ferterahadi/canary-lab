@@ -37,6 +37,7 @@ import {
 import { deriveFeatureSlug, type PlannedFeature, type PlanFeaturesTask } from '../../../../../../shared/flights/types'
 import { PlanFeaturesStore, startPlanFeatures, type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import type { FlightAgentSpawner } from '../logic/stages/context'
+import { hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
 import { loadFeatures } from '../../config/logic/feature-loader'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
@@ -86,23 +87,14 @@ export function buildStageEntryValidator(featuresDir: string) {
     if (after('scaffold') && !fs.existsSync(path.join(featureDir, 'feature.config.cjs'))) {
       return `cannot start at "${fromStage}": feature "${feature}" has no feature.config.cjs (scaffold prerequisite) — start from scout/scaffold instead`
     }
-    if (after('env-capture')) {
-      const envsetDir = path.join(featureDir, 'envsets', env)
-      const hasEnvset = fs.existsSync(envsetDir) && fs.readdirSync(envsetDir).length > 0
-      if (!hasEnvset) {
-        return `cannot start at "${fromStage}": no captured envset at envsets/${env}/ (env-capture prerequisite) — start from env-capture instead`
-      }
+    if (after('env-capture') && !hasCapturedEnvset(featureDir, env)) {
+      return `cannot start at "${fromStage}": no captured envset at envsets/${env}/ (env-capture prerequisite) — start from env-capture instead`
     }
-    if (after('prd-summary') && !fs.existsSync(path.join(featureDir, 'docs', '_prd-summary.json'))) {
+    if (after('prd-summary') && !hasPrdSummary(featureDir)) {
       return `cannot start at "${fromStage}": no PRD summary at docs/_prd-summary.json (prd-summary prerequisite) — start from docs instead`
     }
-    if (after('specs-coverage')) {
-      const e2eDir = path.join(featureDir, 'e2e')
-      const hasSpecs =
-        fs.existsSync(e2eDir) && fs.readdirSync(e2eDir).some((f) => /\.spec\.[cm]?[jt]sx?$/.test(f))
-      if (!hasSpecs) {
-        return `cannot start at "${fromStage}": no specs under e2e/ (specs-coverage prerequisite) — start from specs-coverage instead`
-      }
+    if (after('specs-coverage') && !hasAuthoredSpecs(featureDir)) {
+      return `cannot start at "${fromStage}": no specs under e2e/ (specs-coverage prerequisite) — start from specs-coverage instead`
     }
     if (fromStage === 'evaluation-export' && !args.existing?.links?.runId) {
       return 'cannot start at "evaluation-export": the flight record has no run yet (run prerequisite) — start from run instead'

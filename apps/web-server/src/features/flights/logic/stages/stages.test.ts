@@ -243,6 +243,18 @@ describe('context helpers', () => {
       expect(extractJson<{ a: number }>('answer is {"a":2} done')).toEqual({ a: 2 })
     })
 
+    it('recovers the fenced JSON even when a later turn only adds prose', () => {
+      // All-turns transcript: config fence first, then a chatter sign-off with
+      // no fence. The fence must still win (the crash this fixed).
+      const transcript = 'here is the config:\n```json\n{"a":3}\n```\nAlready delivered the final JSON above — that trailing find was leftover.'
+      expect(extractJson<{ a: number }>(transcript)).toEqual({ a: 3 })
+    })
+
+    it('prefers the LAST fence when several are present', () => {
+      const transcript = '```json\n{"a":1}\n```\nreasoning…\n```json\n{"a":2}\n```'
+      expect(extractJson<{ a: number }>(transcript)).toEqual({ a: 2 })
+    })
+
     it('throws with an excerpt when nothing parses', () => {
       expect(() => extractJson('no json here at all')).toThrow(/did not return parseable JSON/)
     })

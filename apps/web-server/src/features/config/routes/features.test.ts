@@ -133,6 +133,28 @@ describe('GET /api/features', () => {
     expect(body.find((f) => f.name === 'ported')?.portified).toBe(true)
   })
 
+  it('ships all-false stage evidence for a bare scaffold, and flags each artifact once present', async () => {
+    const dir = writeFeature('evidenced', { spec: `import { test } from '@playwright/test'` })
+    writeFeature('bare')
+    fs.mkdirSync(path.join(dir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'envsets', 'local', 'app.env'), 'PORT=3000\n')
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), '{}')
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{ name: string; evidence: Record<string, boolean> }>
+    expect(body.find((f) => f.name === 'evidenced')?.evidence).toEqual({
+      envCapture: true,
+      prdSummary: true,
+      specs: true,
+    })
+    expect(body.find((f) => f.name === 'bare')?.evidence).toEqual({
+      envCapture: false,
+      prdSummary: false,
+      specs: false,
+    })
+  })
+
   it('substitutes empty arrays when a feature has no repos / envs declared', async () => {
     const dir = path.join(featuresDir, 'sparse')
     fs.mkdirSync(dir, { recursive: true })

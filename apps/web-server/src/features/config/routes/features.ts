@@ -9,6 +9,7 @@ import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
 import { parseDotenv } from '../../config/logic/dotenv-edit'
 import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
+import { deriveFeatureEvidence } from '../../flights/logic/stage-evidence'
 import {
   getEnvSetsDir,
   loadConfig,
@@ -53,6 +54,11 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       // A saved port overlay exists → the feature boots concurrently. Surfaced
       // as the "Portified" badge in the features column.
       portified: portifyOverlayExists(f.featureDir),
+      // On-disk stage artifacts (captured envset, PRD summary, authored specs)
+      // — the picker's derived rail lights completed steps even when the
+      // feature has never flown. Run/export state stays client-side (its live
+      // runs + export stores already carry it).
+      evidence: deriveFeatureEvidence(f.featureDir),
       // Test-file integrity: 'dirty' when a spec changed since the last green
       // (or run-start) and hasn't been approved/committed. Drives the red cue.
       dirty: dirtySummary(deps.dirtySpecStore, f.name),

@@ -144,9 +144,17 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
             if (event.type === 'features-changed') invalidate('repos')
             return
           }
-          if (event.type === 'tests-changed' && selectedFeatureRef.current === event.feature) invalidate('tests')
+          if (event.type === 'tests-changed') {
+            if (selectedFeatureRef.current === event.feature) invalidate('tests')
+            // Authored specs light the picker's derived rail (specs evidence).
+            refreshFeatures(selectedFeatureRef.current)
+          }
           if (event.type === 'envsets-changed') refreshFeatures(selectedFeatureRef.current)
-          if (event.type === 'coverage-changed') invalidate('coverage')
+          if (event.type === 'coverage-changed') {
+            invalidate('coverage')
+            // A generated PRD summary lights the derived rail (prdSummary evidence).
+            refreshFeatures(selectedFeatureRef.current)
+          }
           if (event.type === 'tests-dirty-changed') refreshFeatures(selectedFeatureRef.current)
           if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) invalidate('verification')
           if (event.type === 'journal-changed') invalidate('journal', event.runId)

@@ -3,7 +3,7 @@ import * as api from '../../../shared/api/client'
 import type { FlightManifest, FlightStageStatus } from '../../../shared/api/client'
 import type { FeatureDocsListing } from '../../../shared/api/types'
 import { DocPill, readAsBase64 } from '../../coverage/components/CoverageDocsRail'
-import { FactsGrid, StageStatusChip, type StageFact } from './stage-meta'
+import { StageStatusChip } from './stage-meta'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
 // lens onto the SAME data its full surface owns (feature.config.cjs via the
@@ -120,20 +120,18 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 }
 
 const PW_MODES = ['on', 'off', 'retain-on-failure', 'on-first-retry'] as const
+const PW_SCREENSHOT_MODES = ['off', 'on', 'only-on-failure'] as const
 
 export function FeatureSetupPanel({
   feature,
   editable,
   refreshKey,
-  onOpenConfig,
 }: {
   feature: string
   /** False while the flight is mid-run (edits then would race the conductor). */
   editable: boolean
   /** Bumped on features-changed so an Advanced-setup save shows here live. */
   refreshKey?: number
-  /** Opens FeatureConfigEditor — the full editor over the same on-disk doc. */
-  onOpenConfig?: (feature: string) => void
 }) {
   const [config, setConfig] = useState<unknown>(null)
   const [playwright, setPlaywright] = useState<unknown>(null)
@@ -167,20 +165,14 @@ export function FeatureSetupPanel({
 
   const cfg = asRecord(config)
   const repos = Array.isArray(cfg?.repos) ? (cfg!.repos as unknown[]) : []
-  const repoNames = repos
-    .map((r) => asRecord(r))
-    .filter((r): r is Record<string, unknown> => r !== null)
-    .map((r) => {
-      const name = typeof r.name === 'string' ? r.name : '?'
-      return typeof r.branch === 'string' ? `${name} @ ${r.branch}` : name
-    })
 
   interface ServiceRow {
     repoIdx: number
     cmdIdx: number
     service: string
     command: string
-    ports: string[]
+    repoPath: string | null
+    branch: string | null
     health: string | null
   }
   const services: ServiceRow[] = []
@@ -191,10 +183,6 @@ export function FeatureSetupPanel({
     startCommands.forEach((sc, cmdIdx) => {
       const svc = asRecord(sc)
       if (!svc || typeof svc.command !== 'string') return
-      const ports = (Array.isArray(svc.ports) ? svc.ports : [])
-        .map((p) => asRecord(p))
-        .filter((p): p is Record<string, unknown> => p !== null)
-        .map((p) => `${typeof p.name === 'string' ? p.name : '?'}${typeof p.env === 'string' ? ` → ${p.env}` : ''}`)
       const health = asRecord(svc.health)
       const healthText = health
         ? [typeof health.type === 'string' ? health.type : null,
@@ -207,33 +195,44 @@ export function FeatureSetupPanel({
         cmdIdx,
         service: typeof svc.name === 'string' ? svc.name : (typeof repo.name === 'string' ? repo.name : 'service'),
         command: svc.command,
-        ports,
+        repoPath: typeof repo.localPath === 'string' ? repo.localPath : null,
+        branch: typeof repo.branch === 'string' ? repo.branch : null,
         health: healthText,
       })
     })
   })
 
-  const setCommand = (row: ServiceRow, command: string): void => {
+  // Every service-block edit is one write to the same on-disk config the
+  // Advanced setup editor works on. Branch lives on the repo (services sharing
+  // a repo share the branch — editing it on either block writes the one repo).
+  const mutateService = (
+    row: ServiceRow,
+    fn: (repo: Record<string, unknown>, sc: Record<string, unknown>) => void,
+  ): void => {
     if (!cfg) return
     const next = structuredClone(cfg) as Record<string, unknown>
     const repo = asRecord((next.repos as unknown[])[row.repoIdx])
     const sc = repo && Array.isArray(repo.startCommands) ? asRecord(repo.startCommands[row.cmdIdx]) : null
-    if (!sc) return
-    sc.command = command
+    if (!repo || !sc) return
+    fn(repo, sc)
     saveConfig(next)
   }
+  const setCommand = (row: ServiceRow, command: string): void => mutateService(row, (_repo, sc) => { sc.command = command })
+  const setServiceName = (row: ServiceRow, name: string): void => mutateService(row, (_repo, sc) => { sc.name = name })
+  const setBranch = (row: ServiceRow, branch: string): void => mutateService(row, (repo) => { repo.branch = branch })
 
   const pw = asRecord(playwright)
   const pwUse = asRecord(pw?.use)
-  const setPw = (patch: { workers?: number; retries?: number; video?: string; trace?: string }): void => {
+  const setPw = (patch: { workers?: number; retries?: number; video?: string; trace?: string; screenshot?: string }): void => {
     if (!pw) return
     const next = structuredClone(pw) as Record<string, unknown>
     if (patch.workers !== undefined) next.workers = patch.workers
     if (patch.retries !== undefined) next.retries = patch.retries
-    if (patch.video !== undefined || patch.trace !== undefined) {
+    if (patch.video !== undefined || patch.trace !== undefined || patch.screenshot !== undefined) {
       const use = asRecord(next.use) ?? {}
       if (patch.video !== undefined) use.video = patch.video
       if (patch.trace !== undefined) use.trace = patch.trace
+      if (patch.screenshot !== undefined) use.screenshot = patch.screenshot
       next.use = use
     }
     savePlaywright(next)
@@ -241,72 +240,69 @@ export function FeatureSetupPanel({
 
   if (!cfg && !pw) return null
 
-  const readFacts: StageFact[] = repoNames.length > 0 ? [{ label: 'Repos', value: repoNames.join(', '), mono: true }] : []
-
   return (
-    <section data-testid="feature-setup-panel" className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <h3 className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-          Configuration
-        </h3>
-        <div className="flex-1" />
-        {onOpenConfig && (
-          <button
-            type="button"
-            data-testid="feature-setup-advanced"
-            onClick={() => onOpenConfig(feature)}
-            className="cl-button px-2 py-0.5 text-[11px]"
-          >
-            ⚙ Advanced setup
-          </button>
-        )}
-      </div>
-
-      {readFacts.length > 0 && <FactsGrid facts={readFacts} />}
-
-      {/* R58: one block per service — everything that boots it in one place,
-          instead of command/health/port rows interleaved across services. */}
-      {services.map((row) => (
-        <div
-          key={`${row.repoIdx}-${row.cmdIdx}`}
-          data-testid={`setup-service-${row.service}`}
-          className="flex flex-col gap-1.5 rounded border px-2.5 py-2"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
-        >
-          <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
-            {row.service}
-          </span>
-          <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
-            <SetupField
-              label="Start command"
-              value={row.command}
-              editable={editable}
-              onSave={(v) => setCommand(row, v)}
-              testId={`setup-command-${row.service}`}
-            />
-            {row.health && <ReadRow label="Health check" value={row.health} mono />}
-            {row.ports.length > 0 && (
-              <ReadRow
-                label="Port slot"
-                value={row.ports.join(', ')}
-                mono
-                info={`A named placeholder for the port ${row.service} listens on. Canary injects a free port into it at boot, so runs of this feature can start side by side without clashing. Edit slots under Advanced setup → Ports.`}
-              />
-            )}
+    <section data-testid="feature-setup-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
+      {/* R58 + Repo-scan shape: ONE services card mirroring the repos card —
+          kicker, then a block per service (name, repo @ branch, everything
+          that boots it), divided the way repo rows divide. */}
+      {services.length > 0 && (
+        <div data-testid="setup-services-card" className={REPO_SCAN_CARD_CLASS} style={REPO_SCAN_CARD_STYLE}>
+          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+            {services.length === 1 ? 'Service' : `Services · ${services.length}`}
+          </div>
+          <div className="flex flex-col">
+            {services.map((row, index) => (
+              <div
+                key={`${row.repoIdx}-${row.cmdIdx}`}
+                data-testid={`setup-service-${row.service}`}
+                className={`flex min-w-0 flex-col gap-1.5 ${index > 0 ? 'mt-2 border-t pt-2' : ''}`}
+                style={index > 0 ? { borderColor: 'var(--border-default)' } : undefined}
+              >
+                <ServiceNameField
+                  value={row.service}
+                  editable={editable}
+                  onSave={(v) => setServiceName(row, v)}
+                  testId={`setup-service-name-${row.service}`}
+                />
+                <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
+                  {row.repoPath && <ReadRow label="Repo" value={row.repoPath} mono />}
+                  {(editable || row.branch) && (
+                    <SetupField
+                      label="Branch"
+                      value={row.branch ?? ''}
+                      editable={editable}
+                      onSave={(v) => setBranch(row, v)}
+                      testId={`setup-branch-${row.service}`}
+                    />
+                  )}
+                  <SetupField
+                    label="Start command"
+                    value={row.command}
+                    editable={editable}
+                    onSave={(v) => setCommand(row, v)}
+                    testId={`setup-command-${row.service}`}
+                  />
+                  {row.health && <ReadRow label="Health check" value={row.health} mono />}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
-      ))}
+      )}
 
       {pw && (
-        <div data-testid="setup-playwright" className="flex flex-col gap-1.5">
-          <span className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+        <div data-testid="setup-playwright" className={REPO_SCAN_CARD_CLASS} style={REPO_SCAN_CARD_STYLE}>
+          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
             Playwright
-          </span>
-          <div className="grid grid-cols-[130px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
+          </div>
+          <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
             <NumberRow label="Workers" value={typeof pw.workers === 'number' ? pw.workers : null} editable={editable} onSave={(n) => setPw({ workers: n })} testId="setup-pw-workers" />
             <NumberRow label="Retries" value={typeof pw.retries === 'number' ? pw.retries : null} editable={editable} onSave={(n) => setPw({ retries: n })} testId="setup-pw-retries" />
             <ModeRow label="Video" value={typeof pwUse?.video === 'string' ? pwUse.video : null} editable={editable} onSave={(v) => setPw({ video: v })} testId="setup-pw-video" />
             <ModeRow label="Trace" value={typeof pwUse?.trace === 'string' ? pwUse.trace : null} editable={editable} onSave={(v) => setPw({ trace: v })} testId="setup-pw-trace" />
+            {/* Playwright's own default when unset is 'off' — show it honestly
+                so the setting is discoverable; a change writes use.screenshot. */}
+            <ModeRow label="Screenshot" value={typeof pwUse?.screenshot === 'string' ? pwUse.screenshot : 'off'} modes={PW_SCREENSHOT_MODES} editable={editable} onSave={(v) => setPw({ screenshot: v })} testId="setup-pw-screenshot" />
           </div>
         </div>
       )}
@@ -323,7 +319,7 @@ export function FeatureSetupPanel({
 
 function RowLabel({ label, info }: { label: string; info?: string }) {
   return (
-    <span className="flex items-center gap-1" style={{ color: 'var(--text-muted)' }}>
+    <span className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
       {label}
       {info && (
         <span
@@ -347,6 +343,33 @@ function ReadRow({ label, value, mono, info }: { label: string; value: string; m
         {value}
       </span>
     </>
+  )
+}
+
+/** The service title, editable in place — writes startCommands[].name through
+ *  the same config PUT as every other field. Reads as the block's heading
+ *  (matches the repo-name treatment on the Repo scan cards). */
+function ServiceNameField({ value, editable, onSave, testId }: {
+  value: string
+  editable: boolean
+  onSave: (value: string) => void
+  testId: string
+}) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => { setDraft(value) }, [value])
+  if (!editable) return <span className="text-[12.5px] font-semibold">{value}</span>
+  return (
+    <input
+      type="text"
+      data-testid={testId}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => { if (draft.trim() !== '' && draft.trim() !== value) onSave(draft.trim()) }}
+      onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+      spellCheck={false}
+      className="w-56 rounded border bg-transparent px-1.5 py-0.5 text-[12.5px] font-semibold outline-none"
+      style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+    />
   )
 }
 
@@ -407,9 +430,11 @@ function NumberRow({ label, value, editable, onSave, testId }: {
   )
 }
 
-function ModeRow({ label, value, editable, onSave, testId }: {
+function ModeRow({ label, value, modes = PW_MODES, editable, onSave, testId }: {
   label: string
   value: string | null
+  /** Valid modes for this setting (video/trace share PW_MODES; screenshot differs). */
+  modes?: readonly string[]
   editable: boolean
   onSave: (value: string) => void
   testId: string
@@ -421,12 +446,12 @@ function ModeRow({ label, value, editable, onSave, testId }: {
       <RowLabel label={label} />
       <select
         data-testid={testId}
-        value={PW_MODES.includes(value as (typeof PW_MODES)[number]) ? value : value}
+        value={value}
         onChange={(e) => onSave(e.target.value)}
         className="w-44 rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
         style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', background: 'var(--bg-base)' }}
       >
-        {[...new Set([value, ...PW_MODES])].map((mode) => (
+        {[...new Set([value, ...modes])].map((mode) => (
           <option key={mode} value={mode}>{mode}</option>
         ))}
       </select>

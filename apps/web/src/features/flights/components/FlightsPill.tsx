@@ -77,13 +77,18 @@ const ACTIVITY_STAGE: Record<FeatureActivityKind, FlightStageKey> = {
 }
 
 /** Synthesize a per-stage array for an activity-only row: the mapped stage is
- *  'running' (renders the sky-blue "current" tone), every other stage is
- *  'pending' (grey). Honest — no fake 'done' squares for stages that never ran. */
-export function activityStages(kind: FeatureActivityKind): Array<{ key: FlightStageKey; status: FlightStageStatus }> {
+ *  'running' (renders the sky-blue "current" tone) over the feature's
+ *  evidence-derived rail when one exists (completed steps stay lit), else over
+ *  all-pending. Honest — no fake 'done' squares for stages with no artifact. */
+export function activityStages(
+  kind: FeatureActivityKind,
+  base?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
+): Array<{ key: FlightStageKey; status: FlightStageStatus }> {
   const current = ACTIVITY_STAGE[kind]
+  const baseFor = new Map((base ?? []).map((s) => [s.key, s.status]))
   return FLIGHT_STAGE_KEYS.map((key) => ({
     key,
-    status: (key === current ? 'running' : 'pending') as FlightStageStatus,
+    status: (key === current ? 'running' : baseFor.get(key) ?? 'pending') as FlightStageStatus,
   }))
 }
 
@@ -116,10 +121,16 @@ export interface FeatureChipState {
  *  plan-features launch, auto-started by the conductor) is NOT an attention
  *  state: it reads muted/neutral ("queued") and ranks just above never-flown,
  *  since nothing is asked of the human.
+ *
+ *  A flightless feature splits on evidence: standalone progress exists (any
+ *  lit square in its derived rail) → "idle" — the chip stays a flight-status
+ *  reporter, it never re-narrates what the squares already show; zero
+ *  evidence (or an older server without the evidence payload) → "not flown".
  */
 export function featureChipState(
   flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason'> | null,
   activity?: FeatureActivity,
+  derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
 ): FeatureChipState {
   if (flight?.status === 'waiting-for-approval') {
     return { label: 'to approve', tone: FLIGHT_STATUS_TONE['waiting-for-approval'], live: false, rank: 0, title: 'needs approval' }
@@ -136,8 +147,12 @@ export function featureChipState(
     return { label: chip.label, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: chip.title }
   }
   if (!flight) {
-    // R49: a feature that has never flown — one row per workspace feature,
-    // muted, at the bottom; clicking it opens the flight launcher.
+    // R49: one row per workspace feature, at the bottom; clicking it opens the
+    // flight launcher. "idle" when standalone work already lit squares (the
+    // rail carries the progress story); "not flown" only when truly untouched.
+    if (derived?.some((s) => s.status !== 'pending')) {
+      return { label: 'idle', tone: 'var(--text-secondary)', live: false, rank: 5.8, title: 'progress from standalone work — start a flight to conduct it end-to-end' }
+    }
     return { label: 'not flown', tone: 'var(--text-muted)', live: false, rank: 6, title: 'never flown — start a flight' }
   }
   if (flight.status === 'running') {
@@ -161,11 +176,13 @@ export function featureChipState(
 export function FlightStatusChip({
   flight,
   activity,
+  derived,
 }: {
   flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason'> | null
   activity?: FeatureActivity
+  derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
 }) {
-  const chip = featureChipState(flight, activity)
+  const chip = featureChipState(flight, activity, derived)
   return (
     <Chip testId="flight-status-chip" chrome="border" tone={chip.tone} label={chip.label} width={72} title={chip.title} />
   )
@@ -177,15 +194,23 @@ export interface FeatureActivityRow {
   feature: string
   flight: FlightIndexEntry | null
   activity?: FeatureActivity
+  /** Evidence-derived rail for a flightless feature (see derived-stages.ts) —
+   *  what standalone work already completed. Rows with a flight record ignore
+   *  it (the record is the journal). */
+  derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
 }
 
 /** A workspace feature the picker/landing lists know about — a bare name, or a
- *  name + optional group (R55). Both call sites pass whatever they have; the
- *  row builder normalizes. */
-export type FeatureRef = string | { name: string; group?: string }
+ *  name + optional group and evidence-derived stages (R55). Both call sites
+ *  pass whatever they have; the row builder normalizes. */
+export type FeatureRef = string | { name: string; group?: string; stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }> }
 
 function featureName(f: FeatureRef): string {
   return typeof f === 'string' ? f : f.name
+}
+
+function featureStages(f: FeatureRef | undefined): Array<{ key: FlightStageKey; status: FlightStageStatus }> | undefined {
+  return typeof f === 'object' ? f.stages : undefined
 }
 
 /** Merge flights + the activity map + the workspace feature list into rows,
@@ -204,6 +229,7 @@ export function featureActivityRows(
 ): FeatureActivityRow[] {
   const rows: FeatureActivityRow[] = []
   const seen = new Set<string>()
+  const stagesByName = new Map(features.map((f) => [featureName(f), featureStages(f)]))
   for (const f of flights) {
     if (seen.has(f.feature)) continue // dedupe by feature — keep the first
     seen.add(f.feature)
@@ -212,16 +238,16 @@ export function featureActivityRows(
   for (const [feature, act] of activity) {
     if (seen.has(feature)) continue
     seen.add(feature)
-    rows.push({ feature, flight: null, activity: act })
+    rows.push({ feature, flight: null, activity: act, derived: stagesByName.get(feature) })
   }
   for (const f of features) {
     const name = featureName(f)
     if (seen.has(name)) continue
     seen.add(name)
-    rows.push({ feature: name, flight: null })
+    rows.push({ feature: name, flight: null, derived: featureStages(f) })
   }
   return rows.sort((a, b) =>
-    featureChipState(a.flight, a.activity).rank - featureChipState(b.flight, b.activity).rank
+    featureChipState(a.flight, a.activity, a.derived).rank - featureChipState(b.flight, b.activity, b.derived).rank
     || (b.flight?.updatedAt ?? '').localeCompare(a.flight?.updatedAt ?? '')
     || a.feature.localeCompare(b.feature))
 }
@@ -262,7 +288,7 @@ export function groupPickerRows(rows: FeatureActivityRow[], features: FeatureRef
   const groups: PickerGroup[] = [...byGroup.entries()].map(([group, groupRows]) => ({
     group,
     rows: groupRows,
-    worstRank: Math.min(...groupRows.map((r) => featureChipState(r.flight, r.activity).rank)),
+    worstRank: Math.min(...groupRows.map((r) => featureChipState(r.flight, r.activity, r.derived).rank)),
   }))
   groups.sort((a, b) => a.worstRank - b.worstRank || a.group!.localeCompare(b.group!))
   return { ungrouped, groups }
@@ -287,8 +313,9 @@ export function FlightsPill({
   /** Per-feature live activity (runs / portify / authoring) from useFeatureActivity — App owns it. */
   activity?: Map<string, FeatureActivity>
   /** Every workspace feature — the picker lists them 1:1 (R49) and groups those
-   *  that declare a `group` under a disclosure (R55). */
-  features?: Array<{ name: string; group?: string }>
+   *  that declare a `group` under a disclosure (R55). `stages` is the feature's
+   *  evidence-derived rail (derived-stages.ts) for flightless rows. */
+  features?: Array<{ name: string; group?: string; stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }> }>
   /** Controlled/uncontrolled hybrid (cl_route-every-surface): App drives the
    *  picker's open-state off the route (`view=flights` + no flight selected) so
    *  it's the same deep-linkable surface the URL addresses. Absent → the pill
@@ -430,7 +457,7 @@ function FlightsPickerDialog({
   flights: FlightIndexEntry[]
   preFlights: PlanFeaturesTask[]
   activity: Map<string, FeatureActivity>
-  features: Array<{ name: string; group?: string }>
+  features: Array<{ name: string; group?: string; stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }> }>
   onPick: (flightId: string | null) => void
   onPickActivity: (feature: string, activity: FeatureActivity) => void
   onStartFlight: (feature: string) => void
@@ -546,8 +573,8 @@ function PickerRow({
   return (
     <li>
       {row.activity
-        ? <ActivityOnlyRow feature={row.feature} activity={row.activity} onOpen={onPickActivity} />
-        : <NotFlownRow feature={row.feature} onStart={onStartFlight} />}
+        ? <ActivityOnlyRow feature={row.feature} activity={row.activity} derived={row.derived} onOpen={onPickActivity} />
+        : <NotFlownRow feature={row.feature} derived={row.derived} onStart={onStartFlight} />}
     </li>
   )
 }
@@ -575,7 +602,7 @@ function PickerGroupSection({
   const toggle = (): void => setOpen((v) => { const next = !v; writeGroupOpen(GROUPS_OPEN_STORAGE_KEY, group, next); return next })
   // The worst row drives the section's summary chip (same comparator).
   const worst = section.rows.reduce((acc, r) =>
-    featureChipState(r.flight, r.activity).rank < featureChipState(acc.flight, acc.activity).rank ? r : acc, section.rows[0])
+    featureChipState(r.flight, r.activity, r.derived).rank < featureChipState(acc.flight, acc.activity, acc.derived).rank ? r : acc, section.rows[0])
   return (
     <section data-testid={`flight-group-${group}`}>
       <button
@@ -597,7 +624,7 @@ function PickerGroupSection({
           {group}
         </span>
         <span className="cl-count-chip shrink-0">{section.rows.length}</span>
-        <FlightStatusChip flight={worst.flight} activity={worst.activity} />
+        <FlightStatusChip flight={worst.flight} activity={worst.activity} derived={worst.derived} />
         {/* Invisible arrow-width spacer: aligns the group's status chip with the
          *  trailing '→' column on every row below (rows reserve this width). */}
         <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'transparent' }}>→</span>
@@ -619,17 +646,22 @@ function PickerGroupSection({
   )
 }
 
-/** Row for a feature that has never flown (R49): same anatomy as a flight row
- *  — name, mini rail, chip — but the rail renders fully greyed (all-pending
- *  squares at reduced opacity, per the mock review: squares, never a dash) and
- *  clicking opens the feature-scoped flight launcher. */
+/** Row for a feature with no flight record (R49): same anatomy as a flight row
+ *  — name, mini rail, chip — with the rail showing the evidence-DERIVED
+ *  progress (which steps standalone work already completed; chip "idle").
+ *  With zero evidence the rail renders fully greyed (all-pending squares at
+ *  reduced opacity, per the mock review: squares, never a dash; chip "not
+ *  flown"). Clicking opens the feature-scoped flight launcher either way. */
 export function NotFlownRow({
   feature,
+  derived,
   onStart,
 }: {
   feature: string
+  derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
   onStart: (feature: string) => void
 }) {
+  const chip = featureChipState(null, undefined, derived)
   return (
     <button
       type="button"
@@ -637,13 +669,13 @@ export function NotFlownRow({
       onClick={() => onStart(feature)}
       className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
       style={{ border: '1px solid var(--border-default)' }}
-      title={`${feature}: never flown — start a flight`}
+      title={`${feature}: ${chip.title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium" style={{ color: 'var(--text-secondary)' }}>{feature}</span>
-      <span style={{ opacity: 0.55 }}>
-        <StageMiniRail stages={[]} />
+      <span style={{ opacity: chip.label === 'not flown' ? 0.55 : 1 }}>
+        <StageMiniRail stages={derived ?? []} />
       </span>
-      <FlightStatusChip flight={null} />
+      <FlightStatusChip flight={null} derived={derived} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
     </button>
   )
@@ -656,10 +688,12 @@ export function NotFlownRow({
 export function ActivityOnlyRow({
   feature,
   activity,
+  derived,
   onOpen,
 }: {
   feature: string
   activity: FeatureActivity
+  derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
   onOpen: (feature: string, activity: FeatureActivity) => void
 }) {
   return (
@@ -672,7 +706,7 @@ export function ActivityOnlyRow({
       title={`${feature}: ${ACTIVITY_CHIP[activity.kind].title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{feature}</span>
-      <StageMiniRail stages={activityStages(activity.kind)} />
+      <StageMiniRail stages={activityStages(activity.kind, derived)} />
       <FlightStatusChip flight={null} activity={activity} />
       <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
     </button>

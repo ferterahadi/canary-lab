@@ -313,12 +313,12 @@ export function stageFacts(
       // global intent — no facts left at the stage level.
       return []
     case 'scaffold': {
-      // R32: the merged Feature setup row — identity + the env/boot proof from
-      // the folded env-capture companion. The config digest (run command,
-      // ports, Playwright) renders beside these from the live feature config.
+      // R32: the merged Feature setup row — the env/boot proof from the folded
+      // env-capture companion. The suite name is NOT a fact here: it already
+      // reads in the breadcrumb and the state line. The config digest (run
+      // command, ports, Playwright) renders beside these from the live config.
       const dir = str(ev, 'featureDir')
       return [
-        { label: 'Suite', value: flight.feature },
         ...(ev.reused ? [{ label: 'Setup', value: 'Reused existing', tone: 'good' as const }] : []),
         ...(dir ? [{ label: 'Location', value: dir.split('/').slice(-2).join('/'), mono: true, title: dir }] : []),
         ...bootCheckFacts(cev),
