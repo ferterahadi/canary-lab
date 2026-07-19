@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
   getPlaywrightConfig: vi.fn(),
+  getRepoGitStatus: vi.fn(),
   putFeatureConfigDoc: vi.fn(),
   putPlaywrightConfig: vi.fn(),
   listFeatureDocs: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock('../../../shared/api/client', () => ({
   listRuns: mocks.listRuns,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
+  getRepoGitStatus: mocks.getRepoGitStatus,
   putFeatureConfigDoc: mocks.putFeatureConfigDoc,
   putPlaywrightConfig: mocks.putPlaywrightConfig,
   listFeatureDocs: mocks.listFeatureDocs,
@@ -105,6 +107,17 @@ beforeEach(() => {
   mocks.downloadTask.mockResolvedValue(undefined)
   mocks.getFeatureConfigDoc.mockRejectedValue(new Error('no config'))
   mocks.getPlaywrightConfig.mockRejectedValue(new Error('no config'))
+  mocks.getRepoGitStatus.mockResolvedValue({
+    path: '/repo/shop',
+    expectedBranch: 'develop',
+    isGitRepo: true,
+    currentBranch: 'develop',
+    detached: false,
+    dirty: false,
+    dirtyFiles: [],
+    localBranches: ['develop', 'main'],
+    remoteBranches: ['origin/develop', 'origin/main'],
+  })
   mocks.listFeatureDocs.mockResolvedValue({ feature: 'checkout', docs: [], hasPrdSummary: false, sourceDocCount: 0, docsDrift: false })
   mocks.taskById.mockReturnValue(null)
   mocks.taskForRun.mockReturnValue(null)
@@ -549,6 +562,8 @@ describe('trailer model (R14–R18)', () => {
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Creating the suite in the workspace…')
     expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('generating')
+    // Advanced setup only appears once the config is APPROVED (scaffold done).
+    expect(container.querySelector('[data-testid="feature-setup-advanced"]')).toBeNull()
   })
 
   it('R20/R30: facts fold evidence into plain rows; raw evidence JSON never renders', async () => {
@@ -738,7 +753,7 @@ describe('trailer model (R14–R18)', () => {
         ...(key === 'env-capture' ? { evidence: { captured: 2, boot: { services: [{ name: 'api', status: 'healthy' }] } } } : {}),
       })),
     }))
-    await render('fl_1')
+    await render('fl_1', { onOpenConfig: vi.fn() })
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
     })
@@ -749,17 +764,39 @@ describe('trailer model (R14–R18)', () => {
     expect(facts).toContain('checkout')
     expect(facts).toContain('2 files')
     expect(facts).toContain('api healthy')
-    // R43: the editable setup panel — service name, branch and run command as
-    // inputs writing the real config doc, Playwright as per-setting rows.
+    // R43: the setup panel — a block per config REPO, mirroring the Advanced
+    // setup Service tab (Name ↔ NAME, Branch picker ↔ BRANCH, Start command ↔
+    // RUNTIME COMMAND). Read-only until the block's pencil arms it.
     // Port slots do NOT surface here — ports are Parallel readiness' concept.
     const panel = container.querySelector('[data-testid="feature-setup-panel"]')
     expect(panel).toBeTruthy()
+    // Scaffold is approved (done) → the Advanced setup header action shows.
+    expect(container.querySelector('[data-testid="feature-setup-advanced"]')).toBeTruthy()
+    expect(panel?.textContent).toContain('shop')
+    expect(panel?.textContent).toContain('/repo/shop')
+    expect(panel?.textContent).toContain('develop')
+    expect(panel?.textContent).toContain('npm run dev')
+    expect(panel?.textContent).not.toContain('api → PORT')
+    expect(panel?.querySelector('[data-testid="setup-command-api"]')).toBeNull()
+    await act(async () => {
+      panel?.querySelector<HTMLButtonElement>('[data-testid="setup-edit-shop"]')?.click()
+    })
     const commandInput = panel?.querySelector<HTMLInputElement>('[data-testid="setup-command-api"]')
     expect(commandInput?.value).toBe('npm run dev')
-    expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-service-name-api"]')?.value).toBe('api')
-    expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-branch-api"]')?.value).toBe('develop')
-    expect(panel?.textContent).toContain('/repo/shop')
-    expect(panel?.textContent).not.toContain('api → PORT')
+    expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-service-name-shop"]')?.value).toBe('shop')
+    // The branch field is the SAME picker Advanced setup renders — and opening
+    // it shows the FULL local+remote list, not just entries matching the
+    // current value; typing after focus is what filters.
+    const branchInput = panel?.querySelector<HTMLInputElement>('[data-testid="setup-branch-shop"]')
+    expect(branchInput?.value).toBe('develop')
+    expect(mocks.getRepoGitStatus).toHaveBeenCalledWith('checkout', 'shop')
+    await act(async () => {
+      branchInput!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }))
+    })
+    const suggestions = [...container.querySelectorAll('button')].map((b) => b.textContent)
+    expect(suggestions).toContain('main')
+    expect(suggestions).toContain('origin/main')
+    expect(suggestions).toContain('origin/develop')
     expect(panel?.querySelector<HTMLInputElement>('[data-testid="setup-pw-workers"]')?.value).toBe('2')
     expect(panel?.querySelector<HTMLSelectElement>('[data-testid="setup-pw-video"]')?.value).toBe('on')
     // Screenshot renders Playwright's real default when the config omits it.

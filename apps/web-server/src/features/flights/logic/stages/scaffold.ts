@@ -52,7 +52,7 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
       kind: 'config-approval',
       message: extra?.error
         ? `The edited feature.config.cjs for "${m.feature}" does not parse — fix it and approve again. (${extra.error})`
-        : `Feature "${m.feature}" is set up. Review the configuration (edit it in place or via Advanced setup), then approve — it gets boot-verified after env capture. Redraft re-runs the repo scan.`,
+        : `Feature "${m.feature}" is set up. Review the configuration (edit it in place via each service's ✎), then approve — it gets boot-verified after env capture. Redraft re-runs the repo scan.`,
       options: ['approve', 'redraft'],
       data: { feature: m.feature, configPath, configSource, ...(extra?.error ? { error: extra.error } : {}) },
     }

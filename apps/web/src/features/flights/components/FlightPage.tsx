@@ -575,7 +575,10 @@ function StageDetail({
         <h2 className="text-[13px] font-semibold" title={STAGE_BLURB[stage.key]}>{row.label}</h2>
         <StageStatusChip status={row.status} />
         <div className="flex-1" />
-        {stage.key === 'scaffold' && stage.status !== 'pending' && onOpenConfig && (
+        {/* Advanced setup appears once the config is APPROVED — at the
+            approval checkpoint the in-place editor (per-service ✎) is the
+            one editing surface, so the fork stays a two-button decision. */}
+        {stage.key === 'scaffold' && stage.status === 'done' && onOpenConfig && (
           <button
             type="button"
             data-testid="feature-setup-advanced"

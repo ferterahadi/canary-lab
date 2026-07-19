@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../../../shared/api/client'
 import type { FlightManifest, FlightStageStatus } from '../../../shared/api/client'
 import type { FeatureDocsListing } from '../../../shared/api/types'
+import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '../../config/components/BranchSuggestInput'
 import { DocPill, readAsBase64 } from '../../coverage/components/CoverageDocsRail'
 import { StageStatusChip } from './stage-meta'
 
@@ -122,6 +123,23 @@ function asRecord(v: unknown): Record<string, unknown> | null {
 const PW_MODES = ['on', 'off', 'retain-on-failure', 'on-first-retry'] as const
 const PW_SCREENSHOT_MODES = ['off', 'on', 'only-on-failure'] as const
 
+// A block IS a config repo — the same unit the Advanced setup Service tab
+// renders, so every field here maps 1:1 onto a field there (Name ↔ NAME,
+// Branch ↔ BRANCH, Start command ↔ RUNTIME COMMAND) and edits meet in one doc.
+interface CommandRow {
+  cmdIdx: number
+  name: string | null
+  command: string
+  health: string | null
+}
+interface RepoBlock {
+  repoIdx: number
+  name: string
+  path: string | null
+  branch: string | null
+  commands: CommandRow[]
+}
+
 export function FeatureSetupPanel({
   feature,
   editable,
@@ -166,20 +184,12 @@ export function FeatureSetupPanel({
   const cfg = asRecord(config)
   const repos = Array.isArray(cfg?.repos) ? (cfg!.repos as unknown[]) : []
 
-  interface ServiceRow {
-    repoIdx: number
-    cmdIdx: number
-    service: string
-    command: string
-    repoPath: string | null
-    branch: string | null
-    health: string | null
-  }
-  const services: ServiceRow[] = []
+  const blocks: RepoBlock[] = []
   repos.forEach((r, repoIdx) => {
     const repo = asRecord(r)
     if (!repo) return
     const startCommands = Array.isArray(repo.startCommands) ? repo.startCommands : []
+    const commands: CommandRow[] = []
     startCommands.forEach((sc, cmdIdx) => {
       const svc = asRecord(sc)
       if (!svc || typeof svc.command !== 'string') return
@@ -190,36 +200,40 @@ export function FeatureSetupPanel({
            typeof health.path === 'string' ? health.path : null]
             .filter(Boolean).join(' ') || null
         : null
-      services.push({
-        repoIdx,
+      commands.push({
         cmdIdx,
-        service: typeof svc.name === 'string' ? svc.name : (typeof repo.name === 'string' ? repo.name : 'service'),
+        name: typeof svc.name === 'string' ? svc.name : null,
         command: svc.command,
-        repoPath: typeof repo.localPath === 'string' ? repo.localPath : null,
-        branch: typeof repo.branch === 'string' ? repo.branch : null,
         health: healthText,
       })
     })
+    if (commands.length === 0) return
+    blocks.push({
+      repoIdx,
+      name: typeof repo.name === 'string' ? repo.name : `repo-${repoIdx + 1}`,
+      path: typeof repo.localPath === 'string' ? repo.localPath : null,
+      branch: typeof repo.branch === 'string' ? repo.branch : null,
+      commands,
+    })
   })
 
-  // Every service-block edit is one write to the same on-disk config the
-  // Advanced setup editor works on. Branch lives on the repo (services sharing
-  // a repo share the branch — editing it on either block writes the one repo).
-  const mutateService = (
-    row: ServiceRow,
-    fn: (repo: Record<string, unknown>, sc: Record<string, unknown>) => void,
-  ): void => {
+  // Every block edit is one write to the same on-disk config the Advanced
+  // setup editor works on — that shared doc IS the sync.
+  const mutateRepo = (repoIdx: number, fn: (repo: Record<string, unknown>) => void): void => {
     if (!cfg) return
     const next = structuredClone(cfg) as Record<string, unknown>
-    const repo = asRecord((next.repos as unknown[])[row.repoIdx])
-    const sc = repo && Array.isArray(repo.startCommands) ? asRecord(repo.startCommands[row.cmdIdx]) : null
-    if (!repo || !sc) return
-    fn(repo, sc)
+    const repo = asRecord((next.repos as unknown[])[repoIdx])
+    if (!repo) return
+    fn(repo)
     saveConfig(next)
   }
-  const setCommand = (row: ServiceRow, command: string): void => mutateService(row, (_repo, sc) => { sc.command = command })
-  const setServiceName = (row: ServiceRow, name: string): void => mutateService(row, (_repo, sc) => { sc.name = name })
-  const setBranch = (row: ServiceRow, branch: string): void => mutateService(row, (repo) => { repo.branch = branch })
+  const setRepoName = (block: RepoBlock, name: string): void => mutateRepo(block.repoIdx, (repo) => { repo.name = name })
+  const setBranch = (block: RepoBlock, branch: string): void => mutateRepo(block.repoIdx, (repo) => { repo.branch = branch })
+  const setCommand = (block: RepoBlock, cmd: CommandRow, command: string): void =>
+    mutateRepo(block.repoIdx, (repo) => {
+      const sc = Array.isArray(repo.startCommands) ? asRecord(repo.startCommands[cmd.cmdIdx]) : null
+      if (sc) sc.command = command
+    })
 
   const pw = asRecord(playwright)
   const pwUse = asRecord(pw?.use)
@@ -243,48 +257,26 @@ export function FeatureSetupPanel({
   return (
     <section data-testid="feature-setup-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
       {/* R58 + Repo-scan shape: ONE services card mirroring the repos card —
-          kicker, then a block per service (name, repo @ branch, everything
-          that boots it), divided the way repo rows divide. */}
-      {services.length > 0 && (
+          kicker, then a block per repo (the Advanced setup Service unit):
+          editable name, location, branch picker, start command(s). */}
+      {blocks.length > 0 && (
         <div data-testid="setup-services-card" className={REPO_SCAN_CARD_CLASS} style={REPO_SCAN_CARD_STYLE}>
           <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
-            {services.length === 1 ? 'Service' : `Services · ${services.length}`}
+            {blocks.length === 1 ? 'Service' : `Services · ${blocks.length}`}
           </div>
           <div className="flex flex-col">
-            {services.map((row, index) => (
-              <div
-                key={`${row.repoIdx}-${row.cmdIdx}`}
-                data-testid={`setup-service-${row.service}`}
-                className={`flex min-w-0 flex-col gap-1.5 ${index > 0 ? 'mt-2 border-t pt-2' : ''}`}
-                style={index > 0 ? { borderColor: 'var(--border-default)' } : undefined}
-              >
-                <ServiceNameField
-                  value={row.service}
-                  editable={editable}
-                  onSave={(v) => setServiceName(row, v)}
-                  testId={`setup-service-name-${row.service}`}
-                />
-                <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
-                  {row.repoPath && <ReadRow label="Repo" value={row.repoPath} mono />}
-                  {(editable || row.branch) && (
-                    <SetupField
-                      label="Branch"
-                      value={row.branch ?? ''}
-                      editable={editable}
-                      onSave={(v) => setBranch(row, v)}
-                      testId={`setup-branch-${row.service}`}
-                    />
-                  )}
-                  <SetupField
-                    label="Start command"
-                    value={row.command}
-                    editable={editable}
-                    onSave={(v) => setCommand(row, v)}
-                    testId={`setup-command-${row.service}`}
-                  />
-                  {row.health && <ReadRow label="Health check" value={row.health} mono />}
-                </div>
-              </div>
+            {blocks.map((block, index) => (
+              <ServiceBlock
+                key={block.repoIdx}
+                feature={feature}
+                block={block}
+                allowEdit={editable}
+                refreshKey={refreshKey}
+                divider={index > 0}
+                onRename={(v) => setRepoName(block, v)}
+                onBranch={(v) => setBranch(block, v)}
+                onCommand={(cmd, v) => setCommand(block, cmd, v)}
+              />
             ))}
           </div>
         </div>
@@ -346,18 +338,96 @@ function ReadRow({ label, value, mono, info }: { label: string; value: string; m
   )
 }
 
-/** The service title, editable in place — writes startCommands[].name through
- *  the same config PUT as every other field. Reads as the block's heading
- *  (matches the repo-name treatment on the Repo scan cards). */
-function ServiceNameField({ value, editable, onSave, testId }: {
+/** One service block: the SAME four aligned rows in read and edit mode —
+ *  Name / Repo / Branch / Start command — never a floating title. Fields are
+ *  read-only text until the pencil arms the block; every input then spans the
+ *  full value column (one width for all), and each field still saves itself
+ *  on blur/Enter through the shared config PUT. */
+function ServiceBlock({ feature, block, allowEdit, refreshKey, divider, onRename, onBranch, onCommand }: {
+  feature: string
+  block: RepoBlock
+  /** False while the flight runs — hides the pencil entirely. */
+  allowEdit: boolean
+  refreshKey?: number
+  divider: boolean
+  onRename: (name: string) => void
+  onBranch: (branch: string) => void
+  onCommand: (cmd: CommandRow, command: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const active = allowEdit && editing
+  const commandLabel = (cmd: CommandRow): string =>
+    block.commands.length > 1 && cmd.name ? `Start · ${cmd.name}` : 'Start command'
+  return (
+    <div
+      data-testid={`setup-service-${block.name}`}
+      className={`flex min-w-0 flex-col ${divider ? 'mt-2 border-t pt-2' : ''}`}
+      style={divider ? { borderColor: 'var(--border-default)' } : undefined}
+    >
+      <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
+        <RowLabel label="Name" />
+        <div className="flex min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1">
+            {active ? (
+              <NameInput value={block.name} onSave={onRename} testId={`setup-service-name-${block.name}`} />
+            ) : (
+              <span className="block truncate text-[12px] font-semibold" title={block.name} style={{ fontFamily: 'var(--font-mono)' }}>
+                {block.name}
+              </span>
+            )}
+          </div>
+          {allowEdit && (
+            <button
+              type="button"
+              data-testid={`setup-edit-${block.name}`}
+              aria-label={editing ? 'Done editing' : 'Edit service'}
+              title={editing ? 'Done editing' : 'Edit name, branch and start command'}
+              onClick={() => setEditing(!editing)}
+              className="cl-button shrink-0 px-1.5 py-0.5 text-[11px]"
+            >
+              {editing ? '✓' : '✎'}
+            </button>
+          )}
+        </div>
+        {block.path && <ReadRow label="Repo" value={block.path} mono />}
+        {active ? (
+          <BranchRow
+            feature={feature}
+            repoName={block.name}
+            value={block.branch ?? ''}
+            refreshKey={refreshKey}
+            onSave={onBranch}
+            testId={`setup-branch-${block.name}`}
+          />
+        ) : (
+          block.branch && <ReadRow label="Branch" value={block.branch} mono />
+        )}
+        {block.commands.map((cmd) => (
+          <Fragment key={cmd.cmdIdx}>
+            <SetupField
+              label={commandLabel(cmd)}
+              value={cmd.command}
+              editable={active}
+              onSave={(v) => onCommand(cmd, v)}
+              testId={`setup-command-${cmd.name ?? `${block.name}-${cmd.cmdIdx}`}`}
+            />
+            {cmd.health && <ReadRow label="Health check" value={cmd.health} mono />}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The Name input — writes repos[].name, the SAME field the Advanced setup
+ *  Service tab's NAME edits. */
+function NameInput({ value, onSave, testId }: {
   value: string
-  editable: boolean
   onSave: (value: string) => void
   testId: string
 }) {
   const [draft, setDraft] = useState(value)
   useEffect(() => { setDraft(value) }, [value])
-  if (!editable) return <span className="text-[12.5px] font-semibold">{value}</span>
   return (
     <input
       type="text"
@@ -367,9 +437,46 @@ function ServiceNameField({ value, editable, onSave, testId }: {
       onBlur={() => { if (draft.trim() !== '' && draft.trim() !== value) onSave(draft.trim()) }}
       onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       spellCheck={false}
-      className="w-56 rounded border bg-transparent px-1.5 py-0.5 text-[12.5px] font-semibold outline-none"
-      style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+      className="w-full rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
+      style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
     />
+  )
+}
+
+/** The Branch row — the SAME picker the Advanced setup Service tab renders
+ *  (local + remote branches from the repo's git status), committing straight
+ *  to repos[].branch on selection or blur. Only mounted while its block is
+ *  armed, so the git status is fetched exactly when it can be used. */
+function BranchRow({ feature, repoName, value, refreshKey, onSave, testId }: {
+  feature: string
+  repoName: string
+  value: string
+  refreshKey?: number
+  onSave: (value: string) => void
+  testId: string
+}) {
+  const [draft, setDraft] = useState(value)
+  useEffect(() => { setDraft(value) }, [value])
+  const { status } = useRepoGitStatus(feature, repoName, { refreshKey })
+  const commit = (next: string): void => {
+    const v = next.trim()
+    if (v !== '' && v !== value) onSave(v)
+  }
+  return (
+    <>
+      <RowLabel label="Branch" />
+      <BranchSuggestInput
+        value={draft}
+        branches={branchSuggestions(status)}
+        placeholder={status?.currentBranch ?? undefined}
+        testId={testId}
+        inputClassName="w-full rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
+        inputStyle={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+        onChange={setDraft}
+        onSelect={commit}
+        onBlur={() => commit(draft)}
+      />
+    </>
   )
 }
 

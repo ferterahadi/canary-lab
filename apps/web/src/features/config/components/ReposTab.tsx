@@ -15,6 +15,7 @@ import {
   TextInput,
   TrashIcon,
 } from './atoms'
+import { BranchSuggestInput, branchSuggestions } from './BranchSuggestInput'
 import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { SaveBar } from './SaveBar'
 import { TemplatedInput } from './TemplatedInput'
@@ -723,7 +724,6 @@ function BranchControl({
   const [status, setStatus] = useState<api.GitRepoStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [switching, setSwitching] = useState(false)
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [switchHovered, setSwitchHovered] = useState(false)
   const repoName = repoLookupName || repo.name || deriveRepoName(repo.localPath, repo.cloneUrl)
   const target = repo.branch ?? ''
@@ -783,15 +783,6 @@ function BranchControl({
     }
   }
 
-  const branches = [
-    ...(status?.localBranches ?? []),
-    ...(status?.remoteBranches ?? []),
-  ].filter((branch, index, arr) => arr.indexOf(branch) === index)
-  const normalizedTarget = target.trim().toLowerCase()
-  const visibleBranches = branches
-    .filter((branch) => !normalizedTarget || branch.toLowerCase().includes(normalizedTarget))
-    .slice(0, 80)
-
   const canSwitch = Boolean(repoName && target.trim())
     && status?.isGitRepo === true
     && !status.dirty
@@ -818,57 +809,19 @@ function BranchControl({
     <FieldRow label="Branch" hint="Optional branch Canary Lab expects before starting this repo's services.">
       <div className="flex flex-col gap-1.5">
         <div className="flex items-start gap-2">
-          <div className="relative min-w-0 flex-1">
-            <input
-              type="text"
-              value={target}
-              placeholder={status?.currentBranch ?? 'feature/my-branch'}
-              onFocus={() => setSuggestionsOpen(true)}
-              onClick={() => setSuggestionsOpen(true)}
-              onBlur={() => window.setTimeout(() => setSuggestionsOpen(false), 120)}
-              onChange={(e) => {
-                setSuggestionsOpen(true)
-                onChange({ ...repo, branch: e.target.value || undefined })
-              }}
-              className="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
-              style={{
-                backgroundColor: 'var(--bg-elevated)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-primary)',
-                fontFamily: 'var(--font-mono)',
-              }}
-            />
-            {suggestionsOpen && visibleBranches.length > 0 && (
-              <div
-                className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-44 overflow-y-auto rounded-md py-1 text-xs shadow-lg scrollbar-thin"
-                style={{
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
-                  color: 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                }}
-              >
-                {visibleBranches.map((branch) => (
-                  <button
-                    key={branch}
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      onChange({ ...repo, branch })
-                      setSuggestionsOpen(false)
-                    }}
-                    className="block w-full truncate px-2.5 py-1.5 text-left"
-                    style={{
-                      color: branch === target ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      background: branch === target ? 'var(--bg-selected)' : 'transparent',
-                    }}
-                  >
-                    {branch}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <BranchSuggestInput
+            value={target}
+            branches={branchSuggestions(status)}
+            placeholder={status?.currentBranch ?? 'feature/my-branch'}
+            onChange={(next) => onChange({ ...repo, branch: next || undefined })}
+            inputClassName="w-full rounded-md px-2.5 py-1.5 text-xs outline-none"
+            inputStyle={{
+              backgroundColor: 'var(--bg-elevated)',
+              border: '1px solid var(--border-default)',
+              color: 'var(--text-primary)',
+              fontFamily: 'var(--font-mono)',
+            }}
+          />
           {/* Custom tooltip driven by React state — Tailwind JIT didn't pick up
               group-hover utilities, and native title tooltips don't fire on
               disabled buttons. State-driven render is bulletproof. */}
