@@ -265,6 +265,46 @@ describe('FlightPage', () => {
     // No second Continue in the card — recovery lives on the header primary only.
     expect(container.querySelector('[data-testid="stage-error-retry"]')).toBeNull()
     expect(container.querySelector('[data-testid="flight-resume"]')).toBeTruthy()
+    // No boot errorDetail on this failure → no log-tail section, no open-log.
+    expect(container.querySelector('[data-testid="stage-error-log-tail"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-error-open-log"]')).toBeNull()
+  })
+
+  it('boot failure: the error card carries the service-log tail and an open-log action', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'stage-failed',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'env-capture'
+          ? ('failed' as const)
+          : key === 'similarity' || key === 'scout' || key === 'scaffold'
+            ? ('done' as const)
+            : ('pending' as const),
+        ...(key === 'env-capture'
+          ? {
+              error: 'service "oms" crashed during boot — it never reached its health check',
+              errorDetail: {
+                service: 'oms',
+                reason: 'process-exited' as const,
+                logPath: '/ws/logs/runs/2026-01-01T0000-x/svc-oms.log',
+                logTail: "Unrecognized VM option 'MaxPermSize=512m'\nError: Could not create the Java Virtual Machine.",
+              },
+            }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    // The folded env-capture failure surfaces on the merged Suite setup row.
+    expect(container.querySelector('[data-testid="stage-error-detail"]')?.textContent).toContain('crashed during boot')
+    expect(container.querySelector('[data-testid="stage-error-log-tail"]')?.textContent).toContain('Unrecognized VM option')
+    expect(container.querySelector('[data-testid="stage-error"]')?.textContent).toContain('Last lines of svc-oms.log')
+    // Open full log hands the path to the editor-open API.
+    mocks.openEditor.mockResolvedValue({})
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-error-open-log"]')?.click()
+    })
+    expect(mocks.openEditor).toHaveBeenCalledWith({ file: '/ws/logs/runs/2026-01-01T0000-x/svc-oms.log' })
   })
 
   it('R25/R71: the stage-entry launcher rides the ⋯ menu on done and IS the header primary on failed', async () => {

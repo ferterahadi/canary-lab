@@ -4,6 +4,7 @@ import type {
   FlightCheckpoint,
   FlightManifest,
   FlightStage,
+  FlightStageErrorDetail,
   FlightStageKey,
   SpecsCoverageProgress as SpecsCoverageProgressT,
 } from '../../../shared/api/client'
@@ -432,10 +433,14 @@ function stageDrillThrough(
  *  — one Continue, no confusion. Width is capped to line up with the repo-scan
  *  cards above (both ~76ch) so the stage reads as one column, not a full-bleed
  *  banner under narrow cards. */
-function StageErrorPanel({ stageLabel, detail }: {
+function StageErrorPanel({ stageLabel, detail, errorDetail }: {
   stageLabel: string
   detail: string
+  /** Boot-failure evidence (service log tail + path) — rendered under the
+   *  verdict so the CAUSE is on the stage, not a log-dig away. */
+  errorDetail?: FlightStageErrorDetail
 }) {
+  const logName = errorDetail?.logPath ? errorDetail.logPath.split('/').pop() : null
   return (
     <section
       data-testid="stage-error"
@@ -461,6 +466,36 @@ function StageErrorPanel({ stageLabel, detail }: {
       >
         {detail}
       </pre>
+      {errorDetail?.logTail && (
+        <>
+          <div className="text-[9.5px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+            Last lines of {logName ?? 'the service log'}
+          </div>
+          <pre
+            data-testid="stage-error-log-tail"
+            className="m-0 max-h-[220px] overflow-auto whitespace-pre rounded border p-2 text-[10.5px] leading-relaxed"
+            style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+          >
+            {errorDetail.logTail}
+          </pre>
+        </>
+      )}
+      {errorDetail?.logPath && (
+        <div className="flex min-w-0 items-center gap-2">
+          <button
+            type="button"
+            data-testid="stage-error-open-log"
+            onClick={() => { api.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+            style={{ color: 'rgb(56, 189, 248)' }}
+          >
+            Open full service log
+          </button>
+          <span className="min-w-0 truncate text-[10px]" title={errorDetail.logPath} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+            {errorDetail.logPath}
+          </span>
+        </div>
+      )}
     </section>
   )
 }
@@ -549,6 +584,8 @@ function StageDetail({
     : companion?.status === 'waiting-for-approval' ? companion
     : null
   const error = stage.error ?? companion?.error
+  // Detail travels with whichever half's error is showing.
+  const errorDetail = stage.error != null ? stage.errorDetail : companion?.errorDetail
   const combinedLog = [stage.log, companion?.log].filter(Boolean).join('')
 
   // R66: every stage's activity is the same rail. Resolve its one agent source
@@ -660,7 +697,7 @@ function StageDetail({
       {loopProgress && <SpecsPassTimeline progress={loopProgress} live={live} />}
 
       {(row.status === 'failed' && error) && (
-        <StageErrorPanel stageLabel={row.label} detail={error} />
+        <StageErrorPanel stageLabel={row.label} detail={error} errorDetail={errorDetail} />
       )}
 
       {checkpointStage?.checkpoint && (

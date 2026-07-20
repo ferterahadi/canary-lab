@@ -824,7 +824,7 @@ describe('env-capture stage', () => {
     expect(fs.readFileSync(missing, 'utf-8')).toBe('API_KEY=abc\n')
   })
 
-  it('fails the stage when the boot verify fails', async () => {
+  it('fails the stage when the boot verify fails — verdict + structured errorDetail', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     const inject = makeInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
@@ -843,7 +843,44 @@ describe('env-capture stage', () => {
       return { statusCode: 204, body: {} }
     })
     const outcome = await envCaptureStage(deps({ inject })).run(ctxFor(withScout(manifest(), [])).ctx)
-    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('failed to boot') })
+    expect(outcome).toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('never passed its health check'),
+      errorDetail: { service: 'app', reason: 'health-timeout', logPath: '/tmp/app.log' },
+    })
+  })
+
+  it('a crashed service reads as a crash — and the stage error carries the service-log tail', async () => {
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+    const logPath = path.join(tmpDir, 'svc-app.log')
+    fs.writeFileSync(logPath, "Starting daemon\nUnrecognized VM option 'MaxPermSize=512m'\nError: Could not create the Java Virtual Machine.\n")
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
+      if (call.method === 'GET') {
+        return {
+          statusCode: 200,
+          body: {
+            manifest: {
+              status: 'failed',
+              services: [{ name: 'app', status: 'timeout' }],
+              bootFailure: { service: 'app', safeName: 'app', reason: 'process-exited', detail: 'x', logPath },
+            },
+          },
+        }
+      }
+      return { statusCode: 204, body: {} }
+    })
+    const outcome = await envCaptureStage(deps({ inject })).run(ctxFor(withScout(manifest(), [])).ctx)
+    expect(outcome).toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('crashed during boot'),
+      errorDetail: {
+        service: 'app',
+        reason: 'process-exited',
+        logPath,
+        logTail: expect.stringContaining("Unrecognized VM option 'MaxPermSize=512m'"),
+      },
+    })
   })
 
   it('queues behind a repo collision and still boots', async () => {
@@ -921,7 +958,7 @@ describe('env-capture stage', () => {
     expect(polls).toBeGreaterThanOrEqual(2)
   })
 
-  it('falls back to "its service log" when a bootFailure carries no logPath', async () => {
+  it('a bootFailure with no logPath still yields the verdict, with empty log evidence', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     const inject = makeInject((call) => {
       if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
@@ -940,7 +977,11 @@ describe('env-capture stage', () => {
       return { statusCode: 204, body: {} }
     })
     const outcome = await envCaptureStage(deps({ inject })).run(ctxFor(withScout(manifest(), [])).ctx)
-    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('its service log') })
+    expect(outcome).toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('never passed its health check'),
+      errorDetail: { service: 'app', logPath: '', logTail: '' },
+    })
   })
 
   it('boots cleanly when the feature has nothing to boot (remote-URL, zero services)', async () => {

@@ -67,6 +67,20 @@ export interface FlightCheckpointResponse {
   data?: unknown
 }
 
+/** Structured evidence behind a stage `error` when a boot-verify service
+ *  failed — the verdict distinguishes a crash from an unhealthy service, and
+ *  the log tail puts the actual cause on the stage instead of a bare verdict
+ *  line the user has to go digging for. */
+export interface FlightStageErrorDetail {
+  service: string
+  /** From the run's bootFailure: `process-exited` = crashed before healthy;
+   *  `health-timeout` = up but never answered its readiness probe. */
+  reason: 'process-exited' | 'health-timeout'
+  logPath: string
+  /** Last lines of the service log at failure time. */
+  logTail: string
+}
+
 export interface FlightStage {
   key: FlightStageKey
   status: FlightStageStatus
@@ -85,6 +99,8 @@ export interface FlightStage {
   /** The response that released the checkpoint (kept for the audit trail). */
   checkpointResponse?: FlightCheckpointResponse
   error?: string
+  /** Structured boot-failure evidence accompanying `error` (log tail + path). */
+  errorDetail?: FlightStageErrorDetail
   /** Appended progress log for display (mirrors coverage-job manifests). */
   log?: string
   /** Why the stage was skipped (similarity jump, already portified, …). */

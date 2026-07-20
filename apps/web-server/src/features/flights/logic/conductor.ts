@@ -8,6 +8,7 @@ import {
   type FlightManifest,
   type FlightOptions,
   type FlightStage,
+  type FlightStageErrorDetail,
   type FlightStageKey,
 } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
@@ -83,7 +84,7 @@ export type StageOutcome =
   | { kind: 'done'; evidence?: unknown }
   | { kind: 'skipped'; reason: string }
   | { kind: 'checkpoint'; checkpoint: FlightCheckpoint }
-  | { kind: 'failed'; error: string }
+  | { kind: 'failed'; error: string; errorDetail?: FlightStageErrorDetail }
   /** Settle this stage as done and continue at a LATER stage, marking the
    *  stages in between skipped (similarity's "rerun" jumps straight to run). */
   | { kind: 'jump'; to: FlightStageKey; evidence?: unknown; skipReason: string }
@@ -843,7 +844,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
       }
       // failed → park the flight resumable; the stage keeps its error and is
       // flipped back to pending by resumeFlight so the adapter re-runs.
-      patchStage(stage.key, { status: 'failed', endedAt: now(), error: outcome.error })
+      patchStage(stage.key, { status: 'failed', endedAt: now(), error: outcome.error, errorDetail: outcome.errorDetail })
       {
         const cur = read()
         save({ ...cur, status: 'paused', pauseReason: 'stage-failed', error: outcome.error, updatedAt: now() })

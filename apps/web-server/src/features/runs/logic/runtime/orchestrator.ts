@@ -977,6 +977,18 @@ export class RunOrchestrator extends EventEmitter {
     const detail = failureReason === 'process-exited'
       ? `Service process exited before ${transport.toUpperCase()} readiness (${probeTarget}).`
       : `Timed out waiting for ${transport.toUpperCase()} readiness (${probeTarget}).`
+    // The failure record (reason + service log path) is written for EVERY
+    // execution type — readers like the flight's boot-verify need the real
+    // cause (crashed vs never-healthy) and the log to surface, not just a
+    // `timeout` status. What differs below is only whether the run dies.
+    this.bootFailure ??= {
+      service: svc.name,
+      safeName: svc.safeName,
+      reason: failureReason,
+      detail,
+      logPath: this.paths.serviceLog(svc.safeName),
+    }
+    this.stateSink.patchManifest(this.runId, { bootFailure: this.bootFailure })
     // Boot-only sessions hold whatever came up. A service that fails its
     // readiness probe is marked `timeout` (red) and surfaced as a non-fatal
     // warning, but the session is NOT aborted — the user keeps the healthy
@@ -990,18 +1002,10 @@ export class RunOrchestrator extends EventEmitter {
       return
     }
     // Normal run: a missing service makes the Playwright suite meaningless, but
-    // a broken service IS app code the heal agent can fix. Record the failure
-    // (first one wins) and return — runFullCycle / the heal loops declare the
-    // run `failed` and route it into heal with this service's log as context,
+    // a broken service IS app code the heal agent can fix. The recorded failure
+    // (first one wins) makes runFullCycle / the heal loops declare the run
+    // `failed` and route it into heal with this service's log as context,
     // instead of throwing and aborting with no chance to repair.
-    this.bootFailure ??= {
-      service: svc.name,
-      safeName: svc.safeName,
-      reason: failureReason,
-      detail,
-      logPath: this.paths.serviceLog(svc.safeName),
-    }
-    this.stateSink.patchManifest(this.runId, { bootFailure: this.bootFailure })
     this.recordLifecycle('starting-services', `Service failed to start: ${svc.name}`, {
       detail: `${detail} The run will be marked failed; the heal agent should read the service log to fix why it won't serve.`,
       severity: 'error',

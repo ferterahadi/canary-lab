@@ -3,6 +3,7 @@ import path from 'path'
 import { captureFeatureEnvFiles } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
+import type { FlightStageErrorDetail } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
@@ -15,10 +16,22 @@ import type { ScoutDraft } from './scout'
 // `--yolo` honors: canary never guesses secrets.
 
 const BOOT_VERIFY_TIMEOUT_MS = 5 * 60 * 1000
+const LOG_TAIL_LINES = 15
 
 interface BootEvidence {
   runId: string
   services: Array<{ name: string; status?: string }>
+}
+
+/** Last lines of the failed service's log — the actual cause (a crash, a bind
+ *  error, a stack trace) lives here, so it ships on the stage error instead of
+ *  leaving the user a bare verdict to go digging from. */
+function serviceLogTail(logPath: string): string {
+  try {
+    return fs.readFileSync(logPath, 'utf-8').replace(/\s+$/, '').split('\n').slice(-LOG_TAIL_LINES).join('\n')
+  } catch {
+    return ''
+  }
 }
 
 async function bootVerify(
@@ -26,7 +39,10 @@ async function bootVerify(
   ctx: StageContext,
   feature: string,
   env: string,
-): Promise<{ ok: true; evidence: BootEvidence } | { ok: false; error: string; evidence?: BootEvidence }> {
+): Promise<
+  | { ok: true; evidence: BootEvidence }
+  | { ok: false; error: string; errorDetail?: FlightStageErrorDetail; evidence?: BootEvidence }
+> {
   let resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature, env, mode: 'boot' } })
   let body = resp.json() as Record<string, unknown>
   if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {
@@ -64,14 +80,30 @@ async function bootVerify(
     const failedService = evidence.services.find((s) => s.status === 'timeout')
     if (manifest?.status === 'failed' || manifest?.status === 'aborted' || failedService) {
       const boot = manifest?.bootFailure
+      if (boot) {
+        // The run recorded WHY: crashed vs never-healthy, plus the service
+        // log — put the verdict and the log's last lines on the stage error
+        // so the cause is readable without leaving the flight.
+        return {
+          ok: false,
+          evidence,
+          error: boot.reason === 'process-exited'
+            ? `service "${boot.service}" crashed during boot — it never reached its health check`
+            : `service "${boot.service}" never passed its health check`,
+          errorDetail: {
+            service: boot.service,
+            reason: boot.reason,
+            logPath: boot.logPath ?? '',
+            logTail: boot.logPath ? serviceLogTail(boot.logPath) : '',
+          },
+        }
+      }
       return {
         ok: false,
         evidence,
-        error: boot
-          ? `service "${boot.service}" failed to boot — see ${boot.logPath ?? 'its service log'}`
-          : failedService
-            ? `service "${failedService.name}" never passed its health check`
-            : `boot run ${runId} ended ${manifest?.status}`,
+        error: failedService
+          ? `service "${failedService.name}" never passed its health check`
+          : `boot run ${runId} ended ${manifest?.status}`,
       }
     }
     ctx.appendLog(`[boot-verify] all services ready\n`)
@@ -99,7 +131,7 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
     const failed = capture(ctx, m.feature, m.opts.env, files)
     if (failed) return failed
     const boot = await bootVerify(deps, ctx, m.feature, m.opts.env)
-    if (!boot.ok) return { kind: 'failed', error: boot.error }
+    if (!boot.ok) return { kind: 'failed', error: boot.error, errorDetail: boot.errorDetail }
     return { kind: 'done', evidence: { captured: files.length, boot: boot.evidence } }
   }
 

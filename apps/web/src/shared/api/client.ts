@@ -1825,6 +1825,7 @@ export type {
   FlightManifest,
   FlightIndexEntry,
   FlightStage,
+  FlightStageErrorDetail,
   FlightStageKey,
   FlightStageStatus,
   FlightStatus,

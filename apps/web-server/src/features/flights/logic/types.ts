@@ -17,6 +17,7 @@ export type {
   FlightCheckpoint,
   FlightCheckpointResponse,
   FlightStage,
+  FlightStageErrorDetail,
   FlightStatus,
   FlightOptions,
   FlightManifest,
