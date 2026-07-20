@@ -346,6 +346,37 @@ describe('FlightPage', () => {
     const asv = container.querySelector('[data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-stage')).toBe('scout')
   })
+
+  it('locks Advanced setup while the flight is running, unlocks it when idle', async () => {
+    const onOpenConfig = vi.fn()
+    // Running: scaffold is approved (done) but the flight is still in the air —
+    // the config is owned by the later stages, so setup is locked.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'run' ? ('running' as const) : ('done' as const),
+      })),
+    }))
+    await render('fl_1', { onOpenConfig })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click() })
+    const running = container.querySelector<HTMLButtonElement>('[data-testid="feature-setup-advanced"]')
+    expect(running?.disabled).toBe(true)
+    await act(async () => { running?.click() })
+    expect(onOpenConfig).not.toHaveBeenCalled()
+
+    // Idle (done): the button re-enables and opens the config editor.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    await render('fl_1', { onOpenConfig })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click() })
+    const idle = container.querySelector<HTMLButtonElement>('[data-testid="feature-setup-advanced"]')
+    expect(idle?.disabled).toBe(false)
+    await act(async () => { idle?.click() })
+    expect(onOpenConfig).toHaveBeenCalledWith('checkout')
+  })
 })
 
 describe('stage summary + drill-through (R6)', () => {

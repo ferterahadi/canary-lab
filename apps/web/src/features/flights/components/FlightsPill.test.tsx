@@ -279,6 +279,12 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     expect(featureChipState(null, undefined, lit).rank).toBeLessThan(featureChipState(null).rank)
   })
 
+  it('a running flight on specs-coverage says "authoring", other stages stay "running"', () => {
+    expect(featureChipState({ status: 'running', currentStage: 'specs-coverage', pauseReason: null }).label).toBe('authoring')
+    expect(featureChipState({ status: 'running', currentStage: 'run', pauseReason: null }).label).toBe('running')
+    expect(featureChipState({ status: 'running', currentStage: null, pauseReason: null }).label).toBe('running')
+  })
+
   it('an activity-only row keeps its evidence squares lit under the running overlay', () => {
     const activity = new Map<string, FeatureActivity>([['pay', { kind: 'portifying', workflowId: 'wf9' }]])
     act(() => {

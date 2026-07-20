@@ -21,6 +21,74 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Drag-and-drop wiring for a docs drop target — one home for the dragging
+ *  flag + the three handlers, shared by the coverage rail and the flight
+ *  Requirements panel so both surfaces accept files the same way. */
+export function useDocDrop(disabled: boolean, onFiles: (files: FileList) => void): {
+  dragging: boolean
+  dropHandlers: {
+    onDragOver: (e: DragEvent) => void
+    onDragLeave: (e: DragEvent) => void
+    onDrop: (e: DragEvent) => void
+  }
+} {
+  const [dragging, setDragging] = useState(false)
+  const onDrop = useCallback((e: DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    if (disabled) return
+    const files = e.dataTransfer.files
+    if (files && files.length > 0) onFiles(files)
+  }, [disabled, onFiles])
+  return {
+    dragging,
+    dropHandlers: {
+      onDragOver: (e: DragEvent) => { e.preventDefault(); if (disabled) return; setDragging(true) },
+      onDragLeave: (e: DragEvent) => { if (e.currentTarget === e.target) setDragging(false) },
+      onDrop,
+    },
+  }
+}
+
+/** The dashed "add more docs" tile that follows an existing pill list. */
+export function AddDocsTile({ onPick, disabled, testId = 'add-another-doc' }: {
+  onPick: () => void
+  disabled: boolean
+  testId?: string
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onPick}
+      disabled={disabled}
+      className="flex w-full items-center justify-center gap-2"
+      style={{
+        padding: '10px 12px', borderRadius: 'var(--radius-md)',
+        border: '1px dashed var(--border-default)', background: 'transparent',
+        color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11.5,
+      }}
+    >
+      <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
+      Add docs — drop files or click to browse
+    </button>
+  )
+}
+
+/** The accent overlay a drop target shows while a drag hovers it. The host
+ *  element must be position:relative. */
+export function DocsDropOverlay({ label }: { label: string }) {
+  return (
+    <div
+      data-testid="drop-overlay"
+      className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: '2px dashed var(--accent)', borderRadius: 'var(--radius-md)' }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{label}</span>
+    </div>
+  )
+}
+
 interface Props {
   feature: string
   open: boolean
@@ -49,7 +117,6 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   const [listing, setListing] = useState<FeatureDocsListing | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // `keepError` lets a refetch that follows a partially-failed batch import
@@ -145,13 +212,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // the agent is reading the current docs, so mutating them is never valid.
   const docsReadOnly = docsFrozen || generating
 
-  const onDrop = useCallback((e: DragEvent) => {
-    e.preventDefault()
-    setDragging(false)
-    if (locked || docsFrozen) return
-    const files = e.dataTransfer.files
-    if (files && files.length > 0) void importFiles(files)
-  }, [importFiles, locked, docsFrozen])
+  const { dragging, dropHandlers } = useDocDrop(locked || docsFrozen, (files) => { void importFiles(files) })
 
   const sourceCount = listing?.sourceDocCount ?? 0
   const dirPrefix = `features/${feature}/docs/`
@@ -212,9 +273,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         background: 'var(--bg-surface)', position: 'relative',
         transition: 'width 140ms ease',
       }}
-      onDragOver={(e) => { e.preventDefault(); if (docsFrozen || locked) return; if (!dragging) setDragging(true) }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false) }}
-      onDrop={onDrop}
+      {...dropHandlers}
     >
       <input
         ref={fileInputRef}
@@ -308,21 +367,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
                 />
               ))}
               {!docsReadOnly && (
-                <button
-                  type="button"
-                  data-testid="add-another-doc"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={locked}
-                  className="flex w-full items-center justify-center gap-2"
-                  style={{
-                    padding: '10px 12px', borderRadius: 'var(--radius-md)',
-                    border: '1px dashed var(--border-default)', background: 'transparent',
-                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11.5,
-                  }}
-                >
-                  <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
-                  Add docs — drop files or click to browse
-                </button>
+                <AddDocsTile onPick={() => fileInputRef.current?.click()} disabled={locked} />
               )}
             </div>
           )
@@ -388,15 +433,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
       </div>
 
       {/* Full-rail drag overlay */}
-      {dragging && (
-        <div
-          data-testid="drop-overlay"
-          className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: '2px dashed var(--accent)', borderRadius: 'var(--radius-md)' }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>Drop to add source docs</span>
-        </div>
-      )}
+      {dragging && <DocsDropOverlay label="Drop to add source docs" />}
     </div>
   )
 }
@@ -486,7 +523,13 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
   )
 }
 
-function EmptyDropzone({ onPick, dragging, busy }: { onPick: () => void; dragging: boolean; busy: boolean }) {
+export function EmptyDropzone({ onPick, dragging, busy, title = 'Add source docs' }: {
+  onPick: () => void
+  dragging: boolean
+  busy: boolean
+  /** Heading inside the zone — the coverage rail and the flight Requirements panel name their doc kind. */
+  title?: string
+}) {
   return (
     <button
       type="button"
@@ -512,7 +555,7 @@ function EmptyDropzone({ onPick, dragging, busy }: { onPick: () => void; draggin
           <path d="M12 5v14M5 12h14" />
         </svg>
       </span>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>Add source docs</span>
+      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>{title}</span>
       <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
         Drop spec, ticket, or notes files here — or click to browse. Accepts <code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>.
       </span>

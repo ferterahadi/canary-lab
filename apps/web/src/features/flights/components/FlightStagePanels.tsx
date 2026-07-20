@@ -3,7 +3,7 @@ import * as api from '../../../shared/api/client'
 import type { FlightManifest, FlightStageStatus } from '../../../shared/api/client'
 import type { FeatureDocsListing } from '../../../shared/api/types'
 import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '../../config/components/BranchSuggestInput'
-import { DocPill, readAsBase64 } from '../../coverage/components/CoverageDocsRail'
+import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, readAsBase64, useDocDrop } from '../../coverage/components/CoverageDocsRail'
 import { StageStatusChip } from './stage-meta'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
@@ -649,93 +649,104 @@ export function FlightDocsPanel({
 
   const disabled = busy || locked
   const sourceDocs = (listing?.docs ?? []).filter((d) => !d.generated)
+  const { dragging, dropHandlers } = useDocDrop(disabled, (files) => { void importFiles(files) })
 
   return (
-    <section data-testid="flight-docs-panel" className="flex flex-col gap-1.5">
-      <div className="flex items-center gap-2">
-        <h3 className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-          Requirement docs
-        </h3>
-        {sourceDocs.length > 0 && (
-          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-            {sourceDocs.length} source{sourceDocs.length === 1 ? '' : 's'}
-          </span>
-        )}
-        <div className="flex-1" />
-        {summaryStatus && summaryStatus !== 'pending' && (
-          <span className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="docs-summary-chip">
-            Summary
-            <StageStatusChip status={summaryStatus} />
-          </span>
-        )}
-      </div>
-      <input
-        ref={fileInputRef}
-        data-testid="flight-doc-file-input"
-        type="file"
-        multiple
-        accept=".md,.markdown,.txt,.pdf,.docx"
-        style={{ display: 'none' }}
-        onChange={(e) => {
-          if (e.target.files && e.target.files.length > 0) void importFiles(e.target.files)
-          e.target.value = ''
-        }}
-      />
-      {sourceDocs.length === 0 && (
-        <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          No docs yet — add files, or link a local PRD by path.
+    <section data-testid="flight-docs-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
+      {/* One Repo-scan-shaped card: kicker + summary chip, then the SAME
+          dropzone/pill/add-tile surface the coverage rail renders — drop
+          files anywhere on the card. */}
+      <div className={`relative ${REPO_SCAN_CARD_CLASS}`} style={REPO_SCAN_CARD_STYLE} {...dropHandlers}>
+        <div className="flex items-center gap-2">
+          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+            {sourceDocs.length > 0 ? `Requirement docs · ${sourceDocs.length}` : 'Requirement docs'}
+          </div>
+          <div className="flex-1" />
+          {summaryStatus && summaryStatus !== 'pending' && (
+            <span className="mb-1 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="docs-summary-chip">
+              Summary
+              <StageStatusChip status={summaryStatus} />
+            </span>
+          )}
         </div>
-      )}
-      {sourceDocs.map((d) => (
-        <DocPill
-          key={d.relPath}
-          relPath={d.relPath}
-          dirPrefix={`features/${feature}/docs/`}
-          generated={d.generated}
-          sizeBytes={d.sizeBytes}
-          linked={d.linked}
-          linkTarget={d.linkTarget}
-          broken={d.broken}
-          busy={disabled}
-          onOpen={() => openDoc(d.absPath)}
-          onRemove={locked ? undefined : () => removeDoc(d.relPath)}
-          removeTitle="Remove doc"
+        <input
+          ref={fileInputRef}
+          data-testid="flight-doc-file-input"
+          type="file"
+          multiple
+          accept=".md,.markdown,.txt,.pdf,.docx"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            if (e.target.files && e.target.files.length > 0) void importFiles(e.target.files)
+            e.target.value = ''
+          }}
         />
-      ))}
-      {!locked && (
-        <div className="flex items-center gap-1.5">
-          <input
-            type="text"
-            data-testid="flight-doc-link-input"
-            value={pathInput}
-            onChange={(e) => setPathInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); linkPath() } }}
-            placeholder="/absolute/path/to/prd.md"
-            disabled={disabled}
-            className="min-w-0 flex-1 rounded border bg-transparent px-2 py-1 text-[11px] outline-none"
-            style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
-          />
-          <button
-            type="button"
-            data-testid="flight-doc-link"
-            onClick={linkPath}
-            disabled={disabled || pathInput.trim() === ''}
-            className="cl-button px-2 py-1 text-xs"
-          >
-            Link
-          </button>
-          <button
-            type="button"
-            data-testid="flight-doc-add-files"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={disabled}
-            className="cl-button px-2 py-1 text-xs"
-          >
-            Add files…
-          </button>
-        </div>
-      )}
-      {error && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
+        {sourceDocs.length === 0 ? (
+          locked ? (
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>No source docs.</div>
+          ) : (
+            <EmptyDropzone
+              title="Add requirement docs"
+              onPick={() => fileInputRef.current?.click()}
+              dragging={dragging}
+              busy={disabled}
+            />
+          )
+        ) : (
+          <div className="flex flex-col gap-2">
+            {sourceDocs.map((d) => (
+              <DocPill
+                key={d.relPath}
+                relPath={d.relPath}
+                dirPrefix={`features/${feature}/docs/`}
+                generated={d.generated}
+                sizeBytes={d.sizeBytes}
+                linked={d.linked}
+                linkTarget={d.linkTarget}
+                broken={d.broken}
+                busy={disabled}
+                onOpen={() => openDoc(d.absPath)}
+                onRemove={locked ? undefined : () => removeDoc(d.relPath)}
+                removeTitle="Remove doc"
+              />
+            ))}
+            {!locked && (
+              <AddDocsTile testId="flight-doc-add-files" onPick={() => fileInputRef.current?.click()} disabled={disabled} />
+            )}
+          </div>
+        )}
+        {!locked && (
+          <div className="mt-2.5 flex flex-col gap-1 border-t pt-2" style={{ borderColor: 'var(--border-default)' }}>
+            <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+              Or link a local file by path — the original stays the live source
+            </span>
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                data-testid="flight-doc-link-input"
+                value={pathInput}
+                onChange={(e) => setPathInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); linkPath() } }}
+                placeholder="/absolute/path/to/prd.md"
+                disabled={disabled}
+                className="min-w-0 flex-1 rounded border bg-transparent px-2 py-1 text-[11px] outline-none"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+              />
+              <button
+                type="button"
+                data-testid="flight-doc-link"
+                onClick={linkPath}
+                disabled={disabled || pathInput.trim() === ''}
+                className="cl-button px-2 py-1 text-xs"
+              >
+                Link
+              </button>
+            </div>
+          </div>
+        )}
+        {error && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
+        {dragging && <DocsDropOverlay label="Drop to add requirement docs" />}
+      </div>
     </section>
   )
 }

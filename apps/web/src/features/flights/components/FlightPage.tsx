@@ -619,8 +619,15 @@ function StageDetail({
           <button
             type="button"
             data-testid="feature-setup-advanced"
+            /* Locked while the flight is running (the run/authoring stages own
+               the config) — matches the inline FeatureSetupPanel's `editable`
+               gate below; only editable once the flight is idle. */
+            disabled={flight.status === 'running'}
             onClick={() => onOpenConfig(flight.feature)}
             className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+            title={flight.status === 'running'
+              ? 'Advanced setup is locked while the flight is running'
+              : undefined}
           >
             ⚙ Advanced setup
           </button>
@@ -1420,7 +1427,7 @@ function CheckpointControls({
     <section
       data-testid="checkpoint-controls"
       className="flex w-full max-w-[76ch] flex-col gap-2.5 rounded border p-3"
-      style={{ borderColor: 'color-mix(in srgb, rgb(251, 191, 36) 45%, var(--border-default))' }}
+      style={{ borderColor: 'color-mix(in srgb, rgb(251, 191, 36) 45%, var(--border-default))', background: 'var(--bg-surface)' }}
     >
       <div className="flex items-center gap-2">
         <span aria-hidden="true" style={{ color: 'rgb(251, 191, 36)' }}>⏸</span>
@@ -1432,12 +1439,14 @@ function CheckpointControls({
           {checkpointTitle(checkpoint.kind)}
         </span>
       </div>
-      <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{checkpoint.message}</p>
-
-      {checkpoint.kind === 'prd-source' && (
-        <p className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-          Add or link docs above (they land in features/{flight.feature}/docs/), then continue — or pick a source to infer from.
+      {/* prd-source repeats the stage state line verbatim — the card carries
+          only the directive there, so the message reads once, not three times. */}
+      {checkpoint.kind === 'prd-source' ? (
+        <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+          Add or link docs above, then continue — or pick a source to infer requirements from.
         </p>
+      ) : (
+        <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{checkpoint.message}</p>
       )}
 
       {checkpoint.kind === 'config-approval' && configError && (

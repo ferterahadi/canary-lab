@@ -468,12 +468,17 @@ body {
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.cl-button:hover,
-.cl-button:focus-visible {
+.cl-button:not(:disabled):hover,
+.cl-button:not(:disabled):focus-visible {
   background: var(--bg-hover);
   border-color: var(--border-strong);
   color: var(--text-primary);
   outline: none;
+}
+
+.cl-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* Branch choice cards in the run-start branch-mismatch dialog — the whole card

@@ -66,6 +66,15 @@ const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: string 
   'authoring': { label: 'authoring', title: 'Authoring test specs' },
 }
 
+/** Short chip verb for a RUNNING flight, keyed by the stage the conductor is
+ *  on — the chip narrates WHAT is happening rather than a flat "running" (and
+ *  reads the same as the standalone ACTIVITY_CHIP verb for the absorbed
+ *  surface: a flight authoring specs and a standalone authoring draft both say
+ *  "authoring"). Unmapped stages keep the generic "running". */
+const RUNNING_STAGE_CHIP: Partial<Record<FlightStageKey, string>> = {
+  'specs-coverage': 'authoring',
+}
+
 /** Which flight stage a standalone activity kind maps onto — so an
  *  activity-only row (no flight record) can still show WHERE in the pipeline
  *  the live job sits (R56). */
@@ -113,7 +122,8 @@ export interface FeatureChipState {
  *   2. live activity on the feature  → "running" / "portifying" / "authoring"
  *      (sky — narrates the absorbed surfaces (runs / portify / wizard drafts)
  *      whether the job was started by a flight stage or standalone)
- *   3. flight conductor active       → "running"     (sky — between stage jobs)
+ *   3. flight conductor active       → the stage verb (sky — "authoring" on
+ *      specs-coverage, else the generic "running" between/on other stages)
  *   4. flight paused                 → "paused"      (amber)
  *   5. nothing happening             → the LAST state: "done" / "failed" / "aborted"
  *
@@ -157,7 +167,7 @@ export function featureChipState(
   }
   if (flight.status === 'running') {
     return {
-      label: 'running',
+      label: (flight.currentStage && RUNNING_STAGE_CHIP[flight.currentStage]) ?? 'running',
       tone: FLIGHT_STATUS_TONE['running'],
       live: true,
       rank: 1,
