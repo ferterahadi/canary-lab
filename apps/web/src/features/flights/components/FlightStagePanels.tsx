@@ -331,7 +331,14 @@ function ReadRow({ label, value, mono, info }: { label: string; value: string; m
   return (
     <>
       <RowLabel label={label} info={info} />
-      <span className="min-w-0 truncate" title={value} style={{ color: 'var(--text-secondary)', fontFamily: mono ? 'var(--font-mono)' : undefined }}>
+      {/* Same metrics as the edit-mode inputs (border + px-2 py-1) with the
+          chrome transparent — arming ✎ swaps text for inputs WITHOUT the rows
+          jumping (no height or x-offset change). */}
+      <span
+        className="min-w-0 truncate rounded border border-transparent px-2 py-1"
+        title={value}
+        style={{ color: 'var(--text-secondary)', fontFamily: mono ? 'var(--font-mono)' : undefined }}
+      >
         {value}
       </span>
     </>
@@ -371,7 +378,8 @@ function ServiceBlock({ feature, block, allowEdit, refreshKey, divider, onRename
             {active ? (
               <NameInput value={block.name} onSave={onRename} testId={`setup-service-name-${block.name}`} />
             ) : (
-              <span className="block truncate text-[12px] font-semibold" title={block.name} style={{ fontFamily: 'var(--font-mono)' }}>
+              // Input-matching metrics (transparent chrome) — see ReadRow.
+              <span className="block truncate rounded border border-transparent px-2 py-1 text-[11.5px] font-semibold" title={block.name} style={{ fontFamily: 'var(--font-mono)' }}>
                 {block.name}
               </span>
             )}
@@ -566,35 +574,21 @@ function ModeRow({ label, value, modes = PW_MODES, editable, onSave, testId }: {
   )
 }
 
-// ─── Requirements: the docs manager (R44/R59) ────────────────────────────────
-// List / add / link / remove requirement docs right where the flight pauses
-// for them (user-confirmed 2026-07-07: adding docs HERE stays — the ledger's
-// rail is the other lens on the same folder). Same REST endpoints as the
-// coverage rail + MCP tools; linked docs carry the ↗ marker (the user's
-// original is the live source); the distilled-summary chip narrates the
-// folded prd-summary half.
+// ─── Requirements (R74): the two-path fork + the resting docs panel ──────────
+// While the flight is parked on the prd-source checkpoint the FORK owns the
+// surface: "I'll add docs myself" (drop zone, no agent) vs "Let the agent find
+// them" (two intent-guided hints — collect docs from the repos / infer from
+// the git diff — that spawn the server collector; its output streams in the
+// stage's activity band). Outside the checkpoint the panel is a read-only
+// lens: pills + the summary chip, locked once approved — changes go through
+// Continue → from a step → Requirements.
 
-export function FlightDocsPanel({
-  feature,
-  locked,
-  refreshKey,
-  onChanged,
-  summaryStatus,
-}: {
-  feature: string
-  /** True while the PRD summary is being generated from these docs. */
-  locked: boolean
-  /** Bumped on coverage-changed so out-of-band doc writes show live. */
-  refreshKey?: number
-  onChanged?: () => void
-  /** The folded prd-summary stage's status — rendered as the summary chip. */
-  summaryStatus?: FlightStageStatus
-}) {
+/** Doc CRUD over a feature's docs/ folder — one loader shared by the fork's
+ *  manual path and the resting panel (same REST the coverage rail uses). */
+function useFlightDocs(feature: string, refreshKey?: number, onChanged?: () => void) {
   const [listing, setListing] = useState<FeatureDocsListing | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pathInput, setPathInput] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback((keepError = false) => {
     api.listFeatureDocs(feature)
@@ -621,47 +615,57 @@ export function FlightDocsPanel({
     setBusy(false)
   }, [feature, load, onChanged])
 
-  const linkPath = (): void => {
-    const value = pathInput.trim()
-    if (!value) return
-    setBusy(true)
-    setError(null)
-    api.linkFeatureDocPath(feature, value)
-      .then(() => { setPathInput(''); load(); onChanged?.() })
-      .catch((err: unknown) => {
-        const body = err instanceof api.ApiError ? (err.body as { error?: string } | null) : null
-        setError(body?.error ?? (err instanceof Error ? err.message : String(err)))
-      })
-      .finally(() => setBusy(false))
-  }
-
-  const removeDoc = (relPath: string): void => {
+  const removeDoc = useCallback((relPath: string) => {
     setBusy(true)
     api.deleteFeatureDoc(feature, relPath)
       .then(() => { load(); onChanged?.() })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false))
-  }
+  }, [feature, load, onChanged])
 
-  const openDoc = (absPath: string): void => {
+  const openDoc = useCallback((absPath: string) => {
     api.openEditor({ file: absPath }).catch(() => {})
-  }
+  }, [])
 
-  const disabled = busy || locked
   const sourceDocs = (listing?.docs ?? []).filter((d) => !d.generated)
-  const { dragging, dropHandlers } = useDocDrop(disabled, (files) => { void importFiles(files) })
+  return { sourceDocs, busy, error, importFiles, removeDoc, openDoc }
+}
 
+/** The resting Requirements panel — a read-only lens on docs/ while the stage
+ *  runs or after it settles. No add/remove affordances here: while parked the
+ *  fork owns editing; once approved the set is honestly frozen. */
+export function FlightDocsPanel({
+  feature,
+  approved,
+  refreshKey,
+  summaryStatus,
+}: {
+  feature: string
+  /** Stage settled done — requirements approved, the doc set is frozen. */
+  approved: boolean
+  /** Bumped on coverage-changed so out-of-band doc writes show live. */
+  refreshKey?: number
+  /** The folded prd-summary stage's status — rendered as the summary chip. */
+  summaryStatus?: FlightStageStatus
+}) {
+  const docs = useFlightDocs(feature, refreshKey)
   return (
     <section data-testid="flight-docs-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
-      {/* One Repo-scan-shaped card: kicker + summary chip, then the SAME
-          dropzone/pill/add-tile surface the coverage rail renders — drop
-          files anywhere on the card. */}
-      <div className={`relative ${REPO_SCAN_CARD_CLASS}`} style={REPO_SCAN_CARD_STYLE} {...dropHandlers}>
+      <div className={REPO_SCAN_CARD_CLASS} style={REPO_SCAN_CARD_STYLE}>
         <div className="flex items-center gap-2">
           <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
-            {sourceDocs.length > 0 ? `Requirement docs · ${sourceDocs.length}` : 'Requirement docs'}
+            {docs.sourceDocs.length > 0 ? `Requirement docs · ${docs.sourceDocs.length}` : 'Requirement docs'}
           </div>
           <div className="flex-1" />
+          {approved && (
+            <span
+              data-testid="docs-locked-chip"
+              className="mb-1 rounded border px-1.5 py-px text-[9.5px] font-medium"
+              style={{ color: 'var(--text-muted)', borderColor: 'var(--border-default)' }}
+            >
+              Locked — approved
+            </span>
+          )}
           {summaryStatus && summaryStatus !== 'pending' && (
             <span className="mb-1 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="docs-summary-chip">
               Summary
@@ -669,32 +673,11 @@ export function FlightDocsPanel({
             </span>
           )}
         </div>
-        <input
-          ref={fileInputRef}
-          data-testid="flight-doc-file-input"
-          type="file"
-          multiple
-          accept=".md,.markdown,.txt,.pdf,.docx"
-          style={{ display: 'none' }}
-          onChange={(e) => {
-            if (e.target.files && e.target.files.length > 0) void importFiles(e.target.files)
-            e.target.value = ''
-          }}
-        />
-        {sourceDocs.length === 0 ? (
-          locked ? (
-            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>No source docs.</div>
-          ) : (
-            <EmptyDropzone
-              title="Add requirement docs"
-              onPick={() => fileInputRef.current?.click()}
-              dragging={dragging}
-              busy={disabled}
-            />
-          )
+        {docs.sourceDocs.length === 0 ? (
+          <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>No source docs.</div>
         ) : (
           <div className="flex flex-col gap-2">
-            {sourceDocs.map((d) => (
+            {docs.sourceDocs.map((d) => (
               <DocPill
                 key={d.relPath}
                 relPath={d.relPath}
@@ -704,49 +687,277 @@ export function FlightDocsPanel({
                 linked={d.linked}
                 linkTarget={d.linkTarget}
                 broken={d.broken}
-                busy={disabled}
-                onOpen={() => openDoc(d.absPath)}
-                onRemove={locked ? undefined : () => removeDoc(d.relPath)}
+                busy={false}
+                onOpen={() => docs.openDoc(d.absPath)}
                 removeTitle="Remove doc"
               />
             ))}
-            {!locked && (
-              <AddDocsTile testId="flight-doc-add-files" onPick={() => fileInputRef.current?.click()} disabled={disabled} />
-            )}
           </div>
         )}
-        {!locked && (
-          <div className="mt-2.5 flex flex-col gap-1 border-t pt-2" style={{ borderColor: 'var(--border-default)' }}>
-            <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
-              Or link a local file by path — the original stays the live source
-            </span>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="text"
-                data-testid="flight-doc-link-input"
-                value={pathInput}
-                onChange={(e) => setPathInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); linkPath() } }}
-                placeholder="/absolute/path/to/prd.md"
-                disabled={disabled}
-                className="min-w-0 flex-1 rounded border bg-transparent px-2 py-1 text-[11px] outline-none"
-                style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
-              />
-              <button
-                type="button"
-                data-testid="flight-doc-link"
-                onClick={linkPath}
-                disabled={disabled || pathInput.trim() === ''}
-                className="cl-button px-2 py-1 text-xs"
-              >
-                Link
-              </button>
-            </div>
-          </div>
+        {approved && (
+          <p className="mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+            To change these, use Continue → from a step → Requirements — later results are discarded from that point.
+          </p>
         )}
-        {error && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
-        {dragging && <DocsDropOverlay label="Drop to add requirement docs" />}
+        {docs.error && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{docs.error}</div>}
       </div>
     </section>
   )
 }
+
+/** The folded intent row — one truncated line, View/Fold to expand. The intent
+ *  is frozen and guides both fork paths, so it rides every fork state. */
+function IntentRow({ description }: { description: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <button
+      type="button"
+      data-testid="fork-intent"
+      onClick={() => setOpen(!open)}
+      className="flex w-full items-center gap-2 rounded border px-2.5 py-1.5 text-left"
+      style={{ borderColor: 'var(--border-default)', background: 'transparent', cursor: 'pointer' }}
+      title={open ? 'Fold the intent' : 'View the full intent'}
+    >
+      <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+        Intent
+      </span>
+      {/* Prose, not code — the intent reads in the app face like every other
+          sentence on the page (mono stays reserved for paths/commands). */}
+      <span
+        data-testid="fork-intent-text"
+        className={`min-w-0 flex-1 text-[12px] ${open ? 'leading-relaxed' : 'truncate'}`}
+        style={{ color: 'var(--text-secondary)' }}
+      >
+        {description}
+      </span>
+      <span className="shrink-0 text-[10.5px]" style={{ color: 'rgb(56, 189, 248)' }}>
+        {open ? 'Fold' : 'View'}
+      </span>
+    </button>
+  )
+}
+
+/** One fork path card — a radio-like affordance that STAYS visible after the
+ *  pick (R74 polish): the selected card lights sky + shows its dot filled, the
+ *  other dims but remains clickable, so the previous choice is never hidden. */
+function ForkPathCard({ testId, title, blurb, recommended, selected, dimmed, disabled, onPick }: {
+  testId: string
+  title: string
+  blurb: string
+  recommended?: boolean
+  /** This card is the current pick — its content renders below the pair. */
+  selected?: boolean
+  /** A sibling is selected — recede without disappearing. */
+  dimmed?: boolean
+  disabled: boolean
+  onPick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      role="radio"
+      aria-checked={Boolean(selected)}
+      disabled={disabled}
+      onClick={onPick}
+      className="relative flex min-w-0 flex-1 items-start gap-2.5 rounded border p-3 text-left transition-all"
+      style={{
+        borderColor: selected
+          ? 'color-mix(in srgb, rgb(56, 189, 248) 60%, var(--border-default))'
+          : 'var(--border-default)',
+        background: selected ? 'color-mix(in srgb, rgb(56, 189, 248) 7%, var(--bg-base))' : 'var(--bg-base)',
+        opacity: dimmed ? 0.6 : 1,
+        cursor: 'pointer',
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border"
+        style={{ borderColor: selected ? 'rgb(56, 189, 248)' : 'var(--border-default)' }}
+      >
+        {selected && <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'rgb(56, 189, 248)' }} />}
+      </span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
+          {title}
+          {recommended && !selected && (
+            <span
+              className="rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
+              style={{ color: 'rgb(56, 189, 248)', background: 'color-mix(in srgb, rgb(56, 189, 248) 12%, transparent)' }}
+            >
+              Recommended
+            </span>
+          )}
+        </span>
+        <span className="text-[11px] leading-snug" style={{ color: 'var(--text-secondary)' }}>{blurb}</span>
+      </span>
+    </button>
+  )
+}
+
+/** The prd-source checkpoint as a two-path fork (R74). Owns the whole
+ *  Requirements surface while the flight is parked: choose a path, then the
+ *  path's state — manual drop zone (no agent) or the two agent hints. Every
+ *  release goes through the same respond_flight_checkpoint the MCP path uses. */
+export function RequirementsFork({
+  flightId,
+  flight,
+  refreshKey,
+  onResponded,
+}: {
+  flightId: string
+  flight: FlightManifest
+  /** Bumped on coverage-changed so out-of-band doc writes show live. */
+  refreshKey?: number
+  onResponded: () => void
+}) {
+  const [mode, setMode] = useState<'manual' | 'agent' | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const docs = useFlightDocs(flight.feature, refreshKey)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const disabled = busy || docs.busy
+  const { dragging, dropHandlers } = useDocDrop(disabled || mode !== 'manual', (files) => { void docs.importFiles(files) })
+
+  const respond = (choice: string): void => {
+    setBusy(true)
+    setFailure(null)
+    api.respondFlightCheckpoint(flightId, { choice })
+      .then(() => onResponded())
+      .catch((err: unknown) => setFailure(err instanceof Error ? err.message : String(err)))
+      .finally(() => setBusy(false))
+  }
+
+  return (
+    <section
+      data-testid="requirements-fork"
+      className="relative flex w-full max-w-[76ch] flex-col gap-2.5 rounded border p-3"
+      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
+      {...dropHandlers}
+    >
+      <div className="flex items-center gap-2">
+        <span aria-hidden="true" className="text-[11px]" style={{ color: 'rgb(251, 191, 36)' }}>⏸</span>
+        <span className="text-[12.5px] font-semibold">Where should requirements come from?</span>
+      </div>
+      <IntentRow description={flight.description} />
+
+      <input
+        ref={fileInputRef}
+        data-testid="flight-doc-file-input"
+        type="file"
+        multiple
+        accept=".md,.markdown,.txt,.pdf,.docx"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          if (e.target.files && e.target.files.length > 0) void docs.importFiles(e.target.files)
+          e.target.value = ''
+        }}
+      />
+
+      {/* Both path cards stay on screen — picking one lights it and unfolds
+          its content below; the other recedes but never hides, so the current
+          choice is always visible and reversible in one click. */}
+      <div role="radiogroup" aria-label="Requirements source" className="flex flex-wrap gap-2.5">
+        <ForkPathCard
+          testId="fork-path-manual"
+          title="I'll add docs myself"
+          blurb="Drop PRD, spec, or ticket files. No agent runs."
+          selected={mode === 'manual'}
+          dimmed={mode === 'agent'}
+          disabled={disabled}
+          onPick={() => setMode('manual')}
+        />
+        <ForkPathCard
+          testId="fork-path-agent"
+          title="Let the agent find them"
+          blurb="An agent gathers requirements guided by your intent."
+          recommended
+          selected={mode === 'agent'}
+          dimmed={mode === 'manual'}
+          disabled={disabled}
+          onPick={() => setMode('agent')}
+        />
+      </div>
+
+      {mode === 'manual' && (
+        <>
+          {docs.sourceDocs.length === 0 ? (
+            <EmptyDropzone
+              title="Add requirement docs"
+              onPick={() => fileInputRef.current?.click()}
+              dragging={dragging}
+              busy={disabled}
+            />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {docs.sourceDocs.map((d) => (
+                <DocPill
+                  key={d.relPath}
+                  relPath={d.relPath}
+                  dirPrefix={`features/${flight.feature}/docs/`}
+                  generated={d.generated}
+                  sizeBytes={d.sizeBytes}
+                  linked={d.linked}
+                  linkTarget={d.linkTarget}
+                  broken={d.broken}
+                  busy={disabled}
+                  onOpen={() => docs.openDoc(d.absPath)}
+                  onRemove={() => docs.removeDoc(d.relPath)}
+                  removeTitle="Remove doc"
+                />
+              ))}
+              <AddDocsTile testId="flight-doc-add-files" onPick={() => fileInputRef.current?.click()} disabled={disabled} />
+            </div>
+          )}
+          <div className="flex justify-end">
+            <button
+              type="button"
+              data-testid="fork-use-docs"
+              disabled={disabled || docs.sourceDocs.length === 0}
+              onClick={() => respond('continue')}
+              className="cl-button-primary px-2.5 py-1 text-xs"
+              title={docs.sourceDocs.length === 0 ? 'Add at least one doc first' : 'Approve these docs and distill the requirements'}
+            >
+              Use these docs → distill requirements
+            </button>
+          </div>
+        </>
+      )}
+
+      {mode === 'agent' && (
+        <>
+          <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+            How should the agent look?
+          </div>
+          <div className="flex flex-wrap gap-2.5">
+            <ForkPathCard
+              testId="fork-hint-collect-repo-docs"
+              title="Collect docs from the repos"
+              blurb="The agent copies in only the docs relevant to the intent."
+              disabled={disabled}
+              onPick={() => respond('collect-repo-docs')}
+            />
+            <ForkPathCard
+              testId="fork-hint-infer-from-diff"
+              title="Infer from the git diff"
+              blurb="The agent cross-checks the branch diff vs base against the intent."
+              disabled={disabled}
+              onPick={() => respond('infer-from-diff')}
+            />
+          </div>
+          {busy && (
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              Starting the agent — its output will stream in the activity band below.
+            </div>
+          )}
+        </>
+      )}
+
+      {(failure ?? docs.error) && (
+        <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{failure ?? docs.error}</div>
+      )}
+      {dragging && mode === 'manual' && <DocsDropOverlay label="Drop to add requirement docs" />}
+    </section>
+  )
+}
+

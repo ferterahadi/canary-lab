@@ -13,6 +13,7 @@ Report the actual file(s) the app reads at boot for the chosen start command —
 Repos (one feature spans all of them):
 {{repoPaths}}
 What to test: {{description}}
+{{feedbackNote}}
 
 Reply with ONLY a JSON object in a ```json fence, shaped exactly:
 { "configSource": "<complete feature.config.cjs source>", "envFiles": ["<absolute path of each env file the app reads>"] }

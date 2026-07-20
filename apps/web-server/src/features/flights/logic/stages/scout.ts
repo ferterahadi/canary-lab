@@ -2,7 +2,7 @@ import path from 'path'
 import { readFeatureConfig } from '../../../config/logic/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { extractJson, type FlightStageDeps, defaultSpawnAgent } from './context'
+import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent } from './context'
 
 // The one genuinely new agent prompt in the flight: read the target repo(s)
 // and draft a feature.config.cjs (dev commands, port slots, health checks) +
@@ -23,6 +23,8 @@ export function buildScoutPrompt(args: {
   description: string
   feature: string
   env: string
+  /** Re-entry note from Continue → from-a-step (R74). */
+  feedback?: string
 }): string {
   return renderPrompt('scout.md', {
     repoPaths: args.repoPaths.map((p) => `- ${p}`).join('\n'),
@@ -30,6 +32,9 @@ export function buildScoutPrompt(args: {
     featureJson: JSON.stringify(args.feature),
     descriptionJson: JSON.stringify(args.description),
     envJson: JSON.stringify(args.env),
+    feedbackNote: args.feedback
+      ? `Feedback on the previous attempt — take it into account: ${args.feedback}`
+      : '',
   })
 }
 
@@ -58,6 +63,7 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
         description: m.description,
         feature: m.feature,
         env: m.opts.env,
+        feedback: stageFeedback(m, 'scout'),
       }),
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'scout'),

@@ -1489,7 +1489,7 @@ export function registerCanaryLabTools(
       const cp = view.checkpoint as { stage?: string; kind?: string; options?: string[] } | undefined
       const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint — call respond_flight_checkpoint(flightId, choice: one of ${JSON.stringify(cp?.options ?? [])}).`
       if (cp?.kind === 'prd-source') {
-        return `${base} The Requirements stage ALWAYS pauses here so the human can add docs. BEFORE responding: if this conversation carries requirements, distill them with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md") — then respond "continue" (releases with the docs present) or pick a source to infer from.`
+        return `${base} The Requirements stage ALWAYS pauses here — a two-path fork; ask your user which path. (a) Supply docs yourself: distill THIS conversation with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md"), then respond "continue". (b) Have Canary's agent gather them guided by the flight's frozen intent: respond "collect-repo-docs" (the agent copies in repo docs relevant to the intent) or "infer-from-diff" (the agent derives requirements from the branch diff vs base). If a previous gather went wrong, pass feedback:"<what was wrong>" with the choice — it is added to the agent's prompt.`
       }
       if (cp?.kind === 'config-approval') {
         return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
@@ -1614,19 +1614,20 @@ export function registerCanaryLabTools(
   })
 
   registerTool('respond_flight_checkpoint', {
-    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, a docs-less prd-source, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. At a prd-source park: first add docs with write_feature_doc (content or link_path), then respond "continue" — or pick a source to infer from. export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
+    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, a docs-less prd-source, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
     inputSchema: {
       flightId: z.string(),
       choice: z.string().optional().describe('One of the checkpoint\'s options.'),
       values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
       data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited config — written through to the feature\'s on-disk feature.config.cjs before validation.'),
+      feedback: z.string().optional().describe('prd-source agent choices only: what went wrong last time — added to the collector agent\'s prompt.'),
     },
-  }, async ({ flightId, choice, values, data }) => {
+  }, async ({ flightId, choice, values, data, feedback }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
     const resp = await deps.flightsRequest({
       method: 'POST',
       url: `/api/flights/${encodeURIComponent(flightId)}/respond`,
-      payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}) } },
+      payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}), ...(feedback ? { feedback } : {}) } },
     })
     if (resp.statusCode !== 200) {
       return errorResult(`respond failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)

@@ -629,6 +629,26 @@ describe('abortFlight', () => {
   it('refuses to abort an unknown flight id', () => {
     expect(() => abortFlight('nope', deps(allDone()))).toThrow(/flight not found: nope/)
   })
+
+  it('settles a parked checkpoint like pause does — a terminal record keeps no answerable ask', async () => {
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({
+        kind: 'checkpoint',
+        checkpoint: { kind: 'prd-source', message: 'docs?', options: ['collect-repo-docs'] },
+      }),
+    }
+    const d = deps(adapters)
+    const { manifest, completion } = startFlight(args(), d)
+    await completion // parks on the docs checkpoint
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+    abortFlight(manifest.flightId, d)
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('aborted')
+    const docsStage = final.stages.find((s) => s.key === 'docs')!
+    expect(docsStage.status).toBe('pending')
+    expect(docsStage.checkpoint).toBeUndefined()
+  })
 })
 
 describe('abort', () => {

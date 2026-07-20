@@ -144,6 +144,9 @@ export interface StartFlightArgs {
   /** What to do when the feature already has a flight record. Absent + record
    *  present → FlightExistsError (the caller shows the three-way choice). */
   mode?: FlightEntryMode
+  /** "What went wrong last time" (R74) — stored on the manifest scoped to the
+   *  entry stage, whose agent spawn appends it to its prompt. Redo/jump only. */
+  feedback?: string
 }
 
 export interface FlightConductorDeps {
@@ -312,6 +315,9 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       pauseReason: undefined,
       currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
       stages: freshStages(mode === 'jump' ? args.fromStage : undefined, now),
+      feedback: args.feedback?.trim()
+        ? { stage: args.fromStage ?? FLIGHT_STAGE_KEYS[0], note: args.feedback.trim() }
+        : undefined,
       updatedAt: now(),
       endedAt: undefined,
       error: undefined,
@@ -421,7 +427,16 @@ export function pauseFlight(flightId: string, deps: FlightConductorDeps): Flight
 /** "Start over" — restart this record from stage 1 with its own stored
  *  intent/repos/options, so the header button doesn't reconstruct the start
  *  body client-side. Active flights must be paused/aborted first. */
-export function redoFlight(flightId: string, deps: FlightConductorDeps): StartFlightResult {
+export function redoFlight(
+  flightId: string,
+  deps: FlightConductorDeps,
+  opts: {
+    /** Re-enter at this stage instead of stage 1 (Continue → "from a step…"). */
+    fromStage?: FlightStageKey
+    /** "What went wrong last time" — scoped to the entry stage's agent prompt. */
+    feedback?: string
+  } = {},
+): StartFlightResult {
   const current = deps.store.get(flightId)
   if (!current) throw new Error(`flight not found: ${flightId}`)
   if (isActiveFlightStatus(current.status)) {
@@ -433,7 +448,9 @@ export function redoFlight(flightId: string, deps: FlightConductorDeps): StartFl
       repoPaths: current.repoPaths,
       description: current.description,
       opts: current.opts,
-      mode: 'redo',
+      mode: opts.fromStage ? 'jump' : 'redo',
+      fromStage: opts.fromStage,
+      feedback: opts.feedback,
     },
     deps,
   )
@@ -596,6 +613,11 @@ export function abortFlight(flightId: string, deps: FlightConductorDeps): Flight
     currentStage: null,
     updatedAt: now(),
     endedAt: now(),
+    // Same open-stage settle as pause: a terminal record must not keep a live
+    // checkpoint — the UI would render an answerable ask that can only 409.
+    stages: current.stages.map((s) =>
+      s.key === openStage?.key ? { ...s, status: 'pending' as const, checkpoint: undefined } : s,
+    ),
   }
   store.save(manifest)
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
@@ -832,7 +854,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         const autoKey = `${stage.key}:${outcome.checkpoint.kind}`
         if (auto && !autoAnswered.has(autoKey)) {
           autoAnswered.add(autoKey)
-          ctx.appendLog(`[autopilot] ${outcome.checkpoint.kind}: answered "${auto}" — use ↺ Start over (or the stage's own controls) to choose differently\n`)
+          ctx.appendLog(`[autopilot] ${outcome.checkpoint.kind}: answered "${auto}" — use Continue → from a step (or the stage's own controls) to choose differently\n`)
           patchStage(stage.key, { checkpoint: outcome.checkpoint, checkpointResponse: { choice: auto } })
           pendingResponse = { choice: auto }
           continue

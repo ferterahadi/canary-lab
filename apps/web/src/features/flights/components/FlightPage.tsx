@@ -10,12 +10,13 @@ import type {
 } from '../../../shared/api/client'
 import type { ExternalHealSession, JournalEntry, RunDetail, RunIndexEntry } from '../../../shared/api/types'
 import { AgentSessionView, type AgentSessionSource } from '../../agent-sessions/components/AgentSessionView'
-import { StatusDot } from '../../config/components/atoms'
+import { Modal, StatusDot } from '../../config/components/atoms'
+import { Chip } from '../../../shared/ui/StatusChip'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { RunRow } from '../../runs/components/RunRow'
 import { clientLabel } from '../../runs/components/external-client-branding'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
-import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel } from './FlightStagePanels'
+import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
 import { useInvalidationKey } from '../../../shared/state/invalidation'
 import type { FeatureActivity } from '../state/feature-activity'
 import {
@@ -80,7 +81,6 @@ export function FlightPage({
   onSelectFlight,
   onClose,
   activity,
-  onStartFlight,
   onOpenConfig,
   onOpenRun,
   onOpenCoverage,
@@ -92,7 +92,8 @@ export function FlightPage({
   onClose: () => void
   /** Per-feature live activity (runs / portify / authoring) — App owns it. */
   activity?: Map<string, FeatureActivity>
-  /** Opens the stage-entry launcher for the flight's feature (R25 re-fly). */
+  /** Unused since R74 (Continue ▾ owns re-fly) — kept so call sites that still
+   *  pass the launcher opener don't churn; the flights picker uses its own. */
   onStartFlight?: (feature: string) => void
   /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup. */
   onOpenConfig?: (feature: string) => void
@@ -104,7 +105,7 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
     </div>
   )
 }
@@ -114,7 +115,6 @@ function FlightDetail({
   refreshKey,
   onBackToList,
   onClose,
-  onStartFlight,
   onOpenConfig,
   configRefreshKey,
   docsRefreshKey,
@@ -125,7 +125,6 @@ function FlightDetail({
   refreshKey: number
   onBackToList: () => void
   onClose: () => void
-  onStartFlight?: (feature: string) => void
   onOpenConfig?: (feature: string) => void
   configRefreshKey?: number
   docsRefreshKey?: number
@@ -167,7 +166,7 @@ function FlightDetail({
   const respondJump = useCallback((): void => {
     setSelectedStage(null)
     requestAnimationFrame(() => {
-      document.querySelector('[data-testid="checkpoint-controls"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      document.querySelector('[data-testid="checkpoint-controls"], [data-testid="requirements-fork"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
   }, [])
 
@@ -250,20 +249,20 @@ function FlightDetail({
             Flights
           </button>
           <span aria-hidden="true" className="shrink-0 font-normal" style={{ color: 'var(--text-muted)' }}>/</span>
-          <span className="truncate">🕊️ {flight.feature}</span>
-          <span
-            data-testid="flight-status"
+          <span className="min-w-0 truncate">🕊️ {flight.feature}</span>
+          <Chip
+            testId="flight-status"
+            chrome="fill"
+            tone={tone}
+            fontSize={10}
             title={flight.status === 'paused'
               ? (flight.pauseReason === 'user' ? 'Paused by you — Continue resumes it'
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
                 : 'A stage failed — Continue retries it')
               : undefined}
-            className="inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
-            style={{ color: tone, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }}
-          >
-            {flight.status === 'running' && <StatusDot state="running" className="shrink-0" />}
-            {flightStatusLabel(flight.status)}
-          </span>
+            icon={flight.status === 'running' ? <StatusDot state="running" className="shrink-0" /> : undefined}
+            label={flightStatusLabel(flight.status)}
+          />
         </h1>
         {/* The one primary: the state's obvious next action. Running has none —
             nothing demands a click, so nothing shouts. */}
@@ -278,30 +277,40 @@ function FlightDetail({
             Respond →
           </button>
         )}
-        {flight.status === 'paused' && (
+        {/* R74: one button per state. Active → Pause (immediate + honest —
+            agent killed, run aborted, repo freed; every stage re-runs cleanly).
+            Settled → ONE Continue menu absorbing resume / repeat-a-step /
+            start-over: "From here" (paused) + "From a step…" (+ optional
+            what-went-wrong note that reaches the agent's prompt). */}
+        {(flight.status === 'running' || flight.status === 'waiting-for-approval') && (
           <button
             type="button"
-            data-testid="flight-resume"
-            onClick={() => act(() => api.resumeFlight(flightId))}
-            className="cl-button-primary px-2.5 py-1 text-xs"
+            data-testid="flight-pause"
+            onClick={() => act(() => api.pauseFlight(flightId))}
+            className="cl-button px-2.5 py-1 text-xs"
+            title="Stops the running agent and test run immediately; Continue re-runs the interrupted step"
           >
-            Continue
+            ⏸ Pause
           </button>
         )}
         {flight.status === 'done' && evalStage && (
           <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
         )}
-        {(flight.status === 'failed' || flight.status === 'aborted') && onStartFlight && (
-          <button
-            type="button"
-            data-testid="flight-refly"
-            onClick={() => onStartFlight(flight.feature)}
-            className="cl-button-primary px-2.5 py-1 text-xs"
-          >
-            Repeat a step…
-          </button>
+        {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
+          <ContinueMenu flight={flight} onAction={act} />
         )}
-        <FlightMenu flight={flight} onAction={act} onStartFlight={onStartFlight} onDeleted={onBackToList} />
+        <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} />
+        <button
+          type="button"
+          data-testid="flight-close"
+          aria-label="Close"
+          title="Close (Esc)"
+          onClick={onClose}
+          className="cl-icon-button h-7 w-7 shrink-0"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          ✕
+        </button>
       </header>
       {actionError && (
         <div
@@ -325,31 +334,27 @@ function FlightDetail({
           {/* R72: follow-mode is a corner whisper, not a control bar — a muted
               "following" while auto-select tracks the action, a quiet "↩ follow"
               text link once a manual pick parks it. Never a peer of Continue. */}
-          <div className="flex items-baseline justify-between px-2 pb-1">
-            <span className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+          {/* Fixed-height header; the corner whisper is ONE button in both
+              states — same element, same font, no icons — so toggling
+              follow-mode cannot move a single pixel. Only the color changes:
+              muted while auto-following, sky when a click would resume it. */}
+          <div className="flex h-5 items-center justify-between px-2">
+            <span className="text-[9.5px] font-semibold uppercase tracking-wide leading-none" style={{ color: 'var(--text-muted)' }}>
               Stages
             </span>
-            {selectedStage === null ? (
-              <span
-                data-testid="rail-following"
-                className="text-[9.5px]"
-                style={{ color: 'var(--text-muted)' }}
-                title="Selection follows the stage that needs eyes"
-              >
-                following ⦿
-              </span>
-            ) : (
-              <button
-                type="button"
-                data-testid="rail-resume-follow"
-                onClick={() => setSelectedStage(null)}
-                className="text-[9.5px] underline-offset-2 transition-colors hover:underline"
-                style={{ color: 'rgb(56, 189, 248)' }}
-                title="Return to auto-selecting the stage that needs eyes"
-              >
-                ↩ follow
-              </button>
-            )}
+            <button
+              type="button"
+              data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
+              disabled={selectedStage === null}
+              onClick={() => setSelectedStage(null)}
+              className="w-[64px] text-right text-[9.5px] leading-none underline-offset-2 transition-colors enabled:hover:underline"
+              style={{ color: selectedStage === null ? 'var(--text-muted)' : 'rgb(56, 189, 248)' }}
+              title={selectedStage === null
+                ? 'Selection follows the stage that needs eyes'
+                : 'Return to auto-selecting the stage that needs eyes'}
+            >
+              {selectedStage === null ? 'following' : 'follow'}
+            </button>
           </div>
           {railRows.map((s) => {
             const selected = s.key === stageKey
@@ -547,7 +552,12 @@ function StageDetail({
   const agentDir =
     loopProgress && stage.status === 'running' && loopProgress.phase === 'mapping'
       ? 'coverage-map'
-      : AGENT_STAGE_DIRS[stage.key] ?? (companion ? AGENT_STAGE_DIRS[companion.key] : undefined)
+      // The merged Requirements row has TWO possible agents: the docs
+      // collector (R74) while its own half is open, then the folded
+      // prd-summary's distiller once docs settle.
+      : stage.key === 'docs' && (stage.status === 'running' || stage.status === 'waiting-for-approval')
+        ? 'docs'
+        : AGENT_STAGE_DIRS[stage.key] ?? (companion ? AGENT_STAGE_DIRS[companion.key] : undefined)
   const runMerged = stage.key === 'run'
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
@@ -608,10 +618,13 @@ function StageDetail({
           below fills the rest of the pane so a long transcript scrolls in
           place instead of the whole stage view running off the bottom. */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      {/* Stable header row: title truncates on the left, the chip + actions
+          anchor to the RIGHT edge — switching stages must not shift anything
+          horizontally (only the title text itself changes). */}
       <div className="flex items-center gap-2">
-        <h2 className="text-[13px] font-semibold" title={STAGE_BLURB[stage.key]}>{row.label}</h2>
-        <StageStatusChip status={row.status} />
+        <h2 className="min-w-0 truncate text-[13px] font-semibold" title={STAGE_BLURB[stage.key]}>{row.label}</h2>
         <div className="flex-1" />
+        <StageStatusChip status={row.status} />
         {/* Advanced setup appears once the config is APPROVED — at the
             approval checkpoint the in-place editor (per-service ✎) is the
             one editing surface, so the fork stays a two-button decision. */}
@@ -676,17 +689,29 @@ function StageDetail({
         />
       )}
 
-      {/* Requirements (R44/R59): the docs manager lives where the flight pauses
-          for docs — add files, link local paths, remove; linked docs marked ↗.
-          The folded prd-summary's status chips the header (R59). */}
+      {/* Requirements (R74): while parked on prd-source the FORK owns the
+          surface (manual drop zone vs the two agent hints); otherwise the
+          read-only docs panel — locked once approved. The folded
+          prd-summary's status chips the panel header (R59). The fork is
+          gated on the FLIGHT being parked too: a stale checkpoint on a
+          paused/aborted record must never render an answerable ask that can
+          only 409 (respond requires waiting-for-approval). */}
       {stage.key === 'docs' && stage.status !== 'pending' && (
-        <FlightDocsPanel
-          feature={flight.feature}
-          locked={row.status === 'running'}
-          refreshKey={docsRefreshKey}
-          summaryStatus={companion?.status}
-          onChanged={onResponded}
-        />
+        flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint?.kind === 'prd-source' ? (
+          <RequirementsFork
+            flightId={flightId}
+            flight={flight}
+            refreshKey={docsRefreshKey}
+            onResponded={onResponded}
+          />
+        ) : (
+          <FlightDocsPanel
+            feature={flight.feature}
+            approved={stage.status === 'done'}
+            refreshKey={docsRefreshKey}
+            summaryStatus={companion?.status}
+          />
+        )
       )}
 
       {/* Test Run (R22): what's running now, what each repair cycle fixed —
@@ -707,7 +732,11 @@ function StageDetail({
         <StageErrorPanel stageLabel={row.label} detail={error} errorDetail={errorDetail} />
       )}
 
-      {checkpointStage?.checkpoint && (
+      {/* prd-source renders as the RequirementsFork above — every other
+          checkpoint kind keeps the generic card. Gated on the flight being
+          parked: responding to a paused/aborted record's stale checkpoint
+          can only 409. */}
+      {flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint && checkpointStage.checkpoint.kind !== 'prd-source' && (
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
       )}
 
@@ -842,20 +871,252 @@ function StageActivity({
   )
 }
 
-/** R71/W1: the header's ⋯ menu — every non-primary control, state-filtered so
- *  each item appears only where it applies. Destructive items (Stop flight /
- *  Start over / Delete flight) keep their two-step confirm INSIDE the menu:
- *  first click arms the item in place, second click fires; closing the menu
- *  disarms. Errors route to the header's inline error line via onAction. */
+/** The stages Continue → "from a step…" offers — the user-facing rail rows
+ *  (merged-pair primaries), labeled the way the rail labels them. The server
+ *  validates prerequisites (checkStageEntry) and 400s an invalid target. */
+const REDO_STAGES: Array<{ key: FlightStageKey; label: string }> = [
+  { key: 'scout', label: 'Repo scan' },
+  { key: 'scaffold', label: 'Suite setup' },
+  { key: 'docs', label: 'Requirements' },
+  { key: 'specs-coverage', label: 'Test authoring & coverage' },
+  { key: 'portify', label: 'Parallel readiness' },
+  { key: 'run', label: 'Test Run' },
+  { key: 'evaluation-export', label: 'Evaluation Report' },
+]
+
+/** R74: ONE Continue control for every settled flight state. Paused → a small
+ *  menu (From here / From a step…); everything else goes straight to the
+ *  centered re-run dialog. */
+function ContinueMenu({
+  flight,
+  onAction,
+}: {
+  flight: FlightManifest
+  onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const ref = useRef<HTMLDivElement | null>(null)
+  const paused = flight.status === 'paused'
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative shrink-0">
+      <button
+        type="button"
+        data-testid="flight-continue"
+        aria-haspopup={paused ? 'menu' : 'dialog'}
+        aria-expanded={paused ? open : dialogOpen}
+        onClick={() => (paused ? setOpen((v) => !v) : setDialogOpen(true))}
+        className="cl-button-primary px-2.5 py-1 text-xs"
+      >
+        Continue ▾
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full z-20 mt-1 flex w-[260px] flex-col gap-1 rounded border p-1.5"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-menu, 0 4px 16px rgba(0,0,0,.35))' }}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="flight-resume"
+            onClick={() => { setOpen(false); onAction(() => api.resumeFlight(flight.flightId)) }}
+            className="rounded px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
+          >
+            <span className="block text-xs font-medium">▶ From here</span>
+            <span className="block text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+              Resume exactly where it left off
+            </span>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="flight-redo-open"
+            onClick={() => { setOpen(false); setDialogOpen(true) }}
+            className="rounded px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
+          >
+            <span className="block text-xs font-medium">↻ From a step…</span>
+            <span className="block text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+              Re-run a stage, optionally telling the agent what went wrong
+            </span>
+          </button>
+        </div>
+      )}
+      {dialogOpen && (
+        <RedoFlightDialog flight={flight} onAction={onAction} onClose={() => setDialogOpen(false)} />
+      )}
+    </div>
+  )
+}
+
+/** The centered re-run dialog (R74): pick the step to re-enter, see WHY a step
+ *  is unavailable (the server's stage-entry validator supplies per-stage
+ *  reasons via /api/flights/entry — never a dead 400 on submit), and attach
+ *  the optional "what went wrong" note that rides into the agent's prompt. */
+function RedoFlightDialog({
+  flight,
+  onAction,
+  onClose,
+}: {
+  flight: FlightManifest
+  onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
+  onClose: () => void
+}) {
+  const [entry, setEntry] = useState<Awaited<ReturnType<typeof api.getFlightEntryOptions>> | null>(null)
+  const [entryFailed, setEntryFailed] = useState(false)
+  const [fromStage, setFromStage] = useState<FlightStageKey | null>(null)
+  const [feedback, setFeedback] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    api.getFlightEntryOptions(flight.feature, flight.opts.env)
+      .then((options) => { if (alive) setEntry(options) })
+      // Validation still happens on submit — a failed pre-check must not
+      // brick the dialog, it just can't grey the impossible rows.
+      .catch(() => { if (alive) setEntryFailed(true) })
+    return () => { alive = false }
+  }, [flight.feature, flight.opts.env])
+
+  const entryFor = (key: FlightStageKey): { allowed: boolean; reason?: string } => {
+    if (entryFailed) return { allowed: true }
+    if (!entry) return { allowed: false, reason: 'checking…' }
+    const option = entry.stages.find((s) => s.key === key)
+    return option ?? { allowed: true }
+  }
+  const selectedLabel = REDO_STAGES.find((s) => s.key === fromStage)?.label
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      width={560}
+      title="Re-run from a step"
+      description="Pick where the flight re-enters. Later results are discarded from that step onward; artifacts on disk are kept and reused."
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} className="cl-button px-3 py-1.5 text-xs">
+            Cancel
+          </button>
+          <button
+            type="button"
+            data-testid="flight-redo-submit"
+            disabled={fromStage === null}
+            onClick={() => {
+              const stage = fromStage
+              if (!stage) return
+              onClose()
+              onAction(() => api.redoFlight(flight.flightId, {
+                fromStage: stage,
+                feedback: feedback.trim() || undefined,
+              }))
+            }}
+            className="cl-button-primary px-3 py-1.5 text-xs"
+          >
+            {selectedLabel ? `Re-run from ${selectedLabel}` : 'Re-run'}
+          </button>
+        </div>
+      }
+    >
+      <div className="flex flex-col gap-4 p-4">
+        {/* One connected pipeline the eye reads top-to-bottom. Each row's
+            badge carries the LAST record's verdict for that step (✓ done,
+            number = never reached); its sub-line says what the step does — or
+            the server's full reason when the step can't be an entry point
+            (wrapped, never truncated mid-word). */}
+        <div
+          role="radiogroup"
+          aria-label="Step to re-run from"
+          className="flex flex-col overflow-hidden rounded-md border"
+          style={{ borderColor: 'var(--border-default)' }}
+        >
+          {REDO_STAGES.map((s, index) => {
+            const { allowed, reason } = entryFor(s.key)
+            const selected = fromStage === s.key
+            const lastStatus = flight.stages.find((st) => st.key === s.key)?.status
+            const settled = lastStatus && lastStatus !== 'pending'
+            const badgeTone = selected
+              ? 'rgb(56, 189, 248)'
+              : settled ? stageStatusTone(lastStatus) : 'var(--text-muted)'
+            return (
+              <button
+                key={s.key}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                data-testid={`flight-redo-${s.key}`}
+                disabled={!allowed}
+                onClick={() => setFromStage(selected ? null : s.key)}
+                className={`flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors enabled:hover:bg-white/[0.04] ${index > 0 ? 'border-t' : ''}`}
+                style={{
+                  borderColor: 'var(--border-default)',
+                  background: selected ? 'color-mix(in srgb, rgb(56, 189, 248) 8%, transparent)' : 'var(--bg-base)',
+                  opacity: allowed ? 1 : 0.55,
+                  cursor: allowed ? 'pointer' : 'not-allowed',
+                  boxShadow: selected ? 'inset 2px 0 0 rgb(56, 189, 248)' : undefined,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
+                  style={{
+                    borderColor: `color-mix(in srgb, ${badgeTone} 55%, var(--border-default))`,
+                    color: badgeTone,
+                    background: selected ? 'color-mix(in srgb, rgb(56, 189, 248) 12%, transparent)' : 'transparent',
+                  }}
+                >
+                  {settled ? STAGE_ICON[lastStatus] : index + 1}
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-[12.5px] font-medium" style={{ color: allowed ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                    {s.label}
+                  </span>
+                  <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                    {!allowed && reason ? reason : STAGE_BLURB[s.key]}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+        <label className="flex flex-col gap-1.5">
+          <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+            What went wrong last time? <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional — added to the agent's prompt)</span>
+          </span>
+          <textarea
+            data-testid="flight-redo-feedback"
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="e.g. the collected docs were about the wrong subsystem"
+            rows={2}
+            className="w-full rounded-md border bg-transparent px-2.5 py-2 text-[11.5px] outline-none"
+            style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', background: 'var(--bg-base)' }}
+          />
+        </label>
+      </div>
+    </Modal>
+  )
+}
+
+/** R71/W1: the header's ⋯ menu — R74 slimmed it to the destructive disposal
+ *  (Delete flight, two-step confirm in place: first click arms, second fires;
+ *  closing disarms). Errors route to the header's inline error line. */
 function FlightMenu({
   flight,
   onAction,
-  onStartFlight,
   onDeleted,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
-  onStartFlight?: (feature: string) => void
   onDeleted: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -872,7 +1133,6 @@ function FlightMenu({
   }, [open])
 
   const active = flight.status === 'running' || flight.status === 'waiting-for-approval'
-  const settledByFailure = flight.status === 'failed' || flight.status === 'aborted'
   const id = flight.flightId
 
   interface MenuItem {
@@ -885,48 +1145,10 @@ function FlightMenu({
     testId: string
     fire: () => void
   }
+  // R74: Pause is a header button and resume/repeat/start-over collapsed into
+  // the header's Continue menu — the ⋯ menu keeps only the destructive
+  // disposal. (abortFlight stays as an API/cleanup path, not a GUI control.)
   const items: MenuItem[] = [
-    ...(active
-      ? [{
-          key: 'pause',
-          label: '⏸ Pause',
-          title: 'Pause the flight — in-flight stage work stops safely; Continue resumes it',
-          testId: 'flight-pause',
-          fire: () => onAction(() => api.pauseFlight(id)),
-        }]
-      : []),
-    // Repeat a step… lives ONLY here (except failed/aborted, where re-flying is
-    // the header primary — no duplicate menu entry there).
-    ...(!active && !settledByFailure && onStartFlight
-      ? [{
-          key: 'refly',
-          label: 'Repeat a step…',
-          testId: 'flight-refly',
-          fire: () => onStartFlight(flight.feature),
-        }]
-      : []),
-    ...(active
-      ? [{
-          key: 'abort',
-          label: '⏹ Stop flight…',
-          confirmLabel: 'Really stop?',
-          tone: 'var(--danger)',
-          title: 'Terminal: kills the run, frees the repo queue — Start over or a stage jump is the only redo',
-          testId: 'flight-abort',
-          fire: () => onAction(() => api.abortFlight(id)),
-        }]
-      : []),
-    ...(!active
-      ? [{
-          key: 'redo',
-          label: '↺ Start over…',
-          confirmLabel: 'Really start over?',
-          tone: 'rgb(251, 191, 36)',
-          title: 'Restart this flight from the beginning — stage records reset (artifacts on disk are kept and reused)',
-          testId: 'flight-start-over',
-          fire: () => onAction(() => api.redoFlight(id)),
-        }]
-      : []),
     ...(!active
       ? [{
           key: 'delete',
@@ -1439,15 +1661,7 @@ function CheckpointControls({
           {checkpointTitle(checkpoint.kind)}
         </span>
       </div>
-      {/* prd-source repeats the stage state line verbatim — the card carries
-          only the directive there, so the message reads once, not three times. */}
-      {checkpoint.kind === 'prd-source' ? (
-        <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-          Add or link docs above, then continue — or pick a source to infer requirements from.
-        </p>
-      ) : (
-        <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{checkpoint.message}</p>
-      )}
+      <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{checkpoint.message}</p>
 
       {checkpoint.kind === 'config-approval' && configError && (
         <p data-testid="checkpoint-config-error" className="text-[11px]" style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>

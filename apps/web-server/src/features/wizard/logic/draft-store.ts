@@ -151,7 +151,28 @@ function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
     // remove/prune/reconcile can address them (else they resurrect on refresh).
     idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { draftId?: string }).draftId),
     sortNewestFirst: true,
+    // Crash recovery: a draft left 'planning'/'generating' by a SERVER-spawned
+    // wizard agent belongs to a dead process (this one just started) — flip it
+    // to error so the pill stops narrating a live "authoring" forever. External
+    // drafts (producer 'external') are another process's session and survive a
+    // server restart by design — never touched here.
+    reconcile: {
+      isInterrupted: (r) =>
+        (r.status === 'planning' || r.status === 'generating') && r.producer !== 'external',
+      mark: (r, now) => ({
+        ...r,
+        status: 'error',
+        activeAgentStage: undefined,
+        errorMessage: 'interrupted by a server restart — plan or generate again',
+        updatedAt: now,
+      }),
+    },
   })
+}
+
+/** Boot-time crash recovery — see the store's `reconcile` config above. */
+export function reconcileInterruptedDrafts(logsDir: string, now: () => string): void {
+  draftStore(logsDir).reconcileInterrupted(now)
 }
 
 export interface CreateDraftInput {

@@ -377,14 +377,17 @@ export function Toggle({
   value,
   onChange,
   id,
+  testId,
 }: {
   value: boolean
   onChange: (v: boolean) => void
   id?: string
+  testId?: string
 }) {
   return (
     <button
       id={id}
+      data-testid={testId}
       type="button"
       role="switch"
       aria-checked={value}

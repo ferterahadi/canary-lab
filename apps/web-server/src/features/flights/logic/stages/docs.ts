@@ -4,21 +4,25 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import { linkFeatureDoc, writeFeatureDoc } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
+import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { featureDirFor, type FlightStageDeps } from './context'
+import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps } from './context'
 
-// Populate features/<f>/docs/ from the PRD-source hierarchy:
-//   (0)   docs already present (user-dropped, or MCP-path conversation docs)
-//   (0.5) local doc paths referenced in the intent ("refer to ~/…/prd.md") —
-//         symlinked in, so the user's original stays the live source
-//   (1)   requirement-bearing repo docs (README, docs/**.md)
-//   (2)   the code diff vs the base branch, when a meaningful one exists
-//   (3)   the flight description alone.
-// Non-yolo flights ALWAYS park on the prd-source checkpoint — even when docs
-// exist — so the human gets one deliberate moment to add requirements before
-// the PRD summary runs; `continue` is the zero-friction release. Everything
-// lands through the same writeFeatureDoc/linkFeatureDoc used by the UI + MCP,
-// feeding the same PRD engine.
+// Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
+//   manual — the user supplies docs (UI drop zone / MCP write_feature_doc),
+//            then releases with `continue`; no agent runs.
+//   agent  — `collect-repo-docs` or `infer-from-diff` spawns a collector agent
+//            guided by the frozen intent: it reads the repos (or the branch
+//            diff vs base) and writes ONE feature-named requirements doc
+//            (<feature>-prd.md / <feature>-from-diff.md), which then feeds the
+//            same distillation as user-dropped docs.
+// Intent-referenced local paths ("refer to ~/…/prd.md") are still symlinked in
+// before parking, so the user's original stays the live source. Yolo flights
+// skip the fork and use the deterministic gather chain (repo-doc sweep → diff
+// → description) — no human moment to fork on.
+// Non-yolo flights ALWAYS park — even when docs exist — so the human gets one
+// deliberate moment before the PRD summary runs; `continue` is the
+// zero-friction release.
 
 const MAX_REPO_DOCS = 10
 const MAX_DOC_BYTES = 200 * 1024
@@ -140,7 +144,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         const base = detectBaseBranch(repo, m.opts.base)
         const diff = base ? diffVsBase(repo, base) : null
         if (diff) {
-          const rel = `diff-${path.basename(repo)}-vs-${base}.md`.toLowerCase()
+          // Feature-named so the doc reads as this suite's artifact, not a
+          // stray repo file (multi-repo keeps the repo qualifier for dedupe).
+          const rel = `${m.feature}-from-diff${m.repoPaths.length > 1 ? `-${path.basename(repo)}` : ''}.md`.toLowerCase()
           const content = `# ${m.description}\n\nRequirements are to be inferred from this change set (${path.basename(repo)}, diff vs ${base}).\n\n\`\`\`diff\n${diff}\n\`\`\`\n`
           const err = write(m.feature, rel, content)
           if (!err) written.push(rel)
@@ -182,23 +188,103 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     return linked
   }
 
-  const park = (ctx: StageContext, linked: string[]): StageOutcome => {
+  /** Park on the two-path fork. `note` carries a prior attempt's outcome
+   *  ("agent found nothing relevant…") so a failed collection re-parks with
+   *  the reason in the user's face instead of a silent bounce. */
+  const park = (ctx: StageContext, linked: string[], note?: string): StageOutcome => {
     const m = ctx.manifest()
     const docs = userDocs(featureDirFor(deps, m.feature))
-    const repoDocs = findRepoDocs(m.repoPaths)
     const hasDocs = docs.length > 0
+    const base = hasDocs
+      ? `${docs.length} requirement doc(s) ready for "${m.feature}"${linked.length > 0 ? ` (${linked.length} linked from your intent)` : ''}. Add more, then continue — or have an agent gather requirements guided by the intent.`
+      : `No requirement docs yet for "${m.feature}". Add docs yourself, or have an agent gather them guided by the intent.`
     return {
       kind: 'checkpoint',
       checkpoint: {
         kind: 'prd-source',
-        message: hasDocs
-          ? `${docs.length} requirement doc(s) ready for "${m.feature}"${linked.length > 0 ? ` (${linked.length} linked from your intent)` : ''}. Add more into features/${m.feature}/docs/ — or link local paths — then continue. Or pick another source to infer from.`
-          : `No PRD docs yet for "${m.feature}". Drop doc files into features/${m.feature}/docs/ (or link local paths) and retry, or pick a source to infer from.`,
+        message: note ? `${note} ${base}` : base,
         options: hasDocs
-          ? ['continue', 'use-repo-docs', 'infer-from-diff', 'description-only', 'retry']
-          : ['use-repo-docs', 'infer-from-diff', 'description-only', 'retry'],
-        data: { docs, linked, repoDocsDetected: repoDocs.map((d) => d.file) },
+          ? ['continue', 'collect-repo-docs', 'infer-from-diff']
+          : ['collect-repo-docs', 'infer-from-diff'],
+        data: { docs, linked, intent: m.description },
       },
+    }
+  }
+
+  /** The agent path of the fork: spawn a collector guided by the intent —
+   *  read the repos (collect) or the branch diff vs base (infer) — writing ONE
+   *  feature-named requirements doc. Success flows straight into distillation
+   *  (same as user-dropped docs); an empty-handed agent re-parks with the
+   *  reason. `feedback` is the user's "what went wrong last time" note. */
+  const spawnAgent = deps.spawnAgent ?? defaultSpawnAgent
+  const collect = async (
+    ctx: StageContext,
+    mode: 'collect-repo-docs' | 'infer-from-diff',
+    feedback?: string,
+  ): Promise<StageOutcome> => {
+    const m = ctx.manifest()
+    const featureDir = featureDirFor(deps, m.feature)
+    const docsDir = path.join(featureDir, 'docs')
+
+    let repoTargets = ''
+    if (mode === 'infer-from-diff') {
+      const targets = m.repoPaths
+        .map((repo) => ({ repo, base: detectBaseBranch(repo, m.opts.base) }))
+        .filter((t): t is { repo: string; base: string } => t.base !== null && diffVsBase(t.repo, t.base) !== null)
+      if (targets.length === 0) {
+        ctx.appendLog('[docs] no meaningful diff vs base in any repo — nothing to infer from.\n')
+        return park(ctx, [], 'No meaningful diff vs the base branch was found.')
+      }
+      repoTargets = targets.map((t) => `- ${t.repo} (diff vs ${t.base})`).join('\n')
+    }
+
+    const outName = mode === 'collect-repo-docs' ? `${m.feature}-prd.md` : `${m.feature}-from-diff.md`
+    const outPath = path.join(docsDir, outName)
+    fs.mkdirSync(docsDir, { recursive: true })
+    ctx.appendLog(`[docs] ${mode === 'collect-repo-docs' ? 'collecting repo docs' : 'inferring from the git diff'} guided by the intent…\n`)
+    // Respond-carried feedback wins; a Continue → from-a-step note targeting
+    // this stage is the fallback (the fork re-parks first, so the choice that
+    // follows should still carry the note).
+    const note = feedback ?? stageFeedback(m, 'docs')
+    const feedbackNote = note ? `Feedback on the previous attempt — take it into account: ${note}` : ''
+    const { text } = await spawnAgent({
+      prompt:
+        mode === 'collect-repo-docs'
+          ? renderPrompt('flight-collect-docs.md', {
+              feature: m.feature,
+              description: m.description,
+              repoPaths: m.repoPaths.map((p) => `- ${p}`).join('\n'),
+              outPath,
+              feedbackNote,
+            })
+          : renderPrompt('flight-infer-diff.md', {
+              feature: m.feature,
+              description: m.description,
+              repoTargets,
+              outPath,
+              feedbackNote,
+            }),
+      cwd: m.repoPaths[0],
+      stageDir: path.join(ctx.flightDir, 'docs'),
+      onChunk: ctx.appendLog,
+      signal: ctx.signal,
+    })
+
+    const wrote = fs.existsSync(outPath) && fs.statSync(outPath).size > 0
+    if (!wrote) {
+      const reason = /NOTHING_FOUND:?\s*(.*)/.exec(text)?.[1]?.trim()
+      const note = reason
+        ? `The agent found nothing relevant: ${reason}.`
+        : 'The agent did not produce a requirements doc.'
+      ctx.appendLog(`[docs] ${note}\n`)
+      return park(ctx, [], note)
+    }
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
+    ctx.appendLog(`[docs] wrote docs/${outName}\n`)
+    const docs = userDocs(featureDir)
+    return {
+      kind: 'done',
+      evidence: { source: mode === 'collect-repo-docs' ? 'agent-repo-docs' : 'agent-diff', docs },
     }
   }
 
@@ -227,10 +313,12 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         }
         return park(ctx, []) // nothing to continue with — re-park
       }
-      if (choice === 'retry') return this.run!(ctx)
-      if (['use-repo-docs', 'infer-from-diff', 'description-only'].includes(choice)) {
-        return gather(ctx, choice === 'infer-from-diff' ? 'diff' : choice)
+      if (choice === 'collect-repo-docs' || choice === 'infer-from-diff') {
+        return collect(ctx, choice, response.feedback)
       }
+      // Legacy choices from older MCP clients degrade to the nearest path.
+      if (choice === 'use-repo-docs') return collect(ctx, 'collect-repo-docs', response.feedback)
+      if (choice === 'description-only') return gather(ctx, choice)
       return this.run!(ctx)
     },
   }

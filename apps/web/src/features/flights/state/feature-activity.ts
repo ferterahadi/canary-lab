@@ -39,17 +39,33 @@ export interface FeatureActivity {
  * "authoring", the portify stage "portifying", the run stage "running", the
  * export stage "exporting"); standalone jobs surface the same way.
  */
+/** How long an EXTERNAL draft may sit silent before it stops counting as live
+ *  "authoring". A server-spawned agent dies with the process (boot reconcile
+ *  flips it), but an external MCP session has no heartbeat the server can
+ *  poll — an abandoned conversation would paint the verb forever. A working
+ *  external agent keeps touching the record (update_external_draft_stage),
+ *  so an hour of silence reads as abandoned. The draft itself stays listed
+ *  and resumable in the wizard panel either way. */
+const EXTERNAL_DRAFT_ACTIVITY_TTL_MS = 60 * 60 * 1000
+
 export function deriveFeatureActivity(input: {
   activeRuns: RunIndexEntry[]
   portifyWorkflows: PortifyIndexEntry[]
   drafts: DraftRecord[]
   exportTasks?: EvaluationExportTask[]
+  /** Injected in tests; defaults to wall-clock now. */
+  nowMs?: number
 }): Map<string, FeatureActivity> {
   const map = new Map<string, FeatureActivity>()
+  const nowMs = input.nowMs ?? Date.now()
+  const externallyStale = (d: DraftRecord): boolean =>
+    d.producer === 'external' && nowMs - Date.parse(d.updatedAt) > EXTERNAL_DRAFT_ACTIVITY_TTL_MS
   // Weakest verb first — stronger ones overwrite the same feature key.
   for (const d of input.drafts) {
     const feature = d.featureName?.trim()
-    if (feature && isActiveWizardTask(d.status)) map.set(feature, { kind: 'authoring', draftId: d.draftId })
+    if (feature && isActiveWizardTask(d.status) && !externallyStale(d)) {
+      map.set(feature, { kind: 'authoring', draftId: d.draftId })
+    }
   }
   for (const w of input.portifyWorkflows) {
     if (isActivePortify(w.status)) map.set(w.feature, { kind: 'portifying', workflowId: w.workflowId })

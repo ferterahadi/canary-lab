@@ -1180,11 +1180,19 @@ describe('docs stage', () => {
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'description-only' } })
   })
 
-  it('parks on prd-source and lists the detected repo docs in the checkpoint data', async () => {
-    fs.writeFileSync(path.join(repoDir, 'README.md'), '# Product\nDoes the thing.')
+  it('parks on the two-path fork: agent options + the intent in the checkpoint data', async () => {
     const parked = await docsStage(deps()).run(ctxFor(manifest()).ctx)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
-    expect((parked.checkpoint.data as { repoDocsDetected: string[] }).repoDocsDetected).toContain(path.join(repoDir, 'README.md'))
+    // No docs yet → the two agent hints, no continue (nothing to continue with).
+    expect(parked.checkpoint.options).toEqual(['collect-repo-docs', 'infer-from-diff'])
+    expect((parked.checkpoint.data as { intent: string }).intent).toBe('checkout flow')
+  })
+
+  it('parks with continue FIRST once docs exist (the recommended release)', async () => {
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'prd.md'), '# PRD\nreal doc')
+    const parked = await docsStage(deps()).run(ctxFor(manifest()).ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect(parked.checkpoint.options).toEqual(['continue', 'collect-repo-docs', 'infer-from-diff'])
   })
 
   it('yolo picks up docs/*.md files from the repo, not just READMEs', async () => {
@@ -1217,8 +1225,9 @@ describe('docs stage', () => {
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'diff-vs-base' } })
     const docs = fs.readdirSync(path.join(featuresDir, 'checkout', 'docs')).filter((f) => !f.startsWith('_'))
-    expect(docs.some((f) => f.startsWith('diff-'))).toBe(true)
-    const content = fs.readFileSync(path.join(featuresDir, 'checkout', 'docs', docs.find((f) => f.startsWith('diff-'))!), 'utf-8')
+    // Feature-named artifact (R74) — never a stray repo-derived name.
+    expect(docs.some((f) => f.startsWith('checkout-from-diff'))).toBe(true)
+    const content = fs.readFileSync(path.join(featuresDir, 'checkout', 'docs', docs.find((f) => f.startsWith('checkout-from-diff'))!), 'utf-8')
     expect(content).toContain('```diff')
   })
 
@@ -1248,15 +1257,66 @@ describe('docs stage', () => {
     expect(outcome.kind).toBe('checkpoint')
   })
 
-  it('checkpoint response: infer-from-diff gathers the diff source', async () => {
+  it('checkpoint response: infer-from-diff spawns the collector agent, which writes the feature-named doc', async () => {
     initGitRepoWithDiff()
-    const adapter = docsStage(deps())
+    const prompts: string[] = []
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async (opts) => {
+      prompts.push(opts.prompt)
+      fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'checkout-from-diff.md'), '# Derived requirements\n- adds world lines')
+      return { text: 'derived requirements from the diff' }
+    }
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'infer-from-diff', feedback: 'skip the refactor noise' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'agent-diff', docs: ['checkout-from-diff.md'] } })
+    // The prompt carries the intent, the output path, and the feedback note.
+    expect(prompts[0]).toContain('checkout flow')
+    expect(prompts[0]).toContain('checkout-from-diff.md')
+    expect(prompts[0]).toContain('skip the refactor noise')
+  })
+
+  it('checkpoint response: infer-from-diff with no meaningful diff re-parks without spawning', async () => {
+    // No git repo at all — detectBaseBranch finds nothing to diff.
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => {
+      throw new Error('must not spawn')
+    }
+    const adapter = docsStage(deps({ spawnAgent }))
     const { ctx, setStage } = ctxFor(manifest())
     const parked = await adapter.run(ctx)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'infer-from-diff' })
-    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'diff-vs-base' } })
+    if (outcome.kind !== 'checkpoint') throw new Error('expected re-park')
+    expect(outcome.checkpoint.message).toContain('No meaningful diff')
+  })
+
+  it('checkpoint response: collect-repo-docs settles done when the agent writes the doc', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => {
+      fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md'), '# Requirements\n- does the thing')
+      return { text: 'collected from README' }
+    }
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'agent-repo-docs', docs: ['checkout-prd.md'] } })
+  })
+
+  it('checkpoint response: an empty-handed collector re-parks with the NOTHING_FOUND reason', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'NOTHING_FOUND: repos carry no requirement material' })
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    if (outcome.kind !== 'checkpoint') throw new Error('expected re-park')
+    expect(outcome.checkpoint.message).toContain('repos carry no requirement material')
   })
 
   it('checkpoint response: description-only settles immediately', async () => {
@@ -1337,7 +1397,7 @@ describe('docs stage', () => {
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true, base: 'main' } })
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'diff-vs-base' } })
-    const docs = fs.readdirSync(path.join(featuresDir, 'checkout', 'docs')).filter((f) => f.startsWith('diff-'))
+    const docs = fs.readdirSync(path.join(featuresDir, 'checkout', 'docs')).filter((f) => f.startsWith('checkout-from-diff'))
     const content = fs.readFileSync(path.join(featuresDir, 'checkout', 'docs', docs[0]), 'utf-8')
     expect(content).toContain('…(truncated)')
   })
@@ -1370,14 +1430,18 @@ describe('docs stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: 'no docs landed in features/<f>/docs/' })
   })
 
-  it('use-repo-docs with nothing to find logs the fallback and lands on description-only', async () => {
-    const adapter = docsStage(deps())
+  it('legacy use-repo-docs choice degrades to the collect-repo-docs agent path', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => {
+      fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md'), '# Requirements')
+      return { text: 'collected' }
+    }
+    const adapter = docsStage(deps({ spawnAgent }))
     const { ctx, setStage } = ctxFor(manifest())
     const parked = await adapter.run(ctx)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'use-repo-docs' })
-    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'description-only' } })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'agent-repo-docs' } })
   })
 
   it('userDocs skips a dangling symlink instead of throwing (statSync follows the link)', async () => {

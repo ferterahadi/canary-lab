@@ -439,19 +439,31 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     }
   })
 
-  // "Start over" — redo this record from stage 1 using its own stored
-  // intent/repos/options (no client-side body reconstruction).
-  app.post<{ Params: { id: string } }>('/api/flights/:id/redo', async (req, reply) => {
-    try {
-      const { manifest } = redoFlight(req.params.id, conductorDeps)
-      reply.code(201)
-      return manifest
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      reply.code(message.includes('not found') ? 404 : 409)
-      return { error: message }
-    }
-  })
+  // Re-fly this record using its own stored intent/repos/options (no
+  // client-side body reconstruction). No body → from stage 1 ("start over");
+  // fromStage → Continue → "from a step…", with the optional "what went wrong"
+  // note scoped to that stage's agent prompt (R74).
+  app.post<{ Params: { id: string }; Body: { fromStage?: string; feedback?: string } | undefined }>(
+    '/api/flights/:id/redo',
+    async (req, reply) => {
+      try {
+        const { manifest } = redoFlight(req.params.id, conductorDeps, {
+          fromStage: req.body?.fromStage as FlightStageKey | undefined,
+          feedback: req.body?.feedback,
+        })
+        reply.code(201)
+        return manifest
+      } catch (err) {
+        if (err instanceof FlightStageEntryError) {
+          reply.code(400)
+          return { error: err.message, type: 'stage_entry_rejected' }
+        }
+        const message = err instanceof Error ? err.message : String(err)
+        reply.code(message.includes('not found') ? 404 : 409)
+        return { error: message }
+      }
+    },
+  )
 
   // Delete a NON-ACTIVE flight record — the frozen-repos escape hatch. The
   // feature and its on-disk artifacts stay; the pill row returns to "not

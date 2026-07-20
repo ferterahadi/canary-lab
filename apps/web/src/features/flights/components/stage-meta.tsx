@@ -85,8 +85,9 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
   return (
     <Chip
       testId="stage-status-chip"
-      chrome="border"
+      chrome="fill"
       tone={tone}
+      fontSize={10}
       icon={status === 'running'
         ? <StatusDot state="running" className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
@@ -129,10 +130,8 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   },
   'prd-source': {
     'continue': 'Use the docs present',
-    'use-repo-docs': 'Copy repo docs in',
-    'infer-from-diff': 'Infer from git diff',
-    'description-only': 'From the intent alone',
-    'retry': 'Re-check docs',
+    'collect-repo-docs': 'Collect docs from the repos',
+    'infer-from-diff': 'Infer from the git diff',
   },
   'coverage-stuck': {
     'accept-partial': 'Accept current coverage',
@@ -279,13 +278,22 @@ function bootCheckFacts(envEv: Record<string, unknown>): StageFact[] {
   return [
     ...(captured != null ? [{ label: 'Env files', value: plural(captured, 'file') }] : []),
     ...(services.length > 0
-      ? [{
-          label: 'Boot check',
-          value: failed.length === 0
-            ? `${services.map((s) => s.name).filter(Boolean).join(', ')} healthy`
-            : `${failed.map((s) => s.name).filter(Boolean).join(', ')} failed`,
-          tone: failed.length === 0 ? 'good' as const : 'bad' as const,
-        }]
+      ? [(() => {
+          // A many-service stack summarizes to a count (names ride the
+          // tooltip) — 20 comma-joined names is a wall, not a fact.
+          const names = (list: typeof services) => list.map((s) => s.name).filter(Boolean)
+          const ok = failed.length === 0
+          const subject = ok ? services : failed
+          const label = names(subject).length <= 3
+            ? names(subject).join(', ')
+            : `${subject.length} services`
+          return {
+            label: 'Boot check',
+            value: `${label} ${ok ? 'healthy' : 'failed'}`,
+            title: `${names(subject).join(', ')} ${ok ? 'healthy' : 'failed'}`,
+            tone: ok ? 'good' as const : 'bad' as const,
+          }
+        })()]
       : []),
   ]
 }
@@ -429,7 +437,9 @@ const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
 export function FactsGrid({ facts }: { facts: StageFact[] }) {
   if (facts.length === 0) return null
   return (
-    <dl data-testid="stage-facts" className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-4 gap-y-1">
+    // Same 76ch column as every stage panel — a long value truncates inside
+    // the column (full text on the title), never sprawls the whole pane.
+    <dl data-testid="stage-facts" className="m-0 grid w-full max-w-[76ch] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-4 gap-y-1">
       {facts.map((f, i) => (
         <div key={`${f.label}-${i}`} className="contents">
           <dt className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{f.label}</dt>

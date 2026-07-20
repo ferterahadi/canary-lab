@@ -190,3 +190,12 @@ export async function pollUntil<T>(
 export function featureDirFor(deps: FlightStageDeps, feature: string): string {
   return path.join(deps.featuresDir, feature)
 }
+
+/** The user's re-entry feedback ("what went wrong last time"), if it targets
+ *  this stage (R74) — agent-spawning stages append it to their prompt. */
+export function stageFeedback(
+  m: { feedback?: { stage: string; note: string } },
+  key: string,
+): string | undefined {
+  return m.feedback?.stage === key ? m.feedback.note : undefined
+}

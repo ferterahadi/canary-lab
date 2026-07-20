@@ -32,6 +32,24 @@ const draft = (over: Partial<DraftRecord>): DraftRecord => ({
 })
 
 describe('deriveFeatureActivity', () => {
+  it('an EXTERNAL draft silent for over an hour stops counting as live authoring; fresh + server-spawned stay', () => {
+    const nowMs = Date.parse('2026-01-02T00:00:00Z')
+    const map = deriveFeatureActivity({
+      activeRuns: [],
+      portifyWorkflows: [],
+      drafts: [
+        draft({ featureName: 'stale', draftId: 'd-stale', producer: 'external', updatedAt: '2026-01-01T00:00:00Z' }),
+        draft({ featureName: 'fresh', draftId: 'd-fresh', producer: 'external', updatedAt: '2026-01-01T23:30:00Z' }),
+        // Server-spawned drafts have no TTL — boot reconcile owns their death.
+        draft({ featureName: 'server', draftId: 'd-srv', updatedAt: '2026-01-01T00:00:00Z' }),
+      ],
+      nowMs,
+    })
+    expect(map.get('stale')).toBeUndefined()
+    expect(map.get('fresh')).toEqual({ kind: 'authoring', draftId: 'd-fresh' })
+    expect(map.get('server')).toEqual({ kind: 'authoring', draftId: 'd-srv' })
+  })
+
   it('maps each absorbed surface to its verb with a handle into the real surface', () => {
     const map = deriveFeatureActivity({
       activeRuns: [run({ feature: 'a', runId: 'r-a' })],

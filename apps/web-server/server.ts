@@ -57,6 +57,7 @@ import {
   spawnSpecAgent as makeSpecAgentSpawner,
 } from './src/features/wizard/logic/wizard-agent-runner'
 import { WizardAgentRegistry } from './src/features/wizard/logic/wizard-agent-registry'
+import { reconcileInterruptedDrafts } from './src/features/wizard/logic/draft-store'
 import { generateRunId } from './src/features/runs/logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from './src/features/runs/logic/runtime/run-paths'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './src/features/runs/logic/runtime/orchestrator'
@@ -223,6 +224,11 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // flights route registration below, once adapters exist to drive them.)
   const planStore = new PlanFeaturesStore(logsDir)
   planStore.reconcileInterrupted(() => new Date().toISOString())
+  // Wizard drafts: a draft left 'planning'/'generating' by a server-spawned
+  // agent belongs to a dead process — flip it to 'error' so the Flights pill
+  // stops narrating a live "authoring" forever. External drafts are another
+  // process's session and are deliberately left alone.
+  reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the
   // single source of truth both the UI feature list and the MCP run result read.

@@ -13,6 +13,7 @@ import {
   mergeRootDevDependencies,
   paths,
   readDraft,
+  reconcileInterruptedDrafts,
   slugifyFeatureName,
   transition,
   validateFeatureTarget,
@@ -357,5 +358,26 @@ describe('slugifyFeatureName', () => {
   it('falls back to untitled when empty', () => {
     expect(slugifyFeatureName('')).toBe('untitled-feature')
     expect(slugifyFeatureName('!!!')).toBe('untitled-feature')
+  })
+})
+
+describe('reconcileInterruptedDrafts (boot crash recovery)', () => {
+  const mk = (draftId: string, status: 'generating' | 'planning' | 'accepted', producer?: 'external'): void => {
+    const rec = createDraft(tmp, { ...baseInput, draftId })
+    writeDraft(tmp, { ...rec, status, ...(producer ? { producer } : {}) })
+  }
+
+  it('flips server-spawned planning/generating to error; external + settled drafts stay', () => {
+    mk('d-gen', 'generating')
+    mk('d-plan', 'planning')
+    mk('d-ext', 'generating', 'external')
+    mk('d-done', 'accepted')
+    reconcileInterruptedDrafts(tmp, () => '2026-01-02T00:00:00Z')
+    expect(readDraft(tmp, 'd-gen')?.status).toBe('error')
+    expect(readDraft(tmp, 'd-gen')?.errorMessage).toContain('server restart')
+    expect(readDraft(tmp, 'd-plan')?.status).toBe('error')
+    // An external draft is another process's live session — never touched.
+    expect(readDraft(tmp, 'd-ext')?.status).toBe('generating')
+    expect(readDraft(tmp, 'd-done')?.status).toBe('accepted')
   })
 })

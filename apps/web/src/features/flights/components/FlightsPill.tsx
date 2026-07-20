@@ -174,6 +174,12 @@ export function featureChipState(
       title: flight.currentStage ? stageLabel(flight.currentStage) : 'running',
     }
   }
+  // R74: a pause the USER chose is a quiet resting state (shelving a flight is
+  // now the normal way to park one) — only failure/restart pauses keep the
+  // amber "you're the blocker" tone.
+  if (flight.status === 'paused' && flight.pauseReason === 'user') {
+    return { label: 'paused', tone: 'var(--text-secondary)', live: false, rank: 2, title: 'paused by you — Continue resumes it' }
+  }
   const rank = flight.status === 'paused' ? 2 : flight.status === 'failed' ? 3 : flight.status === 'aborted' ? 4 : 5
   return { label: flight.status, tone: FLIGHT_STATUS_TONE[flight.status], live: false, rank, title: flightStatusLabel(flight.status) }
 }
@@ -194,7 +200,7 @@ export function FlightStatusChip({
 }) {
   const chip = featureChipState(flight, activity, derived)
   return (
-    <Chip testId="flight-status-chip" chrome="border" tone={chip.tone} label={chip.label} width={72} title={chip.title} />
+    <Chip testId="flight-status-chip" chrome="fill" tone={chip.tone} fontSize={10} label={chip.label} width={72} title={chip.title} />
   )
 }
 
@@ -568,8 +574,8 @@ function PickerRow({
           type="button"
           data-testid={`flight-open-${row.flight.flightId}`}
           onClick={() => onPick(row.flight!.flightId)}
-          className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
-          style={{ border: '1px solid var(--border-default)' }}
+          className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+          style={{ border: '1px solid transparent' }}
           title={`Open flight ${row.flight.flightId} (${row.feature})`}
         >
           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{row.feature}</span>
@@ -677,8 +683,8 @@ export function NotFlownRow({
       type="button"
       data-testid={`not-flown-${feature}`}
       onClick={() => onStart(feature)}
-      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
-      style={{ border: '1px solid var(--border-default)' }}
+      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+      style={{ border: '1px solid transparent' }}
       title={`${feature}: ${chip.title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium" style={{ color: 'var(--text-secondary)' }}>{feature}</span>
@@ -711,8 +717,8 @@ export function ActivityOnlyRow({
       type="button"
       data-testid={`activity-open-${feature}`}
       onClick={() => onOpen(feature, activity)}
-      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
-      style={{ border: '1px solid var(--border-default)' }}
+      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+      style={{ border: '1px solid transparent' }}
       title={`${feature}: ${ACTIVITY_CHIP[activity.kind].title}`}
     >
       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{feature}</span>
@@ -742,8 +748,8 @@ export function PreFlightRow({
         type="button"
         data-testid={`pre-flight-open-${task.taskId}`}
         onClick={() => onOpen(task.taskId)}
-        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
-        style={{ border: '1px solid var(--border-default)' }}
+        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+        style={{ border: '1px solid transparent' }}
         title={`${chip.title} — ${task.description}`}
       >
         <span aria-hidden="true" className="shrink-0" style={{ color: 'var(--text-muted)' }}>

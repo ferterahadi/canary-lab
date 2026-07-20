@@ -9,7 +9,7 @@ import type {
   PlannedFeature,
 } from '../../../shared/api/client'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
-import { ChevronRightIcon, Modal, Textarea } from '../../config/components/atoms'
+import { ChevronRightIcon, Modal, Textarea, Toggle } from '../../config/components/atoms'
 import { STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 
@@ -369,15 +369,17 @@ export function FlightStartDialog({
       {/* Continue sits above the fold — the common resume path, never buried in
           the collapsible journey list. */}
       {!newFlight && entry?.canContinue && (
-        <StageRow
-          testId="flight-start-continue"
-          selected={picked === 'continue'}
-          onPick={() => setPicked('continue')}
-          icon="▸"
-          iconTone="rgb(56, 189, 248)"
-          label="Continue where it left off"
-          sub="Resumes the paused flight at its first open stage."
-        />
+        <div className="overflow-hidden rounded-md border" style={{ borderColor: 'var(--border-default)' }}>
+          <StageRow
+            testId="flight-start-continue"
+            selected={picked === 'continue'}
+            onPick={() => setPicked('continue')}
+            icon="▸"
+            iconTone="rgb(56, 189, 248)"
+            label="Continue where it left off"
+            sub="Resumes the paused flight at its first open stage."
+          />
+        </div>
       )}
 
       {/* R69: the whole flight as a collapsible preview. Greyed + locked for a
@@ -408,8 +410,8 @@ export function FlightStartDialog({
           )}
         </button>
         {showSteps && (
-          <div className="flex flex-col gap-0.5 p-1.5">
-            {PICKABLE.map((key) => {
+          <div className="flex flex-col">
+            {PICKABLE.map((key, index) => {
               // New flights always start from the beginning: the whole menu
               // renders visible-but-locked so the re-entry affordance is
               // learnable (R41).
@@ -431,6 +433,8 @@ export function FlightStartDialog({
                   iconTone={stageStatusTone(status)}
                   label={rowLabel(key)}
                   sub={sub}
+                  step={index + 1}
+                  divider
                 />
               )
             })}
@@ -586,25 +590,34 @@ export function FlightStartDialog({
 
             {/* R71/W4: autopilot — on by default; the flight asks only where a
                 wrong guess would do damage (secrets, duplicate feature). */}
-            <label
+            <div
               data-testid="flight-autopilot-toggle"
-              className="flex cursor-pointer items-start gap-2.5 rounded border px-3 py-2"
-              style={{ borderColor: 'var(--border-default)' }}
+              className="flex items-center gap-3 rounded border px-3 py-2.5 transition-colors"
+              style={{
+                borderColor: autopilot
+                  ? 'color-mix(in srgb, var(--accent) 35%, var(--border-default))'
+                  : 'var(--border-default)',
+                background: 'var(--bg-surface)',
+              }}
             >
-              <input
-                type="checkbox"
-                data-testid="flight-autopilot-checkbox"
-                checked={autopilot}
-                onChange={(e) => setAutopilot(e.target.checked)}
-                className="mt-0.5"
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="text-[12px] font-medium">Autopilot — ask only when required</span>
-                <span className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                  Safe checkpoints answer themselves (each decision is logged on its stage); the flight still stops for missing secrets or a duplicate feature.
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex items-center gap-2 text-[12px] font-medium">
+                  Autopilot
+                  <span
+                    className="rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
+                    style={autopilot
+                      ? { color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }
+                      : { color: 'var(--text-muted)', background: 'color-mix(in srgb, var(--text-muted) 12%, transparent)' }}
+                  >
+                    {autopilot ? 'On' : 'Off'}
+                  </span>
+                </span>
+                <span className="text-[10.5px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  Safe checkpoints answer themselves — each decision is logged on its stage. The flight still stops for missing secrets or a duplicate feature.
                 </span>
               </span>
-            </label>
+              <Toggle testId="flight-autopilot-checkbox" value={autopilot} onChange={setAutopilot} />
+            </div>
 
             {hasRecord && (
               <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
@@ -895,6 +908,8 @@ function StageRow({
   iconTone,
   label,
   sub,
+  step,
+  divider,
 }: {
   testId: string
   selected: boolean
@@ -904,7 +919,16 @@ function StageRow({
   iconTone: string
   label: string
   sub?: string
+  /** Position in the pipeline — the badge's number; a status glyph (prior
+   *  record) still wins the badge over the number. */
+  step?: number
+  /** Hairline above — the connected-list divider (all rows but a standalone). */
+  divider?: boolean
 }) {
+  // The badge carries the most specific mark available: a prior record's
+  // status glyph, else the pipeline number, else the caller's icon (▸).
+  const badge = icon !== '·' ? icon : step != null ? String(step) : icon
+  const badgeTone = selected ? 'rgb(56, 189, 248)' : iconTone
   return (
     <button
       type="button"
@@ -913,22 +937,34 @@ function StageRow({
       data-testid={testId}
       disabled={disabled}
       onClick={onPick}
-      className="flex items-start gap-2 rounded px-2 py-1.5 text-left transition-colors enabled:hover:bg-white/[0.04]"
+      className={`flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors enabled:hover:bg-white/[0.04] ${divider ? 'border-t' : ''}`}
       style={{
-        background: selected ? 'var(--bg-selected)' : undefined,
+        // Neutral surfaces only — the rows sit on the modal's own grey, never
+        // a tinted slab. Selection = the app's selected-grey + one sky bar.
+        borderColor: 'var(--border-default)',
+        background: selected ? 'var(--bg-selected)' : 'transparent',
         opacity: disabled ? 0.55 : 1,
         cursor: disabled ? 'not-allowed' : undefined,
+        boxShadow: selected ? 'inset 2px 0 0 rgb(56, 189, 248)' : undefined,
       }}
     >
-      <span className="w-3 shrink-0 text-center text-[12px] font-semibold" style={{ color: iconTone }} aria-hidden="true">
-        {icon}
+      <span
+        aria-hidden="true"
+        className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
+        style={{
+          borderColor: `color-mix(in srgb, ${badgeTone} 55%, var(--border-default))`,
+          color: badgeTone,
+          background: 'transparent',
+        }}
+      >
+        {badge}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12px]" style={{ color: disabled ? 'var(--text-muted)' : 'var(--text-primary)' }}>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[12.5px] font-medium" style={{ color: disabled ? 'var(--text-muted)' : 'var(--text-primary)' }}>
           {label}
         </span>
         {sub && (
-          <span className="block text-[10.5px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+          <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-muted)' }}>
             {sub}
           </span>
         )}

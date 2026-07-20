@@ -65,6 +65,9 @@ export interface FlightCheckpointResponse {
   choice?: string
   values?: Record<string, string>
   data?: unknown
+  /** The user's "what went wrong last time" note — appended to the prompt of
+   *  the agent the responded choice spawns (R74: feedback-on-redo channel). */
+  feedback?: string
 }
 
 /** Structured evidence behind a stage `error` when a boot-verify service
@@ -175,6 +178,11 @@ export interface FlightManifest {
   error?: string
   /** Terminal status of the flight's run, once the run stage settles. */
   runVerdict?: 'passed' | 'failed' | 'aborted'
+  /** The user's "what went wrong last time" note from a Continue → from-a-step
+   *  re-entry (R74). Scoped to the entry stage: that stage's agent spawn
+   *  appends it to its prompt; other stages ignore it. Overwritten by the next
+   *  re-entry, kept afterwards as the audit trail. */
+  feedback?: { stage: FlightStageKey; note: string }
   /** Pointers to the flight's deliverables. */
   links?: {
     runId?: string

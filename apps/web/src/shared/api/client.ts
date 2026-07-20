@@ -1944,12 +1944,18 @@ export function pauseFlight(flightId: string, opts?: ClientOptions): Promise<Fli
   )
 }
 
-/** "Start over" — restart the record from stage 1 with its own stored args. */
-export function redoFlight(flightId: string, opts?: ClientOptions): Promise<FlightManifestT> {
+/** Re-fly the record with its own stored args. No body → from stage 1 ("start
+ *  over"); `fromStage` → Continue → "from a step…", with the optional "what
+ *  went wrong" note scoped to that stage's agent prompt (R74). */
+export function redoFlight(
+  flightId: string,
+  body?: { fromStage?: string; feedback?: string },
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<FlightManifestT>(
     `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/redo`,
-    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) },
     fetchImpl,
   )
 }
