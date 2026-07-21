@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
 import type { FlightStageKey, FlightStageStatus } from '../../../shared/api/client'
 import type { EvaluationExportTask, Feature, RunIndexEntry } from '../../../shared/api/types'
 import { useRuns } from '../../runs/state/RunsContext'
@@ -55,6 +55,65 @@ export function deriveFeatureStages(
     'evaluation-export': hasExport ? 'done' : 'pending',
   }
   return FLIGHT_STAGE_KEYS.map((key) => ({ key, status: statusFor[key] }))
+}
+
+// ---------------------------------------------------------------------------
+// R81 — derived flights: a feature whose stages were completed OUTSIDE the
+// conductor has flown. The flight record is the conductor's journal, not the
+// definition of a flight, so the picker routes such a feature to the flight
+// detail view under a token id instead of dead-ending on a start-from-scratch
+// dialog. The token qualifies `view=flights` exactly like a real flightId
+// (URL-only, per cl_route-every-surface), and FlightPage swaps in a
+// pseudo-manifest so the whole rail/panel render path is reused unchanged.
+
+/** URL/id prefix marking a derived flight — `feature:<name>` (a real flightId
+ *  is `fl_<hex>`, so the two id spaces can never collide). */
+export const DERIVED_FLIGHT_PREFIX = 'feature:'
+
+export function derivedFlightToken(feature: string): string {
+  return `${DERIVED_FLIGHT_PREFIX}${feature}`
+}
+
+/** The feature a derived token points at, or null for a real flightId. */
+export function derivedFlightFeature(flightId: string): string | null {
+  return flightId.startsWith(DERIVED_FLIGHT_PREFIX)
+    ? flightId.slice(DERIVED_FLIGHT_PREFIX.length) || null
+    : null
+}
+
+/** A client-only FlightManifest standing in for evidence-derived progress.
+ *  Never persisted and never sent to the server — it exists so FlightPage can
+ *  render derived stages through the same rail, panels and drill-throughs a
+ *  recorded flight uses. `status` is computed, not invented: every derived
+ *  stage done → `done`; anything still open → `paused` (the page overrides the
+ *  chip copy and controls in derived mode, so no "paused by you" lie reaches
+ *  the user). */
+export function buildDerivedManifest(
+  feature: string,
+  stages: DerivedStage[],
+  prefill?: { repoPaths?: string[]; env?: string },
+): FlightManifest {
+  const allDone = stages.every((s) => s.status === 'done')
+  return {
+    flightId: derivedFlightToken(feature),
+    feature,
+    repoPaths: prefill?.repoPaths ?? [],
+    description: '',
+    opts: { env: prefill?.env ?? 'local', coverageTarget: 100, yolo: false },
+    status: allDone ? 'done' : 'paused',
+    currentStage: null,
+    stages: stages.map((s) => ({ key: s.key, status: s.status })),
+    createdAt: '',
+    updatedAt: '',
+  }
+}
+
+/** The stage a derived flight would be conducted FROM: the first one whose
+ *  evidence is missing. Null when every stage is already done (nothing to
+ *  continue — the offer is a fresh flight instead). Mirrors the server's
+ *  stage-entry validator, which has the final say at submit time. */
+export function derivedEntryStage(stages: DerivedStage[]): FlightStageKey | null {
+  return stages.find((s) => s.status !== 'done')?.key ?? null
 }
 
 /** The latest settled test run per feature (boots/benchmarks/verifies are not

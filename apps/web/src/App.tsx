@@ -42,7 +42,7 @@ export function App() {
     selectedFlightId, setSelectedFlightId,
     configFor, setConfigFor,
     verifyOpen, setVerifyOpen,
-    flightStartFor, flightStartFresh, setFlightStartFor,
+    flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     draftFor, setDraftFor,
     resumePlanTaskId, setResumePlanTaskId,
@@ -350,6 +350,7 @@ export function App() {
           ? <FlightPage
               flightId={selectedFlightId}
               activity={featureActivity}
+              derivedStages={derivedStages}
               onOpenConfig={(feature) => setConfigFor(feature)}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
@@ -361,7 +362,7 @@ export function App() {
               }}
               onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
               onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
-              onStartFlight={(feature, intent) => { setSelectedFeature(feature); setFlightStartFor(feature, intent) }}
+              onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
             />
           : <ResizablePanels panels={panels} />}
       </div>
@@ -370,6 +371,7 @@ export function App() {
         <FlightStartDialog
           feature={flightStartNew ? null : flightStartFor}
           intent={flightStartFresh ? 'fresh' : 'refly'}
+          fromStage={flightStartNew ? null : flightStartStage}
           resumePlanTaskId={flightStartNew ? resumePlanTaskId : null}
           knownRepos={knownRepos}
           onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null) }}

@@ -8,6 +8,7 @@ import { StatusPill } from '../../../shared/ui/StatusPill'
 import { Tooltip } from '../../../shared/ui/Tooltip'
 import { stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
 import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
+import { derivedFlightToken } from '../lib/derived-stages'
 
 // Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress, and (since the pill consolidation) the one live indicator for
@@ -132,10 +133,14 @@ export interface FeatureChipState {
  *  state: it reads muted/neutral ("queued") and ranks just above never-flown,
  *  since nothing is asked of the human.
  *
- *  A flightless feature splits on evidence: standalone progress exists (any
- *  lit square in its derived rail) → "idle" — the chip stays a flight-status
- *  reporter, it never re-narrates what the squares already show; zero
- *  evidence (or an older server without the evidence payload) → "not flown".
+ *  R81 — a flightless feature reports on its DERIVED progress, because stages
+ *  completed outside the conductor are flight progress (a coverage run, repo /
+ *  requirement / docs setup and MCP authoring each complete the same stage the
+ *  conductor would have). Every derived stage done → "done", the same word a
+ *  recorded flight gets: the row has flown, it just wasn't conducted. Partial
+ *  progress → "idle" (nothing is running) with a title that points at the
+ *  continue, never at a restart. Zero evidence (or an older server without the
+ *  evidence payload) → "not flown".
  */
 export function featureChipState(
   flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason'> | null,
@@ -157,11 +162,15 @@ export function featureChipState(
     return { label: chip.label, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: chip.title }
   }
   if (!flight) {
-    // R49: one row per workspace feature, at the bottom; clicking it opens the
-    // flight launcher. "idle" when standalone work already lit squares (the
-    // rail carries the progress story); "not flown" only when truly untouched.
+    // R49/R81: one row per workspace feature. A derived row opens the flight
+    // detail for its evidence — never a start-from-scratch dialog.
+    // "Done" means the WHOLE pipeline — a partial rail (or a caller passing a
+    // subset) must never read as a finished flight.
+    if (derived && derived.length >= FLIGHT_STAGE_KEYS.length && derived.every((s) => s.status === 'done')) {
+      return { label: 'done', tone: FLIGHT_STATUS_TONE['done'], live: false, rank: 5, title: 'every step complete — flown outside the conductor' }
+    }
     if (derived?.some((s) => s.status !== 'pending')) {
-      return { label: 'idle', tone: 'var(--text-secondary)', live: false, rank: 5.8, title: 'progress from standalone work — start a flight to conduct it end-to-end' }
+      return { label: 'idle', tone: 'var(--text-secondary)', live: false, rank: 5.8, title: 'part-way through — open to continue from the next step' }
     }
     return { label: 'not flown', tone: 'var(--text-muted)', live: false, rank: 6, title: 'never flown — start a flight' }
   }
@@ -590,7 +599,14 @@ function PickerRow({
     <li>
       {row.activity
         ? <ActivityOnlyRow feature={row.feature} activity={row.activity} derived={row.derived} onOpen={onPickActivity} />
-        : <NotFlownRow feature={row.feature} derived={row.derived} onStart={onStartFlight} />}
+        : <NotFlownRow
+            feature={row.feature}
+            derived={row.derived}
+            onStart={onStartFlight}
+            /* R81: derived progress opens the flight view under a token id —
+               the same `onPick` channel a recorded flight uses. */
+            onOpenDerived={(f) => onPick(derivedFlightToken(f))}
+          />}
     </li>
   )
 }
@@ -664,25 +680,36 @@ function PickerGroupSection({
 
 /** Row for a feature with no flight record (R49): same anatomy as a flight row
  *  — name, mini rail, chip — with the rail showing the evidence-DERIVED
- *  progress (which steps standalone work already completed; chip "idle").
+ *  progress (which steps standalone work already completed).
  *  With zero evidence the rail renders fully greyed (all-pending squares at
  *  reduced opacity, per the mock review: squares, never a dash; chip "not
- *  flown"). Clicking opens the feature-scoped flight launcher either way. */
+ *  flown").
+ *
+ *  R81 — the click target follows the evidence, not the record. Any derived
+ *  progress → open the flight detail for it (a `feature:` token id), because
+ *  those completed stages ARE flight progress and the user came to see them.
+ *  Only a truly untouched feature opens the launcher: with nothing to show,
+ *  starting IS the next action. Routing a part-flown row to a
+ *  start-from-scratch dialog asks the user to redo finished work. */
 export function NotFlownRow({
   feature,
   derived,
   onStart,
+  onOpenDerived,
 }: {
   feature: string
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
   onStart: (feature: string) => void
+  onOpenDerived?: (feature: string) => void
 }) {
   const chip = featureChipState(null, undefined, derived)
+  const hasProgress = derived?.some((s) => s.status !== 'pending') ?? false
+  const open = hasProgress && onOpenDerived ? () => onOpenDerived(feature) : () => onStart(feature)
   return (
     <button
       type="button"
-      data-testid={`not-flown-${feature}`}
-      onClick={() => onStart(feature)}
+      data-testid={hasProgress && onOpenDerived ? `derived-open-${feature}` : `not-flown-${feature}`}
+      onClick={open}
       className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
       style={{ border: '1px solid transparent' }}
       title={`${feature}: ${chip.title}`}

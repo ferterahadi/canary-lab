@@ -201,6 +201,28 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     return `The agent found nothing relevant: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}`
   }
 
+  const MODE_LABEL = {
+    'collect-repo-docs': 'collect repo docs',
+    'infer-from-diff': 'infer from diff',
+  } as const
+
+  /** Log form of a rejected attempt — deliberately NOT `describeAttempt`.
+   *  The activity band is append-only, so a rejected attempt sits above
+   *  whatever ran next with nothing marking it as finished business: three
+   *  bare "found nothing relevant" lines above a healthy distillation read as
+   *  a live failure. So each line names its attempt, states the verdict as
+   *  terminal, and says what the flight did about it (re-parked) plus the two
+   *  ways out — answering "what happens next?" in the line itself. */
+  const attemptLogLine = (attempt: PrdSourceAttempt): string => {
+    const why =
+      attempt.outcome === 'no-diff'
+        ? 'no meaningful diff vs the base branch in any repo'
+        : attempt.outcome === 'no-output'
+          ? 'the agent produced no requirements doc'
+          : attempt.reason?.trim() || 'the agent searched and found nothing relevant'
+    return `[docs] agent attempt (${MODE_LABEL[attempt.mode]}) came back empty — ${why.replace(/[.\s]+$/, '')}. Back to your choice: add docs yourself, or retry with feedback.\n`
+  }
+
   /** Park on the two-path fork. `attempt` carries a prior collector run's
    *  outcome so a failed collection re-parks with the reason in the user's
    *  face instead of a silent bounce.
@@ -252,8 +274,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         .map((repo) => ({ repo, base: detectBaseBranch(repo, m.opts.base) }))
         .filter((t): t is { repo: string; base: string } => t.base !== null && diffVsBase(t.repo, t.base) !== null)
       if (targets.length === 0) {
-        ctx.appendLog('[docs] no meaningful diff vs base in any repo — nothing to infer from.\n')
-        return park(ctx, [], { mode, outcome: 'no-diff' })
+        const attempt: PrdSourceAttempt = { mode, outcome: 'no-diff' }
+        ctx.appendLog(attemptLogLine(attempt))
+        return park(ctx, [], attempt)
       }
       repoTargets = targets.map((t) => `- ${t.repo} (diff vs ${t.base})`).join('\n')
     }
@@ -261,7 +284,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     const outName = mode === 'collect-repo-docs' ? `${m.feature}-prd.md` : `${m.feature}-from-diff.md`
     const outPath = path.join(docsDir, outName)
     fs.mkdirSync(docsDir, { recursive: true })
-    ctx.appendLog(`[docs] ${mode === 'collect-repo-docs' ? 'collecting repo docs' : 'inferring from the git diff'} guided by the intent…\n`)
+    // Trailing "…" is load-bearing: StageActivity splits the band after the
+    // last tagged line ending in an ellipsis when no agent chunks mirrored in.
+    ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) — ${mode === 'collect-repo-docs' ? 'reading the repos' : 'reading the git diff'} guided by the intent…\n`)
     // Respond-carried feedback wins; a Continue → from-a-step note targeting
     // this stage is the fallback (the fork re-parks first, so the choice that
     // follows should still carry the note).
@@ -297,11 +322,13 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       const attempt: PrdSourceAttempt = reason
         ? { mode, outcome: 'empty', reason }
         : { mode, outcome: 'no-output' }
-      ctx.appendLog(`[docs] ${describeAttempt(attempt)}\n`)
+      ctx.appendLog(attemptLogLine(attempt))
       return park(ctx, [], attempt)
     }
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
-    ctx.appendLog(`[docs] wrote docs/${outName}\n`)
+    // Symmetric with attemptLogLine: the accepted attempt says so, so the band
+    // reads as a sequence of verdicts rather than undifferentiated noise.
+    ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) succeeded — wrote docs/${outName}\n`)
     const docs = userDocs(featureDir)
     return {
       kind: 'done',

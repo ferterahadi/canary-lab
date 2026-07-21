@@ -1348,6 +1348,44 @@ describe('docs stage', () => {
     expect(outcome.checkpoint.message).not.toContain('repo..')
   })
 
+  it('a rejected attempt logs a TERMINAL line — named attempt, verdict, and the way out', async () => {
+    // The activity band is append-only: a rejected attempt sits above whatever
+    // ran next. Without "came back empty" + "back to your choice" the line
+    // reads as a live failure long after the user has moved on.
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'NOTHING_FOUND: no loyalty flow in either repo' })
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const log: string[] = []
+    ctx.appendLog = (chunk) => { log.push(chunk) }
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+
+    const text = log.join('')
+    expect(text).toContain('[docs] agent attempt (collect repo docs) — reading the repos guided by the intent…')
+    expect(text).toContain('[docs] agent attempt (collect repo docs) came back empty — no loyalty flow in either repo.')
+    expect(text).toContain('Back to your choice: add docs yourself, or retry with feedback.')
+    // The spawn line must keep its ellipsis — StageActivity splits the band on it.
+    expect(log.some((l) => l.trimEnd().endsWith('…'))).toBe(true)
+  })
+
+  it('a succeeding attempt says so, so the band reads as a sequence of verdicts', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async (o) => {
+      fs.writeFileSync(o.prompt.match(/\/[^\s]*checkout-prd\.md/)![0], '# collected\n')
+      return { text: 'done' }
+    }
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const log: string[] = []
+    ctx.appendLog = (chunk) => { log.push(chunk) }
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    expect(log.join('')).toContain('agent attempt (collect repo docs) succeeded — wrote docs/checkout-prd.md')
+  })
+
   it('checkpoint response: a collector that writes nothing and says nothing reports no-output', async () => {
     const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'I had a look around.' })
     const adapter = docsStage(deps({ spawnAgent }))

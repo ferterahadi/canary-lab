@@ -666,27 +666,45 @@ function useFlightDocs(feature: string, refreshKey?: number, onChanged?: () => v
   }, [])
 
   const sourceDocs = (listing?.docs ?? []).filter((d) => !d.generated)
-  return { sourceDocs, busy, error, importFiles, removeDoc, openDoc }
+  // The distilled artifact (_prd-summary.md/.json) — the stage's actual OUTPUT.
+  // Filtered out of the source list on purpose; it gets its own card.
+  const generatedDocs = (listing?.docs ?? []).filter((d) => d.generated)
+  return { sourceDocs, generatedDocs, busy, error, importFiles, removeDoc, openDoc }
 }
 
 /** The resting Requirements panel — a read-only lens on docs/ while the stage
  *  runs or after it settles. No add/remove affordances here: while parked the
- *  fork owns editing; once approved the set is honestly frozen. */
+ *  fork owns editing; once approved the set is honestly frozen.
+ *
+ *  Two cards, because the stage has two halves the user thinks about
+ *  separately: the source docs that went IN, and the distilled summary that
+ *  came OUT. Before, only the inputs had a card and the output existed solely
+ *  as a 10px "Summary ✓" chip — the stage's actual deliverable was the one
+ *  thing you couldn't see or open. The summary chip now rides the output card
+ *  it describes, so neither card reports the other's status. */
 export function FlightDocsPanel({
   feature,
   approved,
   refreshKey,
   summaryStatus,
+  requirementCount,
+  onOpenCoverage,
 }: {
   feature: string
   /** Stage settled done — requirements approved, the doc set is frozen. */
   approved: boolean
   /** Bumped on coverage-changed so out-of-band doc writes show live. */
   refreshKey?: number
-  /** The folded prd-summary stage's status — rendered as the summary chip. */
+  /** The folded prd-summary stage's status — chips the distilled card. */
   summaryStatus?: FlightStageStatus
+  /** Live requirement count from the folded prd-summary's evidence. */
+  requirementCount?: number
+  /** Drill to the coverage ledger, where the requirements are browsable —
+   *  the distilled card's next action so it never dead-ends on a file pill. */
+  onOpenCoverage?: () => void
 }) {
   const docs = useFlightDocs(feature, refreshKey)
+  const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
     <section data-testid="flight-docs-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
       <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
@@ -702,12 +720,6 @@ export function FlightDocsPanel({
               style={{ color: 'var(--text-muted)', borderColor: 'var(--border-default)' }}
             >
               Locked — approved
-            </span>
-          )}
-          {summaryStatus && summaryStatus !== 'pending' && (
-            <span className="mb-1 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="docs-summary-chip">
-              Summary
-              <StageStatusChip status={summaryStatus} />
             </span>
           )}
         </div>
@@ -739,6 +751,61 @@ export function FlightDocsPanel({
         )}
         {docs.error && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{docs.error}</div>}
       </div>
+
+      {/* The output half. Rendered from `summaryStatus` alone (not from the
+          artifact existing) so the running state has a card too — otherwise
+          the panel is a blank gap for the whole distillation, which is the
+          longest part of the stage. */}
+      {showDistilled && (
+        <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE} data-testid="flight-distilled-panel">
+          <div className="flex items-center gap-2">
+            <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+              {requirementCount != null ? `Distilled requirements · ${requirementCount}` : 'Distilled requirements'}
+            </div>
+            <div className="flex-1" />
+            <span className="mb-1 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="docs-summary-chip">
+              Summary
+              <StageStatusChip status={summaryStatus} />
+            </span>
+          </div>
+
+          {docs.generatedDocs.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              {docs.generatedDocs.map((d) => (
+                <DocPill
+                  key={d.relPath}
+                  relPath={d.relPath}
+                  dirPrefix={`features/${feature}/docs/`}
+                  generated={d.generated}
+                  sizeBytes={d.sizeBytes}
+                  linked={d.linked}
+                  linkTarget={d.linkTarget}
+                  broken={d.broken}
+                  busy={false}
+                  onOpen={() => docs.openDoc(d.absPath)}
+                  removeTitle="Remove doc"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              {summaryStatus === 'running'
+                ? 'Distilling the source docs into requirements — the agent’s progress is in Activity below.'
+                : summaryStatus === 'failed'
+                  ? 'Distillation failed before writing a summary — see Activity below.'
+                  : 'No summary artifact on disk.'}
+            </div>
+          )}
+
+          {onOpenCoverage && summaryStatus === 'done' && (
+            <div className="mt-2.5 flex">
+              <button type="button" className="cl-button px-2 py-0.5 text-[11px]" onClick={onOpenCoverage} data-testid="distilled-open-ledger">
+                Open coverage ledger →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </section>
   )
 }

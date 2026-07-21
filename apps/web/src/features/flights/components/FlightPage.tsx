@@ -34,6 +34,7 @@ import {
   formatDuration,
   specsCoverageProgress,
   stageFacts,
+  stageLabel,
   stageRailRows,
   stageRowKey,
   stageStateLine,
@@ -42,6 +43,12 @@ import {
   type StageRailRow,
 } from './stage-meta'
 import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import {
+  buildDerivedManifest,
+  derivedEntryStage,
+  derivedFlightFeature,
+  type DerivedStage,
+} from '../lib/derived-stages'
 
 // Flight detail — the routed full-screen view (?view=flights&flight=<id>)
 // that owns a flight's lifecycle: a stage rail on the left (harness-computed
@@ -87,22 +94,27 @@ export function FlightPage({
   onSelectFlight,
   onClose,
   activity,
+  derivedStages,
   onStartFlight,
   onOpenConfig,
   onOpenRun,
   onOpenCoverage,
   onOpenPortify,
 }: {
+  /** A real flight id, or a `feature:<name>` derived token (R81). */
   flightId: string
   /** Back to the flights picker (null clears the selected flight). */
   onSelectFlight: (flightId: string | null) => void
   onClose: () => void
   /** Per-feature live activity (runs / portify / authoring) — App owns it. */
   activity?: Map<string, FeatureActivity>
+  /** R81: evidence-derived rails per feature — App owns the one instance (same
+   *  ownership rule as `activity`). Supplies the stages for a derived token. */
+  derivedStages?: Map<string, DerivedStage[]>
   /** Opens the flight launcher for this feature — the "Start fresh" handoff
    *  (R75): full restart with editable intent + repos lives THERE, never in
    *  the re-run dialog. */
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent) => void
+  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup. */
   onOpenConfig?: (feature: string) => void
 } & FlightDrillThroughs) {
@@ -113,7 +125,7 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
     </div>
   )
 }
@@ -122,27 +134,38 @@ function FlightDetail({
   flightId,
   refreshKey,
   onBackToList,
+  onNavigateFlight,
   onClose,
   onStartFlight,
   onOpenConfig,
   configRefreshKey,
   docsRefreshKey,
   activity,
+  derivedStages,
   drill,
 }: {
   flightId: string
   refreshKey: number
   onBackToList: () => void
+  /** Select a different flight — used by the derived→real redirect (R81). */
+  onNavigateFlight?: (flightId: string | null) => void
   onClose: () => void
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent) => void
+  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   onOpenConfig?: (feature: string) => void
   configRefreshKey?: number
   docsRefreshKey?: number
   /** Per-feature live activity — drives the run row's live icon (R64). */
   activity?: Map<string, FeatureActivity>
+  derivedStages?: Map<string, DerivedStage[]>
   drill: FlightDrillThroughs
 }) {
-  const [flight, setFlight] = useState<FlightManifest | null>(null)
+  // R81 — derived mode: `flightId` is a `feature:<name>` token, so there is no
+  // record to GET. The rail comes from live workspace evidence and everything
+  // below renders from a client-only pseudo-manifest, unchanged.
+  const derivedFeature = derivedFlightFeature(flightId)
+  const derivedRail = derivedFeature ? derivedStages?.get(derivedFeature) : undefined
+  const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; env: string } | null>(null)
+  const [fetched, setFlight] = useState<FlightManifest | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedStage, setSelectedStage] = useState<FlightStageKey | null>(null)
   // R71/W1: one inline error line under the header — every header/run control
@@ -150,10 +173,33 @@ function FlightDetail({
   const [actionError, setActionError] = useState<string | null>(null)
 
   const refetch = useCallback((): void => {
+    if (derivedFeature) {
+      // No record to load. One entry call supplies the repo/env prefill the
+      // panels show — and answers "has a record appeared since?", which is how
+      // the token self-heals: the moment a flight is minted for this feature
+      // (conducted from here, or from anywhere else), we hand over to it so the
+      // URL can never point at a stale derived view.
+      api.getFlightEntryOptions(derivedFeature)
+        .then((o) => {
+          setError(null)
+          setDerivedPrefill({ repoPaths: o.prefill.repoPaths, env: o.prefill.env })
+          if (o.flight) onNavigateFlight?.(o.flight.flightId)
+        })
+        .catch(() => { /* prefill is best-effort — the rail stands on its own */ })
+      return
+    }
     api.getFlight(flightId)
       .then((m) => { setFlight(m); setError(null) })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-  }, [flightId])
+  }, [flightId, derivedFeature, onNavigateFlight])
+
+  const derivedManifest = useMemo(
+    () => (derivedFeature && derivedRail ? buildDerivedManifest(derivedFeature, derivedRail, derivedPrefill ?? undefined) : null),
+    [derivedFeature, derivedRail, derivedPrefill],
+  )
+  const flight = derivedManifest ?? (derivedFeature ? null : fetched)
+  /** The stage a "Continue" would enter at — first one without evidence. */
+  const derivedEntry = derivedRail ? derivedEntryStage(derivedRail) : null
 
   /** Fire a flight control call: refetch on success, surface failure inline. */
   const act = useCallback((call: () => Promise<unknown>, onSuccess?: () => void): void => {
@@ -268,13 +314,20 @@ function FlightDetail({
             chrome="fill"
             tone={tone}
             fontSize={10}
-            title={flight.status === 'paused'
+            // R81: a derived flight was never paused or interrupted — its steps
+            // were simply completed outside the conductor, so it must not
+            // borrow the record-only "paused by you / a stage failed" copy.
+            title={derivedFeature
+              ? (flight.status === 'done'
+                ? 'Every step complete — done outside the conductor, so there is no flight record'
+                : 'Steps completed outside the conductor — continue to conduct the rest')
+              : flight.status === 'paused'
               ? (flight.pauseReason === 'user' ? 'Paused by you — Continue resumes it'
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
                 : 'A stage failed — Continue retries it')
               : undefined}
             icon={flight.status === 'running' ? <StatusDot state="running" className="shrink-0" /> : undefined}
-            label={flightStatusLabel(flight.status)}
+            label={derivedFeature && flight.status !== 'done' ? 'idle' : flightStatusLabel(flight.status)}
           />
         </h1>
         {/* The one primary: the state's obvious next action. Running has none —
@@ -306,13 +359,35 @@ function FlightDetail({
             ⏸ Pause
           </button>
         )}
-        {flight.status === 'done' && evalStage && (
-          <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
+        {/* R81 — a derived flight has no record, so every record-scoped control
+            (resume / redo / abort / delete / download) would call an id that
+            doesn't exist. It gets exactly one primary instead: conduct the rest
+            from the first step without evidence, or — with every step already
+            done — fly it again from the top. Both hand off to the launcher,
+            which mints the record. */}
+        {derivedFeature ? (
+          <button
+            type="button"
+            data-testid="derived-conduct"
+            onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
+            className="cl-button-primary px-2.5 py-1 text-xs"
+            title={derivedEntry
+              ? `Conduct this suite from ${stageLabel(derivedEntry)} — the steps already done are kept`
+              : 'Every step is done — start a fresh flight to fly it again'}
+          >
+            {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
+          </button>
+        ) : (
+          <>
+            {flight.status === 'done' && evalStage && (
+              <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
+            )}
+            {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
+              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} />
+            )}
+            <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} />
+          </>
         )}
-        {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
-          <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} />
-        )}
-        <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} />
         <button
           type="button"
           data-testid="flight-close"
@@ -339,7 +414,9 @@ function FlightDetail({
       <FlightSummaryStrip
         flight={flight}
         onSelectStage={setSelectedStage}
-        onToggleAutopilot={(next) => act(() => api.setFlightAutopilot(flight.flightId, next))}
+        // R81: no record → nothing to toggle. Autopilot is chosen in the
+        // launcher when this suite is actually conducted.
+        onToggleAutopilot={derivedFeature ? undefined : (next) => act(() => api.setFlightAutopilot(flight.flightId, next))}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -568,7 +645,7 @@ function StageDetail({
   /** R71/W1: run-control failures surface on the header's inline error line. */
   onActionError?: (msg: string) => void
   /** R75: the Repo scan panel's "Change…" → launcher handoff. */
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent) => void
+  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
   onOpenConfig?: (feature: string) => void
   configRefreshKey?: number
   docsRefreshKey?: number
@@ -747,6 +824,12 @@ function StageDetail({
             approved={stage.status === 'done'}
             refreshKey={docsRefreshKey}
             summaryStatus={companion?.status}
+            requirementCount={
+              typeof (companion?.evidence as Record<string, unknown> | undefined)?.requirementCount === 'number'
+                ? ((companion!.evidence as Record<string, unknown>).requirementCount as number)
+                : undefined
+            }
+            onOpenCoverage={drill.onOpenCoverage ? () => drill.onOpenCoverage!(flight.feature) : undefined}
           />
         )
       )}
@@ -949,7 +1032,7 @@ function ContinueMenu({
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
   /** The "Start fresh" handoff — opens the launcher with editable inputs. */
-  onStartFlight?: (feature: string, intent?: FlightLauncherIntent) => void
+  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
 }) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)

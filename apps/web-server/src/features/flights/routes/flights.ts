@@ -40,6 +40,7 @@ import { PlanFeaturesStore, startPlanFeatures, type PlanAutoLaunchOutcome } from
 import type { FlightAgentSpawner } from '../logic/stages/context'
 import { hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
 import { loadFeatures } from '../../config/logic/feature-loader'
+import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export interface FlightRouteDeps {
@@ -70,7 +71,21 @@ export interface FlightRouteDeps {
  *  would be skipped must already have its on-disk artifact — the same evidence
  *  the stage itself would have produced. Returns the FIRST missing
  *  prerequisite as a human-readable reason, or null when the jump is OK. */
-export function buildStageEntryValidator(featuresDir: string) {
+export function buildStageEntryValidator(featuresDir: string, logsDir?: string) {
+  /** R81: "has this feature produced a run?" without a flight record. A
+   *  standalone passed run is the same evidence the flight's own run stage
+   *  would have left behind, so it satisfies the evaluation-export
+   *  prerequisite. Only consulted when the record can't answer. */
+  const hasStandalonePassedRun = (feature: string): boolean => {
+    if (!logsDir) return false
+    try {
+      return listRuns(logsDir, { feature }).some(
+        (r) => r.status === 'passed' && r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify',
+      )
+    } catch {
+      return false
+    }
+  }
   return (args: {
     feature: string
     fromStage: FlightStageKey
@@ -97,8 +112,8 @@ export function buildStageEntryValidator(featuresDir: string) {
     if (after('specs-coverage') && !hasAuthoredSpecs(featureDir)) {
       return `cannot start at "${fromStage}": no specs under e2e/ (specs-coverage prerequisite) — start from specs-coverage instead`
     }
-    if (fromStage === 'evaluation-export' && !args.existing?.links?.runId) {
-      return 'cannot start at "evaluation-export": the flight record has no run yet (run prerequisite) — start from run instead'
+    if (fromStage === 'evaluation-export' && !args.existing?.links?.runId && !hasStandalonePassedRun(feature)) {
+      return 'cannot start at "evaluation-export": no passed run for this feature yet (run prerequisite) — start from run instead'
     }
     return null
   }
@@ -185,7 +200,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     store,
     adapters: deps.adapters,
     workspaceEvents: deps.workspaceEvents,
-    validateStageEntry: buildStageEntryValidator(deps.featuresDir),
+    validateStageEntry: buildStageEntryValidator(deps.featuresDir, deps.logsDir),
   }
 
   // One row per feature: the invariant is one flight record per feature, but
@@ -228,14 +243,16 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         return { error: `feature not set up: ${feature} (no flight record and no feature.config)` }
       }
 
-      // A feature that has never flown always starts from the beginning — the
-      // stage-entry menu unlocks only once a flight record exists (R41). The
-      // start route itself stays permissive for CLI power users.
-      const validate = buildStageEntryValidator(deps.featuresDir)
+      // R81: a stage is unlocked by EVIDENCE, not by the existence of a flight
+      // record. Work done outside the conductor — a standalone coverage run,
+      // repo/requirement/docs setup, MCP authoring — completes the same stage
+      // the conductor would have, so it must open the same entry point. (This
+      // replaces the R41 blanket lock, which made a fully-built feature look
+      // like it had never flown and offered only a start-from-scratch.) The
+      // validator's on-disk probes are the single gate, exactly as they are for
+      // a jump inside an existing record.
+      const validate = buildStageEntryValidator(deps.featuresDir, deps.logsDir)
       const stages: FlightStageEntryOption[] = FLIGHT_STAGE_KEYS.map((key) => {
-        if (!manifest && key !== 'similarity') {
-          return { key, allowed: false, reason: 'available after this feature\'s first flight' }
-        }
         const reason = validate({ feature, fromStage: key, env, existing: manifest })
         return reason ? { key, allowed: false, reason } : { key, allowed: true }
       })

@@ -1548,6 +1548,71 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(container.querySelector('[data-testid="empty-dropzone"]')).toBeNull()
   })
 
+  it('the distilled summary gets its own card — artifact pill, count, and a ledger drill', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((k) => ({
+        key: k,
+        status: k === 'specs-coverage' ? ('running' as const) : k === 'portify' || k === 'run' || k === 'heal' || k === 'evaluation-export' ? ('pending' as const) : ('done' as const),
+        ...(k === 'prd-summary' ? { evidence: { requirementCount: 6 } } : {}),
+      })),
+    }))
+    mocks.listFeatureDocs.mockResolvedValue({
+      feature: 'checkout',
+      docs: [
+        { relPath: 'okr.md', absPath: '/ws/features/checkout/docs/okr.md', sizeBytes: 5100, generated: false },
+        { relPath: '_prd-summary.md', absPath: '/ws/features/checkout/docs/_prd-summary.md', sizeBytes: 4200, generated: true },
+      ],
+      hasPrdSummary: true,
+      sourceDocCount: 1,
+      docsDrift: false,
+    })
+    const onOpenCoverage = vi.fn()
+    await render('fl_1', { onOpenCoverage })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
+
+    // The stage's OUTPUT is visible and openable, not just a status chip.
+    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
+    expect(distilled?.textContent).toContain('Distilled requirements · 6')
+    expect(distilled?.querySelector('[data-testid="doc-pill-_prd-summary.md"]')).toBeTruthy()
+    // The generated artifact stays OUT of the source-docs card — one card per half.
+    const sourceCard = container.querySelector('[data-testid="flight-docs-panel"] > div')
+    expect(sourceCard?.textContent).toContain('okr.md')
+    expect(sourceCard?.textContent).not.toContain('_prd-summary.md')
+    // The summary chip rides the card it describes, not the inputs card.
+    expect(distilled?.querySelector('[data-testid="docs-summary-chip"]')).toBeTruthy()
+    expect(sourceCard?.querySelector('[data-testid="docs-summary-chip"]')).toBeNull()
+    // Never dead-end: the card drills to where the requirements are browsable.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="distilled-open-ledger"]')?.click() })
+    expect(onOpenCoverage).toHaveBeenCalledWith('checkout')
+  })
+
+  it('while distilling, the output card holds the space instead of leaving a blank gap', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'prd-summary',
+      stages: FLIGHT_STAGE_KEYS.map((k) => ({
+        key: k,
+        status: k === 'prd-summary' ? ('running' as const) : k === 'scout' || k === 'scaffold' || k === 'env-capture' || k === 'similarity' || k === 'docs' ? ('done' as const) : ('pending' as const),
+      })),
+    }))
+    mocks.listFeatureDocs.mockResolvedValue({
+      feature: 'checkout',
+      docs: [{ relPath: 'okr.md', absPath: '/ws/features/checkout/docs/okr.md', sizeBytes: 5100, generated: false }],
+      hasPrdSummary: false,
+      sourceDocCount: 1,
+      docsDrift: false,
+    })
+    await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
+    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
+    expect(distilled?.textContent).toContain('Distilling the source docs')
+    // No count yet, and no drill to a ledger that has nothing in it.
+    expect(distilled?.textContent).not.toContain('·')
+    expect(container.querySelector('[data-testid="distilled-open-ledger"]')).toBeNull()
+  })
+
   it('an unmapped kind/option degrades to its raw key, never blank', async () => {
     mocks.getFlight.mockResolvedValue(parkedOn('scout', {
       kind: 'future-kind', message: 'New question.', options: ['yes-do-it'],

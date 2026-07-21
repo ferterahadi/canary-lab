@@ -111,6 +111,7 @@ function Step({
 export function FlightStartDialog({
   feature,
   intent = 'refly',
+  fromStage = null,
   resumePlanTaskId,
   onClose,
   onOpenFlight,
@@ -123,6 +124,11 @@ export function FlightStartDialog({
    *  intent/repo set is valid for. Ignored in new-flight mode, which is already
    *  intent-first. */
   intent?: FlightLauncherIntent
+  /** R81: pre-pick this entry stage — the handoff from a DERIVED flight's
+   *  "Continue from <stage>", where the stage was computed from on-disk
+   *  evidence (the first step with nothing to show for it). The server's
+   *  stage-entry validator still has the final say at submit. */
+  fromStage?: FlightStageKey | null
   /** Reopen attached to a backgrounded pre-flight (plan-features) task — a
    *  Flights-pill pre-flight row routes this. New-flight mode only; the dialog
    *  fetches the task and drops straight into the planning/proposal view. */
@@ -146,7 +152,7 @@ export function FlightStartDialog({
   // Fresh mode never asks where to re-enter — a changed intent/repo set is only
   // valid from the beginning — so it opens pre-picked there and stays put.
   const [picked, setPicked] = useState<FlightStageKey | 'continue' | null>(
-    feature && intent !== 'fresh' ? null : 'similarity',
+    feature && intent !== 'fresh' ? fromStage : 'similarity',
   )
   const [busy, setBusy] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
@@ -221,6 +227,10 @@ export function FlightStartDialog({
         // "change the intent" handoff on `continue` is exactly the bug that
         // rework fixed: it re-froze the fields the user came to edit.
         if (intent === 'fresh') return
+        // R81: a derived "Continue from <stage>" handoff already answered
+        // "where do we re-enter?" from on-disk evidence — the entry load must
+        // not clobber it back to the top of the pipeline.
+        if (fromStage) return
         setPicked(options.canContinue ? 'continue' : options.flight ? 'similarity' : null)
       })
       .catch((err: unknown) => {
@@ -228,7 +238,7 @@ export function FlightStartDialog({
         setLoadError(err instanceof Error ? err.message : String(err))
       })
     return () => { alive = false }
-  }, [resolvedFeature, newFlight, intent, entryNonce])
+  }, [resolvedFeature, newFlight, intent, fromStage, entryNonce])
 
   // Planning: poll the task until the agent settles. Attach-or-start means the
   // task may already be done on the first poll.

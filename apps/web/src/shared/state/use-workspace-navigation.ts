@@ -14,6 +14,7 @@ import {
   type NavState,
   type PortifyTarget,
 } from './nav-state'
+import type { FlightStageKey } from '../api/client'
 
 // Owns the workspace navigation: the routed state, the URL/localStorage
 // persistence, the cross-tab sync, and the selection-mirror refs the WS handler
@@ -50,7 +51,12 @@ export interface WorkspaceNavigation {
    *  it opens for — 're-fly' (the stage-entry picker, default) or 'fresh' (edit
    *  intent + repos, full restart). Setting it always rewrites the intent, so a
    *  later re-fly can't inherit a stale fresh flag. */
-  setFlightStartFor: (f: string | null, intent?: FlightLauncherIntent) => void
+  setFlightStartFor: (f: string | null, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
+  /** R81: the stage a derived flight's "Continue from X" handed off — the
+   *  launcher's default pick. Ephemeral (like `resumePlanTaskId`): it's a
+   *  prefill, not a location, and a cold load without it still opens a coherent
+   *  dialog on the re-entry picker. */
+  flightStartStage: FlightStageKey | null
   setFlightStartNew: (open: boolean) => void
   /** Open (id) / close (null) the external authoring-draft dialog. */
   setDraftFor: (id: string | null) => void
@@ -82,9 +88,11 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
 
   // One opener for both launcher intents so the fresh flag can never outlive the
   // handoff that set it (a later re-fly would otherwise inherit it).
-  const setFlightStartFor = useCallback((f: string | null, intent: FlightLauncherIntent = 'refly') => {
+  const [flightStartStage, setFlightStartStage] = useState<FlightStageKey | null>(null)
+  const setFlightStartFor = useCallback((f: string | null, intent: FlightLauncherIntent = 'refly', fromStage: FlightStageKey | null = null) => {
     setFlightStartForState(f)
     setFlightStartFresh(f !== null && intent === 'fresh')
+    setFlightStartStage(f !== null ? fromStage : null)
   }, [])
   const [draftFor, setDraftFor] = useState<string | null>(SEED.draftFor)
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
@@ -156,6 +164,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     verifyOpen,
     flightStartFor,
     flightStartFresh,
+    flightStartStage,
     flightStartNew,
     draftFor,
     resumePlanTaskId,

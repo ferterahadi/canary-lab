@@ -260,15 +260,68 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     act(() => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Flights"]')!.click()
     })
-    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="not-flown-todo-api"]')
+    // R81: evidence-derived progress IS flight progress, so the row is a
+    // flight-detail link (`derived-open-…`), not the start-from-scratch row.
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="derived-open-todo-api"]')
     expect(row).toBeTruthy()
-    // The chip stays a flight-status reporter: no flight record → "idle", the
-    // rail (not the chip) carries the progress story.
+    // Nothing is running and the pipeline isn't finished → "idle"; the rail
+    // (not the chip) carries the progress story.
     expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('idle')
     const railCell = (key: string) => row!.querySelector(`[data-testid="stage-mini-cell-${key}"]`) as HTMLElement | null
     expect(railCell('scaffold')?.style.background).toContain('52, 211, 153') // Suite setup done (green)
     expect(railCell('run')?.style.background).toContain('52, 211, 153') // latest run green
     expect(railCell('specs-coverage')?.style.background).toContain('var(--border-default)') // no artifact → pending
+  })
+
+  // R81 — the reported bug: a fully-built suite with no flight record opened the
+  // start-from-scratch dialog, asking the user to redo finished work.
+  it('a flightless feature with EVERY stage done reads "done" and opens its derived flight', () => {
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+    const onOpenFlight = vi.fn()
+    const onStartFlight = vi.fn()
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[]}
+          features={[{ name: 'go-smoke', stages }]}
+          onOpenFlight={onOpenFlight}
+          onStartFlight={onStartFlight}
+        />,
+      )
+    })
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Flights"]')!.click()
+    })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="derived-open-go-smoke"]')
+    expect(row).toBeTruthy()
+    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('done')
+    act(() => { row!.click() })
+    // Routes to the flight view under the derived token — never the launcher.
+    expect(onOpenFlight).toHaveBeenCalledWith('feature:go-smoke')
+    expect(onStartFlight).not.toHaveBeenCalled()
+  })
+
+  it('an untouched feature still opens the launcher — with nothing to show, starting IS the next action', () => {
+    const onOpenFlight = vi.fn()
+    const onStartFlight = vi.fn()
+    act(() => {
+      root.render(
+        <FlightsPill
+          flights={[]}
+          features={[{ name: 'bare', stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })) }]}
+          onOpenFlight={onOpenFlight}
+          onStartFlight={onStartFlight}
+        />,
+      )
+    })
+    act(() => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Flights"]')!.click()
+    })
+    const row = document.body.querySelector<HTMLButtonElement>('[data-testid="not-flown-bare"]')
+    expect(row).toBeTruthy()
+    act(() => { row!.click() })
+    expect(onStartFlight).toHaveBeenCalledWith('bare')
+    expect(onOpenFlight).not.toHaveBeenCalled()
   })
 
   it('idle ranks above not flown, and the chip splits on evidence', () => {
@@ -277,6 +330,9 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     expect(featureChipState(null, undefined, [{ key: 'scout', status: 'pending' }]).label).toBe('not flown')
     expect(featureChipState(null, undefined, undefined).label).toBe('not flown')
     expect(featureChipState(null, undefined, lit).rank).toBeLessThan(featureChipState(null).rank)
+    // A partial rail never reads "done" just because every square it happens to
+    // carry is lit — "done" means the whole pipeline.
+    expect(featureChipState(null, undefined, FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))).label).toBe('done')
   })
 
   it('a running flight on specs-coverage says "authoring", other stages stay "running"', () => {
