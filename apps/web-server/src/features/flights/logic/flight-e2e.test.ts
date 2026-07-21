@@ -270,7 +270,7 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
     expect(final.status).toBe('done')
     const exportStage = final.stages.find((s) => s.key === 'evaluation-export')!
     expect(exportStage.checkpointResponse).toEqual({ choice: 'raw' })
-    expect(exportStage.log).toContain('[autopilot] export-mode')
+    expect(exportStage.log).toMatch(/\[autopilot@[^\]]+\] export-mode/)
     expect(final.feature).toBe('first-flight-app') // re-pointed at the existing feature
     expect(final.links?.evaluationZip).toBeTruthy()
     // Authoring stages were skipped — no agent ran on the rerun path.

@@ -413,6 +413,7 @@ function FlightDetail({
 
       <FlightSummaryStrip
         flight={flight}
+        derived={derivedFeature != null}
         onSelectStage={setSelectedStage}
         // R81: no record → nothing to toggle. Autopilot is chosen in the
         // launcher when this suite is actually conducted.
@@ -926,7 +927,9 @@ function StageActivity({
   if (nothingYet && (!hasSource || pending)) return null
   const open = userToggled ?? !settled
 
-  const isTagged = (l: string): boolean => /^\[[\w-]+\]/.test(l)
+  // `[tag]` or `[tag@<iso>]` — the conductor stamps its own lines; agent output
+  // is mirrored untagged, which is what this split is looking for.
+  const isTagged = (l: string): boolean => /^\[[\w-]+(?:@[^\]]+)?\]/.test(l)
   let pre = lines
   let post: string[] = []
   if (hasSource) {
@@ -1418,10 +1421,14 @@ function asRecord(v: unknown): Record<string, unknown> | null {
  *  Coverage/Run/Docs/Report selects that stage in the rail. */
 function FlightSummaryStrip({
   flight,
+  derived,
   onSelectStage,
   onToggleAutopilot,
 }: {
   flight: FlightManifest
+  /** R81: rendering a pseudo-manifest — suppress facts that only a real record
+   *  can honestly answer. */
+  derived?: boolean
   onSelectStage?: (key: FlightStageKey) => void
   /** R78: autopilot is a preference the user flips whenever they want, not a
    *  start-time-only option — so it reads and toggles from the facts strip. */
@@ -1445,8 +1452,10 @@ function FlightSummaryStrip({
 
   // R79: which CLI conducts this flight's stage agents — read-only (chosen at
   // start, sticky for the record's life), shown as a plain fact so the user
-  // always knows without a control they can't change here.
-  items.push({ label: 'Agent', value: flight.opts.agent ?? 'claude' })
+  // always knows without a control they can't change here. R81: a derived
+  // flight has no conductor and no stored choice, so naming one would be a
+  // fabrication — the agent is picked in the launcher if it's ever conducted.
+  if (!derived) items.push({ label: 'Agent', value: flight.opts.agent ?? 'claude' })
 
   const specs = flight.stages.find((s) => s.key === 'specs-coverage')
   const progress = specsCoverageProgress(specs)

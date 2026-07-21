@@ -364,19 +364,28 @@ function EventRow({ event, subagents }: { event: AgentSessionEvent; subagents?: 
 /** A run of consecutive conductor lines sharing one `[TAG]` (untagged lines
  *  group under `tag: undefined`). Exact repeats inside the run collapse to one
  *  entry with a count — the conductor re-announces the same state often. */
-export type SystemGroup = { tag?: string; entries: Array<{ text: string; count: number }> }
+export type SystemGroup = {
+  tag?: string
+  /** When the run's FIRST line was written — the group heads on it, the way an
+   *  agent row heads on its event time. Absent for unstamped older logs. */
+  timestamp?: string
+  entries: Array<{ text: string; count: number }>
+}
 
 /** Fold `[TAG] text` lines into tag-runs so the tag prints once per run and
  *  identical consecutive lines show as `×N` instead of stacking. */
 export function groupSystemLines(lines: string[]): SystemGroup[] {
   const groups: SystemGroup[] = []
   for (const line of lines) {
-    const m = /^\[([\w-]+)\]\s?(.*)$/.exec(line)
+    // `[tag@<iso>] text` — the stamp is optional: lines written before the
+    // conductor stamped them (older flights) still parse, just undated.
+    const m = /^\[([\w-]+)(?:@([^\]]+))?\]\s?(.*)$/.exec(line)
     const tag = m?.[1]
-    const text = m ? m[2] : line
+    const timestamp = m?.[2]
+    const text = m ? m[3] : line
     const last = groups[groups.length - 1]
     if (!last || last.tag !== tag) {
-      groups.push({ tag, entries: [{ text, count: 1 }] })
+      groups.push({ tag, timestamp, entries: [{ text, count: 1 }] })
       continue
     }
     const lastEntry = last.entries[last.entries.length - 1]
@@ -400,13 +409,17 @@ export function SystemRow({ group }: { group: SystemGroup }) {
         </svg>
       </span>
       <div className="agentts-sysbody">
+        {/* The tag heads the run on its own line — same shape as an agent row's
+            head (label above, body below) so system and agent rows read as one
+            rail instead of two layouts. */}
+        {group.tag !== undefined && (
+          <div className="agentts-rowhead">
+            <span className="agentts-label agentts-systag">{group.tag}</span>
+            {group.timestamp && <Timestamp value={group.timestamp} />}
+          </div>
+        )}
         {group.entries.map((entry, idx) => (
           <div className="agentts-sysline" key={idx}>
-            {group.tag !== undefined && (
-              // The tag prints once per run; later lines keep the gutter so the
-              // messages stay in one column.
-              <span className="agentts-systag" aria-hidden={idx > 0 || undefined}>{idx === 0 ? group.tag : ''}</span>
-            )}
             <span className="agentts-systext">
               {entry.text}
               {entry.count > 1 && <span className="agentts-sysrepeat">×{entry.count}</span>}
@@ -730,8 +743,8 @@ const TIMELINE_CSS = `
 .agentts-sysnode{position:absolute;left:0;top:2px;width:15px;height:15px;border-radius:4px;border:1.5px solid var(--border-default);display:grid;place-items:center;background:var(--bg-base);color:var(--text-muted);z-index:1}
 .agentts-sysnode svg{width:9px;height:9px}
 .agentts-sysbody{display:flex;flex-direction:column;gap:2px;min-width:0}
-.agentts-sysline{display:flex;align-items:baseline;gap:9px;min-width:0}
-.agentts-systag{flex:none;min-width:46px;font-family:var(--font-mono);font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--text-muted)}
+.agentts-sysline{display:flex;align-items:baseline;min-width:0}
+.agentts-systag{font-family:var(--font-mono)}
 .agentts-systext{font-family:var(--font-mono);font-size:13px;line-height:1.62;color:var(--text-secondary);word-break:break-word;white-space:pre-wrap;min-width:0}
 .agentts-sysrepeat{margin-left:6px;color:var(--text-muted)}
 .agentts-node svg{width:8.5px;height:8.5px}

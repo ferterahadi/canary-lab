@@ -445,10 +445,14 @@ export function FlightStartDialog({
   const stepCount = PICKABLE.filter((k) => k !== 'similarity').length
 
   const stageMenu = (
-    <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Start from">
+    <div
+      className="flex flex-col gap-1.5"
+      {...(freshMode ? { 'aria-label': 'The full flight' } : { role: 'radiogroup', 'aria-label': 'Start from' })}
+    >
       {/* Continue sits above the fold — the common resume path, never buried in
-          the collapsible journey list. */}
-      {!newFlight && entry?.canContinue && (
+          the collapsible journey list. Fresh mode has no resume: changing the
+          inputs is the restart. */}
+      {!newFlight && !freshMode && entry?.canContinue && (
         <div className="overflow-hidden rounded-md border" style={{ borderColor: 'var(--border-default)' }}>
           <StageRow
             testId="flight-start-continue"
@@ -483,9 +487,9 @@ export function FlightStartDialog({
           </span>
           <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>The full flight</span>
           <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{stepCount} steps, fully automated</span>
-          {newFlight && (
+          {(newFlight || freshMode) && (
             <span className="ml-auto text-[10.5px]" style={{ color: 'var(--text-secondary)' }}>
-              step entry unlocks after the first flight
+              {freshMode ? 'every step re-runs' : 'step entry unlocks after the first flight'}
             </span>
           )}
         </button>
@@ -495,13 +499,15 @@ export function FlightStartDialog({
               // New flights always start from the beginning: the whole menu
               // renders visible-but-locked so the re-entry affordance is
               // learnable (R41).
-              const verdict = newFlight ? undefined : byKey.get(key)
-              const allowed = newFlight ? key === 'similarity' : (verdict?.allowed ?? false)
-              const status = key === 'similarity' ? undefined : lastStatus.get(key)
+              const verdict = newFlight || freshMode ? undefined : byKey.get(key)
+              const allowed = newFlight || freshMode ? key === 'similarity' : (verdict?.allowed ?? false)
+              // Fresh mode wipes the last attempt, so its stage glyphs would be
+              // lying about what survives — the bare pipeline number instead.
+              const status = key === 'similarity' || freshMode ? undefined : lastStatus.get(key)
               // Every row explains what its stage does; a re-fly's BLOCKED rows
               // instead surface the server's specific prerequisite reason. The
               // uniform first-flight lock is stated once, on the section header.
-              const sub = !newFlight && !allowed
+              const sub = !newFlight && !freshMode && !allowed
                 ? verdict?.reason
                 // The full-restart row says what it COSTS once there's a record
                 // to discard; on a first flight it's just the whole journey.
@@ -514,6 +520,7 @@ export function FlightStartDialog({
                   testId={`flight-start-stage-${key}`}
                   selected={picked === key}
                   disabled={!allowed}
+                  readOnly={freshMode}
                   onPick={() => setPicked(key)}
                   icon={status ? STAGE_ICON[status] : '·'}
                   iconTone={stageStatusTone(status)}
@@ -573,9 +580,9 @@ export function FlightStartDialog({
     <Modal
       open
       onClose={onClose}
-      // Only the re-fly form swings height with the step-list disclosure; the
-      // fresh view has no disclosure, so it shrink-wraps its two fields.
-      height={formView && !freshMode ? 'min(608px, calc(100vh - 2rem))' : undefined}
+      // Both form flavours carry the step-list disclosure, so both pin their
+      // height and scroll the body instead of resizing the whole dialog.
+      height={formView ? 'min(608px, calc(100vh - 2rem))' : undefined}
       footer={formView ? formFooter : undefined}
       icon={
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -700,7 +707,7 @@ export function FlightStartDialog({
               {/* Repos show whenever they can be sent: a record-less feature,
                   or a full restart (R75) — hidden only while frozen. */}
               {inputsRequired && (
-                <Step n={2} title="Repos" last={freshMode}>
+                <Step n={2} title="Repos">
                   <RepoMultiPicker
                     selected={repoPaths}
                     onChange={setRepoPaths}
@@ -708,11 +715,13 @@ export function FlightStartDialog({
                 </Step>
               )}
 
-              {!freshMode && (
-                <Step n={inputsRequired ? 3 : 2} last>
-                  {stageMenu}
-                </Step>
-              )}
+              {/* R76 follow-up: fresh mode shows the same journey, read-only —
+                  it can't offer re-entry (a changed intent invalidates every
+                  partial result), but hiding the list left the user guessing
+                  what "re-flies from the beginning" actually runs. */}
+              <Step n={inputsRequired ? 3 : 2} last>
+                {stageMenu}
+              </Step>
             </div>
 
             {/* R71/W4: autopilot — on by default; the flight asks only where a
@@ -1021,6 +1030,7 @@ function StageRow({
   testId,
   selected,
   disabled,
+  readOnly,
   onPick,
   icon,
   iconTone,
@@ -1032,6 +1042,9 @@ function StageRow({
   testId: string
   selected: boolean
   disabled?: boolean
+  /** Display-only row (fresh mode's journey preview): same anatomy, but not a
+   *  control — no radio semantics, no hover, no blocked cursor. */
+  readOnly?: boolean
   onPick: () => void
   icon: string
   iconTone: string
@@ -1051,6 +1064,46 @@ function StageRow({
   // is carried by the row's accent inset bar alone — the badge is never
   // recoloured for it, so the accent never stacks.
   const badgeTone = icon !== '·' ? iconTone : 'var(--text-secondary)'
+  const body = (
+    <>
+      <span
+        aria-hidden="true"
+        className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
+        style={{
+          borderColor: `color-mix(in srgb, ${badgeTone} 70%, var(--border-default))`,
+          color: badgeTone,
+          background: 'transparent',
+        }}
+      >
+        {badge}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-[12.5px] font-medium" style={{ color: disabled && !readOnly ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
+          {label}
+        </span>
+        {sub && (
+          <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
+            {sub}
+          </span>
+        )}
+      </span>
+    </>
+  )
+  if (readOnly) {
+    return (
+      <div
+        data-testid={testId}
+        className={`flex items-start gap-3 px-3.5 py-2.5 text-left ${divider ? 'border-t' : ''}`}
+        style={{
+          borderColor: 'var(--border-default)',
+          background: selected ? 'var(--bg-selected)' : 'transparent',
+          boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
+        }}
+      >
+        {body}
+      </div>
+    )
+  }
   return (
     <button
       type="button"
@@ -1073,27 +1126,7 @@ function StageRow({
         boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
       }}
     >
-      <span
-        aria-hidden="true"
-        className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
-        style={{
-          borderColor: `color-mix(in srgb, ${badgeTone} 70%, var(--border-default))`,
-          color: badgeTone,
-          background: 'transparent',
-        }}
-      >
-        {badge}
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[12.5px] font-medium" style={{ color: disabled ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
-          {label}
-        </span>
-        {sub && (
-          <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
-            {sub}
-          </span>
-        )}
-      </span>
+      {body}
     </button>
   )
 }

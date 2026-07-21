@@ -26,6 +26,19 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 // them) so the machine's semantics — advance, pause/resume, jump, crash
 // recovery, single-flight — are testable in isolation.
 
+/** Stamps a conductor system line with the time it was written, so the UI can
+ *  show *when* each `[tag]` step happened instead of an undated wall of text.
+ *  The stamp rides inside the tag (`[docs@<iso>] …`) rather than as a separate
+ *  column, so the log stays one plain-text stream and an unstamped line from a
+ *  pre-stamping flight still parses — the reader just gets no time for it.
+ *
+ *  Only a chunk that OPENS with a tag is stamped: agent output is mirrored into
+ *  the same log untagged and in partial chunks, and stamping mid-stream would
+ *  splice timestamps into the agent's prose. */
+export function stampSystemLine(chunk: string, iso: string): string {
+  return chunk.replace(/^\[([\w-]+)\]/, `[$1@${iso}]`)
+}
+
 export class FlightConflictError extends Error {
   readonly statusCode = 409
   constructor(public readonly repoPaths: string[], public readonly existingFlightId: string) {
@@ -878,7 +891,7 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         signal: controller.signal,
         appendLog: (chunk) => {
           const cur = read().stages.find((s) => s.key === stage.key)
-          patchStage(stage.key, { log: (cur?.log ?? '') + chunk })
+          patchStage(stage.key, { log: (cur?.log ?? '') + stampSystemLine(chunk, now()) })
         },
         setProgress: (progress) => {
           patchStage(stage.key, { progress })

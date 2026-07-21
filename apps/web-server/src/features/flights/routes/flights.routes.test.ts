@@ -580,7 +580,10 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'some/repo')])
   })
 
-  it('locks every stage entry (except the full flight) for a feature that never flew — R41', async () => {
+  // R81 (replaces the R41 blanket lock): a stage is gated by EVIDENCE, not by
+  // the existence of a flight record. Work done outside the conductor completes
+  // the same stage the conductor would have, so it opens the same entry point.
+  it('gates a never-flown feature on evidence, not on having a record — R81', async () => {
     writeFeatureConfig('checkout')
     app = await buildApp(allDone())
     const { status, body } = await entryFor('checkout')
@@ -590,14 +593,39 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.canContinue).toBe(false)
     expect(body.prefill.repoPaths).toEqual([repoDir])
     expect(body.prefill.description).toBe('')
-    // No flight record → the stage-entry menu is fully locked: a first flight
-    // always starts from the beginning, even when on-disk evidence would
-    // otherwise satisfy a jump. (The start route stays permissive for CLI.)
-    expect(stageOf(body, 'similarity').allowed).toBe(true)
-    for (const key of ['scout', 'env-capture', 'docs', 'specs-coverage', 'run', 'evaluation-export'] as const) {
-      expect(stageOf(body, key)).toMatchObject({ allowed: false })
-      expect(stageOf(body, key).reason).toMatch(/first flight/)
+    // Config on disk → everything up to and including env-capture is enterable
+    // with no flight record at all.
+    for (const key of ['similarity', 'scout', 'scaffold', 'env-capture'] as const) {
+      expect(stageOf(body, key)).toMatchObject({ allowed: true })
     }
+    // Past that the artifacts don't exist yet, so the validator — not a record
+    // check — is what blocks, and it names the missing prerequisite.
+    for (const key of ['docs', 'specs-coverage', 'run'] as const) {
+      expect(stageOf(body, key)).toMatchObject({ allowed: false })
+      expect(stageOf(body, key).reason).toMatch(/env-capture prerequisite/)
+      expect(stageOf(body, key).reason).not.toMatch(/first flight/)
+    }
+  })
+
+  it('unlocks a stage for a never-flown feature once its evidence is on disk — R81', async () => {
+    const featureDir = writeFeatureConfig('checkout')
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api.env'), 'PORT=0\n')
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), '{}')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'e2e', 'checkout.spec.ts'), '// spec\n')
+
+    app = await buildApp(allDone())
+    const { body } = await entryFor('checkout')
+    // Never flown — the suite was built by standalone/MCP work — yet the whole
+    // pipeline up to `run` is enterable, because the artifacts are all there.
+    expect(body.flight).toBeNull()
+    for (const key of ['docs', 'specs-coverage', 'run'] as const) {
+      expect(stageOf(body, key)).toMatchObject({ allowed: true })
+    }
+    // Export still needs a run — no record and no passed run on disk.
+    expect(stageOf(body, 'evaluation-export')).toMatchObject({ allowed: false })
   })
 
   it('unlocks stages as on-disk evidence appears, and prefills from the latest manifest', async () => {
@@ -622,7 +650,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(stageOf(body, 'run').allowed).toBe(true)
     // No runId recorded on the flight links (stub adapters) → export blocked.
     expect(stageOf(body, 'evaluation-export').allowed).toBe(false)
-    expect(stageOf(body, 'evaluation-export').reason).toMatch(/no run yet/)
+    expect(stageOf(body, 'evaluation-export').reason).toMatch(/no passed run/)
   })
 
   it('flags an active flight (attach, don’t start) and continue for a paused one', async () => {

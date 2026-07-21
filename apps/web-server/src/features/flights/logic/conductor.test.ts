@@ -16,6 +16,7 @@ import {
   enqueueFlight,
   drainQueuedFlights,
   reopenStages,
+  stampSystemLine,
   FlightConflictError,
   FlightExistsError,
   FlightFrozenError,
@@ -60,6 +61,27 @@ function deps(adapters: StageAdapters): FlightConductorDeps {
 function args(repo = '/repo/a') {
   return { feature: 'checkout', repoPaths: [repo], description: 'checkout flow', opts: OPTS }
 }
+
+describe('stampSystemLine', () => {
+  const iso = '2026-07-22T20:35:24.000Z'
+
+  it('stamps a tagged conductor line inside its tag', () => {
+    expect(stampSystemLine('[docs] collecting repo docs…\n', iso))
+      .toBe(`[docs@${iso}] collecting repo docs…\n`)
+  })
+
+  it('leaves mirrored agent output alone — it is untagged and arrives in partial chunks', () => {
+    expect(stampSystemLine('The agent found nothing relevant', iso))
+      .toBe('The agent found nothing relevant')
+    // A bracket mid-chunk is prose, not a tag opening the line.
+    expect(stampSystemLine('see [docs] above', iso)).toBe('see [docs] above')
+  })
+
+  it('does not double-stamp a line that already carries a time', () => {
+    const once = stampSystemLine('[docs] a\n', iso)
+    expect(stampSystemLine(once, '2026-07-22T21:00:00.000Z')).toBe(once)
+  })
+})
 
 describe('startFlight', () => {
   it('advances every stage in order and settles done', async () => {
@@ -1430,7 +1452,11 @@ describe('autopilot (R71/W4)', () => {
     expect(responses).toEqual([{ choice }])
     const docs = final.stages.find((s) => s.key === 'docs')!
     expect(docs.checkpointResponse).toEqual({ choice })
-    expect(docs.log).toContain(`[autopilot] ${kind}: answered "${choice}"`)
+    // The conductor stamps its own lines (`[autopilot@<iso>]`), so match the
+    // tag and the message around the stamp rather than the raw literal.
+    expect(docs.log).toMatch(
+      new RegExp(`\\[autopilot@[^\\]]+\\] ${kind}: answered "${choice}"`),
+    )
   })
 
   it('similarity-choice and missing-env always park — no safe default exists', async () => {
@@ -1571,7 +1597,7 @@ describe('autopilot (R71/W4)', () => {
     expect(final.status).toBe('waiting-for-approval')
     expect(responses).toEqual([{ choice: 'approve' }])
     const log = final.stages.find((s) => s.key === 'docs')!.log ?? ''
-    expect(log.match(/\[autopilot\]/g)?.length).toBe(1)
+    expect(log.match(/\[autopilot@/g)?.length).toBe(1)
     expect(final.stages.find((s) => s.key === 'docs')!.checkpoint?.message).toContain('parse error')
   })
 })

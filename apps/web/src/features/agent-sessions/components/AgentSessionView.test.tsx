@@ -81,6 +81,22 @@ describe('SystemRow (flight conductor line on the agent rail)', () => {
     expect(container.querySelector('.agentts-sysnode')).not.toBeNull()
   })
 
+  it('heads a stamped run with its time, and keeps the message clean', () => {
+    render('[docs@2026-07-22T20:35:24.000Z] collecting repo docs…')
+    expect(container.querySelector('.agentts-systag')?.textContent).toBe('docs')
+    // The rendered clock is local-time, so assert the source instant instead.
+    expect(container.querySelector('.agentts-rowhead span[title]')?.getAttribute('title'))
+      .toBe('2026-07-22T20:35:24.000Z')
+    expect(texts()).toEqual(['collecting repo docs…'])
+  })
+
+  it('parses an unstamped line from an older flight, just without a time', () => {
+    render('[docs] collecting repo docs…')
+    expect(container.querySelector('.agentts-systag')?.textContent).toBe('docs')
+    expect(container.querySelector('.agentts-rowhead span[title]')).toBeNull()
+    expect(texts()).toEqual(['collecting repo docs…'])
+  })
+
   it('renders an untagged line verbatim with no tag label', () => {
     render('plain conductor note')
     expect(container.querySelector('.agentts-systag')).toBeNull()
@@ -89,12 +105,13 @@ describe('SystemRow (flight conductor line on the agent rail)', () => {
 
   it('prints the tag once for a run of same-tag lines', () => {
     render('[docs] scanning repos', '[docs] collecting repo docs…')
-    // One row for the run, and only the first line carries the tag text.
+    // One row for the run, and the tag heads it once — on its own line, above
+    // the messages (same head/body shape as an agent row).
     expect(container.querySelectorAll('.agentts-sysrow')).toHaveLength(1)
     expect(Array.from(container.querySelectorAll('.agentts-systag')).map((n) => n.textContent)).toEqual([
       'docs',
-      '',
     ])
+    expect(container.querySelector('.agentts-sysbody')?.firstElementChild?.className).toContain('agentts-rowhead')
     expect(texts()).toEqual(['scanning repos', 'collecting repo docs…'])
   })
 

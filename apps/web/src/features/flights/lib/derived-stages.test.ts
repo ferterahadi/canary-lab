@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest'
-import { deriveFeatureStages, latestTerminalRunByFeature } from './derived-stages'
+import {
+  buildDerivedManifest,
+  deriveFeatureStages,
+  derivedEntryStage,
+  derivedFlightFeature,
+  derivedFlightToken,
+  latestTerminalRunByFeature,
+} from './derived-stages'
+import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
 import type { RunIndexEntry } from '../../../shared/api/types'
 
 function run(over: Partial<RunIndexEntry>): RunIndexEntry {
@@ -72,5 +80,37 @@ describe('latestTerminalRunByFeature', () => {
     ])
     expect(map.get('f')?.runId).toBe('new-fail')
     expect(map.get('g')?.runId).toBe('other')
+  })
+})
+
+// R81 — the derived-flight id space and the pseudo-manifest FlightPage renders.
+describe('derived flight tokens (R81)', () => {
+  it('round-trips a feature name and never claims a real flight id', () => {
+    expect(derivedFlightToken('go-smoke')).toBe('feature:go-smoke')
+    expect(derivedFlightFeature('feature:go-smoke')).toBe('go-smoke')
+    // A real flightId is `fl_<hex>` — the two id spaces cannot collide.
+    expect(derivedFlightFeature('fl_d0a98e795add')).toBeNull()
+    expect(derivedFlightFeature('feature:')).toBeNull()
+  })
+
+  it('builds a manifest that reports done only when the whole pipeline is done', () => {
+    const done = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+    expect(buildDerivedManifest('go-smoke', done).status).toBe('done')
+    const partial = done.map((s, i) => (i === done.length - 1 ? { ...s, status: 'pending' as const } : s))
+    expect(buildDerivedManifest('go-smoke', partial).status).toBe('paused')
+    // The pseudo-manifest carries the feature and its token id, nothing invented.
+    const m = buildDerivedManifest('go-smoke', done, { repoPaths: ['/repo/a'], env: 'staging' })
+    expect(m).toMatchObject({ flightId: 'feature:go-smoke', feature: 'go-smoke', description: '', repoPaths: ['/repo/a'] })
+    expect(m.opts.env).toBe('staging')
+  })
+
+  it('entry stage is the first step with nothing to show for it', () => {
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: (['similarity', 'scout', 'scaffold'].includes(key) ? 'done' : 'pending') as 'done' | 'pending',
+    }))
+    expect(derivedEntryStage(stages)).toBe('env-capture')
+    // Nothing open → nothing to continue; the offer becomes a fresh flight.
+    expect(derivedEntryStage(FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })))).toBeNull()
   })
 })

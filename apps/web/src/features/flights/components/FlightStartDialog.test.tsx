@@ -264,14 +264,31 @@ describe('FlightStartDialog — fresh intent (R76)', () => {
     prefill: { repoPaths: ['/repo'], description: 'checkout flow', env: 'local', coverageTarget: 100 },
   })
 
-  it('drops the stage menu entirely — the only entry a changed input set is valid for is the full restart', async () => {
+  it('shows the full flight as a READ-ONLY preview — no resume row, no pickable step', async () => {
     mocks.getFlightEntryOptions.mockResolvedValue(paused())
     await render({ intent: 'fresh' })
 
+    // No re-entry choice: a changed input set is only valid from the beginning.
     expect(byTestId('flight-start-continue')).toBeNull()
-    expect(byTestId('flight-steps-toggle')).toBeNull()
-    expect(byTestId('flight-start-stage-similarity')).toBeNull()
-    expect(byTestId('flight-start-stage-scout')).toBeNull()
+    // …but the journey it WILL run is still spelled out.
+    expect(byTestId('flight-steps-toggle')).not.toBeNull()
+    const first = byTestId('flight-start-stage-similarity')!
+    const later = byTestId('flight-start-stage-scout')!
+    expect(first.tagName).toBe('DIV')
+    expect(later.tagName).toBe('DIV')
+    expect(first.getAttribute('role')).toBeNull()
+    // The restart is what happens, so the lead row carries the selected mark.
+    expect(first.getAttribute('style')).toContain('var(--accent)')
+    expect(later.getAttribute('style')).not.toContain('var(--accent)')
+  })
+
+  it('shows bare step numbers, never the wiped flight\'s status glyphs', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(paused())
+    await render({ intent: 'fresh' })
+
+    // `scout` was done last flight; fresh wipes it, so claiming ✓ would lie.
+    expect(byTestId('flight-start-stage-scout')!.textContent).toContain('2')
+    expect(byTestId('flight-start-stage-scout')!.textContent).not.toContain('✓')
   })
 
   it('lands with the intent EDITABLE, never frozen — even though the flight can continue', async () => {

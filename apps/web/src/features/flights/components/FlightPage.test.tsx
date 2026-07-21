@@ -1851,3 +1851,85 @@ describe('detail redesign (R53–R68)', () => {
     expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('1m 10s')
   })
 })
+
+// R81 — a feature whose stages were completed OUTSIDE the conductor has flown.
+// FlightPage renders that progress from a client-only pseudo-manifest under a
+// `feature:<name>` token, so there is no record to GET and no record-scoped
+// control (resume / redo / abort / delete / download) may appear.
+describe('derived flights (R81)', () => {
+  const allDone = () => FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+  const upToSpecs = () => FLIGHT_STAGE_KEYS.map((key) => ({
+    key,
+    status: (['similarity', 'scout', 'scaffold', 'env-capture', 'docs', 'prd-summary'].includes(key) ? 'done' : 'pending') as 'done' | 'pending',
+  }))
+
+  it('renders a derived token without fetching a flight record', async () => {
+    await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]) })
+    expect(mocks.getFlight).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('go-smoke')
+    // Every step done → the same word a recorded flight gets. It flew; it just
+    // wasn't conducted.
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('done')
+  })
+
+  it('offers exactly one primary and no record-scoped controls', async () => {
+    await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]) })
+    expect(container.querySelector('[data-testid="derived-conduct"]')).toBeTruthy()
+    for (const testId of ['flight-pause', 'flight-primary-download', 'flight-continue', 'flight-menu']) {
+      expect(container.querySelector(`[data-testid="${testId}"]`)).toBeNull()
+    }
+  })
+
+  it('continues from the first stage with no evidence, handing that stage to the launcher', async () => {
+    const onStartFlight = vi.fn()
+    await render('feature:half-built', {
+      derivedStages: new Map([['half-built', upToSpecs()]]),
+      onStartFlight,
+    })
+    const primary = container.querySelector<HTMLButtonElement>('[data-testid="derived-conduct"]')!
+    expect(primary.textContent).toContain('Continue from')
+    act(() => { primary.click() })
+    // specs-coverage is the first stage without an artifact — re-fly intent, so
+    // the finished steps are kept rather than redone.
+    expect(onStartFlight).toHaveBeenCalledWith('half-built', 'refly', 'specs-coverage')
+  })
+
+  it('offers a fresh flight — not a continue — when every stage is already done', async () => {
+    const onStartFlight = vi.fn()
+    await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]), onStartFlight })
+    const primary = container.querySelector<HTMLButtonElement>('[data-testid="derived-conduct"]')!
+    expect(primary.textContent).toContain('Fly again')
+    act(() => { primary.click() })
+    expect(onStartFlight).toHaveBeenCalledWith('go-smoke', 'fresh', null)
+  })
+
+  it('hands over to the real record the moment one exists for the feature', async () => {
+    const onSelectFlight = vi.fn()
+    mocks.getFlightEntryOptions.mockResolvedValue({
+      feature: 'go-smoke',
+      flight: { flightId: 'fl_real', status: 'running', stages: [] },
+      active: true,
+      canContinue: false,
+      prefill: { repoPaths: ['/repo/shop'], description: '', env: 'local', coverageTarget: 100 },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, allowed: true })),
+    })
+    await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]), onSelectFlight })
+    // The token can never point at a stale derived view.
+    expect(onSelectFlight).toHaveBeenCalledWith('fl_real')
+  })
+})
+
+// A pseudo-manifest must not answer questions only a real record can answer.
+describe('derived flights state no facts they do not have (R81)', () => {
+  it('names no conducting agent — nothing conducted it', async () => {
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))]]),
+    })
+    const strip = container.querySelector('[data-testid="flight-summary-strip"]')
+    expect(strip?.textContent ?? '').not.toContain('Agent')
+    // A real record still states it.
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="flight-summary-strip"]')?.textContent).toContain('Agent')
+  })
+})
