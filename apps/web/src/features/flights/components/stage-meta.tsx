@@ -1,4 +1,4 @@
-import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '../../../shared/api/client'
+import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, PrdSourceCheckpointData, SpecsCoverageProgress } from '../../../shared/api/client'
 import { StatusDot } from '../../config/components/atoms'
 import { Chip } from '../../../shared/ui/StatusChip'
 
@@ -13,7 +13,7 @@ import { Chip } from '../../../shared/ui/StatusChip'
  *  portify describe their verified function (create the feature in the
  *  workspace / make services port-injectable for concurrent runs). */
 export const STAGE_LABEL: Record<FlightStageKey, string> = {
-  'similarity': 'Existing feature found',
+  'similarity': 'Existing suite found',
   'scout': 'Repo scan',
   'scaffold': 'Suite setup',
   'env-capture': 'Environment snapshot',
@@ -104,7 +104,7 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
 // raw key, so new server checkpoints degrade readable, never blank.
 
 const CHECKPOINT_TITLE: Record<string, string> = {
-  'similarity-choice': 'Existing feature found — what should this flight do?',
+  'similarity-choice': 'Existing suite found — what should this flight do?',
   'config-approval': 'Approve the drafted config?',
   'missing-env': 'Environment values needed',
   'prd-source': 'Where should requirements come from?',
@@ -118,7 +118,7 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   'similarity-choice': {
     'rerun': 'Run existing tests',
     'enhance': 'Update it, then run',
-    'new': 'Start a fresh feature',
+    'new': 'Start a fresh suite',
   },
   'config-approval': {
     'approve': 'Approve config',
@@ -195,6 +195,11 @@ export interface StageRailRow {
   key: FlightStageKey
   label: string
   status: FlightStageStatus
+  /** Short qualifier shown beside the label — currently "empty" when a stage
+   *  is parked because its agent came back with nothing. `waiting-for-approval`
+   *  alone can't distinguish "your turn to choose" from "your turn because the
+   *  agent found nothing", and those want different urgency from the rail. */
+  note?: string
 }
 
 /** Pair-merged rail rows: row key → the companion stage folded into it. The
@@ -204,6 +209,17 @@ export const STAGE_COMPANION: Partial<Record<FlightStageKey, FlightStageKey>> = 
   'run': 'heal',
   'scaffold': 'env-capture',
   'docs': 'prd-summary',
+}
+
+/** The rail row `key` renders in — a folded companion maps back to its
+ *  primary, every other stage is its own row. Anything that names a stage to
+ *  the user (the resume target, a jump label) must go through this: naming the
+ *  raw stage key would surface `prd-summary`, a row the rail never shows. */
+export function stageRowKey(key: FlightStageKey): FlightStageKey {
+  const primary = (Object.keys(STAGE_COMPANION) as FlightStageKey[]).find(
+    (k) => STAGE_COMPANION[k] === key,
+  )
+  return primary ?? key
 }
 const FOLDED_KEYS = new Set<string>(Object.values(STAGE_COMPANION))
 
@@ -223,11 +239,26 @@ function mergedPairStatus(
   if (p === 'running' || c === 'running') return 'running'
   if (p === 'waiting-for-approval' || c === 'waiting-for-approval') return 'waiting-for-approval'
   if (p === 'failed' || c === 'failed') return 'failed'
-  return p
+  // R78: a merged row is done only when BOTH halves have settled. Reporting the
+  // primary alone marked Requirements ✓ done while its summary distiller had
+  // not run at all (docs approved, flight paused before prd-summary) — the row
+  // claimed a step was finished that the conductor will still re-enter. The
+  // unsettled half wins, so the row reads exactly as far as it actually got.
+  const settled = (s: FlightStageStatus) => s === 'done' || s === 'skipped'
+  return settled(p) && !settled(c) ? c : p
+}
+
+/** "empty" when this stage is parked on a collector attempt that found
+ *  nothing. Reads the same `lastAttempt` the fork panel uses, so the rail and
+ *  the panel can never disagree. */
+function stageRailNote(stage: { key: string; checkpoint?: { data?: unknown } }): string | undefined {
+  if (stage.key !== 'docs') return undefined
+  const data = stage.checkpoint?.data as PrdSourceCheckpointData | undefined
+  return data?.lastAttempt ? 'empty' : undefined
 }
 
 export function stageRailRows(
-  stages: Array<{ key: string; status: FlightStageStatus }>,
+  stages: Array<{ key: string; status: FlightStageStatus; checkpoint?: { data?: unknown } }>,
 ): StageRailRow[] {
   const rows: StageRailRow[] = []
   for (const s of stages) {
@@ -241,10 +272,17 @@ export function stageRailRows(
     const companionKey = STAGE_COMPANION[key]
     if (companionKey) {
       const companion = stages.find((x) => x.key === companionKey)
-      rows.push({ key, label: MERGED_LABEL[key] ?? stageLabel(key), status: mergedPairStatus(s, companion) })
+      // `docs` reaches the rail through here, not the plain branch below — it
+      // is the primary of the docs+prd-summary pair ("Requirements").
+      rows.push({
+        key,
+        label: MERGED_LABEL[key] ?? stageLabel(key),
+        status: mergedPairStatus(s, companion),
+        note: stageRailNote(s),
+      })
       continue
     }
-    rows.push({ key, label: stageLabel(key), status: s.status })
+    rows.push({ key, label: stageLabel(key), status: s.status, note: stageRailNote(s) })
   }
   return rows
 }
@@ -459,6 +497,16 @@ export function FactsGrid({ facts }: { facts: StageFact[] }) {
   )
 }
 
+/** `skipReason` is a mixed field: the conductor writes prose for evidence-based
+ *  jumps ("rerun of existing feature X") but a bare machine token for the
+ *  stage-entry pre-skip. Map the tokens; wrap prose so every skipped stage
+ *  reads as a sentence instead of leaking an enum into the UI. */
+function skippedLine(reason: string | undefined): string {
+  if (!reason) return 'Skipped.'
+  if (reason === 'stage-entry') return 'Skipped — this flight started at a later step.'
+  return `Skipped — ${reason}.`
+}
+
 /** "Where are we" — one plain-language line per stage per status (R16 Q1).
  *  Folds the load-bearing evidence facts (scan count, coverage %, heal cycles)
  *  into the sentence; the raw evidence stays in the facts and the log. Never
@@ -477,9 +525,29 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
   }
   const companionDone = companion?.status === 'done'
 
-  if (status === 'pending') return 'Waiting for earlier stages.'
+  // A pending stage that already has a startedAt was INTERRUPTED mid-run
+  // (pause / restart-reconcile flips running back to pending but keeps the
+  // timestamp) — "waiting for earlier stages" would contradict the activity
+  // shown right below it.
+  if (status === 'pending') {
+    if (stage.startedAt) return 'Interrupted mid-step — Continue resumes it from here.'
+    // "Waiting for earlier stages" only makes sense when an earlier stage is
+    // still ahead of this one. For the first stage to run (nothing earlier,
+    // or every earlier stage already done/skipped) there is nothing to wait
+    // on — a flight parked here was stopped before this step began.
+    const idx = flight.stages.findIndex((s) => s.key === key)
+    const waitingOnEarlier = flight.stages
+      .slice(0, idx < 0 ? 0 : idx)
+      .some((s) => s.status !== 'done' && s.status !== 'skipped')
+    if (!waitingOnEarlier) {
+      return flight.status === 'paused'
+        ? 'Paused before it started — Continue begins this step.'
+        : 'Not started yet.'
+    }
+    return 'Waiting for earlier stages.'
+  }
   if (status === 'waiting-for-approval') return stage.checkpoint?.message ?? 'Paused — your decision is needed below.'
-  if (status === 'skipped') return stage.skipReason ?? 'Skipped.'
+  if (status === 'skipped') return skippedLine(stage.skipReason)
   if (status === 'failed') return 'Failed — details below.'
 
   // Pair-settled combined lines (R32/R33): one sentence for the whole step.
@@ -500,14 +568,14 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
   const running = status === 'running'
   switch (key) {
     case 'similarity': {
-      if (running) return 'Checking existing features for a duplicate…'
+      if (running) return 'Checking existing suites for a duplicate…'
       const match = ev.match as Record<string, unknown> | null | undefined
       const scanned = num(ev, 'scanned')
       if (match && typeof match.feature === 'string') {
         const choice = str(ev, 'choice')
-        return `Matched existing feature "${match.feature}"${choice ? ` — continuing as ${choice}` : ''}.`
+        return `Matched existing suite "${match.feature}"${choice ? ` — continuing as ${choice}` : ''}.`
       }
-      return `No duplicate found${scanned != null ? ` (${scanned} feature${scanned === 1 ? '' : 's'} scanned)` : ''} — proceeding fresh.`
+      return `No duplicate found${scanned != null ? ` (${scanned} suite${scanned === 1 ? '' : 's'} scanned)` : ''} — proceeding fresh.`
     }
     case 'scout': {
       const repos = flight.repoPaths.length

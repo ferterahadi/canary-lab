@@ -15,6 +15,13 @@ export type PortifyTarget =
   | { kind: 'new'; feature: string }
   | { kind: 'revisit'; workflowId: string }
 
+/** R76: which job the flight launcher is open for. 're-fly' asks "where does the
+ *  pipeline restart?" (the stage-entry picker); 'fresh' asks "what should this
+ *  flight test?" — editable intent + repos, always a full restart. They're
+ *  separate intents because a fresh input set INVALIDATES every mid-pipeline
+ *  entry point, so offering both at once offers choices that cancel each other. */
+export type FlightLauncherIntent = 'refly' | 'fresh'
+
 export interface NavState {
   view: WorkspaceView
   feature: string | null
@@ -26,6 +33,12 @@ export interface NavState {
   verifyOpen: boolean
   /** The flight stage-entry launcher (routed ?dialog=flight-start), by feature. */
   flightStartFor: string | null
+  /** R76: the launcher opened in START-FRESH intent (routed ?dialog=flight-fresh)
+   *  — same `flightStartFor` feature, but the dialog drops the stage menu and
+   *  shows only the editable intent + repos. Set by the two "change what this
+   *  flight tests" handoffs (the Repo-scan panel's Change…, the re-run dialog's
+   *  Start fresh row); ignored unless `flightStartFor` is set. */
+  flightStartFresh: boolean
   /** The new-flight launcher — intent + repo picker (routed ?dialog=flight-new). */
   flightStartNew: boolean
   /** The external authoring draft whose dialog is open (routed ?dialog=draft),
@@ -46,7 +59,10 @@ export function initialNavState(persisted: PersistedView): NavState {
     flight: persisted.flight,
     configFor: persisted.dialog === 'config' ? persisted.feature : null,
     verifyOpen: persisted.dialog === 'verification',
-    flightStartFor: persisted.dialog === 'flight-start' ? persisted.feature : null,
+    flightStartFor: persisted.dialog === 'flight-start' || persisted.dialog === 'flight-fresh'
+      ? persisted.feature
+      : null,
+    flightStartFresh: persisted.dialog === 'flight-fresh',
     flightStartNew: persisted.dialog === 'flight-new',
     draftFor: persisted.dialog === 'draft' ? persisted.draft : null,
     resumePlanTaskId: null,
@@ -60,7 +76,7 @@ export function initialNavState(persisted: PersistedView): NavState {
 export function routedDialog(state: NavState): RouteDialog | null {
   if (state.configFor) return 'config'
   if (state.draftFor) return 'draft'
-  if (state.flightStartFor) return 'flight-start'
+  if (state.flightStartFor) return state.flightStartFresh ? 'flight-fresh' : 'flight-start'
   if (state.flightStartNew) return 'flight-new'
   if (state.verifyOpen) return 'verification'
   return null

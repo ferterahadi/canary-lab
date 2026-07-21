@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   listJournal: vi.fn(),
   respondFlightCheckpoint: vi.fn(),
   resumeFlight: vi.fn(),
+  setFlightAutopilot: vi.fn(),
   abortFlight: vi.fn(),
   pauseFlight: vi.fn(),
   redoFlight: vi.fn(),
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   getFlightEntryOptions: vi.fn(),
   importFeatureDoc: vi.fn(),
   deleteFeatureDoc: vi.fn(),
+  deleteFeature: vi.fn(),
   linkFeatureDocPath: vi.fn(),
   openEditor: vi.fn(),
   cancelHealRun: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock('../../../shared/api/client', () => ({
   listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
   resumeFlight: mocks.resumeFlight,
+  setFlightAutopilot: mocks.setFlightAutopilot,
   abortFlight: mocks.abortFlight,
   pauseFlight: mocks.pauseFlight,
   redoFlight: mocks.redoFlight,
@@ -59,6 +62,7 @@ vi.mock('../../../shared/api/client', () => ({
   getFlightEntryOptions: mocks.getFlightEntryOptions,
   importFeatureDoc: mocks.importFeatureDoc,
   deleteFeatureDoc: mocks.deleteFeatureDoc,
+  deleteFeature: mocks.deleteFeature,
   linkFeatureDocPath: mocks.linkFeatureDocPath,
   openEditor: mocks.openEditor,
   cancelHealRun: mocks.cancelHealRun,
@@ -238,6 +242,71 @@ describe('FlightPage', () => {
     })
   })
 
+  it('R78: autopilot reads + toggles from the facts strip, any status', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
+    mocks.setFlightAutopilot.mockResolvedValue(manifest({ status: 'running' }))
+    await render('fl_1')
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="flight-autopilot-toggle"]')!
+    // Absent opts.autopilot = on (the default for every new flight).
+    expect(toggle.textContent).toContain('on')
+    expect(toggle.getAttribute('aria-pressed')).toBe('true')
+    await act(async () => { toggle.click() })
+    expect(mocks.setFlightAutopilot).toHaveBeenCalledWith('fl_1', false)
+  })
+
+  it('R78: a yolo flight shows autopilot as inert — yolo already skips the checkpoints', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } }))
+    await render('fl_1')
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="flight-autopilot-toggle"]')!
+    expect(toggle.textContent).toContain('yolo')
+    expect(toggle.disabled).toBe(true)
+  })
+
+  it('R78: a merged row is not ✓ done while its folded half has not run', async () => {
+    // docs approved, then paused before prd-summary ever started: the row used
+    // to read the primary alone and claim Requirements ✓ done.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'user',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: ['similarity', 'scout', 'scaffold', 'env-capture', 'docs'].includes(key)
+          ? ('done' as const)
+          : ('pending' as const),
+      })),
+    }))
+    await render('fl_1')
+    const row = container.querySelector('[data-testid="stage-rail-docs"]')!
+    expect(row.textContent).toContain('Requirements')
+    expect(row.textContent).not.toContain('✓')
+    // Suite setup, whose folded env-capture DID settle, still reads done.
+    expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('✓')
+    // …and the panel still opens on that half-finished row, not "Pick a stage."
+    expect(row.getAttribute('aria-current')).toBe('true')
+  })
+
+  it('R78: Continue names the ROW that resumes — a failed folded companion does not skip the label ahead', async () => {
+    // docs done, its folded companion prd-summary failed: the row reads
+    // "Requirements", so the resume label must too (it used to scan only the
+    // primary keys, see docs as finished, and advertise the NEXT row).
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'stage-failed',
+      error: 'PRD summary requires the claude or codex agent',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'prd-summary'
+          ? ('failed' as const)
+          : ['similarity', 'scout', 'scaffold', 'env-capture', 'docs'].includes(key)
+            ? ('done' as const)
+            : ('pending' as const),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-resume"]')?.textContent).toContain('Resume at Requirements')
+  })
+
   it('R74: a paused flight offers Continue ▾ (From here resumes); a running one shows only header Pause', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', error: 'boot failed' }))
     mocks.resumeFlight.mockResolvedValue(manifest())
@@ -365,6 +434,32 @@ describe('FlightPage', () => {
     expect(container.querySelector('[data-testid="flight-continue"]')).toBeNull()
   })
 
+  it('R76: the re-run dialog LEADS with Start fresh (it re-enters before step 1) and hands off in fresh intent', async () => {
+    const onStartFlight = vi.fn()
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'done' }))
+    mocks.getFlightEntryOptions.mockResolvedValue({
+      feature: 'checkout',
+      flight: null,
+      active: false,
+      canContinue: false,
+      prefill: { repoPaths: ['/repo/shop'], description: 'checkout flow', env: 'local', coverageTarget: 100 },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, allowed: true })),
+    })
+    await render('fl_1', { onStartFlight })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+
+    const fresh = container.querySelector('[data-testid="flight-redo-start-fresh"]')!
+    const firstStage = container.querySelector('[data-testid="flight-redo-scout"]')!
+    // Document order: fresh sits ABOVE Repo scan, the first pipeline step.
+    expect(fresh.compareDocumentPosition(firstStage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // Not a radio — it navigates to the launcher, it doesn't pick a step.
+    expect(fresh.getAttribute('role')).toBeNull()
+    expect(fresh.textContent).toContain('Start fresh — from the beginning')
+
+    await act(async () => { (fresh as HTMLButtonElement).click() })
+    expect(onStartFlight).toHaveBeenCalledWith('checkout', 'fresh')
+  })
+
   it('mounts the agent timeline for agent-backed stages', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       stages: FLIGHT_STAGE_KEYS.map((key) => ({
@@ -406,6 +501,41 @@ describe('FlightPage', () => {
     expect(idle?.disabled).toBe(false)
     await act(async () => { idle?.click() })
     expect(onOpenConfig).toHaveBeenCalledWith('checkout')
+  })
+
+  it('a SKIPPED scaffold still reaches Advanced setup — header action and the synced-live hint', async () => {
+    const onOpenConfig = vi.fn()
+    mocks.getFeatureConfigDoc.mockResolvedValue({
+      path: '/ws/features/checkout/feature.config.cjs',
+      format: 'cjs',
+      content: '',
+      parsed: {
+        value: { repos: [{ name: 'shop', localPath: '/repo/shop', branch: 'develop', startCommands: [{ name: 'api', command: 'npm run dev' }] }] },
+        complexFields: [],
+        source: '',
+      },
+    })
+    // Scaffold skipped = the config already existed on disk. The setup panel
+    // renders it, so both routes into the full editor must be live.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scaffold' ? ('skipped' as const) : ('done' as const),
+      })),
+    }))
+    await render('fl_1', { onOpenConfig })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click() })
+    const header = container.querySelector<HTMLButtonElement>('[data-testid="feature-setup-advanced"]')
+    expect(header?.disabled).toBe(false)
+    await act(async () => { header?.click() })
+    expect(onOpenConfig).toHaveBeenCalledWith('checkout')
+
+    // The hint sentence names Advanced setup — so it must BE the link.
+    const hint = container.querySelector<HTMLButtonElement>('[data-testid="setup-open-advanced"]')
+    expect(hint?.textContent).toBe('Advanced setup')
+    await act(async () => { hint?.click() })
+    expect(onOpenConfig).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -568,7 +698,7 @@ describe('trailer model (R14–R18)', () => {
     }))
     await render('fl_1')
     const rail = container.querySelector('[data-testid="stage-rail-similarity"]')
-    expect(rail?.textContent).toContain('Existing feature found')
+    expect(rail?.textContent).toContain('Existing suite found')
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('checkout')
     expect(container.querySelector('[data-testid="checkpoint-controls"]')).toBeTruthy()
   })
@@ -1068,6 +1198,37 @@ describe('flight controls (R48/R71)', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('R71/W1: Escape closes an open dialog first — the page only exits once nothing else is open', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'done' }))
+    const onClose = vi.fn()
+    await render('fl_1', { onClose })
+    // Open the centered re-run dialog over the flight page.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-redo-scout"]')).toBeTruthy()
+    // First Escape dismisses the dialog, NOT the page.
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(container.querySelector('[data-testid="flight-redo-scout"]')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    // Second Escape now exits the page.
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('R74/W1: Escape closes the open Continue menu first, not the page', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user' }))
+    const onClose = vi.fn()
+    await render('fl_1', { onClose })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
+    expect(container.querySelector('[data-testid="flight-redo-open"]')).toBeTruthy()
+    // First Escape closes the dropdown, not the page.
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(container.querySelector('[data-testid="flight-redo-open"]')).toBeNull()
+    expect(onClose).not.toHaveBeenCalled()
+    // Second Escape exits the page.
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
+    expect(onClose).toHaveBeenCalled()
+  })
+
   it('R71/W1: a parked flight leads with Respond → (primary); clicking returns selection to the parked stage', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'waiting-for-approval',
@@ -1165,7 +1326,7 @@ describe('checkpoint display language (R71/W3)', () => {
     }))
     mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
     await render('fl_1')
-    expect(container.querySelector('[data-testid="checkpoint-title"]')?.textContent).toContain('Existing feature found')
+    expect(container.querySelector('[data-testid="checkpoint-title"]')?.textContent).toContain('Existing suite found')
     const first = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-choice-rerun"]')
     expect(first?.textContent).toContain('Run existing tests')
     expect(first?.textContent).toContain('Recommended')
@@ -1174,6 +1335,56 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(container.querySelector('[data-testid="checkpoint-more-options"]')).toBeNull()
     await act(async () => { first?.click() })
     expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'rerun' })
+  })
+
+  it('R80: an empty-handed collector surfaces a verdict band and flips the recommendation', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source',
+      message: 'The agent found nothing relevant: no loyalty flow in either repo. No requirement docs yet.',
+      options: ['collect-repo-docs', 'infer-from-diff'],
+      data: {
+        docs: [], linked: [], intent: 'checkout flow',
+        lastAttempt: { mode: 'collect-repo-docs', outcome: 'empty', reason: 'no loyalty flow in either repo' },
+      },
+    }))
+    await render('fl_1')
+    // The verdict reads without expanding Activity, and without being fused
+    // into the generic help sentence.
+    const verdict = container.querySelector('[data-testid="prd-source-verdict"]')
+    expect(verdict?.textContent).toContain('Agent searched the repos')
+    expect(verdict?.textContent).toContain('no loyalty flow in either repo')
+    // The path that just came back empty is no longer the recommendation.
+    expect(container.querySelector('[data-testid="fork-path-agent"]')?.textContent).not.toContain('Recommended')
+    expect(container.querySelector('[data-testid="fork-path-agent-note"]')?.textContent).toContain('Tried')
+    expect(container.querySelector('[data-testid="fork-path-manual"]')?.textContent).toContain('Recommended')
+    // The rail says so too, so it reads from the collapsed stage list.
+    expect(container.querySelector('[data-testid="stage-rail-note-docs"]')?.textContent).toBe('empty')
+    // The agent path stays clickable — a retry with feedback is legitimate.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-agent"]')?.click() })
+    expect(container.querySelector('[data-testid="fork-path-agent"]')?.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('R80: a no-diff attempt names that outcome instead of "found nothing"', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source', message: 'No meaningful diff vs the base branch was found.',
+      options: ['collect-repo-docs', 'infer-from-diff'],
+      data: { docs: [], linked: [], intent: 'checkout flow', lastAttempt: { mode: 'infer-from-diff', outcome: 'no-diff' } },
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="prd-source-verdict"]')?.textContent).toContain('No diff vs base')
+    expect(container.querySelector('[data-testid="fork-path-agent-note"]')?.textContent).toContain('No diff')
+  })
+
+  it('R80: a first visit shows no verdict and keeps the agent path recommended', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source', message: 'No requirement docs yet.', options: ['collect-repo-docs', 'infer-from-diff'],
+      data: { docs: [], linked: [], intent: 'checkout flow' },
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="prd-source-verdict"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-rail-note-docs"]')).toBeNull()
+    expect(container.querySelector('[data-testid="fork-path-agent"]')?.textContent).toContain('Recommended')
+    expect(container.querySelector('[data-testid="fork-path-manual"]')?.textContent).not.toContain('Recommended')
   })
 
   it('folds a 4+-option checkpoint behind More options', async () => {
@@ -1210,8 +1421,60 @@ describe('checkpoint display language (R71/W3)', () => {
     mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-agent"]')?.click() })
     expect(container.querySelector('[data-testid="fork-path-agent"]')?.getAttribute('aria-checked')).toBe('true')
+    // Agent path: no hint picked yet → the release is disabled, nothing spawns.
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.disabled).toBe(true)
+    // Picking a hint only stages it — the agent starts on the confirm button.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-hint-collect-repo-docs"]')?.click() })
+    expect(mocks.respondFlightCheckpoint).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="fork-hint-collect-repo-docs"]')?.getAttribute('aria-checked')).toBe('true')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.click() })
     expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'collect-repo-docs' })
+  })
+
+  it('R74: pressing "Gather with agent" flashes a one-line confirmation that re-triggers on a repeat press', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source', message: 'No requirement docs yet.', options: ['collect-repo-docs', 'infer-from-diff'],
+    }))
+    mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
+    await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-agent"]')?.click() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-hint-collect-repo-docs"]')?.click() })
+    expect(container.querySelector('[data-testid="fork-start-agent"]')?.textContent).toBe('Gather with agent')
+    expect(container.querySelector('[data-testid="fork-start-agent-flash"]')).toBeNull()
+
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.click() })
+    const flash = container.querySelector('[data-testid="fork-start-agent-flash"]')
+    expect(flash?.textContent).toBe('Agent started — output streams in the activity band below')
+    // ONE confirmation only: the old persistent "Starting the agent…" line is gone.
+    expect(container.textContent).not.toContain('Starting the agent')
+
+    // Simulate the fade-out finishing: the flash unmounts itself.
+    await act(async () => { flash?.dispatchEvent(new Event('animationend', { bubbles: true })) })
+    expect(container.querySelector('[data-testid="fork-start-agent-flash"]')).toBeNull()
+
+    // A repeat press re-triggers the flash rather than leaving it gone.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.click() })
+    expect(container.querySelector('[data-testid="fork-start-agent-flash"]')?.textContent).toBe('Agent started — output streams in the activity band below')
+  })
+
+  it('R74: the start button itself shows the working state while the respond is in flight', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source', message: 'No docs yet.', options: ['collect-repo-docs', 'infer-from-diff'],
+    }))
+    let resolveRespond: ((v: unknown) => void) | null = null
+    mocks.respondFlightCheckpoint.mockReturnValue(new Promise((res) => { resolveRespond = res }))
+    await render('fl_1')
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-agent"]')?.click() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-hint-collect-repo-docs"]')?.click() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.click() })
+
+    // While the respond round-trip is pending: the button IS the running cue.
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')
+    expect(button?.textContent).toBe('Starting…')
+    expect(button?.disabled).toBe(true)
+
+    await act(async () => { resolveRespond?.(manifest()) })
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.textContent).toBe('Gather with agent')
   })
 
   it('R74: manual path with docs present releases via continue', async () => {
@@ -1293,6 +1556,18 @@ describe('summary strip (R71/W5)', () => {
     expect(container.querySelector('[data-testid="stage-rail-docs"]')?.getAttribute('aria-current')).toBe('true')
   })
 
+  it('R79: the strip shows the conducting agent read-only (claude by default, codex when set)', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'running' }))
+    await render('fl_1')
+    const strip = () => container.querySelector('[data-testid="flight-summary-strip"]')?.textContent ?? ''
+    expect(strip().toLowerCase()).toContain('agent')
+    expect(strip()).toContain('claude')
+
+    mocks.getFlight.mockResolvedValue(manifest({ status: 'running', opts: { env: 'local', coverageTarget: 100, yolo: false, agent: 'codex' } }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="flight-summary-strip"]')?.textContent).toContain('codex')
+  })
+
   it('the paused status chip explains WHO paused it (pauseReason tooltip)', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user', currentStage: 'docs' }))
     await render('fl_1')
@@ -1303,22 +1578,30 @@ describe('summary strip (R71/W5)', () => {
 describe('detail redesign (R53–R68)', () => {
   const doneStages = () => FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
 
-  it('R62/R71: no standalone back button (breadcrumb only); delete confirms once in the menu then returns to the list', async () => {
+  it('R76: Delete suite… opens the shared type-name confirm; deleting removes suite + history and returns to the list', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: doneStages() }))
     const onSelectFlight = vi.fn()
     await render('fl_1', { onSelectFlight })
     expect(container.querySelector('[aria-label="All flights"]')).toBeNull()
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
     const del = container.querySelector<HTMLButtonElement>('[data-testid="flight-delete"]')
-    expect(del).toBeTruthy()
+    expect(del?.textContent).toContain('Delete suite')
     await act(async () => { del!.click() })
-    expect(mocks.deleteFlight).not.toHaveBeenCalled()
-    mocks.deleteFlight.mockResolvedValue({ deleted: true })
+    // The modal is open; nothing fires until the typed name matches.
+    expect(mocks.deleteFeature).not.toHaveBeenCalled()
+    const nameInput = container.querySelector<HTMLInputElement>('[data-testid="delete-suite-confirm-name"]')!
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="flight-delete-confirm"]')?.click()
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(nameInput, 'checkout')
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    expect(mocks.deleteFlight).toHaveBeenCalledWith('fl_1')
+    mocks.deleteFeature.mockResolvedValue(undefined)
+    const confirm = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Delete suite')!
+    await act(async () => { confirm.click() })
+    expect(mocks.deleteFeature).toHaveBeenCalledWith('checkout', 'checkout')
     expect(onSelectFlight).toHaveBeenCalledWith(null)
+    // Journal-only delete is API-only now — the GUI never calls it.
+    expect(mocks.deleteFlight).not.toHaveBeenCalled()
   })
 
   it('R64: a live run for the feature flips the settled run row to running and lists the run cards', async () => {

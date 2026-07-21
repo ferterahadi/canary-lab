@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { regeneratePrdSummary } from '../../../coverage/logic/coverage/service'
+import { clearPrdSummary, regeneratePrdSummary } from '../../../coverage/logic/coverage/service'
 import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
@@ -46,6 +46,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       await regenerate({
         featuresDir: deps.featuresDir,
         feature: m.feature,
+        adapter: m.opts.agent,
         cwd: deps.projectRoot,
         onOutput: ctx.appendLog,
         onAgentSession: (session) => {
@@ -65,6 +66,16 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       }
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
       return { kind: 'done', evidence: { requirementCount: count } }
+    },
+    // R78 restart wipe: the existing coverage "redo from the start" clear —
+    // drops _prd-summary.json/.md (and the downstream coverage state, which the
+    // specs-coverage reset that always follows discards anyway). The docs
+    // themselves belong to the docs stage; a restart HERE keeps them.
+    async reset(ctx) {
+      const m = ctx.manifest()
+      if (!fs.existsSync(featureDirFor(deps, m.feature))) return
+      clearPrdSummary({ featuresDir: deps.featuresDir, feature: m.feature })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     },
   }
 }

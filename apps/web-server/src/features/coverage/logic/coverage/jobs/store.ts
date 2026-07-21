@@ -19,6 +19,8 @@ export interface CoverageJobStore {
   activeFor(feature: string, kind: CoverageJobKind): CoverageJobIndexEntry | null
   save(manifest: CoverageJobManifest): void
   remove(jobId: string): void
+  /** Re-home every record from one feature name to another (suite rename). */
+  renameFeature(from: string, to: string): number
   reconcileInterrupted(now: () => string): void
   onEvent(fn: (event: CoverageJobStoreEvent) => void): void
   offEvent(fn: (event: CoverageJobStoreEvent) => void): void
@@ -52,6 +54,8 @@ export class CoverageJobRunStore implements CoverageJobStore {
       // Legacy rows (pre-`id` index shape) carry only `jobId`; fall back to it so
       // remove/prune/reconcile can address them (else they resurrect on refresh).
       idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { jobId?: string }).jobId),
+      featureOf: (m) => m.feature,
+      withFeature: (m, feature) => ({ ...m, feature }),
       reconcile: {
         isInterrupted: (m) => m.status === 'running',
         mark: (m, now) => ({
@@ -89,6 +93,10 @@ export class CoverageJobRunStore implements CoverageJobStore {
 
   remove(jobId: string): void {
     this.store.remove(jobId)
+  }
+
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
   }
 
   /** Flip any job left `running` by a dead process to `aborted` — its in-memory

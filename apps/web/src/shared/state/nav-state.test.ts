@@ -17,6 +17,7 @@ const base: NavState = {
   configFor: null,
   verifyOpen: false,
   flightStartFor: null,
+  flightStartFresh: false,
   flightStartNew: false,
   draftFor: null,
   resumePlanTaskId: null,
@@ -50,6 +51,16 @@ describe('initialNavState', () => {
     expect(s.flightStartFor).toBe('checkout')
   })
 
+  it('opens the launcher in fresh intent from ?dialog=flight-fresh (R76)', () => {
+    const s = initialNavState(persisted({ dialog: 'flight-fresh', feature: 'checkout' }))
+    expect(s.flightStartFor).toBe('checkout')
+    expect(s.flightStartFresh).toBe(true)
+  })
+
+  it('leaves the fresh flag off for a plain flight-start', () => {
+    expect(initialNavState(persisted({ dialog: 'flight-start', feature: 'checkout' })).flightStartFresh).toBe(false)
+  })
+
   it('opens verification / flight-new from their dialog params', () => {
     expect(initialNavState(persisted({ dialog: 'verification' })).verifyOpen).toBe(true)
     expect(initialNavState(persisted({ dialog: 'flight-new' })).flightStartNew).toBe(true)
@@ -75,6 +86,12 @@ describe('routedDialog precedence (z-order)', () => {
 
   it('flight-start outranks flight-new and verify', () => {
     expect(routedDialog({ ...base, flightStartFor: 'y', flightStartNew: true, verifyOpen: true })).toBe('flight-start')
+  })
+
+  it('routes the fresh intent to its own dialog value (R76)', () => {
+    expect(routedDialog({ ...base, flightStartFor: 'y', flightStartFresh: true })).toBe('flight-fresh')
+    // The flag alone routes nothing — it qualifies an open launcher.
+    expect(routedDialog({ ...base, flightStartFresh: true })).toBeNull()
   })
 
   it('flight-new outranks verify', () => {

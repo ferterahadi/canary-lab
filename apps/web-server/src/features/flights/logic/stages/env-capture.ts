@@ -5,7 +5,7 @@ import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
 import type { FlightStageErrorDetail } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { pollUntil, type FlightStageDeps } from './context'
+import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
 
 // Capture the scout's detected env files into the flight's envset, then prove
@@ -176,6 +176,17 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
         return captureAndBoot(ctx, files)
       }
       return this.run!(ctx)
+    },
+    // R78 restart wipe: drop the envset this stage captured for the flight's
+    // env (user-supplied values included — explicit ruling). The boot run it
+    // verified with was already aborted + is not a deliverable, so no run
+    // record cleanup belongs here.
+    async reset(ctx) {
+      const m = ctx.manifest()
+      const envsetDir = path.join(featureDirFor(deps, m.feature), 'envsets', m.opts.env)
+      if (!fs.existsSync(envsetDir)) return
+      fs.rmSync(envsetDir, { recursive: true, force: true })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: m.feature })
     },
   }
 }

@@ -40,7 +40,11 @@ export interface AgentSessionRefFile {
 
 export type AgentEvent =
   | { kind: 'user-message'; timestamp: string; text: string }
-  | { kind: 'assistant-message'; timestamp: string; text: string }
+  // `apiError` marks a turn the CLI synthesized after the model's HTTP stream
+  // dropped mid-response ("Connection closed mid-response"). It is NOT the
+  // agent's own prose — the surrounding text is whatever partial output was
+  // recovered — so the UI renders it as a termination, not a conclusion.
+  | { kind: 'assistant-message'; timestamp: string; text: string; apiError?: boolean }
   | { kind: 'assistant-thinking'; timestamp: string; text: string }
   | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
   | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
@@ -510,6 +514,124 @@ export function loadAgentSessionLog(ref: AgentSessionRef): AgentEvent[] {
   return loadAgentSession(ref).events
 }
 
+// ─── Subagent threads (claude only) ────────────────────────────────────────
+//
+// When a claude session spawns subagents (the `Agent`/`Task` tool), each child
+// gets its own JSONL beside the parent's log:
+//
+//   <parent-log-dir>/<session-uuid>/subagents/agent-<id>.jsonl
+//   <parent-log-dir>/<session-uuid>/subagents/agent-<id>.meta.json
+//
+// The meta carries `toolUseId` — the exact `id` of the parent's `tool_use`
+// block — so a child thread joins to its parent row by key, with no timestamp
+// correlation or name matching. The child JSONL is the same claude format, so
+// it reuses `parseAgentSessionLine` unchanged.
+//
+// Codex has no subagent concept; these functions return empty for it, which is
+// why callers can invoke them unconditionally.
+
+export interface SubagentThread {
+  agentId: string
+  /** The parent `tool-call` event's `toolId` this thread hangs under. */
+  parentToolId: string
+  agentType: string
+  description: string
+  spawnDepth: number
+  logPath: string
+  events: AgentEvent[]
+}
+
+/** The `subagents/` dir for a session log, or null if the agent can't have one. */
+export function subagentDirFor(ref: AgentSessionRef): string | null {
+  if (ref.agent !== 'claude' || !ref.logPath) return null
+  const base = ref.logPath.endsWith('.jsonl')
+    ? ref.logPath.slice(0, -'.jsonl'.length)
+    : ref.logPath
+  return path.join(base, 'subagents')
+}
+
+function readSubagentMeta(metaPath: string): {
+  agentType: string
+  description: string
+  toolUseId: string
+  spawnDepth: number
+} | null {
+  let raw: string
+  try { raw = fs.readFileSync(metaPath, 'utf-8') } catch { return null }
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { return null }
+  if (!parsed || typeof parsed !== 'object') return null
+  const m = parsed as { agentType?: unknown; description?: unknown; toolUseId?: unknown; spawnDepth?: unknown }
+  // `toolUseId` is the join key — a thread without one can't be placed under a
+  // parent row, so it's dropped rather than rendered at an arbitrary position.
+  if (typeof m.toolUseId !== 'string' || !m.toolUseId) return null
+  return {
+    agentType: typeof m.agentType === 'string' ? m.agentType : 'agent',
+    description: typeof m.description === 'string' ? m.description : '',
+    toolUseId: m.toolUseId,
+    spawnDepth: typeof m.spawnDepth === 'number' ? m.spawnDepth : 1,
+  }
+}
+
+/** Parse one subagent thread from its jsonl path (meta sits beside it). */
+export function loadSubagentThread(jsonlPath: string): SubagentThread | null {
+  if (!jsonlPath.endsWith('.jsonl')) return null
+  const meta = readSubagentMeta(`${jsonlPath.slice(0, -'.jsonl'.length)}.meta.json`)
+  if (!meta) return null
+  let raw: string
+  try { raw = fs.readFileSync(jsonlPath, 'utf-8') } catch { return null }
+  const events: AgentEvent[] = []
+  for (const line of raw.split('\n')) {
+    // Children of a claude session are always claude-format, regardless of
+    // which agent the caller thinks it's reading.
+    for (const ev of parseAgentSessionLine('claude', line)) events.push(ev)
+  }
+  return {
+    agentId: path.basename(jsonlPath, '.jsonl'),
+    parentToolId: meta.toolUseId,
+    agentType: meta.agentType,
+    description: meta.description,
+    spawnDepth: meta.spawnDepth,
+    logPath: jsonlPath,
+    events,
+  }
+}
+
+/** The full REST snapshot for a session: its own timeline, its metadata, and
+ *  every subagent thread it spawned. Every `/agent-session` endpoint returns
+ *  this exact shape, so a new field reaches all of them at once. */
+export function buildAgentSessionResponse(ref: AgentSessionRef): {
+  agent: AgentKind
+  sessionId: string
+  model?: string
+  effort?: string
+  events: AgentEvent[]
+  subagents: SubagentThread[]
+} {
+  const { events, meta } = loadAgentSession(ref)
+  return {
+    agent: ref.agent,
+    sessionId: ref.sessionId,
+    model: meta.model,
+    effort: meta.effort,
+    events,
+    subagents: loadSubagentThreads(ref),
+  }
+}
+
+/** Every subagent thread spawned by a session, in stable (agentId) order. */
+export function loadSubagentThreads(ref: AgentSessionRef): SubagentThread[] {
+  const dir = subagentDirFor(ref)
+  if (!dir) return []
+  const out: SubagentThread[] = []
+  for (const name of readDirNames(dir).sort()) {
+    if (!name.endsWith('.jsonl')) continue
+    const thread = loadSubagentThread(path.join(dir, name))
+    if (thread) out.push(thread)
+  }
+  return out
+}
+
 // Extract just the session metadata. Used by the live WS handshake, which only
 // needs model/effort and not the full event list.
 export function loadAgentSessionMeta(ref: AgentSessionRef): AgentSessionMeta {
@@ -668,6 +790,7 @@ interface ClaudeContentBlock {
 interface ClaudeLine {
   type?: unknown
   timestamp?: unknown
+  isApiErrorMessage?: unknown
   message?: { content?: unknown }
 }
 
@@ -699,9 +822,10 @@ function pushClaudeEvents(line: ClaudeLine, out: AgentEvent[]): void {
   if (line.type === 'assistant') {
     const content = line.message?.content
     if (!Array.isArray(content)) return
+    const apiError = line.isApiErrorMessage === true ? true : undefined
     for (const block of content as ClaudeContentBlock[]) {
       if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
-        out.push({ kind: 'assistant-message', timestamp: ts, text: block.text })
+        out.push({ kind: 'assistant-message', timestamp: ts, text: block.text, apiError })
       } else if (block?.type === 'thinking' && typeof block.thinking === 'string' && block.thinking.trim()) {
         out.push({ kind: 'assistant-thinking', timestamp: ts, text: block.thinking })
       } else if (block?.type === 'tool_use') {

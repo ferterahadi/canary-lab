@@ -8,6 +8,7 @@ import type {
   PlanFeaturesTask,
   PlannedFeature,
 } from '../../../shared/api/client'
+import type { FlightLauncherIntent } from '../../../shared/state/nav-state'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { ChevronRightIcon, Modal, Textarea, Toggle } from '../../config/components/atoms'
 import { STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
@@ -47,8 +48,14 @@ const PICKABLE: FlightStageKey[] = [
   'evaluation-export',
 ]
 
+/** R76: one name for the full-restart entry across both dialogs (this launcher's
+ *  stage list and the re-run dialog's lead row) — they perform the identical act
+ *  (mode `redo`), so they can't read as two different things. */
+export const START_FRESH_LABEL = 'Start fresh — from the beginning'
+export const START_FRESH_BLURB = 'Change intent or repos; discards every stage result.'
+
 function rowLabel(key: FlightStageKey): string {
-  return key === 'similarity' ? 'Full flight — from the beginning' : STAGE_LABEL[key]
+  return key === 'similarity' ? START_FRESH_LABEL : STAGE_LABEL[key]
 }
 
 /** The new-flight side of the dialog moves through three views (one per
@@ -58,37 +65,40 @@ type NewFlightPhase = 'form' | 'planning' | 'proposal'
 
 /** R69 (concept C): one numbered step in the launch form — a badge + connector
  *  rail on the left, the section's title + content on the right, so the setup
- *  reads as an ordered sequence (intent → repos → launch). `active` tints the
- *  badge accent (an editable input step); the last step drops its connector. */
+ *  reads as an ordered sequence (intent → repos → launch). Every badge shares
+ *  one solid, high-contrast treatment so the whole sequence reads as equally
+ *  present — the accent is spent only on the primary action and the selected
+ *  stage row, never on the step numbers. The last step drops its connector. */
 function Step({
   n,
   title,
-  active,
   last,
   children,
 }: {
   n: number
   title?: string
-  active?: boolean
   last?: boolean
   children: ReactNode
 }) {
-  const tone = active ? 'var(--accent)' : 'var(--text-muted)'
   return (
     <div className="flex gap-3">
       <div className="flex flex-col items-center pt-0.5">
         <span
           aria-hidden="true"
-          className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-medium"
-          style={{ border: `1px solid color-mix(in srgb, ${tone} 55%, transparent)`, color: tone }}
+          className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
+          style={{
+            background: 'var(--bg-elevated)',
+            border: '1px solid var(--border-strong)',
+            color: 'var(--text-primary)',
+          }}
         >
           {n}
         </span>
-        {!last && <span className="mt-1 w-px flex-1" style={{ background: 'var(--border-default)', minHeight: 14 }} />}
+        {!last && <span className="mt-1 w-px flex-1" style={{ background: 'var(--border-strong)', minHeight: 14 }} />}
       </div>
       <div className={`min-w-0 flex-1 ${last ? '' : 'pb-4'}`}>
         {title && (
-          <div className="mb-1.5 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+          <div className="mb-1.5 text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>
             {title}
           </div>
         )}
@@ -100,12 +110,19 @@ function Step({
 
 export function FlightStartDialog({
   feature,
+  intent = 'refly',
   resumePlanTaskId,
   onClose,
   onOpenFlight,
 }: {
   /** Feature to (re)fly, or null → new-flight mode (intent + repo picker). */
   feature: string | null
+  /** R76: which job this launcher is open for. 'fresh' (the Repo-scan panel's
+   *  Change… and the re-run dialog's Start fresh row) drops the stage menu
+   *  entirely and locks the entry to a full restart — the only entry a changed
+   *  intent/repo set is valid for. Ignored in new-flight mode, which is already
+   *  intent-first. */
+  intent?: FlightLauncherIntent
   /** Reopen attached to a backgrounded pre-flight (plan-features) task — a
    *  Flights-pill pre-flight row routes this. New-flight mode only; the dialog
    *  fetches the task and drops straight into the planning/proposal view. */
@@ -126,7 +143,11 @@ export function FlightStartDialog({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [description, setDescription] = useState('')
   const [repoPaths, setRepoPaths] = useState<string[]>([])
-  const [picked, setPicked] = useState<FlightStageKey | 'continue' | null>(feature ? null : 'similarity')
+  // Fresh mode never asks where to re-enter — a changed intent/repo set is only
+  // valid from the beginning — so it opens pre-picked there and stays put.
+  const [picked, setPicked] = useState<FlightStageKey | 'continue' | null>(
+    feature && intent !== 'fresh' ? null : 'similarity',
+  )
   const [busy, setBusy] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
 
@@ -140,6 +161,16 @@ export function FlightStartDialog({
   // field only on an explicit opt-out (absent = on, server-side too).
   const [autopilot, setAutopilot] = useState(true)
   const autopilotBody = autopilot ? {} : { autopilot: false as const }
+  // R79: which CLI conducts the flight's stage agents. Preselected from the
+  // workspace's default-agent setting; claude is the wire default, so only a
+  // codex pick rides the body. Sticky server-side once the flight exists.
+  const [agent, setAgent] = useState<'claude' | 'codex'>('claude')
+  const agentBody = agent === 'codex' ? { agent: 'codex' as const } : {}
+  useEffect(() => {
+    api.getProjectConfig()
+      .then((c) => { if (c.healAgent === 'codex') setAgent('codex') })
+      .catch(() => {})
+  }, [])
 
   // R54 plan flow state. Resuming a backgrounded pre-flight opens straight in
   // the planning view (the resume effect attaches the task; the settle effect
@@ -181,14 +212,19 @@ export function FlightStartDialog({
         setEntry(options)
         setDescription(options.prefill.description)
         setRepoPaths(options.prefill.repoPaths)
-        setPicked(options.canContinue ? 'continue' : null)
+        // Default pick: a paused flight resumes; anything else defaults to the
+        // full restart. Fresh mode (R76) keeps its own pre-pick — landing a
+        // "change the intent" handoff on `continue` is exactly the bug that
+        // rework fixed: it re-froze the fields the user came to edit.
+        if (intent === 'fresh') return
+        setPicked(options.canContinue ? 'continue' : options.flight ? 'similarity' : null)
       })
       .catch((err: unknown) => {
         if (!alive) return
         setLoadError(err instanceof Error ? err.message : String(err))
       })
     return () => { alive = false }
-  }, [resolvedFeature, newFlight])
+  }, [resolvedFeature, newFlight, intent])
 
   // Planning: poll the task until the agent settles. Attach-or-start means the
   // task may already be done on the first poll.
@@ -264,15 +300,22 @@ export function FlightStartDialog({
   }, [entry])
 
   const derivedFeature = newFlight && repoPaths.length > 0 ? api.deriveFeatureSlug(repoPaths[0]) : null
-  // Frozen once flown (R57): a record means repos + intent are fixed forever —
-  // the form neither shows the picker nor sends the values.
+  // R75: repos + intent are frozen against PARTIAL re-entry only — a full
+  // restart ("Start fresh — from the beginning", mode redo) discards every
+  // stage's evidence, so the inputs unlock exactly there and nowhere else.
   const hasRecord = !newFlight && entry?.flight != null
   const needsArgs = newFlight || (entry !== null && entry.flight === null)
+  const editableInputs = hasRecord && picked === 'similarity'
+  const inputsRequired = needsArgs || editableInputs
+  // R76: the fresh-intent view — intent + repos only. The stage menu is not
+  // rendered at all (not merely defaulted), because every row it offers except
+  // the full restart is invalid the moment these inputs change.
+  const freshMode = !newFlight && intent === 'fresh'
 
   const canSubmit = newFlight
     ? !busy && description.trim() !== '' && repoPaths.length > 0
     : entry !== null && !entry.active && !busy && picked !== null
-      && (!needsArgs || (description.trim() !== '' && repoPaths.length > 0))
+      && (!inputsRequired || (description.trim() !== '' && repoPaths.length > 0))
 
   const openFlightFail = (err: unknown): void => {
     const body = err instanceof api.ApiError
@@ -296,7 +339,7 @@ export function FlightStartDialog({
     if (busy) return
     setBusy(true)
     setStartError(null)
-    api.planFeatures({ repoPaths, description: description.trim(), ...autopilotBody })
+    api.planFeatures({ repoPaths, description: description.trim(), ...autopilotBody, ...agentBody })
       .then((task) => {
         setPlanTask(task)
         setPhase('planning')
@@ -315,6 +358,7 @@ export function FlightStartDialog({
       repoPaths,
       description: description.trim(),
       ...autopilotBody,
+      ...agentBody,
     })
       .then((manifest) => onOpenFlight(manifest.flightId))
       .catch(openFlightFail)
@@ -330,7 +374,7 @@ export function FlightStartDialog({
       ...f,
       ...(sharedGroup.trim() ? { group: sharedGroup.trim() } : {}),
     }))
-    api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody })
+    api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody })
       .then(({ flightIds }) => onOpenFlight(flightIds[0]))
       .catch(applyLaunchFailure)
   }
@@ -343,9 +387,11 @@ export function FlightStartDialog({
     setStartError(null)
     const body: api.StartFlightBody = {
       feature: resolvedFeature!,
-      // Frozen args (R57): with a record, omit repos + intent — the server
-      // reuses the stored values (and 409s on differing ones).
-      ...(needsArgs ? { repoPaths, description: description.trim() } : {}),
+      // Frozen args (R57/R75): with a record, repos + intent ride the body
+      // ONLY on a full restart (mode redo accepts new values); mid-pipeline
+      // re-entry omits them — the server reuses the stored values (and 409s
+      // on differing ones).
+      ...(inputsRequired ? { repoPaths, description: description.trim() } : {}),
       env: entry.prefill.env,
       coverageTarget: entry.prefill.coverageTarget,
       ...(picked === 'continue'
@@ -354,6 +400,7 @@ export function FlightStartDialog({
           ? (hasRecord ? { mode: 'redo' as const } : {})
           : { ...(hasRecord ? { mode: 'jump' as const } : {}), fromStage: picked }),
       ...autopilotBody,
+      ...agentBody,
     }
     api.startFlight(body)
       .then((manifest) => onOpenFlight(manifest.flightId))
@@ -375,7 +422,7 @@ export function FlightStartDialog({
             selected={picked === 'continue'}
             onPick={() => setPicked('continue')}
             icon="▸"
-            iconTone="rgb(56, 189, 248)"
+            iconTone="var(--accent)"
             label="Continue where it left off"
             sub="Resumes the paused flight at its first open stage."
           />
@@ -401,10 +448,10 @@ export function FlightStartDialog({
           >
             <ChevronRightIcon />
           </span>
-          <span className="text-[12px] font-medium" style={{ color: 'var(--text-secondary)' }}>The full flight</span>
-          <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>{stepCount} steps, fully automated</span>
+          <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>The full flight</span>
+          <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{stepCount} steps, fully automated</span>
           {newFlight && (
-            <span className="ml-auto text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+            <span className="ml-auto text-[10.5px]" style={{ color: 'var(--text-secondary)' }}>
               step entry unlocks after the first flight
             </span>
           )}
@@ -421,7 +468,13 @@ export function FlightStartDialog({
               // Every row explains what its stage does; a re-fly's BLOCKED rows
               // instead surface the server's specific prerequisite reason. The
               // uniform first-flight lock is stated once, on the section header.
-              const sub = !newFlight && !allowed ? verdict?.reason : STAGE_BLURB[key]
+              const sub = !newFlight && !allowed
+                ? verdict?.reason
+                // The full-restart row says what it COSTS once there's a record
+                // to discard; on a first flight it's just the whole journey.
+                : key === 'similarity' && hasRecord
+                  ? START_FRESH_BLURB
+                  : STAGE_BLURB[key]
               return (
                 <StageRow
                   key={key}
@@ -474,7 +527,11 @@ export function FlightStartDialog({
         onClick={start}
         className="cl-button-primary px-3.5 py-1 text-xs"
       >
-        {busy ? 'Starting…' : newFlight ? 'Plan flight →' : picked === 'continue' ? 'Continue flight' : 'Start flight'}
+        {busy
+          ? 'Starting…'
+          : newFlight ? 'Plan flight →'
+            : freshMode ? 'Start fresh flight'
+              : picked === 'continue' ? 'Continue flight' : 'Start flight'}
       </button>
     </>
   )
@@ -483,7 +540,9 @@ export function FlightStartDialog({
     <Modal
       open
       onClose={onClose}
-      height={formView ? 'min(608px, calc(100vh - 2rem))' : undefined}
+      // Only the re-fly form swings height with the step-list disclosure; the
+      // fresh view has no disclosure, so it shrink-wraps its two fields.
+      height={formView && !freshMode ? 'min(608px, calc(100vh - 2rem))' : undefined}
       footer={formView ? formFooter : undefined}
       icon={
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -493,9 +552,11 @@ export function FlightStartDialog({
       }
       title={resolvedFeature ?? 'Start a flight'}
       description={
-        hasRecord
-          ? 'Re-fly this feature — pick where the pipeline restarts.'
-          : 'One command from a bare repo to a green, covered, evaluated run.'
+        freshMode
+          ? 'Start fresh — change what this flight tests. It re-flies from the beginning.'
+          : hasRecord
+            ? 'Re-fly this suite — pick where the pipeline restarts.'
+            : 'One command from a bare repo to a green, covered, evaluated run.'
       }
       width={620}
       stableScrollGutter
@@ -511,14 +572,14 @@ export function FlightStartDialog({
           // Attach, never a second start: the single-flight lock holds server-side.
           <div className="flex flex-col gap-2">
             <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-              This feature is flying right now.
+              This suite is flying right now.
             </div>
             <button
               type="button"
               data-testid="flight-start-open-active"
               onClick={() => onOpenFlight(entry.flight!.flightId)}
               className="cl-button self-start px-2.5 py-1 text-xs"
-              style={{ color: 'rgb(56, 189, 248)' }}
+              style={{ color: 'var(--accent)' }}
             >
               Open the running flight →
             </button>
@@ -548,13 +609,14 @@ export function FlightStartDialog({
                 intent → repos → the pipeline — so each section is unmistakably
                 its own step. Repos folds out when a record already froze them. */}
             <div className="flex flex-col">
-              <Step n={1} title="What should this flight test?" active={!hasRecord}>
-                {hasRecord ? (
-                  // Frozen intent (R57): presented, never edited, from here.
+              <Step n={1} title="What should this flight test?">
+                {hasRecord && !editableInputs ? (
+                  // Frozen intent (R57/R75): locked while re-entering
+                  // mid-pipeline — the surviving artifacts were built from it.
                   <blockquote
                     data-testid="flight-start-frozen-intent"
                     className="rounded border-l-2 py-1 pl-2.5 text-[12px]"
-                    style={{ borderColor: 'rgb(56, 189, 248)', color: 'var(--text-secondary)' }}
+                    style={{ borderColor: 'var(--accent)', color: 'var(--text-secondary)' }}
                   >
                     {entry?.prefill.description || '—'}
                   </blockquote>
@@ -562,20 +624,28 @@ export function FlightStartDialog({
                   <Textarea
                     value={description}
                     onChange={setDescription}
-                    minRows={5}
+                    minRows={hasRecord ? 3 : 5}
                     placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
                   />
                 )}
-                {hasRecord && (
+                {hasRecord && !freshMode && (
                   <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                    Repos and intent froze when this flight first started — delete the flight to test different ones.
+                    {editableInputs
+                      ? 'Prefilled from the last flight — editable because you’re starting from the beginning.'
+                      : 'Locked while re-entering mid-pipeline (earlier steps used these inputs) — pick "Start fresh — from the beginning" below to change them.'}
+                  </div>
+                )}
+                {freshMode && (
+                  <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                    Prefilled from the last flight.
                   </div>
                 )}
               </Step>
 
-              {/* R63: no repo section once a record exists — repos are frozen. */}
-              {needsArgs && (
-                <Step n={2} title="Repos" active>
+              {/* Repos show whenever they can be sent: a record-less feature,
+                  or a full restart (R75) — hidden only while frozen. */}
+              {inputsRequired && (
+                <Step n={2} title="Repos" last={freshMode}>
                   <RepoMultiPicker
                     selected={repoPaths}
                     onChange={setRepoPaths}
@@ -583,46 +653,39 @@ export function FlightStartDialog({
                 </Step>
               )}
 
-              <Step n={needsArgs ? 3 : 2} last>
-                {stageMenu}
-              </Step>
+              {!freshMode && (
+                <Step n={inputsRequired ? 3 : 2} last>
+                  {stageMenu}
+                </Step>
+              )}
             </div>
 
             {/* R71/W4: autopilot — on by default; the flight asks only where a
-                wrong guess would do damage (secrets, duplicate feature). */}
+                wrong guess would do damage (secrets, duplicate feature). A
+                launch setting, not a step, so it drops the border-card that
+                competed with the step list above — a hairline ties it to the
+                form and the toggle stays the one accent. */}
             <div
               data-testid="flight-autopilot-toggle"
-              className="flex items-center gap-3 rounded border px-3 py-2.5 transition-colors"
-              style={{
-                borderColor: autopilot
-                  ? 'color-mix(in srgb, var(--accent) 35%, var(--border-default))'
-                  : 'var(--border-default)',
-                background: 'var(--bg-surface)',
-              }}
+              className="mt-1 flex items-center gap-3 border-t pt-3"
+              style={{ borderColor: 'var(--border-default)' }}
             >
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="flex items-center gap-2 text-[12px] font-medium">
-                  Autopilot
-                  <span
-                    className="rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
-                    style={autopilot
-                      ? { color: 'var(--accent)', background: 'color-mix(in srgb, var(--accent) 12%, transparent)' }
-                      : { color: 'var(--text-muted)', background: 'color-mix(in srgb, var(--text-muted) 12%, transparent)' }}
-                  >
-                    {autopilot ? 'On' : 'Off'}
-                  </span>
-                </span>
-                <span className="text-[10.5px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
-                  Safe checkpoints answer themselves — each decision is logged on its stage. The flight still stops for missing secrets or a duplicate feature.
+                <span className="text-[12px] font-medium">Autopilot</span>
+                <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
+                  Safe checkpoints answer themselves — it still stops for missing secrets or a duplicate suite.
                 </span>
               </span>
               <Toggle testId="flight-autopilot-checkbox" value={autopilot} onChange={setAutopilot} />
             </div>
 
             {hasRecord && (
-              <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                Starting resets this flight's stage records; captured artifacts on
-                disk (config, envset, docs, specs) are kept and reused.
+              <div data-testid="flight-start-reset-note" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                {freshMode
+                  ? 'Every step runs again from the beginning — the previous attempt\'s artifacts (docs, specs, envset, run, export) are wiped first.'
+                  : picked === 'continue'
+                    ? 'Continue picks up from the last state — nothing is wiped.'
+                    : 'Restarting from a step wipes that step\'s and every later step\'s artifacts (docs, specs, envset, run, export); earlier steps keep theirs.'}
               </div>
             )}
 
@@ -678,7 +741,7 @@ function PlanningView({
             disabled={busy}
             onClick={onSkip}
             className="cl-button px-2.5 py-1 text-xs"
-            style={{ color: 'rgb(56, 189, 248)' }}
+            style={{ color: 'var(--accent)' }}
           >
             {busy ? 'Starting…' : 'Start a single flight'}
           </button>
@@ -811,14 +874,14 @@ function ProposalView({
                     <input
                       value={f.name}
                       onChange={(e) => patch(i, { name: e.target.value })}
-                      aria-label="Feature name"
+                      aria-label="Suite name"
                       spellCheck={false}
                       className="mb-1.5 w-full rounded border px-2 py-1 text-[12px] outline-none"
                       style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
                     />
                     {conflicted && (
                       <div data-testid={`flight-proposal-conflict-${i}`} className="mb-1.5 text-[10.5px]" style={{ color: 'var(--danger)' }}>
-                        A feature named "{slug}" already exists — rename this one.
+                        A suite named "{slug}" already exists — rename this one.
                       </div>
                     )}
                     <div className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
@@ -928,7 +991,11 @@ function StageRow({
   // The badge carries the most specific mark available: a prior record's
   // status glyph, else the pipeline number, else the caller's icon (▸).
   const badge = icon !== '·' ? icon : step != null ? String(step) : icon
-  const badgeTone = selected ? 'rgb(56, 189, 248)' : iconTone
+  // Status glyphs (and caller icons like ▸) keep their meaningful hue; a bare
+  // pipeline number reads in secondary so the sequence stays legible. Selection
+  // is carried by the row's accent inset bar alone — the badge is never
+  // recoloured for it, so the accent never stacks.
+  const badgeTone = icon !== '·' ? iconTone : 'var(--text-secondary)'
   return (
     <button
       type="button"
@@ -940,19 +1007,22 @@ function StageRow({
       className={`flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors enabled:hover:bg-white/[0.04] ${divider ? 'border-t' : ''}`}
       style={{
         // Neutral surfaces only — the rows sit on the modal's own grey, never
-        // a tinted slab. Selection = the app's selected-grey + one sky bar.
+        // a tinted slab. Selection = the app's selected-grey + one accent bar.
         borderColor: 'var(--border-default)',
         background: selected ? 'var(--bg-selected)' : 'transparent',
-        opacity: disabled ? 0.55 : 1,
+        // Locked rows are NOT dimmed: a blanket opacity multiplied every child
+        // (label, reason, badge) down past readable — and the reason line is
+        // exactly what a locked row exists to say. Locked-ness is carried by the
+        // label dropping to secondary + the not-allowed cursor instead.
         cursor: disabled ? 'not-allowed' : undefined,
-        boxShadow: selected ? 'inset 2px 0 0 rgb(56, 189, 248)' : undefined,
+        boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
       }}
     >
       <span
         aria-hidden="true"
         className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[9.5px] font-semibold"
         style={{
-          borderColor: `color-mix(in srgb, ${badgeTone} 55%, var(--border-default))`,
+          borderColor: `color-mix(in srgb, ${badgeTone} 70%, var(--border-default))`,
           color: badgeTone,
           background: 'transparent',
         }}
@@ -960,11 +1030,11 @@ function StageRow({
         {badge}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-[12.5px] font-medium" style={{ color: disabled ? 'var(--text-muted)' : 'var(--text-primary)' }}>
+        <span className="truncate text-[12.5px] font-medium" style={{ color: disabled ? 'var(--text-secondary)' : 'var(--text-primary)' }}>
           {label}
         </span>
         {sub && (
-          <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+          <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
             {sub}
           </span>
         )}

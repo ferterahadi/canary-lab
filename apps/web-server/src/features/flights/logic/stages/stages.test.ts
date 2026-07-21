@@ -1319,6 +1319,55 @@ describe('docs stage', () => {
     expect(outcome.checkpoint.message).toContain('repos carry no requirement material')
   })
 
+  it('checkpoint response: an empty-handed collector re-parks with a STRUCTURED attempt', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'NOTHING_FOUND: no loyalty flow in either repo' })
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    if (outcome.kind !== 'checkpoint') throw new Error('expected re-park')
+    // The UI keys its verdict band + recommendation flip off this, not off the
+    // prose in `message`.
+    expect(outcome.checkpoint.data).toMatchObject({
+      lastAttempt: { mode: 'collect-repo-docs', outcome: 'empty', reason: 'no loyalty flow in either repo' },
+    })
+  })
+
+  it('checkpoint response: a reason ending in a period is not double-punctuated', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'NOTHING_FOUND: the flow does not exist in either repo.' })
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    if (outcome.kind !== 'checkpoint') throw new Error('expected re-park')
+    expect(outcome.checkpoint.message).toContain('does not exist in either repo.')
+    expect(outcome.checkpoint.message).not.toContain('repo..')
+  })
+
+  it('checkpoint response: a collector that writes nothing and says nothing reports no-output', async () => {
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'I had a look around.' })
+    const adapter = docsStage(deps({ spawnAgent }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    if (outcome.kind !== 'checkpoint') throw new Error('expected re-park')
+    expect(outcome.checkpoint.data).toMatchObject({ lastAttempt: { outcome: 'no-output' } })
+  })
+
+  it('a first visit carries no lastAttempt — the agent path stays the recommendation', async () => {
+    const adapter = docsStage(deps())
+    const { ctx } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect((parked.checkpoint.data as { lastAttempt?: unknown }).lastAttempt).toBeUndefined()
+  })
+
   it('checkpoint response: description-only settles immediately', async () => {
     const adapter = docsStage(deps())
     const { ctx, setStage } = ctxFor(manifest())
@@ -2751,5 +2800,436 @@ describe('evaluation-export stage', () => {
     setStage('evaluation-export', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, {})
     expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'export-mode' } })
+  })
+})
+
+describe('stage reset (R78 restart wipe)', () => {
+  type PublishedEvent = { type: string; feature?: string; taskId?: string }
+  function eventSink(): { events: PublishedEvent[]; publisher: { publish: (e: PublishedEvent) => void } } {
+    const events: PublishedEvent[] = []
+    return { events, publisher: { publish: (e) => events.push(e) } }
+  }
+
+  describe('scaffold.reset', () => {
+    it('deletes the feature dir + marker when the marker proves this flight created it', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const featureDir = path.join(featuresDir, 'checkout')
+      const { ctx } = ctxFor(manifest())
+      fs.mkdirSync(ctx.flightDir, { recursive: true })
+      fs.writeFileSync(path.join(ctx.flightDir, 'scaffolded-feature'), 'checkout')
+      const { events, publisher } = eventSink()
+
+      await scaffoldStage(deps({ workspaceEvents: publisher })).reset!(ctx)
+
+      expect(fs.existsSync(featureDir)).toBe(false)
+      expect(fs.existsSync(path.join(ctx.flightDir, 'scaffolded-feature'))).toBe(false)
+      expect(events).toContainEqual({ type: 'feature-deleted', feature: 'checkout' })
+    })
+
+    it('leaves a PRE-EXISTING feature alone (no marker — the enhance path)', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const featureDir = path.join(featuresDir, 'checkout')
+      const { ctx } = ctxFor(manifest())
+      const { events, publisher } = eventSink()
+
+      await scaffoldStage(deps({ workspaceEvents: publisher })).reset!(ctx)
+
+      expect(fs.existsSync(featureDir)).toBe(true)
+      expect(events).toEqual([])
+    })
+
+    it('leaves a feature alone when the marker names a DIFFERENT feature', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const { ctx } = ctxFor(manifest())
+      fs.mkdirSync(ctx.flightDir, { recursive: true })
+      fs.writeFileSync(path.join(ctx.flightDir, 'scaffolded-feature'), 'other-feature')
+
+      await scaffoldStage(deps()).reset!(ctx)
+
+      expect(fs.existsSync(path.join(featuresDir, 'checkout'))).toBe(true)
+    })
+  })
+
+  describe('env-capture.reset', () => {
+    it("removes the captured envset for the flight's env", async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const envsetDir = path.join(featuresDir, 'checkout', 'envsets', 'local')
+      fs.mkdirSync(envsetDir, { recursive: true })
+      fs.writeFileSync(path.join(envsetDir, '.env'), 'API_KEY=secret\n')
+      const { events, publisher } = eventSink()
+
+      await envCaptureStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      expect(fs.existsSync(envsetDir)).toBe(false)
+      expect(events).toContainEqual({ type: 'envsets-changed', feature: 'checkout' })
+    })
+
+    it('is a no-op when the feature dir is already gone', async () => {
+      const { events, publisher } = eventSink()
+      await envCaptureStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+      expect(events).toEqual([])
+    })
+  })
+
+  describe('docs.reset', () => {
+    it('wipes the ENTIRE docs dir — user files, symlinks, generated artifacts (user ruling)', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const docsDir = path.join(featuresDir, 'checkout', 'docs')
+      fs.mkdirSync(docsDir, { recursive: true })
+      const userPrd = path.join(tmpDir, 'my-own-prd.md')
+      fs.writeFileSync(userPrd, '# my prd\n')
+      fs.writeFileSync(path.join(docsDir, 'hand-added.md'), '# notes\n')
+      fs.symlinkSync(userPrd, path.join(docsDir, 'my-own-prd.md'))
+      fs.writeFileSync(path.join(docsDir, '_prd-summary.json'), '{}')
+      const { events, publisher } = eventSink()
+
+      await docsStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      expect(fs.existsSync(docsDir)).toBe(false)
+      // The symlink TARGET (the user's own file) is never touched.
+      expect(fs.existsSync(userPrd)).toBe(true)
+      expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
+    })
+
+    it('is a no-op when there is no docs dir', async () => {
+      const { events, publisher } = eventSink()
+      await docsStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+      expect(events).toEqual([])
+    })
+  })
+
+  describe('prd-summary.reset', () => {
+    it('clears the PRD summary artifacts but keeps user docs', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const docsDir = path.join(featuresDir, 'checkout', 'docs')
+      fs.mkdirSync(docsDir, { recursive: true })
+      fs.writeFileSync(path.join(docsDir, 'hand-added.md'), '# notes\n')
+      fs.writeFileSync(path.join(docsDir, '_prd-summary.json'), '{"requirements":[]}')
+      fs.writeFileSync(path.join(docsDir, '_prd-summary.md'), '# summary\n')
+      const { events, publisher } = eventSink()
+
+      await prdSummaryStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      expect(fs.existsSync(path.join(docsDir, '_prd-summary.json'))).toBe(false)
+      expect(fs.existsSync(path.join(docsDir, '_prd-summary.md'))).toBe(false)
+      expect(fs.existsSync(path.join(docsDir, 'hand-added.md'))).toBe(true)
+      expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
+    })
+
+    it('is a no-op when the feature is already gone (redo wiped it earlier in the pass)', async () => {
+      await expect(prdSummaryStage(deps()).reset!(ctxFor(manifest()).ctx)).resolves.toBeUndefined()
+    })
+  })
+
+  describe('specs-coverage.reset', () => {
+    it('deletes every authored spec (incl. the seed) and the coverage state — but keeps the PRD summary', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const featureDir = path.join(featuresDir, 'checkout')
+      const e2eDir = path.join(featureDir, 'e2e')
+      fs.mkdirSync(e2eDir, { recursive: true })
+      fs.writeFileSync(path.join(e2eDir, 'authored.spec.ts'), '// spec\n')
+      const docsDir = path.join(featureDir, 'docs')
+      fs.mkdirSync(docsDir, { recursive: true })
+      fs.writeFileSync(path.join(docsDir, '_coverage-state.json'), '{}')
+      fs.writeFileSync(path.join(docsDir, '_coverage-mappings.json'), '{}')
+      fs.writeFileSync(path.join(docsDir, '_prd-summary.json'), '{"requirements":[]}')
+      const { events, publisher } = eventSink()
+
+      await specsCoverageStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      const specs = fs.existsSync(e2eDir) ? fs.readdirSync(e2eDir).filter((f) => f.endsWith('.spec.ts')) : []
+      expect(specs).toEqual([])
+      expect(fs.existsSync(path.join(docsDir, '_coverage-state.json'))).toBe(false)
+      expect(fs.existsSync(path.join(docsDir, '_coverage-mappings.json'))).toBe(false)
+      // An EARLIER stage's artifact — a restart at specs-coverage must not touch it.
+      expect(fs.existsSync(path.join(docsDir, '_prd-summary.json'))).toBe(true)
+      expect(events).toContainEqual({ type: 'tests-changed', feature: 'checkout' })
+      expect(events).toContainEqual({ type: 'coverage-changed', feature: 'checkout' })
+    })
+
+    it('is a no-op when the feature dir is already gone', async () => {
+      const { events, publisher } = eventSink()
+      await specsCoverageStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+      expect(events).toEqual([])
+    })
+  })
+
+  describe('portify.reset', () => {
+    it('restores the pre-portify config from its snapshot and drops the overlay', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const featureDir = path.join(featuresDir, 'checkout')
+      const original = fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf-8')
+      const overlayDir = path.join(featureDir, 'portify')
+      fs.mkdirSync(overlayDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(overlayDir, 'meta.json'),
+        JSON.stringify({ version: 1, repos: [{ name: 'app', patchFile: 'app.patch', baseCommit: 'abc' }] }),
+      )
+      fs.writeFileSync(path.join(overlayDir, 'original-config.snapshot'), original)
+      fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), original + '\n// portified\n')
+      const { events, publisher } = eventSink()
+
+      await portifyStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf-8')).toBe(original)
+      expect(fs.existsSync(overlayDir)).toBe(false)
+      expect(events).toContainEqual({ type: 'features-changed' })
+    })
+
+    it('is a no-op when no overlay exists', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const featureDir = path.join(featuresDir, 'checkout')
+      const original = fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf-8')
+      const { events, publisher } = eventSink()
+
+      await portifyStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf-8')).toBe(original)
+      expect(events).toEqual([])
+    })
+  })
+
+  describe('run.reset', () => {
+    it('aborts a live run, then deletes the record through the runs route', async () => {
+      let aborted = false
+      const calls: InjectCall[] = []
+      const inject = makeInject((c) => {
+        if (c.method === 'GET' && c.url === '/api/runs/r1') {
+          return { statusCode: 200, body: { manifest: { status: aborted ? 'aborted' : 'running' } } }
+        }
+        if (c.method === 'POST' && c.url === '/api/runs/r1/abort') {
+          aborted = true
+          return { statusCode: 200, body: {} }
+        }
+        if (c.method === 'DELETE' && c.url === '/api/runs/r1') return { statusCode: 204, body: '' }
+        return undefined
+      }, calls)
+
+      await runStage(deps({ inject })).reset!(ctxFor(manifest({ links: { runId: 'r1' } })).ctx)
+
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs/r1/abort')).toBe(true)
+      expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/runs/r1')).toBe(true)
+    })
+
+    it('deletes a terminal run record without aborting', async () => {
+      const calls: InjectCall[] = []
+      const inject = makeInject((c) => {
+        if (c.method === 'GET' && c.url === '/api/runs/r1') {
+          return { statusCode: 200, body: { manifest: { status: 'passed' } } }
+        }
+        if (c.method === 'DELETE' && c.url === '/api/runs/r1') return { statusCode: 204, body: '' }
+        return undefined
+      }, calls)
+
+      await runStage(deps({ inject })).reset!(ctxFor(manifest({ links: { runId: 'r1' } })).ctx)
+
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs/r1/abort')).toBe(false)
+      expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/runs/r1')).toBe(true)
+    })
+
+    it('is a no-op without a runId link', async () => {
+      const calls: InjectCall[] = []
+      await runStage(deps({ inject: makeInject(() => undefined, calls) })).reset!(ctxFor(manifest()).ctx)
+      expect(calls).toEqual([])
+    })
+  })
+
+  describe('evaluation-export.reset', () => {
+    it('deletes the export task through the evaluation route', async () => {
+      const calls: InjectCall[] = []
+      const inject = makeInject((c) => {
+        if (c.method === 'DELETE' && c.url === '/api/evaluation-exports/t1') return { statusCode: 204, body: '' }
+        return undefined
+      }, calls)
+
+      await evaluationExportStage(deps({ inject })).reset!(
+        ctxFor(manifest({ links: { runId: 'r1', evaluationTaskId: 't1' } })).ctx,
+      )
+
+      expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/evaluation-exports/t1')).toBe(true)
+    })
+
+    it('is a no-op without an evaluationTaskId link', async () => {
+      const calls: InjectCall[] = []
+      await evaluationExportStage(deps({ inject: makeInject(() => undefined, calls) })).reset!(
+        ctxFor(manifest({ links: { runId: 'r1' } })).ctx,
+      )
+      expect(calls).toEqual([])
+    })
+  })
+})
+
+describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
+  it("run 'rerun' re-attaches to a still-active rerun instead of double-starting into its own repo lock", async () => {
+    let reads = 0
+    const calls: InjectCall[] = []
+    const inject = makeInject((c) => {
+      if (c.method === 'GET' && c.url === '/api/runs/r2') {
+        reads += 1
+        // First read (the replay guard) sees it live; the verdict poll then
+        // finds it terminal so the test settles fast.
+        return { statusCode: 200, body: { manifest: { status: reads === 1 ? 'running' : 'passed', healCycles: 0 } } }
+      }
+      return undefined
+    }, calls)
+    const { ctx } = ctxFor(manifest({ links: { runId: 'r2' } }))
+
+    const outcome = await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'rerun' })
+
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'r2', status: 'passed' } })
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs')).toBe(false)
+  })
+
+  it("run 'rerun' still force-starts a new run when the linked run is terminal", async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((c) => {
+      if (c.method === 'GET' && c.url === '/api/runs/r-old') {
+        return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 1 } } }
+      }
+      if (c.method === 'POST' && c.url === '/api/runs') {
+        return { statusCode: 201, body: { runId: 'r-new' } }
+      }
+      if (c.method === 'GET' && c.url === '/api/runs/r-new') {
+        return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0 } } }
+      }
+      return undefined
+    }, calls)
+    const { ctx } = ctxFor(manifest({ links: { runId: 'r-old' } }))
+
+    const outcome = await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'rerun' })
+
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'r-new', status: 'passed' } })
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs')).toBe(true)
+  })
+
+  it('evaluation-export re-attaches to its still-running task on a replayed answer instead of starting a duplicate', async () => {
+    const m = manifest({ links: { runId: 'r1', evaluationTaskId: 'eval-live' } })
+    const { ctx } = ctxFor(m)
+    // A live task on disk, already download-ready so the poll settles at once.
+    writeEvaluationExportTask(logsDir, {
+      taskId: 'eval-live',
+      runId: 'r1',
+      feature: 'checkout',
+      mode: 'raw',
+      status: 'completed',
+      downloadReady: true,
+      archiveBase: 'export-r1',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+    } as never)
+    const exportDir = path.join(logsDir, 'evaluation-exports', 'eval-live')
+    fs.mkdirSync(exportDir, { recursive: true })
+    fs.writeFileSync(path.join(exportDir, 'export.zip'), 'zip')
+    const calls: InjectCall[] = []
+
+    const outcome = await evaluationExportStage(deps({ inject: makeInject(() => undefined, calls) })).onCheckpointResponse!(
+      ctx,
+      { choice: 'raw' },
+    )
+
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { taskId: 'eval-live' } })
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([])
+  })
+})
+
+describe('flight agent selection (R79)', () => {
+  const CODEX_SUMMARY = JSON.stringify({
+    generatedAt: '2026-01-01T00:00:00Z',
+    requirements: [{ id: 'R1', title: 't', text: 'x', pathTypes: ['happy'], variants: [] }],
+  })
+  const LEDGER = (pct: number) => ({
+    feature: 'checkout',
+    requirements: [],
+    tests: [],
+    totals: { total: 1, covered: pct >= 100 ? 1 : 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+    coveragePct: pct,
+    mappedPct: pct,
+    orphanRequirementIds: [],
+    orphanTestNames: [],
+  })
+
+  const ORIGINAL_CODEX_BIN = process.env.CANARY_LAB_CODEX_BIN
+  afterEach(() => {
+    if (ORIGINAL_CODEX_BIN === undefined) delete process.env.CANARY_LAB_CODEX_BIN
+    else process.env.CANARY_LAB_CODEX_BIN = ORIGINAL_CODEX_BIN
+  })
+
+  it('defaultSpawnAgent spawns codex (exec, prompt on stdin) and records a codex session ref', async () => {
+    const script = path.join(tmpDir, 'fake-codex.sh')
+    fs.writeFileSync(script, '#!/bin/sh\ncat > /dev/null\necho "codex answer"\n')
+    fs.chmodSync(script, 0o755)
+    process.env.CANARY_LAB_CODEX_BIN = script
+    const stageDir = path.join(tmpDir, 'stage-codex')
+    fs.mkdirSync(stageDir, { recursive: true })
+
+    const result = await defaultSpawnAgent({ prompt: 'do it', cwd: tmpDir, stageDir, agent: 'codex' })
+
+    expect(result.text.trim()).toBe('codex answer')
+    const ref = JSON.parse(fs.readFileSync(path.join(stageDir, 'agent-session.json'), 'utf-8'))
+    expect(ref.activeAgent).toBe('codex')
+  })
+
+  it('scout passes the flight agent to the spawner', async () => {
+    const agents: Array<string | undefined> = []
+    const d = deps({
+      spawnAgent: async (o) => {
+        agents.push(o.agent)
+        return { text: JSON.stringify({ configSource: VALID_CONFIG(), envFiles: [] }) }
+      },
+    })
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, agent: 'codex' } })
+    await scoutStage(d).run(ctxFor(m).ctx)
+    expect(agents).toEqual(['codex'])
+  })
+
+  it('docs collector passes the flight agent to the spawner', async () => {
+    const agents: Array<string | undefined> = []
+    const d = deps({ spawnAgent: async (o) => { agents.push(o.agent); return { text: 'NOTHING_FOUND: nope' } } })
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, agent: 'codex' } })
+    const { ctx, setStage } = ctxFor(m)
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+    setStage('docs', { status: 'waiting-for-approval', checkpoint: { kind: 'prd-source', message: 'q', options: ['collect-repo-docs'] } })
+    await docsStage(d).onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
+    expect(agents).toEqual(['codex'])
+  })
+
+  it('prd-summary forwards the flight agent as the engine adapter', async () => {
+    const adapters: Array<string | undefined> = []
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+    const d = deps({
+      coverage: { regenerate: (async (args: { adapter?: string }) => { adapters.push(args.adapter); return {} }) as never },
+    })
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, agent: 'codex' } })
+    await prdSummaryStage(d).run(ctxFor(m).ctx)
+    expect(adapters).toEqual(['codex'])
+  })
+
+  it('specs loop forwards the flight agent to both the author spawner and the mapping engine', async () => {
+    const agents: Array<string | undefined> = []
+    const adapters: Array<string | undefined> = []
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+    fs.mkdirSync(path.join(featuresDir, 'checkout', 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), CODEX_SUMMARY)
+    const ledgers = [LEDGER(0), LEDGER(100)]
+    const AUTHORED_SPEC = `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'\n\ntest('checkout @req-R1 @path-happy', async ({ page }) => { expect(1).toBe(1) })\n`
+    const d = deps({
+      spawnAgent: async (o) => {
+        agents.push(o.agent)
+        const e2eDir = path.join(featuresDir, 'checkout', 'e2e')
+        fs.mkdirSync(e2eDir, { recursive: true })
+        fs.writeFileSync(path.join(e2eDir, 'checkout.spec.ts'), AUTHORED_SPEC)
+        return { text: 'wrote e2e/checkout.spec.ts' }
+      },
+      validateSpecs: async () => ({ ok: true }),
+      coverage: {
+        compute: (() => (ledgers.shift() ?? LEDGER(100))) as never,
+        runEngine: (async (args: { adapter?: string }) => { adapters.push(args.adapter); return {} }) as never,
+      },
+    })
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, agent: 'codex' } })
+    const outcome = await specsCoverageStage(d).run(ctxFor(m).ctx)
+    expect(outcome).toMatchObject({ kind: 'done' })
+    expect(agents).toEqual(['codex'])
+    expect(adapters).toEqual(['codex'])
   })
 })

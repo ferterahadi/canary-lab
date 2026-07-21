@@ -1,7 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
-import { computeFeatureCoverage, runCoverageEngine } from '../../../coverage/logic/coverage/service'
+import { computeFeatureCoverage, LEGACY_MAPPINGS_JSON, runCoverageEngine } from '../../../coverage/logic/coverage/service'
+import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
 import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
 import { applyExternalDraftFiles } from '../../../config/logic/feature-authoring'
 import { listPlaywrightTests } from '../../../runs/logic/playwright-list'
@@ -209,6 +210,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         stageDir: path.join(ctx.flightDir, 'specs-coverage'),
         onChunk: ctx.appendLog,
         signal: ctx.signal,
+        agent: m.opts.agent,
       })
       // The agent edited <featureDir>/e2e/*.spec.ts in place; re-read what
       // landed on disk and gate it through the same draft validation as the
@@ -242,6 +244,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         featuresDir: deps.featuresDir,
         logsDir: deps.logsDir,
         feature: m.feature,
+        adapter: m.opts.agent,
         cwd: deps.projectRoot,
         onOutput: ctx.appendLog,
         onAgentSession: (session) => {
@@ -281,6 +284,30 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         return { kind: 'done', evidence: { ...(ledgerEvidence(ledger) as object), acceptedPartial: true } }
       }
       return loop(ctx)
+    },
+    // R78 restart wipe: every spec goes — the scaffold's seed spec included,
+    // re-running authoring regenerates it — plus the coverage state the mapping
+    // agent produced. The PRD summary is the PREVIOUS stage's artifact and
+    // survives a restart that enters here.
+    async reset(ctx) {
+      const m = ctx.manifest()
+      const featureDir = featureDirFor(deps, m.feature)
+      if (!fs.existsSync(featureDir)) return
+      const e2eDir = path.join(featureDir, 'e2e')
+      let wipedSpecs = false
+      if (fs.existsSync(e2eDir)) {
+        for (const entry of fs.readdirSync(e2eDir)) {
+          if (!entry.endsWith('.spec.ts')) continue
+          fs.rmSync(path.join(e2eDir, entry), { force: true })
+          wipedSpecs = true
+        }
+      }
+      const docsDir = path.join(featureDir, 'docs')
+      for (const name of [COVERAGE_STATE_JSON, LEGACY_MAPPINGS_JSON]) {
+        fs.rmSync(path.join(docsDir, name), { force: true })
+      }
+      if (wipedSpecs) publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: m.feature })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     },
   }
 }

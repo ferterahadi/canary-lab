@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
+import { createFeatureSkeleton, deleteFeature } from '../../../config/logic/feature-authoring'
 import { readFeatureConfig } from '../../../config/logic/config-ast'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
@@ -178,6 +178,29 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
         return { kind: 'failed', error: 'config rejected at the approval checkpoint' }
       }
       return { kind: 'checkpoint', checkpoint: approvalCheckpoint(ctx) }
+    },
+    // R78 restart wipe. Guard: the whole feature dir goes ONLY when the marker
+    // proves THIS flight scaffolded it — a pre-existing suite (the similarity →
+    // enhance path) must survive a restart; its flight-collected contents are
+    // wiped by the later stages' own resets instead.
+    async reset(ctx) {
+      const markerPath = path.join(ctx.flightDir, 'scaffolded-feature')
+      let marker: string | null = null
+      try {
+        marker = fs.readFileSync(markerPath, 'utf-8').trim()
+      } catch {
+        /* no marker — not ours to delete */
+      }
+      if (marker && marker === ctx.manifest().feature) {
+        const deleted = deleteFeature(
+          { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+          { feature: marker, confirmName: marker },
+        )
+        if (deleted.ok) {
+          publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature: marker })
+        }
+      }
+      fs.rmSync(markerPath, { force: true })
     },
   }
 }

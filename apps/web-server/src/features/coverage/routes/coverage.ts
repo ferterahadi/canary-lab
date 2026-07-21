@@ -18,7 +18,7 @@ import { extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
 import { loadFeatures } from '../../config/logic/feature-loader'
 import {
   findClaudeLogBySessionId,
-  loadAgentSession,
+  buildAgentSessionResponse,
   locateCodexSessionLog,
   type AgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
@@ -295,8 +295,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       located = locateCodexSessionLog(deps.projectRoot, manifest.startedAt)
     }
     if (!located) return null
-    const { events, meta } = loadAgentSession(located)
-    return { agent: located.agent, sessionId: located.sessionId, model: meta.model, effort: meta.effort, events }
+    return buildAgentSessionResponse(located)
   })
 
   app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter } | undefined }>(

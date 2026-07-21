@@ -119,6 +119,31 @@ export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexE
 }
 
 /**
+ * Follow a suite rename into run history. The feature name IS the suite's
+ * identity, so it is stamped on both the index row and the run's own manifest —
+ * a rename that touches only one of them splits the history in half. Rewrites
+ * both, leaves other features alone, and returns how many runs moved.
+ * A missing run directory is not an error (a trimmed/cleaned run still has an
+ * index row that must follow the name).
+ */
+export function renameRunFeature(logsDir: string, from: string, to: string): number {
+  if (from === to) return 0
+  const entries = readRunsIndex(logsDir)
+  const matching = entries.filter((e) => e.feature === from)
+  if (matching.length === 0) return 0
+  writeRunsIndex(
+    logsDir,
+    entries.map((e) => (e.feature === from ? { ...e, feature: to } : e)),
+  )
+  for (const entry of matching) {
+    const manifestPath = path.join(runDirFor(logsDir, entry.runId), 'manifest.json')
+    if (!fs.existsSync(manifestPath)) continue
+    updateManifest(manifestPath, { feature: to })
+  }
+  return matching.length
+}
+
+/**
  * One-shot cleanup for runs left in `running`/`healing` state by a previous
  * server process that crashed without writing a final status. Intended to run
  * once at server boot — never on a hot read path. A run is reaped only when

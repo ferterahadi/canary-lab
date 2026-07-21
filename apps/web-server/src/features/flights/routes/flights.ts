@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import {
-  loadAgentSession,
+  buildAgentSessionResponse,
   resolveWorkflowAgentRef,
 } from '../../agent-sessions/logic/agent-session-log'
 import { FlightRunStore, type FlightStore } from '../logic/store'
@@ -14,6 +14,7 @@ import {
   FlightStageEntryError,
   startFlight,
   resumeFlight,
+  setFlightAutopilot,
   respondToFlightCheckpoint,
   abortFlight,
   pauseFlight,
@@ -133,6 +134,8 @@ export function executePlannedLaunch(
     yolo: boolean
     /** Absent = autopilot on (R71/W4). */
     autopilot?: boolean
+    /** R79: the CLI conducting every launched flight. Absent = claude. */
+    agent?: 'claude' | 'codex'
   },
   deps: PlannedLaunchDeps,
 ): PlanAutoLaunchOutcome {
@@ -150,6 +153,7 @@ export function executePlannedLaunch(
     coverageTarget: args.coverageTarget,
     yolo: args.yolo,
     ...(args.autopilot === false ? { autopilot: false } : {}),
+    ...(args.agent ? { agent: args.agent } : {}),
     // The proposal step already answered "new feature over this repo?" for
     // every sibling — similarity must not re-ask (or yolo-rerun the first).
     plannedSplit: true,
@@ -286,6 +290,9 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           yolo?: boolean
           /** Absent = on; only an explicit false opts out (R71/W4). */
           autopilot?: boolean
+          /** R79: which CLI conducts the flight's stage agents; sticky per
+           *  record (jump/continue reuse the stored one). Absent → claude. */
+          agent?: string
           /** continue | redo | jump — required when the feature already has a
            *  flight record (409 flight_exists_requires_choice otherwise). */
           mode?: string
@@ -353,6 +360,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
       ...(body.base ? { base: body.base } : {}),
       yolo: body.yolo === true,
       ...(body.autopilot === false ? { autopilot: false } : {}),
+      ...(body.agent === 'claude' || body.agent === 'codex' ? { agent: body.agent } : {}),
     }
 
     try {
@@ -439,6 +447,26 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     }
   })
 
+  // R78: autopilot is a live preference, not a start-time-only option — flip it
+  // on any flight, in any status. Takes effect at the NEXT checkpoint (the drive
+  // re-reads opts); a checkpoint already parked stays parked for the human.
+  app.post<{ Params: { id: string }; Body: { autopilot?: boolean } | undefined }>(
+    '/api/flights/:id/autopilot',
+    async (req, reply) => {
+      if (typeof req.body?.autopilot !== 'boolean') {
+        reply.code(400)
+        return { error: 'autopilot must be a boolean' }
+      }
+      try {
+        return setFlightAutopilot(req.params.id, req.body.autopilot, conductorDeps)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        reply.code(message.includes('not found') ? 404 : 409)
+        return { error: message }
+      }
+    },
+  )
+
   // Re-fly this record using its own stored intent/repos/options (no
   // client-side body reconstruction). No body → from stage 1 ("start over");
   // fromStage → Continue → "from a step…", with the optional "what went wrong"
@@ -485,7 +513,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
   // and launch creates one flight per feature — the first running, the rest
   // parked `queued` for the conductor's sequential drain.
 
-  app.post<{ Body: { repoPaths?: string[]; description?: string; autopilot?: boolean } | undefined }>(
+  app.post<{ Body: { repoPaths?: string[]; description?: string; autopilot?: boolean; agent?: string } | undefined }>(
     '/api/flights/plan-features',
     async (req, reply) => {
       const body = req.body ?? {}
@@ -512,6 +540,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           repoPaths: resolved,
           description: body.description.trim(),
           ...(body.autopilot === false ? { autopilot: false } : {}),
+          ...(body.agent === 'claude' || body.agent === 'codex' ? { agent: body.agent } : {}),
         },
         planStore,
         {
@@ -530,6 +559,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
                 coverageTarget: 100,
                 yolo: false,
                 ...(settled.autopilot === false ? { autopilot: false } : {}),
+                ...(settled.agent ? { agent: settled.agent } : {}),
               },
               { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
             ),
@@ -574,8 +604,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         reply.code(404)
         return { reason: 'no-session' }
       }
-      const { events, meta } = loadAgentSession(ref)
-      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+      return buildAgentSessionResponse(ref)
     },
   )
 
@@ -589,6 +618,8 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
           yolo?: boolean
           /** Absent = the task's stored choice; explicit false opts out. */
           autopilot?: boolean
+          /** Absent = the task's stored choice. */
+          agent?: string
         }
       | undefined
   }>('/api/flights/plan-features/:taskId/launch', async (req, reply) => {
@@ -631,6 +662,9 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         coverageTarget: body.coverageTarget ?? 100,
         yolo: body.yolo === true,
         ...((body.autopilot ?? task.autopilot) === false ? { autopilot: false } : {}),
+        ...((body.agent ?? task.agent) === 'claude' || (body.agent ?? task.agent) === 'codex'
+          ? { agent: (body.agent ?? task.agent) as 'claude' | 'codex' }
+          : {}),
       },
       { store, featuresDir: deps.featuresDir, conductorDeps, workspaceEvents: deps.workspaceEvents },
     )
@@ -665,8 +699,7 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
         reply.code(404)
         return { reason: 'no-session' }
       }
-      const { events, meta } = loadAgentSession(ref)
-      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+      return buildAgentSessionResponse(ref)
     },
   )
 

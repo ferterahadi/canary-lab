@@ -620,19 +620,56 @@ export function FolderIcon() {
   )
 }
 
-/** Close on Escape — the one behavior every dialog/panel in the app wants.
+// Layered Escape: a single document listener dispatches Escape to only the
+// innermost open layer (the most recently activated), so a dialog or menu
+// opened over a page swallows the key instead of both closing on one press.
+// Layers register in mount/activation order; the top of the stack wins, and
+// once it pops the layer beneath takes over on the next press. Every hook user
+// (Modal, the flight page, its header menus, …) shares this ONE stack, so
+// there is never a duplicate `keydown` listener racing another.
+const escapeLayers: Array<() => void> = []
+let escapeListenerBound = false
+
+function dispatchEscape(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  const top = escapeLayers[escapeLayers.length - 1]
+  if (top) top()
+}
+
+function pushEscapeLayer(handler: () => void): () => void {
+  escapeLayers.push(handler)
+  if (!escapeListenerBound) {
+    document.addEventListener('keydown', dispatchEscape)
+    escapeListenerBound = true
+  }
+  return () => {
+    const i = escapeLayers.lastIndexOf(handler)
+    if (i >= 0) escapeLayers.splice(i, 1)
+    if (escapeLayers.length === 0 && escapeListenerBound) {
+      document.removeEventListener('keydown', dispatchEscape)
+      escapeListenerBound = false
+    }
+  }
+}
+
+/** Close on Escape — the one behavior every dialog/panel/menu in the app wants.
  *  Shared so it's implemented once instead of a fresh `keydown` effect per
- *  dialog (it had drifted to 6+ near-identical copies). Components that
- *  unmount on close (most dialogs) can omit `enabled`; components that stay
- *  mounted and toggle visibility internally (e.g. `Modal`) must pass their
- *  own `open` flag so the listener isn't live while hidden. */
+ *  dialog (it had drifted to 6+ near-identical copies), AND so nested layers
+ *  cooperate: the innermost open layer handles Escape and the ones beneath it
+ *  stay put (a dialog over the flight page closes only the dialog, not both).
+ *  The layer registers once while `enabled`, independent of `onClose`'s
+ *  identity, so a re-render never reshuffles the stack; the latest `onClose` is
+ *  always the one invoked. Components that unmount on close (most dialogs) can
+ *  omit `enabled`; components that stay mounted and toggle visibility (e.g.
+ *  `Modal`, a header dropdown) must pass their own `open` flag so their layer
+ *  isn't live while hidden. */
 export function useEscapeToClose(onClose: () => void, enabled = true): void {
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     if (!enabled) return
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose, enabled])
+    return pushEscapeLayer(() => onCloseRef.current())
+  }, [enabled])
 }
 
 export function Modal({

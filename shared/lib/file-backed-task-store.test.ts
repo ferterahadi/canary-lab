@@ -21,6 +21,8 @@ function makeStore(logsDir: string) {
     idOf: (r) => r.id,
     statusOf: (r) => r.status,
     indexEntryOf: (r) => ({ id: r.id, status: r.status, feature: r.feature, createdAt: r.createdAt }),
+    featureOf: (r) => r.feature,
+    withFeature: (r, feature) => ({ ...r, feature }),
     allowedTransitions: { created: ['running'], running: ['done', 'failed'], done: [], failed: [] },
     sortNewestFirst: true,
     reconcile: {
@@ -189,6 +191,62 @@ describe('FileBackedTaskStore', () => {
     rows.push({ jobId: 'legacy', status: 'done', feature: 'f' })
     fs.writeFileSync(indexPath, JSON.stringify(rows))
     expect(() => store.list()).not.toThrow()
+  })
+
+  describe('renameFeature', () => {
+    it('rewrites the feature on every matching record and index row, leaving others alone', () => {
+      const store = makeStore(dir)
+      store.save({ id: 'a', status: 'done', feature: 'old', createdAt: '2026-01-01' })
+      store.save({ id: 'b', status: 'done', feature: 'other', createdAt: '2026-01-02' })
+      store.save({ id: 'c', status: 'done', feature: 'old', createdAt: '2026-01-03' })
+
+      expect(store.renameFeature('old', 'new')).toBe(2)
+
+      expect(store.get('a')).toMatchObject({ feature: 'new' })
+      expect(store.get('c')).toMatchObject({ feature: 'new' })
+      expect(store.get('b')).toMatchObject({ feature: 'other' })
+      expect(store.list().map((e) => e.feature).sort()).toEqual(['new', 'new', 'other'])
+    })
+
+    it('is a no-op when the store carries no feature, or from === to', () => {
+      const featureless = new FileBackedTaskStore<Rec>({
+        logsDir: dir,
+        dirName: 'featureless',
+        recordFile: 'record.json',
+        idOf: (r) => r.id,
+        indexEntryOf: (r) => ({ id: r.id, createdAt: r.createdAt }),
+      })
+      featureless.save({ id: 'a', status: 'done', feature: 'old', createdAt: '2026-01-01' })
+      expect(featureless.renameFeature('old', 'new')).toBe(0)
+      expect(featureless.get('a')).toMatchObject({ feature: 'old' })
+
+      const store = makeStore(dir)
+      store.save({ id: 'a', status: 'done', feature: 'old', createdAt: '2026-01-01' })
+      expect(store.renameFeature('old', 'old')).toBe(0)
+    })
+
+    it('moves the record directory (sidecars included) when the id IS the feature name', () => {
+      // dirty-specs keys its record BY the feature — renaming re-homes the row.
+      const keyed = new FileBackedTaskStore<Rec>({
+        logsDir: dir,
+        dirName: 'keyed',
+        recordFile: 'record.json',
+        idOf: (r) => r.feature,
+        indexEntryOf: (r) => ({ id: r.feature, feature: r.feature, createdAt: r.createdAt }),
+        featureOf: (r) => r.feature,
+        withFeature: (r, feature) => ({ ...r, id: feature, feature }),
+      })
+      keyed.save({ id: 'old', status: 'done', feature: 'old', createdAt: '2026-01-01' })
+      fs.writeFileSync(path.join(keyed.recordDir('old'), 'sidecar.txt'), 'keep me')
+
+      expect(keyed.renameFeature('old', 'new')).toBe(1)
+
+      expect(keyed.get('new')).toMatchObject({ feature: 'new' })
+      expect(keyed.get('old')).toBeNull()
+      expect(fs.existsSync(keyed.recordDir('old'))).toBe(false)
+      expect(fs.readFileSync(path.join(keyed.recordDir('new'), 'sidecar.txt'), 'utf8')).toBe('keep me')
+      expect(keyed.list().map((e) => e.id)).toEqual(['new'])
+    })
   })
 
   it('a throwing listener does not break persistence', () => {

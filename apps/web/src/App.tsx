@@ -42,7 +42,7 @@ export function App() {
     selectedFlightId, setSelectedFlightId,
     configFor, setConfigFor,
     verifyOpen, setVerifyOpen,
-    flightStartFor, setFlightStartFor,
+    flightStartFor, flightStartFresh, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     draftFor, setDraftFor,
     resumePlanTaskId, setResumePlanTaskId,
@@ -74,6 +74,10 @@ export function App() {
     selectedFeatureRef,
     selectedRunIdRef,
     pendingRunSelectionRef,
+    // A rename anywhere (this tab, another tab, an MCP client) must move the
+    // open config dialog with the suite instead of leaving it on a name the
+    // server no longer resolves.
+    onFeatureRenamed: (from, to) => { if (configFor === from) setConfigFor(to) },
   })
 
   const { entry: globalActiveRunEntry, detail: activeRunDetail } = useGlobalActiveRun()
@@ -357,7 +361,7 @@ export function App() {
               }}
               onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
               onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
-              onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
+              onStartFlight={(feature, intent) => { setSelectedFeature(feature); setFlightStartFor(feature, intent) }}
             />
           : <ResizablePanels panels={panels} />}
       </div>
@@ -365,6 +369,7 @@ export function App() {
       {(flightStartFor !== null || flightStartNew) && (
         <FlightStartDialog
           feature={flightStartNew ? null : flightStartFor}
+          intent={flightStartFresh ? 'fresh' : 'refly'}
           resumePlanTaskId={flightStartNew ? resumePlanTaskId : null}
           knownRepos={knownRepos}
           onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null) }}

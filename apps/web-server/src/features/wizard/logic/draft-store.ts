@@ -150,6 +150,8 @@ function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
     // Legacy rows (pre-`id` index shape) carry only `draftId`; fall back to it so
     // remove/prune/reconcile can address them (else they resurrect on refresh).
     idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { draftId?: string }).draftId),
+    featureOf: (r) => r.featureName,
+    withFeature: (r, featureName) => ({ ...r, featureName }),
     sortNewestFirst: true,
     // Crash recovery: a draft left 'planning'/'generating' by a SERVER-spawned
     // wizard agent belongs to a dead process (this one just started) — flip it
@@ -232,6 +234,12 @@ export function listDrafts(logsDir: string): DraftRecord[] {
     .list()
     .map((e) => store.get(String(e.id)))
     .filter((r): r is DraftRecord => r !== null)
+}
+
+/** Follow a suite rename into wizard drafts, so a draft that targeted the old
+ *  name keeps pointing at the same suite. Returns how many drafts moved. */
+export function renameDraftFeature(logsDir: string, from: string, to: string): number {
+  return draftStore(logsDir).renameFeature(from, to)
 }
 
 export class IllegalTransitionError extends Error {

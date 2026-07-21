@@ -18,6 +18,8 @@ export interface PortifyStore {
   get(workflowId: string): PortifyManifest | null
   save(manifest: PortifyManifest): void
   remove(workflowId: string): void
+  /** Re-home every record from one feature name to another (suite rename). */
+  renameFeature(from: string, to: string): number
   onEvent(fn: (event: PortifyStoreEvent) => void): void
   offEvent(fn: (event: PortifyStoreEvent) => void): void
 }
@@ -51,6 +53,8 @@ export class PortifyRunStore implements PortifyStore {
       // it so they stay addressable for remove/prune/reconcile — otherwise such
       // a row can't be deleted and resurrects on refresh.
       idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { workflowId?: string }).workflowId),
+      featureOf: (m) => m.feature,
+      withFeature: (m, feature) => ({ ...m, feature }),
       reconcile: {
         // 'ready-to-save' is also non-terminal but awaits a user action; a dead
         // process can't hold that scratch worktree, so it too becomes aborted.
@@ -90,6 +94,10 @@ export class PortifyRunStore implements PortifyStore {
    */
   remove(workflowId: string): void {
     this.store.remove(workflowId)
+  }
+
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
   }
 
   /**

@@ -5,6 +5,7 @@ export type WorkspaceEvent =
   | { type: 'connected' }
   | { type: 'feature-created'; feature: string }
   | { type: 'feature-deleted'; feature: string }
+  | { type: 'feature-renamed'; from: string; to: string }
   | { type: 'features-changed' }
   | { type: 'tests-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }

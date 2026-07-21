@@ -45,7 +45,7 @@ export function preFlightChipState(
   task: Pick<PlanFeaturesTask, 'status' | 'conflicts'>,
 ): { label: string; tone: string; live: boolean; rank: number; title: string } {
   if (task.status === 'running') {
-    return { label: 'planning', tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: 'Judging whether this intent is one feature or several' }
+    return { label: 'planning', tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: 'Judging whether this intent is one suite or several' }
   }
   const conflict = (task.conflicts?.length ?? 0) > 0
   return {

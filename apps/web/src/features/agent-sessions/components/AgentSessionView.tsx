@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as api from '../../../shared/api/client'
-import type { AgentSessionEvent, AgentSessionResponse } from '../../../shared/api/client'
+import type { AgentSessionEvent, AgentSessionResponse, SubagentThread } from '../../../shared/api/client'
 import { connectAgentSessionStream } from '../api/agent-session-socket'
 
 // Single agent viewer for the wizard (draft planning/generating) and the run
@@ -50,6 +50,40 @@ interface ViewState {
   model?: string
   effort?: string
   events: AgentSessionEvent[]
+  /** Subagent threads keyed by the parent tool call they hang under, so a
+   *  `tool-call` row can find its children by `toolId` in O(1). A parent can
+   *  spawn several in one turn, hence an array per key. */
+  subagents: Map<string, SubagentThread[]>
+}
+
+/** Merge one streamed subagent event into the by-parent map, keyed by the
+ *  event's index within its own thread. Out-of-order and duplicate arrivals
+ *  are both idempotent — the same index always lands in the same slot — which
+ *  is what lets the WS replay and the REST snapshot converge. */
+export function mergeSubagentEvent(
+  prev: Map<string, SubagentThread[]>,
+  update: { thread: Omit<SubagentThread, 'events'>; event: AgentSessionEvent; index: number },
+): Map<string, SubagentThread[]> {
+  const next = new Map(prev)
+  const siblings = [...(next.get(update.thread.parentToolId) ?? [])]
+  const at = siblings.findIndex((t) => t.agentId === update.thread.agentId)
+  const thread = at >= 0 ? { ...siblings[at], events: [...siblings[at].events] } : { ...update.thread, events: [] }
+  if (thread.events[update.index] === undefined) {
+    thread.events[update.index] = update.event
+  }
+  if (at >= 0) siblings[at] = thread
+  else siblings.push(thread)
+  next.set(update.thread.parentToolId, siblings)
+  return next
+}
+
+/** Index a snapshot's flat thread list by parent tool id. */
+export function indexSubagents(threads: SubagentThread[] | undefined): Map<string, SubagentThread[]> {
+  const map = new Map<string, SubagentThread[]>()
+  for (const t of threads ?? []) {
+    map.set(t.parentToolId, [...(map.get(t.parentToolId) ?? []), t])
+  }
+  return map
 }
 
 export function AgentSessionView({ source, systemRows }: Props) {
@@ -76,10 +110,17 @@ export function AgentSessionView({ source, systemRows }: Props) {
       if (cancelled) return
       if (!snapshot) {
         // No log yet on disk. Keep waiting if live; otherwise show empty state.
-        setState({ agent: null, sessionId: '', events: [] })
+        setState({ agent: null, sessionId: '', events: [], subagents: new Map() })
         return
       }
-      setState({ agent: snapshot.agent, sessionId: snapshot.sessionId, model: snapshot.model, effort: snapshot.effort, events: snapshot.events })
+      setState({
+        agent: snapshot.agent,
+        sessionId: snapshot.sessionId,
+        model: snapshot.model,
+        effort: snapshot.effort,
+        events: snapshot.events,
+        subagents: indexSubagents(snapshot.subagents),
+      })
     }
 
     const fetchSnapshot = async (): Promise<AgentSessionResponse | null> => {
@@ -123,7 +164,13 @@ export function AgentSessionView({ source, systemRows }: Props) {
             if (cancelled) return
             setState((prev) => prev
               ? { ...prev, agent: session.agent, sessionId: session.sessionId, model: session.model, effort: session.effort }
-              : { agent: session.agent, sessionId: session.sessionId, model: session.model, effort: session.effort, events: [] })
+              : { agent: session.agent, sessionId: session.sessionId, model: session.model, effort: session.effort, events: [], subagents: new Map() })
+          },
+          onSubagentEvent: (update) => {
+            if (cancelled) return
+            setState((prev) => prev
+              ? { ...prev, subagents: mergeSubagentEvent(prev.subagents, update) }
+              : { agent: null, sessionId: '', events: [], subagents: mergeSubagentEvent(new Map(), update) })
           },
           onEvent: (event) => {
             if (cancelled) return
@@ -132,7 +179,7 @@ export function AgentSessionView({ source, systemRows }: Props) {
             seenFromWs += 1
             if (seenFromWs <= snapshotLen) return
             setState((prev) => {
-              if (!prev) return { agent: null, sessionId: '', events: [event] }
+              if (!prev) return { agent: null, sessionId: '', events: [event], subagents: new Map() }
               return { ...prev, events: [...prev.events, event] }
             })
           },
@@ -244,14 +291,14 @@ export function AgentSessionView({ source, systemRows }: Props) {
           </div>
         )}
         <ol className="agentts-rail">
-          {sys.pre.map((line, idx) => (
-            <SystemRow key={`sys-pre-${idx}`} line={line} />
+          {groupSystemLines(sys.pre).map((group, idx) => (
+            <SystemRow key={`sys-pre-${idx}`} group={group} />
           ))}
           {(state?.events ?? []).map((event: AgentSessionEvent, idx: number) => (
-            <EventRow key={idx} event={event} />
+            <EventRow key={idx} event={event} subagents={state?.subagents} />
           ))}
-          {sys.post.map((line, idx) => (
-            <SystemRow key={`sys-post-${idx}`} line={line} />
+          {groupSystemLines(sys.post).map((group, idx) => (
+            <SystemRow key={`sys-post-${idx}`} group={group} />
           ))}
         </ol>
       </div>
@@ -305,22 +352,45 @@ function sourceCacheKey(source: AgentSessionSource): string {
 // glyph) + its content. Tool calls/results collapse to one mono line and
 // disclose their full payload; prose reads as a clean transcript.
 
-function EventRow({ event }: { event: AgentSessionEvent }) {
+function EventRow({ event, subagents }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]> }) {
   return (
     <li className="agentts-row" data-kind={event.kind}>
       <NodeMarker event={event} />
-      <EventBody event={event} />
+      <EventBody event={event} subagents={subagents} />
     </li>
   )
 }
 
-// A conductor system line (`[TAG] text`) on the same rail as the agent events,
-// but visually its own lane: a tinted band, a boxy terminal node, and the tag
-// as a mono chip — so "system" reads apart from the agent's round colored nodes.
-export function SystemRow({ line }: { line: string }) {
-  const m = /^\[([\w-]+)\]\s?(.*)$/.exec(line)
-  const tag = m?.[1]
-  const text = m ? m[2] : line
+/** A run of consecutive conductor lines sharing one `[TAG]` (untagged lines
+ *  group under `tag: undefined`). Exact repeats inside the run collapse to one
+ *  entry with a count — the conductor re-announces the same state often. */
+export type SystemGroup = { tag?: string; entries: Array<{ text: string; count: number }> }
+
+/** Fold `[TAG] text` lines into tag-runs so the tag prints once per run and
+ *  identical consecutive lines show as `×N` instead of stacking. */
+export function groupSystemLines(lines: string[]): SystemGroup[] {
+  const groups: SystemGroup[] = []
+  for (const line of lines) {
+    const m = /^\[([\w-]+)\]\s?(.*)$/.exec(line)
+    const tag = m?.[1]
+    const text = m ? m[2] : line
+    const last = groups[groups.length - 1]
+    if (!last || last.tag !== tag) {
+      groups.push({ tag, entries: [{ text, count: 1 }] })
+      continue
+    }
+    const lastEntry = last.entries[last.entries.length - 1]
+    if (lastEntry.text === text) lastEntry.count += 1
+    else last.entries.push({ text, count: 1 })
+  }
+  return groups
+}
+
+// A run of conductor system lines on the same rail as the agent events, in the
+// same left gutter (boxy terminal node + shared thread line) so it reads as one
+// timeline. No band, no chip: mono type at the agent's own size, in muted
+// colour, is the whole distinction — the agent's prose stays the loudest thing.
+export function SystemRow({ group }: { group: SystemGroup }) {
   return (
     <li className="agentts-sysrow">
       <span className="agentts-sysnode" aria-hidden="true">
@@ -329,8 +399,21 @@ export function SystemRow({ line }: { line: string }) {
           <path d="M8.5 11h4.5" />
         </svg>
       </span>
-      {tag && <span className="agentts-systag">{tag}</span>}
-      <span className="agentts-systext">{text}</span>
+      <div className="agentts-sysbody">
+        {group.entries.map((entry, idx) => (
+          <div className="agentts-sysline" key={idx}>
+            {group.tag !== undefined && (
+              // The tag prints once per run; later lines keep the gutter so the
+              // messages stay in one column.
+              <span className="agentts-systag" aria-hidden={idx > 0 || undefined}>{idx === 0 ? group.tag : ''}</span>
+            )}
+            <span className="agentts-systext">
+              {entry.text}
+              {entry.count > 1 && <span className="agentts-sysrepeat">×{entry.count}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
     </li>
   )
 }
@@ -375,19 +458,50 @@ function NodeSvg({ children }: { children: React.ReactNode }) {
   )
 }
 
-function EventBody({ event }: { event: AgentSessionEvent }) {
+function EventBody({ event, subagents }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]> }) {
   switch (event.kind) {
     case 'user-message':
       return <PromptBody text={event.text} timestamp={event.timestamp} />
     case 'assistant-message':
-      return <ProseBody label="Assistant" text={event.text} timestamp={event.timestamp} />
+      return event.apiError
+        ? <ApiErrorBody text={event.text} timestamp={event.timestamp} />
+        : <ProseBody label="Assistant" text={event.text} timestamp={event.timestamp} />
     case 'assistant-thinking':
       return <ThinkingBody text={event.text} timestamp={event.timestamp} />
     case 'tool-call':
-      return <ToolCallBody name={event.name} input={event.input} timestamp={event.timestamp} toolId={event.toolId} />
+      return (
+        <ToolCallBody
+          name={event.name}
+          input={event.input}
+          timestamp={event.timestamp}
+          toolId={event.toolId}
+          threads={subagents?.get(event.toolId)}
+        />
+      )
     case 'tool-result':
       return <ToolResultBody output={event.output} isError={event.isError} timestamp={event.timestamp} toolId={event.toolId} />
   }
+}
+
+/** A turn the CLI synthesized after the model's stream dropped. Rendered as a
+ *  termination rather than prose: the text that came with it is recovered
+ *  partial output, and reading it as the agent's conclusion is exactly the
+ *  mistake this row exists to prevent. */
+function ApiErrorBody({ text, timestamp }: { text: string; timestamp: string }) {
+  return (
+    <>
+      <div className="agentts-rowhead">
+        <span className="agentts-label" style={{ color: 'var(--accent-rose, #fb7185)' }}>Terminated · API error</span>
+        <Timestamp value={timestamp} />
+      </div>
+      <div className="agentts-prose" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{firstLineOf(text)}</div>
+    </>
+  )
+}
+
+function firstLineOf(text: string): string {
+  const line = text.split('\n').find((l) => l.trim().length > 0)?.trim() ?? ''
+  return line.length > 160 ? `${line.slice(0, 157)}…` : line
 }
 
 function RowHead({ label, timestamp }: { label: string; timestamp: string }) {
@@ -459,7 +573,13 @@ function ThinkingBody({ text, timestamp }: { text: string; timestamp: string }) 
   )
 }
 
-function ToolCallBody({ name, input, timestamp, toolId }: { name: string; input: unknown; timestamp: string; toolId: string }) {
+function ToolCallBody({ name, input, timestamp, toolId, threads }: {
+  name: string
+  input: unknown
+  timestamp: string
+  toolId: string
+  threads?: SubagentThread[]
+}) {
   const [expanded, setExpanded] = useState(false)
   const target = summarizeInput(input)
   return (
@@ -472,8 +592,65 @@ function ToolCallBody({ name, input, timestamp, toolId }: { name: string; input:
           <Chevron open={expanded} className="agentts-chev" />
         </button>
         {expanded && <pre className="agentts-pre">{formatJson(input)}</pre>}
+        {/* Spawned children hang below the input disclosure as siblings, not
+            inside it: "what did it do" and "what were its args" are separate
+            questions, and gating the timeline behind the JSON would bury the
+            one that matters. */}
+        {(threads ?? []).map((thread) => (
+          <SubagentThreadRow key={thread.agentId} thread={thread} />
+        ))}
       </div>
     </>
+  )
+}
+
+/** How long a thread ran, from its first to its last event. */
+export function threadDuration(events: AgentSessionEvent[]): string {
+  const stamps = events.map((e) => Date.parse(e.timestamp)).filter((n) => Number.isFinite(n))
+  if (stamps.length < 2) return ''
+  const secs = Math.round((Math.max(...stamps) - Math.min(...stamps)) / 1000)
+  if (secs < 60) return `${secs}s`
+  return `${Math.floor(secs / 60)}m ${secs % 60}s`
+}
+
+/** One spawned subagent, disclosed inside its parent's tool-call box. Collapsed
+ *  by default — a finished child's conclusion already reached the parent rail —
+ *  except when it's still running or died, which are the two cases where the
+ *  parent rail alone leaves the user guessing. */
+export function SubagentThreadRow({ thread }: { thread: SubagentThread }) {
+  const events = thread.events.filter(Boolean)
+  const failed = events.some((e) => e.kind === 'assistant-message' && e.apiError)
+  // A thread whose last event is a tool call is mid-flight: the result that
+  // would close it hasn't been written yet.
+  const running = !failed && events.length > 0 && events[events.length - 1].kind === 'tool-call'
+  const [expanded, setExpanded] = useState(running || failed)
+  const duration = threadDuration(events)
+  return (
+    <div className="agentts-sub">
+      <button type="button" className="agentts-subbtn" onClick={() => setExpanded((v) => !v)}>
+        {running && <span className="agentts-sublive" aria-hidden="true" />}
+        <span className="agentts-subtype">{thread.agentType}</span>
+        <span className="agentts-submeta">
+          {events.length} event{events.length === 1 ? '' : 's'}
+          {duration && ` · ${duration}`}
+          {failed ? ' · terminated' : running ? '' : ' · done'}
+        </span>
+        <Chevron open={expanded} className="agentts-chev" />
+      </button>
+      {expanded && (
+        <ol className="agentts-nest">
+          {events.map((event, idx) => (
+            // Depth stops here: a subagent's own children would nest a third
+            // rail inside an already-indented one, which stops being readable
+            // long before it stops being possible.
+            <li key={idx} className="agentts-row agentts-nestrow" data-kind={event.kind}>
+              <NodeMarker event={event} />
+              <EventBody event={event} />
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   )
 }
 
@@ -546,11 +723,17 @@ const TIMELINE_CSS = `
 .agentts-row::before{content:'';position:absolute;left:7px;top:17px;bottom:-1px;width:1.5px;background:linear-gradient(180deg,var(--border-default),color-mix(in srgb,var(--border-default) 25%,transparent));border-radius:2px}
 .agentts-row:last-child::before{display:none}
 .agentts-node{position:absolute;left:0;top:2px;width:15px;height:15px;border-radius:50%;border:1.5px solid var(--border-default);display:grid;place-items:center;background:var(--bg-base);z-index:1}
-.agentts-sysrow{position:relative;margin:0 0 6px;padding:6px 11px 6px 30px;list-style:none;border-radius:var(--radius-md);background:color-mix(in srgb,var(--bg-elevated) 45%,transparent);border:1px solid var(--border-default);display:flex;align-items:baseline;gap:7px;animation:agentts-in .26s cubic-bezier(.22,1,.36,1) both}
-.agentts-sysnode{position:absolute;left:8px;top:6px;width:15px;height:15px;border-radius:4px;border:1.5px solid var(--border-default);display:grid;place-items:center;background:var(--bg-base);color:var(--text-secondary)}
+.agentts-sysrow{position:relative;margin:0;padding:0 0 13px 28px;list-style:none;animation:agentts-in .26s cubic-bezier(.22,1,.36,1) both}
+.agentts-sysrow:last-child{padding-bottom:2px}
+.agentts-sysrow::before{content:'';position:absolute;left:7px;top:17px;bottom:-1px;width:1.5px;background:linear-gradient(180deg,var(--border-default),color-mix(in srgb,var(--border-default) 25%,transparent));border-radius:2px}
+.agentts-sysrow:last-child::before{display:none}
+.agentts-sysnode{position:absolute;left:0;top:2px;width:15px;height:15px;border-radius:4px;border:1.5px solid var(--border-default);display:grid;place-items:center;background:var(--bg-base);color:var(--text-muted);z-index:1}
 .agentts-sysnode svg{width:9px;height:9px}
-.agentts-systag{flex:none;font-family:var(--font-mono);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-secondary);border:1px solid var(--border-default);border-radius:4px;padding:1px 5px}
-.agentts-systext{font-family:var(--font-mono);font-size:11.5px;line-height:1.5;color:var(--text-secondary);word-break:break-word;white-space:pre-wrap;min-width:0}
+.agentts-sysbody{display:flex;flex-direction:column;gap:2px;min-width:0}
+.agentts-sysline{display:flex;align-items:baseline;gap:9px;min-width:0}
+.agentts-systag{flex:none;min-width:46px;font-family:var(--font-mono);font-size:10.5px;font-weight:600;letter-spacing:.06em;color:var(--text-muted)}
+.agentts-systext{font-family:var(--font-mono);font-size:13px;line-height:1.62;color:var(--text-secondary);word-break:break-word;white-space:pre-wrap;min-width:0}
+.agentts-sysrepeat{margin-left:6px;color:var(--text-muted)}
 .agentts-node svg{width:8.5px;height:8.5px}
 .agentts-rowhead{display:flex;align-items:center;gap:8px;min-height:15px}
 .agentts-label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600}
@@ -563,6 +746,18 @@ const TIMELINE_CSS = `
 .agentts-tooltarget{font-family:var(--font-mono);font-size:11.5px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .agentts-chev{margin-left:auto;color:var(--text-muted)}
 .agentts-pre{margin:0;border-top:1px solid var(--border-default);padding:9px 12px;font-family:var(--font-mono);font-size:11px;line-height:1.55;color:var(--text-secondary);background:var(--bg-base);white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto}
+.agentts-sub{border-top:1px solid var(--border-default)}
+.agentts-subbtn{display:flex;width:100%;align-items:center;gap:8px;padding:6px 11px;background:none;border:none;cursor:pointer;text-align:left;min-width:0}
+.agentts-subbtn:hover{background:color-mix(in srgb,var(--bg-elevated) 70%,transparent)}
+.agentts-sublive{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px color-mix(in srgb,var(--accent) 60%,transparent);flex:none}
+.agentts-subtype{flex:none;font-family:var(--font-mono);font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 35%,var(--border-default));border-radius:4px;padding:1px 5px}
+.agentts-submeta{font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.agentts-nest{margin:0 0 0 15px;padding:8px 12px 4px 12px;list-style:none;border-left:2px solid var(--border-default);background:var(--bg-base)}
+.agentts-nestrow{padding-bottom:11px}
+.agentts-nestrow::before{left:5px;top:14px}
+.agentts-nestrow .agentts-node{width:11px;height:11px;top:3px}
+.agentts-nestrow .agentts-node svg{width:6.5px;height:6.5px}
+.agentts-nestrow .agentts-prose{font-size:12px}
 .agentts-think{margin-top:1px}
 .agentts-thinkbtn{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:10px;text-transform:uppercase;letter-spacing:.07em;font-weight:600;padding:0}
 .agentts-thinkbody{margin-top:6px;color:var(--text-muted);font-size:12px;line-height:1.55;font-style:italic;white-space:pre-wrap;border-left:2px solid var(--border-default);padding-left:11px}
@@ -590,7 +785,7 @@ const TIMELINE_CSS = `
 .agentts-md th{background:color-mix(in srgb,var(--bg-elevated) 60%,transparent);font-weight:600;color:var(--text-primary)}
 .agentts-md img{max-width:100%}
 @keyframes agentts-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
-@media (prefers-reduced-motion:reduce){.agentts-row{animation:none}}
+@media (prefers-reduced-motion:reduce){.agentts-row,.agentts-sysrow{animation:none}}
 `
 
 function Timestamp({ value }: { value: string }) {

@@ -21,6 +21,8 @@ export interface BenchmarkStore {
   /** Persist a manifest and push a `changed` event to WS subscribers. Used by
    *  routes that mutate a benchmark out-of-band (e.g. clearing worktrees). */
   save(manifest: BenchmarkManifest): void
+  /** Re-home every record from one feature name to another (suite rename). */
+  renameFeature(from: string, to: string): number
   onEvent(fn: (event: BenchmarkStoreEvent) => void): void
   offEvent(fn: (event: BenchmarkStoreEvent) => void): void
 }
@@ -53,6 +55,8 @@ export class BenchmarkRunStore implements BenchmarkStore {
       // Legacy rows (pre-`id` index shape) carry only `benchmarkId`; fall back to
       // it so remove/prune/reconcile can address them (else they resurrect on refresh).
       idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { benchmarkId?: string }).benchmarkId),
+      featureOf: (m) => m.feature,
+      withFeature: (m, feature) => ({ ...m, feature }),
       reconcile: {
         // A `sabotaging`/`ready`/`running` benchmark in the index belongs to a
         // dead process (its driver was killed on restart) and can never finish.
@@ -97,6 +101,10 @@ export class BenchmarkRunStore implements BenchmarkStore {
   /** Drop a benchmark from the index, delete its dir, and notify subscribers. */
   remove(benchmarkId: string): void {
     this.store.remove(benchmarkId)
+  }
+
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
   }
 
   onEvent(fn: (event: BenchmarkStoreEvent) => void): void {

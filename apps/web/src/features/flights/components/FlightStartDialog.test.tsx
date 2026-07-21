@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   getPlanFeaturesTask: vi.fn(),
   launchPlannedFeatures: vi.fn(),
   listWorkspaceDirs: vi.fn(),
+  getProjectConfig: vi.fn(),
 }))
 
 vi.mock('../../../shared/api/client', async (importOriginal) => ({
@@ -22,6 +23,7 @@ vi.mock('../../../shared/api/client', async (importOriginal) => ({
   planFeatures: mocks.planFeatures,
   getPlanFeaturesTask: mocks.getPlanFeaturesTask,
   launchPlannedFeatures: mocks.launchPlannedFeatures,
+  getProjectConfig: mocks.getProjectConfig,
   // The repo picker reuses FolderPickerModal, which lists dirs via this.
   listWorkspaceDirs: mocks.listWorkspaceDirs,
 }))
@@ -45,6 +47,7 @@ let root: Root
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getProjectConfig.mockResolvedValue({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -218,6 +221,72 @@ describe('FlightStartDialog', () => {
     click(byTestId('flight-start-submit')!)
     await flush()
     expect(byTestId('flight-start-error')!.textContent).toContain('flight conflict: repo busy')
+  })
+})
+
+describe('FlightStartDialog — fresh intent (R76)', () => {
+  const paused = (): FlightEntryOptions => entry({
+    canContinue: true,
+    flight: { flightId: 'fl_1', status: 'paused', stages: [{ key: 'scout', status: 'done' }] },
+    prefill: { repoPaths: ['/repo'], description: 'checkout flow', env: 'local', coverageTarget: 100 },
+  })
+
+  it('drops the stage menu entirely — the only entry a changed input set is valid for is the full restart', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(paused())
+    await render({ intent: 'fresh' })
+
+    expect(byTestId('flight-start-continue')).toBeNull()
+    expect(byTestId('flight-steps-toggle')).toBeNull()
+    expect(byTestId('flight-start-stage-similarity')).toBeNull()
+    expect(byTestId('flight-start-stage-scout')).toBeNull()
+  })
+
+  it('lands with the intent EDITABLE, never frozen — even though the flight can continue', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(paused())
+    await render({ intent: 'fresh' })
+
+    // The bug this rework fixes: defaulting to `continue` re-froze the very
+    // fields the "Change…" handoff exists to edit.
+    expect(byTestId('flight-start-frozen-intent')).toBeNull()
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(textarea.value).toBe('checkout flow')
+    expect((byTestId('flight-start-submit') as HTMLButtonElement).textContent).toBe('Start fresh flight')
+  })
+
+  it('posts mode redo WITH the edited repos + intent', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(paused())
+    mocks.startFlight.mockResolvedValue({ flightId: 'fl_2' })
+    const { onOpenFlight } = await render({ intent: 'fresh' })
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(textarea, 'the refund flow instead')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    click(byTestId('flight-start-submit')!)
+    await flush()
+
+    expect(mocks.startFlight).toHaveBeenCalledWith(expect.objectContaining({
+      feature: 'checkout',
+      mode: 'redo',
+      description: 'the refund flow instead',
+      repoPaths: ['/repo'],
+    }))
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_2')
+  })
+
+  it('states what a fresh start costs', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(paused())
+    await render({ intent: 'fresh' })
+    expect(byTestId('flight-start-reset-note')!.textContent).toContain('wiped')
+  })
+
+  it('leaves the re-fly intent alone — the stage menu still preselects Continue', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(paused())
+    await render()
+    expect(byTestId('flight-start-continue')).not.toBeNull()
+    expect((byTestId('flight-start-submit') as HTMLButtonElement).textContent).toBe('Continue flight')
   })
 })
 
@@ -411,7 +480,14 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     click(byTestId('flight-start-submit')!)
     await flush()
     expect(mocks.getFlightEntryOptions).toHaveBeenCalledWith('shop')
-    // Feature-scoped + frozen: intent read-only, no repo picker.
+    // Feature-scoped, settled record → "Full flight" is the default pick, so
+    // the inputs land EDITABLE and prefilled from the record (R75).
+    expect(byTestId('flight-start-frozen-intent')).toBeNull()
+    expect(container.querySelector('textarea')?.value).toBe('old intent')
+    expect(byTestId('repo-multi-picker')).toBeTruthy()
+    // Picking a mid-pipeline step re-locks them — frozen against partial re-entry.
+    click(byTestId('flight-start-stage-scout')!)
+    await flush()
     expect(byTestId('flight-start-frozen-intent')?.textContent).toContain('old intent')
     expect(byTestId('repo-multi-picker')).toBeNull()
   })
@@ -447,9 +523,9 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     // User edits the group + a feature name.
     setValue(byTestId('flight-proposal-group') as HTMLInputElement, 'TEST')
     click(byTestId('flight-proposal-edit-0')!)
-    setValue(container.querySelector('input[aria-label="Feature name"]') as HTMLInputElement, 'renamed')
+    setValue(container.querySelector('input[aria-label="Suite name"]') as HTMLInputElement, 'renamed')
     expect((byTestId('flight-proposal-group') as HTMLInputElement).value).toBe('TEST')
-    expect((container.querySelector('input[aria-label="Feature name"]') as HTMLInputElement).value).toBe('renamed')
+    expect((container.querySelector('input[aria-label="Suite name"]') as HTMLInputElement).value).toBe('renamed')
 
     // The parent re-renders with a FRESH onOpenFlight arrow (App re-renders every
     // few seconds on poll/WS). The settle effect must NOT re-seed the proposal.
@@ -458,7 +534,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     })
     await flush()
     expect((byTestId('flight-proposal-group') as HTMLInputElement).value).toBe('TEST')
-    expect((container.querySelector('input[aria-label="Feature name"]') as HTMLInputElement).value).toBe('renamed')
+    expect((container.querySelector('input[aria-label="Suite name"]') as HTMLInputElement).value).toBe('renamed')
   })
 
   it('adds a repo through the shared folder picker', async () => {
@@ -476,5 +552,56 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     const textarea = container.querySelector('textarea')!
     setValue(textarea, 'test something')
     expect((byTestId('flight-start-submit') as HTMLButtonElement).disabled).toBe(false)
+  })
+})
+
+
+describe('flight agent pick (R79)', () => {
+  const setValue = (el: HTMLTextAreaElement | HTMLInputElement, value: string): void => {
+    const proto = el instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+    Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value)
+    act(() => { el.dispatchEvent(new Event('input', { bubbles: true })) })
+  }
+  const addRepo = async (path: string): Promise<void> => {
+    mocks.listWorkspaceDirs.mockResolvedValue({ root: '/', at: path, absolute: path, parent: '/', dirs: [] })
+    click(byTestId('repo-pick-add')!)
+    await flush()
+    click(byTestId('folder-picker-confirm')!)
+    await flush()
+  }
+
+  it('a codex default-agent setting rides the start body — no picker shown', async () => {
+    mocks.getProjectConfig.mockResolvedValue({ healAgent: 'codex', editor: 'auto', personalWikiPath: null })
+    mocks.planFeatures.mockResolvedValue({ taskId: 't1', status: 'failed', repoPaths: ['/repo/Acme Shop'], description: 'test the checkout flow', error: 'agent crashed' })
+    mocks.startFlight.mockResolvedValue({ flightId: 'fl_new' })
+    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Acme Shop' }] })
+    setValue(container.querySelector('textarea')!, 'test the checkout flow')
+    await addRepo('/repo/Acme Shop')
+
+    // The agent is chosen by the workspace setting, not a dialog control.
+    expect(byTestId('flight-agent-row')).toBeNull()
+
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    expect(mocks.planFeatures).toHaveBeenCalledWith(expect.objectContaining({ agent: 'codex' }))
+    click(byTestId('flight-plan-skip')!)
+    await flush()
+    expect(mocks.startFlight).toHaveBeenCalledWith(expect.objectContaining({ agent: 'codex' }))
+  })
+
+  it('claude default-agent setting is the wire default — no agent field sent', async () => {
+    mocks.getProjectConfig.mockResolvedValue({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+    mocks.planFeatures.mockResolvedValue({ taskId: 't1', status: 'failed', repoPaths: ['/repo/Acme Shop'], description: 'test the checkout flow', error: 'x' })
+    mocks.startFlight.mockResolvedValue({ flightId: 'fl_new' })
+    await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/Acme Shop' }] })
+    setValue(container.querySelector('textarea')!, 'test the checkout flow')
+    await addRepo('/repo/Acme Shop')
+
+    click(byTestId('flight-start-submit')!)
+    await flush()
+    expect(mocks.planFeatures).toHaveBeenCalledWith(expect.not.objectContaining({ agent: expect.anything() }))
+    click(byTestId('flight-plan-skip')!)
+    await flush()
+    expect(mocks.startFlight).toHaveBeenCalledWith(expect.not.objectContaining({ agent: expect.anything() }))
   })
 })

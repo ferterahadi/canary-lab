@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import * as api from '../../../shared/api/client'
-import type { FlightManifest, FlightStageStatus } from '../../../shared/api/client'
+import type { FlightManifest, FlightStageStatus, PrdSourceAttempt, PrdSourceCheckpointData } from '../../../shared/api/client'
 import type { FeatureDocsListing } from '../../../shared/api/types'
 import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '../../config/components/BranchSuggestInput'
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, readAsBase64, useDocDrop } from '../../coverage/components/CoverageDocsRail'
@@ -27,9 +27,13 @@ const REPO_SCAN_KICKER_CLASS = 'mb-1 text-[9.5px] font-semibold uppercase tracki
 export function RepoScanPanel({
   flight,
   envFiles = [],
+  onChangeInputs,
 }: {
   flight: FlightManifest
   envFiles?: string[]
+  /** R75: opens the launcher (prefilled, editable) — changing intent/repos is
+   *  a full restart, and the launcher is its one home. */
+  onChangeInputs?: () => void
 }) {
   // Attribute each scanned env file to the repo that contains it.
   const envsFor = (repo: string): string[] =>
@@ -43,15 +47,30 @@ export function RepoScanPanel({
     <section
       data-testid="repo-scan-panel"
       className="flex w-full max-w-[76ch] flex-col gap-2.5"
-      title="Repos and intent are set when the flight first starts — delete the flight to test different ones."
+      title="Repos and intent froze when this flight started — Change… reopens them and re-flies from the beginning."
     >
       <div
         data-testid="flight-intent-card"
         className={REPO_SCAN_CARD_CLASS}
         style={REPO_SCAN_CARD_STYLE}
       >
-        <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
-          Flight input
+        <div className="flex items-baseline gap-2">
+          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+            Flight input
+          </div>
+          <div className="flex-1" />
+          {onChangeInputs && (
+            <button
+              type="button"
+              data-testid="flight-inputs-change"
+              onClick={onChangeInputs}
+              className="text-[10.5px] underline-offset-2 transition-colors hover:underline"
+              style={{ color: 'rgb(56, 189, 248)' }}
+              title="Change what this flight tests — opens the intent + repos prefilled; the flight re-flies from the beginning"
+            >
+              Change…
+            </button>
+          )}
         </div>
         <h3 className="mb-1.5 text-[12.5px] font-semibold">Intent · what to test</h3>
         <p
@@ -144,12 +163,16 @@ export function FeatureSetupPanel({
   feature,
   editable,
   refreshKey,
+  onOpenAdvanced,
 }: {
   feature: string
   /** False while the flight is mid-run (edits then would race the conductor). */
   editable: boolean
   /** Bumped on features-changed so an Advanced-setup save shows here live. */
   refreshKey?: number
+  /** Opens FeatureConfigEditor. When absent the hint stays plain text — the
+   *  sentence must never name a surface the user has no way to reach. */
+  onOpenAdvanced?: () => void
 }) {
   const [config, setConfig] = useState<unknown>(null)
   const [playwright, setPlaywright] = useState<unknown>(null)
@@ -301,7 +324,21 @@ export function FeatureSetupPanel({
 
       {editable && (
         <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-          Synced live with Advanced setup — edits apply both ways.
+          Synced live with{' '}
+          {onOpenAdvanced ? (
+            <button
+              type="button"
+              data-testid="setup-open-advanced"
+              onClick={onOpenAdvanced}
+              className="underline underline-offset-2"
+              style={{ color: 'rgb(56, 189, 248)' }}
+            >
+              Advanced setup
+            </button>
+          ) : (
+            'Advanced setup'
+          )}
+          {' '}— the full config editor. Edits apply both ways.
         </div>
       )}
       {error && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
@@ -740,11 +777,14 @@ function IntentRow({ description }: { description: string }) {
 /** One fork path card — a radio-like affordance that STAYS visible after the
  *  pick (R74 polish): the selected card lights sky + shows its dot filled, the
  *  other dims but remains clickable, so the previous choice is never hidden. */
-function ForkPathCard({ testId, title, blurb, recommended, selected, dimmed, disabled, onPick }: {
+function ForkPathCard({ testId, title, blurb, recommended, note, selected, dimmed, disabled, onPick }: {
   testId: string
   title: string
   blurb: string
   recommended?: boolean
+  /** Neutral status chip (e.g. "Tried · empty") — states what happened on this
+   *  path without the sky accent that marks a recommendation. */
+  note?: string
   /** This card is the current pick — its content renders below the pair. */
   selected?: boolean
   /** A sibling is selected — recede without disappearing. */
@@ -760,12 +800,13 @@ function ForkPathCard({ testId, title, blurb, recommended, selected, dimmed, dis
       aria-checked={Boolean(selected)}
       disabled={disabled}
       onClick={onPick}
-      className="relative flex min-w-0 flex-1 items-start gap-2.5 rounded border p-3 text-left transition-all"
+      className="relative flex min-w-0 flex-1 items-start gap-2.5 rounded-md border p-3 text-left transition-all"
       style={{
+        // Neutral surfaces — the sky lives in the border + radio dot only.
         borderColor: selected
           ? 'color-mix(in srgb, rgb(56, 189, 248) 60%, var(--border-default))'
           : 'var(--border-default)',
-        background: selected ? 'color-mix(in srgb, rgb(56, 189, 248) 7%, var(--bg-base))' : 'var(--bg-base)',
+        background: selected ? 'var(--bg-selected)' : 'transparent',
         opacity: dimmed ? 0.6 : 1,
         cursor: 'pointer',
       }}
@@ -788,10 +829,68 @@ function ForkPathCard({ testId, title, blurb, recommended, selected, dimmed, dis
               Recommended
             </span>
           )}
+          {note && !selected && (
+            <span
+              data-testid={`${testId}-note`}
+              className="rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
+              style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+            >
+              {note}
+            </span>
+          )}
         </span>
         <span className="text-[11px] leading-snug" style={{ color: 'var(--text-secondary)' }}>{blurb}</span>
       </span>
     </button>
+  )
+}
+
+/** Read the structured outcome of the previous collector attempt off the
+ *  parked checkpoint. Absent on a first visit, and on flights parked by an
+ *  older server (which folded the reason into `message` instead) — both cases
+ *  simply fall back to the neutral first-visit rendering. */
+export function prdSourceAttempt(flight: FlightManifest): PrdSourceAttempt | null {
+  const stage = flight.stages.find((s) => s.key === 'docs')
+  const data = stage?.checkpoint?.data as PrdSourceCheckpointData | undefined
+  return data?.lastAttempt ?? null
+}
+
+/** Headline for the verdict band — states what the agent DID, so the row reads
+ *  as a finding rather than as an error the user caused. */
+function attemptHeadline(attempt: PrdSourceAttempt): string {
+  if (attempt.outcome === 'no-diff') return 'No diff vs base · nothing to infer from'
+  if (attempt.outcome === 'no-output') return 'Agent ran · produced no document'
+  return attempt.mode === 'infer-from-diff'
+    ? 'Agent read the diff · found nothing'
+    : 'Agent searched the repos · found nothing'
+}
+
+/** The empty-handed verdict, given its own row above the fork. Amber + a
+ *  left-edge rule matches how the console marks "needs your attention"
+ *  elsewhere, without the weight of a full tinted card. */
+function AttemptVerdict({ attempt }: { attempt: PrdSourceAttempt }) {
+  return (
+    <div
+      data-testid="prd-source-verdict"
+      className="flex items-start gap-2 px-2.5 py-2"
+      style={{
+        borderLeft: '2px solid rgb(251, 191, 36)',
+        background: 'color-mix(in srgb, rgb(251, 191, 36) 7%, transparent)',
+      }}
+    >
+      <span aria-hidden="true" className="mt-px text-[11px]" style={{ color: 'rgb(251, 191, 36)' }}>⊘</span>
+      <div className="flex min-w-0 flex-col gap-1">
+        <span
+          className="text-[10px] font-semibold uppercase tracking-wide"
+          style={{ color: 'rgb(251, 191, 36)' }}
+        >
+          {attemptHeadline(attempt)}
+        </span>
+        {attempt.reason && (
+          <span className="text-[12px] leading-snug" style={{ color: 'var(--text-primary)' }}>{attempt.reason}</span>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -812,8 +911,18 @@ export function RequirementsFork({
   onResponded: () => void
 }) {
   const [mode, setMode] = useState<'manual' | 'agent' | null>(null)
+  /** Agent hint is *staged*, not fired — picking a card must never spawn the
+   *  agent. The release goes through the confirm button, same as manual. */
+  const [hint, setHint] = useState<'collect-repo-docs' | 'infer-from-diff' | null>(null)
+  /** Outcome of the collector's last run, when this park follows a failed one.
+   *  Drives both the verdict band and which path we recommend. */
+  const lastAttempt = prdSourceAttempt(flight)
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+  /** A quick "Agent started" flash beside the button — appears on press and
+   *  fades on its own (cl-flash-fade). The token forces a remount so a repeat
+   *  press restarts the animation even if the previous flash hasn't finished. */
+  const [startedFlash, setStartedFlash] = useState<number | null>(null)
   const docs = useFlightDocs(flight.feature, refreshKey)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const disabled = busy || docs.busy
@@ -835,6 +944,7 @@ export function RequirementsFork({
       style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
       {...dropHandlers}
     >
+      {lastAttempt && <AttemptVerdict attempt={lastAttempt} />}
       <div className="flex items-center gap-2">
         <span aria-hidden="true" className="text-[11px]" style={{ color: 'rgb(251, 191, 36)' }}>⏸</span>
         <span className="text-[12.5px] font-semibold">Where should requirements come from?</span>
@@ -858,10 +968,16 @@ export function RequirementsFork({
           its content below; the other recedes but never hides, so the current
           choice is always visible and reversible in one click. */}
       <div role="radiogroup" aria-label="Requirements source" className="flex flex-wrap gap-2.5">
+        {/* The recommendation follows the evidence: once a collector has come
+            back empty, pointing the user at the same collector again is the
+            wrong default — the material it was asked to find isn't in these
+            repos. The agent path stays available (a retry with feedback, or a
+            different repo set, is legitimate) but stops being the suggestion. */}
         <ForkPathCard
           testId="fork-path-manual"
           title="I'll add docs myself"
           blurb="Drop PRD, spec, or ticket files. No agent runs."
+          recommended={lastAttempt !== null}
           selected={mode === 'manual'}
           dimmed={mode === 'agent'}
           disabled={disabled}
@@ -870,8 +986,11 @@ export function RequirementsFork({
         <ForkPathCard
           testId="fork-path-agent"
           title="Let the agent find them"
-          blurb="An agent gathers requirements guided by your intent."
-          recommended
+          blurb={lastAttempt
+            ? 'Retry with feedback, or point it at different repos.'
+            : 'An agent gathers requirements guided by your intent.'}
+          recommended={lastAttempt === null}
+          note={lastAttempt ? (lastAttempt.outcome === 'no-diff' ? 'No diff' : 'Tried · empty') : undefined}
           selected={mode === 'agent'}
           dimmed={mode === 'manual'}
           disabled={disabled}
@@ -934,22 +1053,48 @@ export function RequirementsFork({
               testId="fork-hint-collect-repo-docs"
               title="Collect docs from the repos"
               blurb="The agent copies in only the docs relevant to the intent."
+              selected={hint === 'collect-repo-docs'}
+              dimmed={hint === 'infer-from-diff'}
               disabled={disabled}
-              onPick={() => respond('collect-repo-docs')}
+              onPick={() => setHint('collect-repo-docs')}
             />
             <ForkPathCard
               testId="fork-hint-infer-from-diff"
               title="Infer from the git diff"
               blurb="The agent cross-checks the branch diff vs base against the intent."
+              selected={hint === 'infer-from-diff'}
+              dimmed={hint === 'collect-repo-docs'}
               disabled={disabled}
-              onPick={() => respond('infer-from-diff')}
+              onPick={() => setHint('infer-from-diff')}
             />
           </div>
-          {busy && (
-            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-              Starting the agent — its output will stream in the activity band below.
-            </div>
-          )}
+          <div className="flex items-center justify-end gap-2">
+            {startedFlash !== null && (
+              <span
+                key={startedFlash}
+                data-testid="fork-start-agent-flash"
+                className="cl-flash-fade text-[11px] font-medium"
+                style={{ color: 'var(--accent)' }}
+                onAnimationEnd={() => setStartedFlash(null)}
+              >
+                Agent started — output streams in the activity band below
+              </span>
+            )}
+            <button
+              type="button"
+              data-testid="fork-start-agent"
+              disabled={disabled || hint === null}
+              onClick={() => {
+                if (!hint) return
+                respond(hint)
+                setStartedFlash(Date.now())
+              }}
+              className="cl-button-primary px-2.5 py-1 text-xs"
+              title={hint === null ? 'Pick how the agent should look first' : 'Start the agent with this approach'}
+            >
+              {busy ? 'Starting…' : 'Gather with agent'}
+            </button>
+          </div>
         </>
       )}
 

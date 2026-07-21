@@ -221,15 +221,19 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
     expect(settled.repoPaths).toEqual([repoDir]) // stored args reused
     expect(settled.description).toBe('todo flow')
 
-    // Frozen forever: differing repos or intent are a 409-class error.
+    // R75: the freeze guards MID-PIPELINE re-entry — a jump with a different
+    // intent is a 409-class error…
     expect(() => startFlight(
-      { feature: 'first-flight-app', repoPaths: [tmpDir], description: 'todo flow', opts: OPTS_YOLO, mode: 'redo' },
+      { feature: 'first-flight-app', repoPaths: [], description: 'a different intent', opts: OPTS_YOLO, mode: 'jump', fromStage: 'run' },
       deps,
     )).toThrow(FlightFrozenError)
-    expect(() => startFlight(
+    // …while a full restart (redo) ACCEPTS a new intent and replaces the
+    // stored one (every stage's evidence is discarded anyway).
+    await startFlight(
       { feature: 'first-flight-app', repoPaths: [], description: 'a different intent', opts: OPTS_YOLO, mode: 'redo' },
       deps,
-    )).toThrow(FlightFrozenError)
+    ).completion
+    expect(store.get(manifest.flightId)!.description).toBe('a different intent')
 
     // Delete is the escape hatch: the record goes, the feature dir stays.
     deleteFlight(manifest.flightId, deps)

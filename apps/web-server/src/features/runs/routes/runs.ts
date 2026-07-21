@@ -13,7 +13,7 @@ import { launchEditorDir } from '../../../shared/editor-launch'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import {
-  loadAgentSession,
+  buildAgentSessionResponse,
   locateMostRecentAgentSessionRef,
   parseAgentSessionRefFile,
   selectAgentSessionRef,
@@ -132,8 +132,7 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       reply.code(404)
       return { reason: 'session-log-missing' }
     }
-    const { events, meta } = loadAgentSession(ref)
-    return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+    return buildAgentSessionResponse(ref)
   })
 
   app.get<{ Params: { runId: string; '*': string } }>('/api/runs/:runId/artifacts/*', async (req, reply) => {

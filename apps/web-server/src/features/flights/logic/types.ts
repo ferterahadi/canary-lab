@@ -24,4 +24,6 @@ export type {
   FlightIndexEntry,
   FlightStageEntryOption,
   FlightEntryOptions,
+  PrdSourceAttempt,
+  PrdSourceCheckpointData,
 } from '../../../../../../shared/flights/types'

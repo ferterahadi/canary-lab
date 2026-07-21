@@ -35,6 +35,8 @@ export interface FlightStore {
   latestForFeature(feature: string): FlightIndexEntry | null
   save(manifest: FlightManifest): void
   remove(flightId: string): void
+  /** Re-home every record from one feature name to another (suite rename). */
+  renameFeature(from: string, to: string): number
   /** Per-flight sidecar dir (agent-session refs, stage artifacts). */
   flightDir(flightId: string): string
   reconcileInterrupted(now: () => string): void
@@ -76,6 +78,8 @@ export class FlightRunStore implements FlightStore {
       recordFile: 'flight.json',
       idOf: (m) => m.flightId,
       indexEntryOf: indexEntryFromManifest,
+      featureOf: (m) => m.feature,
+      withFeature: (m, feature) => ({ ...m, feature }),
       sortNewestFirst: true,
       reconcile: {
         isInterrupted: (m) => m.status === 'running',
@@ -125,6 +129,10 @@ export class FlightRunStore implements FlightStore {
 
   remove(flightId: string): void {
     this.store.remove(flightId)
+  }
+
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
   }
 
   flightDir(flightId: string): string {

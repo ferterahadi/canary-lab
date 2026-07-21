@@ -6,7 +6,14 @@ import {
   type RouteDialog,
   type WorkspaceView,
 } from '../lib/workspace-view-state'
-import { initialNavState, navToPersistedView, routedDialog, type NavState, type PortifyTarget } from './nav-state'
+import {
+  initialNavState,
+  navToPersistedView,
+  routedDialog,
+  type FlightLauncherIntent,
+  type NavState,
+  type PortifyTarget,
+} from './nav-state'
 
 // Owns the workspace navigation: the routed state, the URL/localStorage
 // persistence, the cross-tab sync, and the selection-mirror refs the WS handler
@@ -27,6 +34,7 @@ export interface WorkspaceNavigation {
   configFor: string | null
   verifyOpen: boolean
   flightStartFor: string | null
+  flightStartFresh: boolean
   flightStartNew: boolean
   draftFor: string | null
   resumePlanTaskId: string | null
@@ -38,7 +46,11 @@ export interface WorkspaceNavigation {
   setSelectedFlightId: (f: string | null) => void
   setConfigFor: (f: string | null) => void
   setVerifyOpen: (open: boolean) => void
-  setFlightStartFor: (f: string | null) => void
+  /** Open (feature) / close (null) the flight launcher. `intent` picks which job
+   *  it opens for — 're-fly' (the stage-entry picker, default) or 'fresh' (edit
+   *  intent + repos, full restart). Setting it always rewrites the intent, so a
+   *  later re-fly can't inherit a stale fresh flag. */
+  setFlightStartFor: (f: string | null, intent?: FlightLauncherIntent) => void
   setFlightStartNew: (open: boolean) => void
   /** Open (id) / close (null) the external authoring-draft dialog. */
   setDraftFor: (id: string | null) => void
@@ -64,8 +76,16 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(SEED.flight)
   const [configFor, setConfigFor] = useState<string | null>(SEED.configFor)
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
-  const [flightStartFor, setFlightStartFor] = useState<string | null>(SEED.flightStartFor)
+  const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
+  const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
   const [flightStartNew, setFlightStartNew] = useState<boolean>(SEED.flightStartNew)
+
+  // One opener for both launcher intents so the fresh flag can never outlive the
+  // handoff that set it (a later re-fly would otherwise inherit it).
+  const setFlightStartFor = useCallback((f: string | null, intent: FlightLauncherIntent = 'refly') => {
+    setFlightStartForState(f)
+    setFlightStartFresh(f !== null && intent === 'fresh')
+  }, [])
   const [draftFor, setDraftFor] = useState<string | null>(SEED.draftFor)
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
@@ -84,6 +104,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configFor,
     verifyOpen,
     flightStartFor,
+    flightStartFresh,
     flightStartNew,
     draftFor,
     resumePlanTaskId,
@@ -134,6 +155,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     configFor,
     verifyOpen,
     flightStartFor,
+    flightStartFresh,
     flightStartNew,
     draftFor,
     resumePlanTaskId,

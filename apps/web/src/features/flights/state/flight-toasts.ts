@@ -111,6 +111,10 @@ export function diffFlightToasts(
     if (ctx.view === 'flights' && ctx.selectedFlightId === f.flightId) continue
     const stageLabel = stageLabelFor(f.currentStage)
     const isCheckpoint = f.status === 'waiting-for-approval'
+    // Non-checkpoint attention pauses are only 'restart' or 'stage-failed' here
+    // ('user'/'queued' are filtered out above). A restart interruption is not a
+    // failure — say so, so the toast matches the header chip's own wording.
+    const restarted = f.pauseReason === 'restart'
     out.push({
       id: f.flightId,
       kind: 'flight',
@@ -118,7 +122,9 @@ export function diffFlightToasts(
       title: isCheckpoint ? `${f.feature} needs input` : `${f.feature} paused`,
       body: isCheckpoint
         ? (stageLabel ? `${stageLabel} is waiting for you` : 'A checkpoint is waiting for you')
-        : (stageLabel ? `${stageLabel} failed — open to resume` : 'A stage failed — open to resume'),
+        : restarted
+          ? (stageLabel ? `${stageLabel} was interrupted by a server restart — open to resume` : 'Interrupted by a server restart — open to resume')
+          : (stageLabel ? `${stageLabel} failed — open to resume` : 'A stage failed — open to resume'),
     })
   }
   return out

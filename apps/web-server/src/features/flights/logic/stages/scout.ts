@@ -69,6 +69,7 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       stageDir: path.join(ctx.flightDir, 'scout'),
       onChunk: ctx.appendLog,
       signal: ctx.signal,
+      agent: m.opts.agent,
     })
     const draft = extractJson<ScoutDraft>(text)
     draft.envFiles = Array.isArray(draft.envFiles) ? draft.envFiles.filter((f) => typeof f === 'string') : []

@@ -5,6 +5,7 @@ import { execFileSync } from 'child_process'
 import { linkFeatureDoc, writeFeatureDoc } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import { renderPrompt } from '../../../../shared/prompts'
+import type { PrdSourceAttempt } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps } from './context'
 
@@ -188,16 +189,35 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     return linked
   }
 
-  /** Park on the two-path fork. `note` carries a prior attempt's outcome
-   *  ("agent found nothing relevant…") so a failed collection re-parks with
-   *  the reason in the user's face instead of a silent bounce. */
-  const park = (ctx: StageContext, linked: string[], note?: string): StageOutcome => {
+  /** Prose form of an attempt, for `message` (CLI/MCP + older clients). The
+   *  agent's reason is already a sentence, so it's emitted verbatim rather
+   *  than wrapped in punctuation we'd have to guess at — the previous version
+   *  appended a period and produced "…in either repo..". */
+  const describeAttempt = (attempt: PrdSourceAttempt): string => {
+    if (attempt.outcome === 'no-diff') return 'No meaningful diff vs the base branch was found.'
+    if (attempt.outcome === 'no-output') return 'The agent did not produce a requirements doc.'
+    const reason = attempt.reason?.trim() ?? ''
+    if (!reason) return 'The agent searched and found nothing relevant.'
+    return `The agent found nothing relevant: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}`
+  }
+
+  /** Park on the two-path fork. `attempt` carries a prior collector run's
+   *  outcome so a failed collection re-parks with the reason in the user's
+   *  face instead of a silent bounce.
+   *
+   *  The outcome rides on `data.lastAttempt`, NOT concatenated into `message`:
+   *  a UI can only give the verdict its own treatment — and flip its
+   *  recommendation away from the path that just failed — if it can tell an
+   *  empty-handed retry from a first visit. `message` still carries the prose
+   *  form for the CLI/MCP surfaces and older clients. */
+  const park = (ctx: StageContext, linked: string[], attempt?: PrdSourceAttempt): StageOutcome => {
     const m = ctx.manifest()
     const docs = userDocs(featureDirFor(deps, m.feature))
     const hasDocs = docs.length > 0
     const base = hasDocs
       ? `${docs.length} requirement doc(s) ready for "${m.feature}"${linked.length > 0 ? ` (${linked.length} linked from your intent)` : ''}. Add more, then continue — or have an agent gather requirements guided by the intent.`
       : `No requirement docs yet for "${m.feature}". Add docs yourself, or have an agent gather them guided by the intent.`
+    const note = attempt ? describeAttempt(attempt) : ''
     return {
       kind: 'checkpoint',
       checkpoint: {
@@ -206,7 +226,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         options: hasDocs
           ? ['continue', 'collect-repo-docs', 'infer-from-diff']
           : ['collect-repo-docs', 'infer-from-diff'],
-        data: { docs, linked, intent: m.description },
+        data: { docs, linked, intent: m.description, lastAttempt: attempt },
       },
     }
   }
@@ -233,7 +253,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         .filter((t): t is { repo: string; base: string } => t.base !== null && diffVsBase(t.repo, t.base) !== null)
       if (targets.length === 0) {
         ctx.appendLog('[docs] no meaningful diff vs base in any repo — nothing to infer from.\n')
-        return park(ctx, [], 'No meaningful diff vs the base branch was found.')
+        return park(ctx, [], { mode, outcome: 'no-diff' })
       }
       repoTargets = targets.map((t) => `- ${t.repo} (diff vs ${t.base})`).join('\n')
     }
@@ -268,16 +288,17 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       stageDir: path.join(ctx.flightDir, 'docs'),
       onChunk: ctx.appendLog,
       signal: ctx.signal,
+      agent: m.opts.agent,
     })
 
     const wrote = fs.existsSync(outPath) && fs.statSync(outPath).size > 0
     if (!wrote) {
       const reason = /NOTHING_FOUND:?\s*(.*)/.exec(text)?.[1]?.trim()
-      const note = reason
-        ? `The agent found nothing relevant: ${reason}.`
-        : 'The agent did not produce a requirements doc.'
-      ctx.appendLog(`[docs] ${note}\n`)
-      return park(ctx, [], note)
+      const attempt: PrdSourceAttempt = reason
+        ? { mode, outcome: 'empty', reason }
+        : { mode, outcome: 'no-output' }
+      ctx.appendLog(`[docs] ${describeAttempt(attempt)}\n`)
+      return park(ctx, [], attempt)
     }
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     ctx.appendLog(`[docs] wrote docs/${outName}\n`)
@@ -320,6 +341,17 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       if (choice === 'use-repo-docs') return collect(ctx, 'collect-repo-docs', response.feedback)
       if (choice === 'description-only') return gather(ctx, choice)
       return this.run!(ctx)
+    },
+    // R78 restart wipe: the ENTIRE docs dir goes — hand-added files, symlinks
+    // pointing at the user's own PRD (links only, never their targets), agent-
+    // collected docs, and the generated `_` artifacts. Explicit user ruling:
+    // re-adding inputs on every retry IS the purpose of restart.
+    async reset(ctx) {
+      const m = ctx.manifest()
+      const docsDir = path.join(featureDirFor(deps, m.feature), 'docs')
+      if (!fs.existsSync(docsDir)) return
+      fs.rmSync(docsDir, { recursive: true, force: true })
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     },
   }
 }

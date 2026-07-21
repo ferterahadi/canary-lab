@@ -79,7 +79,20 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
   return {
     run: (ctx) => startAndWait(ctx),
     async onCheckpointResponse(ctx, response) {
-      if (response.choice === 'rerun') return startAndWait(ctx, { forceNew: true })
+      if (response.choice === 'rerun') {
+        // A REPLAYED rerun (resume after a mid-rerun pause) may find the rerun
+        // already started — links.runId then points at a live run. Re-attach
+        // instead of force-starting a second run into our own repo lock.
+        const runId = ctx.manifest().links?.runId
+        if (runId) {
+          const existing = await readManifest(deps, runId)
+          if (existing && !isTerminalRunStatus(existing.status)) {
+            ctx.appendLog(`[run] rerun already in flight — re-attaching to ${runId} (${existing.status})\n`)
+            return waitForVerdict(ctx, runId)
+          }
+        }
+        return startAndWait(ctx, { forceNew: true })
+      }
       if (response.choice === 'export-as-is') {
         const stage = ctx.manifest().stages.find((s) => s.key === 'run')
         return { kind: 'done', evidence: stage?.checkpoint?.data }
@@ -97,6 +110,25 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
       const existing = await readManifest(deps, runId)
       if (!existing || isTerminalRunStatus(existing.status)) return
       await deps.inject({ method: 'POST', url: `/api/runs/${encodeURIComponent(runId)}/abort` })
+    },
+    // R78 restart wipe: the run record (logs/runs/<runId>/) is this stage's
+    // artifact — delete it through the runs route so the store's own guards
+    // and events apply. A still-live run is aborted first; the routes' delete
+    // refuses active runs, so the abort must settle before the delete lands.
+    async reset(ctx) {
+      const runId = ctx.manifest().links?.runId
+      if (!runId) return
+      const url = `/api/runs/${encodeURIComponent(runId)}`
+      const existing = await readManifest(deps, runId)
+      if (existing && !isTerminalRunStatus(existing.status)) {
+        await deps.inject({ method: 'POST', url: `${url}/abort`, payload: {} }).catch(() => {})
+        await pollUntil(
+          () => readManifest(deps, runId),
+          (man) => !man || isTerminalRunStatus(man.status),
+          { what: `run ${runId} abort before restart wipe`, timeoutMs: 60_000 },
+        ).catch(() => {})
+      }
+      await deps.inject({ method: 'DELETE', url }).catch(() => {})
     },
   }
 }

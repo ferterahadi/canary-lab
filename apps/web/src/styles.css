@@ -326,6 +326,19 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* A one-line confirmation that appears then fades on its own (e.g. "Agent
+   started" beside a fire-and-forget button) — holds fully visible briefly,
+   then dissolves, without shifting layout. */
+@keyframes cl-flash-fade {
+  0%   { opacity: 0; }
+  12%  { opacity: 1; }
+  70%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+.cl-flash-fade {
+  animation: cl-flash-fade 2s ease-out forwards;
+}
+
 @keyframes cl-spin {
   to { transform: rotate(360deg); }
 }

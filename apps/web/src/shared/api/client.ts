@@ -1351,10 +1351,25 @@ async function readResponseBody(res: Response): Promise<unknown> {
 // can fall back to the raw transcript replay without try/catch noise.
 export type AgentSessionEvent =
   | { kind: 'user-message'; timestamp: string; text: string }
-  | { kind: 'assistant-message'; timestamp: string; text: string }
+  // `apiError` marks a turn the CLI synthesized when the model's stream dropped
+  // mid-response — the text is recovered partial output, not a conclusion.
+  | { kind: 'assistant-message'; timestamp: string; text: string; apiError?: boolean }
   | { kind: 'assistant-thinking'; timestamp: string; text: string }
   | { kind: 'tool-call'; timestamp: string; toolId: string; name: string; input: unknown }
   | { kind: 'tool-result'; timestamp: string; toolId: string; output: string; isError?: boolean }
+
+/** A subagent thread minus its events — the identity carried on live frames. */
+export interface SubagentIdentity {
+  agentId: string
+  /** The parent `tool-call` event's `toolId` this thread hangs under. */
+  parentToolId: string
+  agentType: string
+  description: string
+  spawnDepth: number
+  logPath: string
+}
+
+export type SubagentThread = SubagentIdentity & { events: AgentSessionEvent[] }
 
 export interface AgentSessionResponse {
   agent: 'claude' | 'codex'
@@ -1363,6 +1378,9 @@ export interface AgentSessionResponse {
   model?: string
   effort?: string
   events: AgentSessionEvent[]
+  // Threads spawned via the `Agent`/`Task` tool. Claude-only; absent on older
+  // servers and always empty for codex, so callers default it to [].
+  subagents?: SubagentThread[]
 }
 
 export async function getAgentSession(
@@ -1839,6 +1857,8 @@ export type {
   PlannedFeature,
   PlanFeaturesTask,
   PlanFeaturesTaskStatus,
+  PrdSourceAttempt,
+  PrdSourceCheckpointData,
 } from '../../../../../shared/flights/types'
 export { deriveFeatureSlug } from '../../../../../shared/flights/types'
 
@@ -1874,6 +1894,9 @@ export interface StartFlightBody {
   fromStage?: FlightStageKeyT
   /** Absent = autopilot on; explicit false asks at every checkpoint (R71/W4). */
   autopilot?: boolean
+  /** R79: which CLI conducts the flight's stage agents. Sticky per record —
+   *  jump/continue reuse the stored one. Absent = claude. */
+  agent?: 'claude' | 'codex'
 }
 
 /** Start / continue / redo / jump a flight (POST /api/flights, non-blocking —
@@ -1920,6 +1943,21 @@ export function resumeFlight(flightId: string, opts?: ClientOptions): Promise<Fl
   return request<FlightManifestT>(
     `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/resume`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** R78: flip autopilot on an existing flight, in any status. Takes effect at
+ *  the next checkpoint; one the flight is already parked on stays parked. */
+export function setFlightAutopilot(
+  flightId: string,
+  autopilot: boolean,
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/autopilot`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ autopilot }) },
     fetchImpl,
   )
 }
@@ -2011,7 +2049,7 @@ export async function getFlightAgentSession(
  *  several. 202 with the task record; attach-or-start server-side (same repo
  *  set + description reattaches to the running task). */
 export function planFeatures(
-  body: { repoPaths: string[]; description: string; autopilot?: boolean },
+  body: { repoPaths: string[]; description: string; autopilot?: boolean; agent?: 'claude' | 'codex' },
   opts?: ClientOptions,
 ): Promise<PlanFeaturesTaskT> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -2048,7 +2086,7 @@ export function listPlanFeatures(opts?: ClientOptions): Promise<{ tasks: PlanFea
  *  `feature_name_conflicts` lists names already in use (nothing created). */
 export function launchPlannedFeatures(
   taskId: string,
-  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean; autopilot?: boolean },
+  body: { features: PlannedFeatureT[]; env?: string; coverageTarget?: number; yolo?: boolean; autopilot?: boolean; agent?: 'claude' | 'codex' },
   opts?: ClientOptions,
 ): Promise<{ flightIds: string[] }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

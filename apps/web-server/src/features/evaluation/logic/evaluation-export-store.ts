@@ -105,6 +105,8 @@ function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRec
     // Legacy rows (pre-`id` index shape) carry only `taskId`; fall back to it so
     // remove/prune/reconcile can address them (else they resurrect on refresh).
     idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { taskId?: string }).taskId),
+    featureOf: (r) => r.feature,
+    withFeature: (r, feature) => ({ ...r, feature }),
     sortNewestFirst: true,
   })
 }
@@ -154,6 +156,12 @@ export function listEvaluationExportTasks(
     .map((e) => store.get(String(e.id)))
     .filter((task): task is EvaluationExportTaskRecord => task !== null)
     .filter((task) => !opts.runId || task.runId === opts.runId)
+}
+
+/** Follow a suite rename into export history, so past exports stay attached to
+ *  the feature that produced them. Returns how many tasks moved. */
+export function renameEvaluationExportFeature(logsDir: string, from: string, to: string): number {
+  return evalStore(logsDir).renameFeature(from, to)
 }
 
 export function appendEvaluationExportLog(logsDir: string, taskId: string, chunk: string): void {

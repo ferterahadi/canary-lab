@@ -110,6 +110,16 @@ describe('diffFlightToasts (R68)', () => {
     expect(out[0].kind === 'flight' && out[0].body).toBe('Run failed — open to resume')
   })
 
+  it('a restart pause reads as interrupted, not failed', () => {
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    const out = diffFlightToasts(prev, [fl({ flightId: 'a', status: 'paused', pauseReason: 'restart', currentStage: 'specs-coverage' })], noView, stageLabel)
+    expect(out[0]).toMatchObject({ title: 'checkout paused' })
+    const body = out[0].kind === 'flight' ? out[0].body : ''
+    expect(body).not.toMatch(/failed/)
+    expect(body).toMatch(/interrupted by a server restart/i)
+    expect(body).toMatch(/open to resume/)
+  })
+
   it('a user→stage-failed pause transition toasts (pauseReason folded into the key)', () => {
     const prev = attentionKeyMap([fl({ flightId: 'a', status: 'paused', pauseReason: 'user' })])
     const out = diffFlightToasts(prev, [fl({ flightId: 'a', status: 'paused', pauseReason: 'stage-failed' })], noView, stageLabel)

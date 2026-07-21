@@ -59,6 +59,27 @@ export interface FlightCheckpoint {
   data?: unknown
 }
 
+/** Outcome of the collector agent's previous attempt, carried on the
+ *  `prd-source` checkpoint's `data`. Structured rather than folded into
+ *  `message` so the UI can give the verdict its own row AND stop recommending
+ *  the path that just came back empty — a prose sentence can do neither. */
+export interface PrdSourceAttempt {
+  mode: 'collect-repo-docs' | 'infer-from-diff'
+  /** `empty` = the agent ran and found nothing; `no-output` = it produced no
+   *  doc without saying why; `no-diff` = there was nothing to infer from. */
+  outcome: 'empty' | 'no-output' | 'no-diff'
+  /** The agent's own one-line reason, verbatim and unpunctuated by us. */
+  reason?: string
+}
+
+/** `data` payload of the `prd-source` checkpoint. */
+export interface PrdSourceCheckpointData {
+  docs: string[]
+  linked: string[]
+  intent: string
+  lastAttempt?: PrdSourceAttempt
+}
+
 /** The client's answer to a checkpoint. `choice` addresses `options`; `values`
  *  carries user-supplied env values for `missing-env`. */
 export interface FlightCheckpointResponse {
@@ -134,6 +155,12 @@ export interface FlightOptions {
   env: string
   /** Coverage the specs↔coverage loop must reach before advancing (0–100). */
   coverageTarget: number
+  /** R79: which CLI conducts this flight's stage agents (scout, requirements
+   *  collector, PRD summary, spec author, coverage mapper). Chosen at start
+   *  (defaulting from the workspace's default-agent setting) and STICKY for
+   *  the record's lifetime: jump/continue reuse the stored value; only a full
+   *  redo may change it. Absent → claude. */
+  agent?: 'claude' | 'codex'
   /** Base branch for diff-inferred requirements (auto-detected when absent). */
   base?: string
   /** Skip every checkpoint except missing-env. */
@@ -183,6 +210,12 @@ export interface FlightManifest {
    *  appends it to its prompt; other stages ignore it. Overwritten by the next
    *  re-entry, kept afterwards as the audit trail. */
   feedback?: { stage: FlightStageKey; note: string }
+  /** R78: the stage the user explicitly re-entered (Continue → "from a step…",
+   *  or a redo). Autopilot does NOT auto-answer that stage's first checkpoint —
+   *  choosing to re-run a step IS the intent to decide it differently, so the
+   *  flight asks even when a safe default exists. Cleared the moment that stage
+   *  parks or settles, so only the first checkpoint is protected. */
+  askAtStage?: FlightStageKey
   /** Pointers to the flight's deliverables. */
   links?: {
     runId?: string
@@ -316,6 +349,9 @@ export interface PlanFeaturesTask {
    *  or proposal-confirmed) starts its flights with the user's choice. Absent
    *  = autopilot on. */
   autopilot?: boolean
+  /** R79: the dialog's agent pick, carried the same way — every launched
+   *  flight is conducted by this CLI. Absent = claude. */
+  agent?: 'claude' | 'codex'
   status: PlanFeaturesTaskStatus
   result?: PlanFeaturesResult
   error?: string

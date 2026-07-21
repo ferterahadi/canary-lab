@@ -1,11 +1,15 @@
 import fs from 'fs'
+import path from 'path'
 import {
   type AgentEvent,
   type AgentKind,
   type AgentSessionRef,
+  type SubagentThread,
   claudeSessionLogPath,
+  loadSubagentThread,
   locateLatestSessionLogForAgent,
   parseAgentSessionLine,
+  subagentDirFor,
 } from '../../agent-sessions/logic/agent-session-log'
 
 // Tails an agent CLI's JSONL session log and emits normalized events as new
@@ -28,11 +32,30 @@ export interface TailHandle {
   close(): void
 }
 
+/** One event from one subagent thread, carrying enough identity for the client
+ *  to file it under the right parent tool call and dedupe it.
+ *
+ *  `index` is the event's position within ITS OWN thread — not a global
+ *  counter. The client keeps a per-thread array and ignores any index it
+ *  already holds, so a REST snapshot and a WS replay converge on the same
+ *  result regardless of the order threads happen to be read or streamed in.
+ *  Counting arrivals (the way the parent stream dedupes) cannot work here:
+ *  the snapshot reads threads in directory order while the tailer emits them
+ *  in append order, so the two sequences differ. */
+export interface SubagentUpdate {
+  thread: Omit<SubagentThread, 'events'>
+  event: AgentEvent
+  index: number
+}
+
 export interface TailOptions {
   // Initial reference. For codex, `logPath` may not exist yet — the tailer
   // will try `discoverRef` to locate it once it appears on disk.
   ref: AgentSessionRef
   onEvent(event: AgentEvent): void
+  /** Optional: receive events from subagent threads the session spawns. Omit
+   *  to tail only the parent log (existing behavior). Never fires for codex. */
+  onSubagentEvent?(update: SubagentUpdate): void
   onError?(err: Error): void
   // Optional resolver for cases where `ref.logPath` is not yet known on disk
   // (codex spawns can't pin a session id up front). Called on a backoff until
@@ -42,14 +65,18 @@ export interface TailOptions {
   // Overridable for tests; defaults match a 2-minute discovery window.
   pollIntervalMs?: number
   pollMaxAttempts?: number
+  /** Overridable for tests; how often the `subagents/` dir is re-scanned. */
+  subagentPollMs?: number
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 500
 const DEFAULT_POLL_MAX_ATTEMPTS = 240
+const DEFAULT_SUBAGENT_POLL_MS = 1_000
 
 export function tailAgentSession(opts: TailOptions): TailHandle {
   const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS
   const pollMaxAttempts = opts.pollMaxAttempts ?? DEFAULT_POLL_MAX_ATTEMPTS
+  const subagentPollMs = opts.subagentPollMs ?? DEFAULT_SUBAGENT_POLL_MS
   let closed = false
   let watcher: fs.FSWatcher | null = null
   let pollTimer: ReturnType<typeof setTimeout> | null = null
@@ -114,6 +141,40 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
     setImmediate(flush)
   }
 
+  // ── Subagent threads ─────────────────────────────────────────────────────
+  // The `subagents/` dir appears only once the session spawns its first child,
+  // and new thread files appear at any time after, so it's polled rather than
+  // watched from the start. Each thread then gets its own byte-offset cursor;
+  // we re-scan on a light interval instead of one fs.watch per file, because a
+  // fan-out can open a dozen threads at once and watcher handles are scarcer
+  // than a periodic stat.
+  let subagentTimer: ReturnType<typeof setInterval> | null = null
+  // agentId → how many events of that thread we've already emitted.
+  const subagentCursors = new Map<string, number>()
+
+  const scanSubagents = (): void => {
+    if (closed || !opts.onSubagentEvent) return
+    const dir = subagentDirFor(ref)
+    if (!dir) return
+    let names: string[]
+    try { names = fs.readdirSync(dir) } catch { return }
+    for (const name of names.sort()) {
+      if (!name.endsWith('.jsonl')) continue
+      // Re-parsing the whole child log each tick keeps the cursor logic honest
+      // (a partial trailing line simply yields fewer events until it's
+      // complete) at the cost of re-reading a file that tops out around 100 KB.
+      const thread = loadSubagentThread(path.join(dir, name))
+      if (!thread) continue
+      const seen = subagentCursors.get(thread.agentId) ?? 0
+      if (thread.events.length <= seen) continue
+      const { events, ...identity } = thread
+      for (let i = seen; i < events.length; i++) {
+        try { opts.onSubagentEvent({ thread: identity, event: events[i], index: i }) } catch { /* ignore */ }
+      }
+      subagentCursors.set(thread.agentId, events.length)
+    }
+  }
+
   const startWatching = (): void => {
     if (closed) return
     try {
@@ -128,6 +189,11 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
     // Some agents write the file in one go after our initial flush; trigger
     // an extra flush shortly after to catch that case.
     setTimeout(scheduleFlush, 100)
+    if (opts.onSubagentEvent) {
+      scanSubagents()
+      subagentTimer = setInterval(scanSubagents, subagentPollMs)
+      subagentTimer.unref?.()
+    }
   }
 
   const tryResolve = (): void => {
@@ -159,6 +225,10 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
       if (pollTimer) {
         clearTimeout(pollTimer)
         pollTimer = null
+      }
+      if (subagentTimer) {
+        clearInterval(subagentTimer)
+        subagentTimer = null
       }
       if (watcher) {
         try { watcher.close() } catch { /* ignore */ }

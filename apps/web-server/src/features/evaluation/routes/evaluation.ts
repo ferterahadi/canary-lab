@@ -6,7 +6,7 @@ import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { PaneBroker, type PaneSubscriber } from '../../runs/logic/pane-broker'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
-import { loadAgentSession, resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse, resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../logic/test-review-export'
 import { buildEvaluationExportArchive } from '../logic/evaluation-export-archive'
@@ -249,8 +249,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       reply.code(404)
       return { reason: 'session-log-missing' }
     }
-    const { events, meta } = loadAgentSession(ref)
-    return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+    return buildAgentSessionResponse(ref)
   })
 
   app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/download', async (req, reply) => {

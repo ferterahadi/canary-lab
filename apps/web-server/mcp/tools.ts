@@ -258,6 +258,10 @@ export interface CanaryLabMcpDeps {
    *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —
    *  the MCP surface never approves or gates on it (awareness, not enforcement). */
   dirtySpecStore?: DirtySpecStore
+  /** R76: deleting a feature deletes its flight history with it — guards
+   *  (error while a flight is active) and removes the records. Absent →
+   *  directory-only delete, the pre-R76 behavior. */
+  removeFlightRecordsFor?: (feature: string) => { error?: string; removed: number }
   /** Flight (`canary-lab flight` pipeline) driven over MCP. Reuses the
    *  flights REST routes via app.inject — same store + conductor as UI/CLI, so
    *  a flight started here shows live in the web UI and vice versa. */
@@ -1144,17 +1148,24 @@ export function registerCanaryLabTools(
   })
 
   registerTool('delete_feature', {
-    description: 'Delete a Canary Lab feature directory. Requires confirmName to match the feature name.',
+    description: 'Delete a Canary Lab feature (suite) directory AND its flight history — one deletion concept. Rejected while the feature has an active flight (pause it first). Requires confirmName to match the feature name.',
     inputSchema: {
       feature: z.string(),
       confirmName: z.string().describe('Must exactly match feature.'),
     },
     annotations: { destructiveHint: true, idempotentHint: false },
   }, async ({ feature, confirmName }) => {
+    // Validate the confirm BEFORE the flight-history hook removes anything.
+    if (confirmName !== feature) return errorResult('confirmName must match the feature name')
+    // R76 guard — an active flight blocks the whole deletion before anything
+    // is removed.
+    const flights = deps.removeFlightRecordsFor?.(feature)
+    if (flights?.error) return errorResult(flights.error)
     const result = deleteFeature({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, confirmName })
     if (!result.ok) return errorResult(result.error)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature })
-    return asJsonResult({ deleted: true, feature, featureDir: result.featureDir })
+    if ((flights?.removed ?? 0) > 0) publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+    return asJsonResult({ deleted: true, feature, featureDir: result.featureDir, flightRecordsRemoved: flights?.removed ?? 0 })
   })
 
   registerTool('get_feature_repo_status', {
@@ -1486,10 +1497,27 @@ export function registerCanaryLabTools(
   }
   const flightNext = (view: Record<string, unknown>): string => {
     if (view.status === 'waiting-for-approval') {
-      const cp = view.checkpoint as { stage?: string; kind?: string; options?: string[] } | undefined
+      const cp = view.checkpoint as {
+        stage?: string
+        kind?: string
+        options?: string[]
+        data?: { lastAttempt?: { mode?: string; outcome?: string; reason?: string } }
+      } | undefined
       const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint — call respond_flight_checkpoint(flightId, choice: one of ${JSON.stringify(cp?.options ?? [])}).`
       if (cp?.kind === 'prd-source') {
-        return `${base} The Requirements stage ALWAYS pauses here — a two-path fork; ask your user which path. (a) Supply docs yourself: distill THIS conversation with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md"), then respond "continue". (b) Have Canary's agent gather them guided by the flight's frozen intent: respond "collect-repo-docs" (the agent copies in repo docs relevant to the intent) or "infer-from-diff" (the agent derives requirements from the branch diff vs base). If a previous gather went wrong, pass feedback:"<what was wrong>" with the choice — it is added to the agent's prompt.`
+        const fork = `${base} The Requirements stage ALWAYS pauses here — a two-path fork; ask your user which path. (a) Supply docs yourself: distill THIS conversation with write_feature_doc("${String(view.feature)}", "conversation-prd.md", <markdown>) or link a local file with write_feature_doc(link_path: "~/path/to/prd.md"), then respond "continue". (b) Have Canary's agent gather them guided by the flight's frozen intent: respond "collect-repo-docs" (the agent copies in repo docs relevant to the intent) or "infer-from-diff" (the agent derives requirements from the branch diff vs base). If a previous gather went wrong, pass feedback:"<what was wrong>" with the choice — it is added to the agent's prompt.`
+        // A re-park after an empty gather must NOT read as a neutral first
+        // visit: repeating the same collector over the same repos is the one
+        // choice already known to fail. Mirrors the web UI, which flips its
+        // recommendation to the manual path on the same `lastAttempt`.
+        const last = cp.data?.lastAttempt
+        if (!last) return fork
+        const what = last.outcome === 'no-diff'
+          ? 'found no meaningful diff vs the base branch'
+          : last.reason
+            ? `searched and found nothing relevant: ${last.reason}`
+            : 'ran but produced no requirements doc'
+        return `${fork} NOTE — a previous "${String(last.mode)}" gather already ${what}. Do NOT simply repeat that same choice: the material is not in these repos. Prefer (a) supplying the docs yourself, or re-run the agent ONLY with feedback:"<what it missed>" or after the user points the flight at different repos.`
       }
       if (cp?.kind === 'config-approval') {
         return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
@@ -1508,7 +1536,7 @@ export function registerCanaryLabTools(
   const flightsUnavailable = () => errorResult('flightsRequest dependency is not configured')
 
   registerTool('start_flight', {
-    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Autopilot is ON by default: checkpoints with a safe default answer themselves — config-approval→approve (the scaffolded on-disk config), prd-source→continue (only when requirement docs already exist), coverage-stuck→accept-partial, portify-apply→apply, run-failed→export-as-is, export-mode→raw — each decision logged [autopilot] on its stage. The flight still parks on similarity-choice and missing-env (no safe default), on prd-source when NO docs exist yet, and on any RE-parked checkpoint (e.g. a config parse error after an auto-approve). Pass autopilot:false to be asked at every checkpoint — do that when you plan to distill THIS conversation into requirement docs at the prd-source stop. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1, discarding its stage evidence) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A flight\'s repos and intent are FROZEN once it first starts: on redo / from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing a DIFFERENT repo set or description is rejected with type:"flight_frozen"; to change them the user deletes the flight in the web UI (there is no delete tool). A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early.',
+    description: 'Start (or resume) a Flight: one background pipeline that takes bare product repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict; you approve checkpoints via respond_flight_checkpoint and can feed docs via write_feature_doc (content or link_path). Autopilot is ON by default: checkpoints with a safe default answer themselves — config-approval→approve (the scaffolded on-disk config), prd-source→continue (only when requirement docs already exist), coverage-stuck→accept-partial, portify-apply→apply, run-failed→export-as-is, export-mode→raw — each decision logged [autopilot] on its stage. The flight still parks on similarity-choice and missing-env (no safe default), on prd-source when NO docs exist yet, and on any RE-parked checkpoint (e.g. a config parse error after an auto-approve). A stage you explicitly RE-ENTER (from_stage / redo) always parks its FIRST checkpoint even under autopilot — choosing to re-run a step IS the intent to answer it differently. Pass autopilot:false to be asked at every checkpoint — do that when you plan to distill THIS conversation into requirement docs at the prd-source stop. ONE flight record per feature: a paused flight is resumed, an ACTIVE one returns its id to follow, and a settled one requires redo:true (restart from stage 1) or from_stage (jump to a chosen stage; prerequisites checked, rejected with the missing one named). A restart WIPES the entry step and every later step back to zero on disk — requirement docs (user-added files/links included), authored specs, captured envsets, portify overlay, run record, evaluation export — as if never run; plain resume never wipes, so warn the user before redo/from_stage on artifacts they still want. A flight\'s repos and intent are FROZEN against MID-PIPELINE re-entry: on from_stage (and on resume) OMIT repoPaths/description and the stored values are reused — passing DIFFERENT ones is rejected with type:"flight_frozen". A full restart (redo:true) accepts new repoPaths/description and replaces the stored ones (omit to reuse); deleting the flight (web UI only, no tool) removes the record itself. A queued flight (status:"paused", pauseReason:"queued") is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — re-calling start_flight resumes it early. `agent` picks which CLI (claude|codex) conducts the flight\'s stage agents — sticky per record (jump/continue reuse it; only redo may change it); the run stage\'s auto-heal follows the workspace heal setting instead.',
     inputSchema: {
       repoPaths: z.array(z.string()).min(1).optional().describe('Absolute path(s) of the product repo(s); several paths become ONE feature spanning them. REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s repos are frozen and the stored set is reused (a different set is rejected with flight_frozen).'),
       description: z.string().optional().describe('What to test, e.g. "checkout flow". REQUIRED for a fresh start; OMIT on redo / from_stage / resume — the flight\'s intent is frozen and the stored value is reused (a different one is rejected with flight_frozen).'),
@@ -1519,10 +1547,11 @@ export function registerCanaryLabTools(
       yolo: z.boolean().optional().describe('Skip every checkpoint except missing env secrets.'),
       autopilot: z.boolean().optional().describe('Default true: safe checkpoints answer themselves (logged [autopilot]); similarity-choice, missing-env, docs-less prd-source, and re-parked checkpoints still park. Pass false to be asked at every checkpoint (e.g. to add conversation docs at the prd-source stop).'),
       fresh: z.boolean().optional().describe('Do not resume a paused flight — start over.'),
-      redo: z.boolean().optional().describe('Restart the feature\'s existing flight from stage 1, discarding its stage evidence.'),
-      from_stage: z.string().optional().describe('Start at this stage instead of stage 1 (e.g. "specs-coverage", "run"). Prerequisite artifacts are checked; rejected with the missing one named.'),
+      agent: z.enum(['claude', 'codex']).optional().describe('R79: which CLI conducts the flight\'s stage agents (scout, requirements collector, PRD summary, spec author, coverage mapper). STICKY per record: jump/continue reuse the stored one; only redo:true may change it. Absent = the stored value, or claude for a fresh start.'),
+      redo: z.boolean().optional().describe('Restart the feature\'s existing flight from stage 1. WIPES every step\'s on-disk artifacts back to zero — requirement docs (user-added included), specs, envsets, portify overlay, run record, export — as if the flight never ran; warn the user first if they may still want them.'),
+      from_stage: z.string().optional().describe('Start at this stage instead of stage 1 (e.g. "specs-coverage", "run"). Prerequisite artifacts are checked; rejected with the missing one named. WIPES this step\'s and every later step\'s on-disk artifacts (user-added inputs included) back to zero before re-running; earlier steps keep theirs.'),
     },
-  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, autopilot, fresh, redo, from_stage }) => {
+  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, autopilot, agent, fresh, redo, from_stage }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
     // Repos + intent are frozen once a flight exists, so redo / from_stage /
     // resume may OMIT repoPaths/description — but then we need `feature` to
@@ -1566,6 +1595,7 @@ export function registerCanaryLabTools(
         ...(base ? { base } : {}),
         ...(yolo ? { yolo } : {}),
         ...(autopilot === false ? { autopilot: false } : {}),
+        ...(agent ? { agent } : {}),
         ...(redo ? { mode: 'redo' } : from_stage ? { mode: 'jump' } : {}),
         ...(from_stage ? { fromStage: from_stage } : {}),
       },
@@ -1578,7 +1608,7 @@ export function registerCanaryLabTools(
         existingFlightId: startedBody.existingFlightId,
         existingStatus: startedBody.existingStatus,
         options: startedBody.options,
-        next: 'This feature already has a flight record. Re-call start_flight with redo:true to restart from stage 1, or from_stage:"<stage>" to jump (prerequisites checked) — OMIT repoPaths/description so the frozen stored values are reused. A paused record resumes automatically without either flag.',
+        next: 'This feature already has a flight record. Re-call start_flight with redo:true to restart from stage 1, or from_stage:"<stage>" to jump (prerequisites checked) — OMIT repoPaths/description so the frozen stored values are reused. Either flag WIPES the re-entered step\'s and every later step\'s on-disk artifacts (user-added docs included) back to zero. A paused record resumes automatically without either flag — resume never wipes.',
       })
     }
     if (started.statusCode === 409 && startedBody.type === 'flight_frozen') {

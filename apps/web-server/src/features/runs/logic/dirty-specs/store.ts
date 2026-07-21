@@ -78,6 +78,10 @@ export class DirtySpecStore {
         status: r.status,
         since: r.since,
       }),
+      // This store is keyed BY the feature — a rename re-homes the record dir
+      // (see FileBackedTaskStore.renameFeature) rather than editing in place.
+      featureOf: (r) => r.featureId,
+      withFeature: (r, feature) => ({ ...r, id: feature, featureId: feature }),
     })
     this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, featureId: e.id }))
   }
@@ -164,6 +168,10 @@ export class DirtySpecStore {
 
   remove(featureId: string): void {
     this.store.remove(featureId)
+  }
+
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
   }
 
   onEvent(fn: (event: DirtySpecStoreEvent) => void): void {

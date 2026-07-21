@@ -6,11 +6,13 @@ import { FlightRunStore, type FlightStore } from './store'
 import {
   startFlight,
   resumeFlight,
+  setFlightAutopilot,
   respondToFlightCheckpoint,
   abortFlight,
   pauseFlight,
   redoFlight,
   deleteFlight,
+  removeFlightRecordsForFeature,
   enqueueFlight,
   drainQueuedFlights,
   reopenStages,
@@ -1138,22 +1140,35 @@ describe('rewind outcome', () => {
   })
 })
 
-describe('frozen repos + intent (R57)', () => {
-  it('redo with a DIFFERENT repo set is rejected — repos are frozen on the record', async () => {
+describe('frozen repos + intent (R57/R75)', () => {
+  it('JUMP with a DIFFERENT repo set is rejected — mid-pipeline re-entry keeps the freeze', async () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))
     await completion
     expect(() =>
-      startFlight({ ...args('/repo/b'), mode: 'redo' }, deps(allDone())),
+      startFlight({ ...args('/repo/b'), mode: 'jump', fromStage: 'scout' }, deps(allDone())),
     ).toThrow(FlightFrozenError)
     expect(store.get(manifest.flightId)!.repoPaths).toEqual(['/repo/a'])
   })
 
-  it('redo with a DIFFERENT description is rejected — intent is frozen on the record', async () => {
+  it('JUMP with a DIFFERENT description is rejected — intent stays frozen mid-pipeline', async () => {
     const { completion } = startFlight(args(), deps(allDone()))
     await completion
     expect(() =>
-      startFlight({ ...args(), description: 'something else entirely', mode: 'redo' }, deps(allDone())),
+      startFlight({ ...args(), description: 'something else entirely', mode: 'jump', fromStage: 'scout' }, deps(allDone())),
     ).toThrow(FlightFrozenError)
+  })
+
+  it('REDO with different repos + intent is ACCEPTED — a full restart replaces the stored inputs (R75)', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const redone = startFlight(
+      { ...args('/repo/b'), description: 'a new intent', mode: 'redo' },
+      deps(allDone()),
+    )
+    expect(redone.manifest.flightId).toBe(manifest.flightId) // same record, replaced inputs
+    expect(redone.manifest.repoPaths).toEqual(['/repo/b'])
+    expect(redone.manifest.description).toBe('a new intent')
+    await redone.completion
   })
 
   it('redo with EMPTY repos/description reuses the stored values (the CLI/dialog omission path)', async () => {
@@ -1183,6 +1198,25 @@ describe('deleteFlight', () => {
     deleteFlight(manifest.flightId, deps(allDone()))
     expect(store.get(manifest.flightId)).toBeNull()
     expect(store.latestForFeature('checkout')).toBeNull()
+  })
+
+  it('R76: removeFlightRecordsForFeature clears every settled record; an active flight blocks it', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const cleared = removeFlightRecordsForFeature(store, 'checkout')
+    expect(cleared).toEqual({ removed: 1 })
+    expect(store.get(manifest.flightId)).toBeNull()
+    expect(store.latestForFeature('checkout')).toBeNull()
+
+    // Active → error, nothing removed.
+    const adapters = allDone()
+    adapters.scout = { run: () => new Promise(() => {}) }
+    const live = startFlight(args(), deps(adapters))
+    await new Promise((r) => setTimeout(r, 10))
+    const blocked = removeFlightRecordsForFeature(store, 'checkout')
+    expect(blocked.error).toMatch(/pause it before deleting/)
+    expect(blocked.removed).toBe(0)
+    expect(store.get(live.manifest.flightId)).not.toBeNull()
   })
 
   it('rejects deleting an active flight — stop it first', async () => {
@@ -1450,6 +1484,54 @@ describe('autopilot (R71/W4)', () => {
     expect(responses).toEqual([])
   })
 
+  it('R78: a step the user explicitly re-entered parks its FIRST checkpoint even under autopilot', async () => {
+    const responses: unknown[] = []
+    const adapters = allDone()
+    adapters.docs = parkThenDone('prd-source', ['continue', 'collect-repo-docs'], responses)
+    // First pass: autopilot answers prd-source and the flight completes.
+    const { manifest, completion } = startFlight(args('/repo/re-entry'), deps(adapters))
+    await completion
+    expect(responses).toEqual([{ choice: 'continue' }])
+
+    // The user picks Continue → from a step → Requirements: same autopilot
+    // setting, but this checkpoint is theirs to answer.
+    const redone = redoFlight(manifest.flightId, { ...deps(adapters), validateStageEntry: () => null }, { fromStage: 'docs' })
+    await redone.completion
+    const parked = store.get(manifest.flightId)!
+    expect(parked.status).toBe('waiting-for-approval')
+    expect(parked.stages.find((s) => s.key === 'docs')!.status).toBe('waiting-for-approval')
+    expect(responses).toEqual([{ choice: 'continue' }]) // no second auto-answer
+    // Protection is spent — the flag is gone once the user has been asked.
+    expect(parked.askAtStage).toBeUndefined()
+
+    // Answering it releases the flight; later checkpoints autopilot normally.
+    const released = respondToFlightCheckpoint(manifest.flightId, { choice: 'continue' }, deps(adapters))
+    await released.completion
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+  })
+
+  it('R78: setFlightAutopilot flips the preference on an existing flight, and the next checkpoint honours it', async () => {
+    const responses: unknown[] = []
+    const adapters = allDone()
+    adapters.docs = parkThenDone('config-approval', ['approve', 'redraft'], responses)
+    const { manifest, completion } = startFlight(
+      { ...args('/repo/toggle'), opts: { ...OPTS, autopilot: false } },
+      deps(adapters),
+    )
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+
+    const flipped = setFlightAutopilot(manifest.flightId, true, deps(adapters))
+    expect(flipped.opts.autopilot).toBe(true)
+    // The parked checkpoint is deliberately NOT auto-answered under the user.
+    expect(responses).toEqual([])
+    // Releasing it by hand lets the drive continue; the next stage's checkpoint
+    // now auto-answers because the flight reads the flipped preference.
+    const released = respondToFlightCheckpoint(manifest.flightId, { choice: 'approve' }, deps(adapters))
+    await released.completion
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+  })
+
   it('yolo flights are exempt — a checkpoint an adapter parks under yolo reaches the human', async () => {
     const adapters = allDone()
     adapters.docs = {
@@ -1491,5 +1573,255 @@ describe('autopilot (R71/W4)', () => {
     const log = final.stages.find((s) => s.key === 'docs')!.log ?? ''
     expect(log.match(/\[autopilot\]/g)?.length).toBe(1)
     expect(final.stages.find((s) => s.key === 'docs')!.checkpoint?.message).toContain('parse error')
+  })
+})
+
+describe('restart wipe (R78)', () => {
+  const SIDECARS = ['scout', 'docs', 'prd-summary', 'specs-coverage', 'coverage-map']
+
+  function recordingAdapters(events: string[]): StageAdapters {
+    return Object.fromEntries(
+      FLIGHT_STAGE_KEYS.map((k) => [
+        k,
+        {
+          run: async () => {
+            events.push(`run:${k}`)
+            return { kind: 'done' } as StageOutcome
+          },
+          reset: async () => {
+            events.push(`reset:${k}`)
+          },
+        },
+      ]),
+    ) as StageAdapters
+  }
+
+  function plantSidecars(flightId: string): string {
+    const flightDir = store.flightDir(flightId)
+    for (const dir of SIDECARS) {
+      fs.mkdirSync(path.join(flightDir, dir), { recursive: true })
+      fs.writeFileSync(path.join(flightDir, dir, 'agent-session.json'), '{}')
+    }
+    return flightDir
+  }
+
+  it('redo resets every stage in order and deletes sidecar dirs before any stage runs', async () => {
+    const events: string[] = []
+    const d = deps(recordingAdapters(events))
+    const first = startFlight(args(), d)
+    await first.completion
+    const flightDir = plantSidecars(first.manifest.flightId)
+
+    events.length = 0
+    const redone = redoFlight(first.manifest.flightId, d)
+    await redone.completion
+
+    // Every stage's reset ran, in stage order, all before the first stage ran.
+    expect(events.slice(0, FLIGHT_STAGE_KEYS.length)).toEqual(FLIGHT_STAGE_KEYS.map((k) => `reset:${k}`))
+    expect(events[FLIGHT_STAGE_KEYS.length]).toBe('run:similarity')
+    for (const dir of SIDECARS) {
+      expect(fs.existsSync(path.join(flightDir, dir)), dir).toBe(false)
+    }
+  })
+
+  it('jump resets the entry stage and every later stage — never the ones before it', async () => {
+    const events: string[] = []
+    const d: FlightConductorDeps = { ...deps(recordingAdapters(events)), validateStageEntry: () => null }
+    const first = startFlight(args(), d)
+    await first.completion
+    const flightDir = plantSidecars(first.manifest.flightId)
+
+    events.length = 0
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'docs' as const }, d)
+    await jumped.completion
+
+    const fromDocs = FLIGHT_STAGE_KEYS.slice(FLIGHT_STAGE_KEYS.indexOf('docs'))
+    expect(events.filter((e) => e.startsWith('reset:'))).toEqual(fromDocs.map((k) => `reset:${k}`))
+    // Earlier stages keep their sidecars (their transcripts are still true).
+    expect(fs.existsSync(path.join(flightDir, 'scout'))).toBe(true)
+    for (const dir of ['docs', 'prd-summary', 'specs-coverage', 'coverage-map']) {
+      expect(fs.existsSync(path.join(flightDir, dir)), dir).toBe(false)
+    }
+  })
+
+  it('reset reads the PRIOR record — the old links survive into its ctx', async () => {
+    let seenRunId: string | undefined
+    const adapters = allDone()
+    adapters.run = {
+      run: async () => ({ kind: 'done' }),
+      reset: async (ctx) => {
+        seenRunId = ctx.manifest().links?.runId
+      },
+    }
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+    store.save({ ...store.get(first.manifest.flightId)!, links: { runId: 'r-123' } })
+
+    const redone = redoFlight(first.manifest.flightId, deps(adapters))
+    await redone.completion
+    expect(seenRunId).toBe('r-123')
+  })
+
+  it('a throwing reset never blocks the restart (best-effort, like interrupt)', async () => {
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({ kind: 'done' }),
+      reset: async () => {
+        throw new Error('boom')
+      },
+    }
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+
+    const redone = redoFlight(first.manifest.flightId, deps(adapters))
+    await redone.completion
+    expect(store.get(redone.manifest.flightId)!.status).toBe('done')
+  })
+
+  it('resume never resets — it continues from the last state', async () => {
+    const events: string[] = []
+    const adapters = recordingAdapters(events)
+    let docsAttempts = 0
+    adapters.docs = {
+      run: async () => {
+        docsAttempts += 1
+        return docsAttempts === 1 ? { kind: 'failed', error: 'flaky' } : { kind: 'done' }
+      },
+      reset: async () => {
+        events.push('reset:docs')
+      },
+    }
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+    expect(store.get(first.manifest.flightId)!.status).toBe('paused')
+    const flightDir = plantSidecars(first.manifest.flightId)
+
+    events.length = 0
+    const resumed = resumeFlight(first.manifest.flightId, deps(adapters))
+    await resumed.completion
+    expect(store.get(first.manifest.flightId)!.status).toBe('done')
+    expect(events.filter((e) => e.startsWith('reset:'))).toEqual([])
+    for (const dir of SIDECARS) {
+      expect(fs.existsSync(path.join(flightDir, dir)), dir).toBe(true)
+    }
+  })
+})
+
+describe('resume replays the in-flight answer (R78: resume is seamless, never a re-ask)', () => {
+  it('a stage paused MID-EXECUTION of its answer re-runs with the same answer — the fork is not re-asked', async () => {
+    const runCalls: string[] = []
+    const responses: Array<Record<string, unknown>> = []
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => {
+        runCalls.push('run')
+        return {
+          kind: 'checkpoint',
+          checkpoint: { kind: 'prd-source', message: 'where from?', options: ['collect-repo-docs', 'infer-from-diff'] },
+        }
+      },
+      onCheckpointResponse: async (ctx, response) => {
+        responses.push(response as Record<string, unknown>)
+        if (responses.length === 1) {
+          // Simulate the collector agent: park until the pause aborts us, then
+          // die the way a SIGTERMed spawn does.
+          await new Promise<void>((resolve) => {
+            if (ctx.signal.aborted) return resolve()
+            ctx.signal.addEventListener('abort', () => resolve(), { once: true })
+          })
+          throw new Error('collector cancelled by pause')
+        }
+        return { kind: 'done', evidence: { source: 'agent-repo-docs' } }
+      },
+    }
+    const d = deps(adapters)
+    const first = startFlight(args(), d)
+    await first.completion
+    const flightId = first.manifest.flightId
+    expect(store.get(flightId)!.status).toBe('waiting-for-approval')
+
+    const responded = respondToFlightCheckpoint(flightId, { choice: 'collect-repo-docs' }, d)
+    pauseFlight(flightId, d) // aborts the in-flight collector
+    await responded.completion
+    expect(store.get(flightId)!.status).toBe('paused')
+
+    const resumed = resumeFlight(flightId, d)
+    await resumed.completion
+
+    // The answer replayed; run() (the fork) was never re-entered.
+    expect(responses).toHaveLength(2)
+    expect(responses[1]).toMatchObject({ choice: 'collect-repo-docs' })
+    expect(runCalls).toEqual(['run'])
+    expect(store.get(flightId)!.status).toBe('done')
+  })
+
+  it('an answer that was already SPENT (stage re-parked, then paused while waiting) is not replayed — resume re-asks', async () => {
+    const runCalls: string[] = []
+    const responses: string[] = []
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => {
+        runCalls.push('run')
+        return {
+          kind: 'checkpoint',
+          // A kind with no autopilot default, so every park reaches the test.
+          checkpoint: { kind: 'similarity-choice', message: 'pick', options: ['a', 'b'] },
+        }
+      },
+      onCheckpointResponse: async (_ctx, response) => {
+        responses.push(String(response.choice))
+        // The answer "fails" — same checkpoint parks again.
+        return {
+          kind: 'checkpoint',
+          checkpoint: { kind: 'similarity-choice', message: 'pick again', options: ['a', 'b'] },
+        }
+      },
+    }
+    const d = deps(adapters)
+    const first = startFlight(args(), d)
+    await first.completion
+    const flightId = first.manifest.flightId
+
+    const responded = respondToFlightCheckpoint(flightId, { choice: 'a' }, d)
+    await responded.completion // consumed → re-parked, waiting again
+    expect(store.get(flightId)!.status).toBe('waiting-for-approval')
+
+    pauseFlight(flightId, d) // paused while PARKED — the old answer is spent
+    const resumed = resumeFlight(flightId, d)
+    await resumed.completion
+
+    // Resume re-ran the stage (re-asking), it did NOT replay the stale 'a'.
+    expect(responses).toEqual(['a'])
+    expect(runCalls).toEqual(['run', 'run'])
+    expect(store.get(flightId)!.status).toBe('waiting-for-approval')
+  })
+})
+
+describe('flight agent stickiness (R79: once codex, always codex)', () => {
+  const withAgent = (agent: 'claude' | 'codex' | undefined): FlightOptions =>
+    ({ ...OPTS, ...(agent ? { agent } : {}) })
+
+  it('jump keeps the stored agent even when the caller passes a different one', async () => {
+    const d: FlightConductorDeps = { ...deps(allDone()), validateStageEntry: () => null }
+    const first = startFlight({ ...args(), opts: withAgent('codex') }, d)
+    await first.completion
+
+    const jumped = startFlight({ ...args(), opts: withAgent('claude'), mode: 'jump' as const, fromStage: 'docs' as const }, d)
+    await jumped.completion
+    expect(store.get(jumped.manifest.flightId)!.opts.agent).toBe('codex')
+  })
+
+  it('redo accepts a new agent; omitting it keeps the stored one', async () => {
+    const d = deps(allDone())
+    const first = startFlight({ ...args(), opts: withAgent('codex') }, d)
+    await first.completion
+
+    const kept = startFlight({ ...args(), opts: withAgent(undefined), mode: 'redo' as const }, d)
+    await kept.completion
+    expect(store.get(kept.manifest.flightId)!.opts.agent).toBe('codex')
+
+    const changed = startFlight({ ...args(), opts: withAgent('claude'), mode: 'redo' as const }, d)
+    await changed.completion
+    expect(store.get(changed.manifest.flightId)!.opts.agent).toBe('claude')
   })
 })

@@ -42,6 +42,12 @@ export interface TaskStoreConfig<T> {
   idOfEntry?: (entry: TaskIndexEntry) => string | undefined
   /** Current status, used by `transition` + the default index sort tiebreak. */
   statusOf?: (rec: T) => string
+  /** The feature a record belongs to, for `renameFeature`. Declare this pair on
+   *  every store whose records name a feature — a suite rename rewrites the name
+   *  in place rather than orphaning the history behind the old one. Omitted →
+   *  `renameFeature` is a no-op for this store. */
+  featureOf?: (rec: T) => string | undefined
+  withFeature?: (rec: T, feature: string) => T
   /** Validate/normalize an untrusted record read from disk; return null to drop. */
   validate?: (raw: unknown) => T | null
   /** State-machine guard for `transition`. Absent → any transition allowed. */
@@ -166,6 +172,47 @@ export class FileBackedTaskStore<T> {
     } catch {
       /* best-effort */
     }
+    this.emit({ kind: 'removed', id })
+  }
+
+  /** Re-home every record from one feature name to another, in place. The
+   *  feature name IS a suite's identity, so a rename must follow it into every
+   *  store that recorded work against it — otherwise the history orphans behind
+   *  a name nothing resolves any more (the row still lists, but no feature
+   *  matches it). Returns how many records moved.
+   *
+   *  Stores whose record id is derived FROM the feature (dirty-specs) get their
+   *  per-record directory moved so sidecar files survive, and the stale index
+   *  row dropped. Requires `featureOf` + `withFeature`; otherwise a no-op. */
+  renameFeature(from: string, to: string): number {
+    const { featureOf, withFeature } = this.config
+    if (!featureOf || !withFeature || from === to) return 0
+    let renamed = 0
+    for (const entry of this.readIndex()) {
+      const id = this.entryId(entry)
+      if (!id) continue
+      const rec = this.get(id)
+      if (!rec || featureOf(rec) !== from) continue
+      const next = withFeature(rec, to)
+      const nextId = this.config.idOf(next)
+      if (nextId !== id) {
+        try {
+          fs.rmSync(this.recordDir(nextId), { recursive: true, force: true })
+          fs.renameSync(this.recordDir(id), this.recordDir(nextId))
+        } catch {
+          /* best-effort — save() below still writes the record at its new id */
+        }
+        this.dropIndexRow(id)
+      }
+      this.save(next)
+      renamed++
+    }
+    return renamed
+  }
+
+  /** Drop an index row without touching its (already-moved) record directory. */
+  private dropIndexRow(id: string): void {
+    this.writeIndex(this.readIndex().filter((e) => this.entryId(e) !== id))
     this.emit({ kind: 'removed', id })
   }
 

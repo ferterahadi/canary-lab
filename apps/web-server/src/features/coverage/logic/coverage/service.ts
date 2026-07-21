@@ -205,8 +205,9 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
 }
 
 // Legacy review-queue sidecar (removed with the accept/reject flow). Still named
-// here so `clearPrdSummary` cleans up any file left by an older build.
-const LEGACY_MAPPINGS_JSON = '_coverage-mappings.json'
+// here so `clearPrdSummary` and the flight's specs-coverage reset clean up any
+// file left by an older build.
+export const LEGACY_MAPPINGS_JSON = '_coverage-mappings.json'
 
 // ---------------------------------------------------------------------------
 // Coverage engine — annotate-pass (R2). Infers which requirement(s) each

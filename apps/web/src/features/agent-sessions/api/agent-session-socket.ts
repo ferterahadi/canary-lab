@@ -1,5 +1,5 @@
 import { connectReconnectingSocket, defaultWsBase } from '../../../shared/api/reconnecting-socket'
-import type { AgentSessionEvent } from '../../../shared/api/client'
+import type { AgentSessionEvent, SubagentIdentity } from '../../../shared/api/client'
 
 // WebSocket wrapper for live structured agent-session events. Source is
 // either a run id or a (draftId, stage) pair — the server routes are
@@ -18,12 +18,16 @@ export type AgentSessionSocketSource =
   | { kind: 'flight-plan'; taskId: string }
 
 export interface AgentSessionSocketMessage {
-  type: 'session' | 'event' | 'error' | 'done'
+  type: 'session' | 'event' | 'subagent' | 'error' | 'done'
   agent?: 'claude' | 'codex'
   sessionId?: string
   model?: string
   effort?: string
   event?: AgentSessionEvent
+  /** `subagent` frames only: which thread the event belongs to, and its
+   *  position within that thread (the dedupe key — see `SubagentUpdate`). */
+  thread?: SubagentIdentity
+  index?: number
   error?: string
 }
 
@@ -31,6 +35,7 @@ export interface ConnectAgentSessionOptions {
   source: AgentSessionSocketSource
   onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string; model?: string; effort?: string }) => void
   onEvent: (event: AgentSessionEvent) => void
+  onSubagentEvent?: (update: { thread: SubagentIdentity; event: AgentSessionEvent; index: number }) => void
   onError?: (err: string) => void
   onDone?: () => void
   wsBase?: string
@@ -81,6 +86,8 @@ export function connectAgentSessionStream(opts: ConnectAgentSessionOptions): Age
         opts.onSession?.({ agent: msg.agent, sessionId: msg.sessionId, model: msg.model, effort: msg.effort })
       } else if (msg.type === 'event' && msg.event) {
         opts.onEvent(msg.event)
+      } else if (msg.type === 'subagent' && msg.event && msg.thread && typeof msg.index === 'number') {
+        opts.onSubagentEvent?.({ thread: msg.thread, event: msg.event, index: msg.index })
       } else if (msg.type === 'error') {
         opts.onError?.(msg.error ?? 'unknown error')
       } else if (msg.type === 'done') {

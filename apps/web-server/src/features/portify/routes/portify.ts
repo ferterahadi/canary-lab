@@ -19,7 +19,7 @@ export interface PortifyRouteDeps {
   cancelPortify(workflowId: string): Promise<PortifyManifest>
   revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
   removePortify(workflowId: string): Promise<{ workflowId: string; removed: true }>
-  loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
+  loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[]; subagents?: unknown[] } | null
   workspaceEvents?: WorkspaceEventPublisher
   /** Product root — resolves the configured editor for "open in editor". */
   projectRoot?: string

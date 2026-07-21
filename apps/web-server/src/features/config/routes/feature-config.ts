@@ -23,6 +23,20 @@ export interface FeatureConfigRouteDeps {
   featuresDir: string
   isRepoActive?: (feature: string, repo: string) => boolean
   workspaceEvents?: WorkspaceEventPublisher
+  /** R76: deleting a feature deletes its flight history with it — the hook
+   *  guards (error string while a flight is active) and removes the records.
+   *  Absent (tests without a flight store) → the directory delete proceeds
+   *  alone, matching the pre-R76 behavior. */
+  removeFlightRecordsFor?: (feature: string) => { error?: string; removed: number }
+  /** A suite's `name` IS its identity — every store stamps it on its records.
+   *  Editing it therefore renames the suite: `blockedBy` refuses (with a
+   *  reason) while live work still holds the old name, and `apply` carries the
+   *  rename into flights/runs/coverage/portify/benchmarks/dirty-specs/exports/
+   *  drafts. Absent (tests without stores) → the config write proceeds alone. */
+  featureRename?: {
+    blockedBy: (feature: string) => string | null
+    apply: (from: string, to: string) => number
+  }
 }
 
 const FEATURE_CONFIG_NAMES = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
@@ -162,6 +176,25 @@ export async function featureConfigRoutes(
         incoming && typeof incoming === 'object' && !Array.isArray(incoming)
           ? { ...(incoming as { [k: string]: ConfigValue }), envs: listEnvFolders(feature.featureDir) }
           : incoming
+      // Editing `name` renames the suite: `loadFeatures` keys every feature by
+      // it, so the old name stops resolving the moment this file is written.
+      // Validate + guard BEFORE the write — a refused rename must leave the
+      // config untouched, not half-applied.
+      const nextName = typeof (synced as { name?: unknown })?.name === 'string'
+        ? ((synced as { name: string }).name).trim()
+        : ''
+      const renaming = nextName !== '' && nextName !== feature.name
+      if (renaming) {
+        if (features.some((f) => f.name === nextName)) {
+          reply.code(409)
+          return { error: `feature name already in use: ${nextName}` }
+        }
+        const blocked = deps.featureRename?.blockedBy(feature.name)
+        if (blocked) {
+          reply.code(409)
+          return { error: blocked }
+        }
+      }
       let next: string
       try {
         next = writeFeatureConfig(source, synced)
@@ -171,6 +204,23 @@ export async function featureConfigRoutes(
       }
       fs.writeFileSync(cfg.path, next)
       const parsed = readFeatureConfig(next)
+      if (renaming) {
+        // The suite's history follows its identity. NOTE: the feature DIRECTORY
+        // deliberately stays put — `loadFeatures` never reads it (`featureDir`
+        // is `__dirname`), while run/coverage/portify records bake absolute
+        // `features/<dir>/…` spec + config paths that a move would invalidate.
+        const moved = deps.featureRename?.apply(feature.name, nextName) ?? 0
+        publishWorkspaceEvent(deps.workspaceEvents, {
+          type: 'feature-renamed',
+          from: feature.name,
+          to: nextName,
+        })
+        // Flight rows are keyed by feature name — refresh them too, so the
+        // renamed suite and its flight stop looking like two separate things.
+        if (moved > 0) {
+          publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+        }
+      }
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return { path: cfg.path, format: cfg.format, content: next, parsed }
     },
@@ -343,8 +393,18 @@ export async function featureConfigRoutes(
         reply.code(400)
         return { error: 'feature directory is outside the features root' }
       }
+      // R76: the suite's flight history goes with it — guarded first, so an
+      // active flight blocks the whole deletion before anything is removed.
+      const flights = deps.removeFlightRecordsFor?.(feature.name)
+      if (flights?.error) {
+        reply.code(409)
+        return { error: flights.error }
+      }
       fs.rmSync(featureDir, { recursive: true, force: true })
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature: feature.name })
+      if ((flights?.removed ?? 0) > 0) {
+        publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+      }
       reply.code(204)
       return null
     },

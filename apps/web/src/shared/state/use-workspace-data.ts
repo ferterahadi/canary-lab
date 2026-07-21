@@ -30,6 +30,10 @@ export interface WorkspaceDataDeps {
   selectedFeatureRef: MutableRefObject<string | null>
   selectedRunIdRef: MutableRefObject<string | null>
   pendingRunSelectionRef: MutableRefObject<string | null>
+  /** A suite was renamed elsewhere (another tab, an MCP client, this tab's own
+   *  save). Anything App holds keyed by the old name — an open config dialog —
+   *  must re-point at the new one; the selection itself is handled here. */
+  onFeatureRenamed?: (from: string, to: string) => void
 }
 
 export interface WorkspaceData {
@@ -49,7 +53,13 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     invalidate, allRuns, initialSelectedFeature,
     setSelectedFeature, setSelectedRunId,
     selectedFeatureRef, selectedRunIdRef, pendingRunSelectionRef,
+    onFeatureRenamed,
   } = deps
+
+  // Read through a ref so the WS connect effect keeps a stable dep list — a
+  // teardown/reconnect would drop events in the gap (the bus has no replay).
+  const onFeatureRenamedRef = useRef(onFeatureRenamed)
+  useEffect(() => { onFeatureRenamedRef.current = onFeatureRenamed }, [onFeatureRenamed])
 
   const [features, setFeatures] = useState<Feature[]>([])
   const [flights, setFlights] = useState<FlightIndexEntry[]>([])
@@ -139,6 +149,20 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     try {
       conn = connectWorkspaceEvents({
         onEvent: (event) => {
+          if (event.type === 'feature-renamed') {
+            // The suite kept its identity but changed its name. Follow it —
+            // otherwise the selected feature (and any surface keyed by the old
+            // name) no longer matches any row and the view falls back to the
+            // first suite, which reads as "my feature disappeared".
+            const following = selectedFeatureRef.current === event.from
+            onFeatureRenamedRef.current?.(event.from, event.to)
+            refreshFeatures(following ? event.to : selectedFeatureRef.current)
+            // Flight rows are keyed by feature name too.
+            refreshFlights()
+            invalidate('flights')
+            invalidate('repos')
+            return
+          }
           if (event.type === 'feature-created' || event.type === 'feature-deleted' || event.type === 'features-changed') {
             refreshFeatures(event.type === 'feature-created' ? event.feature : undefined)
             if (event.type === 'features-changed') invalidate('repos')

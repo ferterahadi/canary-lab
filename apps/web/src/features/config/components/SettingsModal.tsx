@@ -13,17 +13,17 @@ const HEAL_AGENT_OPTIONS: { value: VisibleHealAgentChoice; label: string; descri
   {
     value: 'external',
     label: 'External client',
-    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for that client to claim and signal.',
+    description: 'Let Claude / Codex Desktop or CLI drive heal over MCP. Canary Lab waits for that client to claim and signal. New flights default to Claude.',
   },
   {
     value: 'claude',
     label: 'Claude',
-    description: 'Always use the `claude` CLI for auto-heal.',
+    description: 'Always use the `claude` CLI for auto-heal, and preselect it for new flights.',
   },
   {
     value: 'codex',
     label: 'Codex',
-    description: 'Always use the `codex` CLI for auto-heal.',
+    description: 'Always use the `codex` CLI for auto-heal, and preselect it for new flights.',
   },
 ]
 
@@ -294,7 +294,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                 Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
               </div>
               <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                Heal agent
+                Default agent
               </div>
               <div className="flex flex-col gap-1.5">
                 {HEAL_AGENT_OPTIONS.map((opt) => (

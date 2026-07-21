@@ -7,6 +7,7 @@ import {
   listRuns,
   reapStaleRuns,
   removeRunFromHistory,
+  renameRunFeature,
   trimRunArtifacts,
   getRunDetail,
   indexPlaywrightArtifacts,
@@ -103,6 +104,60 @@ describe('listRuns', () => {
     const result = listRuns(tmpDir)
     expect(result[0].status).toBe('running')
     expect(readManifest(path.join(dir, 'manifest.json'))?.status).toBe('running')
+  })
+})
+
+describe('renameRunFeature', () => {
+  function writeRun(runId: string, feature: string): string {
+    const dir = runDirFor(tmpDir, runId)
+    fs.mkdirSync(dir, { recursive: true })
+    const manifestPath = path.join(dir, 'manifest.json')
+    writeManifest(manifestPath, {
+      runId,
+      feature,
+      startedAt: '2026-01-01T00:00:00Z',
+      status: 'passed',
+      healCycles: 0,
+      services: [],
+    })
+    return manifestPath
+  }
+
+  it('rewrites the feature in the index and in every matching manifest', () => {
+    const a = writeRun('a', 'old')
+    const b = writeRun('b', 'other')
+    const c = writeRun('c', 'old')
+    writeRunsIndex(tmpDir, [
+      { runId: 'a', feature: 'old', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+      { runId: 'b', feature: 'other', startedAt: '2026-01-02T00:00:00Z', status: 'passed' },
+      { runId: 'c', feature: 'old', startedAt: '2026-01-03T00:00:00Z', status: 'passed' },
+    ])
+
+    expect(renameRunFeature(tmpDir, 'old', 'new')).toBe(2)
+
+    expect(readRunsIndex(tmpDir).map((e) => e.feature).sort()).toEqual(['new', 'new', 'other'])
+    expect(readManifest(a)?.feature).toBe('new')
+    expect(readManifest(c)?.feature).toBe('new')
+    expect(readManifest(b)?.feature).toBe('other')
+    expect(listRuns(tmpDir, { feature: 'new' }).map((e) => e.runId)).toEqual(['c', 'a'])
+  })
+
+  it('is a no-op with no index, no match, or from === to', () => {
+    expect(renameRunFeature(tmpDir, 'old', 'new')).toBe(0)
+    writeRunsIndex(tmpDir, [
+      { runId: 'a', feature: 'old', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    expect(renameRunFeature(tmpDir, 'absent', 'new')).toBe(0)
+    expect(renameRunFeature(tmpDir, 'old', 'old')).toBe(0)
+    expect(readRunsIndex(tmpDir)[0].feature).toBe('old')
+  })
+
+  it('still rewrites the index row when the run directory is gone', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'ghost', feature: 'old', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    expect(renameRunFeature(tmpDir, 'old', 'new')).toBe(1)
+    expect(readRunsIndex(tmpDir)[0].feature).toBe('new')
   })
 })
 

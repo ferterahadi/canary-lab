@@ -1,4 +1,6 @@
 import crypto from 'crypto'
+import fs from 'fs'
+import path from 'path'
 import type { FlightStore } from './store'
 import {
   FLIGHT_STAGE_KEYS,
@@ -65,16 +67,18 @@ export class FlightStageEntryError extends Error {
   }
 }
 
-/** A flight's repos + intent are frozen once the record exists — every redo /
- *  jump / continue reuses the stored values. Thrown when a caller passes a
- *  DIFFERENT repo set or description, so the CLI/REST/MCP all reject the edit
- *  with the same escape hatch instead of silently mutating the record. */
+/** A flight's repos + intent are frozen against PARTIAL re-entry (jump /
+ *  continue) — the surviving stage artifacts were built from them. Thrown when
+ *  a caller passes a DIFFERENT repo set or description on those paths, so the
+ *  CLI/REST/MCP all reject the edit with the same escape hatch instead of
+ *  silently mutating the record. A full restart (mode `redo`) accepts new
+ *  values — every stage's evidence is discarded, so nothing can lie (R75). */
 export class FlightFrozenError extends Error {
   readonly statusCode = 409
   constructor(public readonly feature: string, what: 'repos' | 'intent') {
     super(
-      `${what === 'repos' ? 'repo list' : 'intent'} is frozen for feature "${feature}" — ` +
-        `a flight's repos and intent are set when it first starts; delete the flight to start fresh with different ones`,
+      `${what === 'repos' ? 'repo list' : 'intent'} is frozen for feature "${feature}" while re-entering mid-pipeline — ` +
+        `restart from the beginning (mode "redo") to change it, or delete the flight`,
     )
     this.name = 'FlightFrozenError'
   }
@@ -125,6 +129,15 @@ export interface StageAdapter {
    *  In-process work is cancelled via ctx.signal instead. Errors are logged
    *  and swallowed — interrupt must never block the pause itself. */
   interrupt?(ctx: StageContext, kind: 'pause' | 'abort'): Promise<void>
+  /** R78 restart wipe: delete everything this stage produced on disk, as if it
+   *  never ran — including user-supplied inputs the stage collected (explicit
+   *  user ruling: a restart rewinds the step to zero). Invoked ONLY on the
+   *  explicit restart entry path (startFlight mode redo/jump, redoFlight) for
+   *  the entry stage and every later stage, in order — never on resume.
+   *  ctx.manifest() returns the PRIOR record (the one being discarded), so old
+   *  deliverable links (runId, evaluationTaskId) are still readable. Same
+   *  error posture as interrupt: best-effort, never blocks the restart. */
+  reset?(ctx: StageContext): Promise<void>
 }
 
 export type StageAdapters = Partial<Record<FlightStageKey, StageAdapter>>
@@ -215,6 +228,53 @@ async function interruptStage(
   }
 }
 
+/** Per-stage sidecar dirs under `<flightDir>/` (agent-session refs the stage
+ *  panel resolves transcripts from). Almost always the stage key itself; the
+ *  specs loop's SECOND agent (the coverage mapper) lives under `coverage-map`. */
+function stageSidecarDirs(key: FlightStageKey): string[] {
+  return key === 'specs-coverage' ? ['specs-coverage', 'coverage-map'] : [key]
+}
+
+/** R78: rewind the feature to the state just before `entry` ran — invoke each
+ *  stage's reset (entry stage and every later one, in order) against the PRIOR
+ *  record, then drop the stage's sidecar dir so the panel can never resolve a
+ *  discarded attempt's transcript (even for stages with no reset of their own).
+ *  Best-effort throughout: a broken wipe must not block the restart itself. */
+async function resetStagesForRestart(
+  prior: FlightManifest,
+  entry: FlightStageKey,
+  deps: FlightConductorDeps,
+): Promise<void> {
+  const startIdx = FLIGHT_STAGE_KEYS.indexOf(entry)
+  if (startIdx < 0) return
+  const flightDir = deps.store.flightDir(prior.flightId)
+  const ctx: StageContext = {
+    manifest: () => prior,
+    flightDir,
+    signal: new AbortController().signal,
+    appendLog: () => {},
+    setProgress: () => {},
+    patchFlight: () => {},
+  }
+  for (const key of FLIGHT_STAGE_KEYS.slice(startIdx)) {
+    const adapter = deps.adapters[key]
+    if (adapter?.reset) {
+      try {
+        await adapter.reset(ctx)
+      } catch {
+        /* best-effort */
+      }
+    }
+    for (const dir of stageSidecarDirs(key)) {
+      try {
+        fs.rmSync(path.join(flightDir, dir), { recursive: true, force: true })
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+}
+
 function sameRepoSet(a: string[], b: string[]): boolean {
   const norm = (paths: string[]) => [...paths].map((p) => p.replace(/[\\/]+$/, '')).sort().join('\n')
   return norm(a) === norm(b)
@@ -295,22 +355,37 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     if (mode === 'jump' && !args.fromStage) {
       throw new FlightStageEntryError('jump requires fromStage')
     }
-    // Repos + intent are frozen on the record: empty/identical args reuse the
-    // stored values, different ones are rejected (delete the flight to change
-    // them). Options (env / coverage target / yolo) stay caller-supplied.
-    if (args.repoPaths.length > 0 && !sameRepoSet(args.repoPaths, existing.repoPaths)) {
-      throw new FlightFrozenError(args.feature, 'repos')
+    // Repos + intent are frozen against PARTIAL re-entry (jump): the surviving
+    // stage artifacts were built from them, so changing them would make the
+    // record lie. A full restart (redo) discards every stage's evidence — new
+    // values are accepted there and replace the stored ones (R75: "start
+    // fresh"). Empty/identical args always reuse the stored values. Options
+    // (env / coverage target / yolo) stay caller-supplied either way.
+    const wantsNewRepos = args.repoPaths.length > 0 && !sameRepoSet(args.repoPaths, existing.repoPaths)
+    const trimmedDescription = args.description.trim()
+    const wantsNewIntent = trimmedDescription !== '' && trimmedDescription !== existing.description
+    if (mode !== 'redo') {
+      if (wantsNewRepos) throw new FlightFrozenError(args.feature, 'repos')
+      if (wantsNewIntent) throw new FlightFrozenError(args.feature, 'intent')
     }
-    const description = args.description.trim()
-    if (description && description !== existing.description) {
-      throw new FlightFrozenError(args.feature, 'intent')
-    }
-    checkStageEntry({ ...args, repoPaths: existing.repoPaths }, deps, existing)
+    const nextRepoPaths = mode === 'redo' && wantsNewRepos ? args.repoPaths : existing.repoPaths
+    const nextDescription = mode === 'redo' && wantsNewIntent ? trimmedDescription : existing.description
+    checkStageEntry({ ...args, repoPaths: nextRepoPaths }, deps, existing)
     const manifest: FlightManifest = {
       ...existing,
-      repoPaths: existing.repoPaths,
-      description: existing.description,
-      opts: args.opts,
+      repoPaths: nextRepoPaths,
+      description: nextDescription,
+      // R79: the conducting agent is sticky like repos/intent — the surviving
+      // artifacts were produced by it. Jump keeps the stored agent regardless
+      // of the caller; a full redo may change it (omitted → stored survives).
+      opts: {
+        ...args.opts,
+        ...(mode === 'redo'
+          ? { agent: args.opts.agent ?? existing.opts.agent }
+          : existing.opts.agent
+            ? { agent: existing.opts.agent }
+            : {}),
+      },
       status: 'running',
       pauseReason: undefined,
       currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
@@ -318,6 +393,10 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       feedback: args.feedback?.trim()
         ? { stage: args.fromStage ?? FLIGHT_STAGE_KEYS[0], note: args.feedback.trim() }
         : undefined,
+      // R78: the user chose to re-run this step, so its first checkpoint reaches
+      // them even under autopilot — otherwise the safe default re-decides it
+      // within the same tick and a deliberate redo looks exactly like a resume.
+      askAtStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
       updatedAt: now(),
       endedAt: undefined,
       error: undefined,
@@ -332,7 +411,15 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     }
     store.save(manifest)
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
-    return { manifest, completion: drive(manifest.flightId, deps) }
+    // R78: an explicit restart wipes the entry stage's artifacts and every
+    // later stage's — BEFORE the drive re-runs anything, so no adapter can
+    // mistake a discarded attempt's leftovers for prior state. `existing` is
+    // the pre-reset snapshot: resets read the old deliverable links from it.
+    const entryStage = mode === 'jump' ? args.fromStage! : FLIGHT_STAGE_KEYS[0]
+    const completion = resetStagesForRestart(existing, entryStage, deps).then(() =>
+      drive(manifest.flightId, deps),
+    )
+    return { manifest, completion }
   }
 
   // Fresh record: the caller must actually supply the inputs (a mode-carrying
@@ -367,7 +454,13 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
 
 /** Resume a `paused` flight (stage failure or server restart) from its first
  *  open stage. A failed stage was flipped back to `pending` by the pause, so
- *  the adapter re-runs from its own postcondition check. */
+ *  the adapter re-runs from its own postcondition check.
+ *
+ *  Resume CONTINUES from the last state — every settled stage keeps its
+ *  evidence and its recorded checkpoint answers, and an answer the open stage
+ *  was executing when paused is REPLAYED (never re-asked). Resetting a step to
+ *  its initial state is what "From a step…" (redo/jump) is for; it discards
+ *  the target stage's evidence and everything after it. */
 export function resumeFlight(flightId: string, deps: FlightConductorDeps): StartFlightResult {
   const store = deps.store
   const now = deps.now ?? (() => new Date().toISOString())
@@ -388,7 +481,39 @@ export function resumeFlight(flightId: string, deps: FlightConductorDeps): Start
   }
   store.save(manifest)
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
-  return { manifest, completion: drive(flightId, deps) }
+  // Seamless resume: a stage paused (or crash-reconciled) MID-EXECUTION of a
+  // checkpoint answer still carries that answer — replay it so the stage picks
+  // up the user's choice instead of re-parking the question. pauseFlight
+  // clears the answer when it was already spent (paused while parked), so a
+  // stale choice never replays.
+  const openIdx = firstOpenStageIndex(manifest)
+  const replay = openIdx >= 0 ? manifest.stages[openIdx].checkpointResponse : undefined
+  return { manifest, completion: drive(flightId, deps, replay ? { checkpointResponse: replay } : {}) }
+}
+
+/** R78: flip autopilot on a flight that already exists, in ANY status — it is a
+ *  preference, not a start-time-only option, and the drive re-reads `opts` at
+ *  every checkpoint so the next one honours the new value. A checkpoint the
+ *  flight is ALREADY parked on is deliberately left alone: the user is looking
+ *  at it, and auto-answering it out from under them discards the very choice
+ *  they opened. */
+export function setFlightAutopilot(
+  flightId: string,
+  autopilot: boolean,
+  deps: FlightConductorDeps,
+): FlightManifest {
+  const { store } = deps
+  const now = deps.now ?? (() => new Date().toISOString())
+  const current = store.get(flightId)
+  if (!current) throw new Error(`flight not found: ${flightId}`)
+  const manifest: FlightManifest = {
+    ...current,
+    opts: { ...current.opts, autopilot },
+    updatedAt: now(),
+  }
+  store.save(manifest)
+  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+  return manifest
 }
 
 /** User-initiated pause of an active flight. Parks FIRST (so the drive loop's
@@ -414,7 +539,18 @@ export function pauseFlight(flightId: string, deps: FlightConductorDeps): Flight
     pauseReason: 'user',
     updatedAt: now(),
     stages: current.stages.map((s) =>
-      s.key === openStage?.key ? { ...s, status: 'pending' as const, checkpoint: undefined } : s,
+      s.key === openStage?.key
+        ? {
+            ...s,
+            status: 'pending' as const,
+            checkpoint: undefined,
+            // An answer the stage was EXECUTING when paused survives — resume
+            // replays it (seamless). An answer that already produced the park
+            // the user paused on is spent; keeping it would replay a stale
+            // choice instead of re-asking.
+            ...(openStage.status === 'waiting-for-approval' ? { checkpointResponse: undefined } : {}),
+          }
+        : s,
     ),
   }
   store.save(manifest)
@@ -523,6 +659,24 @@ export function deleteFlight(flightId: string, deps: FlightConductorDeps): void 
   }
   store.remove(flightId)
   publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
+}
+
+/** R76: deleting a FEATURE deletes its flight history with it — one deletion
+ *  concept, no orphaned journal pointing at a suite that no longer exists.
+ *  Refuses while a flight is active (same guard as deleteFlight); removes
+ *  every record for the feature (legacy indexes may hold more than one).
+ *  Callers publish `flights-changed` when `removed > 0`. */
+export function removeFlightRecordsForFeature(
+  store: FlightStore,
+  feature: string,
+): { error?: string; removed: number } {
+  const records = store.list().filter((e) => e.feature === feature)
+  const active = records.find((e) => isActiveFlightStatus(e.status))
+  if (active) {
+    return { error: `flight ${active.flightId} is ${active.status} — pause it before deleting the feature`, removed: 0 }
+  }
+  for (const record of records) store.remove(record.flightId)
+  return { removed: records.length }
 }
 
 /** Flip the named stages (and everything after the earliest of them — their
@@ -678,6 +832,13 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
     return next
   }
 
+  /** Spend the re-entry protection (R78) once its stage settles without ever
+   *  parking — otherwise the flag outlives the step it was set for. */
+  const clearAskAt = (key: FlightStageKey): void => {
+    const m = read()
+    if (m.askAtStage === key) save({ ...m, askAtStage: undefined, updatedAt: now() })
+  }
+
   let pendingResponse = opts.checkpointResponse
   // R71/W4: stage:kind pairs already auto-answered this drive — the loop-guard
   // that turns a would-be infinite approve→re-park cycle into a human park.
@@ -783,10 +944,12 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
           ...(outcome.evidence !== undefined ? { evidence: outcome.evidence } : {}),
           checkpoint: undefined,
         })
+        clearAskAt(stage.key)
         continue
       }
       if (outcome.kind === 'skipped') {
         patchStage(stage.key, { status: 'skipped', endedAt: now(), skipReason: outcome.reason, checkpoint: undefined })
+        clearAskAt(stage.key)
         continue
       }
       if (outcome.kind === 'jump') {
@@ -850,7 +1013,11 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         // options answers itself — logged, recorded on the stage, and guarded
         // so a RE-parked checkpoint (config parse error, unrecognized choice)
         // is never auto-answered twice: the second park reaches the human.
-        const auto = autopilotChoice(read().opts, outcome.checkpoint)
+        // …and a stage the user explicitly re-entered always reaches them:
+        // picking "from a step → X" IS the intent to answer X differently.
+        const beforeCheckpoint = read()
+        const askHere = beforeCheckpoint.askAtStage === stage.key
+        const auto = askHere ? null : autopilotChoice(beforeCheckpoint.opts, outcome.checkpoint)
         const autoKey = `${stage.key}:${outcome.checkpoint.kind}`
         if (auto && !autoAnswered.has(autoKey)) {
           autoAnswered.add(autoKey)
@@ -861,7 +1028,14 @@ async function drive(flightId: string, deps: FlightConductorDeps, opts: DriveOpt
         }
         patchStage(stage.key, { status: 'waiting-for-approval', checkpoint: outcome.checkpoint })
         const cur = read()
-        save({ ...cur, status: 'waiting-for-approval', updatedAt: now() })
+        // The re-entry protection is spent once the user has been asked — a
+        // later checkpoint in the same stage autopilots normally again.
+        save({
+          ...cur,
+          status: 'waiting-for-approval',
+          askAtStage: askHere ? undefined : cur.askAtStage,
+          updatedAt: now(),
+        })
         return
       }
       // failed → park the flight resumable; the stage keeps its error and is

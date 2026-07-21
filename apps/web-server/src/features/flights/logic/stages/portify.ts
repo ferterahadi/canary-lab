@@ -1,4 +1,7 @@
+import fs from 'fs'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
+import { revertPortification } from '../../../portify/logic/runtime/unportify'
+import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 
@@ -91,6 +94,14 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         return { kind: 'failed', error: 'portify declined — the feature is not concurrency-ready' }
       }
       return { kind: 'checkpoint', checkpoint: stage!.checkpoint! }
+    },
+    // R78 restart wipe: the existing un-portify — restore the pre-portify
+    // feature.config.cjs from its overlay snapshot and drop features/<f>/portify/.
+    async reset(ctx) {
+      const featureDir = featureDirFor(deps, ctx.manifest().feature)
+      if (!fs.existsSync(featureDir) || !overlayExists(featureDir)) return
+      revertPortification(featureDir)
+      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
     },
   }
 }

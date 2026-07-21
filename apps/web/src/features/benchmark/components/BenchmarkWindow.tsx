@@ -251,7 +251,7 @@ function ConfigScreen({
             ))}
             {skills.length === 0 && (
               <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                No sabotage skills for this feature. Run <span style={{ fontFamily: 'var(--font-mono)' }}>canary-lab upgrade</span> or add skills under <span style={{ fontFamily: 'var(--font-mono)' }}>sabotage-skills/</span>.
+                No sabotage skills for this suite. Run <span style={{ fontFamily: 'var(--font-mono)' }}>canary-lab upgrade</span> or add skills under <span style={{ fontFamily: 'var(--font-mono)' }}>sabotage-skills/</span>.
               </div>
             )}
           </div>

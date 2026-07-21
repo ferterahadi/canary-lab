@@ -29,7 +29,7 @@ export interface FlightInjectResponse {
   json(): unknown
 }
 export type FlightInject = (opts: {
-  method: 'GET' | 'POST'
+  method: 'GET' | 'POST' | 'DELETE'
   url: string
   payload?: unknown
 }) => Promise<FlightInjectResponse>
@@ -43,6 +43,8 @@ export interface FlightAgentSpawnOpts {
   /** Aborted when the user pauses/aborts the flight — the spawn SIGTERMs the
    *  agent and throws StageCancelledError instead of a generic exit error. */
   signal?: AbortSignal
+  /** R79: which CLI to spawn (the flight's sticky opts.agent). Absent → claude. */
+  agent?: 'claude' | 'codex'
 }
 
 /** Thrown when in-flight stage work was cancelled by a user pause/abort — the
@@ -86,39 +88,48 @@ export interface FlightStageDeps {
 
 export const FLIGHT_AGENT_IDLE_MS = 5 * 60 * 1000
 
-/** The one way a flight spawns judgment agents: claude via the shared
- *  runner, session pinned so the JSONL both feeds the idle backstop and lets
- *  the UI attach an AgentSessionView to the stage. */
+/** The one way a flight spawns judgment agents, via the shared runner.
+ *  claude: session pinned so the JSONL both feeds the idle backstop and lets
+ *  the UI attach an AgentSessionView to the stage. codex (R79, the flight's
+ *  sticky opts.agent): `exec` reads the prompt from stdin and the final
+ *  message is the captured stdout; the session ref is located by cwd+start. */
 export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
   if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
-  const sessionId = crypto.randomUUID()
+  const agent = opts.agent ?? 'claude'
+  const sessionId = agent === 'claude' ? crypto.randomUUID() : undefined
   writeWorkflowAgentRef(opts.stageDir, {
-    agent: 'claude',
+    agent,
     cwd: opts.cwd,
     spawnedAt: new Date().toISOString(),
-    sessionId,
+    sessionId: sessionId ?? '',
   })
   const handle = runAgentProcess({
-    command: 'claude',
-    args: buildClaudeAgenticArgs(opts.prompt, { sessionId }),
+    command: agent,
+    args:
+      agent === 'claude'
+        ? buildClaudeAgenticArgs(opts.prompt, { sessionId })
+        : ['exec', '--full-auto', '--skip-git-repo-check', '-'],
     cwd: opts.cwd,
+    stdin: agent === 'codex' ? opts.prompt : undefined,
     captureStdout: true,
     onChunk: (text, stream) => {
       if (stream === 'stderr') opts.onChunk?.(text)
     },
     idleMs: FLIGHT_AGENT_IDLE_MS,
-    activityPath: claudeSessionLogPath(opts.cwd, sessionId),
+    // codex pins no session id — liveness falls back to output chunks.
+    activityPath: sessionId ? claudeSessionLogPath(opts.cwd, sessionId) : undefined,
   })
   const onAbort = () => handle.stop('SIGTERM')
   opts.signal?.addEventListener('abort', onAbort, { once: true })
   try {
     const result = await handle.done
     if (opts.signal?.aborted) throw new StageCancelledError('agent spawn')
-    // Flight agents are parsed for structured output (extractJson), never shown
-    // — so recover EVERY assistant turn, not just the final message. A scout
+    // Flight agents are parsed for structured output (extractJson), never shown.
+    // claude: recover EVERY assistant turn, not just the final message — a scout
     // that emits the config JSON then signs off with prose in a later turn must
     // not lose the JSON to that trailing turn (the display view tails the JSONL).
-    const text = recoverClaudeAssistantText(result.stdout)
+    // codex: `exec` prints the final message to stdout — use it as-is.
+    const text = agent === 'claude' ? recoverClaudeAssistantText(result.stdout) : result.stdout
     if (result.code !== 0 && !text.trim()) {
       throw new Error(`agent exited with code ${result.code ?? 'null'}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
     }

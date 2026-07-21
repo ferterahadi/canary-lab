@@ -33,6 +33,9 @@ import { portifyStreamRoutes } from './src/features/portify/ws/portify-stream'
 import { PortifyRunStore } from './src/features/portify/logic/runtime/store'
 import { CoverageJobRunStore } from './src/features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './src/features/flights/logic/store'
+import { removeFlightRecordsForFeature } from './src/features/flights/logic/conductor'
+import { isActiveFlightStatus } from '../../shared/flights/types'
+import { renameFeatureRecords } from './src/features/config/logic/feature-rename'
 import { PlanFeaturesStore } from './src/features/flights/logic/plan-features'
 import { flightsRoutes } from './src/features/flights/routes/flights'
 import { buildFlightStageAdapters } from './src/features/flights/logic/stages'
@@ -42,7 +45,7 @@ import { createPortifyRunner } from './src/features/portify/logic/runtime/runner
 import { reclaimOrphanedPortify } from './src/features/portify/logic/runtime/reclaim'
 import { portifyDir } from './src/features/portify/logic/runtime/paths'
 import {
-  loadAgentSession,
+  buildAgentSessionResponse,
   resolveWorkflowAgentRef,
 } from './src/features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './src/shared/workspace-events'
@@ -326,12 +329,36 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       },
     }),
   })
+  // A suite's `name` IS its identity — renaming it must carry every record that
+  // stamped the old name along, or the history orphans behind a name nothing
+  // resolves (a flight row and its suite showing up as two separate things).
+  // Refused outright while live work still holds the old name: a running
+  // orchestrator/conductor addresses its feature by name and would lose it.
+  const featureRenameBlockedBy = (featureName: string): string | null => {
+    const run = runStore.list({ feature: featureName }).find((r) => isActiveRunStatus(r.status))
+    if (run) return `run ${run.runId} is ${run.status} — stop it before renaming the suite`
+    const flight = flightStore
+      .list()
+      .find((f) => f.feature === featureName && isActiveFlightStatus(f.status))
+    if (flight) return `flight ${flight.flightId} is ${flight.status} — pause it before renaming the suite`
+    return null
+  }
   await app.register(featureConfigRoutes, {
     featuresDir,
     workspaceEvents,
     isRepoActive: (featureName) => runStore
       .list({ feature: featureName })
       .some((run) => isActiveRunStatus(run.status)),
+    // R76: deleting a suite deletes its flight history with it.
+    removeFlightRecordsFor: (featureName) => removeFlightRecordsForFeature(flightStore, featureName),
+    featureRename: {
+      blockedBy: featureRenameBlockedBy,
+      apply: (from, to) => renameFeatureRecords(from, to, {
+        logsDir,
+        stores: [flightStore, coverageJobStore, portifyStore, benchmarkStore, dirtySpecStore],
+        activeWork: featureRenameBlockedBy,
+      }).moved,
+    },
   })
   const startVerification = async (
     featureName: string,
@@ -1279,9 +1306,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     abortBenchmark: benchmarkRunner.abort,
     loadAgentSession: (id) => {
       const ref = resolveWorkflowAgentRef(benchmarkDir(logsDir, id))
-      if (!ref) return null
-      const { events, meta } = loadAgentSession(ref)
-      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+      return ref ? buildAgentSessionResponse(ref) : null
     },
     listSkills: (feature) => sabotageSkillsForFeature(loadBundledSabotageSkills(), feature),
   })
@@ -1311,9 +1336,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     loadAgentSession: (id) => {
       const ref = resolveWorkflowAgentRef(portifyDir(logsDir, id))
-      if (!ref) return null
-      const { events, meta } = loadAgentSession(ref)
-      return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+      return ref ? buildAgentSessionResponse(ref) : null
     },
   })
   await app.register(portifyStreamRoutes, { store: portifyStore })
@@ -1336,6 +1359,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     projectRoot: opts.projectRoot,
     workspaceEvents,
     dirtySpecStore,
+    // R76: deleting a suite deletes its flight history with it.
+    removeFlightRecordsFor: (featureName) => removeFlightRecordsForFeature(flightStore, featureName),
     // Flight over MCP: reuse the flights REST routes so the MCP surface
     // shares the store + conductor (and single-flight guard) with the UI/CLI.
     flightsRequest: async (o) => {

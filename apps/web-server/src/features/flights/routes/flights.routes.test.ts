@@ -211,6 +211,23 @@ describe('flights routes', () => {
     expect(again.statusCode).toBe(409)
   })
 
+  it('R78: POST /autopilot flips the preference on a settled flight; a non-boolean body is a 400', async () => {
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const off = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/autopilot`, body: { autopilot: false } })
+    expect(off.statusCode).toBe(200)
+    expect((off.json() as { opts: { autopilot?: boolean } }).opts.autopilot).toBe(false)
+
+    const bad = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/autopilot`, body: {} })
+    expect(bad.statusCode).toBe(400)
+
+    const missing = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/autopilot', body: { autopilot: true } })
+    expect(missing.statusCode).toBe(404)
+  })
+
   it('resumes a paused flight and aborts an active one', async () => {
     let fail = true
     const adapters = allDone()
@@ -686,29 +703,32 @@ describe('POST /api/flights/:id/pause + /redo, frozen args, DELETE', () => {
     await waitForStatus(flightId, ['done'])
   })
 
-  it('repos + intent are frozen: a redo with different values is a 409 flight_frozen', async () => {
+  it('R75: mid-pipeline re-entry keeps the freeze (409 flight_frozen); a full redo ACCEPTS new values', async () => {
     app = await buildApp(allDone())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
     const flightId = (started.json() as { flightId: string }).flightId
     await waitForStatus(flightId, ['done'])
 
-    const otherRepo = path.join(tmpDir, 'other-repo')
-    fs.mkdirSync(otherRepo, { recursive: true })
-    const repoChange = await app.inject({
+    // Jump = partial re-entry → frozen, 409.
+    const intentChange = await app.inject({
       method: 'POST',
       url: '/api/flights',
-      body: startBody({ repoPaths: [otherRepo], mode: 'redo' }),
+      body: startBody({ description: 'a different intent', mode: 'jump', fromStage: 'scout' }),
     })
-    expect(repoChange.statusCode).toBe(409)
-    expect(repoChange.json()).toMatchObject({ type: 'flight_frozen' })
+    expect(intentChange.statusCode).toBe(409)
+    expect(intentChange.json()).toMatchObject({ type: 'flight_frozen' })
 
-    const intentChange = await app.inject({
+    // Redo = full restart → new values accepted, replacing the stored ones.
+    const redone = await app.inject({
       method: 'POST',
       url: '/api/flights',
       body: startBody({ description: 'a different intent', mode: 'redo' }),
     })
-    expect(intentChange.statusCode).toBe(409)
-    expect(intentChange.json()).toMatchObject({ type: 'flight_frozen' })
+    expect(redone.statusCode).toBe(201)
+    const body = redone.json() as { flightId: string; description: string }
+    expect(body.flightId).toBe(flightId)
+    expect(body.description).toBe('a different intent')
+    await waitForStatus(flightId, ['done'])
   })
 
   it('a mode-carrying POST may omit repos + description — the stored values are reused', async () => {
@@ -1336,5 +1356,24 @@ describe('~-relative repo paths (dialog picker parity)', () => {
     } finally {
       fs.rmSync(abs, { recursive: true, force: true })
     }
+  })
+})
+
+describe('flight agent (R79)', () => {
+  it('agent rides the start body into the manifest opts (invalid values dropped)', async () => {
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ agent: 'codex' }) })
+    expect(started.statusCode).toBe(201)
+    expect((started.json() as { opts: { agent?: string } }).opts.agent).toBe('codex')
+
+    await waitForStatus((started.json() as { flightId: string }).flightId, ['done'])
+    const otherRepo = path.join(path.dirname(repoDir), 'product-repo-b')
+    fs.mkdirSync(otherRepo, { recursive: true })
+    const other = await app.inject({
+      method: 'POST', url: '/api/flights',
+      body: startBody({ feature: 'other', repoPaths: [otherRepo], agent: 'gpt-oss' }),
+    })
+    expect(other.statusCode).toBe(201)
+    expect((other.json() as { opts: { agent?: string } }).opts.agent).toBeUndefined()
   })
 })

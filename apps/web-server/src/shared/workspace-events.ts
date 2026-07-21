@@ -5,6 +5,10 @@ import type { EvaluationExportTaskView } from '../features/evaluation/logic/eval
 export type WorkspaceEvent =
   | { type: 'feature-created'; feature: string }
   | { type: 'feature-deleted'; feature: string }
+  /** A suite's `name` changed — its identity, so every surface keyed by the old
+   *  name (selection, open dialogs, the URL, flight rows) must re-point at the
+   *  new one rather than go blank. */
+  | { type: 'feature-renamed'; from: string; to: string }
   | { type: 'features-changed' }
   | { type: 'tests-changed'; feature: string }
   | { type: 'envsets-changed'; feature: string }

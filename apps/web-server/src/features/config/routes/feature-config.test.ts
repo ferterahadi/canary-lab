@@ -63,12 +63,17 @@ function buildGitRepo(name: string): string {
 async function makeApp(opts: {
   isRepoActive?: (feature: string, repo: string) => boolean
   events?: WorkspaceEvent[]
+  featureRename?: {
+    blockedBy: (feature: string) => string | null
+    apply: (from: string, to: string) => number
+  }
 } = {}): Promise<FastifyInstance> {
   const app = Fastify()
   await app.register(async (a) => {
     await featureConfigRoutes(a, {
       featuresDir,
       isRepoActive: opts.isRepoActive,
+      ...(opts.featureRename ? { featureRename: opts.featureRename } : {}),
       workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
     })
   })
@@ -363,6 +368,99 @@ describe('feature.config endpoints', () => {
         payload: { value: { name: 'nope' } },
       })
       expect(r.statusCode).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('PUT that changes `name` renames the suite: records follow and clients hear about it', async () => {
+    buildFeature('old_name')
+    const events: WorkspaceEvent[] = []
+    const calls: Array<[string, string]> = []
+    const app = await makeApp({
+      events,
+      featureRename: {
+        blockedBy: () => null,
+        apply: (from, to) => { calls.push([from, to]); return 3 },
+      },
+    })
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/features/old_name/config-doc',
+        payload: { value: { name: 'new_name', description: 'd', envs: ['local'], featureDir: { $expr: '__dirname' } } },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(calls).toEqual([['old_name', 'new_name']])
+      const onDisk = fs.readFileSync(path.join(featuresDir, 'old_name', 'feature.config.cjs'), 'utf-8')
+      expect(onDisk).toContain("name: 'new_name'")
+      expect(events).toContainEqual({ type: 'feature-renamed', from: 'old_name', to: 'new_name' })
+      expect(events).toContainEqual({ type: 'flights-changed' })
+      expect(events).toContainEqual({ type: 'features-changed' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('PUT that does not change `name` neither renames nor announces one', async () => {
+    buildFeature('steady')
+    const events: WorkspaceEvent[] = []
+    const calls: Array<[string, string]> = []
+    const app = await makeApp({
+      events,
+      featureRename: { blockedBy: () => null, apply: (from, to) => { calls.push([from, to]); return 1 } },
+    })
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/features/steady/config-doc',
+        payload: { value: { name: 'steady', description: 'updated', envs: ['local'], featureDir: { $expr: '__dirname' } } },
+      })
+      expect(r.statusCode).toBe(200)
+      expect(calls).toEqual([])
+      expect(events.some((e) => e.type === 'feature-renamed')).toBe(false)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('PUT 409 when the new name is already another suite — nothing is written', async () => {
+    buildFeature('one')
+    buildFeature('two')
+    const app = await makeApp({ featureRename: { blockedBy: () => null, apply: () => 0 } })
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/features/one/config-doc',
+        payload: { value: { name: 'two', description: 'd', envs: ['local'], featureDir: { $expr: '__dirname' } } },
+      })
+      expect(r.statusCode).toBe(409)
+      expect((r.json() as { error: string }).error).toContain('already in use')
+      const onDisk = fs.readFileSync(path.join(featuresDir, 'one', 'feature.config.cjs'), 'utf-8')
+      expect(onDisk).toContain('name: "one"')
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('PUT 409 while live work still holds the old name — nothing is written', async () => {
+    buildFeature('busy')
+    const app = await makeApp({
+      featureRename: {
+        blockedBy: () => 'run r1 is running — stop it before renaming the suite',
+        apply: () => 0,
+      },
+    })
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/features/busy/config-doc',
+        payload: { value: { name: 'busy_renamed', description: 'd', envs: ['local'], featureDir: { $expr: '__dirname' } } },
+      })
+      expect(r.statusCode).toBe(409)
+      expect((r.json() as { error: string }).error).toContain('r1 is running')
+      const onDisk = fs.readFileSync(path.join(featuresDir, 'busy', 'feature.config.cjs'), 'utf-8')
+      expect(onDisk).toContain('name: "busy"')
     } finally {
       await app.close()
     }

@@ -18,23 +18,7 @@ const EXPORT_TIMEOUT_MS = 10 * 60 * 1000
 type ExportMode = 'raw' | 'localized'
 
 export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
-  const startExport = async (ctx: StageContext, mode: ExportMode): Promise<StageOutcome> => {
-    const m = ctx.manifest()
-    const runId = m.links?.runId
-    if (!runId) return { kind: 'failed', error: 'no run to export — the run stage must settle first' }
-
-    const started = await deps.inject({
-      method: 'POST',
-      url: `/api/runs/${encodeURIComponent(runId)}/evaluation-export`,
-      payload: { mode },
-    })
-    const body = started.json() as { taskId?: string; error?: string }
-    if (started.statusCode !== 202 || !body.taskId) {
-      return { kind: 'failed', error: `evaluation export rejected (${started.statusCode}): ${body.error ?? 'unknown'}` }
-    }
-    const taskId = body.taskId
-    ctx.appendLog(`[export] evaluation export task ${taskId} started (${mode})\n`)
-
+  const settleTask = async (ctx: StageContext, taskId: string, mode: ExportMode): Promise<StageOutcome> => {
     const task = await pollUntil(
       async () => readEvaluationExportTask(deps.logsDir, taskId),
       (t) => Boolean(t && (t.downloadReady || t.error || t.status === 'failed')),
@@ -52,6 +36,40 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
     }
     ctx.patchFlight({ links: { evaluationTaskId: taskId, evaluationZip } })
     return { kind: 'done', evidence: { taskId, evaluationZip, archiveBase: task.archiveBase, mode } }
+  }
+
+  const startExport = async (ctx: StageContext, mode: ExportMode): Promise<StageOutcome> => {
+    const m = ctx.manifest()
+    const runId = m.links?.runId
+    if (!runId) return { kind: 'failed', error: 'no run to export — the run stage must settle first' }
+
+    // A REPLAYED answer (resume after a mid-export pause) may find the task
+    // this flight already started still running or finished — re-attach
+    // instead of producing a duplicate archive.
+    const priorTaskId = m.links?.evaluationTaskId
+    if (priorTaskId) {
+      const prior = readEvaluationExportTask(deps.logsDir, priorTaskId)
+      if (prior && prior.status !== 'failed' && !prior.error) {
+        ctx.appendLog(`[export] re-attaching to export task ${priorTaskId}\n`)
+        return settleTask(ctx, priorTaskId, mode)
+      }
+    }
+
+    const started = await deps.inject({
+      method: 'POST',
+      url: `/api/runs/${encodeURIComponent(runId)}/evaluation-export`,
+      payload: { mode },
+    })
+    const body = started.json() as { taskId?: string; error?: string }
+    if (started.statusCode !== 202 || !body.taskId) {
+      return { kind: 'failed', error: `evaluation export rejected (${started.statusCode}): ${body.error ?? 'unknown'}` }
+    }
+    const taskId = body.taskId
+    // Linked at START, not completion — a pause/crash mid-export must leave
+    // the pointer behind for the replay above to re-attach to.
+    ctx.patchFlight({ links: { evaluationTaskId: taskId } })
+    ctx.appendLog(`[export] evaluation export task ${taskId} started (${mode})\n`)
+    return settleTask(ctx, taskId, mode)
   }
 
   const modeCheckpoint = (ctx: StageContext): StageOutcome => {
@@ -84,6 +102,17 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       const choice = response.choice ?? ''
       if (choice === 'raw' || choice === 'localized') return startExport(ctx, choice)
       return modeCheckpoint(ctx)
+    },
+    // R78 restart wipe: drop the export task dir (export.zip included) through
+    // the evaluation route — it aborts a still-running task and emits the
+    // evaluation-export-deleted event. The run record is the RUN stage's
+    // artifact; a restart entering here keeps it (it is this stage's input).
+    async reset(ctx) {
+      const taskId = ctx.manifest().links?.evaluationTaskId
+      if (!taskId) return
+      await deps
+        .inject({ method: 'DELETE', url: `/api/evaluation-exports/${encodeURIComponent(taskId)}` })
+        .catch(() => {})
     },
   }
 }

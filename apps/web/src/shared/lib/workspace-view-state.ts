@@ -32,7 +32,11 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // `draft` reopens a live external authoring draft (an MCP agent authoring a
 // feature's specs) by its `draft` id qualifier — the draft record is
 // server-persisted (GET /api/tests/draft), so a cold load rebuilds it.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new' | 'draft'
+// `flight-fresh` is the launcher in START-FRESH intent (R76): same dialog as
+// `flight-start`, but scoped to the one job of changing intent/repos — it needs
+// its own route value so a refresh restores that intent instead of dropping the
+// user back into the re-entry picker.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'draft'
 
 export interface PersistedView {
   view: WorkspaceView
@@ -54,7 +58,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-new', 'draft']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'draft']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)

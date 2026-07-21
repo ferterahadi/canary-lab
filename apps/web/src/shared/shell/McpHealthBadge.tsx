@@ -166,7 +166,7 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
       data-mcp-health-menu
       role="dialog"
       aria-label="MCP connection tools"
-      className="cl-popover fixed z-[80] overflow-hidden"
+      className="cl-popover fixed z-[80] flex flex-col overflow-hidden"
       style={{
         top: position.top,
         left: position.left,
@@ -175,7 +175,7 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
         color: 'var(--text-primary)',
       }}
     >
-      <div className="border-b px-3 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
+      <div className="shrink-0 border-b px-3 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
@@ -196,66 +196,68 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
           </div>
         </div>
       </div>
-      <div className="border-b px-2 py-2" style={{ borderColor: 'var(--border-default)' }}>
-        <div className="mb-1 px-1 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
-          Profiles
-        </div>
-        <div className="grid grid-cols-3 gap-1">
-          {MCP_PROFILES.map((candidate) => {
-            const selected = candidate.id === selectedProfile
-            return (
-              <button
-                key={candidate.id}
-                type="button"
-                onClick={() => onSelectProfile(candidate.id)}
-                className="min-w-0 rounded border px-2 py-1 text-center text-[11px]"
-                aria-pressed={selected}
-                title={candidate.detail}
-                style={{
-                  borderColor: selected ? 'color-mix(in srgb, var(--accent) 58%, var(--border-default))' : 'var(--border-default)',
-                  background: selected
-                    ? 'color-mix(in srgb, var(--accent) 13%, transparent)'
-                    : 'color-mix(in srgb, var(--bg-muted) 26%, transparent)',
-                }}
-              >
-                <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{candidate.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </div>
-      <McpConnectGuide profile={selectedProfile} healthy={health.state === 'ready'} />
-      <div className="border-b px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
-        <div className="flex items-center justify-between gap-2 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
-          <span>Tools</span>
-          <span>{tools.length} shown</span>
-        </div>
-      </div>
-      <div className="max-h-40 overflow-y-auto px-2 py-1.5">
-        {tools.length > 0 ? (
-          <ul className="grid grid-cols-1 gap-1" aria-label="MCP tools">
-            {tools.map((tool) => (
-              <li
-                key={tool}
-                className="truncate rounded px-2 py-0.5 text-[11px]"
-                title={tool}
-                style={{
-                  background: 'color-mix(in srgb, var(--bg-muted) 52%, transparent)',
-                  color: 'var(--text-secondary)',
-                  fontFamily: 'var(--font-mono)',
-                }}
-              >
-                {tool}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="px-2 py-5 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-            Tool names are unavailable from this server.
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="border-b px-2 py-2" style={{ borderColor: 'var(--border-default)' }}>
+          <div className="mb-1 px-1 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
+            Profiles
           </div>
-        )}
+          <div className="grid grid-cols-3 gap-1">
+            {MCP_PROFILES.map((candidate) => {
+              const selected = candidate.id === selectedProfile
+              return (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  onClick={() => onSelectProfile(candidate.id)}
+                  className="min-w-0 rounded border px-2 py-1 text-center text-[11px]"
+                  aria-pressed={selected}
+                  title={candidate.detail}
+                  style={{
+                    borderColor: selected ? 'color-mix(in srgb, var(--accent) 58%, var(--border-default))' : 'var(--border-default)',
+                    background: selected
+                      ? 'color-mix(in srgb, var(--accent) 13%, transparent)'
+                      : 'color-mix(in srgb, var(--bg-muted) 26%, transparent)',
+                  }}
+                >
+                  <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{candidate.label}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+        <McpConnectGuide profile={selectedProfile} healthy={health.state === 'ready'} />
+        <div className="border-b px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
+          <div className="flex items-center justify-between gap-2 text-[10px] uppercase" style={{ color: 'var(--text-muted)', letterSpacing: 0 }}>
+            <span>Tools</span>
+            <span>{tools.length} shown</span>
+          </div>
+        </div>
+        <div className="px-2 py-1.5">
+          {tools.length > 0 ? (
+            <ul className="grid grid-cols-1 gap-1" aria-label="MCP tools">
+              {tools.map((tool) => (
+                <li
+                  key={tool}
+                  className="truncate rounded px-2 py-0.5 text-[11px]"
+                  title={tool}
+                  style={{
+                    background: 'color-mix(in srgb, var(--bg-muted) 52%, transparent)',
+                    color: 'var(--text-secondary)',
+                    fontFamily: 'var(--font-mono)',
+                  }}
+                >
+                  {tool}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="px-2 py-5 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
+              Tool names are unavailable from this server.
+            </div>
+          )}
+        </div>
       </div>
-      <div className="border-t px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
+      <div className="shrink-0 border-t px-3 py-1.5" style={{ borderColor: 'var(--border-default)' }}>
         <div className="flex items-center justify-between gap-2 text-[10px]" style={{ color: 'var(--text-muted)' }}>
           <span className="truncate">{checkMessage ?? 'Checks the selected profile health endpoint'}</span>
           {lastCheckedLabel && <span className="shrink-0">{lastCheckedLabel}</span>}
@@ -291,7 +293,7 @@ function McpConnectGuide({ profile, healthy }: { profile: McpProfile; healthy: b
     })
   }
   return (
-    <div className="border-b" style={{ borderColor: 'var(--border-default)' }}>
+    <div className="shrink-0 border-b" style={{ borderColor: 'var(--border-default)' }}>
       <button
         type="button"
         onClick={toggle}
