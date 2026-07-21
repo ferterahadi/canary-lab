@@ -1,6 +1,7 @@
 import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, PrdSourceCheckpointData, SpecsCoverageProgress } from '../../../shared/api/client'
 import { StatusDot } from '../../config/components/atoms'
 import { Chip } from '../../../shared/ui/StatusChip'
+import { PanelCard } from '../../../shared/ui/PanelCard'
 
 // One home for the flight-stage presentation vocabulary (R14/R16/R18): the
 // user-facing stage labels, the status tone/icon treatment, the shared status
@@ -471,29 +472,39 @@ const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
   bad: 'var(--danger)',
 }
 
-/** The one facts renderer every stage uses (R20): quiet label → value rows. */
+/** The one facts renderer every stage uses (R20): quiet label → value rows,
+ *  carded on the same `PanelCard` surface as the Service / Playwright / docs
+ *  digests below it. The facts used to float bare above those cards, which read
+ *  as an unfinished header rather than the stage's headline summary; on the
+ *  shared surface the whole pane is one stack of like blocks. The 110px label
+ *  column is the sibling cards' column, so labels line up straight down the
+ *  stack no matter which stage is open. */
 export function FactsGrid({ facts }: { facts: StageFact[] }) {
   if (facts.length === 0) return null
   return (
     // Same 76ch column as every stage panel — a long value truncates inside
     // the column (full text on the title), never sprawls the whole pane.
-    <dl data-testid="stage-facts" className="m-0 grid w-full max-w-[76ch] grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-4 gap-y-1">
-      {facts.map((f, i) => (
-        <div key={`${f.label}-${i}`} className="contents">
-          <dt className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{f.label}</dt>
-          <dd
-            className="m-0 truncate text-[12px]"
-            title={f.title ?? f.value}
-            style={{
-              color: f.tone ? FACT_TONE[f.tone] : 'var(--text-primary)',
-              ...(f.mono ? { fontFamily: 'var(--font-mono)', fontSize: 11.5 } : {}),
-            }}
-          >
-            {f.value}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <div className="w-full max-w-[76ch]">
+      <PanelCard kicker="At a glance" testId="stage-facts-card">
+        <dl data-testid="stage-facts" className="m-0 grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5">
+          {facts.map((f, i) => (
+            <div key={`${f.label}-${i}`} className="contents">
+              <dt className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{f.label}</dt>
+              <dd
+                className="m-0 min-w-0 truncate text-[11.5px]"
+                title={f.title ?? f.value}
+                style={{
+                  color: f.tone ? FACT_TONE[f.tone] : 'var(--text-secondary)',
+                  ...(f.mono ? { fontFamily: 'var(--font-mono)' } : {}),
+                }}
+              >
+                {f.value}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </PanelCard>
+    </div>
   )
 }
 

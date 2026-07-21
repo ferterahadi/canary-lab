@@ -4,6 +4,7 @@ import type { FlightManifest, FlightStageStatus, PrdSourceAttempt, PrdSourceChec
 import type { FeatureDocsListing } from '../../../shared/api/types'
 import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '../../config/components/BranchSuggestInput'
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, readAsBase64, useDocDrop } from '../../coverage/components/CoverageDocsRail'
+import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '../../../shared/ui/PanelCard'
 import { StageStatusChip } from './stage-meta'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
@@ -20,9 +21,9 @@ function repoBaseName(p: string): string {
   return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? p
 }
 
-const REPO_SCAN_CARD_CLASS = 'w-full rounded border px-3 py-2.5'
-const REPO_SCAN_CARD_STYLE = { borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }
-const REPO_SCAN_KICKER_CLASS = 'mb-1 text-[9.5px] font-semibold uppercase tracking-[0.11em]'
+// Card chrome + kicker come from the shared primitive (shared/ui/PanelCard) so
+// these panels and the stage facts card are literally the same surface.
+const PANEL_KICKER_CLASS = `mb-1 ${SHARED_KICKER_CLASS}`
 
 export function RepoScanPanel({
   flight,
@@ -51,11 +52,11 @@ export function RepoScanPanel({
     >
       <div
         data-testid="flight-intent-card"
-        className={REPO_SCAN_CARD_CLASS}
-        style={REPO_SCAN_CARD_STYLE}
+        className={PANEL_CARD_CLASS}
+        style={PANEL_CARD_STYLE}
       >
         <div className="flex items-baseline gap-2">
-          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
             Flight input
           </div>
           <div className="flex-1" />
@@ -84,10 +85,10 @@ export function RepoScanPanel({
 
       <div
         data-testid="repo-scan-card"
-        className={REPO_SCAN_CARD_CLASS}
-        style={REPO_SCAN_CARD_STYLE}
+        className={PANEL_CARD_CLASS}
+        style={PANEL_CARD_STYLE}
       >
-        <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+        <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
           {flight.repoPaths.length === 1 ? 'Repo · scanned' : `Repos · ${flight.repoPaths.length} scanned`}
         </div>
         <div className="flex flex-col">
@@ -283,8 +284,8 @@ export function FeatureSetupPanel({
           kicker, then a block per repo (the Advanced setup Service unit):
           editable name, location, branch picker, start command(s). */}
       {blocks.length > 0 && (
-        <div data-testid="setup-services-card" className={REPO_SCAN_CARD_CLASS} style={REPO_SCAN_CARD_STYLE}>
-          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+        <div data-testid="setup-services-card" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
+          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
             {blocks.length === 1 ? 'Service' : `Services · ${blocks.length}`}
           </div>
           <div className="flex flex-col">
@@ -306,8 +307,8 @@ export function FeatureSetupPanel({
       )}
 
       {pw && (
-        <div data-testid="setup-playwright" className={REPO_SCAN_CARD_CLASS} style={REPO_SCAN_CARD_STYLE}>
-          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+        <div data-testid="setup-playwright" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
+          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
             Playwright
           </div>
           <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
@@ -688,9 +689,9 @@ export function FlightDocsPanel({
   const docs = useFlightDocs(feature, refreshKey)
   return (
     <section data-testid="flight-docs-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
-      <div className={REPO_SCAN_CARD_CLASS} style={REPO_SCAN_CARD_STYLE}>
+      <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
         <div className="flex items-center gap-2">
-          <div className={REPO_SCAN_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
             {docs.sourceDocs.length > 0 ? `Requirement docs · ${docs.sourceDocs.length}` : 'Requirement docs'}
           </div>
           <div className="flex-1" />

@@ -150,6 +150,10 @@ export function FlightStartDialog({
   )
   const [busy, setBusy] = useState(false)
   const [startError, setStartError] = useState<string | null>(null)
+  // R80: bumped after the in-dialog stop, to refetch the entry options so the
+  // now-inactive flight drops the "flying right now" branch and the fresh form
+  // takes over — the user lands on the inputs they opened the dialog to change.
+  const [entryNonce, setEntryNonce] = useState(0)
 
   // R69: the full-flight step list is a collapsible preview — the whole journey
   // shown by default (greyed + locked for a first flight, the real re-entry
@@ -224,7 +228,7 @@ export function FlightStartDialog({
         setLoadError(err instanceof Error ? err.message : String(err))
       })
     return () => { alive = false }
-  }, [resolvedFeature, newFlight, intent])
+  }, [resolvedFeature, newFlight, intent, entryNonce])
 
   // Planning: poll the task until the agent settles. Attach-or-start means the
   // task may already be done on the first poll.
@@ -377,6 +381,25 @@ export function FlightStartDialog({
     api.launchPlannedFeatures(planTask.taskId, { features, ...autopilotBody, ...agentBody })
       .then(({ flightIds }) => onOpenFlight(flightIds[0]))
       .catch(applyLaunchFailure)
+  }
+
+  /** R80: the fresh-intent dead-end's way forward. A flying suite can't take new
+   *  inputs — changing them IS a restart — so the dialog offers the restart
+   *  outright: stop the running flight, then reload into the fresh form the user
+   *  came for. Nothing is wiped here; the wipe belongs to the restart itself. */
+  const stopAndStartFresh = (): void => {
+    if (busy || !entry?.flight) return
+    setBusy(true)
+    setStartError(null)
+    api.abortFlight(entry.flight.flightId)
+      .then(() => {
+        setBusy(false)
+        setEntryNonce((n) => n + 1)
+      })
+      .catch((err: unknown) => {
+        setStartError(err instanceof Error ? err.message : String(err))
+        setBusy(false)
+      })
   }
 
   const start = (): void => {
@@ -553,7 +576,7 @@ export function FlightStartDialog({
       title={resolvedFeature ?? 'Start a flight'}
       description={
         freshMode
-          ? 'Start fresh — change what this flight tests. It re-flies from the beginning.'
+          ? 'Change what this suite tests. It re-flies from the beginning.'
           : hasRecord
             ? 'Re-fly this suite — pick where the pipeline restarts.'
             : 'One command from a bare repo to a green, covered, evaluated run.'
@@ -570,19 +593,41 @@ export function FlightStartDialog({
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading stage options…</div>
         ) : !newFlight && entry?.active ? (
           // Attach, never a second start: the single-flight lock holds server-side.
-          <div className="flex flex-col gap-2">
-            <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-              This suite is flying right now.
+          // R80: fresh intent lands here as a dead-end otherwise — the dialog
+          // promised editable inputs, so it must say WHY they're unavailable and
+          // offer the only path to them (stop, then start fresh).
+          <div className="flex flex-col gap-2.5">
+            <div className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>
+              It’s flying right now.
             </div>
-            <button
-              type="button"
-              data-testid="flight-start-open-active"
-              onClick={() => onOpenFlight(entry.flight!.flightId)}
-              className="cl-button self-start px-2.5 py-1 text-xs"
-              style={{ color: 'var(--accent)' }}
-            >
-              Open the running flight →
-            </button>
+            {freshMode && (
+              <div className="text-[11.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
+                Changing what it tests restarts the flight from the beginning — the current one stops and its results are wiped.
+              </div>
+            )}
+            {errorBlock}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="flight-start-open-active"
+                onClick={() => onOpenFlight(entry.flight!.flightId)}
+                className="cl-button px-2.5 py-1 text-xs"
+                style={{ color: 'var(--accent)' }}
+              >
+                Open the running flight →
+              </button>
+              {freshMode && (
+                <button
+                  type="button"
+                  data-testid="flight-start-stop-active"
+                  disabled={busy}
+                  onClick={stopAndStartFresh}
+                  className="cl-button px-2.5 py-1 text-xs"
+                >
+                  {busy ? 'Stopping…' : 'Stop it and start fresh'}
+                </button>
+              )}
+            </div>
           </div>
         ) : newFlight && phase === 'planning' ? (
           <PlanningView
@@ -673,7 +718,7 @@ export function FlightStartDialog({
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-[12px] font-medium">Autopilot</span>
                 <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
-                  Safe checkpoints answer themselves — it still stops for missing secrets or a duplicate suite.
+                  Answers the safe checkpoints. Still stops for missing secrets or a name clash.
                 </span>
               </span>
               <Toggle testId="flight-autopilot-checkbox" value={autopilot} onChange={setAutopilot} />
@@ -682,7 +727,7 @@ export function FlightStartDialog({
             {hasRecord && (
               <div data-testid="flight-start-reset-note" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
                 {freshMode
-                  ? 'Every step runs again from the beginning — the previous attempt\'s artifacts (docs, specs, envset, run, export) are wiped first.'
+                  ? 'The last attempt is wiped first — docs, specs, envset, run, export.'
                   : picked === 'continue'
                     ? 'Continue picks up from the last state — nothing is wiped.'
                     : 'Restarting from a step wipes that step\'s and every later step\'s artifacts (docs, specs, envset, run, export); earlier steps keep theirs.'}

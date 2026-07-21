@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   launchPlannedFeatures: vi.fn(),
   listWorkspaceDirs: vi.fn(),
   getProjectConfig: vi.fn(),
+  abortFlight: vi.fn(),
 }))
 
 vi.mock('../../../shared/api/client', async (importOriginal) => ({
@@ -24,6 +25,7 @@ vi.mock('../../../shared/api/client', async (importOriginal) => ({
   getPlanFeaturesTask: mocks.getPlanFeaturesTask,
   launchPlannedFeatures: mocks.launchPlannedFeatures,
   getProjectConfig: mocks.getProjectConfig,
+  abortFlight: mocks.abortFlight,
   // The repo picker reuses FolderPickerModal, which lists dirs via this.
   listWorkspaceDirs: mocks.listWorkspaceDirs,
 }))
@@ -124,6 +126,37 @@ describe('FlightStartDialog', () => {
     click(byTestId('flight-start-open-active')!)
     expect(onOpenFlight).toHaveBeenCalledWith('fl_live')
     expect(mocks.startFlight).not.toHaveBeenCalled()
+    // Non-fresh re-fly: attaching is the only move — no stop offered.
+    expect(byTestId('flight-start-stop-active')).toBeNull()
+  })
+
+  it('R80: fresh intent on a flying suite offers the stop, then lands on the editable form', async () => {
+    const active = entry({
+      active: true,
+      flight: { flightId: 'fl_live', status: 'running', stages: [] },
+      prefill: { repoPaths: ['/repo'], description: 'checkout flow', env: 'local', coverageTarget: 100 },
+    })
+    mocks.getFlightEntryOptions.mockResolvedValueOnce(active)
+    mocks.abortFlight.mockResolvedValue({ flightId: 'fl_live' })
+    await render({ intent: 'fresh' })
+
+    // The dead-end explains the cost instead of just refusing.
+    expect(container.textContent).toContain('restarts the flight from the beginning')
+
+    // Second fetch (post-stop) reports the flight inactive.
+    mocks.getFlightEntryOptions.mockResolvedValueOnce(entry({
+      active: false,
+      flight: { flightId: 'fl_live', status: 'aborted', stages: [] },
+      prefill: active.prefill,
+    }))
+    click(byTestId('flight-start-stop-active')!)
+    await flush()
+
+    expect(mocks.abortFlight).toHaveBeenCalledWith('fl_live')
+    // …and the fresh form the user opened the dialog for is now in front of them.
+    expect(byTestId('flight-start-stop-active')).toBeNull()
+    expect((byTestId('flight-start-submit') as HTMLButtonElement).textContent).toBe('Start fresh flight')
+    expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('checkout flow')
   })
 
   it('preselects Continue for a paused flight and posts mode continue', async () => {
