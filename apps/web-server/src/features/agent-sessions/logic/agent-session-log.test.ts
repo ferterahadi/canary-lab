@@ -26,6 +26,7 @@ import {
   writeWorkflowAgentRef,
   resolveWorkflowAgentRef,
   buildAgentSessionResponse,
+  parseAgentSessionLine,
   loadSubagentThread,
   loadSubagentThreads,
   subagentDirFor,
@@ -1758,5 +1759,56 @@ describe('buildAgentSessionResponse', () => {
     expect(res.events).toHaveLength(1)
     expect(res.subagents).toHaveLength(1)
     expect(res.subagents[0].parentToolId).toBe('toolu_x')
+  })
+})
+
+describe('claude injected-tag filtering', () => {
+  const userLine = (text: string, asString = false) => JSON.stringify({
+    type: 'user',
+    timestamp: '2026-07-21T12:09:53.515Z',
+    message: { content: asString ? text : [{ type: 'text', text }] },
+  })
+
+  it('drops harness bookkeeping the CLI injects as user turns', () => {
+    for (const tag of [
+      'task-notification', 'command-message', 'command-name', 'command-args',
+      'local-command-stdout', 'local-command-stderr', 'local-command-caveat', 'system-reminder',
+    ]) {
+      expect(parseAgentSessionLine('claude', userLine(`<${tag}>\nnoise\n</${tag}>`))).toEqual([])
+    }
+  })
+
+  it('drops them when the content is a bare string too', () => {
+    expect(parseAgentSessionLine('claude', userLine('<task-notification>x</task-notification>', true))).toEqual([])
+  })
+
+  it('drops them with leading whitespace (the CLI is not consistent)', () => {
+    expect(parseAgentSessionLine('claude', userLine('\n  <task-notification>x</task-notification>'))).toEqual([])
+  })
+
+  it('KEEPS a real prompt that merely starts with markup', () => {
+    const events = parseAgentSessionLine('claude', userLine('<html>\n<body>fix this markup</body>\n</html>'))
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ kind: 'user-message' })
+  })
+
+  it('KEEPS a prompt that only mentions a tag mid-text', () => {
+    const events = parseAgentSessionLine('claude', userLine('Explain what a <task-notification> block is.'))
+    expect(events).toHaveLength(1)
+  })
+
+  it('KEEPS the collector prompt', () => {
+    const events = parseAgentSessionLine('claude', userLine('You are gathering requirement material for an E2E test suite.'))
+    expect(events).toHaveLength(1)
+  })
+
+  it('leaves codex parsing untouched', () => {
+    const codexLine = JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-07-21T12:00:00.000Z',
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: '<task-notification>x</task-notification>' }] },
+    })
+    // Codex has its own injection vocabulary; this filter is claude-specific.
+    expect(parseAgentSessionLine('codex', codexLine)).toHaveLength(1)
   })
 })

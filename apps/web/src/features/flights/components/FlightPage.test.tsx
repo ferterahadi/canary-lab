@@ -995,6 +995,11 @@ describe('trailer model (R14–R18)', () => {
     expect(facts).toContain('checkout')
     expect(facts).toContain('2 files')
     expect(facts).toContain('api healthy')
+    // The facts sit on the SAME card surface as the panels below them (one
+    // stack of like blocks) — not bare above the first card.
+    const factsCard = container.querySelector('[data-testid="stage-facts-card"]')
+    expect(factsCard?.textContent).toContain('At a glance')
+    expect(factsCard?.contains(container.querySelector('[data-testid="stage-facts"]'))).toBe(true)
     // R43: the setup panel — a block per config REPO, mirroring the Advanced
     // setup Service tab (Name ↔ NAME, Branch picker ↔ BRANCH, Start command ↔
     // RUNTIME COMMAND). Read-only until the block's pencil arms it.
@@ -1362,6 +1367,25 @@ describe('checkpoint display language (R71/W3)', () => {
     // The agent path stays clickable — a retry with feedback is legitimate.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-agent"]')?.click() })
     expect(container.querySelector('[data-testid="fork-path-agent"]')?.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('R80: the stage prose does NOT echo the verdict the band already shows', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source',
+      message: 'The agent found nothing relevant: no loyalty flow in either repo. No requirement docs yet for "x". Add docs yourself, or have an agent gather them guided by the intent.',
+      options: ['collect-repo-docs', 'infer-from-diff'],
+      data: {
+        docs: [], linked: [], intent: 'checkout flow',
+        lastAttempt: { mode: 'collect-repo-docs', outcome: 'empty', reason: 'no loyalty flow in either repo' },
+      },
+    }))
+    await render('fl_1')
+    // The reason appears exactly once — in the band, not also as stage prose.
+    const hits = (container.textContent?.match(/no loyalty flow in either repo/g) ?? []).length
+    expect(hits).toBe(1)
+    expect(container.querySelector('[data-testid="prd-source-verdict"]')?.textContent).toContain('no loyalty flow')
+    // And the advice the two cards already carry is not repeated as prose.
+    expect(container.textContent).not.toContain('Add docs yourself, or have an agent gather them')
   })
 
   it('R80: a no-diff attempt names that outcome instead of "found nothing"', async () => {

@@ -794,18 +794,45 @@ interface ClaudeLine {
   message?: { content?: unknown }
 }
 
+// Harness bookkeeping the CLI injects as `user` turns: background-task
+// completions, slash-command envelopes, local-command stdout. They are not the
+// prompt and not the agent's reasoning, so they'd read as noise on the
+// timeline — a `<task-notification>` XML blob rendered as a user message is
+// the symptom that prompted this. Matched against a known tag set rather than
+// "any leading <tag>" so a genuine pasted HTML/XML prompt still shows.
+// Mirrors the codex path's `<environment_context>` skip.
+const CLAUDE_INJECTED_TAGS = [
+  'task-notification',
+  'command-message',
+  'command-name',
+  'command-args',
+  'local-command-stdout',
+  'local-command-stderr',
+  'local-command-caveat',
+  'system-reminder',
+] as const
+
+function isInjectedClaudeUserText(text: string): boolean {
+  const head = text.trimStart()
+  return CLAUDE_INJECTED_TAGS.some((tag) => head.startsWith(`<${tag}>`))
+}
+
 function pushClaudeEvents(line: ClaudeLine, out: AgentEvent[]): void {
   const ts = typeof line.timestamp === 'string' ? line.timestamp : ''
   if (line.type === 'user') {
     const content = line.message?.content
     if (typeof content === 'string') {
-      if (content.trim()) out.push({ kind: 'user-message', timestamp: ts, text: content })
+      if (content.trim() && !isInjectedClaudeUserText(content)) {
+        out.push({ kind: 'user-message', timestamp: ts, text: content })
+      }
       return
     }
     if (Array.isArray(content)) {
       for (const block of content as ClaudeContentBlock[]) {
         if (block?.type === 'text' && typeof block.text === 'string' && block.text.trim()) {
-          out.push({ kind: 'user-message', timestamp: ts, text: block.text })
+          if (!isInjectedClaudeUserText(block.text)) {
+            out.push({ kind: 'user-message', timestamp: ts, text: block.text })
+          }
         } else if (block?.type === 'tool_result') {
           out.push({
             kind: 'tool-result',

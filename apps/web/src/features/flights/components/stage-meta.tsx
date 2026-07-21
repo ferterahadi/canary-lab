@@ -546,7 +546,19 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     }
     return 'Waiting for earlier stages.'
   }
-  if (status === 'waiting-for-approval') return stage.checkpoint?.message ?? 'Paused — your decision is needed below.'
+  if (status === 'waiting-for-approval') {
+    // `prd-source` renders as the RequirementsFork, which owns the whole
+    // surface: it shows the verdict band (the same finding this message
+    // carries) and the two path cards (the same "add docs yourself, or have an
+    // agent gather them" advice). Echoing `message` here would print both a
+    // second time — the message exists for the CLI/MCP surfaces, which have no
+    // fork to render. Other checkpoint kinds still need it: their generic card
+    // shows options, not prose.
+    if (stage.checkpoint?.kind === 'prd-source') {
+      return 'Paused — choose where requirements come from below.'
+    }
+    return stage.checkpoint?.message ?? 'Paused — your decision is needed below.'
+  }
   if (status === 'skipped') return skippedLine(stage.skipReason)
   if (status === 'failed') return 'Failed — details below.'
 
