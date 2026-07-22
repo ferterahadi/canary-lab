@@ -5,6 +5,7 @@ import type { FeatureDocsListing } from '../../../shared/api/types'
 import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '../../config/components/BranchSuggestInput'
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, readAsBase64, useDocDrop } from '../../coverage/components/CoverageDocsRail'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '../../../shared/ui/PanelCard'
+import { StepList, StepRow } from '../../../shared/ui/StepList'
 import { StageStatusChip } from './stage-meta'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
@@ -91,35 +92,35 @@ export function RepoScanPanel({
         <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
           {flight.repoPaths.length === 1 ? 'Repo · scanned' : `Repos · ${flight.repoPaths.length} scanned`}
         </div>
-        <div className="flex flex-col">
-          {flight.repoPaths.map((p, index) => {
+        <StepList>
+          {flight.repoPaths.map((p) => {
             const envs = envsFor(p)
             return (
-              <div
+              <StepRow
                 key={p}
-                data-testid={`repo-card-${repoBaseName(p)}`}
-                className={`flex min-w-0 flex-col gap-1 ${index > 0 ? 'mt-2 border-t pt-2' : ''}`}
-                style={index > 0 ? { borderColor: 'var(--border-default)' } : undefined}
-              >
-                <span className="text-[12.5px] font-semibold">{repoBaseName(p)}</span>
-                <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
-                  <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Location</span>
-                  <span className="max-w-[340px] truncate text-[10px]" title={p} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                    {p}
+                testId={`repo-card-${repoBaseName(p)}`}
+                state="done"
+                title={repoBaseName(p)}
+                sub={
+                  <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
+                    <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Location</span>
+                    <span className="max-w-[340px] truncate text-[10px]" title={p} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                      {p}
+                    </span>
+                    {envs.length > 0 && (
+                      <>
+                        <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Env</span>
+                        <span className="max-w-[340px] truncate text-[10px]" title={envs.join('\n')} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                          {envs.join(' · ')}
+                        </span>
+                      </>
+                    )}
                   </span>
-                  {envs.length > 0 && (
-                    <>
-                      <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Env</span>
-                      <span className="max-w-[340px] truncate text-[10px]" title={envs.join('\n')} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                        {envs.join(' · ')}
-                      </span>
-                    </>
-                  )}
-                </span>
-              </div>
+                }
+              />
             )
           })}
-        </div>
+        </StepList>
         {orphans.length > 0 && (
           <div className="mt-2 border-t pt-2 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} title={orphans.join('\n')}>
             env outside repos: {orphans.map(repoBaseName).join(' · ')}
