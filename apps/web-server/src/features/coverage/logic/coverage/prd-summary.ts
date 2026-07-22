@@ -6,6 +6,7 @@ import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runt
 import { PRD_SUMMARY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import type { CoverageAgentSession } from '../../../coverage/logic/coverage/annotate-engine'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import type {
   PathType,
@@ -194,18 +195,18 @@ function normalizeLadder(value: unknown): StrictnessLadderRung[] | undefined {
 }
 
 function parseTopLevelObject(output: string): Record<string, unknown> | null {
-  const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
-  const text = (fenced ?? output).trim()
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) return null
-  try {
-    // The slice is guaranteed to start with `{` and end with `}`, so a successful
-    // parse is always an object (an array/primitive can't begin with `{`).
-    return JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>
-  } catch {
-    return null
+  // The real answer envelope always carries a `requirements` array (the schema
+  // requires it), so anchor on that — a stray parseable object in the agent's
+  // prose (inline code, placeholders) can't shadow it. Fall back to the first
+  // plain object so a shape-drifted answer still degrades like before.
+  let firstObject: Record<string, unknown> | null = null
+  for (const c of extractJsonCandidates(output)) {
+    if (!c || typeof c !== 'object' || Array.isArray(c)) continue
+    const o = c as Record<string, unknown>
+    if (Array.isArray(o.requirements)) return o
+    firstObject ??= o
   }
+  return firstObject
 }
 
 /** Parse the agent's top-level `variantDimension` (D1) from the output, if any.

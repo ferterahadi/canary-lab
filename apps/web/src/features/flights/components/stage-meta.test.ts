@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { stageStateLine, stageFacts } from './stage-meta'
+import { portifyWorkflowId, stageStateLine, stageFacts } from './stage-meta'
 import type { FlightManifest, FlightStage } from '../../../shared/api/client'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
@@ -73,11 +73,11 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       evidence: { gaps: [{ gap: 'untested' }, { gap: 'untested' }, { gap: 'path-incomplete' }] },
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
-    expect(facts.find((f) => f.label === 'Pass')).toMatchObject({ value: '2', big: true, stepper: [2, 5] })
-    const cov = facts.find((f) => f.label === 'Coverage')
+    expect(facts.find((f) => f.label === 'Authoring pass')).toMatchObject({ value: '2', big: true, stepper: [2, 5] })
+    const cov = facts.find((f) => f.label === 'Requirements covered')
     expect(cov).toMatchObject({ value: '40%', big: true, tone: 'warn' })
     expect(cov?.bar).toBeCloseTo(0.4)
-    const gaps = facts.find((f) => f.label === 'Open gaps')
+    const gaps = facts.find((f) => f.label === 'Coverage gaps')
     expect(gaps).toMatchObject({ value: '3', big: true, tone: 'warn', sub: '2 untested · 1 path-incomplete' })
   })
 
@@ -89,12 +89,12 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       evidence: { coveragePct: 100, gaps: [] },
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
-    expect(facts.find((f) => f.label === 'Coverage')).toMatchObject({ value: '100%', big: true, tone: 'good', bar: 1 })
-    const gaps = facts.find((f) => f.label === 'Open gaps')
+    expect(facts.find((f) => f.label === 'Requirements covered')).toMatchObject({ value: '100%', big: true, tone: 'good', bar: 1 })
+    const gaps = facts.find((f) => f.label === 'Coverage gaps')
     expect(gaps).toMatchObject({ value: '0', big: true, tone: 'good' })
     expect(gaps?.sub).toBeUndefined()
-    expect(facts.find((f) => f.label === 'Pass')).toBeUndefined()
-    expect(facts.find((f) => f.label === 'Passes')).toMatchObject({ value: '2' })
+    expect(facts.find((f) => f.label === 'Authoring pass')).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Authoring passes')).toMatchObject({ value: '2', big: true })
   })
 })
 
@@ -114,5 +114,37 @@ describe('stageStateLine — skipped copy', () => {
   it('falls back when no reason was recorded', () => {
     const stage = { key: 'scout', status: 'skipped' } as FlightStage
     expect(stageStateLine(stage, flight({ stages: [stage] }))).toBe('Skipped.')
+  })
+})
+
+describe('portify live progress (workflow id + phase mirror)', () => {
+  const running = (progress?: unknown): FlightStage =>
+    ({ key: 'portify', status: 'running', ...(progress !== undefined ? { progress } : {}) }) as FlightStage
+
+  it('portifyWorkflowId: evidence wins once settled; progress pins it live; other stages null', () => {
+    expect(portifyWorkflowId({ key: 'portify', evidence: { workflowId: 'wf-done' }, progress: { workflowId: 'wf-live' } })).toBe('wf-done')
+    expect(portifyWorkflowId({ key: 'portify', progress: { workflowId: 'wf-live' } })).toBe('wf-live')
+    expect(portifyWorkflowId({ key: 'portify' })).toBeNull()
+    expect(portifyWorkflowId({ key: 'scout', evidence: { workflowId: 'wf-x' } })).toBeNull()
+  })
+
+  it('running facts: attempt stepper + phase verb from the live mirror', () => {
+    const facts = stageFacts(running({ workflowId: 'wf1', status: 'editing', attempt: 2, maxAttempts: 3 }), flight())
+    const attempt = facts.find((f) => f.label === 'Attempt')
+    expect(attempt).toMatchObject({ value: '2', big: true, stepper: [2, 3] })
+    expect(facts.find((f) => f.label === 'Phase')?.value).toBe('Agent editing services')
+  })
+
+  it('running facts: older flights without the mirror render no half-empty tiles', () => {
+    expect(stageFacts(running({ workflowId: 'wf1' }), flight())).toEqual([])
+    expect(stageFacts(running(), flight())).toEqual([])
+  })
+
+  it('running state line follows the phase; unknown/missing phase falls back to the generic line', () => {
+    const line = (progress?: unknown) => stageStateLine(running(progress), flight({ status: 'running', stages: [running(progress)] }))
+    expect(line({ workflowId: 'wf1', status: 'editing' })).toBe('Agent is editing the services to read injected ports…')
+    expect(line({ workflowId: 'wf1', status: 'verifying' })).toBe('Double-boot verifying the edits (two instances side by side)…')
+    expect(line({ workflowId: 'wf1', status: 'weird-new-phase' })).toBe('Verifying the services boot concurrently (port injection)…')
+    expect(line()).toBe('Verifying the services boot concurrently (port injection)…')
   })
 })

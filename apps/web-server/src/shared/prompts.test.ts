@@ -67,3 +67,43 @@ describe('renderPrompt', () => {
     expect(out).toContain('port 3007 still bound')
   })
 })
+
+// Every *.schema.json under prompts/ is handed to `codex exec --output-schema`,
+// where OpenAI's strict structured-output mode enforces rules plain JSON Schema
+// does not: every object with `properties` must list EVERY key in `required`
+// (optionality is expressed as a `null` type union instead). A violation is a
+// guaranteed 400 (`invalid_json_schema`) at the first codex turn — the agent
+// can never succeed. Regression: coverage-annotate.schema.json shipped with
+// partial `required` and killed every codex coverage-mapping attempt.
+describe('codex output schemas (prompts/*.schema.json)', () => {
+  const schemaFiles = fs.readdirSync(PROMPTS_DIR).filter((f) => f.endsWith('.schema.json'))
+
+  function collectStrictViolations(node: unknown, ctx: string, out: string[]): void {
+    if (!node || typeof node !== 'object') return
+    const o = node as Record<string, unknown>
+    if (o.properties && typeof o.properties === 'object') {
+      const keys = Object.keys(o.properties as Record<string, unknown>)
+      const required = Array.isArray(o.required) ? (o.required as string[]) : []
+      const missing = keys.filter((k) => !required.includes(k))
+      if (missing.length) out.push(`${ctx}: required is missing [${missing.join(', ')}]`)
+    }
+    for (const [key, value] of Object.entries(o)) {
+      if (value && typeof value === 'object') collectStrictViolations(value, `${ctx}.${key}`, out)
+    }
+  }
+
+  it('ships at least the known schemas', () => {
+    expect(schemaFiles).toEqual(expect.arrayContaining([
+      'coverage-annotate.schema.json',
+      'evaluation-rewrite.schema.json',
+      'prd-summary.schema.json',
+    ]))
+  })
+
+  it.each(schemaFiles)('%s satisfies OpenAI strict mode (every property key in required)', (file) => {
+    const schema = JSON.parse(fs.readFileSync(path.join(PROMPTS_DIR, file), 'utf-8')) as unknown
+    const violations: string[] = []
+    collectStrictViolations(schema, '$', violations)
+    expect(violations).toEqual([])
+  })
+})

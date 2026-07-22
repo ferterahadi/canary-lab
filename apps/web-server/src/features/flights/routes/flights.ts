@@ -39,6 +39,7 @@ import { deriveFeatureSlug, type PlannedFeature, type PlanFeaturesTask } from '.
 import { PlanFeaturesStore, startPlanFeatures, type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import type { FlightAgentSpawner } from '../logic/stages/context'
 import { hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
+import { applyFlightStageRemedy, flightStageRemedy } from '../logic/stage-remedy'
 import { loadFeatures } from '../../config/logic/feature-loader'
 import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
@@ -294,6 +295,46 @@ export async function flightsRoutes(app: FastifyInstance, deps: FlightRouteDeps)
     }
     return manifest
   })
+
+  // Machine-actionable fix for a failed stage — derived at read time (live
+  // `git status`), never persisted. `remedy: null` = nothing actionable;
+  // `repos: []` = the error is stale and everything is clean (just Continue).
+  app.get<{ Params: { id: string } }>('/api/flights/:id/remedy', async (req, reply) => {
+    const manifest = store.get(req.params.id)
+    if (!manifest) {
+      reply.code(404)
+      return { error: `flight not found: ${req.params.id}` }
+    }
+    return { remedy: await flightStageRemedy(manifest) }
+  })
+
+  // Execute the remedy (stash or commit every currently-dirty repo), then
+  // resume the flight — the same path as the header Continue, so the retried
+  // stage and the flights-changed events flow exactly as a manual resume.
+  app.post<{ Params: { id: string }; Body: { action?: string } | undefined }>(
+    '/api/flights/:id/remedy',
+    async (req, reply) => {
+      const manifest = store.get(req.params.id)
+      if (!manifest) {
+        reply.code(404)
+        return { error: `flight not found: ${req.params.id}` }
+      }
+      const action = req.body?.action
+      if (action !== 'stash' && action !== 'commit') {
+        reply.code(400)
+        return { error: 'action must be "stash" or "commit"' }
+      }
+      try {
+        await applyFlightStageRemedy(manifest, action)
+        const { manifest: resumed } = resumeFlight(req.params.id, conductorDeps)
+        return resumed
+      } catch (err) {
+        const statusCode = (err as { statusCode?: number }).statusCode
+        reply.code(typeof statusCode === 'number' ? statusCode : 500)
+        return { error: err instanceof Error ? err.message : String(err) }
+      }
+    },
+  )
 
   app.post<{
     Body:

@@ -5,6 +5,7 @@ import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { ANNOTATE_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
@@ -121,19 +122,12 @@ export function parseAnnotateOutput(
   knownIds: Set<string>,
   knownVariants: Set<string> = new Set(),
 ): ProposedMapping[] | null {
-  const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
-  const text = (fenced ?? output).trim()
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text.slice(start, end + 1))
-  } catch {
-    return null
-  }
-  const rows = (parsed as { mappings?: unknown }).mappings
-  if (!Array.isArray(rows)) return null
+  // First candidate carrying a `mappings` array — prose asides with braces
+  // (inline code, placeholders) can't shadow the real answer.
+  const rows = extractJsonCandidates(output)
+    .map((c) => (c && typeof c === 'object' ? (c as { mappings?: unknown }).mappings : undefined))
+    .find(Array.isArray)
+  if (!rows) return null
   const out: ProposedMapping[] = []
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue

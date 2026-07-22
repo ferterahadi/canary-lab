@@ -10,6 +10,8 @@ import { InvalidationProvider } from '../../../shared/state/invalidation'
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
   getFlight: vi.fn(),
+  getFlightRemedy: vi.fn(),
+  applyFlightRemedy: vi.fn(),
   getRunDetail: vi.fn(),
   listJournal: vi.fn(),
   respondFlightCheckpoint: vi.fn(),
@@ -43,6 +45,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../shared/api/client', () => ({
   listFlights: mocks.listFlights,
   getFlight: mocks.getFlight,
+  getFlightRemedy: mocks.getFlightRemedy,
+  applyFlightRemedy: mocks.applyFlightRemedy,
   getRunDetail: mocks.getRunDetail,
   listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
@@ -108,6 +112,7 @@ let root: Root
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
+  mocks.getFlightRemedy.mockResolvedValue({ remedy: null })
   mocks.listRuns.mockResolvedValue([])
   mocks.listJournal.mockResolvedValue([])
   mocks.downloadTask.mockResolvedValue(undefined)
@@ -352,6 +357,61 @@ describe('FlightPage', () => {
     // No boot errorDetail on this failure → no log-tail section, no open-log.
     expect(container.querySelector('[data-testid="stage-error-log-tail"]')).toBeNull()
     expect(container.querySelector('[data-testid="stage-error-open-log"]')).toBeNull()
+  })
+
+  it('remedy: dirty-repo failure renders the fix block; stash applies and continues', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'stage-failed',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'portify' ? ('failed' as const) : ('done' as const),
+        ...(key === 'portify' ? { error: 'portify start rejected (409): repos "shop", "pay" have uncommitted changes — commit or stash them first' } : {}),
+      })),
+    }))
+    mocks.getFlightRemedy.mockResolvedValue({
+      remedy: {
+        kind: 'dirty-repos',
+        stage: 'portify',
+        repos: [
+          { name: 'shop', path: '/repo/shop', modified: 7 },
+          { name: 'pay', path: '/repo/pay', modified: 2 },
+        ],
+        actions: ['stash', 'commit'],
+      },
+    })
+    mocks.applyFlightRemedy.mockResolvedValue(manifest({ status: 'running' }))
+    await render('fl_1')
+    const block = container.querySelector('[data-testid="stage-remedy"]')
+    expect(block).toBeTruthy()
+    expect(block?.textContent).toContain('Recommended fix')
+    expect(block?.textContent).toContain('shop')
+    expect(block?.textContent).toContain('7 modified')
+    expect(block?.textContent).toContain('pay')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-remedy-stash"]')?.click()
+    })
+    expect(mocks.applyFlightRemedy).toHaveBeenCalledWith('fl_1', 'stash')
+  })
+
+  it('remedy: a stale error over now-clean repos points at Continue instead of buttons', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'stage-failed',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'portify' ? ('failed' as const) : ('done' as const),
+        ...(key === 'portify' ? { error: 'portify start rejected (409): repo "shop" has uncommitted changes — commit or stash them first' } : {}),
+      })),
+    }))
+    mocks.getFlightRemedy.mockResolvedValue({
+      remedy: { kind: 'dirty-repos', stage: 'portify', repos: [], actions: ['stash', 'commit'] },
+    })
+    await render('fl_1')
+    const block = container.querySelector('[data-testid="stage-remedy"]')
+    expect(block?.textContent).toContain('clean again')
+    expect(container.querySelector('[data-testid="stage-remedy-stash"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-remedy-commit"]')).toBeNull()
   })
 
   it('boot failure: the error card carries the service-log tail and an open-log action', async () => {
@@ -711,6 +771,63 @@ describe('stage summary + drill-through (R6)', () => {
     expect(onOpenPortify).toHaveBeenCalledWith('wf-3')
   })
 
+  it('portify drill is HIDDEN while running (the embedded rail is the live view) and unlocks when parked mid-step via live progress', async () => {
+    const onOpenPortify = vi.fn()
+    const before = FLIGHT_STAGE_KEYS.indexOf('portify')
+    const stagesWith = (portifyStatus: 'running' | 'pending') =>
+      FLIGHT_STAGE_KEYS.map((key, i) => ({
+        key,
+        status: i < before ? ('done' as const) : i === before ? portifyStatus : ('pending' as const),
+        // The long agent-editing phase: no evidence yet, only the live pin.
+        ...(key === 'portify'
+          ? { progress: { workflowId: 'wf-live' }, log: '[portify] workflow wf-live started\n', startedAt: '2026-01-01T00:05:00Z' }
+          : {}),
+      }))
+    await renderWithDrill(manifest({ status: 'running', currentStage: 'portify', stages: stagesWith('running') }), { onOpenPortify })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="stage-drill-portify"]')).toBeNull()
+
+    // Paused mid-step (interrupted → pending with startedAt): no evidence yet,
+    // but the progress pin lets the user open the workflow it was driving.
+    await renderWithDrill(manifest({ status: 'paused', currentStage: 'portify', stages: stagesWith('pending') }), { onOpenPortify })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
+    })
+    expect(onOpenPortify).toHaveBeenCalledWith('wf-live')
+  })
+
+  it('running portify tails its workflow agent session in the activity rail', async () => {
+    const before = FLIGHT_STAGE_KEYS.indexOf('portify')
+    await renderWithDrill(manifest({
+      status: 'running',
+      currentStage: 'portify',
+      stages: FLIGHT_STAGE_KEYS.map((key, i) => ({
+        key,
+        status: i < before ? ('done' as const) : i === before ? ('running' as const) : ('pending' as const),
+        // Mid-editing: only the live progress pin exists — the rail must tail
+        // the portify workflow session, not fall back to system rows alone.
+        ...(key === 'portify'
+          ? { progress: { workflowId: 'wf-live', status: 'editing', attempt: 1, maxAttempts: 3 }, log: '[portify] workflow wf-live started\n' }
+          : {}),
+      })),
+    }), {})
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    const asv = container.querySelector('[data-testid="agent-session-view"]')
+    expect(asv?.getAttribute('data-kind')).toBe('portify')
+    // The live phase mirror surfaces as facts + a phase-aware state line.
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('editing the services')
+    const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
+    expect(facts).toContain('Attempt')
+    expect(facts).toContain('Agent editing services')
+  })
+
   it('renders no drill-through when no handler is wired (lens is optional)', async () => {
     await renderWithDrill(manifest({
       status: 'done',
@@ -832,7 +949,7 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
     })
-    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('Passes')
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('Authoring passes')
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('specs failed to compile/list')
     expect(container.querySelector('[data-testid="specs-pass-2"]')?.textContent).toContain('100% covered')
     expect(container.querySelector('[data-testid="specs-pass-live"]')).toBeNull()
@@ -893,18 +1010,17 @@ describe('trailer model (R14–R18)', () => {
   })
 
   it('R30: a stage with no log and no agent has no details disclosure', async () => {
+    // Scaffold, not portify: portify grew an agent source (its workflow
+    // timeline now tails into the rail, settled included), so the agentless
+    // example must be a stage that truly never spawns one.
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
-      stages: FLIGHT_STAGE_KEYS.map((key) => ({
-        key,
-        status: 'done' as const,
-        ...(key === 'portify' ? { evidence: { workflowId: 'wf-3', edits: false } } : {}),
-      })),
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
     }))
     await render('fl_1')
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
     })
     expect(container.querySelector('[data-testid="stage-details-toggle"]')).toBeNull()
   })

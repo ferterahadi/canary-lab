@@ -40,6 +40,28 @@ describe('parseAnnotateOutput', () => {
     expect(out![0].testName).toBe('t')
   })
 
+  // Regression: flight fl_4e775ccc6c15 — claude's unfenced answer opened with
+  // prose whose inline code (`async () => {}`) put a `{` before the JSON, so the
+  // first-`{`→last-`}` slice threw and a valid answer was discarded (the engine
+  // then fell through to a codex attempt that could not succeed).
+  it('recovers bare JSON preceded by prose containing braces', () => {
+    const out = parseAnnotateOutput(
+      'Skips have empty bodies (`async () => {}`) so I omit them.\n\n' +
+        JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'] }] }),
+      KNOWN,
+    )
+    expect(out![0]).toMatchObject({ testName: 't', requirements: ['R1'] })
+  })
+
+  it('recovers bare JSON followed by trailing prose containing braces', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R2'] }] }) +
+        '\n\nNote: the fixme bodies are `async () => {}` stubs.',
+      KNOWN,
+    )
+    expect(out![0].requirements).toEqual(['R2'])
+  })
+
   it('returns [] for a valid-but-empty mapping set', () => {
     expect(parseAnnotateOutput(JSON.stringify({ mappings: [] }), KNOWN)).toEqual([])
   })

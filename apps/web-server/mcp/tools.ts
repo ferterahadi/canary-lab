@@ -21,6 +21,8 @@ import { loadFeatures } from '../src/features/config/logic/feature-loader'
 import type { DirtySpecStore } from '../src/features/runs/logic/dirty-specs/store'
 import { isHealClaimAllowed } from '../src/features/runs/logic/heal/heal-claim-policy'
 import { computePortPreflight } from '../src/features/runs/logic/runtime/port-preflight'
+import { flightStageRemedy } from '../src/features/flights/logic/stage-remedy'
+import type { FlightManifest } from '../../../shared/flights/types'
 import {
   createVerificationConfig,
   getVerificationConfig,
@@ -1622,7 +1624,7 @@ export function registerCanaryLabTools(
   })
 
   registerTool('get_flight', {
-    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses.',
+    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming.',
     inputSchema: {
       flightId: z.string().optional().describe('Omit to list all flights (slim rows).'),
     },
@@ -1640,6 +1642,15 @@ export function registerCanaryLabTools(
     const resp = await deps.flightsRequest({ method: 'GET', url: `/api/flights/${encodeURIComponent(flightId)}` })
     if (resp.statusCode !== 200) return errorResult(`flight not found: ${flightId}`)
     const view = flightView(resp.body)
+    // Read-time remedy for a failed stage (live git re-check, never stored):
+    // give the agent the machine-actionable fix, not just the error prose.
+    const remedy = await flightStageRemedy(resp.body as FlightManifest).catch(() => null)
+    if (remedy) {
+      const fix = remedy.repos.length === 0
+        ? `The failed ${remedy.stage} stage blamed uncommitted changes, but every repo is CLEAN now (fixed outside this conversation) — just start_flight(feature) to resume.`
+        : `The failed ${remedy.stage} stage is blocked by uncommitted changes in ${remedy.repos.map((r) => `"${r.name}" (${r.modified} files, ${r.path})`).join(', ')}. Help the user clean each repo — \`git stash push -u\` (undoable) or commit — then start_flight(feature) to resume; the stage retries automatically.`
+      return asJsonResult({ ...view, remedy, next: `${flightNext(view)} ${fix}`.trim() })
+    }
     return asJsonResult({ ...view, next: flightNext(view) })
   })
 

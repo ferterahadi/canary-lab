@@ -50,6 +50,7 @@ waiting.
 | `waiting-for-approval` | Respond via `respond_flight_checkpoint`. |
 | `paused`, `pauseReason: "queued"` | Narrate as waiting — do NOT resume it. |
 | `paused`, other `pauseReason` | Re-call `start_flight` (OMIT `repoPaths` + `description`) to resume. |
+| `paused` + `remedy` in the result | A stage is blocked by uncommitted repo changes. Help the user clean each listed repo — `git stash push -u` (undoable) or commit — then `start_flight` resumes and the stage retries. |
 | `done` | Point the user at `links.evaluationZip`. |
 | `failed` | Report the failure; a re-call to `start_flight` resumes from the failed stage. |
 

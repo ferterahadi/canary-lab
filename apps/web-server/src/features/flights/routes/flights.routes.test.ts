@@ -258,6 +258,69 @@ describe('flights routes', () => {
     expect(resp.statusCode).toBe(404)
     const resumed = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/resume' })
     expect(resumed.statusCode).toBe(404)
+    const remedy = await app.inject({ method: 'GET', url: '/api/flights/fl_nope/remedy' })
+    expect(remedy.statusCode).toBe(404)
+    const applied = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/remedy', body: { action: 'stash' } })
+    expect(applied.statusCode).toBe(404)
+  })
+
+  it('remedy: lists live-dirty repos on a matching failed stage, stashes them, and resumes', async () => {
+    const { execFileSync } = await import('child_process')
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: repoDir, stdio: 'ignore' })
+    fs.writeFileSync(path.join(repoDir, 'f.txt'), 'a')
+    git('init')
+    git('config', 'user.email', 't@t')
+    git('config', 'user.name', 't')
+    git('add', '-A')
+    git('commit', '-m', 'init')
+    fs.writeFileSync(path.join(repoDir, 'f.txt'), 'changed') // now dirty
+
+    let fail = true
+    const adapters = allDone()
+    adapters.portify = {
+      run: async () =>
+        fail
+          ? { kind: 'failed', error: 'portify start rejected (409): repo "r" has uncommitted changes — commit or stash them first' }
+          : { kind: 'done' },
+    }
+    app = await buildApp(adapters)
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['paused'])
+
+    const listed = await app.inject({ method: 'GET', url: `/api/flights/${flightId}/remedy` })
+    expect(listed.statusCode).toBe(200)
+    const remedy = (listed.json() as { remedy: { kind: string; stage: string; repos: Array<{ path: string; modified: number }> } }).remedy
+    expect(remedy).toMatchObject({ kind: 'dirty-repos', stage: 'portify' })
+    expect(remedy.repos).toEqual([{ name: 'product-repo', path: repoDir, modified: 1 }])
+
+    const bad = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/remedy`, body: { action: 'shred' } })
+    expect(bad.statusCode).toBe(400)
+
+    fail = false
+    const applied = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/remedy`, body: { action: 'stash' } })
+    expect(applied.statusCode).toBe(200)
+    await waitForStatus(flightId, ['done'])
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: repoDir }).toString().trim()).toBe('')
+    expect(execFileSync('git', ['stash', 'list'], { cwd: repoDir }).toString()).toContain('canary-lab: pre-flight stash')
+
+    // Settled flight has no matching failed stage — remedy self-clears.
+    const after = await app.inject({ method: 'GET', url: `/api/flights/${flightId}/remedy` })
+    expect((after.json() as { remedy: unknown }).remedy).toBeNull()
+  })
+
+  it('remedy: null for a non-matching failure and 409 on apply', async () => {
+    const adapters = allDone()
+    adapters.docs = { run: async () => ({ kind: 'failed', error: 'no docs' }) }
+    app = await buildApp(adapters)
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['paused'])
+
+    const listed = await app.inject({ method: 'GET', url: `/api/flights/${flightId}/remedy` })
+    expect((listed.json() as { remedy: unknown }).remedy).toBeNull()
+    const applied = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/remedy`, body: { action: 'stash' } })
+    expect(applied.statusCode).toBe(409)
   })
 
   it('404s respond and abort for an unknown flight (real "not found" Error)', async () => {

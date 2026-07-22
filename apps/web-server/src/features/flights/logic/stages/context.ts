@@ -5,6 +5,7 @@ import {
   buildClaudeAgenticArgs,
 } from '../../../agent-sessions/logic/agent-process'
 import { recoverClaudeAssistantText } from '../../../agent-sessions/logic/agent-stream'
+import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import {
   claudeSessionLogPath,
   writeWorkflowAgentRef,
@@ -140,29 +141,14 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
 }
 
 /** Pull the first JSON object out of an agent's final answer — fenced
- *  (```json … ```) or bare. Throws with a short excerpt when unparseable. */
+ *  (```json … ```) or bare (see agent-json.ts for the candidate order).
+ *  Throws with a short excerpt when unparseable. */
 export function extractJson<T>(text: string): T {
-  const candidates: string[] = []
-  // Every ```json … ``` (or bare ```) fence, LAST first — when a transcript
-  // carries several, the agent's real answer is the final fence; earlier ones
-  // are usually reasoning/examples. A trailing prose turn adds no fence, so the
-  // config fence from an earlier turn still wins.
-  const fenceRe = /```(?:json)?\s*([\s\S]*?)```/g
-  for (let m = fenceRe.exec(text); m !== null; m = fenceRe.exec(text)) {
-    if (m[1]?.trim()) candidates.unshift(m[1])
+  const candidates = extractJsonCandidates(text)
+  if (!candidates.length) {
+    throw new Error(`agent did not return parseable JSON (got: ${text.slice(0, 200)}…)`)
   }
-  // Bare object slice as a last resort.
-  const first = text.indexOf('{')
-  const last = text.lastIndexOf('}')
-  if (first !== -1 && last > first) candidates.push(text.slice(first, last + 1))
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(candidate.trim()) as T
-    } catch {
-      /* try the next candidate */
-    }
-  }
-  throw new Error(`agent did not return parseable JSON (got: ${text.slice(0, 200)}…)`)
+  return candidates[0] as T
 }
 
 export class PollTimeoutError extends Error {

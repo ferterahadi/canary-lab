@@ -3,7 +3,7 @@
   "additionalProperties": false,
   "properties": {
     "variantDimension": {
-      "type": "object",
+      "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
         "name": { "type": "string" },
@@ -21,14 +21,14 @@
         "additionalProperties": false,
         "properties": {
           "id": { "type": "string" },
-          "kind": { "enum": ["functional", "non-functional"] },
+          "kind": { "type": "string", "enum": ["functional", "non-functional"] },
           "title": { "type": "string" },
           "text": { "type": "string" },
           "happyPath": { "type": "string" },
           "unhappyPath": { "type": "string" },
           "pathTypes": {
             "type": "array",
-            "items": { "enum": ["happy", "sad", "edge"] }
+            "items": { "type": "string", "enum": ["happy", "sad", "edge"] }
           },
           "variants": {
             "type": "array",
@@ -59,9 +59,9 @@
             }
           }
         },
-        "required": ["title", "text", "pathTypes"]
+        "required": ["id", "kind", "title", "text", "happyPath", "unhappyPath", "pathTypes", "variants", "variantsNA", "strictnessLadder"]
       }
     }
   },
-  "required": ["requirements"]
+  "required": ["variantDimension", "requirements"]
 }

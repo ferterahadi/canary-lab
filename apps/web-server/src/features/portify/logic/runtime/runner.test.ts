@@ -422,6 +422,19 @@ describe('createPortifyRunner (integration)', () => {
       const runner = await runnerWith([feat({ repos: [{ name: 'r', localPath: dir }] })])
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })
     })
+    it('names ALL dirty repos in one error, not just the first', async () => {
+      const a = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-dirty-a-'))
+      const b = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-dirty-b-'))
+      roots.push(a, b)
+      for (const dir of [a, b]) {
+        fs.writeFileSync(path.join(dir, 'f.txt'), 'a')
+        await gitInit(dir)
+        fs.writeFileSync(path.join(dir, 'f.txt'), 'changed') // now dirty
+      }
+      const runner = await runnerWith([feat({ repos: [{ name: 'ra', localPath: a }, { name: 'rb', localPath: b }] })])
+      await expect(runner.startPortify({ feature: 'myfeat' }))
+        .rejects.toThrow(/repos "ra", "rb" have uncommitted changes/)
+    })
     it('409 when repos is undefined (no bootable repos)', async () => {
       const runner = await runnerWith([feat({ repos: undefined })])
       await expect(runner.startPortify({ feature: 'myfeat' })).rejects.toMatchObject({ statusCode: 409 })

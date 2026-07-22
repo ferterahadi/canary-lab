@@ -8,6 +8,7 @@ import type { RunDetail, PlaywrightPlaybackEvent } from '../../runs/logic/run-st
 import { pickAvailableHealAgent, type HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { EVALUATION_REWRITE_MODELS, modelArgs, modelFor } from '../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../agent-sessions/logic/agent-producer'
+import { extractJsonCandidates } from '../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../agent-sessions/logic/agent-process'
 import { formatCodeForDisplay } from '../../../../../../shared/code-display-format'
 import type { CoverageLedger, TestCoverage, TestStrength } from '../../../../../../shared/coverage/types'
@@ -396,27 +397,21 @@ function previewAgentOutput(output: string): string {
 }
 
 function parseEvaluationRewrite(output: string): EvaluationRewrite | undefined {
-  const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
-  const text = (fenced ?? output).trim()
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) return undefined
-  try {
-    return JSON.parse(text.slice(start, end + 1)) as EvaluationRewrite
-  } catch {
-    return undefined
+  // First candidate carrying a `cases` array — the rewrite envelope's anchor —
+  // so brace-bearing prose around the answer can't shadow it.
+  for (const c of extractJsonCandidates(output)) {
+    if (c && typeof c === 'object' && Array.isArray((c as { cases?: unknown }).cases)) {
+      return c as EvaluationRewrite
+    }
   }
+  return undefined
 }
 
 function parseEvaluationTextSlotRewrite(output: string): EvaluationTextSlot[] | undefined {
-  const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
-  const text = (fenced ?? output).trim()
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) return undefined
-  try {
-    const parsed = JSON.parse(text.slice(start, end + 1)) as { slots?: unknown }
-    if (!Array.isArray(parsed.slots)) return undefined
+  for (const c of extractJsonCandidates(output)) {
+    if (!c || typeof c !== 'object') continue
+    const parsed = c as { slots?: unknown }
+    if (!Array.isArray(parsed.slots)) continue
     const slots = parsed.slots.flatMap((slot): EvaluationTextSlot[] => {
       if (!slot || typeof slot !== 'object') return []
       const item = slot as Partial<EvaluationTextSlot>
@@ -424,9 +419,8 @@ function parseEvaluationTextSlotRewrite(output: string): EvaluationTextSlot[] | 
       return [{ id: item.id, text: item.text }]
     })
     return slots.length ? slots : undefined
-  } catch {
-    return undefined
   }
+  return undefined
 }
 
 export function evaluationTextSlots(rewrite: EvaluationRewrite): EvaluationTextSlot[] {

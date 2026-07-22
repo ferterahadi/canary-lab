@@ -117,7 +117,7 @@ describe('defaultRunAgent — claude non-zero exit', () => {
         tests: [{ name: 'delete removes the todo item' }],
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -131,7 +131,7 @@ describe('defaultRunAgent — spawn error event', () => {
         tests: [{ name: 'create makes a new todo' }],
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -150,7 +150,7 @@ describe('defaultRunAgent — pre-aborted signal', () => {
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -171,7 +171,7 @@ describe('defaultRunAgent — abort signal during run', () => {
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -395,7 +395,7 @@ describe('defaultRunAgent — settled guard: finish called twice (line 278 true 
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -423,7 +423,7 @@ describe('defaultRunAgent — close with non-null signal (line 323 ?? branch)', 
         tests: [{ name: 'delete removes the todo item' }],
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -443,7 +443,7 @@ describe('defaultRunAgent — Error thrown in catch (line 377 err.message branch
         resolveAgents: () => ['claude'],
         runAgent: async () => { throw new Error('agent exploded') },
       },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
 
     // onOutput received the err.message before the throw
     expect(outputChunks.some((c) => c.includes('agent exploded'))).toBe(true)
@@ -466,7 +466,7 @@ describe('defaultRunAgent — non-Error thrown in catch (line 377 String(err) br
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         runAgent: async () => { throw 'non-error string' },
       },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
 
     // onOutput received the String(err) message before the throw
     expect(outputChunks.some((c) => c.includes('non-error string'))).toBe(true)
@@ -507,7 +507,7 @@ describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 297-298
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
   })
 })

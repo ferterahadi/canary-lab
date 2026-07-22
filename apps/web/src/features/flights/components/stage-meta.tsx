@@ -181,6 +181,42 @@ export function specsCoverageProgress(
   return p && typeof p.pass === 'number' && typeof p.phase === 'string' && Array.isArray(p.passes) ? p : null
 }
 
+/** The portify workflow id, live or settled: evidence carries it once the
+ *  stage settles; progress pins it the moment the workflow starts. The agent
+ *  editing phase is the stage's longest — the embedded agent timeline needs
+ *  the id DURING it; the drill-through uses the same pin once the stage
+ *  settles or parks (drills are hidden while a stage runs). */
+export function portifyWorkflowId(stage: { key: string; evidence?: unknown; progress?: unknown } | null | undefined): string | null {
+  if (!stage || stage.key !== 'portify') return null
+  const ev = evidenceOf(stage)
+  if (typeof ev.workflowId === 'string') return ev.workflowId
+  const prog = (stage.progress ?? {}) as Record<string, unknown>
+  return typeof prog.workflowId === 'string' ? prog.workflowId : null
+}
+
+/** The live phase mirror the portify adapter republishes on change (see
+ *  PortifyStageProgress). Empty object for settled/older flights. */
+function portifyProgress(stage: { progress?: unknown }): Record<string, unknown> {
+  return (stage.progress ?? {}) as Record<string, unknown>
+}
+
+/** Fact-tile label per live portify phase (PortifyStatus, matched by string —
+ *  an unknown/new phase renders as itself rather than hiding). */
+const PORTIFY_PHASE_LABEL: Record<string, string> = {
+  'planning': 'Planning the edits',
+  'editing': 'Agent editing services',
+  'verifying': 'Double-boot verifying',
+  'ready-to-save': 'Verified — review pending',
+}
+
+/** State-line sentence per live portify phase — same keys as the labels. */
+const PORTIFY_PHASE_LINE: Record<string, string> = {
+  'planning': 'Planning which services need port-injection edits…',
+  'editing': 'Agent is editing the services to read injected ports…',
+  'verifying': 'Double-boot verifying the edits (two instances side by side)…',
+  'ready-to-save': 'Edits double-boot verified — preparing the review…',
+}
+
 // ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────
 // The rail is a lens for the USER, not a dump of the conductor's internals:
 // - similarity is plumbing — visible ONLY when it needs a human (parked on the
@@ -427,7 +463,7 @@ export function stageFacts(
         // go" reads at a glance instead of being inferred from "2 of 5".
         ...(stage.status === 'running' && p
           ? [{
-              label: 'Pass',
+              label: 'Authoring pass',
               value: String(p.pass),
               big: true as const,
               ...(Number.isFinite(p.maxPasses) ? { stepper: [p.pass, p.maxPasses] as [number, number] } : {}),
@@ -435,7 +471,7 @@ export function stageFacts(
           : []),
         ...(pct != null
           ? [{
-              label: 'Coverage',
+              label: 'Requirements covered',
               value: `${pct}%`,
               big: true as const,
               bar: target > 0 ? pct / target : pct >= 100 ? 1 : 0,
@@ -444,25 +480,40 @@ export function stageFacts(
           : []),
         ...(gaps != null
           ? [{
-              label: 'Open gaps',
+              label: 'Coverage gaps',
               value: gaps === 0 ? '0' : String(gaps),
               big: true as const,
               ...(breakdown && gaps > 0 ? { sub: breakdown } : {}),
               tone: gaps === 0 ? 'good' as const : 'warn' as const,
             }]
           : []),
-        ...(stage.status !== 'running' && p && p.passes.length > 0 ? [{ label: 'Passes', value: String(p.passes.length) }] : []),
+        ...(stage.status !== 'running' && p && p.passes.length > 0 ? [{ label: 'Authoring passes', value: String(p.passes.length), big: true as const }] : []),
       ]
     }
-    case 'portify':
+    case 'portify': {
       // R35: verdict → proof → what changed, in that order.
       if (stage.status === 'skipped') return [{ label: 'Parallel', value: 'Already verified — safe for parallel runs', tone: 'good' }]
+      if (stage.status === 'running') {
+        // Live phase mirror from the workflow (attempt stepper + phase verb) —
+        // the embedded agent timeline below carries the detail.
+        const prog = portifyProgress(stage)
+        const attempt = num(prog, 'attempt')
+        const maxAttempts = num(prog, 'maxAttempts')
+        const phase = str(prog, 'status')
+        return [
+          ...(attempt != null && maxAttempts != null
+            ? [{ label: 'Attempt', value: String(attempt), big: true as const, stepper: [attempt, maxAttempts] as [number, number] }]
+            : []),
+          ...(phase ? [{ label: 'Phase', value: PORTIFY_PHASE_LABEL[phase] ?? phase }] : []),
+        ]
+      }
       if (typeof ev.workflowId !== 'string') return []
       return [
         { label: 'Parallel', value: 'Safe — services boot side by side', tone: 'good' },
         { label: 'Proof', value: 'Concurrent double boot, both green' },
         { label: 'Edits', value: ev.edits ? 'Applied (overlay)' : 'None needed' },
       ]
+    }
     case 'run': {
       const runStatus = str(ev, 'status') ?? flight.runVerdict
       const cycles = num(ev, 'healCycles') ?? num(cev, 'healCycles')
@@ -732,11 +783,19 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       if (ev.acceptedPartial) return `Coverage accepted at ${pct ?? '?'}% (partial, per your call).`
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
     }
-    case 'portify':
-      if (running) return 'Verifying the services boot concurrently (port injection)…'
+    case 'portify': {
+      if (running) {
+        // The workflow's live phase (see PortifyStageProgress) — older flights
+        // have no mirror and fall back to the generic line.
+        const phase = str(portifyProgress(stage), 'status')
+        return phase && PORTIFY_PHASE_LINE[phase]
+          ? PORTIFY_PHASE_LINE[phase]
+          : 'Verifying the services boot concurrently (port injection)…'
+      }
       return ev.edits
         ? 'Services are port-injectable — edits applied and double-boot verified.'
         : 'Services are port-injectable — no edits needed, double-boot verified.'
+    }
     case 'run': {
       if (running) return 'Tests are running…'
       const runId = str(ev, 'runId') ?? flight.links?.runId

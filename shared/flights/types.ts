@@ -105,6 +105,25 @@ export interface FlightStageErrorDetail {
   logTail: string
 }
 
+/** A machine-actionable fix for a failed stage, derived at READ time from the
+ *  stage's error signature plus a live `git status` re-check of the flight's
+ *  repos — never persisted, so repos the user cleans by hand drop off on the
+ *  next read and an empty list means "just Continue". Served by
+ *  GET /api/flights/:id/remedy and attached to failed stage rows in the MCP
+ *  get_flight view; POST /api/flights/:id/remedy executes it. */
+export interface FlightStageRemedy {
+  kind: 'dirty-repos'
+  /** The failed stage this remedy unblocks. */
+  stage: FlightStageKey
+  /** Repos still dirty right now (path is the resolved realpath; modified is
+   *  the `git status --porcelain` line count). */
+  repos: Array<{ name: string; path: string; modified: number }>
+  /** Server-executable fixes: `stash` = `git stash push -u` per dirty repo
+   *  (undoable via `git stash pop`); `commit` = `git add -A` + commit
+   *  "canary-lab: wip". Both then resume the flight. */
+  actions: Array<'stash' | 'commit'>
+}
+
 export interface FlightStage {
   key: FlightStageKey
   status: FlightStageStatus
@@ -273,6 +292,24 @@ export interface SpecsCoverageProgress {
   gapsOpen: number
   /** Settled passes, oldest first. */
   passes: SpecsCoveragePass[]
+}
+
+/** Live shape of the portify stage — published via `FlightStage.progress` the
+ *  moment the background workflow exists, so the flight view can tail the
+ *  workflow's agent session while the agent is still editing (the longest
+ *  phase), and a stage parked mid-step can still drill through to it.
+ *  `evidence` carries the same id only once the stage settles. The phase mirror fields
+ *  are republished only when they change (the stage polls every 3s — a
+ *  manifest write per poll would be churn): the flight view derives its
+ *  attempt stepper + phase verb from them, and its embedded portify timeline
+ *  from the workflowId. */
+export interface PortifyStageProgress {
+  workflowId: string
+  /** The workflow's live phase (planning / editing / verifying / ready-to-save). */
+  status?: string
+  /** Agent attempt counter from the workflow manifest (1-based). */
+  attempt?: number
+  maxAttempts?: number
 }
 
 /** One row of the stage-entry menu: can a flight start AT this stage right

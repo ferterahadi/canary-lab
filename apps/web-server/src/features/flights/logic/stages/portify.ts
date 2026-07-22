@@ -2,6 +2,7 @@ import fs from 'fs'
 import { overlayExists } from '../../../portify/logic/runtime/overlay'
 import { revertPortification } from '../../../portify/logic/runtime/unportify'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
+import type { PortifyStageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 
@@ -17,6 +18,8 @@ const PORTIFY_TIMEOUT_MS = 30 * 60 * 1000
 
 interface PortifyView {
   status?: string
+  attempt?: number
+  maxAttempts?: number
   diff?: string
   error?: string
 }
@@ -58,9 +61,33 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
       }
       const workflowId = body.workflowId
       ctx.appendLog(`[portify] workflow ${workflowId} started\n`)
+      // Pin the workflow id as live progress the moment it exists — the agent
+      // editing phase runs for many minutes, and the flight view tails the
+      // workflow's agent session (the embedded timeline) DURING it, not only
+      // after saveAndVerify settles it into evidence. The same pin lets a
+      // stage parked mid-step (pause / checkpoint) still open its workflow
+      // via the drill-through (see PortifyStageProgress).
+      ctx.setProgress({ workflowId } satisfies PortifyStageProgress)
 
+      // Mirror the workflow's live phase into the same progress shape, but only
+      // when it changes — a manifest write per 3s poll would be churn. Feeds
+      // the flight view's attempt stepper + phase verb.
+      let publishedPhase = ''
       const view = await pollUntil(
-        () => read(workflowId),
+        async () => {
+          const v = await read(workflowId)
+          const phase = `${v.status ?? ''}#${v.attempt ?? ''}`
+          if (phase !== publishedPhase) {
+            publishedPhase = phase
+            ctx.setProgress({
+              workflowId,
+              ...(v.status ? { status: v.status } : {}),
+              ...(v.attempt != null ? { attempt: v.attempt } : {}),
+              ...(v.maxAttempts != null ? { maxAttempts: v.maxAttempts } : {}),
+            } satisfies PortifyStageProgress)
+          }
+          return v
+        },
         (v) => v.status === 'ready-to-save' || v.status === 'saved' || v.status === 'failed' || v.status === 'aborted',
         { what: `portify ${workflowId}`, intervalMs: 3000, timeoutMs: PORTIFY_TIMEOUT_MS, signal: ctx.signal },
       )

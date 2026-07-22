@@ -1859,6 +1859,7 @@ export type {
   PlanFeaturesTaskStatus,
   PrdSourceAttempt,
   PrdSourceCheckpointData,
+  FlightStageRemedy,
 } from '../../../../../shared/flights/types'
 export { deriveFeatureSlug } from '../../../../../shared/flights/types'
 
@@ -1934,6 +1935,35 @@ export function respondFlightCheckpoint(
   return request<FlightManifestT>(
     `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/respond`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response }) },
+    fetchImpl,
+  )
+}
+
+/** Read-time remedy for a failed stage: null = nothing actionable; repos [] =
+ *  the error is stale and every repo is clean again (just Continue). */
+export function getFlightRemedy(
+  flightId: string,
+  opts?: ClientOptions,
+): Promise<{ remedy: import('../../../../../shared/flights/types').FlightStageRemedy | null }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/remedy`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+/** Execute the remedy (stash or commit every dirty repo), then resume the
+ *  flight — server-side twin of fixing the repos by hand + header Continue. */
+export function applyFlightRemedy(
+  flightId: string,
+  action: 'stash' | 'commit',
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/remedy`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action }) },
     fetchImpl,
   )
 }

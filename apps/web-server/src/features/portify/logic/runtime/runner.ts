@@ -223,7 +223,11 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     // Validate each repo is a clean git working tree and resolve its git root.
     // Worktrees only see committed files, so a dirty tree would benchmark a
     // stale snapshot — refuse with a clear error (mirrors the benchmark guard).
+    // Dirty repos are COLLECTED across the whole set before throwing: naming
+    // only the first would send the user through a fix→retry→fail-on-the-next
+    // loop when several repos are dirty at once.
     const byRoot = new Map<string, GroupMember[]>()
+    const dirty: string[] = []
     for (const repo of repos) {
       const repoPath = resolveRepoPath(repo.localPath)
       const status = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
@@ -231,10 +235,8 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
         throw Object.assign(new Error(`repo "${repo.name}" at ${repo.localPath} is not a git repository`), { statusCode: 409 })
       }
       if (status.stdout.trim()) {
-        throw Object.assign(
-          new Error(`repo "${repo.name}" has uncommitted changes — commit or stash them first (worktrees only see committed files)`),
-          { statusCode: 409 },
-        )
+        dirty.push(repo.name)
+        continue
       }
       // `git status` above returned 0, so this path IS inside a work tree —
       // rev-parse --show-toplevel resolves the root.
@@ -242,6 +244,13 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       const members = byRoot.get(sourceRoot) ?? []
       members.push({ name: repo.name, path: repo.localPath })
       byRoot.set(sourceRoot, members)
+    }
+    if (dirty.length > 0) {
+      const label = dirty.length === 1 ? 'repo' : 'repos'
+      throw Object.assign(
+        new Error(`${label} ${dirty.map((n) => `"${n}"`).join(', ')} ${dirty.length === 1 ? 'has' : 'have'} uncommitted changes — commit or stash them first (worktrees only see committed files)`),
+        { statusCode: 409 },
+      )
     }
     // Group repos that share a git root into ONE worktree (git can't check out
     // the same branch in two worktrees of one repo).

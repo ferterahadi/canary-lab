@@ -6,6 +6,7 @@ import type {
   FlightStage,
   FlightStageErrorDetail,
   FlightStageKey,
+  FlightStageRemedy,
   FlightStageStatus,
   SpecsCoverageProgress as SpecsCoverageProgressT,
 } from '../../../shared/api/client'
@@ -33,6 +34,7 @@ import {
   checkpointOptionLabel,
   checkpointTitle,
   formatDuration,
+  portifyWorkflowId,
   specsCoverageProgress,
   stageFacts,
   stageLabel,
@@ -62,7 +64,10 @@ import {
 // gentle poll while the flight is active.
 
 /** Stage key → the sidecar dir its adapter pins an agent-session ref into.
- *  Stages without an agent (similarity, scaffold, run…) have no entry. */
+ *  Stages without an agent (similarity, scaffold, run…) have no entry.
+ *  Portify HAS an agent but no entry either: its session ref lives under the
+ *  workflow's own dir, so its stage tails a `{kind:'portify'}` source keyed by
+ *  the pinned workflowId instead (see `activitySource` in FlightStageView). */
 const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
   'scout': 'scout',
   'prd-summary': 'prd-summary',
@@ -515,12 +520,16 @@ function FlightDetail({
   )
 }
 
-/** The stage's drill-through: a lens button into the real underlying surface. */
+/** The stage's drill-through: a lens button into the real underlying surface.
+ *  Unlocks only once the stage settles (done / failed) or parks (checkpoint /
+ *  paused mid-step) — while it RUNS, the embedded activity rail IS the live
+ *  view, and a drill would just split attention across two copies of it. */
 function stageDrillThrough(
   stage: FlightStage,
   flight: FlightManifest,
   drill: FlightDrillThroughs,
 ): { label: string; onClick: () => void } | null {
+  if (stage.status === 'running') return null
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
   if (stage.key === 'run' || stage.key === 'heal') {
     const runId = typeof ev.runId === 'string' ? ev.runId : flight.links?.runId
@@ -533,10 +542,15 @@ function stageDrillThrough(
     const open = drill.onOpenCoverage
     return { label: 'Open coverage ledger →', onClick: () => open(flight.feature) }
   }
-  if (stage.key === 'portify' && drill.onOpenPortify && typeof ev.workflowId === 'string') {
-    const open = drill.onOpenPortify
-    const workflowId = ev.workflowId
-    return { label: 'Open portify workflow →', onClick: () => open(workflowId) }
+  if (stage.key === 'portify' && drill.onOpenPortify) {
+    // Evidence carries the id once the stage settles; progress pins it the
+    // moment the workflow starts, so a stage parked mid-step (paused, or the
+    // portify-apply checkpoint) can still open the workflow it was driving.
+    const workflowId = portifyWorkflowId(stage)
+    if (workflowId) {
+      const open = drill.onOpenPortify
+      return { label: 'Open portify workflow →', onClick: () => open(workflowId) }
+    }
   }
   return null
 }
@@ -549,7 +563,8 @@ function stageDrillThrough(
  *  — one Continue, no confusion. Width is capped to line up with the repo-scan
  *  cards above (both ~76ch) so the stage reads as one column, not a full-bleed
  *  banner under narrow cards. */
-function StageErrorPanel({ stageLabel, detail, errorDetail }: {
+function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
+  flightId: string
   stageLabel: string
   detail: string
   /** Boot-failure evidence (service log tail + path) — rendered under the
@@ -557,6 +572,31 @@ function StageErrorPanel({ stageLabel, detail, errorDetail }: {
   errorDetail?: FlightStageErrorDetail
 }) {
   const logName = errorDetail?.logPath ? errorDetail.logPath.split('/').pop() : null
+  // Machine-actionable fix, derived server-side at read time (live git
+  // status) — null when this error has no known remedy. Executing it cleans
+  // the repos and resumes the flight; the WS flights-changed refresh then
+  // replaces this panel with the retried stage.
+  const [remedy, setRemedy] = useState<FlightStageRemedy | null>(null)
+  const [remedyBusy, setRemedyBusy] = useState<'stash' | 'commit' | null>(null)
+  const [remedyError, setRemedyError] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api.getFlightRemedy(flightId)
+      .then((r) => { if (!cancelled) setRemedy(r.remedy) })
+      .catch(() => {}) // no remedy is the quiet default — the raw error stands
+    return () => { cancelled = true }
+  }, [flightId, detail])
+  const runRemedy = (action: 'stash' | 'commit') => {
+    setRemedyBusy(action)
+    setRemedyError(null)
+    api.applyFlightRemedy(flightId, action)
+      .catch((err) => {
+        setRemedyError(err instanceof Error ? err.message : String(err))
+        // Partial failures leave some repos cleaned — re-read so the rows match.
+        api.getFlightRemedy(flightId).then((r) => setRemedy(r.remedy)).catch(() => {})
+      })
+      .finally(() => setRemedyBusy(null))
+  }
   return (
     <section
       data-testid="stage-error"
@@ -610,6 +650,68 @@ function StageErrorPanel({ stageLabel, detail, errorDetail }: {
           <span className="min-w-0 truncate text-[10px]" title={errorDetail.logPath} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             {errorDetail.logPath}
           </span>
+        </div>
+      )}
+      {remedy && (
+        <div data-testid="stage-remedy" className="flex flex-col gap-2 border-t pt-2.5" style={{ borderColor: 'var(--border-default)' }}>
+          <div className="text-[9.5px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+            Recommended fix
+          </div>
+          {remedy.repos.length === 0 ? (
+            // The error is stale: every repo is clean again (fixed by hand).
+            <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+              The repos are clean again — Continue from the header retries this step.
+            </p>
+          ) : (
+            <>
+              <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+                Clean the working trees, then the flight retries this step.
+              </p>
+              <div className="rounded border" style={{ borderColor: 'var(--border-default)' }}>
+                {remedy.repos.map((repo, i) => (
+                  <div
+                    key={repo.path}
+                    className={`flex items-center gap-2 px-2.5 py-1.5${i > 0 ? ' border-t' : ''}`}
+                    style={i > 0 ? { borderColor: 'var(--border-default)' } : undefined}
+                    title={repo.path}
+                  >
+                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'rgb(251, 191, 36)' }} />
+                    <span className="text-[11.5px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{repo.name}</span>
+                    <span className="ml-auto text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      {repo.modified} modified
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="stage-remedy-stash"
+                  disabled={remedyBusy !== null}
+                  onClick={() => runRemedy('stash')}
+                  className="cl-button-primary px-2.5 py-1 text-xs"
+                >
+                  {remedyBusy === 'stash' ? 'Stashing…' : 'Stash and continue'}
+                </button>
+                <button
+                  type="button"
+                  data-testid="stage-remedy-commit"
+                  disabled={remedyBusy !== null}
+                  onClick={() => runRemedy('commit')}
+                  className="cl-button px-2.5 py-1 text-xs"
+                  style={{ color: 'rgb(56, 189, 248)' }}
+                >
+                  {remedyBusy === 'commit' ? 'Committing…' : 'Commit and continue'}
+                </button>
+              </div>
+              <p className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+                Stash is undoable — <span style={{ fontFamily: 'var(--font-mono)' }}>git stash pop</span>. Commit uses <span style={{ fontFamily: 'var(--font-mono)' }}>"canary-lab: wip"</span>.
+              </p>
+            </>
+          )}
+          {remedyError && (
+            <p data-testid="stage-remedy-error" className="text-[11px]" style={{ color: 'var(--danger)' }}>{remedyError}</p>
+          )}
         </div>
       )}
     </section>
@@ -773,11 +875,17 @@ function StageDetail({
   const evalTaskId = stage.key === 'evaluation-export'
     ? (((stage.evidence as Record<string, unknown> | undefined)?.taskId as string | undefined) ?? flight.links?.evaluationTaskId)
     : undefined
+  // Portify's agent lives under the WORKFLOW dir (logs/portify/<wf>), not a
+  // flight sidecar — tail it through the portify source the wizard already
+  // uses, keyed by the id the adapter pins as live progress. Without this the
+  // stage's longest phase (the agent editing) shows an empty rail.
+  const portifyId = portifyWorkflowId(stage)
   const activitySource: AgentSessionSource | undefined =
     evalTaskId ? { kind: 'evaluation', taskId: evalTaskId, live }
+    : portifyId ? { kind: 'portify', workflowId: portifyId, live }
     : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
     : undefined
-  const activityKey = evalTaskId ? `evaluation:${evalTaskId}` : (agentDir ?? 'system-only')
+  const activityKey = evalTaskId ? `evaluation:${evalTaskId}` : portifyId ? `portify:${portifyId}` : (agentDir ?? 'system-only')
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -924,7 +1032,7 @@ function StageDetail({
       {loopProgress && <SpecsPassTimeline progress={loopProgress} live={live} />}
 
       {(row.status === 'failed' && error) && (
-        <StageErrorPanel stageLabel={row.label} detail={error} errorDetail={errorDetail} />
+        <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} />
       )}
 
       {/* prd-source renders as the RequirementsFork above — every other

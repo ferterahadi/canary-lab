@@ -2241,6 +2241,33 @@ describe('portify stage', () => {
     expect(outcome).toMatchObject({ kind: 'done', evidence: { edits: true } })
   })
 
+  it('pins the workflowId as live progress at start — the drill-through works before the stage settles', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/server.js' } }
+      return undefined
+    })
+    const { ctx, progressLog } = ctxFor(manifest())
+    const parked = await portifyStage(deps({ inject })).run(ctx)
+    // Parked un-settled (no evidence yet) — progress already carries the id.
+    expect(parked).toMatchObject({ kind: 'checkpoint' })
+    expect(progressLog).toContainEqual({ workflowId: 'wf1' })
+  })
+
+  it('mirrors the workflow phase (status/attempt) into progress as it polls', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', attempt: 1, maxAttempts: 3, diff: '--- a/server.js' } }
+      return undefined
+    })
+    const { ctx, progressLog } = ctxFor(manifest())
+    await portifyStage(deps({ inject })).run(ctx)
+    // The flight view's attempt stepper + phase verb read this mirror; it is
+    // republished only when the phase changes (one poll here → one publish).
+    expect(progressLog).toContainEqual({ workflowId: 'wf1', status: 'ready-to-save', attempt: 1, maxAttempts: 3 })
+    expect(progressLog.filter((p) => (p as { status?: string }).status === 'ready-to-save')).toHaveLength(1)
+  })
+
   it('fails when the portify start request is rejected', async () => {
     const inject = makeInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 400, body: { error: 'no repos' } }
