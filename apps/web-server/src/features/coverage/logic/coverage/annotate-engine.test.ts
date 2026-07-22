@@ -172,6 +172,20 @@ describe('proposeCoverageMappings', () => {
     ).rejects.toThrow(/requires the claude or codex agent/)
   })
 
+  it('surfaces the underlying agent error instead of the generic PATH message', async () => {
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: [{ name: 'creates a todo' }] },
+        {
+          resolveAgents: () => ['claude'],
+          runAgent: async () => {
+            throw new Error('Failed to authenticate: OAuth session expired and could not be refreshed')
+          },
+        },
+      ),
+    ).rejects.toThrow(/OAuth session expired and could not be refreshed/)
+  })
+
   it('returns [] when there are no tests or no active requirements', async () => {
     expect(await proposeCoverageMappings({ requirements: REQS, tests: [] })).toEqual([])
     expect(await proposeCoverageMappings({ requirements: [], tests: [{ name: 'x' }] })).toEqual([])

@@ -521,6 +521,7 @@ export async function summarizePrd(
 
   let parsedReqs: ParsedRequirement[] | null = null
   let parsedDimension: VariantDimension | undefined
+  let lastFailure: string | undefined
   if (agents.length) {
     const prompt = buildPrdSummaryPrompt(args.collection, previous, args.previous?.variantDimension)
     for (const agent of agents) {
@@ -541,7 +542,8 @@ export async function summarizePrd(
         }
         args.onOutput?.(`[agent:${agent}] unparseable output; trying next\n`)
       } catch (err) {
-        args.onOutput?.(`[agent:${agent}] failed: ${err instanceof Error ? err.message : String(err)}\n`)
+        lastFailure = err instanceof Error ? err.message : String(err)
+        args.onOutput?.(`[agent:${agent}] failed: ${lastFailure}\n`)
       }
     }
   }
@@ -550,8 +552,12 @@ export async function summarizePrd(
     // LLM-only: no agent on PATH, or every agent failed / returned unparseable
     // output. We never fabricate requirements from headings — that produced
     // phantom requirements (goals/context/architecture) and tanked coverage.
+    // If an agent actually ran and threw, surface that real cause (e.g. an
+    // expired OAuth session) rather than the misleading "is on PATH" hint.
     throw new Error(
-      'PRD summary requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
+      lastFailure
+        ? `PRD summary failed: ${lastFailure}`
+        : 'PRD summary requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
     )
   }
 

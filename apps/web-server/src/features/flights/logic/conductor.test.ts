@@ -1668,6 +1668,32 @@ describe('restart wipe (R78)', () => {
     for (const dir of ['docs', 'prd-summary', 'specs-coverage', 'coverage-map']) {
       expect(fs.existsSync(path.join(flightDir, dir)), dir).toBe(false)
     }
+    // …and their MANIFEST records too: a jump on an existing flight must NOT
+    // demote the earlier steps to `stage-entry` skipped — they ran on THIS
+    // record, so their `done` status (and evidence/log the UI reads for their
+    // history) stays intact. Only a brand-new flight pre-skips them.
+    const jumpedFinal = store.get(jumped.manifest.flightId)!
+    for (const key of FLIGHT_STAGE_KEYS.slice(0, FLIGHT_STAGE_KEYS.indexOf('docs'))) {
+      const s = jumpedFinal.stages.find((x) => x.key === key)!
+      expect(s.status, key).toBe('done')
+      expect(s.skipReason, key).toBeUndefined()
+    }
+  })
+
+  it('a jump preserves the earlier stages\' evidence — not just their status', async () => {
+    const adapters = allDone()
+    adapters.similarity = { run: async () => ({ kind: 'done', evidence: { scanned: 2 } }) }
+    const d: FlightConductorDeps = { ...deps(adapters), validateStageEntry: () => null }
+    const first = startFlight(args(), d)
+    await first.completion
+    expect(store.get(first.manifest.flightId)!.stages.find((s) => s.key === 'similarity')!.evidence)
+      .toEqual({ scanned: 2 })
+
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'docs' as const }, d)
+    await jumped.completion
+    // The pre-jump Repo-scan evidence survives the restart untouched.
+    expect(store.get(jumped.manifest.flightId)!.stages.find((s) => s.key === 'similarity')!.evidence)
+      .toEqual({ scanned: 2 })
   })
 
   it('reset reads the PRIOR record — the old links survive into its ctx', async () => {

@@ -97,6 +97,22 @@ describe('SystemRow (flight conductor line on the agent rail)', () => {
     expect(texts()).toEqual(['collecting repo docs…'])
   })
 
+  it('dates a mixed run from its first stamped line when it opened undated', () => {
+    // A flight that spanned the stamping change: the specs run wrote undated
+    // lines first, then dated ones on resume. The group must still show a time.
+    render(
+      '[specs] iteration 1: 0% / 100% — 6 gap(s)',
+      '[specs] spec files rejected: no generated files',
+      '[specs@2026-07-22T04:00:55.373Z] iteration 2: 0% / 100% — 6 gap(s)',
+      '[specs@2026-07-22T06:03:01.906Z] validated 1 file(s)',
+    )
+    // One run, headed by the FIRST timestamp it found — not left undated because
+    // the opening line had none.
+    expect(container.querySelectorAll('.agentts-sysrow')).toHaveLength(1)
+    expect(container.querySelector('.agentts-rowhead span[title]')?.getAttribute('title'))
+      .toBe('2026-07-22T04:00:55.373Z')
+  })
+
   it('renders an untagged line verbatim with no tag label', () => {
     render('plain conductor note')
     expect(container.querySelector('.agentts-systag')).toBeNull()

@@ -309,6 +309,29 @@ function freshStages(fromStage: FlightStageKey | undefined, now: () => string): 
   )
 }
 
+/** Jump re-entry on an EXISTING record: stages before `fromStage` keep their
+ *  prior records verbatim, and only `fromStage` and every later stage reset to
+ *  pending. A jump rewinds the chosen step and its successors (resetStagesForRestart
+ *  wipes those on disk); the earlier steps already ran in THIS flight, so their
+ *  `done` status, evidence, log and agent-session refs stay true and the UI can
+ *  still show their history. Contrast `freshStages(fromStage)`, which pre-skips
+ *  earlier stages as `stage-entry` — correct only for a brand-new flight that
+ *  genuinely never ran them, NOT for a restart of a flight that did. */
+function stagesForJump(
+  existing: FlightManifest,
+  fromStage: FlightStageKey,
+  now: () => string,
+): FlightStage[] {
+  const startIdx = FLIGHT_STAGE_KEYS.indexOf(fromStage)
+  return FLIGHT_STAGE_KEYS.map((key, i) => {
+    if (i >= startIdx) return { key, status: 'pending' as const }
+    const prior = existing.stages.find((s) => s.key === key)
+    // A well-formed record carries every stage; fall back to the stage-entry
+    // skip only if a prior record somehow lacks this earlier stage.
+    return prior ?? { key, status: 'skipped' as const, skipReason: 'stage-entry', endedAt: now() }
+  })
+}
+
 function firstOpenStageIndex(m: FlightManifest): number {
   return m.stages.findIndex((s) => s.status !== 'done' && s.status !== 'skipped')
 }
@@ -402,7 +425,11 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       status: 'running',
       pauseReason: undefined,
       currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
-      stages: freshStages(mode === 'jump' ? args.fromStage : undefined, now),
+      // A jump preserves the earlier stages that already ran on this record (so
+      // their history survives); a full redo starts every stage fresh.
+      stages: mode === 'jump' && args.fromStage
+        ? stagesForJump(existing, args.fromStage, now)
+        : freshStages(undefined, now),
       feedback: args.feedback?.trim()
         ? { stage: args.fromStage ?? FLIGHT_STAGE_KEYS[0], note: args.feedback.trim() }
         : undefined,

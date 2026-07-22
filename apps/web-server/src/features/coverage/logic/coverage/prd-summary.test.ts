@@ -424,6 +424,21 @@ describe('summarizePrd orchestrator', () => {
     ).rejects.toThrow(/requires the claude or codex agent/)
   })
 
+  it('surfaces the underlying agent error instead of the generic PATH message', async () => {
+    const c = collection([{ relPath: 'spec.md', content: '# Login\nlog in' }])
+    await expect(
+      summarizePrd(
+        { collection: c, now: 'n' },
+        {
+          resolveAgents: () => ['claude'],
+          runAgent: async () => {
+            throw new Error('Failed to authenticate: OAuth session expired and could not be refreshed')
+          },
+        },
+      ),
+    ).rejects.toThrow(/OAuth session expired and could not be refreshed/)
+  })
+
   it('preserves ids across a real regenerate cycle (agent output, before/after docs pair)', async () => {
     const reqsJson = (titles: string[]) =>
       JSON.stringify({ requirements: titles.map((t) => ({ title: t, text: t.toLowerCase(), pathTypes: ['happy'] })) })

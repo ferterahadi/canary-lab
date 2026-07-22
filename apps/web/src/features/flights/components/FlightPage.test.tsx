@@ -460,6 +460,66 @@ describe('FlightPage', () => {
     expect(onStartFlight).toHaveBeenCalledWith('checkout', 'fresh')
   })
 
+  it('paused resume card: an interrupted step points up to the header Continue, no button of its own', async () => {
+    // The screenshot case — paused mid specs-coverage. The stage kept its
+    // startedAt, so the state line reads "Interrupted mid-step" and the card
+    // fills the void the sentence alone used to leave behind.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'user',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: ['similarity', 'scout', 'scaffold', 'env-capture', 'docs', 'prd-summary'].includes(key)
+          ? ('done' as const)
+          : ('pending' as const),
+        ...(key === 'specs-coverage' ? { startedAt: '2026-01-01T00:05:00Z' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    const card = container.querySelector('[data-testid="stage-paused"]')!
+    expect(card).toBeTruthy()
+    expect(card.textContent).toContain('Paused mid-step')
+    expect(card.textContent).toContain('↑ Continue')
+    // Recovery stays the header's one Continue — the card carries no button.
+    expect(card.querySelector('button')).toBeNull()
+    // The card agrees with the always-present state sentence, never contradicts it.
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
+      .toBe('Interrupted mid-step — Continue resumes it from here.')
+  })
+
+  it('paused resume card: the entry step of a paused flight reads "before this step"', async () => {
+    // Paused before specs-coverage ever started: earlier steps done, no
+    // startedAt on this one → the not-started branch.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'user',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: ['similarity', 'scout', 'scaffold', 'env-capture', 'docs', 'prd-summary'].includes(key)
+          ? ('done' as const)
+          : ('pending' as const),
+      })),
+    }))
+    await render('fl_1')
+    const card = container.querySelector('[data-testid="stage-paused"]')!
+    expect(card?.textContent).toContain('Paused before this step')
+  })
+
+  it('paused resume card: never on a running flight', async () => {
+    // A running flight has an obvious in-progress narrative — no resume card,
+    // even though the step carries a startedAt.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'specs-coverage' ? ('running' as const) : ('pending' as const),
+        ...(key === 'specs-coverage' ? { startedAt: '2026-01-01T00:05:00Z' } : {}),
+      })),
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="stage-paused"]')).toBeNull()
+  })
+
   it('mounts the agent timeline for agent-backed stages', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       stages: FLIGHT_STAGE_KEYS.map((key) => ({
@@ -725,8 +785,12 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.textContent).toContain('Test authoring & coverage')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 2 of 5 — agent is authoring specs to close 3 gaps…')
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('2 of 5')
-    expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('40% covered, 3 gaps open')
+    expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('40% covered · 3 gaps open')
     expect(container.querySelector('[data-testid="specs-pass-live"]')?.textContent).toContain('authoring tests')
+    // R77: the passes still ahead show as quiet future rows (3 of 5 → 3, 4, 5).
+    expect(container.querySelector('[data-testid="specs-pass-pending-3"]')?.textContent).toContain('Pass 3 — pending')
+    expect(container.querySelector('[data-testid="specs-pass-pending-5"]')?.textContent).toContain('Pass 5 — pending')
+    expect(container.querySelector('[data-testid="specs-pass-pending-6"]')).toBeNull()
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-stage')).toBe('specs-coverage')
   })
 
@@ -772,6 +836,9 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('specs failed to compile/list')
     expect(container.querySelector('[data-testid="specs-pass-2"]')?.textContent).toContain('100% covered')
     expect(container.querySelector('[data-testid="specs-pass-live"]')).toBeNull()
+    // R77: a settled loop spends no more passes — no future rows even though
+    // it stopped at 2 of 5 (target met early).
+    expect(container.querySelector('[data-testid="specs-pass-pending-3"]')).toBeNull()
   })
 
   it('R72: the status chip rides the title line, right of the name', async () => {
@@ -1763,6 +1830,8 @@ describe('detail redesign (R53–R68)', () => {
     const toggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
     expect(toggle?.textContent).toContain('Show')
     await act(async () => { toggle!.click() })
+    // Settled → no live pulse on the band; the dot is a running-only cue.
+    expect(toggle!.querySelector('.cl-status-dot')).toBeNull()
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
     // R66 (consolidated): ONE block — no standalone tagged-log panes.
     expect(activitySection.querySelectorAll('[data-testid="stage-log"]').length).toBe(0)
@@ -1794,6 +1863,9 @@ describe('detail redesign (R53–R68)', () => {
     const toggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
     expect(toggle).not.toBeNull()
     expect(toggle!.getAttribute('aria-expanded')).toBe('true')
+    // The band echoes the stage's `generating` pulse: a live status dot rides
+    // the Activity label so a collapsed rail still advertises work is running.
+    expect(toggle!.querySelector('.cl-status-dot')).not.toBeNull()
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
     // One block: the system line rides the agent timeline, no standalone log pane.
     expect(activitySection.querySelector('[data-testid="stage-log"]')).toBeNull()

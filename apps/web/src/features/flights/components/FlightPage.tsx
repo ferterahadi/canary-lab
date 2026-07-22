@@ -13,6 +13,7 @@ import type { ExternalHealSession, JournalEntry, RunDetail, RunIndexEntry } from
 import { AgentSessionView, type AgentSessionSource } from '../../agent-sessions/components/AgentSessionView'
 import { Modal, StatusDot, useEscapeToClose } from '../../config/components/atoms'
 import { Chip } from '../../../shared/ui/StatusChip'
+import { StepList, StepRow } from '../../../shared/ui/StepList'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { RunRow } from '../../runs/components/RunRow'
 import { clientLabel } from '../../runs/components/external-client-branding'
@@ -426,29 +427,35 @@ function FlightDetail({
           className="flex w-[240px] shrink-0 flex-col gap-0.5 overflow-auto border-r p-2 scrollbar-thin"
           style={{ borderColor: 'var(--border-default)', scrollbarGutter: 'stable' }}
         >
-          {/* R72: follow-mode is a corner whisper, not a control bar — a muted
-              "following" while auto-select tracks the action, a quiet "↩ follow"
-              text link once a manual pick parks it. Never a peer of Continue. */}
-          {/* Fixed-height header; the corner whisper is ONE button in both
-              states — same element, same font, no icons — so toggling
-              follow-mode cannot move a single pixel. Only the color changes:
-              muted while auto-following, sky when a click would resume it. */}
-          <div className="flex h-5 items-center justify-between px-2">
+          {/* R72 (restyled): follow-mode now reads as a real button, not a bare
+              text link — the standard bordered `cl-button` chrome. Still
+              subordinate to Continue (10px, tucked in the rail corner), just
+              unmistakably clickable. ONE element in both states so nothing
+              jumps: a sky ● + "Follow" in a pressed/selected look while
+              auto-following, a "↺ Follow" resume button once a manual pick
+              parks the selection. Enabled in both — clicking while already
+              following is a harmless no-op. */}
+          <div className="flex h-6 items-center justify-between px-2">
             <span className="text-[9.5px] font-semibold uppercase tracking-wide leading-none" style={{ color: 'var(--text-muted)' }}>
               Stages
             </span>
             <button
               type="button"
               data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
-              disabled={selectedStage === null}
+              aria-pressed={selectedStage === null}
               onClick={() => setSelectedStage(null)}
-              className="w-[64px] text-right text-[9.5px] leading-none underline-offset-2 transition-colors enabled:hover:underline"
-              style={{ color: selectedStage === null ? 'var(--text-muted)' : 'rgb(56, 189, 248)' }}
+              className="cl-button flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none"
+              style={selectedStage === null
+                ? { color: 'rgb(56, 189, 248)', borderColor: 'color-mix(in srgb, rgb(56, 189, 248) 45%, var(--border-default))', background: 'var(--bg-selected)' }
+                : undefined}
               title={selectedStage === null
                 ? 'Selection follows the stage that needs eyes'
                 : 'Return to auto-selecting the stage that needs eyes'}
             >
-              {selectedStage === null ? 'following' : 'follow'}
+              <span aria-hidden="true" className="text-[9px]" style={selectedStage !== null ? { color: 'rgb(56, 189, 248)' } : undefined}>
+                {selectedStage === null ? '●' : '↺'}
+              </span>
+              Follow
             </button>
           </div>
           {railRows.map((s) => {
@@ -609,6 +616,59 @@ function StageErrorPanel({ stageLabel, detail, errorDetail }: {
   )
 }
 
+/** Which paused-resume narrative this stage carries, if any (null = not a
+ *  resume point). Mirrors the two "Continue picks up here" branches in
+ *  `stageStateLine` so the card and the state sentence never disagree:
+ *   - `interrupted` — pending WITH a startedAt (a pause/restart flipped a
+ *     running step back to pending but kept its timestamp);
+ *   - `not-started` — the entry step of a paused flight, stopped before it
+ *     began (nothing earlier is still ahead of it).
+ *  Only ever true for the single stage Continue would enter at, so the card
+ *  can't render on the later pending rows that are honestly just waiting. */
+function pausedResumeKind(stage: FlightStage, flight: FlightManifest): 'interrupted' | 'not-started' | null {
+  if (flight.status !== 'paused' || stage.status !== 'pending') return null
+  if (stage.startedAt) return 'interrupted'
+  const idx = flight.stages.findIndex((s) => s.key === stage.key)
+  const waitingOnEarlier = flight.stages
+    .slice(0, idx < 0 ? 0 : idx)
+    .some((s) => s.status !== 'done' && s.status !== 'skipped')
+  return waitingOnEarlier ? null : 'not-started'
+}
+
+/** The paused twin of StageErrorPanel — the "how to pick this back up" card for
+ *  a flight parked on a step with nothing else to show (no checkpoint, no
+ *  error). Recovery stays the header's one Continue (R74 — "one Continue, no
+ *  confusion"), so this card carries NO button; it names where the step stopped,
+ *  reassures that finished work is kept, and points the eye up to the header
+ *  control the void otherwise left the user hunting for. Amber left-edge — the
+ *  same "waiting on you" treatment as the prd-source verdict band. */
+function StagePausedPanel({ kind }: { kind: 'interrupted' | 'not-started' }) {
+  const interrupted = kind === 'interrupted'
+  return (
+    <section
+      data-testid="stage-paused"
+      className="flex w-full max-w-[76ch] flex-col gap-1.5 px-3 py-2.5"
+      style={{
+        borderLeft: '2px solid rgb(251, 191, 36)',
+        background: 'color-mix(in srgb, rgb(251, 191, 36) 7%, transparent)',
+      }}
+    >
+      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'rgb(251, 191, 36)' }}>
+        <span aria-hidden="true">⏸</span>
+        {interrupted ? 'Paused mid-step' : 'Paused before this step'}
+      </div>
+      <p className="m-0 text-[12px] leading-snug" style={{ color: 'var(--text-primary)' }}>
+        {/* An ↑ points at the header control by direction, not by a brittle
+            "top-right" — matches the failed card's "Continue from the header". */}
+        Use <span className="whitespace-nowrap font-semibold" style={{ color: 'rgb(56, 189, 248)' }}>↑ Continue</span>{' '}
+        in the header{interrupted
+          ? ' to resume this step from where it stopped — everything finished in earlier steps is kept.'
+          : ' to start this step — the earlier steps are already done.'}
+      </p>
+    </section>
+  )
+}
+
 // One uniform stage template (R20). Every stage renders the SAME skeleton —
 // nothing stage-shaped leaks into the layout:
 //   1. label + status chip + the one primary affordance (drill-through)
@@ -727,8 +787,11 @@ function StageDetail({
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
       {/* Stable header row: title truncates on the left, the chip + actions
           anchor to the RIGHT edge — switching stages must not shift anything
-          horizontally (only the title text itself changes). */}
-      <div className="flex items-center gap-2">
+          horizontally (only the title text itself changes). min-h-6 (=the
+          .cl-button height) locks the row height too, so the vertically-centered
+          title does NOT drop on stages that carry an action button (Advanced
+          setup, drill-through, download) versus the plain chip-only stages. */}
+      <div className="flex min-h-6 items-center gap-2">
         <h2 className="min-w-0 truncate text-[13px] font-semibold" title={STAGE_BLURB[stage.key]}>{row.label}</h2>
         <div className="flex-1" />
         <StageStatusChip status={row.status} />
@@ -774,6 +837,17 @@ function StageDetail({
       </div>
 
       <FactsGrid facts={facts} />
+
+      {/* Paused with nothing else to act on (no checkpoint, no error): the
+          "how to pick it back up" card fills the void the state sentence alone
+          left, and points up to the header's one Continue. Only renders on the
+          single stage Continue resumes (pausedResumeKind mirrors stageStateLine),
+          and never alongside the checkpoint/error cards below (those states are
+          not `paused` + `pending`). */}
+      {(() => {
+        const kind = pausedResumeKind(stage, flight)
+        return kind ? <StagePausedPanel kind={kind} /> : null
+      })()}
 
       {/* Repo scan (R72c): one intent card, then one repo card per inspected
           repo carrying its own location + env files. */}
@@ -971,7 +1045,11 @@ function StageActivity({
           onClick={() => setUserToggled(!open)}
           className="flex flex-1 items-center gap-2.5 text-left"
         >
-          <span className="text-[10px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+          <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+            {/* The same live pulse the stage's `generating` chip shows — echoed
+                on the band so a collapsed rail still advertises that work is
+                running inside it. */}
+            {live && <StatusDot state="running" className="shrink-0" />}
             Activity
           </span>
           <span className="h-px flex-1" style={{ borderTop: '1px dashed var(--border-default)' }} />
@@ -1633,38 +1711,60 @@ function truncate(text: string, max: number): string {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 
-/** The specs↔coverage loop as a pass timeline (R27): each settled pass shows
+/** What the live pass is doing right now, spelled out under its row. */
+function specsPhaseSub(phase: SpecsCoverageProgressT['phase'], gapsOpen: number): string {
+  if (phase === 'authoring') return `writing specs to close the ${gapsOpen} open gap${gapsOpen === 1 ? '' : 's'}`
+  if (phase === 'validating') return 'validating the authored specs'
+  return 'mapping the specs against the requirements'
+}
+
+/** The specs↔coverage loop as a pass timeline (R27/R77): settled passes show
  *  what authoring bought (the ledger % after mapping — the number that feeds
- *  the NEXT pass's prompt); the live pass shows which half of author↔map is
- *  working now. Data is the adapter's structured progress, not parsed log. */
+ *  the NEXT pass's prompt) with a done ✓; the live pass pulses with its current
+ *  half of author↔map; the passes still ahead sit as quiet pending rows so
+ *  "3 passes to go" is visible, not inferred. Pending is live-only — a loop that
+ *  met target early never spends the rest. Rendered on the shared StepList so it
+ *  matches every other stepped stage panel. Data is the adapter's structured
+ *  progress, not parsed log. */
 function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageProgressT; live: boolean }) {
   const phaseLabel =
     progress.phase === 'authoring' ? 'authoring tests' : progress.phase === 'validating' ? 'validating specs' : 'mapping coverage'
   if (!live && progress.passes.length === 0) return null
+  const pending =
+    live && Number.isFinite(progress.maxPasses)
+      ? Array.from({ length: Math.max(0, progress.maxPasses - progress.pass) }, (_, i) => progress.pass + 1 + i)
+      : []
   return (
     <div data-testid="specs-pass-timeline">
-      <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+      <h3 className="mb-2 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
         Passes
       </h3>
-      <ul className="m-0 flex list-none flex-col gap-1 p-0">
+      <StepList>
         {progress.passes.map((p) => (
-          <li key={p.pass} data-testid={`specs-pass-${p.pass}`} className="text-[11.5px]" style={{ color: 'var(--text-secondary)' }}>
-            <span style={{ color: p.note ? 'rgb(251, 191, 36)' : 'rgb(52, 211, 153)' }}>Pass {p.pass}</span>
-            {p.note
-              ? ` — ${p.note}, retried with the errors in the next prompt`
-              : ` — authored → mapped: ${p.coveragePct}% covered, ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'} open`}
-          </li>
+          <StepRow
+            key={p.pass}
+            testId={`specs-pass-${p.pass}`}
+            state={p.note ? 'warn' : 'done'}
+            title={p.note ? `Pass ${p.pass} — ${p.note}` : `Pass ${p.pass} — authored → mapped`}
+            sub={
+              p.note
+                ? 'retried with the errors in the next prompt'
+                : `${p.coveragePct}% covered · ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'} open`
+            }
+          />
         ))}
         {live && (
-          <li data-testid="specs-pass-live" className="flex items-center gap-1.5 text-[11.5px]" style={{ color: 'var(--text-secondary)' }}>
-            <StatusDot state="running" className="shrink-0" />
-            <span>
-              <span style={{ color: 'rgb(56, 189, 248)' }}>Pass {progress.pass}</span>
-              {` — ${phaseLabel}…`}
-            </span>
-          </li>
+          <StepRow
+            testId="specs-pass-live"
+            state="active"
+            title={`Pass ${progress.pass} — ${phaseLabel}…`}
+            sub={specsPhaseSub(progress.phase, progress.gapsOpen)}
+          />
         )}
-      </ul>
+        {pending.map((n) => (
+          <StepRow key={n} testId={`specs-pass-pending-${n}`} state="pending" title={`Pass ${n} — pending`} />
+        ))}
+      </StepList>
     </div>
   )
 }

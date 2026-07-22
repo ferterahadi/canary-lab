@@ -366,8 +366,11 @@ function EventRow({ event, subagents }: { event: AgentSessionEvent; subagents?: 
  *  entry with a count — the conductor re-announces the same state often. */
 export type SystemGroup = {
   tag?: string
-  /** When the run's FIRST line was written — the group heads on it, the way an
-   *  agent row heads on its event time. Absent for unstamped older logs. */
+  /** The earliest STAMPED line in the run — the group heads on it, the way an
+   *  agent row heads on its event time. A run can mix undated lines (written
+   *  before the conductor stamped them) with dated ones when a flight spans the
+   *  change: the head takes the first timestamp it finds, so the group is dated
+   *  as long as ANY line in it is. Absent only when every line is unstamped. */
   timestamp?: string
   entries: Array<{ text: string; count: number }>
 }
@@ -388,6 +391,10 @@ export function groupSystemLines(lines: string[]): SystemGroup[] {
       groups.push({ tag, timestamp, entries: [{ text, count: 1 }] })
       continue
     }
+    // Backfill the head time from a later line when the run opened undated —
+    // a flight that spanned the stamping change has undated lines first, then
+    // stamped ones; without this the whole run reads as timeless.
+    if (last.timestamp === undefined && timestamp !== undefined) last.timestamp = timestamp
     const lastEntry = last.entries[last.entries.length - 1]
     if (lastEntry.text === text) lastEntry.count += 1
     else last.entries.push({ text, count: 1 })

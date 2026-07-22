@@ -301,6 +301,15 @@ export interface StageFact {
   mono?: boolean
   /** Hover detail when the visible value is a shortened form (e.g. a path). */
   title?: string
+  /** Render the value as a large metric number. Numeric/scalar facts only —
+   *  sentence and path values stay in the quiet body size. */
+  big?: boolean
+  /** A segmented stepper under a `big` value: `[current, total]` (pass N of M). */
+  stepper?: [number, number]
+  /** A 0–1 progress bar under a `big` value (fraction toward the target). */
+  bar?: number
+  /** A quiet secondary line under a `big` value (e.g. the gap-kind breakdown). */
+  sub?: string
 }
 
 function plural(n: number, word: string): string {
@@ -411,14 +420,34 @@ export function stageFacts(
       for (const g of gapRows ?? []) {
         if (typeof g.gap === 'string') byKind.set(g.gap, (byKind.get(g.gap) ?? 0) + 1)
       }
-      const breakdown = [...byKind].map(([kind, n]) => `${n} ${kind}`).join(', ')
+      const breakdown = [...byKind].map(([kind, n]) => `${n} ${kind}`).join(' · ')
+      const target = flight.opts.coverageTarget
       return [
-        ...(stage.status === 'running' && p ? [{ label: 'Pass', value: `${p.pass} of ${p.maxPasses}` }] : []),
-        ...(pct != null ? [{ label: 'Coverage', value: `${pct}%`, tone: pct >= flight.opts.coverageTarget ? 'good' as const : 'warn' as const }] : []),
+        // Pass N of M — the big number carries the stepper so "3 passes still to
+        // go" reads at a glance instead of being inferred from "2 of 5".
+        ...(stage.status === 'running' && p
+          ? [{
+              label: 'Pass',
+              value: String(p.pass),
+              big: true as const,
+              ...(Number.isFinite(p.maxPasses) ? { stepper: [p.pass, p.maxPasses] as [number, number] } : {}),
+            }]
+          : []),
+        ...(pct != null
+          ? [{
+              label: 'Coverage',
+              value: `${pct}%`,
+              big: true as const,
+              bar: target > 0 ? pct / target : pct >= 100 ? 1 : 0,
+              tone: pct >= target ? 'good' as const : 'warn' as const,
+            }]
+          : []),
         ...(gaps != null
           ? [{
               label: 'Open gaps',
-              value: gaps === 0 ? '0' : breakdown ? `${gaps} — ${breakdown}` : String(gaps),
+              value: gaps === 0 ? '0' : String(gaps),
+              big: true as const,
+              ...(breakdown && gaps > 0 ? { sub: breakdown } : {}),
               tone: gaps === 0 ? 'good' as const : 'warn' as const,
             }]
           : []),
@@ -472,37 +501,90 @@ const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
   bad: 'var(--danger)',
 }
 
-/** The one facts renderer every stage uses (R20): quiet label → value rows,
- *  carded on the same `PanelCard` surface as the Service / Playwright / docs
- *  digests below it. The facts used to float bare above those cards, which read
- *  as an unfinished header rather than the stage's headline summary; on the
- *  shared surface the whole pane is one stack of like blocks. The 110px label
- *  column is the sibling cards' column, so labels line up straight down the
- *  stack no matter which stage is open. */
+/** A segmented pass stepper under a `big` value: done segments quiet, the
+ *  current one lit sky, the rest hairline — so the remaining passes are visible
+ *  as empty track, not inferred from the number. */
+function FactStepper({ current, total }: { current: number; total: number }) {
+  return (
+    <div className="mt-2 flex gap-1" aria-hidden>
+      {Array.from({ length: total }, (_, i) => (
+        <span
+          key={i}
+          className="h-[3px] flex-1 rounded-full"
+          style={{
+            background:
+              i < current - 1 ? 'var(--text-secondary)' : i === current - 1 ? 'var(--accent-strong)' : 'var(--border-strong)',
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+/** A thin progress bar under a `big` value — coverage filling toward target. */
+function FactBar({ frac, color }: { frac: number; color: string }) {
+  const pct = Math.max(0, Math.min(1, Number.isFinite(frac) ? frac : 0)) * 100
+  return (
+    <div className="mt-2 h-[3px] overflow-hidden rounded-full" style={{ background: 'var(--border-strong)' }} aria-hidden>
+      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+    </div>
+  )
+}
+
+/** One fact as a tile. Numeric/scalar facts (`big`) render a large metric value
+ *  with an optional stepper/bar/sub; text, path, and sentence values stay in the
+ *  quiet body size and truncate inside the tile — so a value like a file path or
+ *  "Safe — services boot side by side" reads on the same grid as "0%". */
+function FactTile({ fact: f }: { fact: StageFact }) {
+  const toneColor = f.tone ? FACT_TONE[f.tone] : null
+  return (
+    <div className="min-w-0 rounded-md px-3 py-2.5" style={{ background: 'var(--bg-elevated)' }}>
+      <div className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{f.label}</div>
+      {f.big ? (
+        <>
+          <div className="mt-1 flex items-baseline gap-1 leading-none">
+            <span className="text-[22px] font-medium" style={{ color: toneColor ?? 'var(--text-primary)' }}>{f.value}</span>
+            {f.stepper ? <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>{` of ${f.stepper[1]}`}</span> : null}
+          </div>
+          {f.stepper ? <FactStepper current={f.stepper[0]} total={f.stepper[1]} /> : null}
+          {f.bar != null ? <FactBar frac={f.bar} color={toneColor ?? 'var(--accent)'} /> : null}
+          {f.sub ? <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-secondary)' }}>{f.sub}</div> : null}
+        </>
+      ) : (
+        <div
+          className="mt-1 min-w-0 truncate text-[11.5px]"
+          title={f.title ?? f.value}
+          style={{ color: toneColor ?? 'var(--text-secondary)', ...(f.mono ? { fontFamily: 'var(--font-mono)' } : {}) }}
+        >
+          {f.value}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** The one facts renderer every stage uses (R20): the 2–4 things that matter at
+ *  this stage, carded on the same `PanelCard` surface as the Service / Playwright
+ *  / docs digests below it, so the whole pane reads as one stack of like blocks.
+ *  Facts render as a responsive tile grid (R77): numeric facts get a large
+ *  metric treatment (coverage %, pass N of M), text/path facts stay quiet — one
+ *  layout that fits every stage's mix of scalar and sentence values. */
 export function FactsGrid({ facts }: { facts: StageFact[] }) {
   if (facts.length === 0) return null
   return (
-    // Same 76ch column as every stage panel — a long value truncates inside
-    // the column (full text on the title), never sprawls the whole pane.
+    // Same 76ch column as every stage panel — the tile grid wraps inside it and
+    // long values truncate within a tile, never sprawling the whole pane.
     <div className="w-full max-w-[76ch]">
       <PanelCard kicker="At a glance" testId="stage-facts-card">
-        <dl data-testid="stage-facts" className="m-0 grid grid-cols-[110px_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1.5">
+        <div
+          data-testid="stage-facts"
+          className="grid gap-2"
+          style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
+        >
           {facts.map((f, i) => (
-            <div key={`${f.label}-${i}`} className="contents">
-              <dt className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{f.label}</dt>
-              <dd
-                className="m-0 min-w-0 truncate text-[11.5px]"
-                title={f.title ?? f.value}
-                style={{
-                  color: f.tone ? FACT_TONE[f.tone] : 'var(--text-secondary)',
-                  ...(f.mono ? { fontFamily: 'var(--font-mono)' } : {}),
-                }}
-              >
-                {f.value}
-              </dd>
-            </div>
+            <FactTile key={`${f.label}-${i}`} fact={f} />
           ))}
-        </dl>
+        </div>
       </PanelCard>
     </div>
   )
