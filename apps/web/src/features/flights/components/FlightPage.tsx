@@ -748,21 +748,23 @@ function pausedResumeKind(stage: FlightStage, flight: FlightManifest): 'interrup
  *  error). Recovery stays the header's one Continue (R74 — "one Continue, no
  *  confusion"), so this card carries NO button; it names where the step stopped,
  *  reassures that finished work is kept, and points the eye up to the header
- *  control the void otherwise left the user hunting for. Amber left-edge — the
- *  same "waiting on you" treatment as the prd-source verdict band. */
+ *  control the void otherwise left the user hunting for. Quiet neutral card —
+ *  a single amber status dot says "waiting on you"; no tinted band or wash
+ *  (neutral surfaces, one accent). */
 function StagePausedPanel({ kind }: { kind: 'interrupted' | 'not-started' }) {
   const interrupted = kind === 'interrupted'
   return (
     <section
       data-testid="stage-paused"
-      className="flex w-full max-w-[76ch] flex-col gap-1.5 px-3 py-2.5"
+      className="flex w-full max-w-[76ch] flex-col gap-2 rounded-lg border px-3.5 py-3"
       style={{
-        borderLeft: '2px solid var(--warning)',
-        background: 'color-mix(in srgb, var(--warning) 7%, transparent)',
+        borderColor: 'var(--border-default)',
+        background: 'var(--bg-surface)',
+        boxShadow: 'var(--shadow-panel)',
       }}
     >
-      <div className="cl-rubric flex items-center gap-1.5" style={{ color: 'var(--warning)' }}>
-        <span aria-hidden="true">⏸</span>
+      <div className="cl-rubric flex items-center gap-2">
+        <span aria-hidden="true" className="cl-status-dot bg-amber-500" style={{ height: '0.45rem', width: '0.45rem' }} />
         {interrupted ? 'Paused mid-step' : 'Paused before this step'}
       </div>
       <p className="m-0 text-[12px] leading-snug" style={{ color: 'var(--text-primary)' }}>
