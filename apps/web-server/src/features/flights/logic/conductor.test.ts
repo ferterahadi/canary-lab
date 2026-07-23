@@ -765,6 +765,49 @@ describe('store events', () => {
   })
 })
 
+describe('index row staleness (merge-upsert can update but never delete)', () => {
+  it('resume clears pauseReason from the INDEX row, not just the manifest', async () => {
+    let attempts = 0
+    const adapters = allDone()
+    adapters.portify = {
+      run: async () => {
+        attempts += 1
+        return attempts === 1 ? { kind: 'failed', error: 'repo has uncommitted changes' } : { kind: 'done' }
+      },
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+
+    // Parked: the row carries the pause reason (the pill reads it from here).
+    const parkedRow = store.list().find((e) => e.flightId === manifest.flightId)!
+    expect(parkedRow.status).toBe('paused')
+    expect(parkedRow.pauseReason).toBe('stage-failed')
+
+    const resumed = resumeFlight(manifest.flightId, deps(adapters))
+    // Mid-drive: a running flight must not still advertise its old failure —
+    // this was the "status running WITH pauseReason stage-failed" stale row.
+    const runningRow = store.list().find((e) => e.flightId === manifest.flightId)!
+    expect(runningRow.status).toBe('running')
+    expect(runningRow.pauseReason).toBeUndefined()
+    await resumed.completion
+    expect(store.list().find((e) => e.flightId === manifest.flightId)!.pauseReason).toBeUndefined()
+  })
+
+  it('redo clears endedAt from the INDEX row of a settled flight', async () => {
+    const first = startFlight(args(), deps(allDone()))
+    await first.completion
+    expect(store.list().find((e) => e.flightId === first.manifest.flightId)!.endedAt).toBeTruthy()
+
+    const redone = startFlight({ ...args(), mode: 'redo' }, deps(allDone()))
+    expect(redone.manifest.flightId).toBe(first.manifest.flightId)
+    // The reset record has no endedAt; the row must drop it too, not keep the
+    // old settle time glued to a freshly running flight.
+    const row = store.list().find((e) => e.flightId === first.manifest.flightId)!
+    expect(row.endedAt).toBeUndefined()
+    await redone.completion
+  })
+})
+
 describe('FlightRunStore.remove', () => {
   it('removes a flight and emits a removed event', async () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))

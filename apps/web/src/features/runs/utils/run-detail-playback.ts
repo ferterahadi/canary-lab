@@ -8,6 +8,7 @@ import type {
   RepoBranchSnapshot,
   ServiceManifestEntry,
 } from '../../../shared/api/types'
+import { parseLocation } from '../../../shared/test-numbering'
 
 export interface PlaybackTest {
   name: string
@@ -76,15 +77,18 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
     tests.set(key, current)
     latestKeyByName.set(event.test.name, key)
   }
-  // Collapse attempts to one entry per (name, location). Retries and heal-cycle
-  // reruns share a location and fold into the latest attempt. Two distinct
-  // tests that happen to share a title (and therefore a `name`) but live at
-  // different locations stay as separate entries — the export HTML disambiguates
+  // Collapse attempts to one entry per (name, spec file). Retries and
+  // heal-cycle reruns fold into the latest attempt — the line number is
+  // deliberately ignored because heal edits shift a test's line between
+  // cycles (e.g. :205 → :222) while it stays the same test. Two distinct
+  // tests that happen to share a title (and therefore a `name`) but live in
+  // different files stay as separate entries — the export HTML disambiguates
   // them via positional anchor IDs. Map preserves first-seen identity order,
   // last write wins so the latest attempt is kept.
   const latestKeyByIdentity = new Map<string, string>()
   for (const [key, test] of tests.entries()) {
-    const identity = `${test.name}@${locationByKey.get(key) ?? ''}`
+    const file = parseLocation(locationByKey.get(key))?.file ?? ''
+    const identity = `${test.name}@${file}`
     latestKeyByIdentity.set(identity, key)
   }
   return [...latestKeyByIdentity.values()]

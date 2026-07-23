@@ -45,19 +45,26 @@ export interface FlightStore {
 }
 
 function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
+  // Clearable keys (group / pauseReason / endedAt) are ALWAYS present — as
+  // `undefined` when the manifest has none — because the index upsert is a
+  // shallow merge (`{ ...oldRow, ...entry }`): a merge can overwrite a key but
+  // never delete one, so omitting a cleared key would leave the previous
+  // value stuck on the row forever (a resumed flight showing `running` WITH
+  // its old `pauseReason: "stage-failed"`). An explicit `undefined` overrides
+  // the stale value in the merge, and JSON.stringify drops the key on write.
   return {
     id: m.flightId,
     createdAt: m.createdAt,
     flightId: m.flightId,
     feature: m.feature,
     repoPaths: m.repoPaths,
-    ...(m.opts.group ? { group: m.opts.group } : {}),
+    group: m.opts.group,
     status: m.status,
-    ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
+    pauseReason: m.pauseReason,
     currentStage: m.currentStage,
     stages: m.stages.map((s) => ({ key: s.key, status: s.status })),
     updatedAt: m.updatedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    endedAt: m.endedAt,
   }
 }
 

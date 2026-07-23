@@ -1679,7 +1679,7 @@ describe('api client', () => {
   it('redoFlight POSTs to the redo endpoint and returns the updated manifest', async () => {
     const manifest = { id: 'fl_1', status: 'running' }
     const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
-    const result = await redoFlight('fl_1', { baseUrl: 'http://x', fetchImpl })
+    const result = await redoFlight('fl_1', undefined, { baseUrl: 'http://x', fetchImpl })
     expect(result).toEqual(manifest)
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://x/api/flights/fl_1/redo',

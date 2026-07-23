@@ -112,6 +112,89 @@ describe('playbackTests', () => {
     ])
   })
 
+  it('collapses heal-cycle reruns whose line number shifted within the same spec file', () => {
+    // A heal edit moved the test from line 205 to 222 between the failed
+    // attempt and the passing rerun — same test, one entry, latest attempt.
+    const events: PlaywrightPlaybackEvent[] = [
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:00.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:205' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:06.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:205' },
+        status: 'failed',
+        passed: false,
+        durationMs: 6000,
+        retry: 0,
+        error: { message: 'Condition was not met within 6000ms' },
+      },
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:02:00.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:222' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:02:49.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:222' },
+        status: 'passed',
+        passed: true,
+        durationMs: 49000,
+        retry: 0,
+      },
+    ]
+
+    expect(playbackTests(events)).toEqual([
+      expect.objectContaining({
+        name: 'cleanup',
+        status: 'passed',
+        passed: true,
+        location: 'cleanup-race.spec.ts:222',
+      }),
+    ])
+  })
+
+  it('keeps same-titled tests in different spec files as separate entries', () => {
+    const events: PlaywrightPlaybackEvent[] = [
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:00.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'api.spec.ts:10' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:02.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'api.spec.ts:10' },
+        status: 'passed',
+        passed: true,
+        durationMs: 2000,
+        retry: 0,
+      },
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:03.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'worker.spec.ts:10' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:05.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'worker.spec.ts:10' },
+        status: 'passed',
+        passed: true,
+        durationMs: 2000,
+        retry: 0,
+      },
+    ]
+
+    expect(playbackTests(events)).toEqual([
+      expect.objectContaining({ location: 'api.spec.ts:10' }),
+      expect.objectContaining({ location: 'worker.spec.ts:10' }),
+    ])
+  })
+
   it('uses the test name as the playback identity when location is missing', () => {
     const events: PlaywrightPlaybackEvent[] = [
       {
