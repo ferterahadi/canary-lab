@@ -261,7 +261,7 @@ describe('TestCasesColumn', () => {
     expect(container.querySelectorAll('.border-sky-500\\/50')).toHaveLength(2)
   })
 
-  it('shows the yellow running-line highlight inside an expanded step body', async () => {
+  it('shows the amber running-line highlight inside an expanded step body', async () => {
     vi.mocked(getFeatureTests).mockResolvedValue([
       {
         file: '/tmp/features/alpha/e2e/a.spec.ts',
@@ -321,7 +321,7 @@ describe('TestCasesColumn', () => {
 
     const activeLine = container.querySelector<HTMLElement>('[data-active-line="true"]')
     expect(activeLine?.textContent).toContain('await send(payload)')
-    expect(activeLine?.getAttribute('style')).toContain('rgb(234, 179, 8)')
+    expect(activeLine?.getAttribute('style')).toContain('var(--warning)')
   })
 
   it('rings only the test named in affectedTests, not every card in the spec', async () => {

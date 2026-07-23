@@ -205,7 +205,7 @@ export function PortifyWizard({
               type="button"
               onClick={() => setConfirmLeave(true)}
               title="Discard this workflow — drops the scratch branch + worktree and restores the config"
-              style={{ background: 'transparent', border: '1px solid rgba(251,113,133,0.4)', borderRadius: 'var(--radius-md)', color: 'rgb(251,113,133)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}
+              style={{ background: 'transparent', border: '1px solid color-mix(in srgb, var(--danger) 45%, var(--border-default))', borderRadius: 'var(--radius-md)', color: 'var(--danger)', fontSize: 12, padding: '6px 12px', cursor: 'pointer' }}
             >
               Cancel
             </button>
@@ -291,7 +291,7 @@ export function PortifyWizard({
       )}
 
       {confirmLeave && (
-        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 90 }}>
+        <div style={{ position: 'absolute', inset: 0, background: 'var(--overlay-backdrop)', display: 'grid', placeItems: 'center', zIndex: 90 }}>
           <div style={{ width: 'min(420px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}>
             <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Discard this workflow?</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
@@ -299,7 +299,7 @@ export function PortifyWizard({
             </div>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
               <button type="button" onClick={() => setConfirmLeave(false)} style={ghostBtn}>Keep running</button>
-              <button type="button" onClick={discard} style={{ ...ghostBtn, color: 'rgb(251,113,133)', borderColor: 'rgba(251,113,133,0.4)' }}>Discard</button>
+              <button type="button" onClick={discard} style={{ ...ghostBtn, color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}>Discard</button>
             </div>
           </div>
         </div>
@@ -324,8 +324,8 @@ function isNavigable(s: PortifyStatus | undefined): boolean {
 }
 
 const ghostBtn: React.CSSProperties = {
-  padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-default)',
-  borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
+  padding: '8px 14px', background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
+  borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
 }
 
 function Stepper({
@@ -356,12 +356,12 @@ function Stepper({
         const isCurrent = i === current
         const clickable = isClickable(i)
         const showSavedTick = saved && i === SAVE_STEP
-        const circleColor = showSavedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--text-muted)'
+        const circleColor = showSavedTick ? 'var(--success)' : isCurrent || reached ? 'var(--accent)' : 'var(--text-muted)'
         const inner = (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: reached ? 1 : 0.45 }}>
             <span style={{
               width: 20, height: 20, borderRadius: 9999, display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700,
-              border: `2px solid ${showSavedTick ? 'rgb(52,211,153)' : isCurrent || reached ? 'var(--accent)' : 'var(--border-default)'}`,
+              border: `2px solid ${showSavedTick ? 'var(--success)' : isCurrent || reached ? 'var(--accent)' : 'var(--border-default)'}`,
               color: circleColor,
               background: isCurrent ? 'color-mix(in srgb, var(--accent) 14%, transparent)' : 'transparent',
             }}>{showSavedTick ? '✓' : i + 1}</span>
@@ -403,8 +403,8 @@ function BlockedScreen({ active, onOpen, onClose }: { active: PortifyIndexEntry;
   return (
     <div style={{ minHeight: 'calc(100dvh - 200px)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div style={{ width: 'min(520px, 100%)', margin: '0 auto', textAlign: 'center' }}>
-        <div style={{ fontSize: 34, marginBottom: 14, opacity: 0.9 }}>🔌</div>
-        <h2 style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 12px' }}>
+        <div style={{ fontSize: 24, marginBottom: 14, opacity: 0.9 }}>🔌</div>
+        <h2 style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 12px' }}>
           A port-ification is already running
         </h2>
         <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 6px' }}>
@@ -432,8 +432,8 @@ function NotFoundScreen({ busy, onRemove, onClose }: { busy: boolean; onRemove: 
   return (
     <div style={{ minHeight: 'calc(100dvh - 200px)', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
       <div style={{ width: 'min(520px, 100%)', margin: '0 auto', textAlign: 'center' }}>
-        <div style={{ fontSize: 34, marginBottom: 14, opacity: 0.9 }}>🗑️</div>
-        <h2 style={{ fontSize: 21, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 12px' }}>
+        <div style={{ fontSize: 24, marginBottom: 14, opacity: 0.9 }}>🗑️</div>
+        <h2 style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 12px' }}>
           This run’s data is no longer available
         </h2>
         <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 26px' }}>
@@ -461,9 +461,9 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
         maxWidth: 'min(560px, calc(100% - 40px))',
         display: 'flex', alignItems: 'flex-start', gap: 10,
         padding: '11px 12px 11px 14px', borderRadius: 'var(--radius-md)',
-        background: 'var(--bg-surface)', border: '1px solid rgba(251,113,133,0.45)',
-        color: 'rgb(251,113,133)', fontSize: 12.5, lineHeight: 1.5,
-        boxShadow: '0 10px 34px rgba(0,0,0,0.4)', zIndex: 70,
+        background: 'var(--bg-surface)', border: '1px solid color-mix(in srgb, var(--danger) 45%, transparent)',
+        color: 'var(--danger)', fontSize: 12.5, lineHeight: 1.5,
+        boxShadow: 'var(--shadow-popover)', zIndex: 70,
       }}
     >
       <span aria-hidden="true" style={{ marginTop: 1 }}>⚠</span>
@@ -472,7 +472,7 @@ function ErrorBanner({ message, onDismiss }: { message: string; onDismiss: () =>
         type="button"
         onClick={onDismiss}
         aria-label="Dismiss error"
-        style={{ background: 'transparent', border: 'none', color: 'rgb(251,113,133)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
+        style={{ background: 'transparent', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '0 2px', flexShrink: 0 }}
       >
         ✕
       </button>
@@ -493,10 +493,10 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
   // Horizontal `margin: 0 auto` still lets it own the width.
   return (
     <div style={{ width: 'min(600px, 100%)', margin: '0 auto', paddingTop: 40 }}>
-        <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600, marginBottom: 12 }}>
+        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 500, marginBottom: 12 }}>
           Guided port-ification
         </div>
-        <h2 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 14px' }}>What will happen</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.01em', margin: '0 0 14px' }}>What will happen</h2>
         <p style={{ fontSize: 14, color: 'var(--text-secondary)', lineHeight: 1.65, margin: '0 0 10px' }}>
           The <b style={{ color: 'var(--text-primary)' }}>{agent}</b> agent edits <b style={{ color: 'var(--text-primary)' }}>{feature}</b> in an isolated scratch worktree so each app reads its listen port from an injected env var, and declares matching <code style={mono}>ports</code> slots in the feature config.
         </p>
@@ -505,7 +505,7 @@ function PlanScreen({ feature, agent, busy, onStart }: { feature: string; agent:
         </p>
 
         <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', background: 'var(--bg-surface)', overflow: 'hidden', marginBottom: 26 }}>
-          <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.5px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 600, padding: '11px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontWeight: 500, padding: '11px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
             Guarantees
           </div>
           {guarantees.map((node, i) => (
@@ -540,7 +540,7 @@ function ExerciseScreen({ m, live }: { m: PortifyManifest; live: boolean }) {
   const external = m.producer === 'external'
   return (
     <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
         {external ? 'External port-ification' : live ? 'Running the exercise' : 'The exercise'}
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 18 }}>
@@ -553,12 +553,12 @@ function ExerciseScreen({ m, live }: { m: PortifyManifest; live: boolean }) {
       </div>
       <div style={{ fontSize: 12.5, color: 'var(--accent)', marginTop: 14 }}>{STATUS_LABEL[m.status]}</div>
       {!external && live && m.verification && !m.verification.ok && m.verification.failureDetail && (
-        <div style={{ marginTop: 12, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '10px 12px', whiteSpace: 'pre-wrap' }}>
+        <div style={{ marginTop: 12, fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--warning)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '10px 12px', whiteSpace: 'pre-wrap' }}>
           Last attempt failed — retrying:{'\n'}{m.verification.failureDetail}
         </div>
       )}
       <div style={{ marginTop: 18 }}>
-        <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: 500, marginBottom: 8 }}>
           {external ? 'Session' : 'Agent'}
         </div>
         <div style={{ height: 360, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
@@ -574,7 +574,7 @@ function ExerciseScreen({ m, live }: { m: PortifyManifest; live: boolean }) {
 function Phase({ label, active, done }: { label: string; active?: boolean; done?: boolean }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 14px', borderTop: '1px solid var(--border-default)' }}>
-      <span style={{ fontSize: 13, color: done ? 'rgb(52,211,153)' : active ? 'var(--accent)' : 'var(--text-muted)' }}>
+      <span style={{ fontSize: 13, color: done ? 'var(--success)' : active ? 'var(--accent)' : 'var(--text-muted)' }}>
         {done ? '✓' : active ? '●' : '○'}
       </span>
       <span style={{ fontSize: 13, color: done || active ? 'var(--text-primary)' : 'var(--text-muted)' }}>{label}</span>
@@ -587,7 +587,7 @@ function VerificationBadge({ m }: { m: PortifyManifest }) {
   if (insts.length < 2 || !m.verification?.ok) return null
   const fmt = (p: Record<string, number>) => Object.entries(p).map(([k, v]) => `${k}:${v}`).join(' ')
   return (
-    <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'rgb(52,211,153)', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', borderRadius: 'var(--radius-md)', padding: '8px 11px', marginBottom: 14 }}>
+    <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--success)', background: 'color-mix(in srgb, var(--success) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)', borderRadius: 'var(--radius-md)', padding: '8px 11px', marginBottom: 14 }}>
       ✓ Booted twice — {fmt(insts[0].ports)} and {fmt(insts[1].ports)} — both healthy
     </div>
   )
@@ -615,7 +615,7 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
     <div>
       {saved ? (
         <>
-          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 6, color: 'rgb(52,211,153)' }}>
+          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: 'var(--success)' }}>
             ✓ Saved — {m.feature} can now run in parallel
           </div>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
@@ -624,7 +624,7 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
         </>
       ) : (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-          <div style={{ fontSize: 16, fontWeight: 600 }}>Review &amp; save</div>
+          <div style={{ fontSize: 14, fontWeight: 600 }}>Review &amp; save</div>
           {rounds > 0 && (
             <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
               revision {rounds}
@@ -653,7 +653,7 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
           {/* R23 (canary-first-flight): say what the saved artifact IS and when
               it acts — labeled rows, not a bare path + checkmark column. */}
           <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginTop: 16 }}>
-            <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 8 }}>
+            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: 500, marginBottom: 8 }}>
               How this is used
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr)', columnGap: 16, rowGap: 6, alignItems: 'baseline' }}>
@@ -740,7 +740,7 @@ function ReviewLocally({ m, openError }: { m: PortifyManifest; openError: string
 // broke the double-boot (or touched tests) — mirrors the retry banner styling.
 function RevisionFailedBanner({ m }: { m: PortifyManifest }) {
   return (
-    <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.3)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
+    <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 30%, transparent)', borderRadius: 'var(--radius-md)', padding: '10px 12px', marginBottom: 14, whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
       ⚠ Your last change didn't pass the double-boot — fix it with “Request changes” before saving.
       {m.verification?.failureDetail ? `\n\n${m.verification.failureDetail}` : ''}
       {m.error ? `\n\n${m.error}` : ''}
@@ -763,7 +763,7 @@ function FeedbackModal({ busy, onSend, onClose }: { busy: boolean; onSend: (feed
   const send = (): void => { if (trimmed && !busy) onSend(trimmed) }
   return (
     <div
-      style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 90 }}
+      style={{ position: 'absolute', inset: 0, background: 'var(--overlay-backdrop)', display: 'grid', placeItems: 'center', zIndex: 90 }}
       onClick={() => { if (!busy) onClose() }}
     >
       <div
@@ -822,12 +822,12 @@ function FailedScreen({ m, onClose }: { m: PortifyManifest; onClose: () => void 
         : 'Could not make it work'
   return (
     <div>
-      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, color: 'rgb(251,113,133)' }}>
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 8, color: 'var(--danger)' }}>
         {title}
       </div>
       {m.error && <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>{m.error}</p>}
       {m.verification?.failureDetail && (
-        <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'rgb(251,191,36)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '10px 12px', whiteSpace: 'pre-wrap', marginBottom: 14 }}>
+        <div style={{ fontSize: 11.5, fontFamily: 'var(--font-mono)', color: 'var(--warning)', background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', padding: '10px 12px', whiteSpace: 'pre-wrap', marginBottom: 14 }}>
           {m.verification.failureDetail}
         </div>
       )}
@@ -849,8 +849,8 @@ function NoChangesNeeded({ feature }: { feature: string }) {
     }}>
       <span style={{
         width: 36, height: 36, borderRadius: 9999, display: 'grid', placeItems: 'center',
-        background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.35)',
-        color: 'rgb(52,211,153)', fontSize: 17, lineHeight: 1,
+        background: 'color-mix(in srgb, var(--success) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
+        color: 'var(--success)', fontSize: 17, lineHeight: 1,
       }}>✓</span>
       <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
         No changes needed
@@ -898,10 +898,10 @@ function DiffView({ diff, onOpenInEditor }: { diff: string; onOpenInEditor?: () 
 
 function lineColor(line: string): string {
   if (line.startsWith('# ')) return 'var(--accent)'
-  if (line.startsWith('+') && !line.startsWith('+++')) return 'rgb(52,211,153)'
-  if (line.startsWith('-') && !line.startsWith('---')) return 'rgb(251,113,133)'
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'var(--success)'
+  if (line.startsWith('-') && !line.startsWith('---')) return 'var(--danger)'
   if (line.startsWith('@@')) return 'var(--text-muted)'
   return 'var(--text-secondary)'
 }
 
-const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 12, background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 4, padding: '1px 5px' }
+const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 12, background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', padding: '1px 5px' }

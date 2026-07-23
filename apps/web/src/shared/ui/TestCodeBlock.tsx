@@ -132,8 +132,10 @@ function decorateShikiLines(
   changedLines?: Set<number>,
 ): string {
   let lineNo = 0
-  const bg = runningHighlight ? 'rgba(234, 179, 8, 0.22)' : 'rgba(14, 165, 233, 0.18)'
-  const bar = runningHighlight ? 'rgb(234, 179, 8)' : 'rgb(14, 165, 233)'
+  const bg = runningHighlight
+    ? 'color-mix(in srgb, var(--warning) 22%, transparent)'
+    : 'color-mix(in srgb, var(--running) 18%, transparent)'
+  const bar = runningHighlight ? 'var(--warning)' : 'var(--running)'
   return html.replace(/<span class="line"/g, (match) => {
     lineNo += 1
     const attrs = startLine ? ` data-source-line="${sourceLineForBodyLine(startLine, lineNo)}"` : ''
@@ -173,12 +175,12 @@ export function StepBlock({
   const activeLine = bodyLineForSourceLine(step.line, step.bodySource, runningSourceLine)
   const isRunningStep = activeLine != null
   const cardClass = isRunningStep
-    ? 'border-yellow-500/60 bg-yellow-400/15 dark:border-yellow-400/60 dark:bg-yellow-400/10'
+    ? 'border-amber-500/60 bg-amber-400/15 dark:border-amber-400/60 dark:bg-amber-400/10'
     : `${colorClassForStatus(status)} bg-[var(--bg-surface)]`
   return (
     <li
       className={`rounded-md border ${cardClass} p-1.5`}
-      style={isRunningStep ? { boxShadow: 'inset 3px 0 0 rgb(234, 179, 8)' } : undefined}
+      style={isRunningStep ? { boxShadow: 'inset 3px 0 0 var(--warning)' } : undefined}
     >
       <button
         type="button"

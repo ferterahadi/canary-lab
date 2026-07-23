@@ -89,7 +89,7 @@ export function RunsListDialog({ onClose, onNavigateToRun }: Props) {
                     type="button"
                     onClick={() => setFinishedOpen((v) => !v)}
                     aria-expanded={finishedOpen}
-                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider transition-colors hover:bg-white/[0.03]"
+                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider cl-hover-row"
                     style={{ color: 'var(--text-muted)' }}
                   >
                     <span

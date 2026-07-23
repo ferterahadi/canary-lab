@@ -23,10 +23,10 @@ import { derivedFlightToken } from '../lib/derived-stages'
 // wizard draft).
 
 export const FLIGHT_STATUS_TONE: Record<FlightStatus, string> = {
-  'running': 'rgb(56, 189, 248)',
-  'waiting-for-approval': 'rgb(251, 191, 36)',
-  'paused': 'rgb(251, 191, 36)',
-  'done': 'rgb(52, 211, 153)',
+  'running': 'var(--running)',
+  'waiting-for-approval': 'var(--warning)',
+  'paused': 'var(--warning)',
+  'done': 'var(--success)',
   'failed': 'var(--danger)',
   'aborted': 'var(--text-muted)',
 }
@@ -450,7 +450,7 @@ export function StageMiniRail({ stages }: { stages: Array<{ key: string; status:
     : FLIGHT_STAGE_KEYS.map((key) => ({ key: key as string, status: 'pending' as FlightStageStatus }))
   const toneFor = (status: FlightStageStatus): string => {
     if (status === 'pending') return 'var(--border-default)'
-    if (status === 'skipped') return 'color-mix(in srgb, rgb(52, 211, 153) 40%, transparent)'
+    if (status === 'skipped') return 'color-mix(in srgb, var(--success) 40%, transparent)'
     return stageStatusTone(status)
   }
   return (
@@ -507,12 +507,18 @@ function FlightsPickerDialog({
       header={
         <>
           <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold">🕊️ Flights</h2>
+            <h2 className="flex items-center gap-1.5 text-[13.5px] font-semibold">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+                <path d="M22 2 11 13" />
+                <path d="M22 2 15 22l-4-9-9-4Z" />
+              </svg>
+              Flights
+            </h2>
             <p className="mt-0.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
               One command from a bare repo to a green, covered, evaluated run. Pick a flight to follow its stages and answer checkpoints.
             </p>
           </div>
-          <button type="button" aria-label="Close flights picker" onClick={onClose} className="rounded px-2 py-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+          <button type="button" aria-label="Close flights picker" onClick={onClose} className="cl-button px-2 py-1 text-xs">
             Close
           </button>
         </>
@@ -522,7 +528,7 @@ function FlightsPickerDialog({
       {rows.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
           No flights yet. Start one from a terminal:
-          <div className="mt-2 rounded px-2 py-1.5 text-[11px]" style={{ fontFamily: 'var(--font-mono)', background: 'var(--bg-base)', border: '1px solid var(--border-default)' }}>
+          <div className="cl-code-shell mt-2 px-2 py-1.5 text-[11px]">
             npx canary-lab flight ../your-repo "what to test"
           </div>
         </div>
@@ -583,7 +589,7 @@ function PickerRow({
           type="button"
           data-testid={`flight-open-${row.flight.flightId}`}
           onClick={() => onPick(row.flight!.flightId)}
-          className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+          className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left cl-hover-row"
           style={{ border: '1px solid transparent' }}
           title={`Open flight ${row.flight.flightId} (${row.feature})`}
         >
@@ -642,7 +648,7 @@ function PickerGroupSection({
         onClick={toggle}
         aria-expanded={open}
         data-testid={`flight-group-toggle-${group}`}
-        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left cl-hover-row"
         style={{ border: '1px solid transparent' }}
       >
         <span
@@ -652,7 +658,7 @@ function PickerGroupSection({
         >
           <ChevronRightIcon />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+        <span className="cl-rubric min-w-0 flex-1 truncate">
           {group}
         </span>
         <span className="cl-count-chip shrink-0">{section.rows.length}</span>
@@ -710,7 +716,7 @@ export function NotFlownRow({
       type="button"
       data-testid={hasProgress && onOpenDerived ? `derived-open-${feature}` : `not-flown-${feature}`}
       onClick={open}
-      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left cl-hover-row"
       style={{ border: '1px solid transparent' }}
       title={`${feature}: ${chip.title}`}
     >
@@ -744,7 +750,7 @@ export function ActivityOnlyRow({
       type="button"
       data-testid={`activity-open-${feature}`}
       onClick={() => onOpen(feature, activity)}
-      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+      className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left cl-hover-row"
       style={{ border: '1px solid transparent' }}
       title={`${feature}: ${ACTIVITY_CHIP[activity.kind].title}`}
     >
@@ -775,7 +781,7 @@ export function PreFlightRow({
         type="button"
         data-testid={`pre-flight-open-${task.taskId}`}
         onClick={() => onOpen(task.taskId)}
-        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-white/[0.05]"
+        className="group flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left cl-hover-row"
         style={{ border: '1px solid transparent' }}
         title={`${chip.title} — ${task.description}`}
       >

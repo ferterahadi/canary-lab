@@ -7,12 +7,15 @@ import type { CSSProperties, ReactNode } from 'react'
 // reads as one stack of like things instead of a pile of near-identical
 // hand-rolled boxes (the sixth copy was the point where this became a primitive).
 
-export const PANEL_CARD_CLASS = 'w-full rounded border px-3 py-2.5'
+export const PANEL_CARD_CLASS = 'w-full rounded-lg border px-3 py-2.5'
 export const PANEL_CARD_STYLE: CSSProperties = {
   borderColor: 'var(--border-default)',
   background: 'var(--bg-surface)',
+  boxShadow: 'var(--shadow-panel)',
 }
-export const PANEL_KICKER_CLASS = 'text-[9.5px] font-semibold uppercase tracking-[0.11em]'
+// The card's label voice is the system rubric (mono 10px caps, styles.css) so
+// stage cards and workspace sub-captions read as one register.
+export const PANEL_KICKER_CLASS = 'cl-rubric'
 
 /** Card + kicker in one call, with an optional right-aligned `aside` (chips,
  *  status) on the kicker line. Callers needing bespoke header content compose

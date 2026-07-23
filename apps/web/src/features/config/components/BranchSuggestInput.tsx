@@ -110,10 +110,8 @@ export function BranchSuggestInput({
       />
       {open && visible.length > 0 && (
         <div
-          className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-44 overflow-y-auto rounded-md py-1 text-xs shadow-lg scrollbar-thin"
+          className="cl-popover absolute left-0 right-0 top-[calc(100%+4px)] z-50 max-h-44 overflow-y-auto rounded-md py-1 text-xs scrollbar-thin"
           style={{
-            background: 'var(--bg-elevated)',
-            border: '1px solid var(--border-default)',
             color: 'var(--text-secondary)',
             fontFamily: 'var(--font-mono)',
           }}

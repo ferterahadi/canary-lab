@@ -67,7 +67,7 @@ export function RepoScanPanel({
               data-testid="flight-inputs-change"
               onClick={onChangeInputs}
               className="text-[10.5px] underline-offset-2 transition-colors hover:underline"
-              style={{ color: 'rgb(56, 189, 248)' }}
+              style={{ color: 'var(--accent)' }}
               title="Change what this flight tests — opens the intent + repos prefilled; the flight re-flies from the beginning"
             >
               Change…
@@ -103,13 +103,13 @@ export function RepoScanPanel({
                 title={repoBaseName(p)}
                 sub={
                   <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
-                    <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Location</span>
+                    <span className="cl-rubric">Location</span>
                     <span className="max-w-[340px] truncate text-[10px]" title={p} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
                       {p}
                     </span>
                     {envs.length > 0 && (
                       <>
-                        <span className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Env</span>
+                        <span className="cl-rubric">Env</span>
                         <span className="max-w-[340px] truncate text-[10px]" title={envs.join('\n')} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
                           {envs.join(' · ')}
                         </span>
@@ -333,7 +333,7 @@ export function FeatureSetupPanel({
               data-testid="setup-open-advanced"
               onClick={onOpenAdvanced}
               className="underline underline-offset-2"
-              style={{ color: 'rgb(56, 189, 248)' }}
+              style={{ color: 'var(--accent)' }}
             >
               Advanced setup
             </button>
@@ -350,14 +350,14 @@ export function FeatureSetupPanel({
 
 function RowLabel({ label, info }: { label: string; info?: string }) {
   return (
-    <span className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+    <span className="cl-rubric flex items-center gap-1">
       {label}
       {info && (
         <span
           aria-label={`${label} explained`}
           title={info}
           className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full text-[9px] font-semibold"
-          style={{ color: 'rgb(56, 189, 248)', border: '1px solid color-mix(in srgb, rgb(56, 189, 248) 40%, transparent)' }}
+          style={{ color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)' }}
         >
           i
         </span>
@@ -484,8 +484,8 @@ function NameInput({ value, onSave, testId }: {
       onBlur={() => { if (draft.trim() !== '' && draft.trim() !== value) onSave(draft.trim()) }}
       onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       spellCheck={false}
-      className="w-full rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
-      style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+      className="cl-input w-full px-2 py-1 text-[11.5px]"
+      style={{ fontFamily: 'var(--font-mono)' }}
     />
   )
 }
@@ -517,8 +517,8 @@ function BranchRow({ feature, repoName, value, refreshKey, onSave, testId }: {
         branches={branchSuggestions(status)}
         placeholder={status?.currentBranch ?? undefined}
         testId={testId}
-        inputClassName="w-full rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
-        inputStyle={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+        inputClassName="cl-input w-full px-2 py-1 text-[11.5px]"
+        inputStyle={{ fontFamily: 'var(--font-mono)' }}
         onChange={setDraft}
         onSelect={commit}
         onBlur={() => commit(draft)}
@@ -577,8 +577,7 @@ function NumberRow({ label, value, editable, onSave, testId }: {
           const n = Number(e.target.value)
           if (Number.isFinite(n) && n >= 0 && n !== value) onSave(n)
         }}
-        className="w-20 rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
-        style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+        className="cl-input w-20 px-2 py-1 text-[11.5px]"
       />
     </>
   )
@@ -602,8 +601,7 @@ function ModeRow({ label, value, modes = PW_MODES, editable, onSave, testId }: {
         data-testid={testId}
         value={value}
         onChange={(e) => onSave(e.target.value)}
-        className="w-44 rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
-        style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', background: 'var(--bg-base)' }}
+        className="themed-select cl-input w-44 px-2 py-1 text-[11.5px]"
       >
         {[...new Set([value, ...modes])].map((mode) => (
           <option key={mode} value={mode}>{mode}</option>
@@ -824,7 +822,7 @@ function IntentRow({ description }: { description: string }) {
       style={{ borderColor: 'var(--border-default)', background: 'transparent', cursor: 'pointer' }}
       title={open ? 'Fold the intent' : 'View the full intent'}
     >
-      <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+      <span className="cl-rubric shrink-0">
         Intent
       </span>
       {/* Prose, not code — the intent reads in the app face like every other
@@ -836,7 +834,7 @@ function IntentRow({ description }: { description: string }) {
       >
         {description}
       </span>
-      <span className="shrink-0 text-[10.5px]" style={{ color: 'rgb(56, 189, 248)' }}>
+      <span className="shrink-0 text-[10.5px]" style={{ color: 'var(--accent)' }}>
         {open ? 'Fold' : 'View'}
       </span>
     </button>
@@ -873,7 +871,7 @@ function ForkPathCard({ testId, title, blurb, recommended, note, selected, dimme
       style={{
         // Neutral surfaces — the sky lives in the border + radio dot only.
         borderColor: selected
-          ? 'color-mix(in srgb, rgb(56, 189, 248) 60%, var(--border-default))'
+          ? 'color-mix(in srgb, var(--accent) 60%, var(--border-default))'
           : 'var(--border-default)',
         background: selected ? 'var(--bg-selected)' : 'transparent',
         opacity: dimmed ? 0.6 : 1,
@@ -883,18 +881,15 @@ function ForkPathCard({ testId, title, blurb, recommended, note, selected, dimme
       <span
         aria-hidden="true"
         className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border"
-        style={{ borderColor: selected ? 'rgb(56, 189, 248)' : 'var(--border-default)' }}
+        style={{ borderColor: selected ? 'var(--accent)' : 'var(--border-default)' }}
       >
-        {selected && <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'rgb(56, 189, 248)' }} />}
+        {selected && <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />}
       </span>
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
           {title}
           {recommended && !selected && (
-            <span
-              className="rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
-              style={{ color: 'rgb(56, 189, 248)', background: 'color-mix(in srgb, rgb(56, 189, 248) 12%, transparent)' }}
-            >
+            <span className="cl-badge-accent">
               Recommended
             </span>
           )}
@@ -943,15 +938,15 @@ function AttemptVerdict({ attempt }: { attempt: PrdSourceAttempt }) {
       data-testid="prd-source-verdict"
       className="flex items-start gap-2 px-2.5 py-2"
       style={{
-        borderLeft: '2px solid rgb(251, 191, 36)',
-        background: 'color-mix(in srgb, rgb(251, 191, 36) 7%, transparent)',
+        borderLeft: '2px solid var(--warning)',
+        background: 'color-mix(in srgb, var(--warning) 7%, transparent)',
       }}
     >
-      <span aria-hidden="true" className="mt-px text-[11px]" style={{ color: 'rgb(251, 191, 36)' }}>⊘</span>
+      <span aria-hidden="true" className="mt-px text-[11px]" style={{ color: 'var(--warning)' }}>⊘</span>
       <div className="flex min-w-0 flex-col gap-1">
         <span
-          className="text-[10px] font-semibold uppercase tracking-wide"
-          style={{ color: 'rgb(251, 191, 36)' }}
+          className="cl-rubric"
+          style={{ color: 'var(--warning)' }}
         >
           {attemptHeadline(attempt)}
         </span>
@@ -1015,7 +1010,7 @@ export function RequirementsFork({
     >
       {lastAttempt && <AttemptVerdict attempt={lastAttempt} />}
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="text-[11px]" style={{ color: 'rgb(251, 191, 36)' }}>⏸</span>
+        <span aria-hidden="true" className="text-[11px]" style={{ color: 'var(--warning)' }}>⏸</span>
         <span className="text-[12.5px] font-semibold">Where should requirements come from?</span>
       </div>
       <IntentRow description={flight.description} />
@@ -1114,7 +1109,7 @@ export function RequirementsFork({
 
       {mode === 'agent' && (
         <>
-          <div className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+          <div className="cl-rubric">
             How should the agent look?
           </div>
           <div className="flex flex-wrap gap-2.5">

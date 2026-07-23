@@ -11,9 +11,9 @@ import { PortifyWizard } from '../../portify/components/PortifyWizard'
 // race → report). Per-arm monitoring reuses the real RunDetailColumn.
 
 const LEVEL_BADGE: Record<SabotageLevel, { bg: string; fg: string }> = {
-  min: { bg: 'rgba(16,185,129,0.15)', fg: 'rgb(52,211,153)' },
-  med: { bg: 'rgba(245,158,11,0.15)', fg: 'rgb(251,191,36)' },
-  max: { bg: 'rgba(244,63,94,0.15)', fg: 'rgb(251,113,133)' },
+  min: { bg: 'color-mix(in srgb, var(--success) 15%, transparent)', fg: 'var(--success)' },
+  med: { bg: 'color-mix(in srgb, var(--warning) 15%, transparent)', fg: 'var(--warning)' },
+  max: { bg: 'color-mix(in srgb, var(--danger) 15%, transparent)', fg: 'var(--danger)' },
 }
 
 // One matrix that captures BOTH what the two benchmark arms share and where they
@@ -52,7 +52,7 @@ const ARM_MATRIX: { section: string; note: string; rows: ArmRow[] }[] = [
 
 function Cell({ on }: { on: boolean }) {
   return (
-    <span style={{ textAlign: 'center', fontWeight: 700, color: on ? 'rgb(52,211,153)' : 'var(--text-muted)', opacity: on ? 1 : 0.5 }}>
+    <span style={{ textAlign: 'center', fontWeight: 700, color: on ? 'var(--success)' : 'var(--text-muted)', opacity: on ? 1 : 0.5 }}>
       {on ? '✓' : '✗'}
     </span>
   )
@@ -105,7 +105,7 @@ function ArmComparisonPage({ onBack }: { onBack: () => void }) {
         >
           <span aria-hidden>←</span> Back to setup
         </button>
-        <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>How the two arms differ</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>How the two arms differ</div>
         <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 18, maxWidth: 640 }}>
           Both arms run the same agent against the same frozen bug with the same tooling. The benchmark isolates a{' '}
           <b style={{ color: 'var(--text-secondary)' }}>single variable</b> — canary-lab’s curated &amp; captured
@@ -278,6 +278,7 @@ function ConfigScreen({
                 setError(null)
                 setFeature(e.target.value)
               }}
+              className="themed-select cl-input"
               style={selectStyle}
             >
               {features.map((f) => <option key={f.name} value={f.name}>{f.name}</option>)}
@@ -335,10 +336,10 @@ function ConfigScreen({
             <span aria-hidden style={{ fontSize: 11, color: 'var(--accent)', flex: 'none', fontWeight: 600 }}>Compare →</span>
           </button>
 
-          {error && <div style={{ color: 'rgb(251,113,133)', fontSize: 12, marginTop: 10 }}>{error}</div>}
+          {error && <div style={{ color: 'var(--danger)', fontSize: 12, marginTop: 10 }}>{error}</div>}
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--border-default)' }}>
-            <span style={{ color: blocked ? 'rgb(251,191,36)' : 'var(--text-muted)', fontSize: 11.5 }}>
+            <span style={{ color: blocked ? 'var(--warning)' : 'var(--text-muted)', fontSize: 11.5 }}>
               {blocked
                 ? 'A benchmark is already running — stop it before starting another.'
                 : 'Both arms get the identical frozen break · tests stay read-only'}
@@ -386,8 +387,8 @@ function DynamicPortsGate({
   const slotlessCommands = preflight.repos
     .flatMap((r) => r.commands.filter((c) => c.declaredPorts.length === 0).map((c) => `${r.name} · ${c.name}`))
   return (
-    <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 70 }}>
-      <div style={{ width: 'min(480px, 92%)', background: 'var(--bg-surface)', border: '1px solid rgba(245,158,11,0.4)', borderRadius: 'var(--radius-lg)', padding: 22, boxShadow: '0 16px 48px rgba(0,0,0,0.5)' }}>
+    <div style={{ position: 'absolute', inset: 0, background: 'var(--overlay-backdrop)', display: 'grid', placeItems: 'center', zIndex: 70 }}>
+      <div style={{ width: 'min(480px, 92%)', background: 'var(--bg-surface)', border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)', borderRadius: 'var(--radius-lg)', padding: 22, boxShadow: 'var(--shadow-popover)' }}>
         <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
           ⚠️ <span style={{ marginLeft: 4 }}>This app isn’t set up for dynamic ports</span>
         </div>
@@ -401,7 +402,7 @@ function DynamicPortsGate({
           </div>
         )}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button type="button" onClick={onCancel} style={{ padding: '8px 14px', background: 'transparent', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
+          <button type="button" onClick={onCancel} className="cl-button px-3 py-1.5">
             Cancel
           </button>
           <button type="button" className="cl-button-primary" onClick={onSetup} style={{ padding: '8px 14px' }}>
@@ -506,11 +507,11 @@ function BenchmarkDetail({ id, onClose, onNew }: { id: string; onClose: () => vo
         {sabotaging ? (
           <SetupView m={m} />
         ) : m.status === 'error' ? (
-          <div style={{ color: 'rgb(251,113,133)', fontSize: 13 }}>Benchmark error: {m.error}</div>
+          <div style={{ color: 'var(--danger)', fontSize: 13 }}>Benchmark error: {m.error}</div>
         ) : m.status === 'invalid' ? (
           <div style={{ maxWidth: 640, display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'rgb(251,191,36)', fontSize: 13, fontWeight: 600 }}>
-              <span style={{ width: 9, height: 9, borderRadius: 9999, background: 'rgb(251,191,36)', flex: 'none' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--warning)', fontSize: 13, fontWeight: 600 }}>
+              <span style={{ width: 9, height: 9, borderRadius: 9999, background: 'var(--warning)', flex: 'none' }} />
               Sabotage didn’t land
             </div>
             <div style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
@@ -548,7 +549,7 @@ function SetupView({ m }: { m: BenchmarkManifest }) {
   return (
     <div style={{ color: 'var(--text-secondary)', fontSize: 13, maxWidth: 980, display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <span className="animate-pulse" style={{ width: 9, height: 9, borderRadius: 9999, background: 'rgb(251,191,36)', flex: 'none' }} />
+        <span className="animate-pulse" style={{ width: 9, height: 9, borderRadius: 9999, background: 'var(--running)', flex: 'none' }} />
         <span>
           Sabotaging <span style={{ fontFamily: 'var(--font-mono)' }}>{m.feature}</span> with the <b>{m.level}</b> skill…{' '}
           <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>{elapsed}s</span>
@@ -713,9 +714,9 @@ function OpenEditorIcon() {
 }
 
 // Outcome palette — shared by the per-iteration blocks and the aggregate.
-const HEALED = 'rgb(52,211,153)'
-const FAILED = 'rgb(251,113,133)'
-const RUNNING = 'rgb(251,191,36)'
+const HEALED = 'var(--success)'
+const FAILED = 'var(--danger)'
+const RUNNING = 'var(--warning)'
 
 type IterState = 'healed' | 'failed' | 'running' | 'pending'
 
@@ -869,7 +870,7 @@ function ReportView({ m }: { m: BenchmarkManifest }) {
         </button>
       </div>
       <div style={{ border: `1px solid ${heroBorder}`, background: heroBg, borderRadius: 'var(--radius-xl)', padding: '20px 22px', marginBottom: 16 }}>
-        <div style={{ fontSize: 25, fontWeight: 700, color: toneColor, lineHeight: 1.05, letterSpacing: '-.01em' }}>{verdict.headline}</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: toneColor, lineHeight: 1.05, letterSpacing: '-.01em' }}>{verdict.headline}</div>
         <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 7, lineHeight: 1.5, maxWidth: 620 }}>{verdict.detail}</div>
 
         {/* Head-to-head bars: each metric on a shared scale so the gap that
@@ -877,7 +878,7 @@ function ReportView({ m }: { m: BenchmarkManifest }) {
         <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: '96px 1fr 1fr', alignItems: 'center', gap: '0 16px' }}>
           <div />
           <ArmHeading emoji="🐤" label="Harness" color="var(--boot)" />
-          <ArmHeading emoji="⚙" label="Baseline" color="rgb(251,191,36)" />
+          <ArmHeading emoji="⚙" label="Baseline" color="var(--assistant)" />
         </div>
         <div style={{ marginTop: 2 }}>
           <CompareRow label="Healed" hValue={rep.harness.iterationsHealed} bValue={rep.baseline.iterationsHealed}
@@ -904,10 +905,10 @@ function ReportView({ m }: { m: BenchmarkManifest }) {
           {iters.map(([n, e]) => (
             <tr key={n}>
               <td style={cell()}>#{n}</td>
-              <td style={cell(true, e.A?.healed ? 'rgb(52,211,153)' : 'rgb(251,113,133)')}>{e.A ? (e.A.healed ? '✓ healed' : '✗ failed') : '—'}</td>
+              <td style={cell(true, e.A?.healed ? 'var(--success)' : 'var(--danger)')}>{e.A ? (e.A.healed ? '✓ healed' : '✗ failed') : '—'}</td>
               <td style={cell(true)}>{e.A?.healCycles ?? '—'}</td>
               <td style={cell(true)}>{e.A ? `${Math.round(e.A.wallClockMs / 1000)}s` : '—'}</td>
-              <td style={cell(true, e.B?.healed ? 'rgb(52,211,153)' : 'rgb(251,113,133)')}>{e.B ? (e.B.healed ? '✓ healed' : '✗ failed') : '—'}</td>
+              <td style={cell(true, e.B?.healed ? 'var(--success)' : 'var(--danger)')}>{e.B ? (e.B.healed ? '✓ healed' : '✗ failed') : '—'}</td>
               <td style={cell(true)}>{e.B?.healCycles ?? '—'}</td>
               <td style={cell(true)}>{e.B ? `${Math.round(e.B.wallClockMs / 1000)}s` : '—'}</td>
             </tr>
@@ -942,7 +943,7 @@ function CompareRow({ label, hValue, bValue, hText, bText, betterIsLower }: {
     <div style={{ display: 'grid', gridTemplateColumns: '96px 1fr 1fr', alignItems: 'center', gap: '0 16px', padding: '6px 0' }}>
       <div style={{ fontSize: 10.5, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.4px', fontWeight: 600 }}>{label}</div>
       <Bar pct={hPct} color="var(--boot)" text={hText} better={hBetter} />
-      <Bar pct={bPct} color="rgb(251,191,36)" text={bText} better={bBetter} />
+      <Bar pct={bPct} color="var(--assistant)" text={bText} better={bBetter} />
     </div>
   )
 }
@@ -1165,10 +1166,10 @@ function BenchmarkHeader({
     : status === 'done'
       ? 'var(--accent)'
       : status === 'invalid'
-        ? 'rgb(251,191,36)'
+        ? 'var(--warning)'
         : status === 'error' || status === 'aborted'
-          ? 'rgb(251,113,133)'
-          : 'rgb(56,189,248)'
+          ? 'var(--danger)'
+          : 'var(--running)'
   return (
     <div style={{ borderBottom: '1px solid var(--border-default)', background: 'var(--bg-surface)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px 8px' }}>
@@ -1195,7 +1196,7 @@ function BenchmarkHeader({
           {onStop && (
             <button
               className="cl-button"
-              style={{ padding: '6px 12px', color: 'rgb(251,113,133)', borderColor: 'color-mix(in srgb, rgb(251,113,133) 45%, var(--border-default))' }}
+              style={{ padding: '6px 12px', color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
               onClick={onStop}
             >
               ■ Stop
@@ -1249,4 +1250,6 @@ function badgeStyle(level: SabotageLevel): React.CSSProperties {
 function cell(right = false, color?: string): React.CSSProperties {
   return { textAlign: right ? 'right' : 'left', padding: '9px 12px', borderBottom: '1px solid var(--border-default)', fontFamily: right ? 'var(--font-mono)' : undefined, color }
 }
-const selectStyle: React.CSSProperties = { background: 'var(--bg-input)', border: '1px solid var(--border-default)', color: 'var(--text-primary)', borderRadius: 'var(--radius-md)', padding: '7px 10px', fontSize: 12 }
+// Chrome comes from themed-select + cl-input (tokens); only sizing lives here
+// (right padding leaves room for the themed-select chevron).
+const selectStyle: React.CSSProperties = { padding: '7px 28px 7px 10px', fontSize: 12 }

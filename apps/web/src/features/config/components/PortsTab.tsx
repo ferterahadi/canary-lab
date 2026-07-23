@@ -117,7 +117,7 @@ export function PortsTab({
           className="flex items-center justify-between gap-4 px-4 py-3"
           style={{
             borderBottom: '1px solid var(--border-default)',
-            borderLeft: `2px solid ${portified ? 'rgb(52,211,153)' : 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'}`,
+            borderLeft: `2px solid ${portified ? 'var(--success)' : 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'}`,
           }}
         >
           <div className="min-w-0">
@@ -126,12 +126,12 @@ export function PortsTab({
                 aria-hidden
                 style={{
                   display: 'inline-block', width: 8, height: 8, borderRadius: 9999,
-                  background: portified ? 'rgb(52,211,153)' : 'transparent',
+                  background: portified ? 'var(--success)' : 'transparent',
                   border: portified ? 'none' : '1.5px solid var(--text-muted)',
-                  boxShadow: portified ? '0 0 8px color-mix(in srgb, rgb(52,211,153) 55%, transparent)' : 'none',
+                  boxShadow: portified ? '0 0 8px color-mix(in srgb, var(--success) 40%, transparent)' : 'none',
                 }}
               />
-              <span style={{ fontSize: 13, fontWeight: 600, color: portified ? 'rgb(52,211,153)' : 'var(--text-primary)' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: portified ? 'var(--success)' : 'var(--text-primary)' }}>
                 {portified ? 'Portified — boots concurrently' : 'Not portified'}
               </span>
             </div>
@@ -262,7 +262,7 @@ export function PortsTab({
 
       {confirmRerun && (
         <div
-          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'grid', placeItems: 'center', zIndex: 95 }}
+          style={{ position: 'fixed', inset: 0, background: 'var(--overlay-backdrop)', display: 'grid', placeItems: 'center', zIndex: 95 }}
           onClick={() => setConfirmRerun(false)}
         >
           <div

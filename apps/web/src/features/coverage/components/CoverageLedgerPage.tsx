@@ -39,24 +39,24 @@ interface Props {
 // is too narrow for the full label (container query); the colour dot + a hover title
 // keep it decipherable.
 const GAP_META: Record<GapType, { label: string; abbr: string; color: string }> = {
-  covered: { label: 'Covered', abbr: 'C', color: 'rgb(52, 211, 153)' },
+  covered: { label: 'Covered', abbr: 'C', color: 'var(--success)' },
   // Short labels keep the legend + card status from crushing the layout at narrow
   // widths; the glossary `i` still spells out the full meaning.
-  'path-incomplete': { label: 'Path gap', abbr: 'P', color: 'rgb(56, 189, 248)' },
+  'path-incomplete': { label: 'Path gap', abbr: 'P', color: 'var(--accent)' },
   // A requirement that spans a variant dimension (channel/tenant/…) but is only
   // tested on some values. Amber = the breadth warning: it claims more than it proves.
-  'variant-incomplete': { label: 'Variant gap', abbr: 'V', color: 'rgb(251, 191, 36)' },
+  'variant-incomplete': { label: 'Variant gap', abbr: 'V', color: 'var(--warning)' },
   untested: { label: 'Untested', abbr: 'U', color: 'var(--text-muted)' },
 }
 
 // Per-test coverage strength — graded off the strongest stack layer a test's
-// assertions touch (tier classifier), independent of runs. Hues reuse the status
-// language: orange/amber weak, sky mid, green strong.
+// assertions touch (tier classifier), independent of runs. A four-step ramp on
+// the system hues: rose weakest → amber → blue → green strong.
 const STRENGTH_META: Record<TestStrength, { label: string; color: string; title: string }> = {
-  strong: { label: 'Strong', color: 'rgb(52, 211, 153)', title: 'Tier 4 — a real external destination / browser confirmed the effect' },
-  solid: { label: 'Solid', color: 'rgb(56, 189, 248)', title: 'Tier 3 — an app/internal API or UI assertion reported success' },
-  basic: { label: 'Basic', color: 'rgb(251, 191, 36)', title: 'Tier 2 — internal state changed (DB row / fixture)' },
-  shallow: { label: 'Shallow', color: 'rgb(251, 146, 60)', title: 'Tier 1 — only the app’s own log / self-report (or no classifiable depth)' },
+  strong: { label: 'Strong', color: 'var(--success)', title: 'Tier 4 — a real external destination / browser confirmed the effect' },
+  solid: { label: 'Solid', color: 'var(--accent)', title: 'Tier 3 — an app/internal API or UI assertion reported success' },
+  basic: { label: 'Basic', color: 'var(--warning)', title: 'Tier 2 — internal state changed (DB row / fixture)' },
+  shallow: { label: 'Shallow', color: 'var(--danger)', title: 'Tier 1 — only the app’s own log / self-report (or no classifiable depth)' },
 }
 // Worst-first: the weakest tests sort to the front of the filter.
 const STRENGTH_ORDER: TestStrength[] = ['shallow', 'basic', 'solid', 'strong']
@@ -393,8 +393,8 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
     <div className="min-h-0 flex-1 overflow-auto p-4" style={{ scrollbarGutter: 'stable' }} data-testid="tests-pane">
       {generating ? (
         <>
-          <div data-testid="tests-remapping-note" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'rgb(56, 189, 248)' }}>
-            <span className="cl-pulse" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgb(56, 189, 248)' }} />
+          <div data-testid="tests-remapping-note" style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 10, fontSize: 11, color: 'var(--running)' }}>
+            <span className="cl-pulse" aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--running)' }} />
             Mapping coverage to your tests…
           </div>
           {(ledger.tests.length > 0 ? ledger.tests : [null, null, null]).map((_, i) => (
@@ -407,7 +407,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
             <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No tests found in this feature&apos;s specs.</div>
           )}
           {orphanTests.length > 0 && (
-            <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'rgb(251, 191, 36)' }}>
+            <div data-testid="orphan-tests-note" style={{ marginBottom: 10, fontSize: 11, color: 'var(--warning)' }}>
               {orphanTests.length} orphan test{orphanTests.length > 1 ? 's' : ''} (no requirement) — regenerate coverage to map them.
             </div>
           )}
@@ -466,7 +466,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
               data-testid="coverage-open-flight"
               onClick={() => onOpenFlight(generatingFlight.flightId)}
               className="cl-button ml-auto px-2 py-0.5 text-[11px]"
-              style={{ color: 'rgb(56, 189, 248)' }}
+              style={{ color: 'var(--accent)' }}
             >
               Open flight →
             </button>
@@ -475,7 +475,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
       )}
 
       {loading && !ledger && <div className="p-6" style={{ color: 'var(--text-secondary)' }}>Loading coverage…</div>}
-      {error && <div className="p-6" style={{ color: 'rgb(251, 113, 133)' }}>Failed to load coverage: {error}</div>}
+      {error && <div className="p-6" style={{ color: 'var(--danger)' }}>Failed to load coverage: {error}</div>}
 
       {/* Unified view (R22): Docs rail + main, always one screen. The rail is
           ALWAYS present (even while generating, with destructive actions disabled);
@@ -497,7 +497,7 @@ export function CoverageLedgerPage({ feature, onClose, generatingFlight = null, 
           />
           <div className="flex min-h-0 flex-1 flex-col">
             {actionError && (
-              <div data-testid="coverage-action-error" className="shrink-0 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)', fontSize: 12, color: 'rgb(251, 113, 133)' }}>
+              <div data-testid="coverage-action-error" className="shrink-0 border-b px-5 py-2" style={{ borderColor: 'var(--border-default)', fontSize: 12, color: 'var(--danger)' }}>
                 {actionError}
               </div>
             )}
@@ -558,10 +558,10 @@ function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
   return (
     <div className="min-h-0 flex-1 overflow-auto" style={{ scrollbarGutter: 'stable' }} data-testid="coverage-empty-main">
       <div style={{ maxWidth: 440, margin: '64px auto 0', padding: '0 24px', textAlign: 'center' }}>
-        <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)', marginBottom: 8 }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 8 }}>
           No coverage yet
         </div>
-        <h2 style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 8px' }}>
           A requirement coverage ledger in one exercise
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55 }}>
@@ -584,7 +584,7 @@ function CoverageRing({ pct }: { pct: number }) {
   const c = 2 * Math.PI * r
   const clamped = Math.max(0, Math.min(100, pct))
   const offset = c * (1 - clamped / 100)
-  const hue = clamped >= 80 ? 'rgb(52, 211, 153)' : clamped >= 40 ? 'rgb(251, 191, 36)' : clamped > 0 ? 'rgb(251, 113, 133)' : 'var(--text-muted)'
+  const hue = clamped >= 80 ? 'var(--success)' : clamped >= 40 ? 'var(--warning)' : clamped > 0 ? 'var(--danger)' : 'var(--text-muted)'
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% covered`}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
@@ -596,8 +596,8 @@ function CoverageRing({ pct }: { pct: number }) {
         />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
-        <span style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)' }}>{Math.round(pct)}<span style={{ fontSize: 10, fontWeight: 600 }}>%</span></span>
-        <span style={{ fontSize: 8.5, fontWeight: 600, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 3 }}>covered</span>
+        <span style={{ fontSize: 19, fontWeight: 600, color: 'var(--text-primary)' }}>{Math.round(pct)}<span style={{ fontSize: 10, fontWeight: 600 }}>%</span></span>
+        <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 3 }}>covered</span>
       </div>
     </div>
   )
@@ -629,11 +629,11 @@ function HeadlinePill({ headline }: { headline: string }) {
   if (headline.startsWith('Covered')) return null
   const generating = headline === 'Generating'
   const tone = headline.startsWith('Covered')
-    ? 'rgb(52, 211, 153)'
+    ? 'var(--success)'
     : generating
-      ? 'rgb(56, 189, 248)'
+      ? 'var(--running)'
       : headline === 'Stale'
-        ? 'rgb(251, 191, 36)'
+        ? 'var(--warning)'
         : 'var(--text-muted)'
   return (
     <span
@@ -968,7 +968,7 @@ function VariantCoverage({ rc }: { rc: RequirementCoverage }) {
             >
               <span aria-hidden="true" className="clcov-vpath-caret">{active ? '▾' : '▸'}</span>
               <span className="clcov-vpath-name">{path}</span>
-              <span className="clcov-vpath-n" style={{ color: complete ? 'rgb(52,211,153)' : GAP_META['variant-incomplete'].color }}>{coveredCount}/{applicableCount}</span>
+              <span className="clcov-vpath-n" style={{ color: complete ? 'var(--success)' : GAP_META['variant-incomplete'].color }}>{coveredCount}/{applicableCount}</span>
             </button>
           )
         })}
@@ -1093,7 +1093,7 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
           </span>
         )}
         {test.requirements.length === 0 ? (
-          <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251,191,36) 12%, transparent)', border: '1px solid color-mix(in srgb, rgb(251,191,36) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
+          <span data-testid={`orphan-${test.name}`} style={{ fontSize: 10, fontWeight: 600, color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)', borderRadius: 999, padding: '1px 8px' }}>orphan — no covers tag</span>
         ) : (
           test.requirements.map((id) => (
             <button
@@ -1103,12 +1103,12 @@ function TestCard({ test, testNumber, color, active, dimmed, onHover, onExpand, 
               data-testid={`reqtag-${test.name}-${id}`}
               title={`Jump to requirement ${id}`}
               onClick={(e) => { e.stopPropagation(); onReqClick(id) }}
-              style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
+              style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', borderRadius: 5, background: `color-mix(in srgb, ${color} 11%, transparent)`, border: `1px solid color-mix(in srgb, ${color} 30%, var(--border-default))`, color: 'var(--text-primary)' }}
             >@req-{id}</button>
           ))
         )}
         {test.pathTypes.map((p) => (
-          <span key={p} title={`Exercises the ${PATH_DESC[p] ?? p} path`} style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
+          <span key={p} title={`Exercises the ${PATH_DESC[p] ?? p} path`} style={{ fontFamily: 'var(--font-mono)', fontSize: 10, padding: '1px 6px', borderRadius: 5, border: '1px solid var(--border-default)', color: 'var(--text-muted)' }}>@path-{p}</span>
         ))}
       </div>
       {expanded && (
@@ -1183,17 +1183,17 @@ function TestCardSkeleton({ index }: { index: number }) {
 // console token system (no new fonts, no component library). Motion is restrained
 // and reduced-motion-safe; meaning carries the colour (cl_ui-design-philosophy).
 const COVERAGE_CSS = `
-.clcov-head{position:relative;display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-surface) 55%,var(--bg-base))}
-.clcov-head::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:transparent;transition:background .2s}
-.clcov-head[data-generating='true']::after{background:linear-gradient(90deg,transparent,rgb(56,189,248),transparent);background-size:200% 100%;animation:clcov-sheen 1.6s linear infinite}
+.clcov-head{position:relative;display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--border-default);background:var(--bg-surface)}
+.clcov-head::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent 0%,color-mix(in srgb,var(--accent) 40%,transparent) 50%,transparent 100%);opacity:.7;transition:background .2s}
+.clcov-head[data-generating='true']::after{height:2px;background:linear-gradient(90deg,transparent,var(--running),transparent);background-size:200% 100%;opacity:1;animation:clcov-sheen 1.6s linear infinite}
 @keyframes clcov-sheen{0%{background-position:200% 0}100%{background-position:-200% 0}}
-@media (prefers-reduced-motion:reduce){.clcov-head[data-generating='true']::after{animation:none;background:rgb(56,189,248)}}
+@media (prefers-reduced-motion:reduce){.clcov-head[data-generating='true']::after{animation:none;background:var(--running)}}
 .clcov-title{display:flex;flex-direction:column;line-height:1.18;min-width:0}
-.clcov-eyebrow{font-size:9px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-muted)}
-.clcov-feature{font-size:14px;font-weight:700;color:var(--text-primary);font-family:var(--font-mono,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40ch}
-.clcov-close{appearance:none;cursor:pointer;font-size:12px;font-weight:600;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:6px 12px;transition:background .14s,color .14s,border-color .14s}
-.clcov-close:hover{color:var(--text-primary);background:var(--bg-selected);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
-.clcov-statbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px 20px;padding:13px 18px;border-bottom:1px solid var(--border-default);background:color-mix(in srgb,var(--bg-surface) 30%,var(--bg-base))}
+.clcov-eyebrow{font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)}
+.clcov-feature{font-size:13.5px;font-weight:600;color:var(--text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40ch}
+.clcov-close{appearance:none;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:6px 12px;transition:background .12s,color .12s,border-color .12s}
+.clcov-close:hover{color:var(--text-primary);background:var(--bg-hover);border-color:var(--border-strong)}
+.clcov-statbar{display:flex;flex-wrap:wrap;align-items:center;gap:14px 20px;padding:12px 16px;border-bottom:1px solid var(--border-default);background:var(--bg-surface)}
 .clcov-chips{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
 /* Strength filter sits over the tests column. The breakdown's flex-grow pushes it to
    the right edge — do NOT use margin-left:auto here (it cancels that grow). A light
@@ -1207,8 +1207,8 @@ const COVERAGE_CSS = `
 @media (max-width:1120px){
   .clcov-strength{flex:1 0 100%;align-self:auto;justify-content:flex-start;padding-left:0;padding-top:14px;border-left:none;border-top:1px solid var(--border-default)}
 }
-.clcov-chip{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:999px;padding:4px 11px;transition:background .14s,border-color .14s,opacity .14s,transform .1s}
-.clcov-chip:hover{transform:translateY(-1px)}
+.clcov-chip{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-primary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:999px;padding:4px 11px;transition:background .12s,border-color .12s,opacity .12s}
+.clcov-chip:hover{background:var(--bg-hover);border-color:var(--border-strong)}
 .clcov-chip[data-empty='true']{opacity:.5}
 .clcov-chip[data-on='true']{background:color-mix(in srgb,var(--chip) 14%,var(--bg-surface));border-color:color-mix(in srgb,var(--chip) 60%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--chip) 30%,transparent) inset}
 .clcov-chip-dot{width:7px;height:7px;border-radius:50%;flex:none}
@@ -1223,51 +1223,49 @@ const COVERAGE_CSS = `
 .clcov-bar-seg{height:100%;min-width:3px;transition:flex-grow .35s ease}
 .clcov-bar-seg+.clcov-bar-seg{box-shadow:-1px 0 0 color-mix(in srgb,var(--bg-base) 70%,transparent)}
 .clcov-legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
-.clcov-legend-item{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-secondary);background:transparent;border:1px solid transparent;border-radius:7px;padding:3px 8px;transition:background .14s,color .14s,border-color .14s,opacity .14s}
+.clcov-legend-item{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;appearance:none;cursor:pointer;font-size:11.5px;color:var(--text-secondary);background:transparent;border:1px solid transparent;border-radius:var(--radius-md);padding:3px 8px;transition:background .12s,color .12s,border-color .12s,opacity .12s}
 .clcov-legend-item:hover{color:var(--text-primary);background:var(--bg-surface)}
 .clcov-legend-item[data-empty='true']{opacity:.4}
 .clcov-legend-item[data-on='true']{color:var(--text-primary);background:color-mix(in srgb,var(--seg) 15%,var(--bg-surface));border-color:color-mix(in srgb,var(--seg) 50%,transparent)}
 .clcov-legend-dot{width:9px;height:9px;border-radius:3px;flex:none}
-.clcov-legend-n{font-variant-numeric:tabular-nums;font-weight:700;color:var(--text-primary)}
+.clcov-legend-n{font-variant-numeric:tabular-nums;font-weight:600;color:var(--text-primary)}
 .clcov-cap{display:flex;flex-wrap:wrap;align-items:center;gap:9px;font-size:11px;color:var(--text-muted)}
-.clcov-cap strong{color:var(--text-secondary);font-variant-numeric:tabular-nums;font-weight:700}
+.clcov-cap strong{color:var(--text-secondary);font-variant-numeric:tabular-nums;font-weight:600}
 .clcov-cap-sep{color:var(--border-default)}
-.clcov-stale{color:rgb(251,191,36);cursor:help;border-bottom:1px dotted color-mix(in srgb,rgb(251,191,36) 55%,transparent)}
+.clcov-stale{color:var(--warning);cursor:help;border-bottom:1px dotted color-mix(in srgb,var(--warning) 55%,transparent)}
 .clcov-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:2px;border-radius:50%;border:1px solid var(--border-default);color:var(--text-muted);cursor:help;outline:none}
 .clcov-info:hover,.clcov-info:focus-visible{color:var(--text-primary);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
-.clcov-info-i{font-size:10px;font-weight:700;font-style:italic;font-family:Georgia,serif;line-height:1}
-.clcov-info-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:10;width:330px;display:flex;flex-direction:column;gap:6px;padding:12px 13px;border-radius:var(--radius-md);background:var(--bg-surface);border:1px solid var(--border-default);box-shadow:var(--shadow-lg,0 8px 28px rgba(0,0,0,.4));font-size:11.5px;line-height:1.5;color:var(--text-secondary);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s,visibility .14s}
+.clcov-info-i{font-size:10px;font-weight:600;line-height:1}
+.clcov-info-pop{position:absolute;top:calc(100% + 8px);left:0;z-index:10;width:330px;display:flex;flex-direction:column;gap:6px;padding:12px 13px;border-radius:var(--radius-lg);background:var(--bg-overlay);border:1px solid var(--border-default);box-shadow:var(--shadow-popover);font-size:11.5px;line-height:1.5;color:var(--text-secondary);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s,transform .14s,visibility .14s}
 .clcov-info:hover .clcov-info-pop,.clcov-info:focus-within .clcov-info-pop,.clcov-info:focus-visible .clcov-info-pop{opacity:1;visibility:visible;transform:translateY(0)}
 /* The card is a query container so its header status chips can collapse to a single
    letter when the card itself (not the whole viewport) is too narrow. */
 .clcov-card{container-type:inline-size}
 .clcov-card:hover{border-color:color-mix(in srgb,var(--text-muted) 38%,var(--border-default))}
 /* A @req tag jumped-to from a test card: a brief accent ring locates the card. */
-.clcov-card[data-focus='true']{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 70%,transparent)}
+.clcov-card[data-focus='true']{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 70%,transparent)}
 /* Clickable @req tags on a test card — jump to the matching requirement. */
-.clcov-reqtag{appearance:none;cursor:pointer;transition:transform .1s,filter .12s}
-.clcov-reqtag:hover{transform:translateY(-1px);filter:brightness(1.18)}
-.clcov-reqtag:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 55%,transparent)}
-.cl-pulse{animation:clcov-pulse 1.4s ease-in-out infinite}
-@keyframes clcov-pulse{0%,100%{opacity:1}50%{opacity:.4}}
-.clcov-skel{display:inline-block;border-radius:5px;background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base));position:relative;overflow:hidden}
+.clcov-reqtag{appearance:none;cursor:pointer;transition:filter .12s}
+.clcov-reqtag:hover{filter:brightness(1.18)}
+.clcov-reqtag:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent)}
+.clcov-skel{display:inline-block;border-radius:var(--radius-sm);background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base));position:relative;overflow:hidden}
 .clcov-skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--text-muted) 22%,transparent),transparent);animation:clcov-skel-sweep 1.3s ease-in-out infinite}
 @keyframes clcov-skel-sweep{100%{transform:translateX(100%)}}
-@media (prefers-reduced-motion:reduce){.cl-pulse{animation:none}.clcov-skel::after{animation:none}}
+@media (prefers-reduced-motion:reduce){.clcov-skel::after{animation:none}}
 /* Click-to-expand cards: a quiet caret leads the header; the row is the hit target. */
-.clcov-disclose{cursor:pointer;outline:none;border-radius:6px;margin:-2px -4px;padding:2px 4px;transition:background .12s}
-.clcov-disclose:hover{background:color-mix(in srgb,var(--text-muted) 9%,transparent)}
-.clcov-disclose:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 60%,transparent)}
+.clcov-disclose{cursor:pointer;outline:none;border-radius:var(--radius-md);margin:-2px -4px;padding:2px 4px;transition:background .12s}
+.clcov-disclose:hover{background:var(--bg-hover)}
+.clcov-disclose:focus-visible{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent)}
 .clcov-caret{flex:none;width:10px;font-size:10px;line-height:1;color:var(--text-muted)}
 /* Test source disclosure. */
 .clcov-source{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px}
 .clcov-source-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-.clcov-source-path{font-family:var(--font-mono,monospace);font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.clcov-source-open{margin-left:auto;flex:none;appearance:none;cursor:pointer;font-size:10px;font-weight:600;color:var(--text-secondary);background:var(--bg-base);border:1px solid var(--border-default);border-radius:6px;padding:2px 8px;transition:background .12s,color .12s,border-color .12s}
-.clcov-source-open:hover{color:var(--text-primary);background:var(--bg-selected);border-color:color-mix(in srgb,var(--text-muted) 45%,var(--border-default))}
+.clcov-source-path{font-family:var(--font-mono);font-size:10px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.clcov-source-open{margin-left:auto;flex:none;appearance:none;cursor:pointer;font-size:10px;font-weight:500;color:var(--text-secondary);background:var(--bg-surface);border:1px solid var(--border-default);border-radius:var(--radius-md);padding:2px 8px;transition:background .12s,color .12s,border-color .12s}
+.clcov-source-open:hover{color:var(--text-primary);background:var(--bg-hover);border-color:var(--border-strong)}
 /* The shared ShikiCode block frames itself (.shiki-block pre); just cap its height so a long body scrolls in place. */
 .clcov-source .shiki-block pre{max-height:360px;overflow:auto}
-.clcov-source-note{font-size:11.5px;color:var(--text-muted);font-style:italic}
+.clcov-source-note{font-size:11.5px;color:var(--text-muted)}
 /* Requirement detail disclosure: kind chip + happy / unhappy paths. */
 .clcov-reqdetail{margin-top:9px;border-top:1px solid var(--border-default);padding-top:9px;display:flex;flex-direction:column;gap:8px}
 /* Requirement card header: a single inline-flow run. Caret, id badge, title, kind
@@ -1276,11 +1274,11 @@ const COVERAGE_CSS = `
    never reserving a right column or block-stacking below it. */
 .clcov-reqhead{display:block;line-height:1.55}
 .clcov-reqhead .clcov-caret{display:inline;margin-right:5px}
-.clcov-reqid{display:inline-flex;align-items:center;vertical-align:middle;margin-right:7px;font-family:var(--font-mono,monospace);font-size:10.5px;font-weight:600;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:5px;padding:1px 5px}
+.clcov-reqid{display:inline-flex;align-items:center;vertical-align:middle;margin-right:7px;font-family:var(--font-mono);font-size:10.5px;font-weight:500;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:var(--radius-sm);padding:1px 5px}
 /* Wraps the shared TestIdBadge so it flows inline in the test card's header. */
 .clcov-testid{display:inline-block;vertical-align:middle;margin-right:7px}
 .clcov-req-title{font-size:13px;color:var(--text-primary);overflow-wrap:anywhere}
-.clcov-kind-tag{display:inline-flex;align-items:center;vertical-align:middle;margin-left:6px;font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:1px 8px}
+.clcov-kind-tag{display:inline-flex;align-items:center;vertical-align:middle;margin-left:6px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text-muted);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:1px 8px}
 /* Status chips collapse to their single-letter form when the card is too narrow for
    the words; the full label stays available via the chip's hover title. */
 .clcov-cq-abbr{display:none}
@@ -1298,28 +1296,28 @@ const COVERAGE_CSS = `
    stays compact and you inspect one path's gap at a time. */
 .clcov-vgrid{margin-top:9px;display:flex;flex-direction:column;gap:6px}
 .clcov-vpaths{display:flex;flex-wrap:wrap;gap:6px}
-.clcov-vpath{display:inline-flex;align-items:center;gap:5px;appearance:none;cursor:pointer;font-family:var(--font-mono,monospace);font-size:9.5px;color:var(--text-secondary);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:2px 10px;transition:background .12s,border-color .12s,transform .1s}
-.clcov-vpath:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--text-muted) 40%,var(--border-default))}
-.clcov-vpath:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent,rgb(56,189,248)) 55%,transparent)}
+.clcov-vpath{display:inline-flex;align-items:center;gap:5px;appearance:none;cursor:pointer;font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);background:var(--bg-base);border:1px solid var(--border-default);border-radius:999px;padding:2px 10px;transition:background .12s,border-color .12s}
+.clcov-vpath:hover{border-color:var(--border-strong);background:var(--bg-hover)}
+.clcov-vpath:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent)}
 /* Active pill: accent-tinted so it clearly owns the tray below it. */
-.clcov-vpath[data-on='true']{background:color-mix(in srgb,var(--accent,rgb(56,189,248)) 13%,var(--bg-surface));border-color:color-mix(in srgb,var(--accent,rgb(56,189,248)) 45%,transparent)}
+.clcov-vpath[data-on='true']{background:color-mix(in srgb,var(--accent) 13%,var(--bg-surface));border-color:color-mix(in srgb,var(--accent) 45%,transparent)}
 .clcov-vpath[data-on='true'] .clcov-vpath-name{color:var(--text-primary)}
 .clcov-vpath-caret{flex:none;width:7px;font-size:8px;color:var(--text-muted)}
-.clcov-vpath[data-on='true'] .clcov-vpath-caret{color:color-mix(in srgb,var(--accent,rgb(56,189,248)) 80%,var(--text-primary))}
+.clcov-vpath[data-on='true'] .clcov-vpath-caret{color:color-mix(in srgb,var(--accent) 80%,var(--text-primary))}
 .clcov-vpath-name{color:var(--text-secondary)}
-.clcov-vpath-n{font-weight:700;font-variant-numeric:tabular-nums}
+.clcov-vpath-n{font-weight:600;font-variant-numeric:tabular-nums}
 /* Expanded detail: a self-contained tray headed by its path name, so the chips
    unambiguously belong to the pill you opened (not the pill above-left of them). */
-.clcov-vtray{display:flex;flex-direction:column;gap:7px;background:var(--bg-base);border:1px solid color-mix(in srgb,var(--accent,rgb(56,189,248)) 22%,var(--border-default));border-radius:var(--radius-md);padding:8px 10px}
-.clcov-vtray-head{font-family:var(--font-mono,monospace);font-size:9.5px;color:var(--text-muted)}
-.clcov-vtray-path{color:var(--text-primary);font-weight:700}
+.clcov-vtray{display:flex;flex-direction:column;gap:7px;background:var(--bg-base);border:1px solid color-mix(in srgb,var(--accent) 22%,var(--border-default));border-radius:var(--radius-md);padding:8px 10px}
+.clcov-vtray-head{font-family:var(--font-mono);font-size:10px;color:var(--text-muted)}
+.clcov-vtray-path{color:var(--text-primary);font-weight:600}
 .clcov-vtray-chips{display:flex;flex-wrap:wrap;gap:6px}
-.clcov-vchip{font-family:var(--font-mono,monospace);font-size:9.5px;letter-spacing:.02em;padding:1px 7px;border-radius:5px;border:1px dashed color-mix(in srgb,var(--text-muted) 55%,var(--border-default));color:var(--text-muted)}
-.clcov-vchip-on{border:1px solid color-mix(in srgb,rgb(52,211,153) 40%,var(--border-default));background:color-mix(in srgb,rgb(52,211,153) 10%,transparent);color:rgb(52,211,153)}
-.clcov-vchip-na{border:1px solid color-mix(in srgb,var(--text-muted) 28%,var(--border-default));background:color-mix(in srgb,var(--text-muted) 6%,transparent);color:var(--text-muted);opacity:.7;font-style:italic}
+.clcov-vchip{font-family:var(--font-mono);font-size:10px;letter-spacing:.02em;padding:1px 7px;border-radius:var(--radius-sm);border:1px dashed color-mix(in srgb,var(--text-muted) 55%,var(--border-default));color:var(--text-muted)}
+.clcov-vchip-on{border:1px solid color-mix(in srgb,var(--success) 40%,var(--border-default));background:color-mix(in srgb,var(--success) 10%,transparent);color:var(--success)}
+.clcov-vchip-na{border:1px solid color-mix(in srgb,var(--text-muted) 28%,var(--border-default));background:color-mix(in srgb,var(--text-muted) 6%,transparent);color:var(--text-muted);opacity:.7}
 .clcov-path-block{display:flex;flex-direction:column;gap:3px}
-.clcov-path-label{align-self:flex-start;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
-.clcov-path-happy{color:rgb(52,211,153)}
-.clcov-path-unhappy{color:rgb(56,189,248)}
+.clcov-path-label{align-self:flex-start;font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
+.clcov-path-happy{color:var(--success)}
+.clcov-path-unhappy{color:var(--accent)}
 .clcov-path-text{margin:0;font-size:12px;line-height:1.5;color:var(--text-secondary)}
 `

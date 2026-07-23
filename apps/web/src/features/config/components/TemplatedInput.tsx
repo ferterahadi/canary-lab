@@ -390,12 +390,10 @@ function TokenPicker({
   return createPortal(
     <div
       ref={popRef}
-      className="fixed z-50 w-64 rounded-md p-2 shadow-lg"
+      className="cl-popover fixed z-50 w-64 rounded-md p-2"
       style={{
         top: state.caret.top,
         left: state.caret.left,
-        background: 'var(--bg-surface)',
-        border: '1px solid var(--border-default)',
       }}
     >
       <div className="mb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>

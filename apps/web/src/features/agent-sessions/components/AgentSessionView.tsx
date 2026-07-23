@@ -308,11 +308,12 @@ export function AgentSessionView({ source, systemRows }: Props) {
           onClick={jumpLatest}
           aria-label="Jump to latest"
           title="Jump to latest"
-          className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-blue-600/85 transition-all duration-150 hover:text-blue-600 hover:[box-shadow:0_4px_14px_color-mix(in_srgb,black_24%,transparent)] dark:text-blue-300/85 dark:hover:text-blue-200"
+          className="absolute bottom-3 right-3 inline-flex h-8 w-8 items-center justify-center rounded-full opacity-85 transition-all duration-150 hover:opacity-100 hover:[box-shadow:var(--shadow-popover)]"
           style={{
+            color: 'var(--accent)',
             background: 'color-mix(in srgb, var(--bg-elevated) 94%, transparent)',
-            border: '1px solid color-mix(in srgb, var(--border-focus) 32%, var(--border-default))',
-            boxShadow: '0 2px 10px color-mix(in srgb, black 20%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--accent) 32%, var(--border-default))',
+            boxShadow: 'var(--shadow-panel)',
             backdropFilter: 'blur(6px)',
           }}
         >
@@ -439,16 +440,16 @@ export function SystemRow({ group }: { group: SystemGroup }) {
 }
 
 const NODE_ACCENT: Record<AgentSessionEvent['kind'], string> = {
-  'user-message': 'var(--accent-cyan, #22d3ee)',
-  'assistant-message': 'var(--accent-violet, #a78bfa)',
+  'user-message': 'var(--boot)',
+  'assistant-message': 'var(--assistant)',
   'assistant-thinking': 'var(--text-muted)',
-  'tool-call': 'var(--accent-amber, #fbbf24)',
+  'tool-call': 'var(--warning)',
   'tool-result': 'var(--text-muted)',
 }
 
 function NodeMarker({ event }: { event: AgentSessionEvent }) {
   const isError = event.kind === 'tool-result' && event.isError === true
-  const accent = isError ? 'var(--accent-rose, #fb7185)' : NODE_ACCENT[event.kind]
+  const accent = isError ? 'var(--danger)' : NODE_ACCENT[event.kind]
   const filled = event.kind === 'user-message' || event.kind === 'assistant-message'
   return (
     <span
@@ -511,7 +512,7 @@ function ApiErrorBody({ text, timestamp }: { text: string; timestamp: string }) 
   return (
     <>
       <div className="agentts-rowhead">
-        <span className="agentts-label" style={{ color: 'var(--accent-rose, #fb7185)' }}>Terminated · API error</span>
+        <span className="agentts-label" style={{ color: 'var(--danger)' }}>Terminated · API error</span>
         <Timestamp value={timestamp} />
       </div>
       <div className="agentts-prose" style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{firstLineOf(text)}</div>
@@ -681,9 +682,9 @@ function ToolResultBody({ output, isError, timestamp, toolId }: { output: string
   return (
     <>
       <RowHead label={isError ? 'Tool error' : 'Result'} timestamp={timestamp} />
-      <div className="agentts-tool" style={isError ? { borderColor: 'color-mix(in srgb, var(--accent-rose, #fb7185) 45%, var(--border-default))' } : undefined}>
+      <div className="agentts-tool" style={isError ? { borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' } : undefined}>
         <button type="button" className="agentts-toolbtn" onClick={() => setExpanded((v) => !v)} title={toolId}>
-          <span className="agentts-tooltarget" style={{ color: isError ? 'var(--accent-rose, #fb7185)' : 'var(--text-secondary)' }}>
+          <span className="agentts-tooltarget" style={{ color: isError ? 'var(--danger)' : 'var(--text-secondary)' }}>
             {preview || '(empty)'}
           </span>
           <Chevron open={expanded} className="agentts-chev" />

@@ -294,7 +294,7 @@ function FlightDetail({
   const evalStage = flight.stages.find((s) => s.key === 'evaluation-export') ?? null
   return (
     <>
-      <header className="flex items-center gap-3 border-b px-4 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
+      <header className="cl-shell-bar flex items-center gap-3 px-4 py-2.5">
         {/* R71/W1: the title IS the breadcrumb — "Flights" links back to the
             picker (the always-visible Flights pill is the second way back), so
             navigation costs no button. Controls are exactly one state-dependent
@@ -302,7 +302,7 @@ function FlightDetail({
         {/* R72: one line answers "which flight, what state" — breadcrumb,
             name, chip, side by side. Repos + intent live on the Repo scan
             stage. */}
-        <h1 className="flex min-w-0 flex-1 items-center gap-2 text-sm font-semibold">
+        <h1 className="flex min-w-0 flex-1 items-center gap-2 text-[13.5px] font-semibold">
           <button
             type="button"
             data-testid="flight-breadcrumb"
@@ -314,7 +314,13 @@ function FlightDetail({
             Flights
           </button>
           <span aria-hidden="true" className="shrink-0 font-normal" style={{ color: 'var(--text-muted)' }}>/</span>
-          <span className="min-w-0 truncate">🕊️ {flight.feature}</span>
+          <span className="min-w-0 truncate">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="mr-1.5 inline-block align-[-1px]">
+              <path d="M22 2 11 13" />
+              <path d="M22 2 15 22l-4-9-9-4Z" />
+            </svg>
+            {flight.feature}
+          </span>
           <Chip
             testId="flight-status"
             chrome="fill"
@@ -441,7 +447,7 @@ function FlightDetail({
               parks the selection. Enabled in both — clicking while already
               following is a harmless no-op. */}
           <div className="flex h-6 items-center justify-between px-2">
-            <span className="text-[9.5px] font-semibold uppercase tracking-wide leading-none" style={{ color: 'var(--text-muted)' }}>
+            <span className="cl-rubric leading-none">
               Stages
             </span>
             <button
@@ -451,13 +457,13 @@ function FlightDetail({
               onClick={() => setSelectedStage(null)}
               className="cl-button flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none"
               style={selectedStage === null
-                ? { color: 'rgb(56, 189, 248)', borderColor: 'color-mix(in srgb, rgb(56, 189, 248) 45%, var(--border-default))', background: 'var(--bg-selected)' }
+                ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))', background: 'var(--bg-selected)' }
                 : undefined}
               title={selectedStage === null
                 ? 'Selection follows the stage that needs eyes'
                 : 'Return to auto-selecting the stage that needs eyes'}
             >
-              <span aria-hidden="true" className="text-[9px]" style={selectedStage !== null ? { color: 'rgb(56, 189, 248)' } : undefined}>
+              <span aria-hidden="true" className="text-[9px]" style={selectedStage !== null ? { color: 'var(--accent)' } : undefined}>
                 {selectedStage === null ? '●' : '↺'}
               </span>
               Follow
@@ -479,7 +485,7 @@ function FlightDetail({
                 aria-current={selected ? 'true' : undefined}
                 onClick={() => setSelectedStage(s.key)}
                 title={STAGE_BLURB[s.key]}
-                className="flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors hover:bg-white/[0.04]"
+                className="cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors"
                 style={{ background: selected ? 'var(--bg-selected)' : undefined }}
               >
                 <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
@@ -491,8 +497,8 @@ function FlightDetail({
                 {s.note && (
                   <span
                     data-testid={`stage-rail-note-${s.key}`}
-                    className="shrink-0 rounded px-1 text-[9px] font-semibold uppercase tracking-wide"
-                    style={{ color: 'rgb(251, 191, 36)', background: 'color-mix(in srgb, rgb(251, 191, 36) 12%, transparent)' }}
+                    className="cl-rubric shrink-0 rounded px-1"
+                    style={{ color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)' }}
                   >
                     {s.note}
                   </span>
@@ -624,7 +630,7 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
       </pre>
       {errorDetail?.logTail && (
         <>
-          <div className="text-[9.5px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+          <div className="cl-rubric">
             Last lines of {logName ?? 'the service log'}
           </div>
           <pre
@@ -643,7 +649,7 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
             data-testid="stage-error-open-log"
             onClick={() => { api.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
             className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-            style={{ color: 'rgb(56, 189, 248)' }}
+            style={{ color: 'var(--accent)' }}
           >
             Open full service log
           </button>
@@ -654,7 +660,7 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
       )}
       {remedy && (
         <div data-testid="stage-remedy" className="flex flex-col gap-2 border-t pt-2.5" style={{ borderColor: 'var(--border-default)' }}>
-          <div className="text-[9.5px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+          <div className="cl-rubric">
             Recommended fix
           </div>
           {remedy.repos.length === 0 ? (
@@ -675,7 +681,7 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
                     style={i > 0 ? { borderColor: 'var(--border-default)' } : undefined}
                     title={repo.path}
                   >
-                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'rgb(251, 191, 36)' }} />
+                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'var(--warning)' }} />
                     <span className="text-[11.5px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{repo.name}</span>
                     <span className="ml-auto text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                       {repo.modified} modified
@@ -699,7 +705,7 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
                   disabled={remedyBusy !== null}
                   onClick={() => runRemedy('commit')}
                   className="cl-button px-2.5 py-1 text-xs"
-                  style={{ color: 'rgb(56, 189, 248)' }}
+                  style={{ color: 'var(--accent)' }}
                 >
                   {remedyBusy === 'commit' ? 'Committing…' : 'Commit and continue'}
                 </button>
@@ -751,18 +757,18 @@ function StagePausedPanel({ kind }: { kind: 'interrupted' | 'not-started' }) {
       data-testid="stage-paused"
       className="flex w-full max-w-[76ch] flex-col gap-1.5 px-3 py-2.5"
       style={{
-        borderLeft: '2px solid rgb(251, 191, 36)',
-        background: 'color-mix(in srgb, rgb(251, 191, 36) 7%, transparent)',
+        borderLeft: '2px solid var(--warning)',
+        background: 'color-mix(in srgb, var(--warning) 7%, transparent)',
       }}
     >
-      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'rgb(251, 191, 36)' }}>
+      <div className="cl-rubric flex items-center gap-1.5" style={{ color: 'var(--warning)' }}>
         <span aria-hidden="true">⏸</span>
         {interrupted ? 'Paused mid-step' : 'Paused before this step'}
       </div>
       <p className="m-0 text-[12px] leading-snug" style={{ color: 'var(--text-primary)' }}>
         {/* An ↑ points at the header control by direction, not by a brittle
             "top-right" — matches the failed card's "Continue from the header". */}
-        Use <span className="whitespace-nowrap font-semibold" style={{ color: 'rgb(56, 189, 248)' }}>↑ Continue</span>{' '}
+        Use <span className="whitespace-nowrap font-semibold" style={{ color: 'var(--accent)' }}>↑ Continue</span>{' '}
         in the header{interrupted
           ? ' to resume this step from where it stopped — everything finished in earlier steps is kept.'
           : ' to start this step — the earlier steps are already done.'}
@@ -932,7 +938,7 @@ function StageDetail({
             data-testid={`stage-drill-${stage.key}`}
             onClick={drillThrough.onClick}
             className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-            style={{ color: 'rgb(56, 189, 248)' }}
+            style={{ color: 'var(--accent)' }}
           >
             {drillThrough.label}
           </button>
@@ -1153,7 +1159,7 @@ function StageActivity({
           onClick={() => setUserToggled(!open)}
           className="flex flex-1 items-center gap-2.5 text-left"
         >
-          <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.11em]" style={{ color: 'var(--text-muted)' }}>
+          <span className="cl-rubric flex items-center gap-1.5">
             {/* The same live pulse the stage's `generating` chip shows — echoed
                 on the band so a collapsed rail still advertises that work is
                 running inside it. */}
@@ -1256,15 +1262,14 @@ function ContinueMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-20 mt-1 flex w-[260px] flex-col gap-1 rounded border p-1.5"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-menu, 0 4px 16px rgba(0,0,0,.35))' }}
+          className="cl-popover absolute right-0 top-full z-20 mt-1 flex w-[260px] flex-col gap-1 p-1.5"
         >
           <button
             type="button"
             role="menuitem"
             data-testid="flight-resume"
             onClick={() => { setOpen(false); onAction(() => api.resumeFlight(flight.flightId)) }}
-            className="rounded px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
+            className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
             <span className="block text-xs font-medium">
               {resumeTarget ? `▶ Resume at ${resumeTarget}` : '▶ Resume'}
@@ -1278,7 +1283,7 @@ function ContinueMenu({
             role="menuitem"
             data-testid="flight-redo-open"
             onClick={() => { setOpen(false); setDialogOpen(true) }}
-            className="rounded px-2 py-1.5 text-left transition-colors hover:bg-white/[0.05]"
+            className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
             <span className="block text-xs font-medium">↻ From a step…</span>
             <span className="block text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
@@ -1382,7 +1387,7 @@ function RedoFlightDialog({
             type="button"
             data-testid="flight-redo-start-fresh"
             onClick={onStartFresh}
-            className="-mb-2 flex items-start gap-3 rounded-md px-3.5 py-2 text-left transition-colors hover:bg-white/[0.04]"
+            className="cl-hover-row -mb-2 flex items-start gap-3 rounded-md px-3.5 py-2 text-left transition-colors"
           >
             <span
               aria-hidden="true"
@@ -1420,7 +1425,7 @@ function RedoFlightDialog({
             const lastStatus = flight.stages.find((st) => st.key === s.key)?.status
             const settled = lastStatus && lastStatus !== 'pending'
             const badgeTone = selected
-              ? 'rgb(56, 189, 248)'
+              ? 'var(--accent)'
               : settled ? stageStatusTone(lastStatus) : 'var(--text-muted)'
             return (
               <button
@@ -1431,7 +1436,7 @@ function RedoFlightDialog({
                 data-testid={`flight-redo-${s.key}`}
                 disabled={!allowed}
                 onClick={() => setFromStage(selected ? null : s.key)}
-                className={`flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors enabled:hover:bg-white/[0.04] ${index > 0 ? 'border-t' : ''}`}
+                className={`cl-hover-row flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors ${index > 0 ? 'border-t' : ''}`}
                 style={{
                   // Neutral surfaces only — rows sit on the modal's own grey;
                   // selection = the app's selected-grey + one sky bar.
@@ -1439,7 +1444,7 @@ function RedoFlightDialog({
                   background: selected ? 'var(--bg-selected)' : 'transparent',
                   opacity: allowed ? 1 : 0.55,
                   cursor: allowed ? 'pointer' : 'not-allowed',
-                  boxShadow: selected ? 'inset 2px 0 0 rgb(56, 189, 248)' : undefined,
+                  boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
                 }}
               >
                 <span
@@ -1475,8 +1480,7 @@ function RedoFlightDialog({
             onChange={(e) => setFeedback(e.target.value)}
             placeholder="e.g. the collected docs were about the wrong subsystem"
             rows={2}
-            className="w-full rounded-md border bg-transparent px-2.5 py-2 text-[11.5px] outline-none"
-            style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)' }}
+            className="cl-input w-full px-2.5 py-2 text-[11.5px]"
           />
         </label>
       </div>
@@ -1560,8 +1564,7 @@ function FlightMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-20 mt-1 flex min-w-[172px] flex-col rounded border p-1"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', boxShadow: 'var(--shadow-menu, 0 4px 16px rgba(0,0,0,.35))' }}
+          className="cl-popover absolute right-0 top-full z-20 mt-1 flex min-w-[172px] flex-col p-1.5"
         >
           {items.map((item) => {
             const isArmed = armed === item.key
@@ -1577,7 +1580,7 @@ function FlightMenu({
                   setOpen(false)
                   item.fire()
                 }}
-                className="rounded px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/[0.05]"
+                className="cl-hover-row rounded px-2.5 py-1.5 text-left text-xs transition-colors"
                 style={{ color: item.tone }}
               >
                 {isArmed ? item.confirmLabel : item.label}
@@ -1650,7 +1653,7 @@ function FlightSummaryStrip({
     items.push({
       label: 'Coverage',
       value: `${lastMapped.coveragePct}%`,
-      tone: lastMapped.gapsOpen === 0 ? 'rgb(52, 211, 153)' : 'rgb(251, 191, 36)',
+      tone: lastMapped.gapsOpen === 0 ? 'var(--success)' : 'var(--warning)',
       stage: 'specs-coverage',
     })
   }
@@ -1659,7 +1662,7 @@ function FlightSummaryStrip({
     items.push({
       label: 'Run',
       value: flight.runVerdict,
-      tone: flight.runVerdict === 'passed' ? 'rgb(52, 211, 153)' : flight.runVerdict === 'failed' ? 'var(--danger)' : 'var(--text-muted)',
+      tone: flight.runVerdict === 'passed' ? 'var(--success)' : flight.runVerdict === 'failed' ? 'var(--danger)' : 'var(--text-muted)',
       stage: 'run',
     })
   }
@@ -1668,7 +1671,7 @@ function FlightSummaryStrip({
   const docs = Array.isArray(docsEv?.docs) ? docsEv.docs.length : 0
   if (docs > 0) items.push({ label: 'Docs', value: String(docs), stage: 'docs' })
 
-  if (flight.links?.evaluationZip) items.push({ label: 'Report', value: 'ready', tone: 'rgb(52, 211, 153)', stage: 'evaluation-export' })
+  if (flight.links?.evaluationZip) items.push({ label: 'Report', value: 'ready', tone: 'var(--success)', stage: 'evaluation-export' })
 
   const autopilotOn = flight.opts.autopilot !== false
   const autopilotActive = autopilotOn && !flight.opts.yolo
@@ -1683,7 +1686,7 @@ function FlightSummaryStrip({
         {items.map((item) => {
           const body = (
             <>
-              <span className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+              <span className="cl-rubric">
                 {item.label}
               </span>
               <span style={{ color: item.tone ?? 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{item.value}</span>
@@ -1722,7 +1725,7 @@ function FlightSummaryStrip({
                 ? 'Autopilot is answering the checkpoints that have a safe default — click to be asked at every checkpoint from the next one on'
                 : 'Every checkpoint parks for you — click to let the safe defaults answer themselves again'}
           >
-            <span className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+            <span className="cl-rubric">
               Autopilot
             </span>
             <span
@@ -1734,8 +1737,8 @@ function FlightSummaryStrip({
               }}
             >
               <span
-                className="inline-block h-3 w-3 rounded-full shadow-sm transition-transform duration-150"
-                style={{ background: 'var(--bg-base)', transform: autopilotOn ? 'translateX(13px)' : 'translateX(2px)' }}
+                className="inline-block h-3 w-3 rounded-full transition-transform duration-150"
+                style={{ background: 'var(--bg-base)', boxShadow: 'var(--shadow-panel)', transform: autopilotOn ? 'translateX(13px)' : 'translateX(2px)' }}
               />
             </span>
             <span
@@ -1844,7 +1847,7 @@ function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageProgress
       : []
   return (
     <div data-testid="specs-pass-timeline">
-      <h3 className="mb-2 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+      <h3 className="cl-rubric mb-2">
         Passes
       </h3>
       <StepList>
@@ -1919,7 +1922,7 @@ function FeatureRunsPanel({
   if (runs.length === 0) return null
   return (
     <div data-testid="feature-runs">
-      <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+      <h3 className="cl-rubric mb-1">
         Runs
       </h3>
       <ul className="m-0 flex list-none flex-col gap-1 rounded border p-1" style={{ borderColor: 'var(--border-default)' }}>
@@ -2013,7 +2016,7 @@ function RunRepairSummary({ runId, detail, active, onError }: { runId: string; d
               data-testid="run-stage-restart"
               onClick={() => { api.restartRun(runId).catch(report) }}
               className="cl-button px-2 py-0.5 text-[11px]"
-              style={{ color: 'rgb(56, 189, 248)' }}
+              style={{ color: 'var(--accent)' }}
               title="Re-run the remaining/failed tests on the same run"
             >
               ▸ Restart run
@@ -2023,11 +2026,11 @@ function RunRepairSummary({ runId, detail, active, onError }: { runId: string; d
       )}
       {cycles.length > 0 && (
         <div data-testid="repair-journal">
-          <h3 className="mb-1 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Repairs</h3>
+          <h3 className="cl-rubric mb-1">Repairs</h3>
           <ul className="m-0 flex list-none flex-col gap-1 p-0">
             {cycles.map((entry) => (
               <li key={entry.iteration ?? entry.timestamp ?? entry.body.slice(0, 24)} className="text-[11.5px]" style={{ color: 'var(--text-secondary)' }}>
-                <span style={{ color: entry.outcome === 'passed' ? 'rgb(52, 211, 153)' : 'var(--text-muted)' }}>
+                <span style={{ color: entry.outcome === 'passed' ? 'var(--success)' : 'var(--text-muted)' }}>
                   Cycle {entry.iteration ?? '?'}{entry.outcome ? ` · ${entry.outcome}` : ''}
                 </span>
                 {entry.hypothesis ? ` — ${truncate(entry.hypothesis, 90)}` : ''}
@@ -2069,7 +2072,7 @@ function DownloadEvaluationAction({
         downloadTask(taskId).catch(() => setFailed(true))
       }}
       className={`${primary ? 'cl-button-primary' : 'cl-button'} shrink-0 px-2.5 py-1 text-xs`}
-      style={primary ? undefined : { color: failed ? 'var(--danger)' : 'rgb(52, 211, 153)' }}
+      style={primary ? undefined : { color: failed ? 'var(--danger)' : 'var(--success)' }}
     >
       {failed ? 'Download failed — retry' : primary ? '⬇ Download report' : '⬇ Download evaluation (.zip)'}
     </button>
@@ -2117,10 +2120,10 @@ function CheckpointControls({
     <section
       data-testid="checkpoint-controls"
       className="flex w-full max-w-[76ch] flex-col gap-2.5 rounded border p-3"
-      style={{ borderColor: 'color-mix(in srgb, rgb(251, 191, 36) 45%, var(--border-default))', background: 'var(--bg-surface)' }}
+      style={{ borderColor: 'color-mix(in srgb, var(--warning) 45%, var(--border-default))', background: 'var(--bg-surface)' }}
     >
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" style={{ color: 'rgb(251, 191, 36)' }}>⏸</span>
+        <span aria-hidden="true" style={{ color: 'var(--warning)' }}>⏸</span>
         <span
           data-testid="checkpoint-title"
           className="text-[12.5px] font-semibold"
@@ -2155,8 +2158,8 @@ function CheckpointControls({
             placeholder={'KEY=value\nANOTHER_KEY=value'}
             spellCheck={false}
             rows={4}
-            className="w-full rounded border p-2 text-[11px] outline-none"
-            style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+            className="cl-input w-full p-2 text-[11px]"
+            style={{ fontFamily: 'var(--font-mono)' }}
           />
           <button
             type="button"
@@ -2188,7 +2191,7 @@ function CheckpointControls({
             className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs"
             title={option}
             style={i === 0
-              ? { color: 'rgb(56, 189, 248)', borderColor: 'color-mix(in srgb, rgb(56, 189, 248) 45%, var(--border-default))' }
+              ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
               : undefined}
           >
             {checkpointOptionLabel(checkpoint.kind, option)}
@@ -2196,8 +2199,7 @@ function CheckpointControls({
               /* R71/W3: the default is named, not color-only. */
               <span
                 data-testid="checkpoint-recommended"
-                className="rounded border px-1 py-px text-[9px] font-semibold uppercase tracking-wide"
-                style={{ borderColor: 'color-mix(in srgb, rgb(56, 189, 248) 45%, transparent)' }}
+                className="cl-badge-accent"
               >
                 Recommended
               </span>

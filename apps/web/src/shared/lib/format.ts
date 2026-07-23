@@ -1,31 +1,5 @@
 // Pure formatting helpers used by the read-only views.
 
-import type { RunStatus } from '../api/types'
-
-/**
- * @deprecated Use the `<RunStatusIndicator status={...} />` component instead.
- * The bordered-pill style this returns is no longer used in the UI — it
- * collided visually with destructive action buttons (Stop / Delete). Kept
- * exported only to avoid breaking any external consumer; new call sites
- * should not be added.
- */
-export function statusBadgeClass(status: RunStatus): string {
-  switch (status) {
-    case 'passed':
-      return 'bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300'
-    case 'failed':
-      return 'bg-rose-500/15 text-rose-700 border-rose-500/40 dark:text-rose-300'
-    case 'running':
-      return 'bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300'
-    case 'healing':
-      return 'bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300'
-    case 'aborted':
-      return 'bg-zinc-500/15 text-zinc-700 border-zinc-500/40 dark:text-zinc-300'
-    default:
-      return 'bg-zinc-500/15 text-zinc-700 border-zinc-500/40 dark:text-zinc-300'
-  }
-}
-
 // Format a duration (in milliseconds) as a short human string. Examples:
 //   500   -> "0.5s"
 //   12_500 -> "12.5s"

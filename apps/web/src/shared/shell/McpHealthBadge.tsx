@@ -216,7 +216,7 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
                     borderColor: selected ? 'color-mix(in srgb, var(--accent) 58%, var(--border-default))' : 'var(--border-default)',
                     background: selected
                       ? 'color-mix(in srgb, var(--accent) 13%, transparent)'
-                      : 'color-mix(in srgb, var(--bg-muted) 26%, transparent)',
+                      : 'color-mix(in srgb, var(--bg-elevated) 26%, transparent)',
                   }}
                 >
                   <span className="block truncate" style={{ color: 'var(--text-primary)' }}>{candidate.label}</span>
@@ -241,7 +241,7 @@ const McpHealthMenu = forwardRef<HTMLDivElement, {
                   className="truncate rounded px-2 py-0.5 text-[11px]"
                   title={tool}
                   style={{
-                    background: 'color-mix(in srgb, var(--bg-muted) 52%, transparent)',
+                    background: 'color-mix(in srgb, var(--bg-elevated) 52%, transparent)',
                     color: 'var(--text-secondary)',
                     fontFamily: 'var(--font-mono)',
                   }}
@@ -382,7 +382,7 @@ function CopyField({ value, label }: { value: string; label: string }) {
       className="mt-1 flex items-stretch overflow-hidden rounded border"
       style={{
         borderColor: 'var(--border-default)',
-        background: 'color-mix(in srgb, var(--bg-muted) 44%, transparent)',
+        background: 'color-mix(in srgb, var(--bg-elevated) 44%, transparent)',
       }}
     >
       <code

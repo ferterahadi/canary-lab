@@ -156,7 +156,7 @@ export function RunDetailColumn({
           <span
             className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase"
             style={{
-              background: isVerify ? 'rgba(14, 165, 233, 0.12)' : isBootRun ? 'var(--boot-soft)' : 'var(--bg-selected)',
+              background: isVerify ? 'var(--accent-soft)' : isBootRun ? 'var(--boot-soft)' : 'var(--bg-selected)',
               color: isVerify ? 'var(--accent)' : isBootRun ? 'var(--boot)' : 'var(--text-muted)',
               letterSpacing: '0.04em',
             }}
@@ -356,14 +356,14 @@ function RunOverviewTab({
               {exportMenuOpen && (
                 <div
                   role="menu"
-                  className="absolute right-0 z-20 mt-1 w-44 overflow-hidden rounded-md border py-1 text-xs shadow-lg"
-                  style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+                  className="cl-popover absolute right-0 z-20 mt-1 w-44 overflow-hidden py-1 text-xs"
+                  style={{ color: 'var(--text-primary)' }}
                 >
                 <button
                   type="button"
                   role="menuitem"
                   onClick={() => void handleExportEvaluation('raw')}
-                  className="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                  className="cl-hover-row block w-full px-3 py-2 text-left"
                 >
                   <span className="block font-medium">Raw output</span>
                   <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Fast report, no LLM rewrite</span>
@@ -372,7 +372,7 @@ function RunOverviewTab({
                   type="button"
                   role="menuitem"
                   onClick={() => void handleExportEvaluation('localized')}
-                  className="block w-full px-3 py-2 text-left hover:bg-black/5 dark:hover:bg-white/5"
+                  className="cl-hover-row block w-full px-3 py-2 text-left"
                 >
                   <span className="block font-medium">Localized output</span>
                   <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Uses the LLM rewrite</span>
@@ -1354,7 +1354,7 @@ function ServiceTabButton({
       <ServiceStatusDot status={service.status} />
       <span className="max-w-[150px] truncate">{labelParts.primary}</span>
       {labelParts.branch && (
-        <span className="max-w-[120px] truncate rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: branch?.dirty ? '#f59e0b' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+        <span className="max-w-[120px] truncate rounded px-1 py-0.5 text-[10px]" style={{ background: 'var(--bg-selected)', color: branch?.dirty ? 'var(--warning)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
           @ {labelParts.branch}
         </span>
       )}
@@ -1414,7 +1414,7 @@ function BranchRow({ branch }: { branch: RepoBranchSnapshot }) {
         {branch.dirty && (
           <span
             className="shrink-0 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider"
-            style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}
+            style={{ background: 'var(--bg-selected)', color: 'var(--warning)' }}
           >
             dirty
           </span>
@@ -1422,7 +1422,7 @@ function BranchRow({ branch }: { branch: RepoBranchSnapshot }) {
         {mismatch && (
           <span
             className="shrink-0 rounded px-1 py-0.5 text-[9px] uppercase tracking-wider"
-            style={{ background: 'var(--bg-selected)', color: '#f59e0b' }}
+            style={{ background: 'var(--bg-selected)', color: 'var(--warning)' }}
             title={`expected ${branch.expectedBranch}`}
           >
             ≠ {branch.expectedBranch}

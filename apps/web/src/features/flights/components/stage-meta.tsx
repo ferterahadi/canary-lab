@@ -52,11 +52,11 @@ export const STAGE_BLURB: Record<FlightStageKey, string> = {
 /** The single status hue map — rail, chip, mini rail, and any artifact surface
  *  all read this so a colour means the same thing everywhere. */
 export function stageStatusTone(status: FlightStageStatus | undefined): string {
-  if (status === 'done') return 'rgb(52, 211, 153)'
-  if (status === 'running') return 'rgb(56, 189, 248)'
-  if (status === 'waiting-for-approval') return 'rgb(251, 191, 36)'
+  if (status === 'done') return 'var(--success)'
+  if (status === 'running') return 'var(--running)'
+  if (status === 'waiting-for-approval') return 'var(--warning)'
   if (status === 'failed') return 'var(--danger)'
-  if (status === 'skipped') return 'color-mix(in srgb, rgb(52, 211, 153) 55%, var(--text-muted))'
+  if (status === 'skipped') return 'color-mix(in srgb, var(--success) 55%, var(--text-muted))'
   return 'var(--text-muted)'
 }
 
@@ -547,8 +547,8 @@ export function formatDuration(startedAt?: string, endedAt?: string): string | n
 }
 
 const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
-  good: 'rgb(52, 211, 153)',
-  warn: 'rgb(251, 191, 36)',
+  good: 'var(--success)',
+  warn: 'var(--warning)',
   bad: 'var(--danger)',
 }
 
@@ -590,7 +590,7 @@ function FactTile({ fact: f }: { fact: StageFact }) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
   return (
     <div className="min-w-0 rounded-md px-3 py-2.5" style={{ background: 'var(--bg-elevated)' }}>
-      <div className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{f.label}</div>
+      <div className="cl-rubric">{f.label}</div>
       {f.big ? (
         <>
           <div className="mt-1 flex items-baseline gap-1 leading-none">

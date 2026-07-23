@@ -415,8 +415,7 @@ function AddSlotModal({
             <button
               type="button"
               onClick={() => loadDir(pathInput)}
-              className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-              style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+              className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
             >
               Go
             </button>
@@ -460,8 +459,7 @@ function AddSlotModal({
               type="button"
               onClick={() => { setStage('pick'); setError(null) }}
               disabled={busy}
-              className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
-              style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+              className="cl-button rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
             >
               Back
             </button>
@@ -469,8 +467,7 @@ function AddSlotModal({
               type="button"
               onClick={onSubmit}
               disabled={busy || !slotName.trim() || !target.trim()}
-              className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
-              style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+              className="cl-button rounded-md px-3 py-1 text-[11px] uppercase tracking-wider"
             >
               {busy ? '…' : 'Add slot'}
             </button>
@@ -556,8 +553,8 @@ function SlotEditor({
             <button
               type="button"
               onClick={() => ed.setDraft([...draft, { key: '', value: '' }])}
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-              style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+              className="cl-button inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              style={{ borderStyle: 'dashed' }}
             >
               <PlusIcon />
               Add entry
@@ -566,8 +563,8 @@ function SlotEditor({
               type="button"
               onClick={() => setCopyOpen(true)}
               title="Seed values from another env or a file"
-              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-              style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
+              className="cl-button inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              style={{ borderStyle: 'dashed' }}
             >
               Copy from…
             </button>
@@ -718,11 +715,10 @@ function CopyFromModal({
               type="button"
               onClick={() => { if (siblingEnvs.length > 0) setMode('env') }}
               disabled={siblingEnvs.length === 0}
-              className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
               style={{
-                color: mode === 'env' ? 'var(--text-primary)' : 'var(--text-muted)',
-                border: `1px solid ${mode === 'env' ? 'var(--text-primary)' : 'var(--border-default)'}`,
-                opacity: siblingEnvs.length === 0 ? 0.4 : 1,
+                color: mode === 'env' ? 'var(--text-primary)' : undefined,
+                borderColor: mode === 'env' ? 'var(--text-primary)' : undefined,
               }}
             >
               From env
@@ -730,10 +726,10 @@ function CopyFromModal({
             <button
               type="button"
               onClick={() => setMode('file')}
-              className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+              className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
               style={{
-                color: mode === 'file' ? 'var(--text-primary)' : 'var(--text-muted)',
-                border: `1px solid ${mode === 'file' ? 'var(--text-primary)' : 'var(--border-default)'}`,
+                color: mode === 'file' ? 'var(--text-primary)' : undefined,
+                borderColor: mode === 'file' ? 'var(--text-primary)' : undefined,
               }}
             >
               From file
@@ -763,8 +759,7 @@ function CopyFromModal({
                 <button
                   type="button"
                   onClick={() => loadDir(filePath)}
-                  className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-                  style={{ color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
+                  className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
                 >
                   Go
                 </button>

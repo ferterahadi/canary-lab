@@ -53,11 +53,11 @@ export function SaveBar({ dirty, saving, error, savedAt, onSave, onDiscard, righ
           disabled={!dirty || saving}
           className="rounded-md px-3 py-1 text-[11px] uppercase tracking-wider transition-colors duration-150"
           style={{
-            color: 'var(--border-focus)',
-            border: '1px solid color-mix(in srgb, var(--border-focus) 40%, transparent)',
+            color: 'var(--accent)',
+            border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
             background: dirty && !saving
-              ? 'color-mix(in srgb, var(--border-focus) 14%, transparent)'
-              : 'color-mix(in srgb, var(--border-focus) 4%, transparent)',
+              ? 'color-mix(in srgb, var(--accent) 14%, transparent)'
+              : 'color-mix(in srgb, var(--accent) 4%, transparent)',
             opacity: dirty && !saving ? 1 : 0.5,
             cursor: dirty && !saving ? 'pointer' : 'not-allowed',
           }}

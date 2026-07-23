@@ -475,7 +475,7 @@ export function FlightStartDialog({
           data-testid="flight-steps-toggle"
           aria-expanded={showSteps}
           onClick={() => setShowSteps((v) => !v)}
-          className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-white/[0.03]"
+          className="cl-hover-row flex w-full items-center gap-2 px-3 py-2 text-left"
           style={{ background: 'var(--bg-selected)' }}
         >
           <span
@@ -880,7 +880,7 @@ function ProposalView({
           view instead of trailing under the scrolling list. */}
       <div className="flex flex-col gap-1">
         <label className="flex items-center gap-2 rounded border px-3 py-2" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-selected)' }}>
-          <span className="shrink-0 text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>
+          <span className="cl-rubric shrink-0">
             Group
           </span>
           <input
@@ -932,7 +932,7 @@ function ProposalView({
               <div className="min-w-0 flex-1">
                 {isEditing ? (
                   <div className="flex flex-col gap-1">
-                    <div className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+                    <div className="cl-rubric">
                       Name
                     </div>
                     <input
@@ -948,7 +948,7 @@ function ProposalView({
                         A suite named "{slug}" already exists — rename this one.
                       </div>
                     )}
-                    <div className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-secondary)' }}>
+                    <div className="cl-rubric">
                       Intent
                     </div>
                     <Textarea value={f.description} onChange={(v) => patch(i, { description: v })} minRows={4} maxRows={10} />
@@ -985,7 +985,7 @@ function ProposalView({
                         aria-label={`Edit ${f.name}`}
                         data-testid={`flight-proposal-edit-${i}`}
                         onClick={() => openEdit(i)}
-                        className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors hover:bg-white/[0.04]"
+                        className="cl-hover-row flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px]"
                         style={{ color: 'var(--text-muted)' }}
                       >
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1112,7 +1112,7 @@ function StageRow({
       data-testid={testId}
       disabled={disabled}
       onClick={onPick}
-      className={`flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors enabled:hover:bg-white/[0.04] ${divider ? 'border-t' : ''}`}
+      className={`flex items-start gap-3 px-3.5 py-2.5 text-left ${disabled ? '' : 'cl-hover-row'} ${divider ? 'border-t' : ''}`}
       style={{
         // Neutral surfaces only — the rows sit on the modal's own grey, never
         // a tinted slab. Selection = the app's selected-grey + one accent bar.

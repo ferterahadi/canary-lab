@@ -35,11 +35,20 @@
   --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
+  /* Sky "in progress" status hue — the token twin of the bg-sky-500 dot
+     classes, for inline styles that used to hardcode rgb(56,189,248). Distinct
+     from --accent (brand blue = interactive affordances): sky always MEANS
+     running/active, never "click me". */
+  --running: #0ea5e9;
   /* Boot-only sessions: a teal identity distinct from sky=running /
      amber=healing / emerald=passed so a held "services up" run is never
      mistaken for a test run. */
   --boot: #0891b2;
   --boot-soft: color-mix(in srgb, var(--boot) 12%, transparent);
+  /* Assistant-message identity in the agent timeline (AgentSessionView) — a
+     violet reserved for "the model speaks", outside the status-hue vocabulary
+     on purpose so it never reads as run state. */
+  --assistant: #7c3aed;
 
   --text-primary: #0a0a0a;
   --text-secondary: #525252;
@@ -88,8 +97,10 @@
   --success: #34d399;
   --warning: #fbbf24;
   --danger: #f87171;
+  --running: #38bdf8;
   --boot: #22d3ee;
   --boot-soft: color-mix(in srgb, var(--boot) 18%, transparent);
+  --assistant: #a78bfa;
 
   --text-primary: #fafafa;
   --text-secondary: #a3a3a3;
@@ -353,6 +364,16 @@ body {
 .cl-menu-item:hover {
   background: var(--bg-input);
   color: var(--text-primary);
+}
+
+/* Theme-safe row/menu-item hover for hand-composed rows. Replaces the
+   dark-only `hover:bg-white/[0.03]` habit — white-alpha hovers vanish (or go
+   wrong) on the light theme; this tracks the theme's hover token. */
+.cl-hover-row {
+  transition: background 120ms ease;
+}
+.cl-hover-row:hover {
+  background: var(--bg-hover);
 }
 
 .feature-row__cog {
@@ -1241,6 +1262,21 @@ body {
 .dark .cl-status-dot.bg-emerald-500 { box-shadow: 0 0 8px rgba(52, 211, 153, 0.40); }
 .dark .cl-status-dot.bg-rose-500    { box-shadow: 0 0 8px rgba(248, 113, 113, 0.40); }
 .dark .cl-status-dot.bg-amber-500   { box-shadow: 0 0 8px rgba(251, 191, 36, 0.40); }
+.dark .cl-status-dot.bg-cyan-500    { box-shadow: 0 0 8px rgba(34, 211, 238, 0.40); }
+
+/* Slow opacity breathe for "work in progress" labels/dots (the coverage
+   Generating pane's phase indicator). Promoted from the coverage page's
+   private stylesheet so any surface can mark live work the same way. */
+.cl-pulse {
+  animation: cl-pulse-fade 1.4s ease-in-out infinite;
+}
+@keyframes cl-pulse-fade {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cl-pulse { animation: none; }
+}
 
 /* Dialog header. */
 .cl-dialog-header {

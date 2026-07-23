@@ -78,10 +78,10 @@ export function Tooltip({
             fontSize: 11.5,
             lineHeight: 1.35,
             whiteSpace: 'normal',
-            background: 'var(--bg-elevated, #1b1f27)',
+            background: 'var(--bg-elevated)',
             color: 'var(--text-primary)',
             border: '1px solid var(--border-default)',
-            boxShadow: 'var(--shadow-md)',
+            boxShadow: 'var(--shadow-popover)',
           }}
         >
           {label}

@@ -168,14 +168,12 @@ export function FolderPickerModal({
     <div
       data-testid="folder-picker-modal"
       className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.5)' }}
+      style={{ background: 'var(--overlay-backdrop)' }}
       onClick={onCancel}
     >
       <div
-        className="flex w-[560px] max-w-[92vw] flex-col overflow-hidden rounded-lg shadow-2xl"
+        className="cl-modal flex w-[560px] max-w-[92vw] flex-col overflow-hidden"
         style={{
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-default)',
           maxHeight: '80vh',
         }}
         onClick={(e) => e.stopPropagation()}
@@ -207,11 +205,8 @@ export function FolderPickerModal({
             type="button"
             disabled={!parent}
             onClick={() => parent && setAt(parent)}
-            className="rounded px-2 py-1 text-xs"
+            className="cl-button rounded px-2 py-1 text-xs"
             style={{
-              color: parent ? 'var(--text-primary)' : 'var(--text-muted)',
-              border: '1px solid var(--border-default)',
-              opacity: parent ? 1 : 0.4,
               fontFamily: 'var(--font-mono)',
             }}
             title="Parent folder"
@@ -280,9 +275,9 @@ export function FolderPickerModal({
             }}
             className="rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider"
             style={{
-              color: 'var(--border-focus)',
-              border: '1px solid color-mix(in srgb, var(--border-focus) 40%, transparent)',
-              background: 'color-mix(in srgb, var(--border-focus) 8%, transparent)',
+              color: 'var(--accent)',
+              border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
+              background: 'var(--accent-soft)',
               opacity: resp?.absolute ? 1 : 0.4,
             }}
           >

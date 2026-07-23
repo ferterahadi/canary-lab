@@ -608,8 +608,7 @@ function RepoCard({
                   <button
                     type="button"
                     onClick={() => onChange({ ...repo, localPath: '' })}
-                    className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-                    style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+                    className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
                   >
                     Override
                   </button>
@@ -634,9 +633,9 @@ function RepoCard({
               <div
                 className="mt-1 mb-2 flex items-center gap-2 rounded-md px-2.5 py-2 text-[11px]"
                 style={{
-                  background: 'color-mix(in srgb, #f59e0b 8%, transparent)',
-                  border: '1px solid color-mix(in srgb, #f59e0b 40%, transparent)',
-                  color: '#f59e0b',
+                  background: 'color-mix(in srgb, var(--warning) 8%, transparent)',
+                  border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
+                  color: 'var(--warning)',
                 }}
               >
                 <span className="flex-1">Folder not found on this machine.</span>
@@ -644,11 +643,10 @@ function RepoCard({
                   type="button"
                   disabled={cloning}
                   onClick={() => setCloneTargetOpen(true)}
-                  className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
+                  className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
                   style={{
-                    color: '#f59e0b',
-                    border: '1px solid color-mix(in srgb, #f59e0b 50%, transparent)',
-                    opacity: cloning ? 0.5 : 1,
+                    color: 'var(--warning)',
+                    border: '1px solid color-mix(in srgb, var(--warning) 50%, transparent)',
                   }}
                 >
                   {cloning ? 'Cloning…' : 'Clone…'}
@@ -835,11 +833,8 @@ function BranchControl({
               type="button"
               disabled={!canSwitch}
               onClick={doCheckout}
-              className="rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
+              className="cl-button rounded-md px-2.5 py-1.5 text-[10px] uppercase tracking-wider"
               style={{
-                color: canSwitch ? 'var(--text-primary)' : 'var(--text-muted)',
-                border: '1px solid var(--border-default)',
-                opacity: canSwitch ? 1 : 0.55,
                 pointerEvents: canSwitch || switching ? undefined : 'none',
               }}
             >
@@ -848,13 +843,10 @@ function BranchControl({
             {switchHovered && switchDisabledReason && (
               <span
                 role="tooltip"
-                className="pointer-events-none absolute left-1/2 bottom-[calc(100%+6px)] -translate-x-1/2 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
+                className="cl-popover pointer-events-none absolute left-1/2 bottom-[calc(100%+6px)] -translate-x-1/2 whitespace-nowrap rounded-md px-2 py-1 text-[10px]"
                 style={{
-                  background: 'var(--bg-elevated)',
-                  border: '1px solid var(--border-default)',
                   color: 'var(--text-primary)',
                   zIndex: 60,
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
                 }}
               >
                 {switchDisabledReason}
@@ -866,14 +858,13 @@ function BranchControl({
             onClick={loadStatus}
             aria-label="Refresh git status"
             title="Refresh git status"
-            className="shrink-0 inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs leading-none"
-            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+            className="cl-button shrink-0 inline-flex items-center justify-center rounded-md px-2.5 py-1.5 text-xs leading-none"
           >
             ↻
           </button>
         </div>
         {status?.isGitRepo && status.dirty && status.dirtyFiles.length > 0 && (
-          <div className="text-[10px]" style={{ color: '#f59e0b', fontFamily: 'var(--font-mono)' }}>
+          <div className="text-[10px]" style={{ color: 'var(--warning)', fontFamily: 'var(--font-mono)' }}>
             {status.dirtyFiles.length} uncommitted
           </div>
         )}

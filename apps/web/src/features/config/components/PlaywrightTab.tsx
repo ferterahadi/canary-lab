@@ -109,8 +109,7 @@ export function PlaywrightTab({ feature }: { feature: string }) {
           <button
             type="button"
             onClick={() => onChange(defaultIfUnset)}
-            className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+            className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
           >
             Override
           </button>

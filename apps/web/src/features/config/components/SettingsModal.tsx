@@ -210,10 +210,10 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
             disabled={!dirty || saving}
             className="cl-button px-3 py-1 text-xs"
             style={{
-              color: dirty ? 'var(--border-focus)' : 'var(--text-muted)',
+              color: dirty ? 'var(--accent)' : 'var(--text-muted)',
               border: '1px solid',
-              borderColor: dirty ? 'color-mix(in srgb, var(--border-focus) 40%, transparent)' : 'var(--border-default)',
-              background: dirty ? 'color-mix(in srgb, var(--border-focus) 8%, transparent)' : 'transparent',
+              borderColor: dirty ? 'color-mix(in srgb, var(--accent) 40%, transparent)' : 'var(--border-default)',
+              background: dirty ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'transparent',
               opacity: saving ? 0.6 : 1,
             }}
           >
@@ -242,7 +242,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                   onChange={(e) => setPortInput(e.target.value)}
                   disabled={portBusy || restarting}
                   className="cl-input w-28 px-2 py-1 text-sm"
-                  style={{ background: 'var(--bg-default)', color: 'var(--text-primary)', border: '1px solid var(--border-default)', borderRadius: 4 }}
+                  style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
                 />
                 <button
                   type="button"
@@ -408,8 +408,8 @@ function RestartProgress({
       aria-live="polite"
       className="mt-3 overflow-hidden rounded-lg"
       style={{
-        border: '1px solid color-mix(in srgb, var(--border-focus) 32%, var(--border-default))',
-        background: 'color-mix(in srgb, var(--border-focus) 6%, var(--bg-default))',
+        border: '1px solid color-mix(in srgb, var(--accent) 32%, var(--border-default))',
+        background: 'color-mix(in srgb, var(--accent) 6%, var(--bg-elevated))',
         animation: 'fm-fade-up 220ms ease',
       }}
     >
@@ -419,7 +419,7 @@ function RestartProgress({
           <span
             aria-hidden="true"
             className="canary-pulse inline-block rounded-full"
-            style={{ width: 7, height: 7, background: 'var(--border-focus)' }}
+            style={{ width: 7, height: 7, background: 'var(--accent)' }}
           />
           <span className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>
             Restarting Canary Lab
@@ -427,11 +427,11 @@ function RestartProgress({
         </div>
         <div
           className="flex items-center gap-1.5 rounded-full px-2 py-0.5"
-          style={{ background: 'color-mix(in srgb, var(--border-focus) 10%, transparent)', fontFamily: 'var(--font-mono)', fontSize: 10.5 }}
+          style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', fontFamily: 'var(--font-mono)', fontSize: 10.5 }}
         >
           <span style={{ color: 'var(--text-muted)', textDecoration: 'line-through', textDecorationColor: 'color-mix(in srgb, var(--text-muted) 60%, transparent)' }}>:{fromPort}</span>
           <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>→</span>
-          <span style={{ color: 'var(--border-focus)', fontWeight: 600 }}>:{toPort ?? '—'}</span>
+          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>:{toPort ?? '—'}</span>
         </div>
       </div>
 
@@ -460,7 +460,7 @@ function RestartProgress({
                       marginTop: 3,
                       marginBottom: 1,
                       borderRadius: 1,
-                      background: i < currentIdx ? 'var(--border-focus)' : 'var(--border-default)',
+                      background: i < currentIdx ? 'var(--accent)' : 'var(--border-default)',
                     }}
                   />
                 )}
@@ -491,14 +491,14 @@ function RestartProgress({
         {phase !== 'reconnecting' && (
           <div
             className="h-[3px] w-full overflow-hidden rounded-full"
-            style={{ background: 'color-mix(in srgb, var(--border-focus) 14%, transparent)' }}
+            style={{ background: 'color-mix(in srgb, var(--accent) 14%, transparent)' }}
           >
             <div
               style={{
                 height: '100%',
                 width: '38%',
                 borderRadius: 9999,
-                background: 'var(--border-focus)',
+                background: 'var(--accent)',
                 animation: 'cl-indeterminate 1.15s ease-in-out infinite',
               }}
             />
@@ -515,7 +515,7 @@ function RestartProgress({
           <a
             href={origin}
             className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium"
-            style={{ color: 'var(--border-focus)', fontFamily: 'var(--font-mono)' }}
+            style={{ color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}
           >
             Open {origin}
             <span aria-hidden="true">→</span>
@@ -532,7 +532,7 @@ function RestartStepGlyph({ state }: { state: 'done' | 'active' | 'pending' }) {
       <span
         aria-hidden="true"
         className="inline-flex items-center justify-center rounded-full"
-        style={{ width: 14, height: 14, background: 'var(--border-focus)', color: '#fff', fontSize: 9, fontWeight: 700 }}
+        style={{ width: 14, height: 14, background: 'var(--accent)', color: '#fff', fontSize: 9, fontWeight: 700 }}
       >
         ✓
       </span>
@@ -546,8 +546,8 @@ function RestartStepGlyph({ state }: { state: 'done' | 'active' | 'pending' }) {
         style={{
           width: 14,
           height: 14,
-          border: '1.5px solid color-mix(in srgb, var(--border-focus) 25%, transparent)',
-          borderTopColor: 'var(--border-focus)',
+          border: '1.5px solid color-mix(in srgb, var(--accent) 25%, transparent)',
+          borderTopColor: 'var(--accent)',
           animation: 'cl-spin 0.7s linear infinite',
         }}
       />

@@ -187,7 +187,7 @@ describe('FlightsPill', () => {
     const rail = row?.querySelector('[data-testid="stage-mini-rail"]')
     expect(rail).toBeTruthy()
     const portifyCell = rail?.querySelector('[data-testid="stage-mini-cell-portify"]') as HTMLElement | null
-    expect(portifyCell?.style.background).toContain('56, 189, 248') // running tone (sky)
+    expect(portifyCell?.style.background).toContain('var(--running)') // running tone (sky)
     act(() => { row?.click() })
     expect(onOpenActivity).toHaveBeenCalledWith('pay', { kind: 'portifying', workflowId: 'wf9' })
   })
@@ -268,8 +268,8 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     // (not the chip) carries the progress story.
     expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('idle')
     const railCell = (key: string) => row!.querySelector(`[data-testid="stage-mini-cell-${key}"]`) as HTMLElement | null
-    expect(railCell('scaffold')?.style.background).toContain('52, 211, 153') // Suite setup done (green)
-    expect(railCell('run')?.style.background).toContain('52, 211, 153') // latest run green
+    expect(railCell('scaffold')?.style.background).toContain('var(--success)') // Suite setup done (green)
+    expect(railCell('run')?.style.background).toContain('var(--success)') // latest run green
     expect(railCell('specs-coverage')?.style.background).toContain('var(--border-default)') // no artifact → pending
   })
 
@@ -357,8 +357,8 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const row = document.body.querySelector<HTMLButtonElement>('[data-testid="activity-open-pay"]')
     const cell = (key: string) => row?.querySelector(`[data-testid="stage-mini-cell-${key}"]`) as HTMLElement | null
-    expect(cell('portify')?.style.background).toContain('56, 189, 248') // live job (sky)
-    expect(cell('scaffold')?.style.background).toContain('52, 211, 153') // evidence stays lit (green)
+    expect(cell('portify')?.style.background).toContain('var(--running)') // live job (sky)
+    expect(cell('scaffold')?.style.background).toContain('var(--success)') // evidence stays lit (green)
   })
 
   it('never duplicates a feature that already has a flight row, and not-flown rows sink to the bottom', () => {

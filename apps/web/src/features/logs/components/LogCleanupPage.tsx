@@ -34,11 +34,11 @@ const KIND_LABEL: Record<Row['kind'], string> = {
 }
 
 const STATUS_COLOR: Record<RunStatus, string> = {
-  running: 'rgb(56, 189, 248)',
-  healing: 'rgb(251, 191, 36)',
+  running: 'var(--running)',
+  healing: 'var(--warning)',
   queued: 'var(--text-secondary)',
-  passed: 'rgb(52, 211, 153)',
-  failed: 'rgb(251, 113, 133)',
+  passed: 'var(--success)',
+  failed: 'var(--danger)',
   aborted: 'var(--text-muted)',
 }
 
@@ -52,12 +52,12 @@ const WORKTREE_OWNER_LABEL: Record<CleanupWorktree['ownerKind'], string> = {
 // Portify workflow statuses, coloured like the rest of the cleanup UI: greens
 // for the resolved overlay, rose for failures, muted for cancelled / in-flight.
 const PORTIFY_STATUS_COLOR: Record<PortifyCleanupEntry['status'], string> = {
-  planning: 'rgb(56, 189, 248)',
-  editing: 'rgb(56, 189, 248)',
-  verifying: 'rgb(56, 189, 248)',
-  'ready-to-save': 'rgb(52, 211, 153)',
-  saved: 'rgb(52, 211, 153)',
-  failed: 'rgb(251, 113, 133)',
+  planning: 'var(--running)',
+  editing: 'var(--running)',
+  verifying: 'var(--running)',
+  'ready-to-save': 'var(--success)',
+  saved: 'var(--success)',
+  failed: 'var(--danger)',
   aborted: 'var(--text-muted)',
 }
 
@@ -142,10 +142,9 @@ function QuickSelectMenu<T>({ presets, onSelect }: {
       {open && (
         <div
           role="menu"
+          className="cl-popover"
           style={{
             position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 20, minWidth: 190,
-            background: 'var(--bg-surface)', border: '1px solid var(--border-default)',
-            borderRadius: 'var(--radius-md)', boxShadow: '0 10px 28px rgba(0,0,0,0.45)',
             padding: 4, display: 'flex', flexDirection: 'column',
           }}
         >
@@ -329,25 +328,20 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: 'var(--bg-base)' }}>
-      {/* Header — the title doubles as a toggle between the two cleanup views. */}
-      <div className="flex shrink-0 items-center gap-3 border-b px-5 py-3" style={{ borderColor: 'var(--border-default)' }}>
-        <div style={{ display: 'inline-flex', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', overflow: 'hidden' }}>
-          {CLEANUP_TABS.map((t, i) => (
+      {/* Header — the title doubles as a toggle between the two cleanup views.
+          Shell-bar chrome + the segmented-control primitive so this overlay
+          reads as the same tool as the workspace. */}
+      <div className="cl-shell-bar flex shrink-0 items-center gap-3 px-4 py-2.5">
+        <div className="cl-mode-toggle" style={{ margin: 0 }}>
+          {CLEANUP_TABS.map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={() => setView(t.key)}
               aria-pressed={view === t.key}
-              style={{
-                background: view === t.key ? 'var(--bg-selected)' : 'var(--bg-surface)',
-                color: view === t.key ? 'var(--text-primary)' : 'var(--text-secondary)',
-                border: 'none',
-                borderRight: i < CLEANUP_TABS.length - 1 ? '1px solid var(--border-default)' : 'none',
-                padding: '6px 14px',
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
+              data-active={view === t.key}
+              className="cl-mode-toggle-btn"
+              style={{ paddingInline: 12, fontSize: 12 }}
             >
               {t.label}
             </button>
@@ -379,7 +373,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
       )}
 
       {view === 'runs' && actionError && (
-        <div className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'rgb(251, 113, 133)' }}>{actionError}</div>
+        <div className="shrink-0 px-5 py-2" style={{ fontSize: 12, color: 'var(--danger)' }}>{actionError}</div>
       )}
 
       {/* Body */}
@@ -399,7 +393,8 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
         {!loading && !error && rows.length > 0 && (
           <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+              {/* Column headers speak the system's rubric voice (mono caps). */}
+              <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
                 <th className="py-1 pr-2" style={{ width: 28 }} />
                 <SortHeader sortKey="runId" label="Run" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="kind" label="Kind" sort={sort} onSort={toggleSort} />
@@ -421,13 +416,14 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                   <td className="py-1 pr-2">
                     <input
                       type="checkbox"
+                    style={{ accentColor: 'var(--accent)' }}
                       checked={selected.has(r.runId)}
                       disabled={r.active}
                       onChange={() => toggle(r.runId)}
                       aria-label={`Select ${r.runId}`}
                     />
                   </td>
-                  <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)' }}>
+                  <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
                     {onNavigateToRun && !r.isOrphan
                       ? (
                         <button
@@ -442,7 +438,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                       : r.runId}
                   </td>
                   <td className="py-1 pr-3">
-                    <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.4, color: 'var(--text-muted)' }}>{KIND_LABEL[r.kind]}</span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{KIND_LABEL[r.kind]}</span>
                   </td>
                   <td className="py-1 pr-3">
                     {r.status
@@ -451,8 +447,8 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                   </td>
                   <td className="py-1 pr-3">{r.feature}</td>
                   <td className="py-1 pr-3">{r.startedAt ? timeAgo(r.startedAt, now) : '—'}</td>
-                  <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)' }}>{formatBytes(r.folderBytes)}</td>
-                  <td className="py-1 pr-3" style={{ textAlign: 'right' }}>{r.isOrphan ? '—' : formatBytes(r.artifactBytes)}</td>
+                  <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(r.folderBytes)}</td>
+                  <td className="py-1 pr-3" style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{r.isOrphan ? '—' : formatBytes(r.artifactBytes)}</td>
                   <td className="py-1 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {!r.isOrphan && r.artifactBytes > 0 && (
                       <button
@@ -468,7 +464,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                       disabled={r.active || busy}
                       onClick={() => setConfirm({ action: 'delete', ids: [r.runId], bytes: r.folderBytes })}
                       className="cl-button ml-1 px-1.5 py-0.5"
-                      style={{ fontSize: 11, color: 'rgb(251, 113, 133)' }}
+                      style={{ fontSize: 11, color: 'var(--danger)' }}
                     >Delete</button>
                   </td>
                 </tr>
@@ -483,7 +479,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
       {view === 'runs' && selected.size > 0 && (
         <div
           className="flex shrink-0 items-center gap-3 border-t px-5 py-3"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated, var(--bg-base))' }}
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}
         >
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             <strong style={{ color: 'var(--text-primary)' }}>{selected.size}</strong> selected
@@ -503,7 +499,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
               onClick={askDelete}
               disabled={busy}
               className="cl-button px-3 py-1"
-              style={{ color: 'rgb(251, 113, 133)', borderColor: 'color-mix(in srgb, rgb(251,113,133) 45%, var(--border-default))' }}
+              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
             >
               Delete runs ({selected.size} · {formatBytes(deleteBytes)})
             </button>
@@ -513,15 +509,14 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
 
       {/* Confirm dialog */}
       {confirm && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-6" onClick={() => !busy && setConfirm(null)}>
+        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !busy && setConfirm(null)}>
           <div
             role="dialog"
             aria-modal="true"
-            className="w-full max-w-md rounded-lg border p-5"
-            style={{ background: 'var(--bg-base)', borderColor: 'var(--border-default)' }}
+            className="cl-modal w-full max-w-md p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
               {confirm.action === 'trim' ? 'Trim artifacts' : 'Delete runs'}
             </h2>
             <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
@@ -536,7 +531,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                 disabled={busy}
                 onClick={() => { const c = confirm; setConfirm(null); void runAction(c.action, c.ids) }}
                 className="cl-button px-3 py-1"
-                style={confirm.action === 'delete' ? { color: 'rgb(251, 113, 133)' } : undefined}
+                style={confirm.action === 'delete' ? { color: 'var(--danger)' } : undefined}
               >
                 {busy ? 'Working…' : confirm.action === 'trim' ? 'Trim' : 'Delete'}
               </button>
@@ -679,7 +674,7 @@ function WorktreesSection({ now }: { now: number }) {
       {!loading && !err && sorted.length > 0 && (
         <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+            <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               <th className="py-1 pr-2" style={{ width: 28 }} />
               <th className="py-1 pr-3">Owner</th>
               <th className="py-1 pr-3">Ref</th>
@@ -699,6 +694,7 @@ function WorktreesSection({ now }: { now: number }) {
                 <td className="py-1 pr-2">
                   <input
                     type="checkbox"
+                    style={{ accentColor: 'var(--accent)' }}
                     checked={selected.has(wt.path)}
                     disabled={wt.active || bulkBusy}
                     onChange={() => toggle(wt.path)}
@@ -706,16 +702,16 @@ function WorktreesSection({ now }: { now: number }) {
                   />
                 </td>
                 <td className="py-1 pr-3">
-                  <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.4, color: 'var(--text-muted)' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                     {WORKTREE_OWNER_LABEL[wt.ownerKind]}
                   </span>
-                  {wt.ownerId && <span style={{ marginLeft: 6, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)' }}>{wt.ownerId}</span>}
+                  {wt.ownerId && <span style={{ marginLeft: 6, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{wt.ownerId}</span>}
                   {wt.slot && <span style={{ marginLeft: 6, color: 'var(--text-muted)' }}>{wt.slot}</span>}
-                  {wt.active && <span style={{ marginLeft: 6, color: 'rgb(56, 189, 248)' }}>·active</span>}
+                  {wt.active && <span style={{ marginLeft: 6, color: 'var(--running)' }}>·active</span>}
                 </td>
-                <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono, monospace)' }}>{wt.ref}</td>
-                <td className="py-1 pr-3" style={{ color: 'var(--text-muted)', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={wt.path}>{wt.path}</td>
-                <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)' }}>{wt.exists ? formatBytes(wt.bytes) : '—'}</td>
+                <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono)' }}>{wt.ref}</td>
+                <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-muted)', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={wt.path}>{wt.path}</td>
+                <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{wt.exists ? formatBytes(wt.bytes) : '—'}</td>
                 <td className="py-1 pr-3">{wt.ageMs != null ? timeAgo(new Date(now - wt.ageMs).toISOString(), now) : '—'}</td>
                 <td className="py-1 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {wt.exists && (
@@ -726,7 +722,7 @@ function WorktreesSection({ now }: { now: number }) {
                     onClick={() => void remove(wt)}
                     disabled={wt.active || busyPath === wt.path || bulkBusy}
                     className="cl-button ml-1 px-1.5 py-0.5"
-                    style={{ fontSize: 11, color: 'rgb(251, 113, 133)' }}
+                    style={{ fontSize: 11, color: 'var(--danger)' }}
                   >
                     {busyPath === wt.path ? '…' : 'Remove'}
                   </button>
@@ -742,7 +738,7 @@ function WorktreesSection({ now }: { now: number }) {
       {selected.size > 0 && (
         <div
           className="flex shrink-0 items-center gap-3 border-t px-5 py-3"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated, var(--bg-base))' }}
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}
         >
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             <strong style={{ color: 'var(--text-primary)' }}>{selected.size}</strong> selected
@@ -753,7 +749,7 @@ function WorktreesSection({ now }: { now: number }) {
               onClick={() => setConfirmOpen(true)}
               disabled={bulkBusy || selectedTargets.length === 0}
               className="cl-button px-3 py-1"
-              style={{ color: 'rgb(251, 113, 133)', borderColor: 'color-mix(in srgb, rgb(251,113,133) 45%, var(--border-default))' }}
+              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
             >
               {bulkBusy ? 'Removing…' : `Remove worktrees (${selectedTargets.length} · ${formatBytes(selectedBytes)})`}
             </button>
@@ -763,15 +759,14 @@ function WorktreesSection({ now }: { now: number }) {
 
       {/* Confirm dialog — mirrors the runs delete confirm. */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-6" onClick={() => !bulkBusy && setConfirmOpen(false)}>
+        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !bulkBusy && setConfirmOpen(false)}>
           <div
             role="dialog"
             aria-modal="true"
-            className="w-full max-w-md rounded-lg border p-5"
-            style={{ background: 'var(--bg-base)', borderColor: 'var(--border-default)' }}
+            className="cl-modal w-full max-w-md p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Remove worktrees</h2>
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Remove worktrees</h2>
             <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
               Run <strong>git worktree remove</strong> on <strong>{selectedTargets.length}</strong> worktree{selectedTargets.length === 1 ? '' : 's'}, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. The source repos are untouched — this only removes the checked-out copies under logs.
             </p>
@@ -782,7 +777,7 @@ function WorktreesSection({ now }: { now: number }) {
                 disabled={bulkBusy}
                 onClick={() => void doRemoveSelected()}
                 className="cl-button px-3 py-1"
-                style={{ color: 'rgb(251, 113, 133)' }}
+                style={{ color: 'var(--danger)' }}
               >
                 {bulkBusy ? 'Working…' : 'Remove'}
               </button>
@@ -903,7 +898,7 @@ function PortifySection({ now, onNavigateToPortify }: {
       {!loading && !err && sorted.length > 0 && (
         <table className="w-full" style={{ fontSize: 12, color: 'var(--text-secondary)', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
+            <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
               <th className="py-1 pr-2" style={{ width: 28 }} />
               <th className="py-1 pr-3">Feature</th>
               <th className="py-1 pr-3">Status</th>
@@ -918,6 +913,7 @@ function PortifySection({ now, onNavigateToPortify }: {
                 <td className="py-1 pr-2">
                   <input
                     type="checkbox"
+                    style={{ accentColor: 'var(--accent)' }}
                     checked={selected.has(w.workflowId)}
                     disabled={bulkBusy}
                     onChange={() => toggle(w.workflowId)}
@@ -927,7 +923,7 @@ function PortifySection({ now, onNavigateToPortify }: {
                 <td className="py-1 pr-3" style={{ color: 'var(--text-primary)' }}>{w.feature}</td>
                 <td className="py-1 pr-3"><span style={{ color: PORTIFY_STATUS_COLOR[w.status] }}>{w.status}</span></td>
                 <td className="py-1 pr-3">{timeAgo(w.startedAt, now)}</td>
-                <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)' }}>{formatBytes(w.folderBytes)}</td>
+                <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(w.folderBytes)}</td>
                 <td className="py-1 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {onNavigateToPortify && (
                     <button type="button" onClick={() => onNavigateToPortify(w.workflowId)} disabled={bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open</button>
@@ -937,7 +933,7 @@ function PortifySection({ now, onNavigateToPortify }: {
                     onClick={() => void removeOne(w.workflowId)}
                     disabled={bulkBusy}
                     className="cl-button ml-1 px-1.5 py-0.5"
-                    style={{ fontSize: 11, color: 'rgb(251, 113, 133)' }}
+                    style={{ fontSize: 11, color: 'var(--danger)' }}
                   >
                     Delete
                   </button>
@@ -953,7 +949,7 @@ function PortifySection({ now, onNavigateToPortify }: {
       {selected.size > 0 && (
         <div
           className="flex shrink-0 items-center gap-3 border-t px-5 py-3"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated, var(--bg-base))' }}
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}
         >
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
             <strong style={{ color: 'var(--text-primary)' }}>{selected.size}</strong> selected
@@ -964,7 +960,7 @@ function PortifySection({ now, onNavigateToPortify }: {
               onClick={() => setConfirmOpen(true)}
               disabled={bulkBusy || selectedTargets.length === 0}
               className="cl-button px-3 py-1"
-              style={{ color: 'rgb(251, 113, 133)', borderColor: 'color-mix(in srgb, rgb(251,113,133) 45%, var(--border-default))' }}
+              style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
             >
               {bulkBusy ? 'Removing…' : `Delete records (${selectedTargets.length} · ${formatBytes(selectedBytes)})`}
             </button>
@@ -974,15 +970,14 @@ function PortifySection({ now, onNavigateToPortify }: {
 
       {/* Confirm dialog — mirrors the runs/worktrees delete confirm. */}
       {confirmOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-6" onClick={() => !bulkBusy && setConfirmOpen(false)}>
+        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !bulkBusy && setConfirmOpen(false)}>
           <div
             role="dialog"
             aria-modal="true"
-            className="w-full max-w-md rounded-lg border p-5"
-            style={{ background: 'var(--bg-base)', borderColor: 'var(--border-default)' }}
+            className="cl-modal w-full max-w-md p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Portify records</h2>
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Portify records</h2>
             <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
               Remove <strong>{selectedTargets.length}</strong> port-ification record{selectedTargets.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. This drops the workflow record only — a feature's saved overlay (its live port-ification) is untouched. Remove an overlay from the feature's Ports tab.
             </p>
@@ -993,7 +988,7 @@ function PortifySection({ now, onNavigateToPortify }: {
                 disabled={bulkBusy}
                 onClick={() => void doRemoveSelected()}
                 className="cl-button px-3 py-1"
-                style={{ color: 'rgb(251, 113, 133)' }}
+                style={{ color: 'var(--danger)' }}
               >
                 {bulkBusy ? 'Working…' : 'Delete'}
               </button>
@@ -1019,7 +1014,7 @@ function CleanupEmptyState({ icon, title, hint, action }: {
       style={{ minHeight: '55vh', animation: 'fm-fade-up 220ms ease-out both' }}
     >
       <span style={{ color: 'var(--text-muted)', opacity: 0.5 }}>{icon}</span>
-      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>{title}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>{title}</div>
       {hint && (
         <div style={{ maxWidth: 380, fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>{hint}</div>
       )}

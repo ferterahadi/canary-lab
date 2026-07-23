@@ -1,28 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
-  statusBadgeClass,
   formatDuration,
   durationBetween,
   shortTime,
   formatBytes,
   timeAgo,
 } from './format'
-
-describe('statusBadgeClass', () => {
-  it.each([
-    ['passed', 'emerald'],
-    ['failed', 'rose'],
-    ['running', 'sky'],
-    ['healing', 'amber'],
-    ['aborted', 'zinc'],
-  ] as const)('maps %s to a class containing %s', (status, hue) => {
-    expect(statusBadgeClass(status)).toContain(hue)
-  })
-
-  it('falls back to a zinc-toned class for unknown statuses', () => {
-    expect(statusBadgeClass('mystery' as never)).toContain('zinc')
-  })
-})
 
 describe('formatDuration', () => {
   it('formats sub-second durations as ms', () => {

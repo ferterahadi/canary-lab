@@ -19,8 +19,8 @@ const DOT_CLASS: Record<Exclude<StepState, 'pending' | 'done'>, string> = {
 
 const TITLE_COLOR: Record<StepState, string> = {
   done: 'var(--text-primary)',
-  active: 'rgb(56, 189, 248)',
-  warn: 'rgb(251, 191, 36)',
+  active: 'var(--running)',
+  warn: 'var(--warning)',
   failed: 'var(--danger)',
   pending: 'var(--text-muted)',
 }
@@ -48,7 +48,7 @@ export function StepRow({ state, title, sub, testId }: {
   sub?: ReactNode
   testId?: string
 }) {
-  const cellBg = state === 'done' ? 'color-mix(in srgb, #10b981 20%, transparent)' : 'var(--bg-surface)'
+  const cellBg = state === 'done' ? 'color-mix(in srgb, var(--success) 20%, transparent)' : 'var(--bg-surface)'
   return (
     <li data-testid={testId} className="relative flex gap-2.5 text-[11.5px]">
       <span
@@ -58,7 +58,7 @@ export function StepRow({ state, title, sub, testId }: {
       >
         {state === 'done' ? (
           <svg width="9" height="9" viewBox="0 0 12 12" fill="none">
-            <path d="M2.5 6.3l2.4 2.4L9.5 3.6" stroke="#34d399" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M2.5 6.3l2.4 2.4L9.5 3.6" stroke="var(--success)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         ) : state === 'pending' ? (
           <span className="h-[9px] w-[9px] rounded-full border" style={{ borderColor: 'var(--border-strong)' }} />

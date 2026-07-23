@@ -46,7 +46,7 @@ export function EvaluationTaskPanel({
               downloadTask(task.taskId).catch(() => setDownloadFailed(true))
             }}
             className="cl-button shrink-0 px-2.5 py-1 text-xs"
-            style={{ color: downloadFailed ? 'var(--danger)' : 'rgb(52, 211, 153)' }}
+            style={{ color: downloadFailed ? 'var(--danger)' : 'var(--success)' }}
           >
             {downloadFailed ? 'Download failed — retry' : '⬇ Download evaluation (.zip)'}
           </button>

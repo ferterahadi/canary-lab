@@ -214,7 +214,7 @@ export function HintIcon({ hint, icon, label }: { hint: string; icon?: ReactNode
                 background: 'var(--bg-elevated)',
                 border: '1px solid var(--border-default)',
                 color: 'var(--text-primary)',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                boxShadow: 'var(--shadow-popover)',
               }}
             >
               {hint}
@@ -394,7 +394,7 @@ export function Toggle({
       onClick={() => onChange(!value)}
       className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-150"
       style={{
-        background: value ? 'var(--border-focus)' : 'var(--bg-elevated)',
+        background: value ? 'var(--accent)' : 'var(--bg-elevated)',
         border: '1px solid var(--border-default)',
       }}
     >
@@ -916,18 +916,19 @@ export function SlideOverPanel({
 }) {
   useEscapeToClose(onClose)
   const node = (
-    <div className="fixed inset-0 z-[60] flex items-start justify-end bg-black/30 p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-start justify-end p-6" style={{ background: 'var(--overlay-backdrop)' }} onClick={onClose}>
       <section
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
         data-testid={testId}
-        className="flex max-h-[calc(100vh-3rem)] flex-col rounded-lg border shadow-2xl"
+        className="flex max-h-[calc(100vh-3rem)] flex-col rounded-lg border"
         style={{
           width: `min(${width}px, calc(100vw - 3rem))`,
           borderColor: 'var(--border-default)',
           background: 'var(--bg-elevated)',
           color: 'var(--text-primary)',
+          boxShadow: 'var(--shadow-popover)',
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -1040,7 +1041,7 @@ export function ToastHost({ toasts, onDismiss }: { toasts: ToastItem[]; onDismis
               onDismiss(t.id)
             }}
           >
-            ✕
+            <CloseIcon size={11} />
           </button>
         </div>
       ))}

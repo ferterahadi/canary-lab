@@ -243,14 +243,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
               <path d="M14 2v6h6" />
             </svg>
           </span>
-          <span
-            data-testid="docs-rail-count"
-            className="flex h-5 w-5 items-center justify-center rounded-full"
-            style={{
-              fontSize: 11, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)',
-              background: 'color-mix(in srgb, var(--text-muted) 16%, transparent)',
-            }}
-          >
+          <span data-testid="docs-rail-count" className="cl-count-chip">
             {sourceCount}
           </span>
           <span aria-hidden="true" style={{ marginTop: 'auto', color: 'var(--text-muted)' }}>
@@ -294,7 +287,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         className="flex items-center gap-2"
         style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-default)' }}
       >
-        <h2 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Source docs</h2>
+        <h2 className="cl-kicker">Source docs</h2>
         <button
           type="button"
           data-testid="docs-rail-toggle"
@@ -329,17 +322,19 @@ export function CoverageDocsRail(props: Props): JSX.Element {
           <div
             data-testid="docs-rail-drift"
             style={{
-              fontSize: 11, color: 'rgb(251, 191, 36)', lineHeight: 1.45, marginBottom: 12,
-              border: '1px solid rgb(251,191,36)', borderRadius: 'var(--radius-md)', padding: '6px 10px',
+              fontSize: 11, color: 'var(--warning)', lineHeight: 1.45, marginBottom: 12,
+              border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
+              background: 'color-mix(in srgb, var(--warning) 8%, transparent)',
+              borderRadius: 'var(--radius-md)', padding: '6px 10px',
             }}
           >
-            <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{drift.changedDocs.join(', ')}</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{drift.changedDocs.join(', ')}</span>
             {' '}changed → affects {drift.affectedArtifacts.join(' + ')}
           </div>
         )}
 
         {error && (
-          <div data-testid="docs-error" style={{ color: 'rgb(251, 113, 133)', fontSize: 11.5, lineHeight: 1.45, marginBottom: 12 }}>
+          <div data-testid="docs-error" style={{ color: 'var(--danger)', fontSize: 11.5, lineHeight: 1.45, marginBottom: 12 }}>
             {error}
           </div>
         )}
@@ -388,7 +383,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
             className="cl-button w-full px-3 py-1.5"
             title={sourceCount === 0 ? 'Add a source doc first' : 'Generate the PRD summary from these docs'}
             style={!generating && sourceCount > 0
-              ? { background: 'var(--accent)', color: '#0b0f17', borderColor: 'var(--accent)', fontWeight: 600 }
+              ? { background: 'var(--accent)', color: '#ffffff', borderColor: 'var(--accent)', fontWeight: 600 }
               : undefined}
           >
             {generating ? 'Generating…' : 'Generate'}
@@ -404,7 +399,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
               onClick={() => void redoFromStart()}
               disabled={locked}
               className="cl-button w-full px-3 py-1.5"
-              style={{ background: 'rgb(251, 113, 133)', color: '#0b0f17', borderColor: 'rgb(251, 113, 133)', fontWeight: 600 }}
+              style={{ background: 'var(--danger)', color: '#ffffff', borderColor: 'var(--danger)', fontWeight: 600 }}
             >
               Wipe everything &amp; start over
             </button>
@@ -480,7 +475,7 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded"
         style={{
           background: 'color-mix(in srgb, var(--text-muted) 12%, transparent)',
-          color: generated ? 'rgb(56,189,248)' : 'var(--text-secondary)',
+          color: generated ? 'var(--accent)' : 'var(--text-secondary)',
         }}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -489,13 +484,13 @@ export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen
         </svg>
       </span>
       <div className="min-w-0 flex-1">
-        <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12, lineHeight: 1.3 }} className="truncate" title={linked && linkTarget ? `↗ ${linkTarget}` : `${dirPrefix}${relPath}`}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.3 }} className="truncate" title={linked && linkTarget ? `↗ ${linkTarget}` : `${dirPrefix}${relPath}`}>
           <span style={{ color: broken ? 'var(--danger)' : 'var(--text-primary)', fontWeight: 600 }}>{relPath}</span>
           {linked && (
             <span
               data-testid={`doc-linked-${relPath}`}
               className="ml-1.5 rounded px-1 py-[1px] text-[9px] font-semibold"
-              style={{ color: broken ? 'var(--danger)' : 'rgb(56,189,248)', border: `1px solid color-mix(in srgb, ${broken ? 'var(--danger)' : 'rgb(56,189,248)'} 40%, transparent)` }}
+              style={{ color: broken ? 'var(--danger)' : 'var(--accent)', border: `1px solid color-mix(in srgb, ${broken ? 'var(--danger)' : 'var(--accent)'} 40%, transparent)` }}
             >
               {broken ? 'link broken' : 'symlink ↗'}
             </span>

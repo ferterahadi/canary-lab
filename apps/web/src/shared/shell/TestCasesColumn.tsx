@@ -117,7 +117,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
         {loadError ? (
-          <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-muted)' }}>
+          <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
             {loadError}
           </div>
         ) : !displaySpecs ? (
@@ -299,9 +299,9 @@ function TestCard({
               style={{
                 color: 'var(--text-secondary)',
                 borderColor: isRunningTest
-                  ? 'rgb(234, 179, 8)'
+                  ? 'var(--warning)'
                   : 'color-mix(in srgb, var(--accent) 40%, transparent)',
-                background: isRunningTest ? 'rgba(234, 179, 8, 0.15)' : 'var(--accent-soft)',
+                background: isRunningTest ? 'color-mix(in srgb, var(--warning) 15%, transparent)' : 'var(--accent-soft)',
                 fontFamily: 'var(--font-mono)',
               }}
             >
@@ -330,8 +330,8 @@ function TestCard({
                   ? {
                       borderRadius: 6,
                       padding: 2,
-                      background: 'rgba(234, 179, 8, 0.12)',
-                      boxShadow: 'inset 0 0 0 1px rgb(234, 179, 8), inset 3px 0 0 rgb(234, 179, 8)',
+                      background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
+                      boxShadow: 'inset 0 0 0 1px var(--warning), inset 3px 0 0 var(--warning)',
                     }
                   : undefined
               }

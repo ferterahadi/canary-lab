@@ -881,7 +881,7 @@ function MenuItem({
 
 function ExecutionTypeBadge({ type }: { type: ExecutionType }) {
   const style = type === 'verify'
-    ? { background: 'rgba(14, 165, 233, 0.12)', color: 'var(--accent)' }
+    ? { background: 'var(--accent-soft)', color: 'var(--accent)' }
     : type === 'boot'
       ? { background: 'var(--boot-soft)', color: 'var(--boot)' }
       : type === 'benchmark'

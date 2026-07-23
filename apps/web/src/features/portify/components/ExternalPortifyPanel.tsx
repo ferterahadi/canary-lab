@@ -65,7 +65,7 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
           style={{
             whiteSpace: 'pre-wrap',
             fontFamily: 'var(--font-mono)',
-            color: 'rgb(251,191,36)',
+            color: 'var(--warning)',
             background: 'var(--bg-base)',
             border: '1px solid var(--border-default)',
           }}

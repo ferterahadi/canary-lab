@@ -178,7 +178,7 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
 function exportStatusPill(status: EvaluationExportTask['status']): { label: string; palette: PillPalette } {
   if (status === 'completed') return { label: 'Ready', palette: pillPalette('var(--success)') }
   if (status === 'failed') return { label: 'Failed', palette: pillPalette('var(--danger)') }
-  return { label: 'Exporting', palette: pillPalette('var(--border-focus)') }
+  return { label: 'Exporting', palette: pillPalette('var(--accent)') }
 }
 
 function exportBodyCopy(status: EvaluationExportTask['status']): string {

@@ -42,9 +42,9 @@ interface Props {
 // real signal; green when covered, sky while generating, amber when stale.
 function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
   if (!headline) return undefined
-  if (headline.startsWith('Covered')) return 'rgb(52, 211, 153)'
-  if (headline === 'Generating') return 'rgb(56, 189, 248)'
-  if (headline === 'Stale') return 'rgb(251, 191, 36)'
+  if (headline.startsWith('Covered')) return 'var(--success)'
+  if (headline === 'Generating') return 'var(--running)'
+  if (headline === 'Stale') return 'var(--warning)'
   return undefined
 }
 
@@ -313,9 +313,9 @@ function FeatureRow({
             data-testid={`portified-badge-${f.name}`}
             className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] leading-none"
             style={{
-              color: 'rgb(52,211,153)',
-              background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
-              border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
+              color: 'var(--success)',
+              background: 'color-mix(in srgb, var(--success) 14%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
             }}
           >
             ⇄
@@ -407,7 +407,7 @@ function FeatureGroupAccordion({
         onClick={toggle}
         aria-expanded={open}
         data-testid={`feature-group-toggle-${group}`}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+        className="cl-hover-row flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
       >
         <span
           aria-hidden="true"

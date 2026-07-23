@@ -11,11 +11,11 @@ import { shortTime } from '../../../shared/lib/format'
 // Pill chip palettes, keyed by run status. Colour families match
 // RunStatusIndicator / WizardTaskStatus so the surfaces stay in sync.
 const CHIP: Record<RunStatus, { bg: string; text: string }> = {
-  running: { bg: 'rgba(14, 165, 233, 0.15)', text: 'rgb(56, 189, 248)' },
-  healing: { bg: 'rgba(245, 158, 11, 0.15)', text: 'rgb(251, 191, 36)' },
+  running: { bg: 'color-mix(in srgb, var(--running) 15%, transparent)', text: 'var(--running)' },
+  healing: { bg: 'color-mix(in srgb, var(--warning) 15%, transparent)', text: 'var(--warning)' },
   queued:  { bg: 'var(--bg-selected)', text: 'var(--text-secondary)' },
-  passed:  { bg: 'rgba(16, 185, 129, 0.15)', text: 'rgb(52, 211, 153)' },
-  failed:  { bg: 'rgba(244, 63, 94, 0.15)', text: 'rgb(251, 113, 133)' },
+  passed:  { bg: 'color-mix(in srgb, var(--success) 15%, transparent)', text: 'var(--success)' },
+  failed:  { bg: 'color-mix(in srgb, var(--danger) 15%, transparent)', text: 'var(--danger)' },
   aborted: { bg: 'var(--bg-selected)', text: 'var(--text-muted)' },
 }
 
@@ -66,7 +66,7 @@ export function RunRow({
       <button
         type="button"
         onClick={() => onSelect(run)}
-        className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors hover:bg-white/[0.03]"
+        className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left cl-hover-row"
         title={`Go to run ${run.runId}`}
       >
         <StatusDot state={dot.state} pulse={dot.pulse} halo={dot.pulse} className="shrink-0" />
