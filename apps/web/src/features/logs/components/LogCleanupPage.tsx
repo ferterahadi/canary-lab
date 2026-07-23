@@ -181,8 +181,10 @@ function SortHeader({
 }) {
   const active = sort.key === sortKey
   return (
+    // Right-aligned (numeric) columns get a left-padding floor so their
+    // header/cells can never fuse with the right-aligned column before them.
     <th
-      className="cl-sort-th py-1 pr-3 select-none"
+      className={`cl-sort-th py-1 pr-3 select-none${align === 'right' ? ' pl-3' : ''}`}
       style={{ textAlign: align ?? 'left', cursor: 'pointer' }}
       onClick={() => onSort(sortKey)}
       aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
@@ -403,7 +405,7 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                 <SortHeader sortKey="age" label="Age" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="folder" label="Folder" align="right" sort={sort} onSort={toggleSort} />
                 <SortHeader sortKey="artifacts" label="Artifacts" align="right" sort={sort} onSort={toggleSort} />
-                <th className="py-1 pr-1" style={{ textAlign: 'right' }}>Actions</th>
+                <th className="py-1 pl-3 pr-1" style={{ textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -448,8 +450,8 @@ export function LogCleanupPage({ onClose, onNavigateToRun, onNavigateToPortify }
                   <td className="py-1 pr-3">{r.feature}</td>
                   <td className="py-1 pr-3">{r.startedAt ? timeAgo(r.startedAt, now) : '—'}</td>
                   <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(r.folderBytes)}</td>
-                  <td className="py-1 pr-3" style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{r.isOrphan ? '—' : formatBytes(r.artifactBytes)}</td>
-                  <td className="py-1 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                  <td className="py-1 pl-3 pr-3" style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{r.isOrphan ? '—' : formatBytes(r.artifactBytes)}</td>
+                  <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                     {!r.isOrphan && r.artifactBytes > 0 && (
                       <button
                         type="button"
@@ -680,8 +682,8 @@ function WorktreesSection({ now }: { now: number }) {
               <th className="py-1 pr-3">Ref</th>
               <th className="py-1 pr-3">Path</th>
               <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Size</th>
-              <th className="py-1 pr-3">Age</th>
-              <th className="py-1 pr-1" style={{ textAlign: 'right' }}>Actions</th>
+              <th className="py-1 pl-3 pr-3">Age</th>
+              <th className="py-1 pl-3 pr-1" style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -712,8 +714,8 @@ function WorktreesSection({ now }: { now: number }) {
                 <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono)' }}>{wt.ref}</td>
                 <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-muted)', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={wt.path}>{wt.path}</td>
                 <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{wt.exists ? formatBytes(wt.bytes) : '—'}</td>
-                <td className="py-1 pr-3">{wt.ageMs != null ? timeAgo(new Date(now - wt.ageMs).toISOString(), now) : '—'}</td>
-                <td className="py-1 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <td className="py-1 pl-3 pr-3">{wt.ageMs != null ? timeAgo(new Date(now - wt.ageMs).toISOString(), now) : '—'}</td>
+                <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {wt.exists && (
                     <button type="button" onClick={() => void open(wt)} disabled={busyPath === wt.path || bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open</button>
                   )}
@@ -904,7 +906,7 @@ function PortifySection({ now, onNavigateToPortify }: {
               <th className="py-1 pr-3">Status</th>
               <th className="py-1 pr-3">Age</th>
               <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Folder</th>
-              <th className="py-1 pr-1" style={{ textAlign: 'right' }}>Actions</th>
+              <th className="py-1 pl-3 pr-1" style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -924,7 +926,7 @@ function PortifySection({ now, onNavigateToPortify }: {
                 <td className="py-1 pr-3"><span style={{ color: PORTIFY_STATUS_COLOR[w.status] }}>{w.status}</span></td>
                 <td className="py-1 pr-3">{timeAgo(w.startedAt, now)}</td>
                 <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{formatBytes(w.folderBytes)}</td>
-                <td className="py-1 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {onNavigateToPortify && (
                     <button type="button" onClick={() => onNavigateToPortify(w.workflowId)} disabled={bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open</button>
                   )}
