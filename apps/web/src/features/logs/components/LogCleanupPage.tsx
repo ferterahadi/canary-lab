@@ -681,7 +681,9 @@ function WorktreesSection({ now }: { now: number }) {
               <th className="py-1 pr-3">Owner</th>
               <th className="py-1 pr-3">Ref</th>
               <th className="py-1 pr-3">Path</th>
-              <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Size</th>
+              {/* "Folder" — the same disk-usage column name as the runs and
+                  portify tabs, so the three tables read as one table family. */}
+              <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Folder</th>
               <th className="py-1 pl-3 pr-3">Age</th>
               <th className="py-1 pl-3 pr-1" style={{ textAlign: 'right' }}>Actions</th>
             </tr>
