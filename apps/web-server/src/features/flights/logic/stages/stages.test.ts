@@ -298,6 +298,27 @@ describe('context helpers', () => {
       controller.abort()
       await expect(promise).rejects.toThrow('thing cancelled by flight pause/abort')
     })
+
+    it('progressKey: a changing key extends the deadline past timeoutMs (idle budget, not wall-clock)', async () => {
+      // Each poll reports a NEW phase — the job outruns timeoutMs but never
+      // idles, so it must survive until settled. (The k7ru regression: a
+      // 45m two-attempt portify was killed by a 30m wall-clock cap.)
+      let polls = 0
+      const value = await pollUntil(
+        async () => { polls += 1; return polls },
+        (v) => v >= 5,
+        { what: 'thing', timeoutMs: 30, intervalMs: 10, progressKey: (v) => `phase-${v}` },
+      )
+      expect(value).toBe(5) // 5 polls × 10ms interval > 30ms timeout — survived on progress
+    })
+
+    it('progressKey: a FROZEN key still dies after timeoutMs, with the idle wording', async () => {
+      await expect(
+        pollUntil(async () => 'stuck', () => false, {
+          what: 'thing', timeoutMs: 20, intervalMs: 5, progressKey: () => 'same-phase',
+        }),
+      ).rejects.toThrow(/made no progress within/)
+    })
   })
 })
 

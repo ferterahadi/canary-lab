@@ -64,9 +64,10 @@ import {
   capArtifacts,
 } from './playwright-mcp-artifacts'
 import { planRestart } from './restart-planner'
-import { interpolateConfigTokens, makeTokenCache } from './launcher/interpolate'
+import { interpolateConfigTokens, makeTokenCache, resolvePortTokens } from './launcher/interpolate'
 import { releasePorts } from './port-allocator'
 import { removeWorktree, type WorktreeHandle } from './repo-worktree'
+import { hydrateEnvsetIntoWorktrees } from './env-switcher/worktree-hydrate'
 import { overlayExists, readOverlay, checkStaleness, overlayDir } from '../../../portify/logic/runtime/overlay'
 import { applyOverlay, reverseOverlay } from '../../../portify/logic/runtime/git-ops'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
@@ -654,7 +655,34 @@ export class RunOrchestrator extends EventEmitter {
     // — we must never boot a portified feature un-portified (the second
     // concurrent boot would EADDRINUSE on the un-injected port).
     await this.applyPortifyOverlay()
+    // Then the envset: worktrees are cut from committed HEAD, so the real-path
+    // envset apply (uncommitted) never reaches them — a worktree-isolated
+    // service would boot the CHECKED-IN config (e.g. a docker `db` datasource
+    // host) and die where the same feature boots green at its real path.
+    // Overlay-first mirrors real-run semantics: the envset overwrites the
+    // checked-in file either way. Throws like the overlay — booting
+    // un-hydrated just fails later with a far less actionable error.
+    this.hydrateWorktreeEnvsets()
     await this.ensureServicesRunning()
+  }
+
+  /** Hydrate the feature's envset into every per-run worktree (portified or
+   *  collision-isolated). `${port.*}` tokens follow the run's allocation,
+   *  byte-identical to the real-path apply. No restore — per-run worktrees are
+   *  disposable. No-op without an env, worktrees, or an envsets config. */
+  private hydrateWorktreeEnvsets(): void {
+    if (!this.env || this.worktreeHandles.length === 0) return
+    const { written } = hydrateEnvsetIntoWorktrees({
+      featureDir: this.feature.featureDir,
+      setName: this.env,
+      roots: this.worktreeHandles.map((h) => ({ sourceRoot: h.sourceRoot, worktreeRoot: h.worktreeRoot })),
+      resolve: this.portMap && this.portMap.size > 0
+        ? (content) => resolvePortTokens(content, this.portMap!)
+        : undefined,
+    })
+    for (const f of written) {
+      this.runnerLog?.info(`Hydrated envset "${this.env}" into worktree: ${f}`)
+    }
   }
 
   /**

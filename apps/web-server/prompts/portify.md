@@ -80,6 +80,8 @@ The feature has envset files under `envsets/<env>/` next to {{featureConfigPath}
 - Scan EVERY envset file (`.env` / `.properties` / `.env.local`) for values that point at a listener you relocated — e.g. `GATEWAY_URL=http://localhost:3000`. After your rewrite that listener boots on an injected port, so the hardcoded value dials a dead (or worse, *another run's*) port. Verification will NOT catch this — health checks don't read these values; the feature's tests do, and they'd fail later for a reason nobody connects back to port-ification.
 - Rewrite each such value to the token form: `GATEWAY_URL=http://localhost:${port.gateway}`, using the slot you declared for that listener.
 - Apply the same three-bucket test as everywhere else: values pointing at SHARED external infra (broker URIs like `amqp://localhost:5672`, management consoles, DBs, Redis, OAuth issuers) are NOT per-run listeners — leave them hardcoded and list them in the report.
+- The harness applies the envset's NON-port content into the worktree for you during the double-boot verification — so a checked-in config value that differs from the captured envset (e.g. a docker-compose `db` datasource host where the envset says `localhost`) is already handled. Do NOT "repair" datasource hosts, credentials, or other env values in the worktree source; port wiring is the only in-scope source change.
+- One caveat: DURING the double-boot, `${port.<slot>}` tokens inside envset files stay UNRESOLVED (one shared worktree boots twice — a single file can't carry two port maps). Anything that must follow an injected port during verification needs per-process wiring (an env var the source reads, or a CLI arg); the token form still resolves at real run boots.
 
 ## 7. Do NOT touch test files
 

@@ -104,13 +104,41 @@ describe('SystemRow (flight conductor line on the agent rail)', () => {
       '[specs] iteration 1: 0% / 100% — 6 gap(s)',
       '[specs] spec files rejected: no generated files',
       '[specs@2026-07-22T04:00:55.373Z] iteration 2: 0% / 100% — 6 gap(s)',
-      '[specs@2026-07-22T06:03:01.906Z] validated 1 file(s)',
+      '[specs@2026-07-22T04:00:56.001Z] validated 1 file(s)',
     )
     // One run, headed by the FIRST timestamp it found — not left undated because
     // the opening line had none.
     expect(container.querySelectorAll('.agentts-sysrow')).toHaveLength(1)
     expect(container.querySelector('.agentts-rowhead span[title]')?.getAttribute('title'))
       .toBe('2026-07-22T04:00:55.373Z')
+  })
+
+  it('splits a same-tag run at a stamp gap — each stage re-entry heads on its own time', () => {
+    // Portify's stage log accumulates one `workflow … started` line per stage
+    // entry (resume/retry appends; only redo wipes). Folding them under the
+    // FIRST stamp dated today's workflow with yesterday's clock — each visit
+    // must be its own dated row instead.
+    render(
+      '[portify@2026-07-22T17:15:27.000Z] workflow portify-2026-07-22T1715-m81h started',
+      '[portify@2026-07-22T17:42:03.000Z] workflow portify-2026-07-22T1742-vqqq started',
+      '[portify@2026-07-23T02:27:52.000Z] workflow portify-2026-07-23T0227-v3k8 started',
+    )
+    expect(container.querySelectorAll('.agentts-sysrow')).toHaveLength(3)
+    expect(Array.from(container.querySelectorAll('.agentts-rowhead span[title]')).map((n) => n.getAttribute('title'))).toEqual([
+      '2026-07-22T17:15:27.000Z',
+      '2026-07-22T17:42:03.000Z',
+      '2026-07-23T02:27:52.000Z',
+    ])
+  })
+
+  it('keeps a burst of stamped lines seconds apart as one run', () => {
+    render(
+      '[env@2026-07-23T02:27:52.000Z] captured 2 file(s) into envsets/local/',
+      '[env@2026-07-23T02:28:10.000Z] wrote 3 value(s) to .env',
+    )
+    expect(container.querySelectorAll('.agentts-sysrow')).toHaveLength(1)
+    expect(container.querySelector('.agentts-rowhead span[title]')?.getAttribute('title'))
+      .toBe('2026-07-23T02:27:52.000Z')
   })
 
   it('renders an untagged line verbatim with no tag label', () => {

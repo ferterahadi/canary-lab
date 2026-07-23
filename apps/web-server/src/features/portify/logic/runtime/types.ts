@@ -37,6 +37,14 @@ export interface PortifyVerification {
    *  unreachable (e.g. the DB is down) — an ENVIRONMENT problem the port
    *  rewrite cannot fix. Signals the orchestrator to stop retrying. */
   notPortFixable?: boolean
+  /** Differential triage on a failed double-boot: one extra SOLO boot decides
+   *  whether the failure is concurrency at all. `baseline-boot-failed` = the
+   *  solo boot fails too — not a port/concurrency defect (fix the boot
+   *  blocker, don't iterate on ports). `concurrency-failure` = solo passes —
+   *  the defect only appears when two instances share the worktree/machine.
+   *  Absent when verification passed, or when the triage boot was skipped
+   *  (dependency-down failures are already classified by notPortFixable). */
+  failureClass?: 'baseline-boot-failed' | 'concurrency-failure'
 }
 
 export interface PortifyRepoState {

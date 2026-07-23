@@ -9,6 +9,7 @@ import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { generateRunId } from '../../../runs/logic/runtime/run-id'
 import { type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { computeSlotBudget, readSystemResources, resolveAdmissionConfig } from '../../../runs/logic/runtime/admission'
+import { hydrateEnvsetIntoWorktrees } from '../../../runs/logic/runtime/env-switcher/worktree-hydrate'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
@@ -414,13 +415,40 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
         const fresh = deps.loadFeatures().find((f) => f.name === feature.name) ?? feature
         const overrides: Record<string, string> = {}
         for (const member of allMembers()) overrides[member.name] = member.editPath!
-        return verifyDoubleBoot(fresh, env, overrides, {
-          ptyFactory: deps.ptyFactory,
-          healthCheck: deps.healthCheck,
-          healthPollIntervalMs: deps.healthPollIntervalMs,
-          healthDeadlineMs,
-          verifyLogDir: paths.verifyLogDir,
-        })
+        // Hydrate the captured envset into the worktrees for the boot window:
+        // worktrees are cut from committed HEAD, so without this the boots run
+        // the CHECKED-IN config (e.g. a docker `db` datasource host) that the
+        // real-path envset apply normally overwrites — an unfixable-by-the-
+        // agent crash. `${port.*}` tokens stay verbatim (one shared file can't
+        // carry two instances' port maps); restore() in `finally` keeps the
+        // overlay diff `save()` captures afterwards ports-only.
+        const hydrated = env
+          ? hydrateEnvsetIntoWorktrees({
+              featureDir: feature.featureDir,
+              setName: env,
+              roots: state.groups.map((g) => ({ sourceRoot: g.sourceRoot, worktreeRoot: g.handle!.worktreeRoot })),
+            })
+          : null
+        try {
+          const result = await verifyDoubleBoot(fresh, env, overrides, {
+            ptyFactory: deps.ptyFactory,
+            healthCheck: deps.healthCheck,
+            healthPollIntervalMs: deps.healthPollIntervalMs,
+            healthDeadlineMs,
+            verifyLogDir: paths.verifyLogDir,
+          })
+          if (!result.ok && hydrated && hydrated.portTokenSlots.length > 0) {
+            const hint =
+              `NOTE: envset file(s) ${hydrated.portTokenSlots.join(', ')} carry \`\${port.*}\` tokens that stay ` +
+              `UNRESOLVED during the double-boot (one shared file cannot serve two port maps). If a service reads ` +
+              `that wiring from the file, move it to per-process injection (CLI arg / env var) — that is what ` +
+              `port-ification verifies.`
+            result.failureDetail = result.failureDetail ? `${result.failureDetail}\n\n${hint}` : hint
+          }
+          return result
+        } finally {
+          hydrated?.restore()
+        }
       },
 
       checkTestsUntouched: async () => {

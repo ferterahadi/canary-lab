@@ -376,10 +376,22 @@ export type SystemGroup = {
   entries: Array<{ text: string; count: number }>
 }
 
+/** Same-tag lines this far apart are separate visits to the stage (a resume /
+ *  retry days later), not one burst of output — the run splits so each visit
+ *  heads on its own time. Without the split, a stage log that accumulated
+ *  re-entries (portify's `workflow … started` per attempt) renders every start
+ *  under the FIRST stamp, dating today's workflow with yesterday's clock. */
+const SYSTEM_GROUP_SPLIT_MS = 60_000
+
 /** Fold `[TAG] text` lines into tag-runs so the tag prints once per run and
- *  identical consecutive lines show as `×N` instead of stacking. */
+ *  identical consecutive lines show as `×N` instead of stacking. A run breaks
+ *  on a tag change OR a stamp gap over `SYSTEM_GROUP_SPLIT_MS` — see above. */
 export function groupSystemLines(lines: string[]): SystemGroup[] {
   const groups: SystemGroup[] = []
+  // Last stamped instant in the current group — the gap baseline. Undefined
+  // while a group has only unstamped lines (no gap is computable there, so
+  // undated runs never split; they group exactly as before).
+  let lastStampMs: number | undefined
   for (const line of lines) {
     // `[tag@<iso>] text` — the stamp is optional: lines written before the
     // conductor stamped them (older flights) still parse, just undated.
@@ -387,15 +399,20 @@ export function groupSystemLines(lines: string[]): SystemGroup[] {
     const tag = m?.[1]
     const timestamp = m?.[2]
     const text = m ? m[3] : line
+    const stampMs = timestamp !== undefined ? Date.parse(timestamp) : NaN
     const last = groups[groups.length - 1]
-    if (!last || last.tag !== tag) {
+    const reentry =
+      lastStampMs !== undefined && !Number.isNaN(stampMs) && stampMs - lastStampMs > SYSTEM_GROUP_SPLIT_MS
+    if (!last || last.tag !== tag || reentry) {
       groups.push({ tag, timestamp, entries: [{ text, count: 1 }] })
+      lastStampMs = Number.isNaN(stampMs) ? undefined : stampMs
       continue
     }
     // Backfill the head time from a later line when the run opened undated —
     // a flight that spanned the stamping change has undated lines first, then
     // stamped ones; without this the whole run reads as timeless.
     if (last.timestamp === undefined && timestamp !== undefined) last.timestamp = timestamp
+    if (!Number.isNaN(stampMs)) lastStampMs = stampMs
     const lastEntry = last.entries[last.entries.length - 1]
     if (lastEntry.text === text) lastEntry.count += 1
     else last.entries.push({ text, count: 1 })

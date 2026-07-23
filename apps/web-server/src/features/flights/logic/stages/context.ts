@@ -152,8 +152,12 @@ export function extractJson<T>(text: string): T {
 }
 
 export class PollTimeoutError extends Error {
-  constructor(what: string, timeoutMs: number) {
-    super(`${what} did not settle within ${Math.round(timeoutMs / 1000)}s`)
+  constructor(what: string, timeoutMs: number, opts: { idle?: boolean } = {}) {
+    super(
+      opts.idle
+        ? `${what} made no progress within ${Math.round(timeoutMs / 1000)}s`
+        : `${what} did not settle within ${Math.round(timeoutMs / 1000)}s`,
+    )
     this.name = 'PollTimeoutError'
   }
 }
@@ -161,15 +165,34 @@ export class PollTimeoutError extends Error {
 export async function pollUntil<T>(
   read: () => Promise<T>,
   settled: (value: T) => boolean,
-  opts: { what: string; intervalMs?: number; timeoutMs: number; signal?: AbortSignal },
+  opts: {
+    what: string
+    intervalMs?: number
+    timeoutMs: number
+    signal?: AbortSignal
+    /** Liveness escape: when given, every CHANGE in the key extends the
+     *  deadline — `timeoutMs` then bounds IDLE time (no key change), not total
+     *  wall-clock. A long job stays alive as long as it demonstrably
+     *  progresses (portify's multi-attempt double-boot legitimately outruns
+     *  any fixed wall-clock; a hung one still freezes its key and dies). */
+    progressKey?: (value: T) => string
+  },
 ): Promise<T> {
   const interval = opts.intervalMs ?? 2000
-  const deadline = Date.now() + opts.timeoutMs
+  let deadline = Date.now() + opts.timeoutMs
+  let lastKey: string | undefined
   for (;;) {
     if (opts.signal?.aborted) throw new StageCancelledError(opts.what)
     const value = await read()
     if (settled(value)) return value
-    if (Date.now() >= deadline) throw new PollTimeoutError(opts.what, opts.timeoutMs)
+    if (opts.progressKey) {
+      const key = opts.progressKey(value)
+      if (key !== lastKey) {
+        lastKey = key
+        deadline = Date.now() + opts.timeoutMs
+      }
+    }
+    if (Date.now() >= deadline) throw new PollTimeoutError(opts.what, opts.timeoutMs, { idle: opts.progressKey !== undefined })
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
         opts.signal?.removeEventListener('abort', onAbort)

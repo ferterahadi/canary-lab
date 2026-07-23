@@ -165,6 +165,54 @@ async function singleFixture(): Promise<{ featuresDir: string; logsDir: string; 
   return { featuresDir, logsDir, appRepo }
 }
 
+// singleFixture + a captured envset whose slot targets a CHECKED-IN repo config
+// file with different content (the real-world shape: docker `db` host committed,
+// `localhost` captured). Exercises the verify-time worktree hydration.
+async function envsetFixture(slotContent: string): Promise<{
+  featuresDir: string; logsDir: string; appRepo: string; checkedIn: string
+}> {
+  const { featuresDir, logsDir, appRepo } = await singleFixture()
+  const checkedIn = 'db=jdbc:mysql://db:3306/x\n'
+  fs.mkdirSync(path.join(appRepo, 'config'), { recursive: true })
+  fs.writeFileSync(path.join(appRepo, 'config', 'app-local.properties'), checkedIn)
+  await runGit(appRepo, ['add', '-A'])
+  await runGit(appRepo, ['commit', '-q', '-m', 'config', '--no-verify'])
+  const featureDir = path.join(featuresDir, 'myfeat')
+  const setDir = path.join(featureDir, 'envsets', 'local')
+  fs.mkdirSync(setDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(featureDir, 'envsets', 'envsets.config.json'),
+    JSON.stringify({
+      appRoots: {},
+      slots: {
+        'app-local.properties': {
+          description: 'captured',
+          target: path.join(appRepo, 'config', 'app-local.properties'),
+        },
+      },
+      feature: { slots: ['app-local.properties'], testCommand: 'true', testCwd: featureDir },
+    }),
+  )
+  fs.writeFileSync(path.join(setDir, 'app-local.properties'), slotContent)
+  return { featuresDir, logsDir, appRepo, checkedIn }
+}
+
+/** Every scratch-worktree copy of the envset-targeted config file. */
+function findWorktreeEnvFiles(logsDir: string): string[] {
+  const base = path.join(logsDir, 'portify')
+  if (!fs.existsSync(base)) return []
+  const out: string[] = []
+  for (const wf of fs.readdirSync(base)) {
+    const wtDir = path.join(base, wf, 'worktrees')
+    if (!fs.existsSync(wtDir)) continue
+    for (const g of fs.readdirSync(wtDir)) {
+      const f = path.join(wtDir, g, 'config', 'app-local.properties')
+      if (fs.existsSync(f)) out.push(f)
+    }
+  }
+  return out
+}
+
 // Two independent features, each with its own single-repo git root. Used to
 // prove the lock is keyed per FEATURE: different features port-ify concurrently.
 async function twoFeatureFixture(): Promise<{ featuresDir: string; logsDir: string }> {
@@ -1161,6 +1209,70 @@ describe('createPortifyRunner (branch coverage)', () => {
 
       await waitForStatus(store, result.workflowId, ['ready-to-save', 'editing', 'failed'])
       await runner.cancel(result.workflowId)
+    })
+
+    it('envset hydration: worktree carries the captured envset during the double-boot, restored after', async () => {
+      const { featuresDir, logsDir, checkedIn } = await envsetFixture('db=jdbc:mysql://localhost:3306/x\n')
+      const seen: string[] = []
+      const store = new PortifyRunStore(logsDir)
+      const runner = createPortifyRunner({
+        logsDir,
+        store,
+        ptyFactory: fakePtyFactory,
+        loadFeatures: () => loadFeatures(featuresDir),
+        pickAgent: () => 'claude',
+        now: () => '2026-06-07T00:00:00.000Z',
+        // Observe the worktree copy WHILE the double-boot runs — the health
+        // probe fires inside verifyDoubleBoot, i.e. inside the boot window.
+        healthCheck: async () => {
+          for (const f of findWorktreeEnvFiles(logsDir)) seen.push(fs.readFileSync(f, 'utf-8'))
+          return true
+        },
+        healthPollIntervalMs: 5,
+        healthDeadlineMs: 400,
+      })
+
+      const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+
+      // The boots saw the CAPTURED content, not the checked-in bytes.
+      expect(seen.length).toBeGreaterThan(0)
+      expect(seen.every((c) => c === 'db=jdbc:mysql://localhost:3306/x\n')).toBe(true)
+      // After verify the worktree (kept until save/cancel) is byte-identical
+      // to the checkout again — hydration must not survive the boot window.
+      const after = findWorktreeEnvFiles(logsDir)
+      expect(after.length).toBeGreaterThan(0)
+      for (const f of after) expect(fs.readFileSync(f, 'utf-8')).toBe(checkedIn)
+      await runner.cancel(workflowId)
+    })
+
+    it("envset hydration: save()'s overlay patch carries the agent's edits but ZERO envset content", async () => {
+      const { featuresDir, logsDir } = await envsetFixture('db=jdbc:mysql://localhost:3306/x\n')
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+
+      const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+      await runner.save(workflowId)
+
+      const overlay = readOverlay(path.join(featuresDir, 'myfeat'))!
+      const patch = overlay.patches['app']
+      expect(patch).toContain('port made injectable by agent')
+      // The load-bearing regression: the overlay ships ports-only — the
+      // hydrated envset must never leak into the captured diff.
+      expect(patch).not.toContain('jdbc:mysql://localhost')
+      expect(patch).not.toContain('app-local.properties')
+    })
+
+    it('envset hydration: a failed verify hints when envset files carry unresolved ${port.*} tokens', async () => {
+      const { featuresDir, logsDir } = await envsetFixture('url=http://localhost:${port.api}/\n')
+      const { store, runner } = makeRunner(featuresDir, logsDir, /* healthy */ false)
+
+      const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('failed')
+
+      const detail = store.get(workflowId)!.verification?.failureDetail ?? ''
+      expect(detail).toContain('UNRESOLVED')
+      expect(detail).toContain('app-local.properties')
     })
 
     it('realpathOrSelf falls back to returning the original path when fs.realpathSync throws', async () => {

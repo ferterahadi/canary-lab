@@ -355,6 +355,103 @@ describe('portified run: apply failure reverses already-applied overlays', () =>
   })
 })
 
+describe('worktree envset hydration at boot', () => {
+  const CHECKED_IN = 'db=jdbc:mysql://db:3306/x\n'
+
+  /** Commit a checked-in config file + write a captured envset targeting it. */
+  async function writeEnvset(slotContent: string): Promise<void> {
+    fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true })
+    fs.writeFileSync(path.join(repoRoot, 'config', 'app-local.properties'), CHECKED_IN)
+    await runGit(repoRoot, ['add', '-A'])
+    await runGit(repoRoot, ['commit', '-q', '-m', 'config', '--no-verify'])
+    const setDir = path.join(featureDir, 'envsets', 'local')
+    fs.mkdirSync(setDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featureDir, 'envsets', 'envsets.config.json'),
+      JSON.stringify({
+        appRoots: {},
+        slots: {
+          'app-local.properties': {
+            description: 'captured',
+            target: path.join(repoRoot, 'config', 'app-local.properties'),
+          },
+        },
+        feature: { slots: ['app-local.properties'], testCommand: 'true', testCwd: featureDir },
+      }),
+    )
+    fs.writeFileSync(path.join(setDir, 'app-local.properties'), slotContent)
+  }
+
+  const wtEnvFile = (h: WorktreeHandle) =>
+    fs.readFileSync(path.join(h.worktreeRoot, 'config', 'app-local.properties'), 'utf-8')
+
+  it('a portified run boots the worktree with the captured envset, ${port.*} resolved to the run map', async () => {
+    await writeEnvset('url=http://localhost:${port.api}/\n')
+    await saveOverlay()
+    const handle = await makeWorktree()
+    expect(wtEnvFile(handle)).toBe(CHECKED_IN) // worktree starts at committed HEAD
+
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      env: 'local',
+      portMap: new Map([['api', 61234]]),
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    await orch.start()
+    expect(wtEnvFile(handle)).toBe('url=http://localhost:61234/\n')
+    await orch.stop('passed')
+  })
+
+  it('a collision-isolated (non-portified) run hydrates its worktree too', async () => {
+    await writeEnvset('db=jdbc:mysql://localhost:3306/x\n')
+    // No overlay saved → not portified; the worktree exists via isolation.
+    const handle = await makeWorktree()
+
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      env: 'local',
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    await orch.start()
+    expect(wtEnvFile(handle)).toBe('db=jdbc:mysql://localhost:3306/x\n')
+    await orch.stop('passed')
+  })
+
+  it('a run without an env skips hydration', async () => {
+    await writeEnvset('db=jdbc:mysql://localhost:3306/x\n')
+    const handle = await makeWorktree()
+
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+
+    await orch.start()
+    expect(wtEnvFile(handle)).toBe(CHECKED_IN)
+    await orch.stop('passed')
+  })
+})
+
 describe('non-portified run is unaffected', () => {
   it('does not apply or reverse anything and tears down the worktree as before', async () => {
     // No overlay saved → orchestrator.portified is false.

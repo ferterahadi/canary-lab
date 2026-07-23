@@ -89,7 +89,19 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
           return v
         },
         (v) => v.status === 'ready-to-save' || v.status === 'saved' || v.status === 'failed' || v.status === 'aborted',
-        { what: `portify ${workflowId}`, intervalMs: 3000, timeoutMs: PORTIFY_TIMEOUT_MS, signal: ctx.signal },
+        {
+          what: `portify ${workflowId}`,
+          intervalMs: 3000,
+          timeoutMs: PORTIFY_TIMEOUT_MS,
+          signal: ctx.signal,
+          // IDLE budget, not wall-clock: a legitimate multi-attempt double-boot
+          // of heavy Gradle apps outruns any fixed cap (a passing 2-attempt run
+          // took 45m while this was 30m wall-clock — the stage abandoned a
+          // workflow that then SUCCEEDED, orphaned and unsaveable). The phase
+          // key mirrors the progress the stage already publishes; a hung
+          // workflow freezes it and still dies after PORTIFY_TIMEOUT_MS.
+          progressKey: (v) => `${v.status ?? ''}#${v.attempt ?? ''}`,
+        },
       )
       if (view.status === 'failed' || view.status === 'aborted') {
         return { kind: 'failed', error: `portify ${view.status}${view.error ? `: ${view.error}` : ''}` }

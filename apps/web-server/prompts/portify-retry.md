@@ -2,7 +2,7 @@ The previous port-ification attempt did not pass verification. The harness boote
 
 {{failureDetail}}
 
-A failed boot almost always means SOME listener still binds a hardcoded port (ignoring its injected env var), an inter-service URL still points at a fixed port, or a port slot is missing its `env` field. The culprit is very often a NON-HTTP listener the first pass missed — a gRPC server, a WebSocket server, a raw TCP server, or a metrics/admin endpoint on its own port.
+If the detail above opens with a BASELINE CHECK verdict, let it steer you: `baseline-boot-failed` means a SINGLE solo boot fails too — the blocker is the app's own boot (a boot-time migration, a config/validation failure), NOT ports; fix that blocker in the app source if it lives there, and do not spend the attempt re-hunting listeners. `concurrency-failure` (or no verdict) means the solo boot is fine and a failed boot almost always means SOME listener still binds a hardcoded port (ignoring its injected env var), an inter-service URL still points at a fixed port, a port slot is missing its `env` field, or the two boots race on shared on-disk state (a common Gradle/build cache or `build/` output dir — give each boot its own, keyed on the injected port). The culprit is very often a NON-HTTP listener the first pass missed — a gRPC server, a WebSocket server, a raw TCP server, or a metrics/admin endpoint on its own port.
 
 - Re-scan the source EXHAUSTIVELY for every `listen(` / `.port` / `createServer` / `bindAsync` and every hardcoded `localhost:<port>` reference.
 - Make each LISTENER read its injected env var with a matching `ports: [{ name, env }]` slot.
