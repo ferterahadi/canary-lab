@@ -38,7 +38,7 @@ import { runStage, healStage } from './run'
 import { evaluationExportStage } from './evaluation-export'
 import type { FlightInject, FlightStageDeps } from './context'
 import { defaultSpawnAgent, extractJson, pollUntil, PollTimeoutError } from './context'
-import type { StageContext } from '../conductor'
+import type { StageContext, StageOutcome } from '../conductor'
 import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 import { writeEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
@@ -2226,6 +2226,19 @@ describe('portify stage', () => {
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ version: 1, featureName: 'checkout', agent: 'claude', repos: [{ name: 'app' }], capturedAt: 'x' }))
   }
 
+  // Every non-yolo run() parks the upfront portify-gate first. Answer it
+  // 'run' to reach the workflow flow a test actually exercises; non-gate
+  // outcomes (already-portified skip, adopted review) pass through untouched.
+  async function runPastGate(
+    adapter: ReturnType<typeof portifyStage>,
+    ctxObj: ReturnType<typeof ctxFor>,
+  ): Promise<StageOutcome> {
+    const gate = await adapter.run!(ctxObj.ctx)
+    if (gate.kind !== 'checkpoint' || gate.checkpoint.kind !== 'portify-gate') return gate
+    ctxObj.setStage('portify', { status: 'waiting-for-approval', checkpoint: gate.checkpoint })
+    return adapter.onCheckpointResponse!(ctxObj.ctx, { choice: 'run' })
+  }
+
   it('skips only when the portified mark already exists', async () => {
     markPortified()
     const outcome = await portifyStage(deps()).run(ctxFor(manifest()).ctx)
@@ -2240,7 +2253,7 @@ describe('portify stage', () => {
       if (call.url.endsWith('/save')) { status = 'saved'; markPortified(); return { statusCode: 200, body: {} } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: false } })
   })
 
@@ -2253,8 +2266,8 @@ describe('portify stage', () => {
       return undefined
     })
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply' } })
     if (parked.kind !== 'checkpoint') throw new Error('unreachable')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
@@ -2268,8 +2281,8 @@ describe('portify stage', () => {
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/server.js' } }
       return undefined
     })
-    const { ctx, progressLog } = ctxFor(manifest())
-    const parked = await portifyStage(deps({ inject })).run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, progressLog } = ctxObj
+    const parked = await runPastGate(portifyStage(deps({ inject })), ctxObj)
     // Parked un-settled (no evidence yet) — progress already carries the id.
     expect(parked).toMatchObject({ kind: 'checkpoint' })
     expect(progressLog).toContainEqual({ workflowId: 'wf1' })
@@ -2281,8 +2294,8 @@ describe('portify stage', () => {
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', attempt: 1, maxAttempts: 3, diff: '--- a/server.js' } }
       return undefined
     })
-    const { ctx, progressLog } = ctxFor(manifest())
-    await portifyStage(deps({ inject })).run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, progressLog } = ctxObj
+    await runPastGate(portifyStage(deps({ inject })), ctxObj)
     // The flight view's attempt stepper + phase verb read this mirror; it is
     // republished only when the phase changes (one poll here → one publish).
     expect(progressLog).toContainEqual({ workflowId: 'wf1', status: 'ready-to-save', attempt: 1, maxAttempts: 3 })
@@ -2294,7 +2307,7 @@ describe('portify stage', () => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 400, body: { error: 'no repos' } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('portify start rejected') })
   })
 
@@ -2303,7 +2316,7 @@ describe('portify stage', () => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 500, body: {} }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('unknown') })
   })
 
@@ -2314,7 +2327,7 @@ describe('portify stage', () => {
       if (call.url.endsWith('/save')) { markPortified(); return { statusCode: 200, body: {} } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: true } })
   })
 
@@ -2324,7 +2337,7 @@ describe('portify stage', () => {
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'failed', error: 'agent crashed' } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'failed', error: 'portify failed: agent crashed' })
   })
 
@@ -2334,7 +2347,7 @@ describe('portify stage', () => {
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'aborted' } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'failed', error: 'portify aborted' })
   })
 
@@ -2345,7 +2358,7 @@ describe('portify stage', () => {
       if (call.url.endsWith('/save')) return { statusCode: 500, body: { error: 'disk full' } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('portify save rejected') })
     // The WHY reaches the user — a bare "(409)" once hid "cannot save a
     // workflow in status \"aborted\"" after a restart orphaned the workflow.
@@ -2362,8 +2375,8 @@ describe('portify stage', () => {
       return undefined
     }, calls)
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { options: ['apply', 'revise', 'cancel'] } })
     if (parked.kind !== 'checkpoint') throw new Error('unreachable')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
@@ -2385,8 +2398,8 @@ describe('portify stage', () => {
       return undefined
     }, calls)
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     if (parked.kind !== 'checkpoint') throw new Error('unreachable')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
 
@@ -2403,8 +2416,8 @@ describe('portify stage', () => {
       return undefined
     })
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     if (parked.kind !== 'checkpoint') throw new Error('unreachable')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
 
@@ -2428,8 +2441,8 @@ describe('portify stage', () => {
       return undefined
     })
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     if (parked.kind !== 'checkpoint') throw new Error('unreachable')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
 
@@ -2454,15 +2467,61 @@ describe('portify stage', () => {
       return undefined
     }, calls)
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
     setStage('portify', {
       status: 'waiting-for-approval',
       checkpoint: { kind: 'portify-apply', message: 'save?', options: ['apply', 'revise', 'cancel'], data: { workflowId: 'wf-dead', diff: 'd' } },
     })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'apply' })
-    // Fresh workflow started and parked its own review.
-    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf2' } } })
+    // The fresh run() re-parks the upfront gate (nothing has been started
+    // yet); answering 'run' starts a NEW workflow that parks its own review.
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-gate' } })
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify')).toBe(false)
+    if (outcome.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: outcome.checkpoint })
+    const parked = await adapter.onCheckpointResponse!(ctx, { choice: 'run' })
+    expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf2' } } })
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify')).toBe(true)
+  })
+
+  it('portify-gate: parks BEFORE any workflow cost; skip settles the stage serial with zero requests', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject(() => undefined, calls)
+    const adapter = portifyStage(deps({ inject }))
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const gate = await adapter.run!(ctx)
+    expect(gate).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-gate', options: ['run', 'skip'] } })
+    // Nothing was started to ask the question (the list probe for adoptable
+    // reviews is the only allowed request).
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+    if (gate.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: gate.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'skip' })
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('parallel readiness skipped') })
+    expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('portify-gate: a stale replayed choice from an older park re-asks instead of acting', async () => {
+    const adapter = portifyStage(deps({ inject: makeInject(() => undefined) }))
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const gate = await adapter.run!(ctx)
+    if (gate.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: gate.checkpoint })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'apply' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-gate' } })
+  })
+
+  it('yolo bypasses the gate and starts the workflow immediately', async () => {
+    let status = 'verifying'
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') { status = 'ready-to-save'; return { statusCode: 201, body: { workflowId: 'wf1' } } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status, diff: '' } }
+      if (call.url.endsWith('/save')) { status = 'saved'; markPortified(); return { statusCode: 200, body: {} } }
+      return undefined
+    })
+    const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } })
+    const outcome = await portifyStage(deps({ inject })).run!(ctxFor(m).ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: false } })
   })
 
   it('re-adopts a review parked across a server restart instead of starting a new workflow', async () => {
@@ -2474,8 +2533,8 @@ describe('portify stage', () => {
       if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
       return undefined
     }, calls)
-    const { ctx, progressLog } = ctxFor(manifest())
-    const parked = await portifyStage(deps({ inject })).run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, progressLog } = ctxObj
+    const parked = await runPastGate(portifyStage(deps({ inject })), ctxObj)
     expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf9' } } })
     // No new workflow was started; the drill-through pin points at the adopted one.
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify')).toBe(false)
@@ -2490,7 +2549,7 @@ describe('portify stage', () => {
       if (call.url.endsWith('/save')) { status = 'failed'; return { statusCode: 200, body: {} } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     // The save-poll settling on "failed" still falls through to the harness's
     // own overlay-mark check (not the workflow's word for it) — no mark exists.
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('overlay mark is missing') })
@@ -2504,7 +2563,7 @@ describe('portify stage', () => {
       if (call.url.endsWith('/save')) { status = 'aborted'; return { statusCode: 200, body: {} } }
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('overlay mark is missing') })
   })
 
@@ -2516,7 +2575,7 @@ describe('portify stage', () => {
       if (call.url.endsWith('/save')) { status = 'saved'; return { statusCode: 200, body: {} } } // no markPortified()
       return undefined
     })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('overlay mark is missing') })
   })
 
@@ -2529,7 +2588,7 @@ describe('portify stage', () => {
       return undefined
     })
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } })
-    const outcome = await portifyStage(deps({ inject })).run(ctxFor(m).ctx)
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(m))
     expect(outcome).toMatchObject({ kind: 'done', evidence: { edits: true } })
   })
 
@@ -2542,8 +2601,8 @@ describe('portify stage', () => {
       return { statusCode: 500, json: () => ({ error: 'unstubbed' }) }
     }
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'cancel' })
@@ -2560,8 +2619,8 @@ describe('portify stage', () => {
       return undefined
     }, calls)
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'cancel' })
@@ -2580,8 +2639,8 @@ describe('portify stage', () => {
       return undefined
     })
     const adapter = portifyStage(deps({ inject }))
-    const { ctx, setStage } = ctxFor(manifest())
-    const parked = await adapter.run(ctx)
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, {})
@@ -2590,14 +2649,15 @@ describe('portify stage', () => {
 
   it('checkpoint response with no stored workflowId re-runs from scratch', async () => {
     const adapter = portifyStage(deps())
-    const { ctx, setStage } = ctxFor(manifest())
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
     setStage('portify', {
       status: 'waiting-for-approval',
       checkpoint: { kind: 'portify-apply', message: 'x', options: ['apply', 'cancel'], data: {} },
     })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'apply' })
-    // Falls through to run(), which starts a fresh workflow via the unstubbed inject (500 → failed).
-    expect(outcome.kind).toBe('failed')
+    // Falls through to run(), which re-parks the upfront gate — nothing to
+    // save exists, so the decision starts over from the top.
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-gate' } })
   })
 })
 

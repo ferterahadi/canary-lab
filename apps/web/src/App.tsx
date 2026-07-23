@@ -247,6 +247,8 @@ export function App() {
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
           onStartNewFlight={() => setFlightStartNew(true)}
           onOpenFlight={openFlight}
+          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
+          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
         />
       ),
     },
@@ -389,6 +391,9 @@ export function App() {
         <FeatureConfigEditor
           feature={configFor}
           initialTab="playwright"
+          portified={features.find((f) => f.name === configFor)?.portified ?? false}
+          onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
+          onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             // refreshFeatures(nextFeature) refetches the list and re-selects the

@@ -35,6 +35,10 @@ interface Props {
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
+  /** Launch the port-ification wizard for a feature (config dialog → Ports tab). */
+  onStartPortify?: (feature: string) => void
+  /** Reopen a past/active port-ification workflow (by id) in the wizard. */
+  onOpenPortify?: (workflowId: string) => void
 }
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
@@ -115,6 +119,8 @@ export function FeaturesColumn({
   onStartNewFlight,
   onOpenFlight,
   versionStatus,
+  onStartPortify,
+  onOpenPortify,
 }: Props) {
   const { gatePromo } = useMcpPromo()
   // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
@@ -228,6 +234,8 @@ export function FeaturesColumn({
         <FeatureConfigEditor
           feature={configFor}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
+          onStartPortify={onStartPortify}
+          onOpenPortify={onOpenPortify}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)

@@ -5,15 +5,15 @@ import React from 'react'
  *  that shows a captured patch (Portify wizard review, flight portify-apply
  *  checkpoint). Extracted from PortifyWizard so the flight checkpoint stopped
  *  rendering the same diff as an uncoloured wall of text. */
-export function DiffView({ diff, onOpenInEditor }: { diff: string; onOpenInEditor?: () => void }) {
+export function DiffView({ diff, onOpenInEditor, openTitle = 'Open project in editor' }: { diff: string; onOpenInEditor?: () => void; openTitle?: string }) {
   if (!diff.trim()) return <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>(no diff captured)</div>
   return (
     <div style={{ position: 'relative' }}>
       {onOpenInEditor && (
         <button
           type="button"
-          title="Open project in editor"
-          aria-label="Open project in editor"
+          title={openTitle}
+          aria-label={openTitle}
           onClick={onOpenInEditor}
           className="cl-icon-button"
           style={{

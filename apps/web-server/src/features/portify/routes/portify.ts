@@ -6,6 +6,7 @@ import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../
 import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { launchEditorDir } from '../../../shared/editor-launch'
+import { overlayDir } from '../../portify/logic/runtime/overlay'
 import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
@@ -73,9 +74,11 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   })
 
   // Open the port-ification project in the user's editor. While the workflow is
-  // live the scratch worktree(s) hold the edits; once saved they're discarded,
-  // so fall back to the product repo. Best-effort, mirroring the benchmark/run
-  // worktree openers — a failed launch reports the path so the UI can fall back.
+  // live the scratch worktree(s) hold the edits; once saved they're discarded
+  // and the edits live only in the overlay (features/<feature>/portify/), so
+  // open that — the product repo never holds the changes. Best-effort,
+  // mirroring the benchmark/run worktree openers — a failed launch reports the
+  // path so the UI can fall back.
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/open', async (req, reply) => {
     const manifest = deps.store.get(req.params.workflowId)
     if (!manifest) {
@@ -83,9 +86,14 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       return { error: 'workflow not found' }
     }
     const dirs: string[] = []
-    for (const repo of manifest.repos) {
-      const dir = repo.worktreePath && fs.existsSync(repo.worktreePath) ? repo.worktreePath : repo.path
-      if (dir && fs.existsSync(dir) && !dirs.includes(dir)) dirs.push(dir)
+    const overlay = overlayDir(manifest.featureDir)
+    if (manifest.status === 'saved' && fs.existsSync(overlay)) {
+      dirs.push(overlay)
+    } else {
+      for (const repo of manifest.repos) {
+        const dir = repo.worktreePath && fs.existsSync(repo.worktreePath) ? repo.worktreePath : repo.path
+        if (dir && fs.existsSync(dir) && !dirs.includes(dir)) dirs.push(dir)
+      }
     }
     if (dirs.length === 0) {
       reply.code(409)

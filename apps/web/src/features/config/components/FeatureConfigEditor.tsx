@@ -18,7 +18,7 @@ interface Props {
   onDeleted?: (feature: string) => void
   onRenamed?: (oldFeature: string, nextFeature: string) => void
   initialTab?: Tab
-  /** Launch the port-ification wizard for this feature (from the Service tab). */
+  /** Launch the port-ification wizard for this feature (from the Ports tab). */
   onStartPortify?: (feature: string) => void
   /** Reopen a past/active port-ification workflow (by id) from the Ports tab. */
   onOpenPortify?: (workflowId: string) => void

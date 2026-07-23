@@ -3,7 +3,7 @@ import * as api from '../../../shared/api/client'
 import type { ConfigValue } from '../../../shared/api/client'
 import { ConfirmModal, TrashIcon } from './atoms'
 import { usePortify } from '../../portify/state/PortifyContext'
-import { latestSavedWorkflowId } from '../../portify/state/portify-state'
+import { isActivePortify, latestSavedWorkflowId } from '../../portify/state/portify-state'
 import { useInvalidationKey } from '../../../shared/state/invalidation'
 import {
   deriveRepoName,
@@ -59,7 +59,6 @@ export function PortsTab({
       .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Load failed') })
     return () => { cancelled = true }
   }, [feature, portsRefreshKey, reloadKey])
-  const [confirmRerun, setConfirmRerun] = useState(false)
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
@@ -68,6 +67,14 @@ export function PortsTab({
   // the full record history + pruning live in the Log Cleanup → Portify tab.)
   const { workflows } = usePortify()
   const savedWorkflowId = latestSavedWorkflowId(workflows, feature)
+  // Live sync with every other Portify entry point (flight Parallel-readiness
+  // stage, run-collision dialog, MCP): the `/ws/portify`-fed index is shared,
+  // so an active workflow started ANYWHERE shows up here without a refresh.
+  // Portify is single-flight — one active workflow total — so a run on another
+  // feature blocks starting one here.
+  const activeEntry = workflows.find((w) => isActivePortify(w.status))
+  const activeHere = activeEntry?.feature === feature ? activeEntry : undefined
+  const blockedBy = activeEntry && activeEntry.feature !== feature ? activeEntry : undefined
 
   if (loadError) {
     return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{loadError}</div>
@@ -76,17 +83,23 @@ export function PortsTab({
     return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
   }
 
-  const launchPortify = (): void => {
-    // An already-portified feature re-runs (refreshing its overlay) behind a
-    // confirm; a fresh one starts directly.
-    if (portified) setConfirmRerun(true)
-    else onStartPortify?.(feature)
-  }
-
-  // Declared slots with no overlay = orphaned config (leftover from a removed
-  // portification, or hand-declared). When not portified, this is the only
-  // signal that there's port config to clear.
-  const hasSlots = repos.some((r) => r.startCommands.some((c) => (c.ports?.length ?? 0) > 0))
+  // The band reports INJECTABILITY with its evidence level, not portify status:
+  // a feature whose services natively read their port from env declares slots
+  // straight in feature.config.cjs and is concurrency-ready with no overlay at
+  // all. Solid dot = machine-verified (overlay double-boot), hollow = declared.
+  //   verified  — overlay exists (portified)
+  //   declared  — every start command carries a slot, no overlay
+  //   partial   — some commands have slots, others would still clash
+  //   none      — no slots anywhere; Portify (or hand-declaring) is the way in
+  const commands = repos.flatMap((r) => r.startCommands)
+  const slotted = commands.filter((c) => (c.ports?.length ?? 0) > 0)
+  const bandState: 'verified' | 'declared' | 'partial' | 'none' = portified
+    ? 'verified'
+    : slotted.length === 0
+    ? 'none'
+    : slotted.length === commands.length
+    ? 'declared'
+    : 'partial'
 
   const removePortification = async (): Promise<void> => {
     setRemoving(true)
@@ -117,36 +130,86 @@ export function PortsTab({
           className="flex items-center justify-between gap-4 px-4 py-3"
           style={{
             borderBottom: '1px solid var(--border-default)',
-            borderLeft: `2px solid ${portified ? 'var(--success)' : 'color-mix(in srgb, var(--accent) 30%, var(--border-default))'}`,
+            borderLeft: `2px solid ${
+              activeHere ? 'var(--running)'
+              : bandState === 'verified' ? 'var(--success)'
+              : bandState === 'declared' ? 'color-mix(in srgb, var(--success) 45%, var(--border-default))'
+              : bandState === 'partial' ? 'var(--warning)'
+              : 'var(--border-default)'
+            }`,
           }}
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2">
+              {/* Dot fill carries the evidence level: solid = machine-verified
+                  (double-boot), hollow = declared in config, unproven. */}
               <span
                 aria-hidden
+                className={activeHere ? 'cl-pulse' : undefined}
                 style={{
                   display: 'inline-block', width: 8, height: 8, borderRadius: 9999,
-                  background: portified ? 'var(--success)' : 'transparent',
-                  border: portified ? 'none' : '1.5px solid var(--text-muted)',
-                  boxShadow: portified ? '0 0 8px color-mix(in srgb, var(--success) 40%, transparent)' : 'none',
+                  background: activeHere ? 'var(--running)'
+                    : bandState === 'verified' ? 'var(--success)'
+                    : bandState === 'partial' ? 'var(--warning)'
+                    : 'transparent',
+                  border: activeHere || bandState === 'verified' || bandState === 'partial' ? 'none'
+                    : bandState === 'declared' ? '1.5px solid var(--success)'
+                    : '1.5px solid var(--text-muted)',
+                  boxShadow: activeHere
+                    ? '0 0 8px color-mix(in srgb, var(--running) 45%, transparent)'
+                    : bandState === 'verified' ? '0 0 8px color-mix(in srgb, var(--success) 40%, transparent)' : 'none',
                 }}
               />
-              <span style={{ fontSize: 13, fontWeight: 600, color: portified ? 'var(--success)' : 'var(--text-primary)' }}>
-                {portified ? 'Portified — boots concurrently' : 'Not portified'}
+              <span style={{ fontSize: 13, fontWeight: 600, color: activeHere ? 'var(--running)' : bandState === 'verified' ? 'var(--success)' : 'var(--text-primary)' }}>
+                {activeHere
+                  ? (activeHere.status === 'ready-to-save' ? 'Portify — ready to save' : 'Portify in progress')
+                  : bandState === 'verified' ? 'Portified — boots concurrently'
+                  : bandState === 'declared' ? 'Injectable — declared in config'
+                  : bandState === 'partial' ? `Partially injectable — ${slotted.length} of ${commands.length} start commands have slots`
+                  : 'Not injectable — no port slots declared'}
               </span>
             </div>
-            {/* Only the not-portified state needs a prompt; the badge says the rest. */}
-            {!portified && (
-              <p className="mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 560 }}>
-                Booting this feature twice would clash on a hardcoded port. Portify rewrites its listeners to injectable ports and saves the change as an overlay — your repo is never modified.
-              </p>
-            )}
+            {/* Active workflow (started here, from a flight, or by an agent)
+                owns the band; every resting state carries its own explanation. */}
+            <p className="mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 560 }}>
+              {activeHere
+                ? (activeHere.status === 'ready-to-save'
+                  ? 'The rewrite is verified and parked for review. Open it to review the diff and save the overlay.'
+                  : 'A port-ification workflow is running for this feature — it may have been started from a flight or by an agent. Open it to follow along.')
+                : bandState === 'verified'
+                ? 'Agent-rewritten and double-boot verified. Applied as an overlay on each run — the repo itself is never modified.'
+                : bandState === 'declared'
+                ? 'Every start command declares a port slot; Canary injects a free port through its env var at boot. Declared, not agent-verified — proven live whenever the feature boots twice.'
+                : bandState === 'partial'
+                ? 'Commands without a slot keep their fixed ports — two boots would clash there. Portify can cover the remaining commands.'
+                : 'Concurrent boots would clash on fixed ports. Portify rewrites listeners to read injected ports and saves the diff as an overlay — the repo itself is never modified.'}
+            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2 self-start">
+            {/* An active workflow owns the whole action area: one button that
+                opens it in the wizard (follow progress / review & save). The
+                start/remove actions return once it settles. */}
+            {activeHere && onOpenPortify && (
+              <button
+                type="button"
+                onClick={() => onOpenPortify(activeHere.workflowId)}
+                title={activeHere.status === 'ready-to-save'
+                  ? 'Open the parked review — inspect the rewrite diff and save the overlay.'
+                  : 'Open the running port-ification in the wizard to follow its progress.'}
+                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                style={{
+                  color: 'var(--running)',
+                  border: '1px solid color-mix(in srgb, var(--running) 45%, var(--border-default))',
+                  background: 'color-mix(in srgb, var(--running) 8%, transparent)',
+                }}
+              >
+                {activeHere.status === 'ready-to-save' ? 'Review & save' : 'View progress'}
+              </button>
+            )}
             {/* View the saved overlay (the verified diff) read-only in the
                 wizard — the at-a-glance "what got rewritten" the removed inline
                 history used to provide. Only when a saved record backs it. */}
-            {portified && savedWorkflowId && onOpenPortify && (
+            {!activeHere && portified && savedWorkflowId && onOpenPortify && (
               <button
                 type="button"
                 onClick={() => onOpenPortify(savedWorkflowId)}
@@ -158,18 +221,17 @@ export function PortsTab({
                 View saved overlay
               </button>
             )}
-            {/* Portified → undo the whole port-ification (overlay + config).
-                Not portified but slots are still declared → those are orphaned
-                config (a removed portification, or hand-declared); offer to
-                clear them. Both go through the same revert path. */}
-            {(portified || hasSlots) && (
+            {/* Verified → undo the whole port-ification (overlay + config).
+                Re-portifying is the sanctioned two-step: Remove, then the band
+                offers Portify again. (No "Clear port slots": the UI can't tell
+                real declared slots from orphans — config edits stay in
+                feature.config.cjs, where the caption points.) */}
+            {!activeHere && bandState === 'verified' && (
               <button
                 type="button"
                 onClick={() => { setRemoveError(null); setConfirmRemove(true) }}
-                aria-label={portified ? 'Remove portification' : 'Clear port slots'}
-                title={portified
-                  ? 'Remove portification — deletes the saved overlay; the feature reverts to its hardcoded ports.'
-                  : 'Clear port slots — removes the declared slots left in the config (e.g. from a removed portification).'}
+                aria-label="Remove portification"
+                title="Deletes the saved overlay and restores the config; the feature reverts to its fixed ports."
                 className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
                 style={{
                   color: 'var(--danger)',
@@ -178,29 +240,52 @@ export function PortsTab({
                 }}
               >
                 <TrashIcon />
-                {portified ? 'Remove portification' : 'Clear port slots'}
+                Remove portification
               </button>
             )}
-            {onStartPortify && (
+            {/* Portify: the accent CTA only where it's the way in (none /
+                partial). A fully declared feature keeps a demoted ghost —
+                optional, but the recovery door if a service ignores its env
+                var. Verified features have no start button at all. */}
+            {!activeHere && bandState !== 'verified' && onStartPortify && (
               <button
                 type="button"
-                onClick={launchPortify}
+                onClick={() => onStartPortify(feature)}
+                disabled={blockedBy != null}
                 className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
-                title={portified
-                  ? 'Re-run Portify — re-derives the overlay from the current source.'
-                  : 'Portify — rewrite every listener to an injectable port so it can boot concurrently.'}
-                style={{
-                  color: 'var(--accent)',
-                  border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))',
-                  background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
-                }}
+                title={blockedBy
+                  ? `Portify runs one workflow at a time — ${blockedBy.feature} is currently portifying.`
+                  : bandState === 'declared'
+                  ? 'Optional — slots are already declared. Run it if a service ignores its env var and needs its listener rewritten.'
+                  : 'Rewrite every listener to an injectable port so the feature can boot concurrently.'}
+                style={bandState === 'declared'
+                  ? {
+                      color: 'var(--text-secondary)',
+                      border: '1px solid var(--border-default)',
+                      background: 'transparent',
+                      opacity: blockedBy ? 0.5 : undefined,
+                      cursor: blockedBy ? 'not-allowed' : undefined,
+                    }
+                  : {
+                      color: 'var(--accent)',
+                      border: '1px solid color-mix(in srgb, var(--accent) 45%, var(--border-default))',
+                      background: 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                      opacity: blockedBy ? 0.5 : undefined,
+                      cursor: blockedBy ? 'not-allowed' : undefined,
+                    }}
               >
-                <span aria-hidden>🔌</span>
-                {portified ? 'Re-run Portify' : 'Portify'}
+                Portify
               </button>
             )}
           </div>
         </div>
+
+        {/* The tab's single always-on explainer — what a slot IS, and where
+            slots live (feature.config.cjs — also the escape hatch for editing
+            or removing hand-declared ones). */}
+        <p className="px-4 pt-3 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 640 }}>
+          A slot is a port Canary picks free at each boot and hands the service through its env var; {'${port.<name>}'} resolves to that number in commands and health checks. Slots are declared in feature.config.cjs — by you, or by Portify.
+        </p>
 
         <div className="flex flex-col gap-3 px-4 py-3">
           {repos.length === 0 && (
@@ -242,14 +327,14 @@ export function PortsTab({
                     </div>
                     <PortSlotTable
                       ports={cmd.ports ?? []}
-                      // Not-portified empty state: a single neutral status, no
-                      // pitch and no per-card CTA — the intro band already
-                      // explains Portify and carries the one action. (Don't say
-                      // "hardcoded" — the command may already carry a ${port.x}
-                      // token; "no slots declared" is what's actually true.)
-                      emptyHint={!portified ? (
+                      // Always the same neutral empty state — the band + caption
+                      // carry the pitch and the one action. (The PortSlotTable
+                      // default asserts "uses its hardcoded port; can't run
+                      // concurrently", which the UI can't actually know — a
+                      // command may open no port at all.)
+                      emptyHint={
                         <div className="text-[10px]" style={{ color: 'var(--text-muted)' }}>No port slots declared</div>
-                      ) : undefined}
+                      }
                     />
                   </div>
                 ))}
@@ -260,60 +345,21 @@ export function PortsTab({
 
       </div>
 
-      {confirmRerun && (
-        <div
-          style={{ position: 'fixed', inset: 0, background: 'var(--overlay-backdrop)', display: 'grid', placeItems: 'center', zIndex: 95 }}
-          onClick={() => setConfirmRerun(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Re-run Portify"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: 'min(460px, 92%)', background: 'var(--bg-surface)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', padding: 20 }}
-          >
-            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>Re-run Portify?</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 16 }}>
-              <b style={{ color: 'var(--text-secondary)' }}>{feature}</b> already has a saved overlay. Re-running Portify re-derives it from the current source — the saved overlay is replaced when you save again. Nothing is committed to your repo.
-            </div>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button type="button" className="cl-button" onClick={() => setConfirmRerun(false)} style={{ padding: '7px 14px', fontSize: 12.5 }}>Cancel</button>
-              <button
-                type="button"
-                className="cl-button-primary"
-                onClick={() => { setConfirmRerun(false); onStartPortify?.(feature) }}
-                style={{ padding: '7px 14px', fontSize: 12.5 }}
-              >
-                Re-run Portify
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <ConfirmModal
         open={confirmRemove}
-        title={portified ? 'Remove portification?' : 'Clear port slots?'}
+        title="Remove portification?"
         message={
           <div className="space-y-2">
-            {portified ? (
-              <p>
-                This reverts the port-ification of <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>: the code overlay is deleted and its <code style={{ fontFamily: 'var(--font-mono)' }}>feature.config.cjs</code> edits (the port slots and <code style={{ fontFamily: 'var(--font-mono)' }}>{'${port.…}'}</code> health-check URLs) are restored to how they were before. It boots on its hardcoded ports again and can no longer run concurrently.
-              </p>
-            ) : (
-              <p>
-                This removes the declared <code style={{ fontFamily: 'var(--font-mono)' }}>ports</code> slots left in <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>'s config — orphaned leftovers from a removed portification. The feature isn't portified, so nothing else changes.
-              </p>
-            )}
+            <p>
+              This reverts the port-ification of <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code>: the code overlay is deleted and its <code style={{ fontFamily: 'var(--font-mono)' }}>feature.config.cjs</code> edits (the port slots and <code style={{ fontFamily: 'var(--font-mono)' }}>{'${port.…}'}</code> health-check URLs) are restored to how they were before. It boots on its fixed ports again and can no longer run concurrently.
+            </p>
             <p style={{ color: 'var(--text-muted)' }}>
-              {portified
-                ? 'Your product repo is untouched. Re-run Portify any time to regenerate it.'
-                : "Your product repo is untouched. Skip this if a service genuinely reads these env vars — then the slots aren't orphaned. Re-run Portify any time to set them up properly."}
+              Your product repo is untouched. To re-derive the overlay from current source, remove it and run Portify again — the band offers it as soon as this completes. Until a new overlay is saved, the feature can't boot concurrently.
             </p>
             {removeError && <p style={{ color: 'var(--danger)' }}>{removeError}</p>}
           </div>
         }
-        confirmLabel={portified ? 'Remove portification' : 'Clear port slots'}
+        confirmLabel="Remove portification"
         variant="danger"
         busy={removing}
         onCancel={() => { if (!removing) { setConfirmRemove(false); setRemoveError(null) } }}

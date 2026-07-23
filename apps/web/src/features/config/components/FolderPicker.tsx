@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from 'react'
 import * as api from '../../../shared/api/client'
-import { ChevronRightIcon, FolderIcon } from './atoms'
+import { ChevronRightIcon, FolderIcon, Modal } from './atoms'
 
 interface Props {
   /** The path currently saved in the config — string literal absolute path
@@ -150,53 +150,17 @@ export function FolderPickerModal({
     return () => { cancelled = true }
   }, [at])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      e.preventDefault()
-      e.stopImmediatePropagation()
-      onCancel()
-    }
-    window.addEventListener('keydown', onKey, { capture: true })
-    return () => window.removeEventListener('keydown', onKey, { capture: true })
-  }, [onCancel])
-
   const current = resp?.absolute ?? at
   const parent = resp?.parent ?? null
 
   return (
-    <div
-      data-testid="folder-picker-modal"
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      style={{ background: 'var(--overlay-backdrop)' }}
-      onClick={onCancel}
-    >
-      <div
-        className="cl-modal flex w-[560px] max-w-[92vw] flex-col overflow-hidden"
-        style={{
-          maxHeight: '80vh',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-4 py-3"
-          style={{ borderBottom: '1px solid var(--border-default)' }}
-        >
-          <span className="text-xs uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-            {title}
-          </span>
-          <button
-            type="button"
-            onClick={onCancel}
-            className="text-xs"
-            style={{ color: 'var(--text-muted)' }}
-          >
-            Esc
-          </button>
-        </div>
-
-        {/* Path bar with parent button */}
+    <Modal
+      open
+      onClose={onCancel}
+      title={title}
+      width={560}
+      testId="folder-picker-modal"
+      subheader={
         <div
           className="flex items-center gap-2 px-3 py-2"
           style={{ borderBottom: '1px solid var(--border-default)' }}
@@ -221,47 +185,14 @@ export function FolderPickerModal({
             {current}
           </span>
         </div>
-
-        {/* Dir list */}
-        <div className="flex-1 overflow-y-auto scrollbar-thin">
-          {error && (
-            <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-              {error}
-            </div>
-          )}
-          {!error && resp && resp.dirs.length === 0 && (
-            <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-              (no subdirectories)
-            </div>
-          )}
-          {resp?.dirs.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onDoubleClick={() => setAt(`${current.replace(/\/$/, '')}/${d}`)}
-              onClick={() => setAt(`${current.replace(/\/$/, '')}/${d}`)}
-              className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-xs transition-colors duration-150"
-              style={{ color: 'var(--text-secondary)' }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.color = 'var(--text-primary)' }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-            >
-              <FolderIcon />
-              <span style={{ fontFamily: 'var(--font-mono)' }}>{d}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Footer */}
-        <div
-          className="flex items-center justify-end gap-2 px-3 py-2"
-          style={{ borderTop: '1px solid var(--border-default)' }}
-        >
+      }
+      footer={
+        <>
           <button
             type="button"
             data-testid="folder-picker-cancel"
             onClick={onCancel}
-            className="rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider"
-            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+            className="cl-button px-3 py-1 text-xs"
           >
             Cancel
           </button>
@@ -273,18 +204,38 @@ export function FolderPickerModal({
               if (!resp?.absolute) return
               onConfirm(resp.absolute)
             }}
-            className="rounded-md px-3 py-1.5 text-[11px] uppercase tracking-wider"
-            style={{
-              color: 'var(--accent)',
-              border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-              background: 'var(--accent-soft)',
-              opacity: resp?.absolute ? 1 : 0.4,
-            }}
+            className="cl-button-primary px-3.5 py-1 text-xs"
           >
             {confirmLabel}
           </button>
+        </>
+      }
+    >
+      {error && (
+        <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+          {error}
         </div>
-      </div>
-    </div>
+      )}
+      {!error && resp && resp.dirs.length === 0 && (
+        <div className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+          (no subdirectories)
+        </div>
+      )}
+      {resp?.dirs.map((d) => (
+        <button
+          key={d}
+          type="button"
+          onDoubleClick={() => setAt(`${current.replace(/\/$/, '')}/${d}`)}
+          onClick={() => setAt(`${current.replace(/\/$/, '')}/${d}`)}
+          className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-xs transition-colors duration-150"
+          style={{ color: 'var(--text-secondary)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.color = 'var(--text-primary)' }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
+        >
+          <FolderIcon />
+          <span style={{ fontFamily: 'var(--font-mono)' }}>{d}</span>
+        </button>
+      ))}
+    </Modal>
   )
 }

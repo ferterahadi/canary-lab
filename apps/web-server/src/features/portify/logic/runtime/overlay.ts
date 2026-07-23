@@ -2,7 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import { runGit } from '../../../../shared/git-repo'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import { OVERLAY_DIRNAME, patchFileName } from '../../../../../../../shared/portify-overlay'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+
+// Naming rules live in shared/portify-overlay.ts (the web UI shows these
+// paths); re-exported here so server-side callers keep one import.
+export { OVERLAY_DIRNAME, patchFileName }
 
 // The ephemeral port overlay: a captured set of unified diffs (one per product
 // repo) that make a feature's services read canary-lab-injected ports. Unlike
@@ -21,7 +26,6 @@ import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 //                          delete the code overlay. Absent on legacy overlays.
 
 export const OVERLAY_VERSION = 1
-export const OVERLAY_DIRNAME = 'portify'
 export const OVERLAY_META_FILE = 'meta.json'
 export const OVERLAY_ORIGINAL_CONFIG_FILE = 'original-config.snapshot'
 
@@ -104,12 +108,6 @@ export function readOverlayOriginalConfig(featureDir: string): string | null {
   } catch {
     return null
   }
-}
-
-/** Filesystem-safe patch filename for a repo. */
-export function patchFileName(repoName: string): string {
-  const slug = repoName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'repo'
-  return `${slug}.patch`
 }
 
 /** A verified overlay exists for this feature (meta present with ≥1 repo). */

@@ -5,6 +5,7 @@ import { useActivePortify } from '../state/PortifyContext'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { DiffView } from '../../../shared/ui/DiffView'
 import { ExternalPortifyPanel } from './ExternalPortifyPanel'
+import { patchFileName } from '../../../../../../shared/portify-overlay'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
 // ports, proven by a concurrent double-boot, ending when the user SAVES the
@@ -599,7 +600,9 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
   // At ready-to-save verification is always set; a prior revise round may have
   // left it failed — in that case the diff isn't proven and can't be saved.
   const proven = m.verification?.ok === true
-  const overlayPath = `features/${m.feature}/portify/`
+  // The actual saved artifacts — one patch per repo, named by the shared
+  // overlay naming rule, so the row shows real filenames, not just a folder.
+  const overlayFiles = m.repos.map((r) => `features/${m.feature}/portify/${patchFileName(r.name)}`)
   const [openError, setOpenError] = useState<string | null>(null)
   // Open the project in the user's editor — the scratch worktree while live,
   // else the product repo once saved. Best-effort: surface a launch failure.
@@ -639,8 +642,10 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
       {/* A proven-but-empty diff isn't a missing capture — the apps already read
           injected ports, so the rewrite was a no-op (see orchestrator). Say so
           plainly instead of the bare "(no diff captured)". */}
+      {/* Once saved the worktrees are gone and the server opens the overlay
+          folder instead — label the arrow for what it actually opens. */}
       {(m.diff ?? '').trim()
-        ? <DiffView diff={m.diff!} onOpenInEditor={openProject} />
+        ? <DiffView diff={m.diff!} onOpenInEditor={openProject} openTitle={saved ? 'Open overlay in editor' : undefined} />
         : proven
           ? <NoChangesNeeded feature={m.feature} />
           : <DiffView diff="" onOpenInEditor={openProject} />}
@@ -667,7 +672,11 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
                 Applied to a per-run copy before each boot, removed at teardown
               </span>
               <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Stored in</span>
-              <code style={{ ...mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="Inside your canary workspace — not the product repo">{overlayPath}</code>
+              <span style={{ display: 'grid', rowGap: 2 }} title="Inside your canary workspace — not the product repo">
+                {overlayFiles.map((f) => (
+                  <span key={f} style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f}</span>
+                ))}
+              </span>
             </div>
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>

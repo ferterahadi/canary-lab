@@ -1606,7 +1606,8 @@ export function cleanupPortify(opts?: ClientOptions): Promise<PortifyCleanupList
 }
 
 // Open the port-ification project in the user's editor — the scratch worktree
-// while the workflow is live, else the product repo once it's been saved.
+// while the workflow is live, else the saved overlay folder
+// (features/<feature>/portify/) once the worktrees are discarded.
 export function openPortifyProject(
   workflowId: string,
   opts?: ClientOptions,

@@ -61,6 +61,52 @@ describe('PortifyOrchestrator', () => {
     expect(order.indexOf('capture')).toBeLessThan(order.indexOf('persist:ready-to-save'))
   })
 
+  it('attempt 0: a seeded sibling overlay that verifies parks at ready-to-save with NO agent run', async () => {
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({ seeded: () => true, runAgent })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('ready-to-save')
+    expect(runAgent).not.toHaveBeenCalled()
+    expect(m.attempt).toBe(0)
+    expect(m.diff).toBe('diff')
+  })
+
+  it('attempt 0: a seeded verify FAILURE feeds its boot evidence into agent attempt 1', async () => {
+    const verify = vi.fn()
+      .mockResolvedValueOnce({ ok: false, instances: [], failureDetail: 'seeded overlay: port 3007 still bound' })
+      .mockResolvedValueOnce({ ok: true, instances: [] })
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({ seeded: () => true, verify, runAgent })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('ready-to-save')
+    expect(m.attempt).toBe(1)
+    // Normally attempt 1 gets no failure context at all — the attempt-0 boot
+    // evidence is a head start, not a wasted double-boot.
+    expect(runAgent).toHaveBeenNthCalledWith(1, 1, 'seeded overlay: port 3007 still bound')
+  })
+
+  it('attempt 0 is skipped without a seed — the first verify happens after the agent', async () => {
+    const verify = vi.fn(async (): Promise<PortifyVerification> => ({ ok: true, instances: [] }))
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({ runAgent, verify })
+    await new PortifyOrchestrator(deps).run()
+    expect(runAgent).toHaveBeenCalledTimes(1)
+    expect(verify).toHaveBeenCalledTimes(1)
+  })
+
+  it('attempt 0 stops fast (no agent) when the seeded boot failure is notPortFixable', async () => {
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({
+      seeded: () => true,
+      runAgent,
+      verify: async () => ({ ok: false, instances: [], failureDetail: 'db down', notPortFixable: true }),
+    })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('failed')
+    expect(runAgent).not.toHaveBeenCalled()
+    expect(deps.cleanup).toHaveBeenCalledOnce()
+  })
+
   it('retries with failure context until verification passes', async () => {
     const verify = vi.fn()
       .mockResolvedValueOnce({ ok: false, instances: [], failureDetail: 'port 3007 still bound' })

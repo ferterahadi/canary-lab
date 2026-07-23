@@ -685,6 +685,7 @@ export function Modal({
   height,
   role = 'dialog',
   ariaLabel,
+  testId,
   headerActions,
   subheader,
   footer,
@@ -718,6 +719,8 @@ export function Modal({
   /** Accessible name when `title` isn't descriptive enough on its own, or
    *  there's no visible title at all (the body renders its own heading). */
   ariaLabel?: string
+  /** `data-testid` on the dialog surface, so tests can assert open/closed. */
+  testId?: string
   /** Extra header buttons rendered before the built-in Close button (e.g. a
    *  destructive delete action on a hero dialog). */
   headerActions?: ReactNode
@@ -751,6 +754,7 @@ export function Modal({
         role={role}
         aria-label={ariaLabel ?? title}
         aria-modal="true"
+        data-testid={testId}
         className="cl-modal relative flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-lg"
         style={{
           width,

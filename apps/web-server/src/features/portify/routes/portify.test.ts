@@ -307,11 +307,28 @@ describe('portifyRoutes', () => {
       fs.rmSync(tmp, { recursive: true, force: true })
     })
 
-    it('falls back to the product repo once the worktree is gone (saved)', async () => {
+    it('opens the saved overlay folder once the worktree is gone (saved)', async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
       const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
-      // worktreePath points at a now-deleted dir (post-save) → falls back to path.
-      const m = manifest({ status: 'saved', repos: [{ name: 'app', path: repo, worktreePath: path.join(tmp, 'gone') }] })
+      // Saved: the worktree is discarded and the edits live only in the
+      // overlay under the feature dir — open that, not the untouched repo.
+      const featureDir = path.join(tmp, 'feature'); fs.mkdirSync(path.join(featureDir, 'portify'), { recursive: true })
+      const m = manifest({ status: 'saved', featureDir, repos: [{ name: 'app', path: repo, worktreePath: path.join(tmp, 'gone') }] })
+      const app = await build({ store: fakeStore({ get: () => m }) })
+      const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
+      expect(res.statusCode).toBe(200)
+      const overlay = path.join(featureDir, 'portify')
+      expect(res.json()).toMatchObject({ opened: true, paths: [overlay] })
+      expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', overlay)
+      fs.rmSync(tmp, { recursive: true, force: true })
+    })
+
+    it('falls back to the product repo when saved but the overlay was removed', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-open-'))
+      const repo = path.join(tmp, 'repo'); fs.mkdirSync(repo)
+      // featureDir exists but holds no portify/ dir ("Remove portification").
+      const featureDir = path.join(tmp, 'feature'); fs.mkdirSync(featureDir)
+      const m = manifest({ status: 'saved', featureDir, repos: [{ name: 'app', path: repo, worktreePath: path.join(tmp, 'gone') }] })
       const app = await build({ store: fakeStore({ get: () => m }) })
       const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/open' })
       expect(res.statusCode).toBe(200)

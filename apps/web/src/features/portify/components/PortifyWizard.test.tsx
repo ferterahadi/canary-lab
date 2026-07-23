@@ -132,14 +132,15 @@ describe('PortifyWizard', () => {
   })
 
   it('falls back to surfacing a launch failure below the diff once saved', async () => {
-    // Saved state has no Review-locally row, so the error appears below the diff.
+    // Saved state has no Review-locally row, so the error appears below the
+    // diff — and the arrow opens the saved overlay, not the project.
     vi.mocked(api.getPortify).mockResolvedValue(manifest('saved', { diff: '# repo: app\n+ x' }))
     vi.mocked(api.openPortifyProject).mockResolvedValue({ opened: false, paths: ['/repo'], error: 'no editor' })
     await act(async () => {
       root.render(<PortifyWizard workflowId="w" onClose={vi.fn()} onSaved={vi.fn()} />)
     })
     await flush()
-    await act(async () => clickByTitle('Open project in editor'))
+    await act(async () => clickByTitle('Open overlay in editor'))
     await flush()
     expect(container.textContent).toContain('no editor')
   })
@@ -345,7 +346,8 @@ describe('PortifyWizard', () => {
     await act(async () => clickButton('Start ▶'))
     await flush()
     expect(container.textContent).toContain('can now run in parallel')
-    expect(container.textContent).toContain('features/cns/portify/')
+    // Stored-in lists the real per-repo patch filenames, not just the folder.
+    expect(container.textContent).toContain('features/cns/portify/app.patch')
     await act(async () => clickButton('Done'))
     expect(onSaved).toHaveBeenCalled()
   })
@@ -381,7 +383,7 @@ describe('PortifyWizard', () => {
     // Save / Request-changes).
     expect(container.textContent).toContain('can now run in parallel')
     expect(container.textContent).toContain('saved ✓')
-    expect(container.textContent).toContain('features/cns/portify/')
+    expect(container.textContent).toContain('features/cns/portify/app.patch')
     expect(container.textContent).toContain('app.listen(process.env.PORT)')
     expect(buttonLabels()).not.toContain('Save overlay')
     expect(buttonLabels()).not.toContain('Request changes')
