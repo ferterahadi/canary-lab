@@ -48,6 +48,19 @@ describe('PortifyOrchestrator', () => {
     expect(deps.cleanup).not.toHaveBeenCalled() // worktree kept for commit
   })
 
+  it('persists the review capture BEFORE parking at ready-to-save (restart survival)', async () => {
+    const order: string[] = []
+    const { deps } = makeDeps({
+      persist: (m) => { order.push(`persist:${m.status}`) },
+      persistReviewCapture: vi.fn(async () => { order.push('capture') }),
+    })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('ready-to-save')
+    // Capture lands before the manifest goes answerable — by the time anyone
+    // can save, the fallback file already exists.
+    expect(order.indexOf('capture')).toBeLessThan(order.indexOf('persist:ready-to-save'))
+  })
+
   it('retries with failure context until verification passes', async () => {
     const verify = vi.fn()
       .mockResolvedValueOnce({ ok: false, instances: [], failureDetail: 'port 3007 still bound' })
@@ -197,6 +210,23 @@ describe('PortifyOrchestrator', () => {
       expect(m.verification?.ok).toBe(false)
       expect(m.verification?.failureDetail).toContain('3000')
       expect(deps.cleanup).not.toHaveBeenCalled()
+    })
+
+    it('refreshes the review capture on a VERIFIED revise, keeps the previous one on a failed re-verify', async () => {
+      const persistReviewCapture = vi.fn(async () => {})
+      const { deps } = makeDeps({ persistReviewCapture })
+      const orch = new PortifyOrchestrator(deps)
+      await orch.revise(readyManifest(), 'good tweak')
+      expect(persistReviewCapture).toHaveBeenCalledTimes(1)
+
+      const failing = makeDeps({
+        persistReviewCapture,
+        verify: async () => ({ ok: false, instances: [], failureDetail: 'boom' }),
+      })
+      await new PortifyOrchestrator(failing.deps).revise(readyManifest(), 'bad tweak')
+      // Unchanged: the stale-but-verified capture stays the fallback (save is
+      // gated on verification.ok anyway, so it can never land while failed).
+      expect(persistReviewCapture).toHaveBeenCalledTimes(1)
     })
 
     it('flags a test-file edit made during a revise round', async () => {

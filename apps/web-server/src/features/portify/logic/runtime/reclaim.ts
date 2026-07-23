@@ -15,6 +15,15 @@ import type { PortifyManifest, PortifyStatus } from './types'
 //      snapshot — the in-memory original is gone).
 // Then flip the manifest to `aborted` so the UI doesn't show a zombie workflow.
 //
+// EXCEPTION — a parked, verified review survives: a `ready-to-save` workflow
+// whose park persisted its overlay capture (pending-overlay.json) stays
+// `ready-to-save`. Its worktrees/branch still go (revise needs a live agent
+// session and is gone either way), but the config stays portified in place —
+// exactly the state it was in while parked live — and `save()` writes the
+// overlay from the capture. Aborting these was the old behavior, and it turned
+// an already-verified diff into an unanswerable checkpoint (save → 409) every
+// time a restart landed while a review sat open.
+//
 // This supersedes the store's pure-manifest `reconcileInterrupted` at startup;
 // it does the disk cleanup the store can't (the store does no git/fs I/O).
 
@@ -29,7 +38,13 @@ export async function reclaimOrphanedPortify(
     if (TERMINAL.has(entry.status)) continue
     const m = store.get(entry.workflowId)
     if (!m) continue
-    await reclaimOne(m, logsDir)
+    const { pendingOverlayPath } = buildPortifyPaths(portifyDir(logsDir, m.workflowId))
+    if (m.status === 'ready-to-save' && fs.existsSync(pendingOverlayPath)) {
+      await removeWorktrees(m)
+      continue // stays parked + answerable; config deliberately NOT restored
+    }
+    await removeWorktrees(m)
+    restoreOriginalConfig(m, logsDir)
     store.save({
       ...m,
       status: 'aborted',
@@ -39,7 +54,7 @@ export async function reclaimOrphanedPortify(
   }
 }
 
-async function reclaimOne(m: PortifyManifest, logsDir: string): Promise<void> {
+async function removeWorktrees(m: PortifyManifest): Promise<void> {
   // Remove each distinct worktree + delete the shared branch. Repos that share
   // a git root share one worktree, so dedupe by worktreePath.
   const seen = new Set<string>()
@@ -55,7 +70,10 @@ async function reclaimOne(m: PortifyManifest, logsDir: string): Promise<void> {
       /* best-effort — a missing repo/worktree just stays as-is */
     }
   }
-  // Restore the canonical feature config from the pre-edit snapshot.
+}
+
+// Restore the canonical feature config from the pre-edit snapshot.
+function restoreOriginalConfig(m: PortifyManifest, logsDir: string): void {
   try {
     const { originalConfigPath } = buildPortifyPaths(portifyDir(logsDir, m.workflowId))
     if (fs.existsSync(originalConfigPath)) {

@@ -19,6 +19,12 @@ export interface PortifyOrchestratorDeps {
   setup: () => Promise<PortifyRepoState[]>
   /** Run the agent for this attempt; `failureDetail` is set on retries. */
   runAgent: (attempt: number, failureDetail?: string) => Promise<void>
+  /** True when setup() pre-applied a sibling feature's overlay into the
+   *  worktree(s). Gates the attempt-0 verify: a seeded rewrite might already
+   *  pass the double-boot, so try it BEFORE spending an agent run. Without a
+   *  seed there is nothing to test — attempt 0 would burn a doomed double-boot
+   *  on every fresh portify. */
+  seeded?: () => boolean
   /** Resume the agent session with the user's review feedback (revise pass). */
   runFeedbackAgent: (feedback: string) => Promise<void>
   /** Unified diff of the agent's edits so far. */
@@ -27,6 +33,12 @@ export interface PortifyOrchestratorDeps {
   verify: () => Promise<PortifyVerification>
   /** Guard: the change must not touch test files. */
   checkTestsUntouched: () => Promise<{ ok: boolean; offending: string[] }>
+  /** Persist the verified diff as an on-disk overlay capture BEFORE parking at
+   *  `ready-to-save` (verification passed). The parked review can then survive
+   *  a server restart: `save()` falls back to the capture when the in-memory
+   *  worktree state is gone. Best-effort (the runner swallows its own errors —
+   *  the live save path never needs the capture). */
+  persistReviewCapture?: () => Promise<void>
   /** Best-effort teardown (remove worktree + branch). Runs on failed/aborted only. */
   cleanup?: () => Promise<void>
 }
@@ -57,6 +69,44 @@ export class PortifyOrchestrator {
       let lastFailure: string | undefined
       let diff: string | undefined
       let verification: PortifyVerification | undefined
+
+      // Attempt 0 — reuse before investigation: when setup seeded a sibling
+      // feature's saved overlay for the same app(s), the rewrite may already
+      // be complete. Verify it directly; a pass parks at ready-to-save with
+      // ZERO agent minutes spent. A fail is not wasted either — its boot
+      // evidence feeds attempt 1's prompt (normally the first agent run gets
+      // no failure context at all).
+      if (d.seeded?.()) {
+        diff = await d.captureDiff()
+        m = { ...m, status: 'verifying', diff }
+        d.persist(m)
+        verification = await d.verify()
+        if (d.isAborted?.()) return await finalizeAborted()
+        if (!verification.ok && verification.notPortFixable) {
+          await d.cleanup?.()
+          m = {
+            ...m,
+            status: 'failed',
+            diff,
+            verification,
+            endedAt: d.now(),
+            error:
+              'The stack could not boot because a dependency was unreachable (e.g. the database is down). ' +
+              'This is an environment problem, not the port rewrite — fix the environment and re-run portify.',
+          }
+          d.persist(m)
+          return m
+        }
+        if (verification.ok) {
+          await d.persistReviewCapture?.()
+          m = { ...m, status: 'ready-to-save', diff, verification }
+          d.persist(m)
+          return m
+        }
+        lastFailure = verification.failureDetail
+        m = { ...m, verification }
+        d.persist(m)
+      }
 
       for (let attempt = 1; attempt <= m.maxAttempts; attempt++) {
         if (d.isAborted?.()) return await finalizeAborted()
@@ -102,6 +152,7 @@ export class PortifyOrchestrator {
             d.persist(m)
             continue
           }
+          await d.persistReviewCapture?.()
           m = { ...m, status: 'ready-to-save', diff, verification }
           d.persist(m)
           return m
@@ -178,6 +229,11 @@ export class PortifyOrchestrator {
         }
       }
 
+      // Refresh the restart-survival capture only when this pass VERIFIED —
+      // a failed revise keeps the previous good capture (save() is gated on
+      // `verification.ok` anyway, so a stale capture can never be saved while
+      // the latest pass failed).
+      if (verification.ok) await d.persistReviewCapture?.()
       m = { ...m, status: 'ready-to-save', diff, verification }
       d.persist(m)
       return m
@@ -267,6 +323,7 @@ export class PortifyOrchestrator {
         }
       }
 
+      if (verification.ok) await d.persistReviewCapture?.()
       m = verification.ok
         ? { ...m, status: 'ready-to-save', diff, verification }
         : { ...m, status: 'editing', diff, verification }

@@ -14,6 +14,7 @@ import type { ExternalHealSession, JournalEntry, RunDetail, RunIndexEntry } from
 import { AgentSessionView, type AgentSessionSource } from '../../agent-sessions/components/AgentSessionView'
 import { Modal, StatusDot, useEscapeToClose } from '../../config/components/atoms'
 import { Chip } from '../../../shared/ui/StatusChip'
+import { DiffView } from '../../../shared/ui/DiffView'
 import { StepList, StepRow } from '../../../shared/ui/StepList'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { RunRow } from '../../runs/components/RunRow'
@@ -2094,9 +2095,13 @@ function CheckpointControls({
 }) {
   const [busy, setBusy] = useState(false)
   const [envText, setEnvText] = useState('')
+  // portify-apply 'revise': the choice needs feedback text, so its button
+  // opens this composer instead of responding immediately.
+  const [reviseOpen, setReviseOpen] = useState(false)
+  const [reviseText, setReviseText] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
 
-  const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown }): void => {
+  const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string }): void => {
     setBusy(true)
     setFailure(null)
     api.respondFlightCheckpoint(flightId, response)
@@ -2142,11 +2147,10 @@ function CheckpointControls({
         </p>
       )}
 
-      {diff && (
-        <pre className="max-h-[280px] overflow-auto rounded border p-2 text-[10.5px]" style={{ borderColor: 'var(--border-default)', fontFamily: 'var(--font-mono)' }}>
-          {diff}
-        </pre>
-      )}
+      {/* Same renderer as the Portify wizard's review screen — the checkpoint
+          shows the identical captured patch, so it gets the identical
+          per-line-coloured diff block, not a plain wall of text. */}
+      {diff && <DiffView diff={diff} />}
 
       {checkpoint.kind === 'missing-env' && (
         <div className="flex flex-col gap-1.5">
@@ -2189,7 +2193,7 @@ function CheckpointControls({
             type="button"
             data-testid={`checkpoint-choice-${option}`}
             disabled={busy}
-            onClick={() => respond({ choice: option })}
+            onClick={() => (option === 'revise' ? setReviseOpen((v) => !v) : respond({ choice: option }))}
             className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs"
             title={option}
             style={i === 0
@@ -2221,6 +2225,30 @@ function CheckpointControls({
           </button>
         )}
       </div>
+
+      {reviseOpen && (
+        <div className="flex flex-col gap-1.5">
+          <textarea
+            data-testid="checkpoint-revise-feedback"
+            value={reviseText}
+            onChange={(e) => setReviseText(e.target.value)}
+            placeholder="What should the agent change? The edits are re-verified with another double-boot."
+            spellCheck={false}
+            rows={3}
+            className="cl-input w-full p-2 text-[11px]"
+            style={{ fontFamily: 'var(--font-mono)' }}
+          />
+          <button
+            type="button"
+            data-testid="checkpoint-revise-submit"
+            disabled={busy || !reviseText.trim()}
+            onClick={() => respond({ choice: 'revise', feedback: reviseText.trim() })}
+            className="cl-button self-start px-2.5 py-1 text-xs"
+          >
+            Send feedback
+          </button>
+        </div>
+      )}
 
       {failure && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{failure}</div>}
     </section>

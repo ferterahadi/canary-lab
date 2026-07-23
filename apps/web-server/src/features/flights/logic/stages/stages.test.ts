@@ -2338,7 +2338,7 @@ describe('portify stage', () => {
     expect(outcome).toMatchObject({ kind: 'failed', error: 'portify aborted' })
   })
 
-  it('fails when the save request itself is rejected', async () => {
+  it('fails when the save request itself is rejected — carrying the server\'s reason, not just the code', async () => {
     const inject = makeInject((call) => {
       if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
       if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', diff: '' } }
@@ -2347,6 +2347,139 @@ describe('portify stage', () => {
     })
     const outcome = await portifyStage(deps({ inject })).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('portify save rejected') })
+    // The WHY reaches the user — a bare "(409)" once hid "cannot save a
+    // workflow in status \"aborted\"" after a restart orphaned the workflow.
+    expect((outcome as { error?: string }).error).toContain('disk full')
+  })
+
+  it('revise posts the feedback and re-parks the checkpoint with the NEW diff', async () => {
+    let diff = 'old-diff'
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff } }
+      if (call.url.endsWith('/revise')) { diff = 'revised-diff'; return { statusCode: 200, body: {} } }
+      return undefined
+    }, calls)
+    const adapter = portifyStage(deps({ inject }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { options: ['apply', 'revise', 'cancel'] } })
+    if (parked.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'use env vars, not args' })
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf1', diff: 'revised-diff' } },
+    })
+    const revise = calls.find((c) => c.url.endsWith('/revise'))
+    expect(revise?.payload).toEqual({ feedback: 'use env vars, not args' })
+  })
+
+  it('revise without feedback text re-parks asking for it — no revise request fires', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      return undefined
+    }, calls)
+    const adapter = portifyStage(deps({ inject }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'revise' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { message: expect.stringContaining('needs feedback text') } })
+    expect(calls.some((c) => c.url.endsWith('/revise'))).toBe(false)
+  })
+
+  it('a rejected revise (e.g. post-restart, worktree gone) re-parks with the reason — the verified diff stays saveable', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      if (call.url.endsWith('/revise')) return { statusCode: 409, body: { error: 'worktree is no longer available — the server may have restarted; start a new workflow' } }
+      return undefined
+    })
+    const adapter = portifyStage(deps({ inject }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'tweak it' })
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { message: expect.stringContaining('Revise unavailable — worktree is no longer available') },
+    })
+  })
+
+  it('a revise whose re-verify FAILED re-parks with the verdict up front (save is blocked server-side)', async () => {
+    let revised = false
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) {
+        return revised
+          ? { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/y', verification: { ok: false, failureDetail: 'port 3000 still bound\nstack...' } } }
+          : { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      }
+      if (call.url.endsWith('/revise')) { revised = true; return { statusCode: 200, body: {} } }
+      return undefined
+    })
+    const adapter = portifyStage(deps({ inject }))
+    const { ctx, setStage } = ctxFor(manifest())
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'bad idea' })
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { message: expect.stringContaining('FAILED the double-boot re-verify — port 3000 still bound') },
+    })
+  })
+
+  it('a replayed "apply" on a DEAD workflow falls back to a fresh run instead of failing forever', async () => {
+    // Resume replays the stored checkpointResponse; when the stored answer
+    // targets a workflow a restart aborted (pre-capture records), the save can
+    // never succeed — the stage must re-run, not re-fail on every resume.
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.url === '/api/portify/wf-dead/save') {
+        return { statusCode: 409, body: { error: 'cannot save a workflow in status "aborted"' } }
+      }
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf2' } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      return undefined
+    }, calls)
+    const adapter = portifyStage(deps({ inject }))
+    const { ctx, setStage } = ctxFor(manifest())
+    setStage('portify', {
+      status: 'waiting-for-approval',
+      checkpoint: { kind: 'portify-apply', message: 'save?', options: ['apply', 'revise', 'cancel'], data: { workflowId: 'wf-dead', diff: 'd' } },
+    })
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'apply' })
+    // Fresh workflow started and parked its own review.
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf2' } } })
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify')).toBe(true)
+  })
+
+  it('re-adopts a review parked across a server restart instead of starting a new workflow', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify') {
+        return { statusCode: 200, body: [{ workflowId: 'wf9', feature: 'checkout', status: 'ready-to-save' }] }
+      }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      return undefined
+    }, calls)
+    const { ctx, progressLog } = ctxFor(manifest())
+    const parked = await portifyStage(deps({ inject })).run(ctx)
+    expect(parked).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf9' } } })
+    // No new workflow was started; the drill-through pin points at the adopted one.
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify')).toBe(false)
+    expect(progressLog).toContainEqual({ workflowId: 'wf9' })
   })
 
   it('settles the save-poll via a "failed" status (not just "saved") and still checks the overlay mark', async () => {
@@ -2414,10 +2547,10 @@ describe('portify stage', () => {
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'cancel' })
-    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('not concurrency-ready') })
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('not concurrency-ready') })
   })
 
-  it('checkpoint response: cancel fails the stage and calls the cancel endpoint', async () => {
+  it('checkpoint response: cancel SKIPS the stage (flight proceeds without parallel readiness) and calls the cancel endpoint', async () => {
     const calls: InjectCall[] = []
     let status = 'ready-to-save'
     const inject = makeInject((call) => {
@@ -2432,7 +2565,10 @@ describe('portify stage', () => {
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'cancel' })
-    expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('not concurrency-ready') })
+    // Declining is a decision, not a failure — a failed stage was a dead end
+    // (the only retry re-ran the same workflow the user just rejected). The
+    // stage skips; the feature stays serial; the next flight retries portify.
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('not concurrency-ready') })
     expect(calls.some((c) => c.url.endsWith('/cancel'))).toBe(true)
   })
 

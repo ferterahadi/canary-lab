@@ -1527,6 +1527,12 @@ export function registerCanaryLabTools(
       if (cp?.kind === 'export-mode') {
         return `${base} raw = fast report straight from run evidence; localized = an agent rewrites per-test reasoning (slower, more readable).`
       }
+      if (cp?.kind === 'portify-gate') {
+        return `${base} This is the UPFRONT parallel-readiness ask, before any agent or double-boot cost: "run" starts the portify workflow (agent edits port wiring in a throwaway worktree, concurrent double-boot verifies — heavy stacks can take 30-60+ min; a sibling feature's saved overlay for the same app is reused and verified first, so the agent may not run at all); "skip" keeps the feature serial (runs go one at a time) and the flight continues — a later flight can ask again.`
+      }
+      if (cp?.kind === 'portify-apply') {
+        return `${base} The diff passed a concurrent double-boot. "apply" SAVES it as the feature's overlay (nothing lands in the product repos — runs apply it into throwaway per-run worktrees); "revise" REQUIRES feedback:"<what to change>" and sends the agent back for another edit + re-verify pass (the checkpoint re-parks with the new diff); "cancel" discards the edits and SKIPS the stage — the flight continues WITHOUT parallel readiness (the feature stays serial; a later flight can retry).`
+      }
       return base
     }
     if (view.status === 'running') return 'Flight is running — re-call get_flight to follow it; it parks on checkpoints and settles to done/paused/failed.'
@@ -1655,13 +1661,13 @@ export function registerCanaryLabTools(
   })
 
   registerTool('respond_flight_checkpoint', {
-    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, a docs-less prd-source, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
+    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, a docs-less prd-source, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without parallel readiness (the feature stays serial; a later flight can retry). export-mode picks the evaluation flavor: raw (fast) or localized (agent-rewritten reasoning).',
     inputSchema: {
       flightId: z.string(),
       choice: z.string().optional().describe('One of the checkpoint\'s options.'),
       values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
       data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited config — written through to the feature\'s on-disk feature.config.cjs before validation.'),
-      feedback: z.string().optional().describe('prd-source agent choices only: what went wrong last time — added to the collector agent\'s prompt.'),
+      feedback: z.string().optional().describe('prd-source agent choices and portify-apply "revise" only: for prd-source, what went wrong last time (added to the collector agent\'s prompt); for portify-apply revise (where it is REQUIRED), what the agent should change before the double-boot re-verify.'),
     },
   }, async ({ flightId, choice, values, data, feedback }) => {
     if (!deps.flightsRequest) return flightsUnavailable()

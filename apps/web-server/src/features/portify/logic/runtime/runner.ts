@@ -198,6 +198,16 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
         { statusCode: 409 },
       )
     }
+    // A review parked across a server restart is still answerable (reclaim kept
+    // it, save works from its persisted capture) and still owns the feature's
+    // in-place config edit — a second workflow would snapshot that PORTIFIED
+    // config as its "original" and corrupt the revert chain.
+    if (deps.store.list().some((e) => e.feature === featureName && e.status === 'ready-to-save' && !active.has(e.workflowId))) {
+      throw Object.assign(
+        new Error(`A verified port-ification review for "${featureName}" is parked awaiting save/cancel — answer it (or cancel it) first.`),
+        { statusCode: 409 },
+      )
+    }
     const cap = portifyConcurrencyCap()
     if (active.size >= cap) {
       throw Object.assign(
@@ -381,6 +391,10 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
         return states
       },
 
+      // Attempt-0 gate: a borrowed sibling overlay may already complete the
+      // rewrite — the orchestrator verifies it before spending an agent run.
+      seeded: () => state.seededFrom.length > 0,
+
       runAgent: async (attempt, failureDetail) => {
         // setup() ran (and fully succeeded) before any runAgent, so every
         // member has an editPath and every group a handle.
@@ -458,6 +472,19 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
           offending.push(...changed.filter((f) => /(^|\/)e2e\//.test(f) || /\.spec\.[tj]s$/.test(f)).map((f) => `${group.key}:${f}`))
         }
         return { ok: offending.length === 0, offending }
+      },
+
+      // Restart survival for the parked review: snapshot the verified diff in
+      // save()'s exact overlay shape so a post-restart save can still write the
+      // overlay after the worktrees are gone (see paths.pendingOverlayPath).
+      persistReviewCapture: async () => {
+        try {
+          const repos = await captureOverlayRepos(state)
+          fs.writeFileSync(
+            paths.pendingOverlayPath,
+            JSON.stringify({ version: 1, capturedAt: deps.now(), repos, originalConfig: state.originalConfig }, null, 2),
+          )
+        } catch { /* best-effort — the live save path never needs the capture */ }
       },
 
       cleanup: async () => {
@@ -586,6 +613,11 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return deps.store.get(workflowId) ?? m
   }
 
+  function dropPendingOverlay(workflowId: string): void {
+    const paths = buildPortifyPaths(portifyDir(deps.logsDir, workflowId))
+    try { fs.rmSync(paths.pendingOverlayPath, { force: true }) } catch { /* best-effort */ }
+  }
+
   /**
    * Ephemeral-overlay terminal action (replaces commit/merge). Captures the
    * agent's verified edits as a unified diff per git-root group and writes them
@@ -610,22 +642,28 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       )
     }
     const state = active.get(workflowId)
-    if (!state) throw Object.assign(new Error('worktree is no longer available'), { statusCode: 409 })
-
-    // One captured diff per git-root group; every member repo in the group
-    // shares that group's worktree (so the same patch + base SHA). Run time
-    // forces one worktree per repo NAME and applies the repo's patch into it.
-    const overlayRepos: OverlayRepoInput[] = []
-    for (const group of state.groups) {
-      const wt = group.handle! // reaching save means setup fully succeeded
-      const patch = await captureDiff(wt.worktreeRoot, group.snapshotRef)
-      const baseSha = (await runGit(wt.worktreeRoot, ['rev-parse', 'HEAD'])).stdout.trim()
-      const changed = await changedFiles(wt.worktreeRoot, group.snapshotRef)
-      const touchedFiles = await captureTouchedFiles(wt.worktreeRoot, baseSha, changed)
-      for (const member of group.members) {
-        overlayRepos.push({ name: member.name, baseSha, patch, touchedFiles })
-      }
+    if (!state) {
+      // Server restarted since verification: the worktrees are gone, but the
+      // ready-to-save park persisted its overlay capture (pending-overlay.json)
+      // and startup reclaim deliberately left the workflow parked. Save from
+      // the capture — the diff it holds is exactly the last VERIFIED state.
+      const paths = buildPortifyPaths(portifyDir(deps.logsDir, workflowId))
+      const pending = readPendingOverlay(paths.pendingOverlayPath)
+      if (!pending) throw Object.assign(new Error('worktree is no longer available'), { statusCode: 409 })
+      writeOverlay(m.featureDir, {
+        featureName: m.feature,
+        agent: m.agent,
+        capturedAt: deps.now(),
+        repos: pending.repos,
+        originalConfig: pending.originalConfig,
+      })
+      try { fs.rmSync(paths.pendingOverlayPath, { force: true }) } catch { /* best-effort */ }
+      const next: PortifyManifest = { ...m, status: 'saved', endedAt: deps.now() }
+      deps.store.save(next)
+      return next
     }
+
+    const overlayRepos = await captureOverlayRepos(state)
     writeOverlay(m.featureDir, {
       featureName: m.feature,
       agent: m.agent,
@@ -642,6 +680,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       await discardWorktree(group.handle!, state.branch)
     }
     active.delete(workflowId)
+    dropPendingOverlay(workflowId)
     const next: PortifyManifest = { ...m, status: 'saved', endedAt: deps.now() }
     deps.store.save(next)
     return next
@@ -658,7 +697,19 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       }
       restoreConfig(state)
       active.delete(workflowId)
+    } else if (m.status === 'ready-to-save') {
+      // A review parked across a server restart (reclaim kept it answerable and
+      // deliberately did NOT restore the config — the feature stays portified
+      // in place exactly as while parked live). Declining must undo that edit:
+      // restore from the on-disk snapshot the start persisted.
+      const paths = buildPortifyPaths(portifyDir(deps.logsDir, workflowId))
+      try {
+        if (fs.existsSync(paths.originalConfigPath)) {
+          fs.writeFileSync(path.join(m.featureDir, 'feature.config.cjs'), fs.readFileSync(paths.originalConfigPath, 'utf-8'))
+        }
+      } catch { /* best-effort */ }
     }
+    dropPendingOverlay(workflowId)
     // A finished (saved) workflow is returned untouched.
     if (m.status === 'saved') return m
     const next: PortifyManifest = { ...m, status: 'aborted', endedAt: m.endedAt ?? deps.now() }
@@ -692,6 +743,39 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
 
 function readFileOrNull(p: string): string | null {
   try { return fs.readFileSync(p, 'utf-8') } catch { return null }
+}
+
+// One captured diff per git-root group; every member repo in the group shares
+// that group's worktree (so the same patch + base SHA). Run time forces one
+// worktree per repo NAME and applies the repo's patch into it.
+async function captureOverlayRepos(state: ActiveWorkflow): Promise<OverlayRepoInput[]> {
+  const overlayRepos: OverlayRepoInput[] = []
+  for (const group of state.groups) {
+    const wt = group.handle! // reaching a capture means setup fully succeeded
+    const patch = await captureDiff(wt.worktreeRoot, group.snapshotRef)
+    const baseSha = (await runGit(wt.worktreeRoot, ['rev-parse', 'HEAD'])).stdout.trim()
+    const changed = await changedFiles(wt.worktreeRoot, group.snapshotRef)
+    const touchedFiles = await captureTouchedFiles(wt.worktreeRoot, baseSha, changed)
+    for (const member of group.members) {
+      overlayRepos.push({ name: member.name, baseSha, patch, touchedFiles })
+    }
+  }
+  return overlayRepos
+}
+
+/** The restart-survival capture persisted at every verified ready-to-save park. */
+interface PendingOverlayCapture {
+  version: 1
+  capturedAt: string
+  repos: OverlayRepoInput[]
+  originalConfig: string | null
+}
+
+function readPendingOverlay(p: string): PendingOverlayCapture | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as PendingOverlayCapture
+    return Array.isArray(parsed.repos) ? parsed : null
+  } catch { return null }
 }
 
 function realpathOrSelf(p: string): string {

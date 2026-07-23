@@ -8,6 +8,8 @@ import { runGit } from '../../../../shared/git-repo'
 import { loadFeatures } from '../../../config/logic/feature-loader'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
+import { buildPortifyPaths, portifyDir } from './paths'
+import { reclaimOrphanedPortify } from './reclaim'
 import { createPortifyRunner, portifyConcurrencyCap, safeKey } from './runner'
 import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, overlayDir, writeOverlay } from './overlay'
@@ -272,6 +274,71 @@ describe('createPortifyRunner (integration)', () => {
     expect(branches.stdout.trim()).toBe('')
     const log = await runGit(appRepo, ['log', '--oneline'])
     expect(log.stdout.trim().split('\n')).toHaveLength(1) // only the fixture's init commit
+  })
+
+  it('save() works ACROSS a server restart: reclaim keeps the parked review, a fresh runner saves from the persisted capture', async () => {
+    const { featuresDir, logsDir, appRepo } = await singleFixture()
+    const featureDir = path.join(featuresDir, 'myfeat')
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+    const paths = buildPortifyPaths(portifyDir(logsDir, workflowId))
+    // The ready-to-save park persisted the restart-survival capture.
+    expect(fs.existsSync(paths.pendingOverlayPath)).toBe(true)
+
+    // "Restart": boot-time reclaim over a fresh store, then a FRESH runner
+    // (empty in-memory active map — the worktree state died with the process).
+    await reclaimOrphanedPortify(new PortifyRunStore(logsDir), logsDir, () => '2026-06-07T02:00:00.000Z')
+    const fresh = makeRunner(featuresDir, logsDir)
+    expect(fresh.store.get(workflowId)?.status).toBe('ready-to-save') // kept parked, not aborted
+
+    const saved = await fresh.runner.save(workflowId)
+    expect(saved.status).toBe('saved')
+    expect(overlayExists(featureDir)).toBe(true)
+    const overlay = readOverlay(featureDir)!
+    expect(overlay.patches['app']).toContain('port made injectable by agent')
+    expect(fs.existsSync(paths.pendingOverlayPath)).toBe(false) // consumed
+
+    // Still nothing in the product repo.
+    const branches = await runGit(appRepo, ['branch', '--list', 'canary/dynamic-ports-myfeat'])
+    expect(branches.stdout.trim()).toBe('')
+  })
+
+  it('cancel() after a restart restores the pre-edit config from the on-disk snapshot', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const featureDir = path.join(featuresDir, 'myfeat')
+    const configPath = path.join(featureDir, 'feature.config.cjs')
+    const original = fs.readFileSync(configPath, 'utf-8')
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+    // Simulate the agent's in-place config edit (the mocked agent only edits
+    // worktree source, so stamp the canonical config by hand).
+    fs.writeFileSync(configPath, `${original}// portified\n`)
+
+    await reclaimOrphanedPortify(new PortifyRunStore(logsDir), logsDir, () => '2026-06-07T02:00:00.000Z')
+    // Reclaim kept the parked review AND its in-place config edit.
+    expect(fs.readFileSync(configPath, 'utf-8')).toContain('// portified')
+
+    const fresh = makeRunner(featuresDir, logsDir)
+    const cancelled = await fresh.runner.cancel(workflowId)
+    expect(cancelled.status).toBe('aborted')
+    // Declining undid the config edit from the persisted snapshot.
+    expect(fs.readFileSync(configPath, 'utf-8')).toBe(original)
+  })
+
+  it('rejects a NEW workflow for a feature whose parked review survived a restart', async () => {
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+
+    await reclaimOrphanedPortify(new PortifyRunStore(logsDir), logsDir, () => '2026-06-07T02:00:00.000Z')
+    const fresh = makeRunner(featuresDir, logsDir)
+    await expect(fresh.runner.startPortify({ feature: 'myfeat', agent: 'claude' }))
+      .rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('parked awaiting save/cancel') })
   })
 
   it('save() 404s for an unknown workflow and 409s when not ready', async () => {

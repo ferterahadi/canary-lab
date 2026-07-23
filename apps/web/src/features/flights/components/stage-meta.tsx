@@ -110,7 +110,8 @@ const CHECKPOINT_TITLE: Record<string, string> = {
   'missing-env': 'Environment values needed',
   'prd-source': 'Where should requirements come from?',
   'coverage-stuck': 'Coverage stopped short of the target',
-  'portify-apply': 'Apply the parallel-readiness edits?',
+  'portify-gate': 'Run parallel readiness?',
+  'portify-apply': 'Save the parallel-readiness overlay?',
   'run-failed': 'The test run did not pass',
   'export-mode': 'How should the report be built?',
 }
@@ -138,9 +139,25 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
     'accept-partial': 'Accept current coverage',
     'retry': 'Try another round of passes',
   },
+  // The wire key stays 'apply' (MCP/autopilot parity) but the ACTION is a save:
+  // the verified diff is persisted as the feature's overlay — nothing lands in
+  // the product repos; runs apply it into per-run worktrees at boot and reverse
+  // it at teardown. Mirrors the wizard's "Save overlay" button so the same
+  // The upfront ask, before any agent/double-boot cost is spent. Autopilot
+  // answers 'run'; a human can bail here instead of 45 minutes later.
+  'portify-gate': {
+    'run': 'Make it parallel-ready',
+    'skip': 'Skip parallel readiness (stay serial)',
+  },
+  // decision reads the same everywhere. 'revise' sends feedback back to the
+  // agent for another edit + re-verify pass (the checkpoint re-parks with the
+  // new diff); 'cancel' discards the worktree edits and SKIPS the stage — the
+  // flight proceeds without parallel readiness (declining is a decision, not
+  // a failure; a later flight retries).
   'portify-apply': {
-    'apply': 'Apply the edits',
-    'cancel': 'Reject them (stage fails)',
+    'apply': 'Save the overlay',
+    'revise': 'Request changes',
+    'cancel': 'Skip parallel readiness (discard the edits)',
   },
   'run-failed': {
     'rerun': 'Start a new run',

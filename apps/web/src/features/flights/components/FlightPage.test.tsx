@@ -1608,6 +1608,29 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(container.querySelector('[data-testid="checkpoint-more-options"]')).toBeNull()
   })
 
+  it('portify-apply "Request changes" opens the feedback composer and responds with choice+feedback', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('portify', {
+      kind: 'portify-apply', message: 'Save the overlay?', options: ['apply', 'revise', 'cancel'],
+      data: { workflowId: 'wf1', diff: '--- a/x\n+++ b/x' },
+    }))
+    await render('fl_1')
+    // The revise button toggles the composer — it never fires a bare respond.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-choice-revise"]')?.click() })
+    expect(mocks.respondFlightCheckpoint).not.toHaveBeenCalled()
+    const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="checkpoint-revise-feedback"]')!
+    expect(textarea).toBeTruthy()
+    // Empty feedback can't send (the server requires it).
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-revise-submit"]')?.disabled).toBe(true)
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(textarea, 'use env vars, not args')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-revise-submit"]')?.click() })
+    expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'revise', feedback: 'use env vars, not args' })
+  })
+
   it('R74: prd-source parks as the two-path fork — intent row, no generic checkpoint card', async () => {
     mocks.getFlight.mockResolvedValue(parkedOn('docs', {
       kind: 'prd-source', message: 'No requirement docs yet.', options: ['collect-repo-docs', 'infer-from-diff'],

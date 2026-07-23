@@ -45,6 +45,7 @@ export type FlightCheckpointKind =
   | 'missing-env'       // env capture found keys it cannot source (never skipped)
   | 'prd-source'        // docs stage: add/confirm requirement docs before the PRD summary
   | 'coverage-stuck'    // specs↔coverage loop hit its bound with gaps left
+  | 'portify-gate'      // before the portify agent starts: run parallel readiness, or skip (stay serial)
   | 'portify-apply'     // portify agent proposes edits; approve before apply
   | 'run-failed'        // run ended failed/aborted after heal → rerun or export as-is
   | 'export-mode'       // pick the evaluation flavor before exporting: raw | localized

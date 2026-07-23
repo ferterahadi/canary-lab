@@ -830,6 +830,7 @@ const AUTOPILOT_CHOICE: Record<string, string> = {
   'config-approval': 'approve',
   'prd-source': 'continue',
   'coverage-stuck': 'accept-partial',
+  'portify-gate': 'run',
   'portify-apply': 'apply',
   'run-failed': 'export-as-is',
   'export-mode': 'raw',
