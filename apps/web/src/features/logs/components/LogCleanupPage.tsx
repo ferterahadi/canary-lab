@@ -681,10 +681,10 @@ function WorktreesSection({ now }: { now: number }) {
               <th className="py-1 pr-3">Owner</th>
               <th className="py-1 pr-3">Ref</th>
               <th className="py-1 pr-3">Path</th>
-              {/* "Folder" — the same disk-usage column name as the runs and
+              {/* Age then "Folder" — same column name AND order as the runs and
                   portify tabs, so the three tables read as one table family. */}
+              <th className="py-1 pr-3">Age</th>
               <th className="py-1 pr-3" style={{ textAlign: 'right' }}>Folder</th>
-              <th className="py-1 pl-3 pr-3">Age</th>
               <th className="py-1 pl-3 pr-1" style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
@@ -715,8 +715,8 @@ function WorktreesSection({ now }: { now: number }) {
                 </td>
                 <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono)' }}>{wt.ref}</td>
                 <td className="py-1 pr-3" style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--text-muted)', maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={wt.path}>{wt.path}</td>
+                <td className="py-1 pr-3">{wt.ageMs != null ? timeAgo(new Date(now - wt.ageMs).toISOString(), now) : '—'}</td>
                 <td className="py-1 pr-3" style={{ textAlign: 'right', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{wt.exists ? formatBytes(wt.bytes) : '—'}</td>
-                <td className="py-1 pl-3 pr-3">{wt.ageMs != null ? timeAgo(new Date(now - wt.ageMs).toISOString(), now) : '—'}</td>
                 <td className="py-1 pl-3 pr-1" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                   {wt.exists && (
                     <button type="button" onClick={() => void open(wt)} disabled={busyPath === wt.path || bulkBusy} className="cl-button px-1.5 py-0.5" style={{ fontSize: 11 }}>Open</button>
