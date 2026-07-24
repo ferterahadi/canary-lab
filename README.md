@@ -11,7 +11,7 @@ Coding agents optimize for the literal instruction — *"tests pass," "done," "f
 
 Canary Lab doesn't replace Playwright or your agent — it gives both of them steroids. Playwright still runs the tests; the LLM still writes the code and the fixes. Canary Lab owns everything around them: booting real services, isolating ports and worktrees, grounding coverage in requirements, driving the repair loop on evidence, and rendering the proof. The intended loop is simple: **implement a feature with your agent → invoke Canary Lab as the eval → review the evaluation export** (per-test reasoning + verdicts, with video playback where the tests drive a browser). The evaluation report is the deliverable, not the green checkmark.
 
-![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab.gif)
+![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
 
 **One command, from your workspace:**
 
