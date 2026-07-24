@@ -206,8 +206,11 @@ function SortHeader({
   )
 }
 
+// The launcher pill already says "Cleanup", so the tabs name the thing being
+// cleaned — "Runs", not "Log Cleanup" (which made the siblings read as
+// something other than log cleanup).
 const CLEANUP_TABS = [
-  { key: 'runs', label: 'Log Cleanup' },
+  { key: 'runs', label: 'Runs' },
   { key: 'worktrees', label: 'Worktrees' },
   { key: 'portify', label: 'Portify' },
 ] as const
@@ -807,7 +810,10 @@ function PortifySection({ now, onNavigateToPortify }: {
   const [err, setErr] = useState<string | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
-  const [confirmOpen, setConfirmOpen] = useState(false)
+  // Every delete — per-row or bulk — routes through the confirm dialog (like
+  // the runs tab), so the "record only, saved overlay untouched" note is seen
+  // on each path, not just bulk.
+  const [confirmTargets, setConfirmTargets] = useState<PortifyCleanupEntry[] | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -848,20 +854,16 @@ function PortifySection({ now, onNavigateToPortify }: {
   const selectedTargets = sorted.filter((w) => selected.has(w.workflowId))
   const selectedBytes = selectedTargets.reduce((s, w) => s + w.folderBytes, 0)
 
-  const removeOne = async (id: string): Promise<void> => {
+  const doRemove = async (targets: PortifyCleanupEntry[]): Promise<void> => {
+    if (targets.length === 0) return
+    const n = targets.length
+    setConfirmTargets(null)
     setBulkBusy(true)
-    try { await api.removePortify(id) } catch (e) { window.alert(e instanceof Error ? e.message : String(e)) }
-    setBulkBusy(false)
-    await load()
-  }
-  const doRemoveSelected = async (): Promise<void> => {
-    if (selectedTargets.length === 0) return
-    const n = selectedTargets.length
-    setConfirmOpen(false)
-    setBulkBusy(true)
-    const results = await Promise.allSettled(selectedTargets.map((w) => api.removePortify(w.workflowId)))
+    const results = await Promise.allSettled(targets.map((w) => api.removePortify(w.workflowId)))
     const failures = results.filter((r) => r.status === 'rejected').length
-    setSelected(new Set())
+    // Drop only the removed ids — a per-row delete must not wipe an in-progress
+    // bulk selection elsewhere in the table.
+    setSelected((prev) => new Set([...prev].filter((id) => !targets.some((t) => t.workflowId === id))))
     setBulkBusy(false)
     await load()
     if (failures > 0) window.alert(`${failures} of ${n} removals failed.`)
@@ -934,7 +936,7 @@ function PortifySection({ now, onNavigateToPortify }: {
                   )}
                   <button
                     type="button"
-                    onClick={() => void removeOne(w.workflowId)}
+                    onClick={() => setConfirmTargets([w])}
                     disabled={bulkBusy}
                     className="cl-button ml-1 px-1.5 py-0.5"
                     style={{ fontSize: 11, color: 'var(--danger)' }}
@@ -961,7 +963,7 @@ function PortifySection({ now, onNavigateToPortify }: {
           <div className="ml-auto flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setConfirmOpen(true)}
+              onClick={() => setConfirmTargets(selectedTargets)}
               disabled={bulkBusy || selectedTargets.length === 0}
               className="cl-button px-3 py-1"
               style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
@@ -972,25 +974,26 @@ function PortifySection({ now, onNavigateToPortify }: {
         </div>
       )}
 
-      {/* Confirm dialog — mirrors the runs/worktrees delete confirm. */}
-      {confirmOpen && (
-        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !bulkBusy && setConfirmOpen(false)}>
+      {/* Confirm dialog — mirrors the runs/worktrees delete confirm. Serves
+          both the per-row Delete and the bulk action bar. */}
+      {confirmTargets && (
+        <div className="cl-modal-backdrop fixed inset-0 z-[70] flex items-center justify-center p-6" onClick={() => !bulkBusy && setConfirmTargets(null)}>
           <div
             role="dialog"
             aria-modal="true"
             className="cl-modal w-full max-w-md p-5"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Portify records</h2>
+            <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Delete Portify record{confirmTargets.length === 1 ? '' : 's'}</h2>
             <p className="mt-2" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              Remove <strong>{selectedTargets.length}</strong> port-ification record{selectedTargets.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes(selectedBytes)}</strong>. This drops the workflow record only — a feature's saved overlay (its live port-ification) is untouched. Remove an overlay from the feature's Ports tab.
+              Remove <strong>{confirmTargets.length}</strong> port-ification record{confirmTargets.length === 1 ? '' : 's'} from history, reclaiming about <strong>{formatBytes(confirmTargets.reduce((s, w) => s + w.folderBytes, 0))}</strong>. This drops the workflow record only — a feature's saved overlay (its live port-ification) is untouched. Remove an overlay from the feature's Ports tab.
             </p>
             <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirmOpen(false)} disabled={bulkBusy} className="cl-button px-3 py-1">Cancel</button>
+              <button type="button" onClick={() => setConfirmTargets(null)} disabled={bulkBusy} className="cl-button px-3 py-1">Cancel</button>
               <button
                 type="button"
                 disabled={bulkBusy}
-                onClick={() => void doRemoveSelected()}
+                onClick={() => void doRemove(confirmTargets)}
                 className="cl-button px-3 py-1"
                 style={{ color: 'var(--danger)' }}
               >

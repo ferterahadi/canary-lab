@@ -11,7 +11,7 @@ import { LogCleanupPage } from './LogCleanupPage'
 
 vi.mock('../../../shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
-  return { ...actual, cleanupRuns: vi.fn(), trimRun: vi.fn(), deleteRun: vi.fn() }
+  return { ...actual, cleanupRuns: vi.fn(), trimRun: vi.fn(), deleteRun: vi.fn(), cleanupPortify: vi.fn(), removePortify: vi.fn() }
 })
 
 const LISTING: CleanupListing = {
@@ -34,6 +34,14 @@ beforeEach(() => {
   vi.mocked(api.cleanupRuns).mockResolvedValue(structuredClone(LISTING))
   vi.mocked(api.trimRun).mockResolvedValue({ freedBytes: 880_000_000 })
   vi.mocked(api.deleteRun).mockResolvedValue(undefined)
+  vi.mocked(api.cleanupPortify).mockResolvedValue({
+    workflows: [
+      { workflowId: 'portify-2026-05-01T1000-x1', feature: 'shop', status: 'aborted', startedAt: '2026-05-01T10:00:00Z', folderBytes: 4_500_000 },
+      { workflowId: 'portify-2026-05-02T1000-x2', feature: 'auth', status: 'saved', startedAt: '2026-05-02T10:00:00Z', folderBytes: 1_200_000 },
+    ],
+    totalBytes: 5_700_000,
+  })
+  vi.mocked(api.removePortify).mockResolvedValue({ workflowId: 'portify-2026-05-01T1000-x1', removed: true })
 })
 
 afterEach(() => {
@@ -125,5 +133,37 @@ describe('LogCleanupPage', () => {
     await act(async () => { await Promise.resolve() })
     expect(api.deleteRun).toHaveBeenCalledWith('2026-05-03T1000-cccc')
     expect(api.deleteRun).toHaveBeenCalledWith('2026-05-04T1000-dddd')
+  })
+
+  it('portify per-row delete goes through the confirm (record-only note) before removing', async () => {
+    await mount()
+    await act(async () => { buttonByText('Portify')?.click() })
+    await act(async () => { await Promise.resolve() })
+    const row = container.querySelector('input[aria-label="Select shop"]')!.closest('tr')!
+    const deleteBtn = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Delete') as HTMLButtonElement
+    await act(async () => { deleteBtn.click() })
+    // No API call yet — the confirm dialog with the overlay note must appear first.
+    expect(api.removePortify).not.toHaveBeenCalled()
+    const dialog = container.querySelector('[role="dialog"]')!
+    expect(dialog.textContent).toContain('saved overlay')
+    expect(dialog.textContent).toContain('Delete Portify record')
+    const confirmBtn = [...dialog.querySelectorAll('button')].find((b) => b.textContent === 'Delete') as HTMLButtonElement
+    await act(async () => { confirmBtn.click() })
+    await act(async () => { await Promise.resolve() })
+    expect(api.removePortify).toHaveBeenCalledWith('portify-2026-05-01T1000-x1')
+    expect(api.removePortify).toHaveBeenCalledTimes(1)
+  })
+
+  it('portify confirm cancel removes nothing', async () => {
+    await mount()
+    await act(async () => { buttonByText('Portify')?.click() })
+    await act(async () => { await Promise.resolve() })
+    const row = container.querySelector('input[aria-label="Select auth"]')!.closest('tr')!
+    const deleteBtn = [...row.querySelectorAll('button')].find((b) => b.textContent === 'Delete') as HTMLButtonElement
+    await act(async () => { deleteBtn.click() })
+    const cancelBtn = [...container.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent === 'Cancel') as HTMLButtonElement
+    await act(async () => { cancelBtn.click() })
+    expect(api.removePortify).not.toHaveBeenCalled()
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
 })

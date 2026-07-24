@@ -1925,6 +1925,9 @@ describe('RunOrchestrator.runFullCycle', () => {
     expect(journal).toContain('Heal agent exited without writing a signal.')
     expect(journal).toContain('No code changes detected.')
     expect(journal).toContain('- signal: none')
+    // healEnd records WHY the loop stopped: no signal, pty died.
+    const healEnd = readManifest(orch.paths.manifestPath)?.healEnd
+    expect(healEnd).toMatchObject({ reason: 'no-signal', agentWait: 'pty-died', cycle: 1 })
     await orch.stop('failed')
   })
 
@@ -1963,9 +1966,90 @@ describe('RunOrchestrator.runFullCycle', () => {
     expect(journal).toContain('Heal agent went silent')
     expect(journal).not.toContain('exited without writing')
     expect(journal).toContain('- signal: none')
+    // Silent agent that emitted nothing → no-signal / idle-timeout, no cause.
+    const healEnd = readManifest(orch.paths.manifestPath)?.healEnd
+    expect(healEnd).toMatchObject({ reason: 'no-signal', agentWait: 'idle-timeout', cycle: 1 })
+    expect(healEnd?.agentCause).toBeUndefined()
     await orch.stop('failed')
     const events = readLifecycleEvents(orch)
     expect(events.slice(-2).map((event) => event.headline)).not.toEqual(['Run failed', 'Run failed'])
+  }, 10000)
+
+  it('captures the agent output tail and classifies the cause on a no-signal give-up', async () => {
+    // Agent prints a usage-limit banner, then goes silent. The idle timeout
+    // fires; the classifier reads the captured tail and records agentCause,
+    // and the tail is persisted for the UI's "why" line.
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 60_000,
+      healAgentIdleTimeoutMs: 100,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'codex', maxCycles: 1, buildSpawnCommand: () => 'heal' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1) // pw fails → heal loop
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    // Agent emits a usage-limit banner, then stays silent so idle fires.
+    f.spawned[2].emitData("\n You've reached your usage limit. Upgrade your plan.\n")
+
+    const status = await promise
+    expect(status).toBe('failed')
+    const healEnd = readManifest(orch.paths.manifestPath)?.healEnd
+    expect(healEnd).toMatchObject({ reason: 'no-signal', agentCause: 'usage-limit' })
+    expect(fs.existsSync(orch.paths.healAgentTailPath)).toBe(true)
+    expect(fs.readFileSync(orch.paths.healAgentTailPath, 'utf-8')).toContain('usage limit')
+    await orch.stop('failed')
+  }, 10000)
+
+  it('records a max-cycles healEnd when the loop exhausts its cycle cap', async () => {
+    // maxCycles:1 — cycle 1 signals a rerun, the rerun re-fails the same set,
+    // and the next observeFailures trips the cap → healEnd reason 'max-cycles'.
+    const f = makeFakeFactory()
+    let pwIdx = 0
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      healthPollIntervalMs: 5,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 60_000,
+      healAgentIdleTimeoutMs: 60_000,
+      playwrightSpawner: () => ({ command: `pw-${pwIdx++}`, cwd: tmpDir }),
+      autoHeal: { agent: 'claude', maxCycles: 1, buildSpawnCommand: () => 'heal' },
+    })
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(orch.paths.summaryPath, JSON.stringify({ failed: [{ name: 'a' }] }))
+
+    const promise = orch.runFullCycle()
+    await new Promise((r) => setTimeout(r, 10))
+    f.spawned[1].emitExit(1) // pw fails → heal loop, cycle 1 agent = spawned[2]
+    while (f.spawned.length < 3) await new Promise((r) => setTimeout(r, 5))
+    fs.writeFileSync(orch.paths.rerunSignal, '') // agent signals a rerun
+    f.spawned[2].emitExit(0)
+    while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[3].emitExit(1) // rerun re-fails the same set → cap trips next loop
+
+    const status = await promise
+    expect(status).toBe('failed')
+    const healEnd = readManifest(orch.paths.manifestPath)?.healEnd
+    expect(healEnd).toMatchObject({ reason: 'max-cycles', cycle: 1 })
+    await orch.stop('failed')
   }, 10000)
 
   it('ends the heal loop with a hard-timeout journal entry when the cycle hits the absolute ceiling', async () => {

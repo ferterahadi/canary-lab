@@ -14,6 +14,7 @@ vi.mock('../../../shared/api/client', async () => {
     putProjectConfig: vi.fn(),
     changeProjectPort: vi.fn(),
     listWorkspaceDirs: vi.fn(),
+    getGhStatus: vi.fn(),
   }
 })
 
@@ -35,6 +36,7 @@ beforeEach(() => {
   vi.mocked(api.getProjectConfig).mockReset()
   vi.mocked(api.putProjectConfig).mockReset()
   vi.mocked(api.changeProjectPort).mockReset()
+  vi.mocked(api.getGhStatus).mockReset().mockResolvedValue({ installed: true, authenticated: true, account: 'ferterahadi-oddle', host: 'github.com' })
   vi.mocked(api.listWorkspaceDirs).mockReset().mockResolvedValue({
     root: '/tmp/wiki',
     at: '',
@@ -52,6 +54,19 @@ afterEach(() => {
 })
 
 describe('SettingsModal', () => {
+  it('R80: the GitHub section shows the connected account and refreshes on demand', async () => {
+    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'external', editor: 'auto' })
+    await act(async () => { root.render(<SettingsModal onClose={vi.fn()} />) })
+    await act(async () => {})
+    const gh = container.querySelector('[data-testid="settings-github"]')
+    expect(gh?.textContent).toContain('Connected as ferterahadi-oddle')
+    // Auth can change outside the app — the Refresh button re-detects.
+    vi.mocked(api.getGhStatus).mockResolvedValue({ installed: true, authenticated: false })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="settings-github-refresh"]')?.click() })
+    await act(async () => {})
+    expect(container.querySelector('[data-testid="settings-github"]')?.textContent).toContain('gh auth login')
+  })
+
   it('renders the current wiki path and saves a new one picked via the folder picker', async () => {
     const onClose = vi.fn()
     vi.mocked(api.getProjectConfig).mockResolvedValue({

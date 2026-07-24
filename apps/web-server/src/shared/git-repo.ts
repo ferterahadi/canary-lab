@@ -1,4 +1,4 @@
-import { execFile } from 'child_process'
+import { execFile, execFileSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -307,4 +307,29 @@ export async function diffContentSinceSnapshot(
 
 export function findRepo(feature: FeatureConfig, name: string): RepoPrerequisite | null {
   return (feature.repos ?? []).find((repo) => repo.name === name) ?? null
+}
+
+/**
+ * The repo's default branch: the `override` if given, else the target of
+ * `origin/HEAD`, else the first of `main`/`master` that exists locally. Null
+ * when none resolve. Shared by the flight docs stage (diff-vs-base) and the PR
+ * pipeline (the base to open a PR against). Sync — a couple of quick local git
+ * reads, no network.
+ */
+export function detectBaseBranch(repoPath: string, override?: string): string | null {
+  if (override) return override
+  const target = resolveRepoPath(repoPath)
+  const run = (args: string[]): string | null => {
+    try {
+      return execFileSync('git', args, { cwd: target, encoding: 'utf-8', maxBuffer: 8 * 1024 * 1024 }).trim()
+    } catch {
+      return null
+    }
+  }
+  const head = run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
+  if (head) return head.replace(/^origin\//, '')
+  for (const candidate of ['main', 'master']) {
+    if (run(['rev-parse', '--verify', '--quiet', candidate]) !== null) return candidate
+  }
+  return null
 }

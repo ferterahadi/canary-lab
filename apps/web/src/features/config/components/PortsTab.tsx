@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../../shared/api/client'
-import type { ConfigValue } from '../../../shared/api/client'
+import type { ConfigValue, PortifyManifest } from '../../../shared/api/client'
 import { ConfirmModal, TrashIcon } from './atoms'
+import { SavedOverlayPanel } from '../../portify/components/SavedOverlayPanel'
 import { usePortify } from '../../portify/state/PortifyContext'
 import { isActivePortify, latestSavedWorkflowId } from '../../portify/state/portify-state'
 import { useInvalidationKey } from '../../../shared/state/invalidation'
@@ -62,11 +63,30 @@ export function PortsTab({
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
-  // The latest saved overlay's workflow id — opens it read-only in the wizard.
-  // (Replaces the old inline history list: only the live overlay matters here;
-  // the full record history + pruning live in the Log Cleanup → Portify tab.)
+  // The latest saved overlay's workflow id — its manifest feeds the inline
+  // overlay panel below (the diff + proof + per-service apply rows). Only the
+  // live overlay matters here; the full record history + pruning live in the
+  // Log Cleanup → Portify tab.
   const { workflows } = usePortify()
   const savedWorkflowId = latestSavedWorkflowId(workflows, feature)
+  // Fetch the saved manifest so the overlay renders inline (verified state only).
+  // The WS `details` map may not carry `.diff` for saved records, so getPortify
+  // is the reliable source. `portified` is the verified gate — bandState below
+  // is `'verified'` iff `portified` is true, and it's computed after the early
+  // returns, so gate the fetch on the prop here.
+  const [overlay, setOverlay] = useState<PortifyManifest | null>(null)
+  const [overlayLoading, setOverlayLoading] = useState(false)
+  useEffect(() => {
+    if (!portified || !savedWorkflowId) { setOverlay(null); return }
+    let cancelled = false
+    setOverlay(null)
+    setOverlayLoading(true)
+    api.getPortify(savedWorkflowId)
+      .then((m) => { if (!cancelled) setOverlay(m) })
+      .catch(() => { if (!cancelled) setOverlay(null) })
+      .finally(() => { if (!cancelled) setOverlayLoading(false) })
+    return () => { cancelled = true }
+  }, [portified, savedWorkflowId])
   // Live sync with every other Portify entry point (flight Parallel-readiness
   // stage, run-collision dialog, MCP): the `/ws/portify`-fed index is shared,
   // so an active workflow started ANYWHERE shows up here without a refresh.
@@ -206,21 +226,10 @@ export function PortsTab({
                 {activeHere.status === 'ready-to-save' ? 'Review & save' : 'View progress'}
               </button>
             )}
-            {/* View the saved overlay (the verified diff) read-only in the
-                wizard — the at-a-glance "what got rewritten" the removed inline
-                history used to provide. Only when a saved record backs it. */}
-            {!activeHere && portified && savedWorkflowId && onOpenPortify && (
-              <button
-                type="button"
-                onClick={() => onOpenPortify(savedWorkflowId)}
-                aria-label="View saved overlay"
-                title="View saved overlay — opens the verified port-ification in the wizard."
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
-                style={{ color: 'var(--text-secondary)', border: '1px solid var(--border-default)', background: 'transparent' }}
-              >
-                View saved overlay
-              </button>
-            )}
+            {/* The saved overlay itself now renders inline below the band
+                (SavedOverlayPanel) — no button to open the wizard just to see
+                the diff. `onOpenPortify` stays for the active-workflow button
+                above (follow progress / review & save). */}
             {/* Verified → undo the whole port-ification (overlay + config).
                 Re-portifying is the sanctioned two-step: Remove, then the band
                 offers Portify again. (No "Clear port slots": the UI can't tell
@@ -280,12 +289,27 @@ export function PortsTab({
           </div>
         </div>
 
-        {/* The tab's single always-on explainer — what a slot IS, and where
-            slots live (feature.config.cjs — also the escape hatch for editing
-            or removing hand-declared ones). */}
-        <p className="px-4 pt-3 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 640 }}>
-          A slot is a port Canary picks free at each boot and hands the service through its env var; {'${port.<name>}'} resolves to that number in commands and health checks. Slots are declared in feature.config.cjs — by you, or by Portify.
-        </p>
+        {/* Verified → the saved overlay renders inline (the diff, the
+            open-in-editor control, the per-service stored-in + how-applied
+            rows, and the double-boot proof). Only rendered when a saved record
+            backs it — a pruned record leaves the band + slot cards as before. */}
+        {bandState === 'verified' && (overlayLoading || overlay) && (
+          <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
+            {overlay
+              ? <SavedOverlayPanel manifest={overlay} />
+              : <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading overlay…</div>}
+          </div>
+        )}
+
+        {/* The slot explainer — what a slot IS, and where slots live
+            (feature.config.cjs — also the escape hatch for editing or removing
+            hand-declared ones). Skipped in the verified state: the overlay panel
+            above already explains how ports get injected. */}
+        {bandState !== 'verified' && (
+          <p className="px-4 pt-3 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 640 }}>
+            A slot is a port Canary picks free at each boot and hands the service through its env var; {'${port.<name>}'} resolves to that number in commands and health checks. Slots are declared in feature.config.cjs — by you, or by Portify.
+          </p>
+        )}
 
         <div className="flex flex-col gap-3 px-4 py-3">
           {repos.length === 0 && (

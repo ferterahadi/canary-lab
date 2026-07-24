@@ -66,6 +66,81 @@ export interface RunBootFailure {
   logPath: string
 }
 
+/**
+ * Why the auto-heal loop stopped without the run passing. Typed and persisted
+ * on the manifest so the Test Run surface can state the reason plainly instead
+ * of leaving it buried in the diagnosis journal (or, for a silent agent, lost
+ * entirely). Written at every give-up site in the auto-heal loop.
+ *
+ * - `no-signal`   — the heal agent produced no signal and changed no files;
+ *                   `agentWait` says which watchdog fired and `agentCause`
+ *                   (classified from the agent's own output tail) says why the
+ *                   agent went quiet (usage limit, auth, crash, …).
+ * - `max-cycles`  — hit the hard cycle cap (AUTO_HEAL_MAX_CYCLES).
+ * - `no-progress` — the same failing set survived the no-progress limit of
+ *                   consecutive fix attempts, or a fixless rerun made no gain.
+ * - `spawn-failed`— the heal agent process failed to spawn.
+ * - `cancelled`   — the user stopped heal (or the run was aborted) mid-loop.
+ */
+export interface HealEnd {
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'spawn-failed' | 'cancelled'
+  /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
+  agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
+  /** Best-effort classification of why the agent went quiet, from its output
+   *  tail. Set only when `reason === 'no-signal'`. `unknown` = tail captured
+   *  but no known fingerprint matched. */
+  agentCause?: 'usage-limit' | 'auth' | 'rate-limit' | 'crash' | 'unknown'
+  /** 1-based heal cycle in flight when the loop gave up (0 if it never began). */
+  cycle: number
+  /** Plain-language sentence for the UI + transcript. */
+  message: string
+  /** ISO timestamp. */
+  at: string
+}
+
+/**
+ * The fix diff captured from a run's per-run worktree at teardown — the heal
+ * agent's edits, isolated from the overlay/envset/uncommitted state that was
+ * hydrated into the worktree before boot (those form the capture baseline).
+ * The product repos are NEVER mutated; this patch is the ONLY record of what
+ * the repair did, and the user applies it (or opens a PR) on demand.
+ * Absent on green runs (nothing to fix), in-place (non-worktree) runs, and
+ * runs whose agent changed nothing.
+ */
+export interface RunFixCaptureRepo {
+  /** feature.config repos[].name. */
+  repoName: string
+  /** Absolute path to the saved unified-diff patch (<runDir>/fixes/<repo>.patch). */
+  patchPath: string
+  /** The patch's basename, for display and PR body references. */
+  patchFile: string
+  /** The SOURCE repo working-tree root the patch applies against. */
+  repoRoot: string
+  /** The repo HEAD sha the worktree — and thus the patch — is based on. */
+  baseSha: string
+  /** Number of files the fix touched. */
+  files: number
+}
+
+export interface RunFixCapture {
+  repos: RunFixCaptureRepo[]
+  /** ISO timestamp of the capture (run teardown). */
+  capturedAt: string
+}
+
+/** A pull request opened from a run's captured fix, per repo. Persisted so the
+ *  Fixes-captured panel can show "PR opened →" instead of re-offering the
+ *  button, and so a repeat request is idempotent (returns the existing URL). */
+export interface RunProposedPr {
+  repoName: string
+  url: string
+  /** The pushed head branch (deterministic per run+repo). */
+  branch: string
+  /** The base branch the PR targets. */
+  base: string
+  createdAt: string
+}
+
 export interface RunLifecycleSnapshot {
   phase: RunLifecyclePhase
   headline: string

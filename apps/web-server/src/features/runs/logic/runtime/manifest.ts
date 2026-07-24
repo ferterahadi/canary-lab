@@ -2,8 +2,11 @@ import fs from 'fs'
 import path from 'path'
 import { runsIndexPath, runsRoot } from './run-paths'
 import type {
+  HealEnd,
   QueueReason,
   RunBootFailure,
+  RunFixCapture,
+  RunProposedPr,
   RunLifecycleSnapshot,
   RunStatus,
   ServiceStatus,
@@ -15,8 +18,12 @@ import type {
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
 import type { ClientKind, ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 export type {
+  HealEnd,
   QueueReason,
   RunBootFailure,
+  RunFixCapture,
+  RunFixCaptureRepo,
+  RunProposedPr,
   RunLifecycleAbortReason,
   RunLifecycleEvent,
   RunLifecyclePhase,
@@ -163,6 +170,15 @@ export interface RunManifest {
    *  service log as context. Absent on healthy/boot-only runs; cleared on a
    *  successful reboot during a heal cycle. */
   bootFailure?: RunBootFailure
+  /** Why the auto-heal loop stopped without passing. Written at every give-up
+   *  site in `runAutoHealLoop`; absent on passing/boot-only/manual runs and on
+   *  runs that never entered heal. */
+  healEnd?: HealEnd
+  /** The heal agent's edits captured from the per-run worktree at teardown.
+   *  Absent on green runs, in-place runs, and runs the agent didn't change. */
+  fixCapture?: RunFixCapture
+  /** PRs opened from this run's captured fix, per repo. On-demand only. */
+  proposedPrs?: RunProposedPr[]
   verification?: VerificationRunMetadata
 }
 

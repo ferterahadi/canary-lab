@@ -5,7 +5,7 @@ import { useActivePortify } from '../state/PortifyContext'
 import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
 import { DiffView } from '../../../shared/ui/DiffView'
 import { ExternalPortifyPanel } from './ExternalPortifyPanel'
-import { patchFileName } from '../../../../../../shared/portify-overlay'
+import { NoChangesNeeded, SavedOverlayPanel, VerificationBadge } from './SavedOverlayPanel'
 
 // Guided port-ification: an agent rewrites the feature's apps to use injectable
 // ports, proven by a concurrent double-boot, ending when the user SAVES the
@@ -584,28 +584,15 @@ function Phase({ label, active, done }: { label: string; active?: boolean; done?
   )
 }
 
-function VerificationBadge({ m }: { m: PortifyManifest }) {
-  const insts = m.verification?.instances ?? []
-  if (insts.length < 2 || !m.verification?.ok) return null
-  const fmt = (p: Record<string, number>) => Object.entries(p).map(([k, v]) => `${k}:${v}`).join(' ')
-  return (
-    <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--success)', background: 'color-mix(in srgb, var(--success) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 30%, transparent)', borderRadius: 'var(--radius-md)', padding: '8px 11px', marginBottom: 14 }}>
-      ✓ Booted twice — {fmt(insts[0].ports)} and {fmt(insts[1].ports)} — both healthy
-    </div>
-  )
-}
-
 function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m: PortifyManifest; busy: boolean; saved: boolean; onSave: () => void; onRequestChanges: () => void; onDone: () => void }) {
   const rounds = m.feedbackRounds ?? 0
   // At ready-to-save verification is always set; a prior revise round may have
   // left it failed — in that case the diff isn't proven and can't be saved.
   const proven = m.verification?.ok === true
-  // The actual saved artifacts — one patch per repo, named by the shared
-  // overlay naming rule, so the row shows real filenames, not just a folder.
-  const overlayFiles = m.repos.map((r) => `features/${m.feature}/portify/${patchFileName(r.name)}`)
   const [openError, setOpenError] = useState<string | null>(null)
-  // Open the project in the user's editor — the scratch worktree while live,
-  // else the product repo once saved. Best-effort: surface a launch failure.
+  // Open the scratch worktree in the user's editor while live. Best-effort:
+  // surface a launch failure. (The saved view's open control lives inside
+  // SavedOverlayPanel — it opens the overlay folder, not a worktree.)
   const openProject = async () => {
     setOpenError(null)
     try {
@@ -615,75 +602,46 @@ function ReviewScreen({ m, busy, saved, onSave, onRequestChanges, onDone }: { m:
       setOpenError(e instanceof Error ? e.message : 'Failed to open editor')
     }
   }
+  if (saved) {
+    // The saved overlay rendering (diff + open-in-editor + proof + per-service
+    // stored-in/apply rows) is the shared SavedOverlayPanel — the exact same
+    // panel the Ports tab shows inline, so the two can never drift.
+    return (
+      <div>
+        <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: 'var(--success)' }}>
+          ✓ Saved — {m.feature} can now run in parallel
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
+          Parallel runs and benchmark arms each get their own ports. Your repo is never modified.
+        </p>
+        <SavedOverlayPanel manifest={m} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
+          <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
+        </div>
+      </div>
+    )
+  }
   return (
     <div>
-      {saved ? (
-        <>
-          <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6, color: 'var(--success)' }}>
-            ✓ Saved — {m.feature} can now run in parallel
-          </div>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 14 }}>
-            Parallel runs and benchmark arms each get their own ports. Your repo is never modified.
-          </p>
-        </>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
-          <div style={{ fontSize: 14, fontWeight: 600 }}>Review &amp; save</div>
-          {rounds > 0 && (
-            <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-              revision {rounds}
-            </span>
-          )}
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>Review &amp; save</div>
+        {rounds > 0 && (
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+            revision {rounds}
+          </span>
+        )}
+      </div>
       {proven ? <VerificationBadge m={m} /> : <RevisionFailedBanner m={m} />}
-      {/* The scratch worktree is gone after save — review is read-only. */}
-      {!saved && <ReviewLocally m={m} openError={openError} />}
+      <ReviewLocally m={m} openError={openError} />
       {/* A proven-but-empty diff isn't a missing capture — the apps already read
           injected ports, so the rewrite was a no-op (see orchestrator). Say so
           plainly instead of the bare "(no diff captured)". */}
-      {/* Once saved the worktrees are gone and the server opens the overlay
-          folder instead — label the arrow for what it actually opens. */}
       {(m.diff ?? '').trim()
-        ? <DiffView diff={m.diff!} onOpenInEditor={openProject} openTitle={saved ? 'Open overlay in editor' : undefined} />
+        ? <DiffView diff={m.diff!} onOpenInEditor={openProject} />
         : proven
           ? <NoChangesNeeded feature={m.feature} />
           : <DiffView diff="" onOpenInEditor={openProject} />}
-      {/* Saved state has no Review-locally row to host it, so fall back to
-          surfacing a launch failure below the diff. */}
-      {saved && openError && (
-        <div style={{ fontSize: 10.5, color: 'var(--danger)', marginTop: 6 }}>{openError}</div>
-      )}
-      {saved ? (
-        <>
-          {/* R23 (canary-first-flight): say what the saved artifact IS and when
-              it acts — labeled rows, not a bare path + checkmark column. */}
-          <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '13px 15px', marginTop: 16 }}>
-            <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)', fontWeight: 500, marginBottom: 8 }}>
-              How this is used
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr)', columnGap: 16, rowGap: 6, alignItems: 'baseline' }}>
-              <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Applies to</span>
-              <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {m.repos.map((r) => r.name).join(', ')}
-              </span>
-              <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>When</span>
-              <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-                Applied to a per-run copy before each boot, removed at teardown
-              </span>
-              <span style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--text-muted)', fontWeight: 600 }}>Stored in</span>
-              <span style={{ display: 'grid', rowGap: 2 }} title="Inside your canary workspace — not the product repo">
-                {overlayFiles.map((f) => (
-                  <span key={f} style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f}</span>
-                ))}
-              </span>
-            </div>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-            <button type="button" className="cl-button-primary" onClick={onDone} style={{ padding: '9px 16px' }}>Done</button>
-          </div>
-        </>
-      ) : (
+      {(
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, marginTop: 16 }}>
           <button
             type="button"

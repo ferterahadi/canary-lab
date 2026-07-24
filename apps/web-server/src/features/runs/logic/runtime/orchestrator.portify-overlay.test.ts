@@ -6,7 +6,8 @@ import { EventEmitter } from 'events'
 import { RunOrchestrator } from './orchestrator'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { runDirFor } from './run-paths'
+import { buildRunPaths, runDirFor } from './run-paths'
+import { readManifest } from './manifest'
 import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { addWorktree, type WorktreeHandle } from './repo-worktree'
 import { writeOverlay, captureTouchedFiles, overlayDir } from '../../../portify/logic/runtime/overlay'
@@ -170,6 +171,88 @@ describe('portified run: apply before boot, reverse at teardown', () => {
     // Reverse conflicts on the overlapping line → file left intact (heal edit survives), worktree kept.
     expect(wtApp(handle)).toBe(healed)
     expect(fs.existsSync(handle.worktreeRoot)).toBe(true)
+  })
+})
+
+describe('fix capture (R80): the heal edit diff captured from the worktree at teardown', () => {
+  it('writes fixCapture + a patch for a non-portified worktree run whose agent edited code', async () => {
+    // No overlay saved → non-portified: the worktree is torn down at teardown,
+    // so the fix MUST be captured before removal. Baseline is taken in start().
+    const handle = await makeWorktree()
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    await orch.start()
+    // Simulate the heal agent editing a tracked file + adding a new one.
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'app.js'), BASE + '// healed\n')
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'extra.js'), 'export const e = 1\n')
+    await orch.stop('failed')
+
+    const manifest = readManifest(buildRunPaths(runDir).manifestPath)!
+    expect(manifest.fixCapture).toBeTruthy()
+    expect(manifest.fixCapture!.repos).toHaveLength(1)
+    const repo = manifest.fixCapture!.repos[0]
+    expect(repo.repoName).toBe('api')
+    expect(repo.baseSha).toMatch(/^[0-9a-f]{7,}$/)
+    // Both the edited file and the new one ride the patch (intent-to-add).
+    expect(repo.files).toBe(2)
+    const patch = fs.readFileSync(repo.patchPath, 'utf-8')
+    expect(patch).toContain('// healed')
+    expect(patch).toContain('export const e = 1')
+    // The source repo was NEVER mutated (product repos stay clean).
+    expect(fs.readFileSync(path.join(repoRoot, 'app.js'), 'utf-8')).toBe(BASE)
+    expect(fs.existsSync(path.join(repoRoot, 'extra.js'))).toBe(false)
+  })
+
+  it('excludes pre-existing untracked WIP from the capture (only agent-new files)', async () => {
+    const handle = await makeWorktree()
+    // Simulate WIP hydration: untracked files land in the worktree BEFORE start().
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'wip-note.txt'), 'pre-existing WIP\n')
+    fs.mkdirSync(path.join(handle.worktreeRoot, 'docs'), { recursive: true })
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'docs', 'generated.md'), '# generated\n')
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(), runId: RUN_ID, runDir, ptyFactory: factory,
+      worktrees: [handle], healthCheck: async () => true, delay: async () => undefined,
+    })
+    await orch.start() // baseline records wip-note.txt + docs/generated.md as pre-existing
+    // The "agent" edits a tracked file and adds ITS OWN new file.
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'app.js'), BASE + '// agent fix\n')
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'agent-new.js'), 'export const a = 1\n')
+    await orch.stop('failed')
+
+    const capture = readManifest(buildRunPaths(runDir).manifestPath)!.fixCapture!
+    const patch = fs.readFileSync(capture.repos[0].patchPath, 'utf-8')
+    // Only the agent's edits — the pre-existing WIP/docs never leak in.
+    expect(patch).toContain('// agent fix')
+    expect(patch).toContain('agent-new.js')
+    expect(patch).not.toContain('wip-note.txt')
+    expect(patch).not.toContain('generated.md')
+    expect(capture.repos[0].files).toBe(2) // app.js + agent-new.js, not the WIP
+  })
+
+  it('writes no fixCapture when the agent changed nothing', async () => {
+    const handle = await makeWorktree()
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+    })
+    await orch.start()
+    await orch.stop('passed')
+    expect(readManifest(buildRunPaths(runDir).manifestPath)!.fixCapture).toBeUndefined()
   })
 })
 

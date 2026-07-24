@@ -8,6 +8,11 @@ import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import type { ClientKind } from '../../../../../../shared/run-mode'
 import { getGitRoot, resolveRepoPath, type RepoBranchMismatch } from '../../../shared/git-repo'
 import { removeWorktree } from '../../runs/logic/runtime/repo-worktree'
+import { updateManifest, type RunProposedPr } from '../../runs/logic/runtime/manifest'
+import { applyFixCapture } from '../logic/apply-fixes'
+import { buildPrPreflight } from '../logic/pr/pr-preflight'
+import { proposeFixesForRun } from '../logic/pr/propose-fixes'
+import { detectGhStatus } from '../../../shared/gh-cli'
 import { listWorktrees, isUnder } from '../../runs/logic/runtime/worktree-inventory'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
@@ -80,6 +85,84 @@ export async function runsRoutes(app: FastifyInstance, deps: RunsRouteDeps): Pro
       return { error: 'run not found' }
     }
     return detail
+  })
+
+  // Apply a run's captured heal fixes (R80) INTO the real product repos on
+  // demand — the only path a run's edits reach the user's source tree. 404 when
+  // the run is unknown, 409 when it captured no fixes, otherwise 200 with a
+  // per-repo result (a 3-way conflict is `ok:false` with a reason, not a throw).
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/apply-fixes', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const fixCapture = detail.manifest.fixCapture
+    if (!fixCapture || fixCapture.repos.length === 0) {
+      reply.code(409)
+      return { error: 'this run captured no fixes to apply' }
+    }
+    const outcome = await applyFixCapture(fixCapture)
+    reply.code(200)
+    return outcome
+  })
+
+  // gh (GitHub CLI) connection status — detect-and-instruct only (never runs
+  // login, never handles the token). Feeds the Settings "GitHub" section and the
+  // PR dialog's preflight. App-level, not run-scoped.
+  app.get('/api/gh/status', async () => {
+    return detectGhStatus()
+  })
+
+  // Can we open a PR from this run's captured fix? Per-repo origin + default
+  // branch + push rights (side-effect-free). The PR dialog re-runs this on open
+  // (auth changes outside the app). 404/409 mirror apply-fixes.
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/pr-preflight', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const fixCapture = detail.manifest.fixCapture
+    if (!fixCapture || fixCapture.repos.length === 0) {
+      reply.code(409)
+      return { error: 'this run captured no fixes' }
+    }
+    return buildPrPreflight(fixCapture)
+  })
+
+  // Open a PR from the captured fix, per pushable repo (on demand). The product
+  // repo is never touched — a throwaway worktree from the run's baseSha is
+  // committed, force-pushed to a deterministic branch, and turned into a PR.
+  // Idempotent; persists manifest.proposedPrs so a refresh shows the link.
+  app.post<{ Params: { runId: string } }>('/api/runs/:runId/propose-pr', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const fixCapture = detail.manifest.fixCapture
+    if (!fixCapture || fixCapture.repos.length === 0) {
+      reply.code(409)
+      return { error: 'this run captured no fixes' }
+    }
+    const preflight = await buildPrPreflight(fixCapture)
+    if (!preflight.anyPushable) {
+      reply.code(409)
+      return { error: 'no repo is pushable — connect GitHub (Settings) or check push access', preflight }
+    }
+    const results = await proposeFixesForRun({ runId: detail.runId, feature: detail.manifest.feature, fixCapture, preflight })
+    // Merge the freshly-opened PRs into the manifest by repo name (idempotent).
+    const opened = results.filter((r): r is typeof r & { pr: RunProposedPr } => r.ok && !!r.pr).map((r) => r.pr)
+    if (opened.length > 0) {
+      const prev = detail.manifest.proposedPrs ?? []
+      const byRepo = new Map<string, RunProposedPr>(prev.map((p) => [p.repoName, p]))
+      for (const pr of opened) byRepo.set(pr.repoName, pr)
+      const manifestPath = path.join(runDirFor(deps.store.logsDir, detail.runId), 'manifest.json')
+      updateManifest(manifestPath, { proposedPrs: [...byRepo.values()] })
+    }
+    reply.code(200)
+    return { results }
   })
 
   app.get<{ Params: { runId: string } }>('/api/runs/:runId/verification-report', async (req, reply) => {

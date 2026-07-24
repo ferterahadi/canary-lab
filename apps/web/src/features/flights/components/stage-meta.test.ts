@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { portifyWorkflowId, stageStateLine, stageFacts } from './stage-meta'
+import { portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
 import type { FlightManifest, FlightStage } from '../../../shared/api/client'
+import type { HealEnd } from '../../../shared/api/types'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   return {
@@ -61,6 +62,39 @@ describe('stageStateLine — pending copy (R78 pause mid-step)', () => {
     const stage = { key: 'scout', status: 'pending' } as FlightStage
     const line = stageStateLine(stage, flight({ status: 'running', stages: [stage] }))
     expect(line).toBe('Not started yet.')
+  })
+})
+
+describe('stageFacts — run stage renders as the hero, not stage facts (R80)', () => {
+  it('the run stage emits no stage-level facts (the Test Run hero owns them)', () => {
+    const stage = { key: 'run', status: 'done', evidence: { runId: 'run-9', status: 'passed', healCycles: 2 } } as unknown as FlightStage
+    expect(stageFacts(stage, flight())).toEqual([])
+  })
+})
+
+describe('healEndLine / healEndShort (R80)', () => {
+  const he = (over: Partial<HealEnd>): HealEnd => ({ reason: 'no-signal', cycle: 1, message: '', at: '2026-01-01T00:00:00Z', ...over })
+
+  it('returns null when there is no give-up reason', () => {
+    expect(healEndLine(undefined)).toBeNull()
+    expect(healEndShort(undefined)).toBeNull()
+  })
+
+  it('prefers the server-written message for the full line', () => {
+    expect(healEndLine(he({ message: 'Auto-repair stopped after cycle 1 — usage limit.' })))
+      .toBe('Auto-repair stopped after cycle 1 — usage limit.')
+  })
+
+  it('composes a full line per reason when no message is present', () => {
+    expect(healEndLine(he({ reason: 'max-cycles', message: '' }))).toMatch(/repair-cycle limit/i)
+    expect(healEndLine(he({ reason: 'no-signal', agentCause: 'usage-limit', message: '' }))).toMatch(/usage limit/i)
+  })
+
+  it('short form names the cause for a no-signal give-up', () => {
+    expect(healEndShort(he({ reason: 'no-signal', agentCause: 'usage-limit' }))).toBe('stopped — usage limit')
+    expect(healEndShort(he({ reason: 'no-signal', agentCause: 'unknown' }))).toBe('stopped — agent went quiet')
+    expect(healEndShort(he({ reason: 'max-cycles' }))).toBe('stopped — cycle limit')
+    expect(healEndShort(he({ reason: 'cancelled' }))).toBe('stopped by you')
   })
 })
 

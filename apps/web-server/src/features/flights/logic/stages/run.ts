@@ -29,18 +29,23 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     )
     const status = manifest!.status as 'passed' | 'failed' | 'aborted'
     ctx.patchFlight({ runVerdict: status })
-    const evidence = { runId, status, healCycles: manifest!.healCycles }
+    // `healEnd` (why auto-heal stopped) rides along in the evidence + checkpoint
+    // data so the Test Run hero and the run-failed decision footer can state the
+    // give-up reason without a second fetch.
+    const healEnd = manifest!.healEnd
+    const evidence = { runId, status, healCycles: manifest!.healCycles, healEnd }
 
     if (status === 'passed') return { kind: 'done', evidence }
     if (m.opts.yolo) {
       ctx.appendLog(`[run] ${status} after ${manifest!.healCycles} heal cycle(s) — yolo exports as-is\n`)
       return { kind: 'done', evidence }
     }
+    const whyLine = healEnd?.message ? ` ${healEnd.message}` : ''
     return {
       kind: 'checkpoint',
       checkpoint: {
         kind: 'run-failed',
-        message: `Run ${runId} ended ${status} after ${manifest!.healCycles} heal cycle(s). Rerun it, or export the evaluation as-is (status preserved)?`,
+        message: `Run ${runId} ended ${status} after ${manifest!.healCycles} heal cycle(s).${whyLine} Rerun it, or export the evaluation as-is (status preserved)?`,
         options: ['rerun', 'export-as-is'],
         data: evidence,
       },

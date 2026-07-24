@@ -1624,3 +1624,68 @@ describe('compareActiveRuns ordering', () => {
     expect(compareActiveRuns(newer, mk('2026-01-02T00:00:00.000Z'))).toBe(0) // tie
   })
 })
+
+describe('POST /api/runs/:runId/apply-fixes (R80)', () => {
+  it('404 when the run is unknown', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/nope/apply-fixes' })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('409 when the run captured no fixes', async () => {
+    writeManifestForRun('r1', 'foo', 'failed')
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes' })
+    expect(res.statusCode).toBe(409)
+    expect(res.json().error).toMatch(/no fixes/i)
+  })
+
+  it('applies the captured patch into the real repo and reports per-repo results', async () => {
+    // A real repo + a real patch turning x=1 → x=2.
+    const repo = path.join(tmpDir, 'prod-repo')
+    fs.mkdirSync(repo, { recursive: true })
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 1\n')
+    const g = (args: string[]) => execFileSync('git', args, { cwd: repo, stdio: 'ignore' })
+    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't'])
+    g(['add', '-A']); g(['commit', '-q', '-m', 'init', '--no-verify'])
+    const scratch = path.join(tmpDir, 'scratch')
+    execFileSync('git', ['clone', '-q', repo, scratch], { stdio: 'ignore' })
+    fs.writeFileSync(path.join(scratch, 'app.js'), 'const x = 2\n')
+    const patch = execFileSync('git', ['diff'], { cwd: scratch }).toString()
+
+    const runDir = runDirFor(logsDir, 'r1')
+    fs.mkdirSync(path.join(runDir, 'fixes'), { recursive: true })
+    const patchPath = path.join(runDir, 'fixes', 'prod.patch')
+    fs.writeFileSync(patchPath, patch)
+    writeManifest(path.join(runDir, 'manifest.json'), {
+      runId: 'r1', feature: 'foo', featureDir: path.join(featuresDir, 'foo'),
+      startedAt: 'now', status: 'failed', healCycles: 1, services: [],
+      fixCapture: { capturedAt: 'now', repos: [{ repoName: 'prod', patchPath, patchFile: 'prod.patch', repoRoot: repo, baseSha: 'deadbeef', files: 1 }] },
+    })
+
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ results: [{ repoName: 'prod', ok: true }], allOk: true })
+    expect(fs.readFileSync(path.join(repo, 'app.js'), 'utf-8')).toBe('const x = 2\n')
+  })
+})
+
+describe('GitHub / PR routes (R80)', () => {
+  it('GET /api/gh/status returns a status shape', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/gh/status' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toHaveProperty('installed')
+    expect(res.json()).toHaveProperty('authenticated')
+  })
+
+  it('pr-preflight + propose-pr 404 for an unknown run, 409 with no captured fixes', async () => {
+    writeManifestForRun('r1', 'foo', 'failed')
+    const { app } = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/pr-preflight' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/nope/propose-pr' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/pr-preflight' })).statusCode).toBe(409)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })).statusCode).toBe(409)
+  })
+})

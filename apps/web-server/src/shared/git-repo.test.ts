@@ -6,6 +6,7 @@ import path from 'path'
 import {
   checkoutBranch,
   collectRepoBranchSnapshots,
+  detectBaseBranch,
   diffContentSinceSnapshot,
   diffNamesSinceSnapshot,
   findRepo,
@@ -42,6 +43,13 @@ describe('git-repo helpers', () => {
   it('parses porcelain status and ref lists', () => {
     expect(parsePorcelainStatus(' M README.md\n?? tmp.txt\n\n')).toEqual([' M README.md', '?? tmp.txt'])
     expect(parseRefList('main\nfeature/demo\n\n')).toEqual(['main', 'feature/demo'])
+  })
+
+  it('detectBaseBranch: honors override, else falls back to an existing main/master', () => {
+    const repo = tmpRepo() // default branch is main, no origin/HEAD
+    expect(detectBaseBranch(repo, 'develop')).toBe('develop') // override wins
+    expect(detectBaseBranch(repo)).toBe('main') // no origin → first existing of main/master
+    expect(detectBaseBranch(path.join(os.tmpdir(), 'cl-not-a-repo-xyz'))).toBeNull()
   })
 
   it('reports empty status for missing, file, and non-git paths', async () => {

@@ -1,4 +1,5 @@
 import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, PrdSourceCheckpointData, SpecsCoverageProgress } from '../../../shared/api/client'
+import type { HealEnd } from '../../../shared/api/types'
 import { StatusDot } from '../../config/components/atoms'
 import { Chip } from '../../../shared/ui/StatusChip'
 import { PanelCard } from '../../../shared/ui/PanelCard'
@@ -531,22 +532,68 @@ export function stageFacts(
         { label: 'Edits', value: ev.edits ? 'Applied (overlay)' : 'None needed' },
       ]
     }
-    case 'run': {
-      const runStatus = str(ev, 'status') ?? flight.runVerdict
-      const cycles = num(ev, 'healCycles') ?? num(cev, 'healCycles')
-      const healMode = str(cev, 'healMode')
-      return [
-        ...(runStatus ? [{ label: 'Verdict', value: runStatus, tone: runStatus === 'passed' ? 'good' as const : 'bad' as const }] : []),
-        ...(cycles != null ? [{ label: 'Repairs', value: cycles === 0 ? 'None needed' : plural(cycles, 'cycle'), tone: cycles === 0 ? 'good' as const : undefined }] : []),
-        ...(healMode ? [{ label: 'Repair agent', value: healMode === 'external' ? 'External client' : 'Canary (this server)' }] : []),
-      ]
-    }
+    case 'run':
+      // R80: the run is rendered ONCE, as the Test Run hero (TestRunPanel) — it
+      // owns the verdict, pass count, repairs, services and give-up reason as a
+      // single object. Emitting stage facts here too would print the same
+      // numbers a second time in the "At a glance" card above the hero, which is
+      // exactly the duplication the hero replaced. So: no stage-level facts.
+      return []
     case 'evaluation-export': {
       const zip = str(ev, 'evaluationZip') ?? flight.links?.evaluationZip
       return zip ? [{ label: 'Archive', value: zip.split('/').pop() ?? zip, mono: true, title: zip }] : []
     }
     default:
       return []
+  }
+}
+
+// ─── Auto-repair give-up reason (R80) ───────────────────────────────────────
+// The manifest's typed `healEnd` (from the run orchestrator) → plain language.
+// The server already writes a `message`, so the full line prefers it and only
+// composes a fallback for older manifests; the short form is for the Repairs
+// tile's `sub`, where a whole sentence won't fit.
+
+const HEAL_CAUSE_PHRASE: Record<NonNullable<HealEnd['agentCause']>, string> = {
+  'usage-limit': 'usage limit',
+  'auth': 'not signed in',
+  'rate-limit': 'rate-limited',
+  'crash': 'agent crashed',
+  'unknown': '',
+}
+
+/** Full plain-language sentence for why auto-repair stopped — the hero's
+ *  decision-footer "why" line. Null when the run never entered heal. */
+export function healEndLine(healEnd: HealEnd | undefined): string | null {
+  if (!healEnd) return null
+  if (healEnd.message) return healEnd.message
+  switch (healEnd.reason) {
+    case 'no-signal': {
+      const cause = HEAL_CAUSE_PHRASE[healEnd.agentCause ?? 'unknown']
+      return `Auto-repair stopped: the repair agent went quiet without a fix${cause ? ` — ${cause}` : ''}.`
+    }
+    case 'max-cycles': return 'Auto-repair stopped after reaching the repair-cycle limit without passing.'
+    case 'no-progress': return 'Auto-repair stopped: repeated attempts made no progress.'
+    case 'spawn-failed': return 'Auto-repair stopped: the repair agent failed to start.'
+    case 'cancelled': return 'Auto-repair was stopped before the suite passed.'
+    default: return null
+  }
+}
+
+/** Short form for the Repairs tile's secondary line. Null when the run passed
+ *  cleanly (no give-up) or never entered heal. */
+export function healEndShort(healEnd: HealEnd | undefined): string | null {
+  if (!healEnd) return null
+  switch (healEnd.reason) {
+    case 'no-signal':
+      return healEnd.agentCause && healEnd.agentCause !== 'unknown'
+        ? `stopped — ${HEAL_CAUSE_PHRASE[healEnd.agentCause]}`
+        : 'stopped — agent went quiet'
+    case 'max-cycles': return 'stopped — cycle limit'
+    case 'no-progress': return 'stopped — no progress'
+    case 'spawn-failed': return 'stopped — agent failed to start'
+    case 'cancelled': return 'stopped by you'
+    default: return null
   }
 }
 
@@ -603,7 +650,7 @@ function FactBar({ frac, color }: { frac: number; color: string }) {
  *  with an optional stepper/bar/sub; text, path, and sentence values stay in the
  *  quiet body size and truncate inside the tile — so a value like a file path or
  *  "Safe — services boot side by side" reads on the same grid as "0%". */
-function FactTile({ fact: f }: { fact: StageFact }) {
+export function FactTile({ fact: f }: { fact: StageFact }) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
   return (
     <div className="min-w-0 rounded-md px-3 py-2.5" style={{ background: 'var(--bg-elevated)' }}>
@@ -717,6 +764,12 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     // shows options, not prose.
     if (stage.checkpoint?.kind === 'prd-source') {
       return 'Paused — choose where requirements come from below.'
+    }
+    // R80: the run-failed decision is fused into the Test Run hero's footer
+    // (with the give-up reason as its why-line), so the state line stays terse
+    // instead of echoing the whole checkpoint message a second time.
+    if (stage.checkpoint?.kind === 'run-failed') {
+      return 'The run did not pass — review it and decide below.'
     }
     return stage.checkpoint?.message ?? 'Paused — your decision is needed below.'
   }

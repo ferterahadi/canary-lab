@@ -7,9 +7,12 @@ import {
   checkPathExists,
   getFeatureConfigDoc,
   getGitRemote,
+  getPortify,
   getRepoGitStatus,
+  openPortifyProject,
   removePortifyOverlay,
   type ParsedConfigDoc,
+  type PortifyManifest,
 } from '../../../shared/api/client'
 import { PortsTab } from './PortsTab'
 import { InvalidationProvider, useInvalidation } from '../../../shared/state/invalidation'
@@ -29,7 +32,9 @@ vi.mock('../../../shared/api/client', async () => {
     checkPathExists: vi.fn(),
     getFeatureConfigDoc: vi.fn(),
     getGitRemote: vi.fn(),
+    getPortify: vi.fn(),
     getRepoGitStatus: vi.fn(),
+    openPortifyProject: vi.fn(),
     removePortifyOverlay: vi.fn(),
   }
 })
@@ -72,6 +77,9 @@ beforeEach(() => {
   vi.mocked(removePortifyOverlay)
     .mockReset()
     .mockResolvedValue({ name: 'cns_exactly_once_fallback', portified: false, reverted: true })
+  // Safe defaults so any portified+saved render doesn't call an unstubbed fn.
+  vi.mocked(getPortify).mockReset().mockResolvedValue(savedManifest())
+  vi.mocked(openPortifyProject).mockReset().mockResolvedValue({ opened: true, paths: ['/wt'], editor: 'vscode' })
 })
 
 afterEach(() => {
@@ -105,7 +113,7 @@ describe('PortsTab', () => {
     expect(buttons.some((b) => b.textContent?.trim() === 'Save')).toBe(false)
   })
 
-  it('verified state: portified headline + View/Remove only — no Portify button, no re-run', async () => {
+  it('verified state: portified headline + Remove only — no Portify button, no re-run', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     const onStartPortify = vi.fn()
     await act(async () => {
@@ -181,7 +189,9 @@ describe('PortsTab', () => {
     expect(portify.getAttribute('title')).not.toContain('Optional')
   })
 
-  it('always shows the slot explainer caption', async () => {
+  it('shows the slot explainer caption in non-portified states', async () => {
+    // Verified drops it (the overlay panel carries the explanation); every other
+    // state keeps it. Here: the none state.
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docNoPorts())
     await act(async () => {
       root.render(<PortsTab feature="np_feature" />)
@@ -322,15 +332,33 @@ describe('PortsTab', () => {
     expect(onStartPortify).not.toHaveBeenCalled()
   })
 
-  it('offers View saved overlay for a portified feature with a saved record', async () => {
+  it('renders the saved overlay INLINE for a portified feature — diff, stored-in path, double-boot proof; no wizard click-out', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+    vi.mocked(getPortify).mockResolvedValue(savedManifest())
     mockWorkflows = [{ workflowId: 'wf_saved', feature: 'cns_exactly_once_fallback', status: 'saved', startedAt: '2026-01-01T00:00:00Z' }]
     const onOpenPortify = vi.fn()
     await act(async () => {
       root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={vi.fn()} onOpenPortify={onOpenPortify} />)
     })
-    await act(async () => clickButton('View saved overlay'))
-    expect(onOpenPortify).toHaveBeenCalledWith('wf_saved')
+    await flush()
+
+    // The saved manifest is fetched and its overlay shows inline — no button.
+    expect(getPortify).toHaveBeenCalledWith('wf_saved')
+    expect(container.textContent).toContain('process.env.PORT')                                  // the diff
+    expect(container.textContent).toContain('features/cns_exactly_once_fallback/portify/my-backend.patch') // stored-in
+    expect(container.textContent).toContain('Booted twice')                                      // double-boot proof
+
+    // The old "View saved overlay" button is gone; verified state also drops the
+    // slot explainer (the panel explains injection).
+    const buttons = [...container.querySelectorAll('button')]
+    expect(buttons.some((b) => b.getAttribute('aria-label') === 'View saved overlay')).toBe(false)
+    expect(container.textContent).not.toContain('Slots are declared in feature.config.cjs')
+
+    // Open-in-editor opens the overlay folder directly — it does NOT reopen the wizard.
+    await act(async () => clickButton('Open in editor'))
+    await flush()
+    expect(openPortifyProject).toHaveBeenCalledWith('wf_saved')
+    expect(onOpenPortify).not.toHaveBeenCalled()
   })
 
   it('shows an empty state when there are no services', async () => {
@@ -346,6 +374,36 @@ function clickButton(label: string): void {
   const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(label))
   if (!btn) throw new Error(`button not found: ${label}`)
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+}
+
+// Flush the chained async state updates (getFeatureConfigDoc + getPortify
+// effects each resolve a promise before their render).
+async function flush(): Promise<void> {
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+}
+
+// A saved overlay manifest for the inline panel: a real diff, one service, and
+// the double-boot proof. patchFileName('my-backend') → 'my-backend.patch'.
+function savedManifest(): PortifyManifest {
+  return {
+    workflowId: 'wf_saved',
+    feature: 'cns_exactly_once_fallback',
+    repos: [{ name: 'my-backend', path: '~/Documents/my-backend' }],
+    agent: 'claude',
+    branch: 'portify/scratch',
+    status: 'saved',
+    attempt: 1,
+    maxAttempts: 3,
+    startedAt: '2026-01-01T00:00:00Z',
+    diff: '# repo: my-backend\n- app.listen(8080)\n+ app.listen(process.env.PORT)',
+    verification: {
+      ok: true,
+      instances: [
+        { ports: { api: 41207 }, ok: true },
+        { ports: { api: 41311 }, ok: true },
+      ],
+    },
+  }
 }
 
 function docWithPorts(): ParsedConfigDoc {

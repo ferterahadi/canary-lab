@@ -4,7 +4,10 @@
 // semantic model; feature/journal/wizard shapes remain web-local API mirrors.
 import type {
   DisplayStatus,
+  HealEnd,
   RunBootFailure,
+  RunFixCapture,
+  RunProposedPr,
   RunLifecycleEvent,
   RunLifecycleSnapshot,
   RunStatus,
@@ -25,7 +28,11 @@ import type {
 } from '../../../../../shared/flights/types'
 export type {
   DisplayStatus,
+  HealEnd,
   RunBootFailure,
+  RunFixCapture,
+  RunFixCaptureRepo,
+  RunProposedPr,
   RunLifecycleAbortReason,
   RunLifecycleEvent,
   RunLifecyclePhase,
@@ -319,6 +326,14 @@ export interface RunManifest {
   /** Set when a service failed to come up, so the run was declared failed and
    *  (if heal is configured) routed into heal with the service log as context. */
   bootFailure?: RunBootFailure
+  /** Why the auto-heal loop stopped without passing. Drives the Test Run
+   *  hero's "why heal stopped" line. Absent unless the run entered heal. */
+  healEnd?: HealEnd
+  /** The heal agent's edits captured from the per-run worktree at teardown —
+   *  what the FixesCapturedPanel surfaces (patch path, apply-locally, PR). */
+  fixCapture?: RunFixCapture
+  /** PRs opened from this run's captured fix, per repo (on-demand). */
+  proposedPrs?: RunProposedPr[]
   verification?: VerificationRunMetadata
 }
 

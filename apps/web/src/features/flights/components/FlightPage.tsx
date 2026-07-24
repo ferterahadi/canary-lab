@@ -10,15 +10,13 @@ import type {
   FlightStageStatus,
   SpecsCoverageProgress as SpecsCoverageProgressT,
 } from '../../../shared/api/client'
-import type { ExternalHealSession, JournalEntry, RunDetail, RunIndexEntry } from '../../../shared/api/types'
 import { AgentSessionView, type AgentSessionSource } from '../../agent-sessions/components/AgentSessionView'
 import { Modal, StatusDot, useEscapeToClose } from '../../config/components/atoms'
 import { Chip } from '../../../shared/ui/StatusChip'
 import { DiffView } from '../../../shared/ui/DiffView'
 import { StepList, StepRow } from '../../../shared/ui/StepList'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
-import { RunRow } from '../../runs/components/RunRow'
-import { clientLabel } from '../../runs/components/external-client-branding'
+import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
 import { DeleteSuiteConfirm } from '../../config/components/DeleteSuiteConfirm'
@@ -73,18 +71,6 @@ const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
   'scout': 'scout',
   'prd-summary': 'prd-summary',
   'specs-coverage': 'specs-coverage',
-}
-
-/** The `[external]` activity-rail line for the run stage when its heal was
- *  claimed by an external MCP client (Claude Desktop / Codex) — the honest
- *  "this repair runs in your own window" indicator. An external agent's
- *  transcript never reaches Canary (Canary is only the MCP server it calls), so
- *  this is a status row (client · state · cycle), never a mirrored timeline. The
- *  full picture is one drill-through away on the run detail's External panel. */
-export function externalHealSystemLine(session: ExternalHealSession): string {
-  const who = clientLabel(session.clientKind, 'an external client')
-  const cycle = session.cycleCount > 0 ? ` · repair cycle ${session.cycleCount}` : ''
-  return `[external] Heal claimed by ${who} — ${session.status}${cycle}`
 }
 
 /** Drill-through targets: each stage view is a LENS onto the real underlying
@@ -844,27 +830,20 @@ function StageDetail({
   const runId = runMerged
     ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
-  // The run detail behind the merged Run stage — one poll, shared by the repair
-  // summary and the external-heal indicator below (don't fetch it twice).
-  const [runDetail, setRunDetail] = useState<RunDetail | null>(null)
-  useEffect(() => {
-    if (!runMerged || !runId) { setRunDetail(null); return }
-    let alive = true
-    const load = (): void => { api.getRunDetail(runId).then((d) => { if (alive) setRunDetail(d) }).catch(() => {}) }
-    load()
-    if (!live) return () => { alive = false }
-    const id = setInterval(load, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [runMerged, runId, live])
-  // R66/external: when a flight's run is being (or was) repaired by an external
-  // MCP client, the run has no Canary-spawned heal session to tail — so instead
-  // of a blank rail we surface an honest `[external]` status row at the head of
-  // the activity band. Status only (an external agent's transcript never reaches
-  // Canary); the full picture is one drill-through away on the run detail.
-  const externalHeal = runDetail?.manifest?.healMode === 'external'
-    ? runDetail.manifest.externalHealSession
-    : undefined
-  const leadingSystemRows = externalHeal ? [externalHealSystemLine(externalHeal)] : []
+  // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
+  // the run detail poll, so StageDetail no longer fetches it here (R80). The
+  // hero renders from this evidence immediately (before its first poll) and
+  // enriches from the live run detail; healEnd rides the run stage's evidence.
+  const runEv = (stage.evidence ?? {}) as Record<string, unknown>
+  const runCev = (companion?.evidence ?? {}) as Record<string, unknown>
+  const runEvidence: RunStageEvidence = {
+    runId,
+    status: typeof runEv.status === 'string' ? runEv.status : undefined,
+    healCycles: typeof runEv.healCycles === 'number'
+      ? runEv.healCycles
+      : typeof runCev.healCycles === 'number' ? runCev.healCycles : undefined,
+    healEnd: runEv.healEnd as RunStageEvidence['healEnd'],
+  }
   // A pair row surfaces whichever half is parked on a checkpoint (the
   // missing-env checkpoint lives on the folded env-capture, run-failed on run).
   const checkpointStage =
@@ -1026,14 +1005,26 @@ function StageDetail({
         )
       )}
 
-      {/* Test Run (R22): what's running now, what each repair cycle fixed —
-          no agent output, the run detail page holds the rest. */}
-      {runMerged && runId && <RunRepairSummary runId={runId} detail={runDetail} active={live} onError={onActionError} />}
-
-      {/* Test Run (R64): every run this feature has had, as the same cards the
-          runs list renders — click drills into the real run detail. */}
-      {runMerged && row.status !== 'pending' && (
-        <FeatureRunsPanel feature={flight.feature} live={Boolean(runLive) || live} onOpenRun={drill.onOpenRun} />
+      {/* Test Run (R80): the run rendered ONCE as the Latest-run hero —
+          identity, metric tiles, failing tests, controls, the fused run-failed
+          decision, and the earlier runs. Owns its own run-detail/journal/runs
+          poll; the run detail page holds the full agent transcript. */}
+      {runMerged && runId && row.status !== 'pending' && (
+        <TestRunPanel
+          flightId={flightId}
+          feature={flight.feature}
+          runId={runId}
+          live={Boolean(runLive) || live}
+          evidence={runEvidence}
+          checkpoint={
+            flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint?.kind === 'run-failed'
+              ? checkpointStage.checkpoint
+              : null
+          }
+          onResponded={onResponded}
+          onOpenRun={drill.onOpenRun}
+          onError={onActionError}
+        />
       )}
 
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
@@ -1044,25 +1035,31 @@ function StageDetail({
         <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} />
       )}
 
-      {/* prd-source renders as the RequirementsFork above — every other
-          checkpoint kind keeps the generic card. Gated on the flight being
-          parked: responding to a paused/aborted record's stale checkpoint
-          can only 409. */}
-      {flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint && checkpointStage.checkpoint.kind !== 'prd-source' && (
+      {/* prd-source renders as the RequirementsFork above; run-failed is fused
+          into the Test Run hero's decision footer (R80) — every OTHER checkpoint
+          kind keeps the generic card. Gated on the flight being parked:
+          responding to a paused/aborted record's stale checkpoint can only 409. */}
+      {flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint
+        && checkpointStage.checkpoint.kind !== 'prd-source'
+        && checkpointStage.checkpoint.kind !== 'run-failed' && (
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
       )}
 
       </div>
       {/* R66: one activity rail per stage — the conductor's tagged system lines
-          and the stage's agent timeline (if any) on a single block. */}
-      <StageActivity
-        source={activitySource}
-        sourceKey={activityKey}
-        live={live}
-        settled={settled}
-        log={combinedLog}
-        leadingSystemRows={leadingSystemRows}
-      />
+          and the stage's agent timeline (if any) on a single block. The run
+          stage is agentless at the flight level (its repair agent's timeline is
+          on the run detail drill-through), so R80 cut its near-empty band; the
+          hero carries a collapsed "Repairs" disclosure instead. */}
+      {!runMerged && (
+        <StageActivity
+          source={activitySource}
+          sourceKey={activityKey}
+          live={live}
+          settled={settled}
+          log={combinedLog}
+        />
+      )}
     </div>
   )
 }
@@ -1879,169 +1876,6 @@ function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageProgress
           <StepRow key={n} testId={`specs-pass-pending-${n}`} state="pending" title={`Pass ${n} — pending`} />
         ))}
       </StepList>
-    </div>
-  )
-}
-
-/** Every test run this feature has had (R64), as the runs list's own cards —
- *  status chip (passed / healing / running / failed), pass counts from the run
- *  summary, click → the real run detail. Boot/benchmark/verify sessions are
- *  plumbing, not test runs — they don't render here. Polls gently while any
- *  run is live so a settling run flips its chip without a refresh. */
-function FeatureRunsPanel({
-  feature,
-  live,
-  onOpenRun,
-}: {
-  feature: string
-  live: boolean
-  onOpenRun?: (feature: string, runId: string) => void
-}) {
-  const [runs, setRuns] = useState<RunIndexEntry[]>([])
-  const [details, setDetails] = useState<Map<string, RunDetail>>(new Map())
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      api.listRuns({ feature })
-        .then(async (all) => {
-          const shown = all
-            .filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify')
-            .slice(0, 6)
-          if (!alive) return
-          setRuns(shown)
-          const pairs = await Promise.all(
-            shown.map(async (r) => [r.runId, await api.getRunDetail(r.runId).catch(() => null)] as const),
-          )
-          if (alive) setDetails(new Map(pairs.filter((p): p is [string, RunDetail] => p[1] !== null)))
-        })
-        .catch(() => {})
-    }
-    load()
-    if (!live) return () => { alive = false }
-    const id = setInterval(load, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [feature, live])
-
-  if (runs.length === 0) return null
-  return (
-    <div data-testid="feature-runs">
-      <h3 className="cl-rubric mb-1">
-        Runs
-      </h3>
-      <ul className="m-0 flex list-none flex-col gap-1 rounded border p-1" style={{ borderColor: 'var(--border-default)' }}>
-        {runs.map((r) => (
-          <RunRow key={r.runId} run={r} detail={details.get(r.runId)} onSelect={(run) => onOpenRun?.(feature, run.runId)} />
-        ))}
-      </ul>
-    </div>
-  )
-}
-
-/** The merged run row's live heart (R22): what is happening RIGHT NOW and what
- *  each repair cycle fixed — sourced from the run manifest + heal journal, not
- *  the agent's raw output. Polls gently while the run is active. */
-function RunRepairSummary({ runId, detail, active, onError }: { runId: string; detail: RunDetail | null; active: boolean; onError?: (msg: string) => void }) {
-  const report = (err: unknown): void => onError?.(err instanceof Error ? err.message : String(err))
-  const [journal, setJournal] = useState<JournalEntry[]>([])
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      api.listJournal({ run: runId }).then((j) => { if (alive) setJournal(j) }).catch(() => {})
-    }
-    load()
-    if (!active) return () => { alive = false }
-    const id = setInterval(load, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [runId, active])
-
-  const manifest = detail?.manifest
-  const summary = detail?.summary
-  const nowLine = !manifest || !active
-    ? null
-    : manifest.status === 'healing'
-      ? `Repairing — cycle ${(manifest.healCycles ?? 0) + 1}`
-      : summary?.running?.name
-        ? `Running "${summary.running.name}"`
-        : 'Running tests'
-  const failing = summary?.failed ?? []
-  const cycles = [...journal].sort((a, b) => (b.iteration ?? 0) - (a.iteration ?? 0)).slice(0, 3)
-  // R46: the services this run booted — names + live status, straight from the
-  // run manifest the run detail page reads.
-  const services = (manifest?.services ?? []).map((svc) => `${svc.name} (${svc.status})`)
-
-  if (!nowLine && failing.length === 0 && cycles.length === 0 && !summary) return null
-  return (
-    <div data-testid="run-repair-summary" className="flex flex-col gap-1.5">
-      <FactsGrid facts={[
-        ...(nowLine ? [{ label: 'Now', value: nowLine }] : []),
-        ...(services.length > 0
-          ? [{ label: 'Services', value: services.join(', '), mono: true }]
-          : []),
-        ...(summary && summary.total > 0
-          ? [{ label: 'Tests', value: `${summary.passed}/${summary.total} passed`, tone: failing.length > 0 ? 'warn' as const : 'good' as const }]
-          : []),
-        ...(failing.length > 0
-          ? [{
-              label: 'Failing',
-              value: `${failing.slice(0, 2).map((f) => f.name).join(', ')}${failing.length > 2 ? ` +${failing.length - 2} more` : ''}`,
-              tone: 'bad' as const,
-            }]
-          : []),
-      ]} />
-      {/* R46: the run's own controls, right on the stage — same endpoints the
-          run detail page drives; all state flows back over the runs WS. */}
-      {manifest && (
-        <div className="flex flex-wrap items-center gap-1.5" data-testid="run-stage-controls">
-          {active && manifest.status === 'healing' && (
-            <button
-              type="button"
-              data-testid="run-stage-cancel-heal"
-              onClick={() => { api.cancelHealRun(runId).catch(report) }}
-              className="cl-button px-2 py-0.5 text-[11px]"
-            >
-              Cancel repair
-            </button>
-          )}
-          {active && (
-            <button
-              type="button"
-              data-testid="run-stage-stop"
-              onClick={() => { api.stopRun(runId).catch(report) }}
-              className="cl-button px-2 py-0.5 text-[11px]"
-              style={{ color: 'var(--danger)' }}
-            >
-              ⏹ Stop run
-            </button>
-          )}
-          {!active && (manifest.status === 'failed' || manifest.status === 'aborted') && (
-            <button
-              type="button"
-              data-testid="run-stage-restart"
-              onClick={() => { api.restartRun(runId).catch(report) }}
-              className="cl-button px-2 py-0.5 text-[11px]"
-              style={{ color: 'var(--accent)' }}
-              title="Re-run the remaining/failed tests on the same run"
-            >
-              ▸ Restart run
-            </button>
-          )}
-        </div>
-      )}
-      {cycles.length > 0 && (
-        <div data-testid="repair-journal">
-          <h3 className="cl-rubric mb-1">Repairs</h3>
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
-            {cycles.map((entry) => (
-              <li key={entry.iteration ?? entry.timestamp ?? entry.body.slice(0, 24)} className="text-[11.5px]" style={{ color: 'var(--text-secondary)' }}>
-                <span style={{ color: entry.outcome === 'passed' ? 'var(--success)' : 'var(--text-muted)' }}>
-                  Cycle {entry.iteration ?? '?'}{entry.outcome ? ` · ${entry.outcome}` : ''}
-                </span>
-                {entry.hypothesis ? ` — ${truncate(entry.hypothesis, 90)}` : ''}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
     </div>
   )
 }

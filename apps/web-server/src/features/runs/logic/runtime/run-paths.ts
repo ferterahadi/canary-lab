@@ -32,6 +32,15 @@ export interface RunPaths {
   runnerLogPath: string
   healIndexPath: string
   diagnosisJournalPath: string
+  // Tail of the heal agent's raw terminal output, written only when the loop
+  // gives up on a no-signal cycle. The heal-failure classifier reads this to
+  // explain WHY the agent went quiet (usage limit, auth, crash) — the agent's
+  // own bytes are the only evidence when it never wrote a signal.
+  healAgentTailPath: string
+  // Directory holding the heal fix patches captured at teardown — one
+  // `<repoName>.patch` per changed repo plus a `fixes.json` index. The
+  // FixesCapturedPanel and the PR pipeline read from here.
+  fixesDir: string
   failedDir: string
   signalsDir: string
   restartSignal: string
@@ -65,6 +74,8 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     runnerLogPath: path.join(runDir, 'runner.log'),
     healIndexPath: path.join(runDir, 'heal-index.md'),
     diagnosisJournalPath: path.join(runDir, 'diagnosis-journal.md'),
+    healAgentTailPath: path.join(runDir, 'heal-agent-tail.txt'),
+    fixesDir: path.join(runDir, 'fixes'),
     failedDir: path.join(runDir, 'failed'),
     signalsDir,
     restartSignal: path.join(signalsDir, '.restart'),

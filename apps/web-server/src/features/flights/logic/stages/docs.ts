@@ -5,6 +5,7 @@ import { execFileSync } from 'child_process'
 import { linkFeatureDoc, writeFeatureDoc } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import { renderPrompt } from '../../../../shared/prompts'
+import { detectBaseBranch } from '../../../../shared/git-repo'
 import type { PrdSourceAttempt } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps } from './context'
@@ -97,16 +98,6 @@ function git(repo: string, args: string[]): string | null {
   } catch {
     return null
   }
-}
-
-function detectBaseBranch(repo: string, override?: string): string | null {
-  if (override) return override
-  const head = git(repo, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
-  if (head) return head.replace(/^origin\//, '')
-  for (const candidate of ['main', 'master']) {
-    if (git(repo, ['rev-parse', '--verify', '--quiet', candidate]) !== null) return candidate
-  }
-  return null
 }
 
 function diffVsBase(repo: string, base: string): string | null {

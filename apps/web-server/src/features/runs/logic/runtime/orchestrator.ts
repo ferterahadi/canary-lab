@@ -7,9 +7,12 @@ import type { ExecutionType, VerificationRunMetadata } from '../../../../../../.
 import {
   HealSignalGate,
   createRunLifecycleEvent,
+  type HealEnd,
   type HealSignal,
   type HealSignalKind,
+  type RunFixCapture,
 } from '../../../../../../../shared/run-state'
+import { classifyHealFailure } from './heal-failure-classifier'
 import {
   coerceTcpPort,
   enabledForEnv,
@@ -79,6 +82,7 @@ import {
   diffNamesSinceSnapshot,
   getGitRoot,
   resolveRepoPath,
+  runGit,
   snapshotWorkingTree,
   type DiffPathspec,
 } from '../../../../shared/git-repo'
@@ -497,6 +501,14 @@ export class RunOrchestrator extends EventEmitter {
   // Overlays applied this run, recorded so stop() can reverse exactly what it
   // applied (and so a failed partial apply reverses only what landed).
   private appliedOverlays: { repoName: string; worktreeRoot: string; patchPath: string }[] = []
+  // Fix-capture baseline: a stash-create ref of each worktree taken AFTER
+  // overlay + envset + WIP hydration and BEFORE boot, so the diff at teardown
+  // is exactly the heal agent's edits. `untracked` is the set of non-ignored
+  // untracked files present AT baseline (hydrated WIP + generated docs) — the
+  // stash ref doesn't include them, so teardown must exclude them explicitly or
+  // they'd masquerade as agent-created files. Keyed by repo name. Empty for
+  // in-place runs (no worktree to capture from).
+  private fixBaselines = new Map<string, { ref: string; worktreeRoot: string; sourceRoot: string; baseSha: string; untracked: Set<string> }>()
   private readonly signalGate = new HealSignalGate()
   private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
 
@@ -535,6 +547,11 @@ export class RunOrchestrator extends EventEmitter {
   // Last dimensions reported by the browser's agent pane. The pane can mount
   // before auto-heal spawns the REPL, so keep the size and apply it at spawn.
   private healAgentTerminalSize: { cols: number; rows: number } | null = null
+  // Rolling tail of the heal agent's raw terminal output (kept to the last
+  // ~HEAL_AGENT_TAIL_BYTES). When the loop gives up on a no-signal cycle this
+  // is the only evidence of WHY the agent went quiet, so it's written to
+  // `paths.healAgentTailPath` and classified into `HealEnd.agentCause`.
+  private healAgentOutputTail = ''
   // In-memory mirror of `paths.agentSessionRefPath`. `undefined` means we
   // haven't read disk yet; `null` means we read and the file is missing or
   // invalid. The orchestrator is the only writer, so once seeded we trust the
@@ -663,7 +680,71 @@ export class RunOrchestrator extends EventEmitter {
     // checked-in file either way. Throws like the overlay — booting
     // un-hydrated just fails later with a far less actionable error.
     this.hydrateWorktreeEnvsets()
+    // Snapshot each worktree NOW — after overlay + envset + WIP hydration, before
+    // any service (and therefore any heal agent) can touch it. The diff against
+    // this baseline at teardown is exactly the heal agent's fix (R80).
+    await this.captureFixBaseline()
     await this.ensureServicesRunning()
+  }
+
+  /** Stash-create a baseline ref for every per-run worktree so teardown can diff
+   *  the agent's edits out. Best-effort: a repo we can't snapshot simply won't
+   *  have its fix captured — never blocks the boot. */
+  private async captureFixBaseline(): Promise<void> {
+    for (const handle of this.worktreeHandles) {
+      const ref = await snapshotWorkingTree(handle.worktreeRoot)
+      if (ref === null) continue
+      const head = await runGit(handle.worktreeRoot, ['rev-parse', 'HEAD'])
+      const baseSha = head.code === 0 ? head.stdout.trim() : ''
+      this.fixBaselines.set(handle.repoName, {
+        ref,
+        worktreeRoot: handle.worktreeRoot,
+        sourceRoot: handle.sourceRoot,
+        baseSha,
+        untracked: await listUntracked(handle.worktreeRoot),
+      })
+    }
+  }
+
+  /** Diff each worktree against its capture baseline and persist the heal fix as
+   *  `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture`. Called
+   *  at teardown BEFORE the worktrees are removed. A run whose agent changed
+   *  nothing writes no capture. Intent-to-add stages agent-created files so new
+   *  source files ride the patch too; gitignored/untracked-at-baseline state
+   *  (envset .env, hydrated WIP) never leaks in — the baseline already had it or
+   *  git ignores it. */
+  private async captureFixes(): Promise<void> {
+    if (this.fixBaselines.size === 0) return
+    const repos: RunFixCapture['repos'] = []
+    for (const [repoName, base] of this.fixBaselines) {
+      // Stage ONLY agent-created files (untracked now, but not at baseline) so
+      // `git diff <ref>` includes their content — the hydrated WIP / generated
+      // docs that were already untracked at baseline stay untracked and never
+      // leak into the fix patch.
+      const nowUntracked = await listUntracked(base.worktreeRoot)
+      const agentNew = [...nowUntracked].filter((f) => !base.untracked.has(f))
+      if (agentNew.length > 0) await runGit(base.worktreeRoot, ['add', '-N', '--', ...agentNew])
+      const patch = await diffContentSinceSnapshot(base.worktreeRoot, base.ref)
+      if (!patch.trim()) continue
+      const names = await diffNamesSinceSnapshot(base.worktreeRoot, base.ref)
+      const patchFile = `${sanitizeRepoFileName(repoName)}.patch`
+      const patchPath = path.join(this.paths.fixesDir, patchFile)
+      try {
+        fs.mkdirSync(this.paths.fixesDir, { recursive: true })
+        fs.writeFileSync(patchPath, patch)
+      } catch (err) {
+        this.runnerLog?.warn(`Fix capture write failed for "${repoName}": ${(err as Error).message}`)
+        continue
+      }
+      repos.push({ repoName, patchPath, patchFile, repoRoot: base.sourceRoot, baseSha: base.baseSha, files: names.length })
+    }
+    if (repos.length === 0) return
+    const fixCapture: RunFixCapture = { repos, capturedAt: new Date().toISOString() }
+    try {
+      fs.writeFileSync(path.join(this.paths.fixesDir, 'fixes.json'), JSON.stringify(fixCapture, null, 2) + '\n')
+    } catch { /* the manifest carries the same data — index file is a convenience */ }
+    this.stateSink.patchManifest(this.runId, { fixCapture })
+    this.runnerLog?.info(`Captured heal fix diff for ${repos.map((r) => r.repoName).join(', ')} → ${this.paths.fixesDir}`)
   }
 
   /** Hydrate the feature's envset into every per-run worktree (portified or
@@ -1417,6 +1498,15 @@ export class RunOrchestrator extends EventEmitter {
 
     this.healCancelled = true
     this.markStoppedEarly('user-cancel-heal', 0, 0)
+    // Record the give-up reason at its source — every healCancelled break in
+    // the loop funnels through this one flag, so the manifest carries a typed
+    // "stopped by user" instead of a bare failed status.
+    this.recordHealEnd({
+      reason: 'cancelled',
+      cycle: this.healCycles,
+      message: 'Auto-repair was stopped by you before the suite passed.',
+      at: new Date().toISOString(),
+    })
 
     // Best-effort journal note BEFORE we tear down the pty so the entry
     // lands even if the user-cancel races a fast agent exit.
@@ -1551,8 +1641,39 @@ export class RunOrchestrator extends EventEmitter {
   private attachAgentDataHandlers(pty: PtyHandle): void {
     pty.onData((chunk) => {
       this.lastAgentDataAt = Date.now()
+      this.appendAgentOutputTail(chunk)
       this.emit('agent-output', { chunk })
     })
+  }
+
+  // Keep only the last HEAL_AGENT_TAIL_BYTES of agent output. A usage-limit /
+  // auth banner is always near the end (the agent prints it and stops), so the
+  // tail is where the classifier finds its evidence.
+  private appendAgentOutputTail(chunk: string): void {
+    const combined = this.healAgentOutputTail + chunk
+    this.healAgentOutputTail =
+      combined.length > HEAL_AGENT_TAIL_BYTES
+        ? combined.slice(combined.length - HEAL_AGENT_TAIL_BYTES)
+        : combined
+  }
+
+  // Persist the captured tail and classify why the agent went quiet. Called
+  // only from the no-signal give-up path. Best-effort: a failed write still
+  // lets the loop end cleanly, it just leaves `agentCause` unclassified.
+  private captureHealAgentCause(): HealEnd['agentCause'] {
+    const tail = this.healAgentOutputTail
+    if (tail.trim() !== '') {
+      try {
+        fs.writeFileSync(this.paths.healAgentTailPath, tail)
+      } catch { /* tail persistence is best-effort */ }
+    }
+    return classifyHealFailure(tail, this.autoHeal?.agent)
+  }
+
+  // Write the typed give-up reason to the manifest so the Test Run surface can
+  // state it plainly. One writer, called at each give-up site in the loop.
+  private recordHealEnd(healEnd: HealEnd): void {
+    this.stateSink.patchManifest(this.runId, { healEnd })
   }
 
   private echoUserInterject(text: string): void {
@@ -2297,6 +2418,10 @@ export class RunOrchestrator extends EventEmitter {
 
   private async runAutoHealLoop(initialUserGuidance?: string): Promise<RunManifest['status']> {
     if (!this.autoHeal) return 'failed'
+    // Clear any give-up reason from a prior heal session — a restart-heal
+    // re-enters this loop and may now pass, so a stale `healEnd` must not
+    // linger on the manifest.
+    this.stateSink.patchManifest(this.runId, { healEnd: undefined })
     let finalStatus: RunManifest['status'] = 'failed'
     const heal = new HealCycleState({
       maxCycles: this.autoHeal.maxCycles ?? AUTO_HEAL_MAX_CYCLES,
@@ -2364,6 +2489,15 @@ export class RunOrchestrator extends EventEmitter {
                 : 'A rerun made no progress on the not-yet-passed tests; stopping instead of re-running indefinitely.',
               severity: 'warning',
             })
+            this.recordHealEnd({
+              reason: 'no-progress',
+              cycle: heal.snapshot().cycle,
+              message:
+                skippedCount > 0
+                  ? `Auto-repair stopped: ${skippedCount} test${skippedCount === 1 ? '' : 's'} stayed skipped and a rerun without a code fix can't turn them green.`
+                  : 'Auto-repair stopped: a rerun made no progress on the not-yet-passed tests.',
+              at: new Date().toISOString(),
+            })
             break
           }
           continue
@@ -2374,7 +2508,23 @@ export class RunOrchestrator extends EventEmitter {
         // to compute the "delta vs previous cycle" section. The signature
         // string stays as the human-readable lifecycle-event detail.
         const decision = heal.observeFailures(failedSlugs)
-        if (!decision.shouldHeal) break
+        if (!decision.shouldHeal) {
+          // `decision.reason` is always defined here (failedSlugs is non-empty,
+          // so the empty-signature `shouldHeal:false` branch can't fire). Record
+          // WHY the loop stops so the Test Run surface can state it plainly.
+          const reason = decision.reason ?? 'no-progress'
+          const cyclesDone = heal.snapshot().cycle
+          this.recordHealEnd({
+            reason,
+            cycle: cyclesDone,
+            message:
+              reason === 'max-cycles'
+                ? `Auto-repair stopped after the ${cyclesDone}-cycle limit without turning the suite green.`
+                : `Auto-repair stopped: the same tests kept failing across ${cyclesDone} cycles with no progress.`,
+            at: new Date().toISOString(),
+          })
+          break
+        }
 
         // Capture the failure streaks AFTER `observeFailures` has updated
         // them for this cycle. The escalation block in the cycle prompt keys
@@ -2403,6 +2553,13 @@ export class RunOrchestrator extends EventEmitter {
 
         const { signal, reason } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance, consecutiveSameFailures, stuckSlugs, maxSlugStreak })
         userGuidance = undefined
+
+        // Pin the agent's CLI-native session-log pointer as soon as this cycle's
+        // wait ends — codex has no `--session-id` flag, so its rollout log is
+        // discovered by cwd + start time, and that discovery must happen while
+        // the log still exists. Waiting until cleanup lost the ref when a
+        // silent cycle-1 agent gave up (the agent-session-null gap).
+        this.persistAgentSessionRef()
 
         if (this.stopped) return this.status
 
@@ -2446,6 +2603,27 @@ export class RunOrchestrator extends EventEmitter {
               })
             } catch { /* journal write is best-effort */ }
             this.emitAgentSystemMessage('No code changes detected — ending the heal loop.')
+            // The agent produced no signal and changed nothing. Its own output
+            // tail is the only evidence of why — capture + classify it so the
+            // Test Run surface can say "usage limit" vs "tried and couldn't".
+            if (reason === 'spawn-failed') {
+              this.recordHealEnd({
+                reason: 'spawn-failed',
+                cycle: cycleNum,
+                message: 'Auto-repair stopped: the heal agent failed to spawn.',
+                at: new Date().toISOString(),
+              })
+            } else {
+              const agentCause = this.captureHealAgentCause()
+              this.recordHealEnd({
+                reason: 'no-signal',
+                agentWait: reason as HealEnd['agentWait'],
+                agentCause,
+                cycle: cycleNum,
+                message: `${reasonMessage}${healAgentCauseSuffix(agentCause)} No code changes were made, so auto-repair stopped after cycle ${cycleNum}.`,
+                at: new Date().toISOString(),
+              })
+            }
             finalStatus = 'failed'
             this.setStatus(finalStatus)
             break
@@ -2634,6 +2812,13 @@ export class RunOrchestrator extends EventEmitter {
       this.servicePtys.delete(name)
     }
     this.logFiles.clear()
+    // Capture the heal agent's fix diff from each worktree BEFORE the overlay is
+    // reversed or the worktree is removed — the baseline was taken after overlay
+    // + envset + WIP, so this diff is exactly the repair (R80). Best-effort:
+    // never blocks finalization.
+    await this.captureFixes().catch((err) => {
+      this.runnerLog?.warn(`Fix capture failed: ${(err as Error).message}`)
+    })
     // Release per-run isolation resources. Ports go back to the pool. For a
     // PORTIFIED run we reverse the overlay but KEEP the worktree — it holds the
     // heal agent's repair edits, and it follows the normal run-worktree
@@ -3198,6 +3383,44 @@ export function decideRunStatus(
 }
 
 const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
+
+// How much of the heal agent's terminal output to keep for the no-signal
+// give-up classifier. ~16 KB is plenty to catch a usage-limit / auth banner at
+// the tail without holding the whole conversation in memory.
+const HEAL_AGENT_TAIL_BYTES = 16 * 1024
+
+// Repo name → safe patch filename (`fixes/<name>.patch`). Mirrors the worktree
+// dir sanitizer so a repo name with slashes/spaces can't escape the fixes dir.
+function sanitizeRepoFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'repo'
+}
+
+// Non-ignored untracked files in a working tree, as a set of repo-relative
+// paths. Used by the fix-capture baseline/teardown to tell agent-created files
+// apart from WIP/docs that were already present before the run.
+async function listUntracked(worktreeRoot: string): Promise<Set<string>> {
+  const res = await runGit(worktreeRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
+  if (res.code !== 0) return new Set()
+  return new Set(res.stdout.split('\0').filter(Boolean))
+}
+
+// Human-readable suffix appended to the no-signal give-up message when the
+// classifier recognized why the agent went quiet. `unknown`/undefined add
+// nothing (we only editorialize when we actually recognized the cause).
+function healAgentCauseSuffix(cause: HealEnd['agentCause']): string {
+  switch (cause) {
+    case 'usage-limit':
+      return ' Its last output suggests the agent hit a usage limit.'
+    case 'auth':
+      return ' Its last output suggests the agent is not signed in.'
+    case 'rate-limit':
+      return ' Its last output suggests the agent was rate-limited or the model was overloaded.'
+    case 'crash':
+      return ' Its last output suggests the agent crashed or failed to start.'
+    default:
+      return ''
+  }
+}
 
 // Bracketed-paste sequences. Modern TUIs (claude REPL included) toggle
 // `\x1b[?2004h` on init to opt into "this is a paste" framing — text

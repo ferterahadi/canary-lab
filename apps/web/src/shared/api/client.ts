@@ -39,6 +39,7 @@ import type {
   PrdSummary,
   VersionStatus,
   UpdateJobManifest,
+  RunProposedPr,
 } from './types'
 import type {
   BenchmarkIndexEntry,
@@ -1558,6 +1559,53 @@ export function restartRun(
     { method: 'POST' },
     fetchImpl,
   )
+}
+
+// Apply a run's captured heal fixes (R80) into the real product repos. Returns
+// a per-repo result; a 3-way conflict comes back as `ok:false` with a reason,
+// not an error. 409 (no captured fixes) rejects.
+export interface ApplyFixResult { repoName: string; ok: boolean; reason?: string }
+export function applyRunFixes(
+  runId: string,
+  opts?: ClientOptions,
+): Promise<{ results: ApplyFixResult[]; allOk: boolean }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ results: ApplyFixResult[]; allOk: boolean }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/apply-fixes`,
+    { method: 'POST' },
+    fetchImpl,
+  )
+}
+
+// gh (GitHub CLI) connection status — detect-and-instruct only.
+export interface GhStatus { installed: boolean; authenticated: boolean; account?: string; host?: string }
+export function getGhStatus(opts?: ClientOptions): Promise<GhStatus> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<GhStatus>(`${baseUrl}/api/gh/status`, { method: 'GET' }, fetchImpl)
+}
+
+export type PrBlockedReason = 'no-origin' | 'not-github' | 'gh-missing' | 'not-authed' | 'wrong-account'
+export interface PrRepoPreflight {
+  repoName: string
+  repoRoot: string
+  origin: { owner: string; name: string; host: string } | null
+  base: string | null
+  pushable: boolean
+  blocked?: { reason: PrBlockedReason; detail?: string }
+}
+export interface PrPreflight { gh: GhStatus; repos: PrRepoPreflight[]; anyPushable: boolean }
+
+// Side-effect-free "can we open a PR from this run's fix?" check, per repo.
+export function getRunPrPreflight(runId: string, opts?: ClientOptions): Promise<PrPreflight> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<PrPreflight>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/pr-preflight`, { method: 'GET' }, fetchImpl)
+}
+
+export interface ProposePrResult { repoName: string; ok: boolean; pr?: RunProposedPr; reason?: string }
+// Open a PR from the captured fix, per pushable repo (on demand). Idempotent.
+export function proposeRunPr(runId: string, opts?: ClientOptions): Promise<{ results: ProposePrResult[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ results: ProposePrResult[] }>(`${baseUrl}/api/runs/${encodeURIComponent(runId)}/propose-pr`, { method: 'POST' }, fetchImpl)
 }
 
 // Abort an active run. POSTs to the abort endpoint which kills Playwright,

@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { addWorktree, isGitWorktreeCapable, linkNodeModules, removeWorktree } from './repo-worktree'
+import { addWorktree, hydrateWorkingTreeDiff, isGitWorktreeCapable, linkNodeModules, removeWorktree } from './repo-worktree'
 
 let root: string
 let repo: string
@@ -126,6 +126,43 @@ describe('addWorktree / removeWorktree', () => {
       // Real dir preserved (not replaced by a symlink).
       expect(fs.lstatSync(path.join(wt, 'node_modules')).isSymbolicLink()).toBe(false)
       expect(fs.existsSync(path.join(wt, 'node_modules', 'already'))).toBe(true)
+    })
+  })
+
+  describe('hydrateWorkingTreeDiff', () => {
+    it('reproduces tracked WIP and untracked files in a fresh worktree', async () => {
+      // Dirty the source: edit a tracked file + add an untracked one.
+      fs.writeFileSync(path.join(repo, 'features', 'foo', 'server.ts'), 'export const x = 42\n')
+      fs.writeFileSync(path.join(repo, 'features', 'foo', 'new.ts'), 'export const y = 2\n')
+      const handle = await addWorktree({ repoName: 'app', localPath: repo, worktreesDir: path.join(root, 'wt-hy') })
+      // The fresh worktree checks out HEAD only — WIP is absent until hydrated.
+      expect(fs.readFileSync(path.join(handle.worktreeRoot, 'features/foo/server.ts'), 'utf-8')).toContain('x = 1')
+      expect(fs.existsSync(path.join(handle.worktreeRoot, 'features/foo/new.ts'))).toBe(false)
+
+      const res = await hydrateWorkingTreeDiff(handle)
+      expect(res.error).toBeUndefined()
+      expect(res.trackedApplied).toBe(true)
+      expect(res.untrackedCopied).toBe(1)
+      // Now the worktree matches the source's working tree.
+      expect(fs.readFileSync(path.join(handle.worktreeRoot, 'features/foo/server.ts'), 'utf-8')).toContain('x = 42')
+      expect(fs.readFileSync(path.join(handle.worktreeRoot, 'features/foo/new.ts'), 'utf-8')).toContain('y = 2')
+    })
+
+    it('is a clean no-op when the source tree is pristine', async () => {
+      const handle = await addWorktree({ repoName: 'app', localPath: repo, worktreesDir: path.join(root, 'wt-clean') })
+      const res = await hydrateWorkingTreeDiff(handle)
+      expect(res).toEqual({ trackedApplied: false, untrackedCopied: 0, error: undefined })
+    })
+
+    it('does not copy gitignored files', async () => {
+      fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n')
+      execFileSync('git', ['add', '.gitignore'], { cwd: repo, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-q', '-m', 'ignore'], { cwd: repo, stdio: 'ignore' })
+      fs.writeFileSync(path.join(repo, '.env'), 'SECRET=1\n')
+      const handle = await addWorktree({ repoName: 'app', localPath: repo, worktreesDir: path.join(root, 'wt-ign') })
+      const res = await hydrateWorkingTreeDiff(handle)
+      expect(res.untrackedCopied).toBe(0)
+      expect(fs.existsSync(path.join(handle.worktreeRoot, '.env'))).toBe(false)
     })
   })
 })

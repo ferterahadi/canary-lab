@@ -69,7 +69,7 @@ import { resolvePortTokens } from './src/features/runs/logic/runtime/launcher/in
 import { RunScheduler, type SchedulerActiveRun } from './src/features/runs/logic/runtime/run-scheduler'
 import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './src/features/runs/logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './src/features/runs/logic/runtime/repo-collision'
-import { addWorktree, linkNodeModules, type WorktreeHandle } from './src/features/runs/logic/runtime/repo-worktree'
+import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './src/features/runs/logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from './src/features/portify/logic/runtime/overlay'
 import { revertPortification } from './src/features/portify/logic/runtime/unportify'
 import type { QueueReason } from '../../shared/run-state'
@@ -690,15 +690,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
   })
 
-  // Map a set of resolved repo paths back to feature.config repo names so we
-  // know which repos to isolate in a worktree.
-  const repoNamesForPaths = (feature: FeatureConfig, paths: string[]): string[] => {
-    const set = new Set(paths)
-    return (feature.repos ?? [])
-      .filter((r) => { const [p] = normalizeRepoPaths([r.localPath]); return p != null && set.has(p) })
-      .map((r) => r.name)
-  }
-
   // Persist a placeholder manifest for a queued run so it shows up in the UI
   // (status 'queued' + reason) before any process is spawned. Promotion later
   // overwrites this with the real running manifest under the same runId.
@@ -780,10 +771,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           repoPaths: collision.repoPaths,
         }
       }
-      const useWorktree = portified || (Boolean(collision) && isolation === 'worktree')
-      const worktreeRepoNames = portified
-        ? (feature.repos ?? []).map((r) => r.name)
-        : useWorktree && collision ? repoNamesForPaths(feature, collision.repoPaths) : []
+      // R80: EVERY regular test run is worktree-isolated (all repos), so its
+      // heal edits are CAPTURED as a diff and the product repos are never
+      // mutated. Portified runs still get their overlay + disjoint injected
+      // ports; the collision prompt still gates concurrent NON-portified runs
+      // (worktrees isolate the working tree, not the feature's FIXED ports). A
+      // repo that can't worktree falls back in place (loop below). Boot/verify/
+      // benchmark sessions keep the prior portified/collision-only behavior —
+      // they don't heal, so there's nothing to capture.
+      const alwaysWorktree = executionType === 'run'
+      const useWorktree = portified || alwaysWorktree || (Boolean(collision) && isolation === 'worktree')
+      const worktreeRepoNames = useWorktree ? (feature.repos ?? []).map((r) => r.name) : []
 
       // The actual launch: envset apply, worktree isolation, orchestrator
       // construction + kickoff. Deferred and reused by the queue when the run
@@ -910,6 +908,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
           // Symlink the source repo's node_modules in, exactly like the
           // benchmark and portify worktree paths already do.
           linkNodeModules(handle)
+          // R80: reproduce the user's uncommitted edits in the worktree so an
+          // always-worktree run tests their WIP, not just HEAD. A portified run's
+          // intended tree state is its overlay (applied at boot), so skip it
+          // there; boot sessions don't heal, so there's nothing to preserve.
+          if (!portified && !isBoot) {
+            const h = await hydrateWorkingTreeDiff(handle)
+            if (h.error) {
+              runnerLog.warn(`Worktree WIP hydration for "${repoName}" had issues (testing committed state): ${h.error}`)
+            } else if (h.trackedApplied || h.untrackedCopied > 0) {
+              runnerLog.info(`Hydrated uncommitted changes into "${repoName}" worktree (${h.untrackedCopied} untracked file(s)).`)
+            }
+          }
           worktrees.push(handle)
           runnerLog.info(`Isolated repo "${repoName}" in a per-run worktree.`)
         } catch (err) {
@@ -1005,8 +1015,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
         scheduler.enqueue({ runId, feature: feature.name, repoPaths: sourceRepoPaths, cost, reason: 'repo-collision', launch: async () => { await launch() } })
         return { kind: 'queued', runId, reason: 'repo-collision' }
       }
-      // Worktree-isolated runs can't collide, so they're gated on resources only.
-      const schedRepoPaths = useWorktree ? [] : sourceRepoPaths
+      // A PORTIFIED run allocates disjoint injected ports, so it never contends
+      // with another run — it registers no repo paths (resources-only gating).
+      // A plain run is now worktree-isolated too, but still binds the feature's
+      // FIXED ports, so it must register its source repos so a concurrent
+      // same-repo run trips the collision prompt (worktrees isolate the tree,
+      // not the ports).
+      const schedRepoPaths = portified ? [] : sourceRepoPaths
       const fit = scheduler.fits({ repoPaths: schedRepoPaths, cost })
       if (!fit.ok) {
         writeQueuedManifest(runId, feature, env, fit.reason, executionType)

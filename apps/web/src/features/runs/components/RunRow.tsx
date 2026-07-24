@@ -46,12 +46,28 @@ export function RunRow({
   run,
   detail,
   onSelect,
+  primaryLabel,
+  marker,
+  showPorts = true,
+  promotePassCount = false,
 }: {
   run: RunIndexEntry
   detail: RunDetail | undefined
   onSelect: (run: RunIndexEntry) => void
+  /** Override the bold identity line (default `run.feature`). The Test Run
+   *  hero passes "Run <ref>" so the run reads as an object, not a feature row. */
+  primaryLabel?: string
+  /** Extra trailing meta segment (e.g. "run 2 of 2") — the hero's ordinal. */
+  marker?: string
+  /** Show the allocated-ports meta segment. The hero hides it (ports belong on
+   *  the Services tile's tooltip, not the identity line). */
+  showPorts?: boolean
+  /** Render the pass count as its own segment beside the status chip instead of
+   *  inside the meta line — the hero promotes it so the verdict + count read
+   *  together at the top-right. */
+  promotePassCount?: boolean
 }) {
-  const ports = portsLabel(detail)
+  const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
   // A held boot session is status 'running' but reads as teal "services up".
   const isBoot = run.executionType === 'boot'
@@ -59,8 +75,10 @@ export function RunRow({
   const meta: Array<{ text: string; mono?: boolean }> = [{ text: shortTime(run.startedAt) }]
   if (ports) meta.push({ text: ports, mono: true })
   if (note) meta.push({ text: note })
+  if (marker) meta.push({ text: marker })
   const summary = detail?.summary
-  if (summary && summary.total > 0) meta.push({ text: `${summary.passed}/${summary.total} passed` })
+  const passLabel = summary && summary.total > 0 ? `${summary.passed}/${summary.total} passed` : null
+  if (passLabel && !promotePassCount) meta.push({ text: passLabel })
   return (
     <li>
       <button
@@ -72,7 +90,7 @@ export function RunRow({
         <StatusDot state={dot.state} pulse={dot.pulse} halo={dot.pulse} className="shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[13px]" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-            {run.feature}
+            {primaryLabel ?? run.feature}
           </span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
             {meta.map((part, i) => (
@@ -88,6 +106,14 @@ export function RunRow({
             ))}
           </span>
         </span>
+        {promotePassCount && passLabel && (
+          <span
+            className="shrink-0 text-[11px] tabular-nums"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {passLabel}
+          </span>
+        )}
         <RunStatusChip status={run.status} executionType={run.executionType} />
         <span
           className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"

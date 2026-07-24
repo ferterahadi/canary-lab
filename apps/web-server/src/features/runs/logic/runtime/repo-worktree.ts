@@ -1,4 +1,5 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
 import { getGitRoot, resolveRepoPath, runGit } from '../../../../shared/git-repo'
 
@@ -88,6 +89,57 @@ export function linkNodeModules(handle: Pick<WorktreeHandle, 'sourceRoot' | 'wor
   } catch {
     /* best-effort */
   }
+}
+
+/**
+ * Reproduce the SOURCE repo's uncommitted working-tree state inside a fresh
+ * worktree. A `git worktree add --detach HEAD` checks out the committed tree
+ * only — without this, an always-worktree run would silently test HEAD instead
+ * of the user's uncommitted edits (the whole point of running locally).
+ *
+ * Two parts: tracked changes are applied as a binary-safe `git diff HEAD`
+ * patch; untracked (non-ignored) files are copied over. Best-effort per part:
+ * a patch that won't apply, or a file that won't copy, is reported so the
+ * caller can log it, but never aborts the run — testing HEAD is a degraded
+ * mode, not a crash.
+ */
+export async function hydrateWorkingTreeDiff(
+  handle: Pick<WorktreeHandle, 'sourceRoot' | 'worktreeRoot'>,
+): Promise<{ trackedApplied: boolean; untrackedCopied: number; error?: string }> {
+  let error: string | undefined
+  // Tracked WIP: staged + unstaged changes vs HEAD, binary-safe.
+  const diff = await runGit(handle.sourceRoot, ['diff', '--binary', 'HEAD'])
+  let trackedApplied = false
+  if (diff.code === 0 && diff.stdout.trim() !== '') {
+    const patchPath = path.join(os.tmpdir(), `canary-wip-${path.basename(handle.worktreeRoot)}-${process.pid}.patch`)
+    try {
+      fs.writeFileSync(patchPath, diff.stdout)
+      // Context matches exactly (same HEAD), so a plain apply is enough; keep
+      // whitespace warnings quiet so a noisy diff doesn't fail the apply.
+      const applied = await runGit(handle.worktreeRoot, ['apply', '--whitespace=nowarn', patchPath])
+      if (applied.code === 0) trackedApplied = true
+      else error = (applied.stderr || applied.stdout).trim() || 'git apply failed'
+    } catch (err) {
+      error = (err as Error).message
+    } finally {
+      try { fs.rmSync(patchPath, { force: true }) } catch { /* ignore */ }
+    }
+  }
+  // Untracked, non-ignored files: copy each over, preserving its relative path.
+  let untrackedCopied = 0
+  const untracked = await runGit(handle.sourceRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
+  if (untracked.code === 0) {
+    for (const rel of untracked.stdout.split('\0').filter(Boolean)) {
+      const src = path.join(handle.sourceRoot, rel)
+      const dst = path.join(handle.worktreeRoot, rel)
+      try {
+        fs.mkdirSync(path.dirname(dst), { recursive: true })
+        fs.copyFileSync(src, dst)
+        untrackedCopied += 1
+      } catch { /* best-effort per file */ }
+    }
+  }
+  return { trackedApplied, untrackedCopied, error }
 }
 
 /** Remove a worktree. Best-effort: prunes stale metadata if the dir is gone. */

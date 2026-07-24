@@ -687,9 +687,9 @@ describe('stage summary + drill-through (R6)', () => {
     expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
   })
 
-  it('run being repaired by an external client shows an [external] system row on the activity rail', async () => {
-    // Option 1: an externally-claimed heal has no Canary session to tail, so the
-    // rail carries an honest status row instead of a blank/empty timeline.
+  it('R80: a run repaired by an external client shows an honest external-heal note in the hero', async () => {
+    // An externally-claimed heal has no Canary transcript to embed, so the Test
+    // Run hero carries a status line (client · state · cycle) instead.
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: {
@@ -717,12 +717,13 @@ describe('stage summary + drill-through (R6)', () => {
       })),
     }))
     await render('fl_1')
-    const pre = [...container.querySelectorAll('[data-testid="system-pre"]')].map((n) => n.textContent)
-    expect(pre.some((l) => l?.includes('[external] Heal claimed by Claude'))).toBe(true)
-    expect(pre.some((l) => l?.includes('healing') && l?.includes('repair cycle 2'))).toBe(true)
+    const note = container.querySelector('[data-testid="run-hero-external"]')?.textContent ?? ''
+    expect(note).toContain('Claude')
+    expect(note).toContain('healing')
+    expect(note).toContain('repair cycle 2')
   })
 
-  it('a normal (auto) heal shows no [external] row', async () => {
+  it('R80: a normal (auto) heal shows no external-heal note', async () => {
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: { runId: 'run-9', status: 'healing', healMode: 'auto' },
@@ -737,8 +738,7 @@ describe('stage summary + drill-through (R6)', () => {
       })),
     }))
     await render('fl_1')
-    const pre = [...container.querySelectorAll('[data-testid="system-pre"]')].map((n) => n.textContent)
-    expect(pre.some((l) => l?.includes('[external]'))).toBe(false)
+    expect(container.querySelector('[data-testid="run-hero-external"]')).toBeNull()
   })
 
   it('specs-coverage drills through to the coverage ledger; portify to its workflow', async () => {
@@ -1025,7 +1025,12 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-details-toggle"]')).toBeNull()
   })
 
-  it('R22: the merged run row shows verdict/repair facts and NO agent output', async () => {
+  it('R80: the Test Run hero renders the settled run once — verdict + repair cycles, NO agent output', async () => {
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: { runId: 'run-9', status: 'passed', healCycles: 1 },
+      summary: { complete: true, total: 8, passed: 8, failed: [] },
+    })
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
@@ -1035,24 +1040,27 @@ describe('trailer model (R14–R18)', () => {
         key,
         status: 'done' as const,
         ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'passed', healCycles: 1 } } : {}),
-        ...(key === 'heal' ? { evidence: { runId: 'run-9', healCycles: 1, healMode: 'external', finalStatus: 'passed' } } : {}),
       })),
     }))
     await render('fl_1')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
-    const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(facts).toContain('passed')
-    expect(facts).toContain('1 cycle')
-    expect(facts).toContain('External client')
+    const hero = container.querySelector('[data-testid="test-run-hero"]')?.textContent ?? ''
+    // The run is rendered as ONE object: the verdict chip, the pass count, and
+    // the repair cycles — not duplicated across a facts card + a summary card.
+    expect(hero).toContain('passed')
+    expect(hero).toContain('8/8')
+    expect(hero).toContain('Repair cycles')
+    // The top "At a glance" facts card no longer double-renders the run.
+    expect(container.querySelector('[data-testid="stage-facts"]')).toBeNull()
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
-  it('R22: while the run is live it says what is running and what each repair fixed', async () => {
+  it('R80: while the run is live the hero shows the repair state, pass count, and what each repair fixed', async () => {
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
-      manifest: { status: 'healing', healCycles: 1 },
+      manifest: { runId: 'run-9', status: 'healing', healCycles: 1 },
       summary: { complete: false, total: 3, passed: 1, failed: [{ name: 'checkout flow' }] },
     })
     mocks.listJournal.mockResolvedValue([
@@ -1067,12 +1075,63 @@ describe('trailer model (R14–R18)', () => {
       })),
     }))
     await render('fl_1')
-    const summary = container.querySelector('[data-testid="run-repair-summary"]')?.textContent ?? ''
-    expect(summary).toContain('Repairing — cycle 2')
-    expect(summary).toContain('1/3 passed')
-    expect(summary).toContain('checkout flow')
+    const hero = container.querySelector('[data-testid="test-run-hero"]')?.textContent ?? ''
+    expect(hero).toContain('healing')
+    expect(hero).toContain('1/3 passed')
+    expect(container.querySelector('[data-testid="run-hero-failing"]')?.textContent).toContain('checkout flow')
     expect(container.querySelector('[data-testid="repair-journal"]')?.textContent).toContain('create handler dropped the note title')
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
+  })
+
+  it('R80: a failed run fuses the run-failed decision into the hero with the give-up reason as its why-line', async () => {
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: {
+        runId: 'run-9',
+        status: 'failed',
+        healCycles: 1,
+        healEnd: {
+          reason: 'no-signal',
+          agentCause: 'usage-limit',
+          cycle: 1,
+          message: 'Auto-repair stopped after cycle 1. Its last output suggests the agent hit a usage limit.',
+          at: '2026-01-01T00:00:00Z',
+        },
+      },
+      summary: { complete: true, total: 23, passed: 2, failed: [{ name: 'otp guard', location: 'e2e/otp.spec.ts:9' }] },
+    })
+    mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'waiting-for-approval',
+      currentStage: 'run',
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'run' ? ('waiting-for-approval' as const) : ('done' as const),
+        ...(key === 'run'
+          ? {
+              evidence: { runId: 'run-9', status: 'failed', healCycles: 1 },
+              checkpoint: {
+                kind: 'run-failed',
+                message: 'Run run-9 ended failed after 1 heal cycle(s).',
+                options: ['rerun', 'export-as-is'],
+                data: { runId: 'run-9' },
+              },
+            }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    const footer = container.querySelector('[data-testid="run-decision-footer"]')
+    expect(footer).toBeTruthy()
+    // The give-up reason is the why-line — not a generic "did not pass".
+    expect(footer?.textContent).toContain('usage limit')
+    // The hero owns the decision; the generic checkpoint card is NOT also shown.
+    expect(container.querySelector('[data-testid="checkpoint-controls"]')).toBeNull()
+    const rerun = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-choice-rerun"]')
+    expect(rerun?.textContent).toContain('Start a new run')
+    await act(async () => { rerun?.click() })
+    expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'rerun' })
   })
 
   it('R15/R20: the export stage carries the explicit download action; the agent timeline stays behind details', async () => {
@@ -1899,14 +1958,23 @@ describe('detail redesign (R53–R68)', () => {
     expect(mocks.deleteFlight).not.toHaveBeenCalled()
   })
 
-  it('R64: a live run for the feature flips the settled run row to running and lists the run cards', async () => {
-    mocks.getFlight.mockResolvedValue(manifest({ status: 'done', currentStage: null, stages: doneStages() }))
+  it('R80: a live run flips the settled run row to running; the hero shows the run and lists the earlier runs', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'passed', healCycles: 0 } } : {}),
+      })),
+    }))
     mocks.listRuns.mockResolvedValue([
       { runId: 'run-live', feature: 'checkout', status: 'running', startedAt: '2026-01-01T00:03:00Z', executionType: 'run' },
       { runId: 'run-9', feature: 'checkout', status: 'passed', startedAt: '2026-01-01T00:00:00Z', executionType: 'run' },
       { runId: 'boot-1', feature: 'checkout', status: 'running', startedAt: '2026-01-01T00:01:00Z', executionType: 'boot' },
     ])
-    mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' }, summary: { total: 8, passed: 8, failed: [] } })
+    mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { runId: 'run-9', status: 'passed' }, summary: { total: 8, passed: 8, failed: [] } })
     const activity = new Map([['checkout', { kind: 'running' as const, runId: 'run-live' }]])
     const onOpenRun = vi.fn()
     await render('fl_1', { activity, onOpenRun })
@@ -1916,14 +1984,15 @@ describe('detail redesign (R53–R68)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
-    const cards = container.querySelector('[data-testid="feature-runs"]')
-    expect(cards).toBeTruthy()
-    // Boot sessions are plumbing — only the two real test runs render.
-    expect(cards?.textContent).toContain('8/8 passed')
-    const buttons = cards!.querySelectorAll('button')
-    expect(buttons.length).toBe(2)
-    await act(async () => { buttons[1]?.click() })
-    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
+    // The flight's run is the hero (run-9, 8/8 passed).
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('8/8 passed')
+    // The feature's other real runs list below — boot sessions stay hidden.
+    const earlier = container.querySelector('[data-testid="earlier-runs"]')
+    expect(earlier).toBeTruthy()
+    const earlierButtons = earlier!.querySelectorAll('button')
+    expect(earlierButtons.length).toBe(1)
+    await act(async () => { earlierButtons[0]?.click() })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-live')
   })
 
   it('R61: the summary strip shows elapsed, coverage, run verdict, docs and report readiness', async () => {
