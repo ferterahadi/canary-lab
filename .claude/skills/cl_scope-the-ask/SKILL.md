@@ -1,9 +1,11 @@
 ---
 name: cl_scope-the-ask
-description: Use the moment a request is vague or open-ended — "improve the cleanup UI", "make this better", "clean this up", "let's polish X", "can we redo Y" — where the WHAT is named but the specific change is not. Stops the reflex to fire an AskUserQuestion menu guessing the goal; instead look at the target first, then ask one open question or wait for the user to point at the real thing. Applies to any Canary Lab work (UI, run loop, MCP, docs), not just UI.
+description: Use the moment a request is vague or open-ended — "improve the cleanup UI", "make this better", "let's polish X", "can we redo Y" — where the WHAT is named but the specific change is not. Look at the target first; don't fire an options menu guessing the goal.
 ---
 
 # Scope the ask before offering options
+
+Applies to any Canary Lab work (UI, run loop, MCP, docs), not just UI.
 
 A vague opener — "improve the cleanup UI", "make X nicer", "let's clean this
 up" — is an invitation to **look**, not a cue to generate a menu of directions.

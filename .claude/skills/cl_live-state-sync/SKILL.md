@@ -1,9 +1,12 @@
 ---
 name: cl_live-state-sync
-description: Use when a UI must react in real time to a backend state change — a status flip, a panel swap, a list update, anything driven by a workspace/broadcast event — or when a user reports that something "only updates after I refresh", "doesn't update live", "the toggle/swap didn't happen until reload", or a live view feels stale. Also use when choosing how the client learns about a server-side change (broadcast push vs task-scoped stream vs refetch). Prevents gating a correctness-critical UI transition on a single best-effort push that can silently fail to deliver.
+description: Use when a UI must react in real time to a backend state change, when a user reports something "only updates after I refresh" / "doesn't update live", or when choosing how the client learns about a server-side change (broadcast push vs task-scoped stream vs refetch).
 ---
 
 # Live State Sync (push is best-effort; back the transition)
+
+Server side — is the event even emitted? → `cl_ws-driven-state`. This skill is the
+client half: reacting to it reliably.
 
 The expensive mistake on this codebase: **gating a real-time UI transition on a
 single broadcast push.** The server persisted the new state correctly and emitted a
@@ -71,8 +74,8 @@ state was *persisted* (and that a refresh showed it). Those prove the write path
 the live path. The live transition is a separate behaviour and must be observed
 separately — watch it flip *while the job runs*, without reloading.
 
-If you genuinely can't observe the live path locally (the wire needs the user's
-`canary-apply` env — see [[cl_verify-changes]]), **say the live path is unverified**
+If you genuinely can't observe the live path locally (the wire needs the
+`canary-apply` cycle — see [[cl_verify-changes]] Tier 3), **say it's unverified**
 rather than asserting it works. "Persisted + works on refresh; the live swap I
 couldn't exercise here" is the honest report.
 
@@ -101,5 +104,5 @@ couldn't exercise here" is the honest report.
 
 Client live-sync logic (refetch-on-marker, self-limiting guards) is happy-dom /
 unit-testable without a live server. The actual broadcast delivery and the end-to-end
-live transition are the user's `canary-apply` trial (never run it — see
-[[cl_verify-changes]]). Typecheck with `tsconfig.build.json`.
+live transition need the `canary-apply` cycle (see [[cl_verify-changes]] Tier 3 for
+who runs it). Typecheck with `tsconfig.build.json`.

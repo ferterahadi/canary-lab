@@ -65,6 +65,35 @@ describe('applyFixCapture', () => {
     expect(out.results[0].reason).toMatch(/missing/i)
   })
 
+  it('reports a repo whose path no longer exists, naming the path', async () => {
+    const patchPath = makePatch()
+    const gone = path.join(root, 'moved-away')
+    const out = await applyFixCapture({
+      capturedAt: 'now',
+      repos: [{ repoName: 'repo', patchPath, patchFile: 'repo.patch', repoRoot: gone, baseSha: 'deadbeef', files: 1 }],
+    })
+    expect(out.allOk).toBe(false)
+    expect(out.results[0]).toEqual({ repoName: 'repo', ok: false, reason: `repo path no longer exists: ${gone}` })
+  })
+
+  it('falls back to a generic reason when git apply fails silently', async () => {
+    // An empty patch against a non-repo directory: `git apply` exits non-zero
+    // with nothing on either stream, so the reason has to come from us.
+    const plainDir = path.join(root, 'not-a-repo')
+    fs.mkdirSync(plainDir, { recursive: true })
+    const patchPath = path.join(fixesDir, 'empty.patch')
+    fs.writeFileSync(patchPath, '')
+
+    const out = await applyFixCapture({
+      capturedAt: 'now',
+      repos: [{ repoName: 'repo', patchPath, patchFile: 'empty.patch', repoRoot: plainDir, baseSha: 'deadbeef', files: 0 }],
+    })
+
+    expect(out.allOk).toBe(false)
+    expect(out.results[0].ok).toBe(false)
+    expect(out.results[0].reason).toBeTruthy()
+  })
+
   it('reports a per-repo failure when the patch no longer applies', async () => {
     const patchPath = makePatch()
     // Move the repo out from under the patch so it cannot apply.

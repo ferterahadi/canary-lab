@@ -32,6 +32,15 @@ export function stageLabel(key: string): string {
   return (STAGE_LABEL as Record<string, string>)[key] ?? key
 }
 
+/** The stage pane's card column. Every panel, facts grid, error/paused card and
+ *  the Test Run hero share it, so a stage reads as ONE column of like blocks
+ *  instead of a ragged pile of shrink-wrapped boxes.
+ *  Widened from 76ch: the Test Run stage now shows each failure's wrapped title
+ *  and its assertion error, and at 76ch that content was squeezed into the left
+ *  third of a pane with nothing in the rest of it. Prose (the state line, panel
+ *  blurbs) deliberately stays at the narrower 76ch reading measure. */
+export const STAGE_COLUMN = 'w-full max-w-[92ch]'
+
 /** One-line "what this stage does", in plain language — shown in the flight
  *  launcher's full-flight preview so the pipeline explains itself, instead of
  *  every locked row repeating the same "unlocks after the first flight" note
@@ -687,9 +696,9 @@ export function FactTile({ fact: f }: { fact: StageFact }) {
 export function FactsGrid({ facts }: { facts: StageFact[] }) {
   if (facts.length === 0) return null
   return (
-    // Same 76ch column as every stage panel — the tile grid wraps inside it and
+    // Same column as every stage panel — the tile grid wraps inside it and
     // long values truncate within a tile, never sprawling the whole pane.
-    <div className="w-full max-w-[76ch]">
+    <div className={STAGE_COLUMN}>
       <PanelCard kicker="At a glance" testId="stage-facts-card">
         <div
           data-testid="stage-facts"

@@ -231,45 +231,49 @@ describe('statusForTest', () => {
   })
 })
 
+// Status classes name the SEMANTIC token (`success`, `running`, `danger`,
+// `warning`), never a raw Tailwind palette family. The token flips with the
+// theme on its own, so these strings must not carry a `dark:` twin either —
+// see the @theme bridge in styles.css and docs/DESIGN-SYSTEM.md.
+const RAW_PALETTE_RE =
+  /\b(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/
+
 describe('colorClassForStatus', () => {
-  it('returns a green class for passed', () => {
-    expect(colorClassForStatus('passed')).toContain('emerald')
-  })
-  it('returns a blue class for testing', () => {
-    expect(colorClassForStatus('testing')).toContain('sky')
-  })
-  it('returns a red class for failed', () => {
-    expect(colorClassForStatus('failed')).toContain('rose')
-  })
-  it('returns an amber class for timedout', () => {
-    expect(colorClassForStatus('timedout')).toContain('amber')
-  })
-  it('returns an amber class for skipped', () => {
-    expect(colorClassForStatus('skipped')).toContain('amber')
-  })
-  it('returns a neutral class for pending', () => {
-    expect(colorClassForStatus('pending')).toContain('zinc')
+  it.each([
+    ['passed', 'success'],
+    ['testing', 'running'],
+    ['failed', 'danger'],
+    ['timedout', 'warning'],
+    ['skipped', 'warning'],
+    ['pending', 'line-strong'],
+  ] as const)('returns the %s status token for the card', (status, token) => {
+    const className = colorClassForStatus(status)
+    expect(className).toContain(token)
+    expect(className).not.toMatch(RAW_PALETTE_RE)
   })
 })
 
 describe('statusPillClassForStatus', () => {
   it.each([
-    ['testing', 'sky'],
-    ['failed', 'rose'],
-    ['passed', 'emerald'],
-    ['timedout', 'amber'],
-    ['skipped', 'amber'],
-  ] as const)('uses the requested chip color for %s', (status, hue) => {
+    ['testing', 'running'],
+    ['failed', 'danger'],
+    ['passed', 'success'],
+    ['timedout', 'warning'],
+    ['skipped', 'warning'],
+  ] as const)('uses the requested chip token for %s', (status, token) => {
     const className = statusPillClassForStatus(status)
-    expect(className).toContain(hue)
+    expect(className).toContain(token)
     expect(className).toContain('border-')
-    expect(className).toContain('dark:')
+    // One token class per property — no hand-written light/dark pair.
+    expect(className).not.toContain('dark:')
+    expect(className).not.toMatch(RAW_PALETTE_RE)
   })
 
   it('keeps pending neutral and outlined', () => {
     const className = statusPillClassForStatus('pending')
-    expect(className).toContain('zinc')
+    expect(className).toContain('idle')
     expect(className).toContain('bg-transparent')
+    expect(className).not.toMatch(RAW_PALETTE_RE)
   })
 })
 

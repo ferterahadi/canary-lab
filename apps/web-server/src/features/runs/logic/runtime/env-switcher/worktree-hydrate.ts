@@ -47,15 +47,20 @@ const NOOP_RESULT: HydrateResult = { written: [], portTokenSlots: [], restore: (
  *  existing ancestor and re-join the remainder, so containment checks agree
  *  with git's symlink-resolved roots (macOS /var → /private/var). */
 function realpathDeep(p: string): string {
-  let dir = p
-  const tail: string[] = []
-  while (!fs.existsSync(dir)) {
-    const parent = path.dirname(dir)
-    if (parent === dir) return p // hit the root without finding anything real
-    tail.unshift(path.basename(dir))
-    dir = parent
+  // Collect `p` and every ancestor down to the filesystem root, which always
+  // exists — so the search below always finds an anchor, and the walk is
+  // bounded by the path's own segment count.
+  const chain: string[] = []
+  for (let d = p; ; ) {
+    chain.push(d)
+    const parent = path.dirname(d)
+    if (parent === d) break
+    d = parent
   }
+  const anchorIdx = chain.findIndex((d) => fs.existsSync(d))
+  let dir = chain[anchorIdx]
   try { dir = fs.realpathSync(dir) } catch { /* keep as-is */ }
+  const tail = chain.slice(0, anchorIdx).reverse().map((d) => path.basename(d))
   return tail.length > 0 ? path.join(dir, ...tail) : dir
 }
 

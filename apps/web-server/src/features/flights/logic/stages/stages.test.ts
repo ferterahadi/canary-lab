@@ -30,7 +30,7 @@ import { similarityStage } from './similarity'
 import { scoutStage } from './scout'
 import { scaffoldStage } from './scaffold'
 import { envCaptureStage } from './env-capture'
-import { docsStage } from './docs'
+import { attemptLogLine, describeAttempt, docsStage } from './docs'
 import { prdSummaryStage } from './prd-summary'
 import { buildSpecsPrompt, specsCoverageStage, defaultValidateSpecs, tscErrorsForFeature } from './specs-coverage'
 import { portifyStage } from './portify'
@@ -533,6 +533,22 @@ describe('scout stage', () => {
     const d = deps({ spawnAgent: async () => ({ text: draftJson('   ') }) })
     const outcome = await scoutStage(d).run(ctxFor(manifest()).ctx)
     expect(outcome).toMatchObject({ kind: 'failed', error: expect.stringContaining('no configSource') })
+  })
+
+  it('carries a redo note for this stage into the prompt, and ignores one aimed elsewhere', async () => {
+    // R74: "Continue → from a step…" attaches the note to ONE stage, so the
+    // scout prompt must pick it up only when the note is addressed to scout.
+    const prompts: string[] = []
+    const capture = deps({
+      spawnAgent: async ({ prompt }) => { prompts.push(prompt); return { text: draftJson(VALID_CONFIG()) } },
+    })
+
+    await scoutStage(capture).run(ctxFor(manifest({ feedback: { stage: 'scout', note: 'you missed the admin repo' } })).ctx)
+    expect(prompts[0]).toContain('Feedback on the previous attempt')
+    expect(prompts[0]).toContain('you missed the admin repo')
+
+    await scoutStage(capture).run(ctxFor(manifest({ feedback: { stage: 'docs', note: 'wrong docs' } })).ctx)
+    expect(prompts[1]).not.toContain('Feedback on the previous attempt')
   })
 
   // LEGACY release path: manifests that parked on scout's config-approval
@@ -1407,6 +1423,29 @@ describe('docs stage', () => {
     expect(log.join('')).toContain('agent attempt (collect repo docs) succeeded — wrote docs/checkout-prd.md')
   })
 
+  it('qualifies the from-diff doc with the repo name when the flight spans several repos', async () => {
+    // Single-repo flights get a clean `<feature>-from-diff.md`; multi-repo needs
+    // the repo qualifier or the second repo would overwrite the first.
+    initGitRepoWithDiff()
+    const secondRepo = path.join(tmpDir, 'second-repo')
+    fs.mkdirSync(secondRepo, { recursive: true })
+    // `secondRepo` is not a git repo at all, and the explicit base pushes it
+    // past the base-detection guard — so the git probe itself has to fail soft
+    // rather than take the whole stage down.
+    const m = manifest({
+      repoPaths: [repoDir, secondRepo],
+      opts: { env: 'local', coverageTarget: 100, yolo: true, base: 'main' },
+    })
+
+    const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
+
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'diff-vs-base' } })
+    const docs = fs.readdirSync(path.join(featuresDir, 'checkout', 'docs')).filter((f) => !f.startsWith('_'))
+    expect(docs).toContain(`checkout-from-diff-${path.basename(repoDir)}.md`.toLowerCase())
+    // Nothing was written for the non-git repo.
+    expect(docs.filter((f) => f.startsWith('checkout-from-diff'))).toHaveLength(1)
+  })
+
   it('checkpoint response: a collector that writes nothing and says nothing reports no-output', async () => {
     const spawnAgent: FlightStageDeps['spawnAgent'] = async () => ({ text: 'I had a look around.' })
     const adapter = docsStage(deps({ spawnAgent }))
@@ -1623,6 +1662,46 @@ describe('docs stage', () => {
     const m = manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true }, description: `refer to ${prdPath}` })
     const outcome = await docsStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'intent-linked' } })
+  })
+})
+
+describe('docs attempt prose', () => {
+  // Both forms are pinned directly: `reason` is optional on the persisted
+  // shape, so a record written by an older build can reach the fallbacks that
+  // today's collector never produces.
+  it('describeAttempt names each outcome, and emits the reason unpunctuated-by-us', () => {
+    expect(describeAttempt({ mode: 'infer-from-diff', outcome: 'no-diff' }))
+      .toBe('No meaningful diff vs the base branch was found.')
+    expect(describeAttempt({ mode: 'collect-repo-docs', outcome: 'no-output' }))
+      .toBe('The agent did not produce a requirements doc.')
+    expect(describeAttempt({ mode: 'collect-repo-docs', outcome: 'empty', reason: 'no loyalty flow in either repo' }))
+      .toBe('The agent found nothing relevant: no loyalty flow in either repo.')
+    // Already terminated — must not gain a second period ("…repo..").
+    expect(describeAttempt({ mode: 'collect-repo-docs', outcome: 'empty', reason: 'it does not exist here!' }))
+      .toBe('The agent found nothing relevant: it does not exist here!')
+  })
+
+  it('describeAttempt stands on its own when an empty attempt carries no reason', () => {
+    for (const attempt of [
+      { mode: 'collect-repo-docs', outcome: 'empty' } as const,
+      { mode: 'collect-repo-docs', outcome: 'empty', reason: '   ' } as const,
+    ]) {
+      expect(describeAttempt(attempt)).toBe('The agent searched and found nothing relevant.')
+    }
+  })
+
+  it('attemptLogLine names the attempt, the verdict, and the two ways out', () => {
+    expect(attemptLogLine({ mode: 'collect-repo-docs', outcome: 'empty', reason: 'no loyalty flow in either repo.' }))
+      .toBe('[docs] agent attempt (collect repo docs) came back empty — no loyalty flow in either repo. Back to your choice: add docs yourself, or retry with feedback.\n')
+    expect(attemptLogLine({ mode: 'infer-from-diff', outcome: 'no-diff' }))
+      .toContain('(infer from diff) came back empty — no meaningful diff vs the base branch in any repo.')
+    expect(attemptLogLine({ mode: 'collect-repo-docs', outcome: 'no-output' }))
+      .toContain('came back empty — the agent produced no requirements doc.')
+  })
+
+  it('attemptLogLine falls back to its own wording for a reasonless empty attempt', () => {
+    expect(attemptLogLine({ mode: 'collect-repo-docs', outcome: 'empty' }))
+      .toContain('came back empty — the agent searched and found nothing relevant.')
   })
 })
 
@@ -2453,6 +2532,130 @@ describe('portify stage', () => {
     })
   })
 
+  it('reports a bare status code when the rejection body carries no reason', async () => {
+    // Both a reasonless JSON body and a body that is not JSON at all must still
+    // produce a clean message rather than "rejected (500): undefined".
+    for (const body of [{}, 'not json at all']) {
+      const inject = makeInject((call) => {
+        if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+        if (call.method === 'GET') return { statusCode: 200, body: { status: 'ready-to-save', diff: '' } }
+        if (call.url.endsWith('/save')) return { statusCode: 500, body }
+        return undefined
+      })
+      const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
+      expect(outcome).toEqual({ kind: 'failed', error: 'portify save rejected (500)' })
+    }
+  })
+
+  it('a rejected revise with no reason still re-parks on save-or-discard', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) return { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      if (call.url.endsWith('/revise')) return { statusCode: 409, body: {} }
+      return undefined
+    })
+    const adapter = portifyStage(deps({ inject }))
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
+    if (parked.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'tweak it' })
+
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { message: expect.stringContaining('Revise unavailable. Save or discard.') },
+    })
+  })
+
+  it('a failed re-verify with no failure detail still leads with the verdict', async () => {
+    let revised = false
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.method === 'GET' && call.url.startsWith('/api/portify/')) {
+        return revised
+          ? { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/y', verification: { ok: false } } }
+          : { statusCode: 200, body: { status: 'ready-to-save', diff: '--- a/x' } }
+      }
+      if (call.url.endsWith('/revise')) { revised = true; return { statusCode: 200, body: {} } }
+      return undefined
+    })
+    const adapter = portifyStage(deps({ inject }))
+    const ctxObj = ctxFor(manifest()); const { ctx, setStage } = ctxObj
+    const parked = await runPastGate(adapter, ctxObj)
+    if (parked.kind !== 'checkpoint') throw new Error('unreachable')
+    setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'bad idea' })
+
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { message: expect.stringContaining('FAILED the double-boot re-verify. Saving is blocked') },
+    })
+  })
+
+  it('extends its deadline off the phase key while a workflow is still moving', async () => {
+    // The wall-clock cap is idle time, not total: a workflow that keeps
+    // changing status/attempt must stay alive (a 45m two-attempt portify was
+    // once killed by a 30m fixed cap and orphaned mid-success).
+    const phases = [
+      {}, // just created — the route has not written a status yet
+      { status: 'planning' },
+      { status: 'verifying', attempt: 1, maxAttempts: 3 },
+      { status: 'verifying', attempt: 1, maxAttempts: 3 }, // unchanged — must not re-publish
+      { status: 'verifying', attempt: 2, maxAttempts: 3 },
+      { status: 'ready-to-save', attempt: 2, maxAttempts: 3, diff: '' },
+    ]
+    let i = 0
+    let saved = false
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf1' } }
+      if (call.url.endsWith('/save')) { saved = true; markPortified(); return { statusCode: 200, body: {} } }
+      // The parked-review scan hits the LIST endpoint — it must not consume a phase.
+      if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
+      if (call.method === 'GET' && call.url === '/api/portify/wf1') {
+        if (saved) return { statusCode: 200, body: { status: 'saved' } }
+        return { statusCode: 200, body: phases[Math.min(i++, phases.length - 1)] }
+      }
+      return undefined
+    })
+    const ctxObj = ctxFor(manifest())
+
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxObj)
+
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf1', edits: false } })
+    // Each distinct phase was mirrored once, in order — that mirror IS the key.
+    // The bare first entry is the stage pinning the workflowId so the flight
+    // view can drill into the live workflow before any phase is known.
+    expect(ctxObj.progressLog).toEqual([
+      { workflowId: 'wf1' }, // the pin
+      { workflowId: 'wf1' }, // the status-less first read mirrors the id alone
+      { workflowId: 'wf1', status: 'planning' },
+      { workflowId: 'wf1', status: 'verifying', attempt: 1, maxAttempts: 3 },
+      { workflowId: 'wf1', status: 'verifying', attempt: 2, maxAttempts: 3 },
+      { workflowId: 'wf1', status: 'ready-to-save', attempt: 2, maxAttempts: 3 },
+    ])
+  }, 30_000)
+
+  it('reports a bare status code when the rejection body is not readable as JSON', async () => {
+    // A proxy/HTML error page: `json()` throws rather than returning a shape,
+    // and the stage still has to produce a usable message.
+    const inject: FlightInject = async (opts) => {
+      if (opts.method === 'POST' && opts.url === '/api/portify') {
+        return { statusCode: 201, json: () => ({ workflowId: 'wf1' }) }
+      }
+      if (opts.url.endsWith('/save')) {
+        return { statusCode: 502, json: () => { throw new SyntaxError('Unexpected token < in JSON') } }
+      }
+      if (opts.method === 'GET' && opts.url === '/api/portify') return { statusCode: 200, json: () => [] }
+      return { statusCode: 200, json: () => ({ status: 'ready-to-save', diff: '' }) }
+    }
+
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxFor(manifest()))
+
+    expect(outcome).toEqual({ kind: 'failed', error: 'portify save rejected (502)' })
+  })
+
   it('a replayed "apply" on a DEAD workflow falls back to a fresh run instead of failing forever', async () => {
     // Resume replays the stored checkpointResponse; when the stored answer
     // targets a workflow a restart aborted (pre-capture records), the save can
@@ -2687,6 +2890,27 @@ describe('run + heal stages', () => {
     setStage('run', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'export-as-is' })
     expect(outcome).toMatchObject({ kind: 'done', evidence: { status: 'failed' } })
+  })
+
+  it('states the give-up reason in the run-failed prompt when auto-heal explains itself', async () => {
+    // `healEnd.message` is why auto-heal stopped; the decision footer has to
+    // read it out of the checkpoint rather than fetching the run again.
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
+      if (call.method === 'GET') {
+        return {
+          statusCode: 200,
+          body: { manifest: { status: 'failed', healCycles: 4, services: [], healEnd: { reason: 'max-cycles', message: 'Gave up after 4 cycles — the same test kept failing.' } } },
+        }
+      }
+      return undefined
+    })
+
+    const parked = await runStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+
+    if (parked.kind !== 'checkpoint') throw new Error('expected run-failed checkpoint')
+    expect(parked.checkpoint.message).toContain('Gave up after 4 cycles — the same test kept failing.')
+    expect(parked.checkpoint.message).toContain('ended failed after 4 heal cycle(s).')
   })
 
   it('yolo exports a failed run as-is without parking', async () => {
@@ -3120,6 +3344,21 @@ describe('stage reset (R78 restart wipe)', () => {
       expect(events).toEqual([])
     })
 
+    it('drops the marker without announcing a deletion when the feature is already gone', async () => {
+      // The marker claims this flight scaffolded `checkout`, but the dir was
+      // removed out-of-band — no feature-deleted event may be published for a
+      // deletion that did not happen, and the stale marker still has to go.
+      const { ctx } = ctxFor(manifest())
+      fs.mkdirSync(ctx.flightDir, { recursive: true })
+      fs.writeFileSync(path.join(ctx.flightDir, 'scaffolded-feature'), 'checkout')
+      const { events, publisher } = eventSink()
+
+      await scaffoldStage(deps({ workspaceEvents: publisher })).reset!(ctx)
+
+      expect(events).toEqual([])
+      expect(fs.existsSync(path.join(ctx.flightDir, 'scaffolded-feature'))).toBe(false)
+    })
+
     it('leaves a feature alone when the marker names a DIFFERENT feature', async () => {
       createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
       const { ctx } = ctxFor(manifest())
@@ -3234,6 +3473,37 @@ describe('stage reset (R78 restart wipe)', () => {
       await specsCoverageStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
       expect(events).toEqual([])
     })
+
+    it('keeps non-spec files in e2e/ and announces no tests-changed when nothing was wiped', async () => {
+      // Fixtures and helpers under e2e/ are the author's, not this stage's
+      // artifacts — and with no spec deleted there is no test list to refresh.
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const e2eDir = path.join(featuresDir, 'checkout', 'e2e')
+      fs.mkdirSync(e2eDir, { recursive: true })
+      for (const f of fs.readdirSync(e2eDir)) fs.rmSync(path.join(e2eDir, f), { force: true })
+      fs.writeFileSync(path.join(e2eDir, 'helpers.ts'), 'export const x = 1\n')
+      const { events, publisher } = eventSink()
+
+      await specsCoverageStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      expect(fs.readdirSync(e2eDir)).toEqual(['helpers.ts'])
+      expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
+    })
+
+    it('still clears the coverage state when e2e/ does not exist at all', async () => {
+      createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+      const featureDir = path.join(featuresDir, 'checkout')
+      fs.rmSync(path.join(featureDir, 'e2e'), { recursive: true, force: true })
+      const docsDir = path.join(featureDir, 'docs')
+      fs.mkdirSync(docsDir, { recursive: true })
+      fs.writeFileSync(path.join(docsDir, '_coverage-state.json'), '{}')
+      const { events, publisher } = eventSink()
+
+      await specsCoverageStage(deps({ workspaceEvents: publisher })).reset!(ctxFor(manifest()).ctx)
+
+      expect(fs.existsSync(path.join(docsDir, '_coverage-state.json'))).toBe(false)
+      expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
+    })
   })
 
   describe('portify.reset', () => {
@@ -3314,6 +3584,32 @@ describe('stage reset (R78 restart wipe)', () => {
       await runStage(deps({ inject: makeInject(() => undefined, calls) })).reset!(ctxFor(manifest()).ctx)
       expect(calls).toEqual([])
     })
+
+    it('completes even when abort, the abort wait, and the delete all fail', async () => {
+      // The reset is the last thing between the user and a restart — a runs
+      // route that is down must not strand the flight mid-wipe.
+      const seen: string[] = []
+      let gets = 0
+      const inject: FlightInject = async (opts) => {
+        seen.push(`${opts.method} ${opts.url}`)
+        // The first read finds a live run (so the abort path is taken); every
+        // later call — abort, the abort wait's re-read, and the delete — fails.
+        if (opts.method === 'GET' && gets++ === 0) {
+          return { statusCode: 200, json: () => ({ manifest: { status: 'running' } }) }
+        }
+        throw new Error('runs route is down')
+      }
+
+      await expect(
+        runStage(deps({ inject })).reset!(ctxFor(manifest({ links: { runId: 'r1' } })).ctx),
+      ).resolves.toBeUndefined()
+      expect(seen).toEqual([
+        'GET /api/runs/r1',
+        'POST /api/runs/r1/abort',
+        'GET /api/runs/r1',
+        'DELETE /api/runs/r1',
+      ])
+    })
   })
 
   describe('evaluation-export.reset', () => {
@@ -3329,6 +3625,15 @@ describe('stage reset (R78 restart wipe)', () => {
       )
 
       expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/evaluation-exports/t1')).toBe(true)
+    })
+
+    it('swallows a DELETE that fails — reset must not block the restart', async () => {
+      const inject: FlightInject = async () => { throw new Error('evaluation route is down') }
+      await expect(
+        evaluationExportStage(deps({ inject })).reset!(
+          ctxFor(manifest({ links: { runId: 'r1', evaluationTaskId: 't1' } })).ctx,
+        ),
+      ).resolves.toBeUndefined()
     })
 
     it('is a no-op without an evaluationTaskId link', async () => {
@@ -3384,6 +3689,22 @@ describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs')).toBe(true)
   })
 
+  it("run 'rerun' force-starts without any lookup when the flight has no linked run", async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((c) => {
+      if (c.method === 'POST' && c.url === '/api/runs') return { statusCode: 201, body: { runId: 'r-new' } }
+      if (c.method === 'GET' && c.url === '/api/runs/r-new') {
+        return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0 } } }
+      }
+      return undefined
+    }, calls)
+
+    const outcome = await runStage(deps({ inject })).onCheckpointResponse!(ctxFor(manifest()).ctx, { choice: 'rerun' })
+
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'r-new', status: 'passed' } })
+    expect(calls[0]).toMatchObject({ method: 'POST', url: '/api/runs' })
+  })
+
   it('evaluation-export re-attaches to its still-running task on a replayed answer instead of starting a duplicate', async () => {
     const m = manifest({ links: { runId: 'r1', evaluationTaskId: 'eval-live' } })
     const { ctx } = ctxFor(m)
@@ -3411,6 +3732,43 @@ describe('replay-safe checkpoint answers (R78 seamless resume)', () => {
 
     expect(outcome).toMatchObject({ kind: 'done', evidence: { taskId: 'eval-live' } })
     expect(calls.filter((c) => c.method === 'POST')).toEqual([])
+  })
+
+  it('starts a fresh export rather than re-attaching to a prior task that failed', async () => {
+    // Re-attaching to a dead task would strand the stage forever, so a failed
+    // (or errored) prior link has to be abandoned in favour of a new export.
+    for (const prior of [
+      { status: 'failed' as const, error: 'archive step crashed' },
+      { status: 'completed' as const, error: 'archive step crashed' },
+    ]) {
+      const { ctx } = ctxFor(manifest({ links: { runId: 'r1', evaluationTaskId: 'eval-dead' } }))
+      writeEvaluationExportTask(logsDir, {
+        taskId: 'eval-dead', runId: 'r1', feature: 'checkout', mode: 'raw',
+        downloadReady: false, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+        ...prior,
+      } as never)
+
+      const calls: InjectCall[] = []
+      const inject = makeInject((call) => {
+        if (call.method === 'POST' && call.url.endsWith('/evaluation-export')) {
+          writeEvaluationExportTask(logsDir, {
+            taskId: 'eval-fresh', runId: 'r1', feature: 'checkout', mode: 'raw', status: 'completed',
+            downloadReady: true, archiveBase: 'export-r1',
+            createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
+          } as never)
+          const dir = path.join(logsDir, 'evaluation-exports', 'eval-fresh')
+          fs.mkdirSync(dir, { recursive: true })
+          fs.writeFileSync(path.join(dir, 'export.zip'), 'zip')
+          return { statusCode: 202, body: { taskId: 'eval-fresh' } }
+        }
+        return undefined
+      }, calls)
+
+      const outcome = await evaluationExportStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'raw' })
+
+      expect(outcome).toMatchObject({ kind: 'done', evidence: { taskId: 'eval-fresh' } })
+      expect(calls.some((c) => c.method === 'POST')).toBe(true)
+    }
   })
 })
 

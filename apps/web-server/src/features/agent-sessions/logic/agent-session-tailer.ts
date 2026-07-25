@@ -152,8 +152,11 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
   // agentId → how many events of that thread we've already emitted.
   const subagentCursors = new Map<string, number>()
 
-  const scanSubagents = (): void => {
-    if (closed || !opts.onSubagentEvent) return
+  // Takes the handler rather than re-checking `opts.onSubagentEvent`: the scan
+  // is only ever installed when one exists (see startWatching). There is no
+  // `closed` check either — `startWatching` runs behind `tryResolve`'s closed
+  // guard, and `close()` clears the interval.
+  const scanSubagents = (emitSubagent: NonNullable<TailOptions['onSubagentEvent']>): void => {
     const dir = subagentDirFor(ref)
     if (!dir) return
     let names: string[]
@@ -169,7 +172,7 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
       if (thread.events.length <= seen) continue
       const { events, ...identity } = thread
       for (let i = seen; i < events.length; i++) {
-        try { opts.onSubagentEvent({ thread: identity, event: events[i], index: i }) } catch { /* ignore */ }
+        try { emitSubagent({ thread: identity, event: events[i], index: i }) } catch { /* ignore */ }
       }
       subagentCursors.set(thread.agentId, events.length)
     }
@@ -189,9 +192,10 @@ export function tailAgentSession(opts: TailOptions): TailHandle {
     // Some agents write the file in one go after our initial flush; trigger
     // an extra flush shortly after to catch that case.
     setTimeout(scheduleFlush, 100)
-    if (opts.onSubagentEvent) {
-      scanSubagents()
-      subagentTimer = setInterval(scanSubagents, subagentPollMs)
+    const onSubagentEvent = opts.onSubagentEvent
+    if (onSubagentEvent) {
+      scanSubagents(onSubagentEvent)
+      subagentTimer = setInterval(() => scanSubagents(onSubagentEvent), subagentPollMs)
       subagentTimer.unref?.()
     }
   }

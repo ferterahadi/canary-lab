@@ -155,6 +155,24 @@ describe('CoverageJobRunStore', () => {
     expect(statusOf(makeManifest('j1', { status: 'done', endedAt: 'e' }))).toBe('done')
   })
 
+  it('renameFeature() re-homes matching jobs and reports the count', () => {
+    // A suite rename must carry the new name into the coverage-job history.
+    store.save(makeManifest('j1', { feature: 'old_name' }))
+    store.save(makeManifest('j2', { feature: 'old_name', status: 'done', endedAt: 'e' }))
+    store.save(makeManifest('j3', { feature: 'other' }))
+
+    expect(store.renameFeature('old_name', 'new_name')).toBe(2)
+    expect(store.get('j1')?.feature).toBe('new_name')
+    expect(store.get('j2')?.feature).toBe('new_name')
+    expect(store.get('j3')?.feature).toBe('other')
+  })
+
+  it('renameFeature() is a no-op when nothing matches', () => {
+    store.save(makeManifest('j1', { feature: 'kept' }))
+    expect(store.renameFeature('absent', 'new_name')).toBe(0)
+    expect(store.get('j1')?.feature).toBe('kept')
+  })
+
   it('idOfEntry falls back to jobId for legacy index rows that lack an id field', () => {
     // Write a legacy-format index entry (pre-`id` shape: only jobId, no id field).
     store.save(makeManifest('j1'))

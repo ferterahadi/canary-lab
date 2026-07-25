@@ -1682,6 +1682,11 @@ describe('subagentDirFor', () => {
   it('returns null when the ref has no log path yet', () => {
     expect(subagentDirFor({ agent: 'claude', sessionId: 's', logPath: '' })).toBeNull()
   })
+
+  it('appends to a log path that is not .jsonl-suffixed rather than truncating it', () => {
+    expect(subagentDirFor({ agent: 'claude', sessionId: 's', logPath: '/logs/abc' }))
+      .toBe(path.join('/logs/abc', 'subagents'))
+  })
 })
 
 describe('loadSubagentThreads', () => {
@@ -1732,6 +1737,28 @@ describe('loadSubagentThread', () => {
   it('returns null for a non-jsonl path and for unreadable meta', () => {
     expect(loadSubagentThread('/tmp/not-a-log.txt')).toBeNull()
     expect(loadSubagentThread('/tmp/missing-everything.jsonl')).toBeNull()
+  })
+
+  // A half-written subagent pair is normal while a fan-out is live, so every
+  // malformed shape has to read as "not ready yet", never as a crash.
+  it('returns null for meta that is not parseable, or not an object', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-subagent-meta-'))
+    for (const [name, meta] of [['broken', '{ not json'], ['scalar', '42'], ['nul', 'null']] as const) {
+      const jsonl = path.join(dir, `${name}.jsonl`)
+      fs.writeFileSync(jsonl, '')
+      fs.writeFileSync(path.join(dir, `${name}.meta.json`), meta)
+      expect(loadSubagentThread(jsonl)).toBeNull()
+    }
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('returns null when the meta is complete but the jsonl itself is unreadable', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-subagent-jsonl-'))
+    const jsonl = path.join(dir, 'agent-x.jsonl')
+    fs.writeFileSync(path.join(dir, 'agent-x.meta.json'), JSON.stringify({ toolUseId: 'toolu_1' }))
+    // Meta present, transcript not written yet.
+    expect(loadSubagentThread(jsonl)).toBeNull()
+    fs.rmSync(dir, { recursive: true, force: true })
   })
 })
 

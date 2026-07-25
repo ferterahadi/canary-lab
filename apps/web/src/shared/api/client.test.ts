@@ -130,6 +130,13 @@ import {
   listPlanFeatures,
   launchPlannedFeatures,
   getFlightPlanAgentSession,
+  getFlightRemedy,
+  applyFlightRemedy,
+  setFlightAutopilot,
+  applyRunFixes,
+  getGhStatus,
+  getRunPrPreflight,
+  proposeRunPr,
 } from './client'
 
 const ok = (body: unknown, status = 200): Response =>
@@ -1803,5 +1810,67 @@ describe('api client', () => {
       name: 'ApiError',
       status: 500,
     })
+  })
+
+  it('getFlightRemedy GETs the read-time remedy', async () => {
+    const body = { remedy: { kind: 'dirty-repos', stage: 'scout', repos: [], actions: ['stash', 'commit'] } }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(getFlightRemedy('fl 1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/flights/fl%201/remedy', { method: 'GET' })
+  })
+
+  it('applyFlightRemedy POSTs the chosen action and returns the resumed manifest', async () => {
+    const manifest = { id: 'fl_1', status: 'running' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    await expect(applyFlightRemedy('fl_1', 'commit', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/remedy',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'commit' }) },
+    )
+  })
+
+  it('setFlightAutopilot POSTs the new preference', async () => {
+    const manifest = { id: 'fl_1', opts: { autopilot: false } }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    await expect(setFlightAutopilot('fl_1', false, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/autopilot',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ autopilot: false }) },
+    )
+  })
+})
+
+describe('run fixes + PR client (R80)', () => {
+  it('applyRunFixes POSTs and returns the per-repo result set', async () => {
+    const body = { results: [{ repoName: 'fnb', ok: true }], allOk: true }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(applyRunFixes('run 9', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/apply-fixes', { method: 'POST' })
+  })
+
+  it('applyRunFixes surfaces the 409 when a run captured no fixes', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(409, { error: 'this run captured no fixes to apply' }))
+    await expect(applyRunFixes('r1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ name: 'ApiError', status: 409 })
+  })
+
+  it('getGhStatus GETs the app-level gh status', async () => {
+    const status = { installed: true, authenticated: true, account: 'me', host: 'github.com' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(status))
+    await expect(getGhStatus({ baseUrl: 'http://x', fetchImpl })).resolves.toEqual(status)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/gh/status', { method: 'GET' })
+  })
+
+  it('getRunPrPreflight GETs the per-repo preflight', async () => {
+    const preflight = { gh: { installed: true, authenticated: true }, repos: [], anyPushable: false }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(preflight))
+    await expect(getRunPrPreflight('run 9', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(preflight)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/pr-preflight', { method: 'GET' })
+  })
+
+  it('proposeRunPr POSTs and returns the per-repo PR results', async () => {
+    const body = { results: [{ repoName: 'fnb', ok: true, pr: { repoName: 'fnb', url: 'https://github.com/o/r/pull/1', branch: 'b', base: 'main', createdAt: 'T' } }] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(proposeRunPr('run 9', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/propose-pr', { method: 'POST' })
   })
 })

@@ -1,9 +1,13 @@
 ---
 name: cl_reuse-shared-logic
-description: Use the moment you're about to add code or UI that resembles something already in the repo — a second agent spawn, a second pill/card/dialog, a second background store, a second stream parser, a second timeout. Before writing a near-copy, find the existing one and either reuse it or extend it into a shared helper/component/primitive. Captures Canary Lab's "related logic has one home" rule and the primitives that already exist. Skip when the code is genuinely one-of-a-kind or the resemblance is superficial (same shape, different concern); for styling questions use cl_ui-design-philosophy and for background-task lifecycle use cl_async-task-ux.
+description: Use the moment you're about to add code or UI that resembles something already in the repo — a second agent spawn, a second pill/card/dialog, a second background store, a second stream parser, a second timeout. Find the existing one and reuse or extend it instead of writing a near-copy.
 ---
 
 # Canary Lab — Reuse Over Duplication
+
+Skip when the code is genuinely one-of-a-kind or the resemblance is superficial
+(same shape, different concern). Styling → `cl_ui-design-philosophy`;
+background-task lifecycle → `cl_async-task-ux`.
 
 Related logic gets **one home**. Before adding a block that resembles an existing
 one, find that one and reuse it — or extend it into a shared
@@ -36,14 +40,13 @@ slightly different" is how five slightly-different copies are born.
 **Every** agent-spawn site composes `runAgentProcess`
 (`apps/web-server/src/features/agent-sessions/logic/agent-process.ts`) instead of
 re-implementing "spawn → pipe stdout → tee → bump idle → cancel → recover answer".
-Current sites, as of 2026-07 (relative to `apps/web-server/src/features/`; the
-grep below is the source of truth over this list — re-run it, don't trust the
-list alone: `grep -rln runAgentProcess apps/web-server/src --include='*.ts' | grep -v '\.test\.'`):
 
-- `wizard/logic/wizard-agent-runner.ts`, `coverage/logic/coverage/annotate-engine.ts`,
-  `coverage/logic/coverage/prd-summary.ts`, `evaluation/logic/test-review-export.ts`,
-  `portify/logic/runtime/agent.ts`, `benchmark/logic/runtime/runner.ts` (the
-  benchmark's sabotage agent), `flights/logic/stages/context.ts`
+List the current call sites when you need them — an enumeration in this file would
+rot between edits:
+
+```bash
+grep -rln runAgentProcess apps/web-server/src --include='*.ts' | grep -v '\.test\.'
+```
 
 The primitive owns the shared core: spawn; pipe + tee stdout/stderr; bump the idle
 clock on every chunk; `startIdleTimer` with the session-JSONL-growth backstop. The

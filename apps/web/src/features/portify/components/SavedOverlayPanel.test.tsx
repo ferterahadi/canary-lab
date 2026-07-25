@@ -37,8 +37,25 @@ describe('SavedOverlayPanel', () => {
     expect(container.textContent).toContain('features/cns/portify/app.patch')
     // Machine proof: the two concurrent boots.
     expect(container.textContent).toContain('Booted twice')
-    // How-applied copy is per-service.
-    expect(container.textContent).toContain('per-run worktree at boot')
+    // How-applied is one caption line, not a per-service column.
+    expect(container.textContent).toContain('Applied per-run in an isolated worktree')
+  })
+
+  it('collapses the diff behind a toggle when collapsibleDiff is set', async () => {
+    await act(async () => { root.render(<SavedOverlayPanel manifest={manifest()} collapsibleDiff />) })
+    // Diff hidden initially; the toggle offers to reveal it.
+    expect(container.textContent).not.toContain('app.listen(process.env.PORT)')
+    expect(container.textContent).toContain('Show diff')
+    await act(async () => clickButton('Show diff'))
+    expect(container.textContent).toContain('app.listen(process.env.PORT)')
+  })
+
+  it('omits the stored-in table when showServiceTable is false', async () => {
+    await act(async () => { root.render(<SavedOverlayPanel manifest={manifest()} showServiceTable={false} />) })
+    // The per-service patch-path table is folded into the Ports tab's own card
+    // headers, so it's dropped here — but the how-applied caption stays.
+    expect(container.textContent).not.toContain('features/cns/portify/app.patch')
+    expect(container.textContent).toContain('Applied per-run in an isolated worktree')
   })
 
   it('opens the overlay folder in the editor', async () => {
@@ -60,10 +77,33 @@ describe('SavedOverlayPanel', () => {
   it('shows the no-changes-needed state for a proven empty diff', async () => {
     await act(async () => { root.render(<SavedOverlayPanel manifest={manifest({ diff: '' })} />) })
     expect(container.textContent).toContain('No changes needed')
+    // The review surface keeps the full card — it owns the view and has the room.
+    expect(cardHeading()).toBe(true)
     // The double-boot proof still shows — the empty overlay is a verified no-op.
     expect(container.textContent).toContain('Booted twice')
   })
+
+  it('renders the no-op state as a static one-line label when the diff is collapsible', async () => {
+    await act(async () => { root.render(<SavedOverlayPanel manifest={manifest({ diff: '' })} collapsibleDiff />) })
+    // Same slot and type as the "Show diff" toggle would occupy, so both verified
+    // sub-states sit on one line — but static: nothing to expand.
+    const labels = [...container.querySelectorAll('span')].filter((s) => s.style.textTransform === 'uppercase')
+    expect(labels.some((s) => s.textContent?.includes('No changes needed'))).toBe(true)
+    expect(container.querySelector('[aria-expanded]')).toBeNull()
+    expect([...container.querySelectorAll('button')].some((b) => b.textContent?.includes('No changes needed'))).toBe(false)
+    // The centred card is gone; its *why* survives as one muted line.
+    expect(cardHeading()).toBe(false)
+    expect(container.textContent).toContain('already reads')
+    expect(container.textContent).toContain('Saved as a no-op overlay')
+  })
 })
+
+// The big card's heading (13.5px semibold) — present only in the roomy variant.
+function cardHeading(): boolean {
+  return [...container.querySelectorAll('div')].some(
+    (d) => d.style.fontSize === '13.5px' && d.textContent === 'No changes needed',
+  )
+}
 
 function clickButton(label: string): void {
   const btn = [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(label))

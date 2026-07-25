@@ -44,6 +44,25 @@ describe('parsePrdSummaryOutput', () => {
     ])
   })
 
+  it('steps over array and scalar JSON blocks to reach the requirements envelope', () => {
+    // Agents fence more than one block; only a plain object can be the envelope,
+    // so an array or a bare scalar must be skipped rather than shadow it.
+    // Fenced blocks are considered last-first, so the envelope goes first here
+    // and the shapes that must be skipped come after it.
+    const output = [
+      '```json',
+      '{"requirements":[{"id":"R1","title":"Send","text":"send it","pathTypes":["happy"]}]}',
+      '```',
+      '```json',
+      '[1, 2, 3]',
+      '```',
+      '```json',
+      '42',
+      '```',
+    ].join('\n')
+    expect(parsePrdSummaryOutput(output)).toMatchObject([{ id: 'R1', title: 'Send' }])
+  })
+
   it('parses kind + happy/unhappy path prose', () => {
     const out = parsePrdSummaryOutput('{"requirements":[{"id":"R1","kind":"non-functional","title":"Hash","text":"It should hash at rest","happyPath":"stored as digest","unhappyPath":"  ","pathTypes":["happy"]}]}')
     expect(out).toEqual([

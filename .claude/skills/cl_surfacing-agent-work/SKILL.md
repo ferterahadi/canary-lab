@@ -1,9 +1,14 @@
 ---
 name: cl_surfacing-agent-work
-description: Use when building or changing any UI/feature that shows an agent's progress, output, or "what it's doing" (live or historical), when choosing how to stream agent output, or when a user says an agent view "looks stuck" / "I can't see the output". Prevents designing an agent viewer before knowing what the agent actually produces — and promising a rich timeline an agent can't deliver. Skip if the view is blank/stuck because the session-log path or resolution is wrong (CLAUDE_CONFIG_DIR/CODEX_HOME, missing JSONL) → cl_locate-agent-session-logs; this skill is for designing what the viewer shows and how output streams. Skip for non-agent UI styling → cl_ui-design-philosophy, and for generic "only updates after refresh" staleness → cl_live-state-sync.
+description: Use when building or changing any UI that shows an agent's progress or output (live or historical), when choosing how to stream agent output, or when a user says an agent view "looks stuck" / "I can't see the output". Prevents designing a viewer before knowing what the agent actually produces.
 ---
 
 # Surfacing an Agent's Work (without overpromising)
+
+Skip when: the view is blank because the session-log path is wrong
+(`CLAUDE_CONFIG_DIR`/`CODEX_HOME`, missing JSONL) → `cl_locate-agent-session-logs`;
+non-agent UI styling → `cl_ui-design-philosophy`; generic "only updates after
+refresh" staleness → `cl_live-state-sync`.
 
 The expensive, repeated mistake on this codebase: **building the viewer before
 grounding in the agent's real execution model.** A polished "watch the agent
@@ -85,5 +90,5 @@ it (see [[cl_ui-design-philosophy]] "One owner for a long-lived lifecycle" and
 ## Verify
 
 Stream parsing is pure + unit-tested (`features/agent-sessions/logic/agent-stream.test.ts`) so the logic
-is checkable without a live agent; the actual wire shape is the user's `canary-apply`
-trial (never run it — see `cl_verify-changes`). Component behaviour is happy-dom-tested.
+is checkable without a live agent; the actual wire shape needs the `canary-apply`
+cycle (see `cl_verify-changes` Tier 3). Component behaviour is happy-dom-tested.

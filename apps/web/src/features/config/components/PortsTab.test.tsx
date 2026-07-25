@@ -123,11 +123,27 @@ describe('PortsTab', () => {
       root.render(<PortsTab feature="cns_exactly_once_fallback" portified onStartPortify={onStartPortify} />)
     })
     expect(container.textContent).toContain('Portified — boots concurrently')
-    expect(container.textContent).toContain('double-boot verified')
+    expect(container.textContent).toContain('Rewritten by the agent')
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons.some((b) => b.textContent?.trim() === 'Portify')).toBe(false)
     expect(buttons.some((b) => b.textContent?.includes('Re-run'))).toBe(false)
     expect(buttons.some((b) => b.getAttribute('aria-label') === 'Remove portification')).toBe(true)
+  })
+
+  it('lays the tab out as Section cards, like every other config tab', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+    await act(async () => { root.render(<PortsTab feature="cns_exactly_once_fallback" portified />) })
+    // Two cards: the status (headline in its header, action in the right slot)
+    // and the slot cards, wrapped in a titled "Port slots" section.
+    const sections = [...container.querySelectorAll('section')]
+    expect(sections.length).toBeGreaterThanOrEqual(2)
+    expect(sections.some((s) => s.textContent?.includes('Portified — boots concurrently'))).toBe(true)
+    expect(container.textContent).toContain('Port slots')
+    // Nothing bleeds to the modal edge any more: the status headline sits inside
+    // a <section>, not in a full-bleed strip that owns the scroller's first row.
+    const scroller = container.querySelector('.overflow-y-auto')
+    expect(scroller?.firstElementChild?.className).toContain('gap-3')
+    expect(scroller?.firstElementChild?.className).toContain('p-3')
   })
 
   it('none state: Not injectable headline, accent Portify launches directly', async () => {
@@ -332,7 +348,7 @@ describe('PortsTab', () => {
     expect(onStartPortify).not.toHaveBeenCalled()
   })
 
-  it('renders the saved overlay INLINE for a portified feature — diff, stored-in path, double-boot proof; no wizard click-out', async () => {
+  it('renders the saved overlay INLINE for a portified feature — collapsed diff, folded stored-in path, double-boot proof; no wizard click-out', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
     vi.mocked(getPortify).mockResolvedValue(savedManifest())
     mockWorkflows = [{ workflowId: 'wf_saved', feature: 'cns_exactly_once_fallback', status: 'saved', startedAt: '2026-01-01T00:00:00Z' }]
@@ -344,8 +360,12 @@ describe('PortsTab', () => {
 
     // The saved manifest is fetched and its overlay shows inline — no button.
     expect(getPortify).toHaveBeenCalledWith('wf_saved')
-    expect(container.textContent).toContain('process.env.PORT')                                  // the diff
-    expect(container.textContent).toContain('features/cns_exactly_once_fallback/portify/my-backend.patch') // stored-in
+    // The diff is collapsed by default in the verified tab — the boot badge is the
+    // proof, the diff is on-demand. The toggle reveals it.
+    expect(container.textContent).not.toContain('process.env.PORT')
+    expect(container.textContent).toContain('Show diff')
+    // Stored-in path is folded into the service card header, not a separate table.
+    expect(container.textContent).toContain('portify/my-backend.patch')
     expect(container.textContent).toContain('Booted twice')                                      // double-boot proof
 
     // The old "View saved overlay" button is gone; verified state also drops the
@@ -353,6 +373,10 @@ describe('PortsTab', () => {
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons.some((b) => b.getAttribute('aria-label') === 'View saved overlay')).toBe(false)
     expect(container.textContent).not.toContain('Slots are declared in feature.config.cjs')
+
+    // The toggle expands the captured diff in place.
+    await act(async () => clickButton('Show diff'))
+    expect(container.textContent).toContain('process.env.PORT')
 
     // Open-in-editor opens the overlay folder directly — it does NOT reopen the wizard.
     await act(async () => clickButton('Open in editor'))

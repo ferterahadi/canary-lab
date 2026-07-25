@@ -823,6 +823,30 @@ describe('FlightRunStore.remove', () => {
   })
 })
 
+describe('FlightRunStore.renameFeature', () => {
+  it('re-homes every flight on the renamed suite and reports the count', async () => {
+    // A suite rename has to carry the new name into flight history rather than
+    // orphaning it behind the old one.
+    const a = startFlight({ ...args('/repo/a'), feature: 'checkout' }, deps(allDone()))
+    await a.completion
+    const b = startFlight({ ...args('/repo/b'), feature: 'other' }, deps(allDone()))
+    await b.completion
+
+    expect(store.renameFeature('checkout', 'checkout_v2')).toBe(1)
+    expect(store.get(a.manifest.flightId)!.feature).toBe('checkout_v2')
+    expect(store.get(b.manifest.flightId)!.feature).toBe('other')
+    expect(store.latestForFeature('checkout_v2')?.flightId).toBe(a.manifest.flightId)
+    expect(store.latestForFeature('checkout')).toBeNull()
+  })
+
+  it('is a no-op when no flight carries the old name', async () => {
+    const { manifest, completion } = startFlight(args('/repo/a'), deps(allDone()))
+    await completion
+    expect(store.renameFeature('absent', 'whatever')).toBe(0)
+    expect(store.get(manifest.flightId)!.feature).toBe('checkout')
+  })
+})
+
 describe('FlightRunStore repo lookups', () => {
   it('activeForRepos skips an active flight whose repo set does not intersect', async () => {
     const adapters = allDone()
@@ -1755,6 +1779,78 @@ describe('restart wipe (R78)', () => {
     const redone = redoFlight(first.manifest.flightId, deps(adapters))
     await redone.completion
     expect(seenRunId).toBe('r-123')
+  })
+
+  it('gives a reset an inert context — logging, progress, and patches are no-ops', async () => {
+    // The wipe runs outside a drive, so a reset that narrates its work must not
+    // write to the record it is about to replace.
+    const adapters = allDone()
+    let called = 0
+    adapters.docs = {
+      run: async () => ({ kind: 'done' }),
+      reset: async (ctx) => {
+        called++
+        expect(ctx.flightDir).toContain('flights')
+        expect(ctx.signal.aborted).toBe(false)
+        ctx.appendLog('[docs] wiping\n')
+        ctx.setProgress({ anything: true } as never)
+        ctx.patchFlight({ runVerdict: 'failed' })
+      },
+    }
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+
+    const redone = redoFlight(first.manifest.flightId, deps(adapters))
+    await redone.completion
+
+    expect(called).toBe(1)
+    // None of the inert calls leaked into the restarted record.
+    expect(store.get(redone.manifest.flightId)!.runVerdict).toBeUndefined()
+  })
+
+  it('a redo with feedback but no target stage attaches the note to the first stage', async () => {
+    const first = startFlight(args(), deps(allDone()))
+    await first.completion
+
+    const redone = redoFlight(first.manifest.flightId, deps(allDone()), { feedback: '  start over properly  ' })
+    await redone.completion
+
+    // Both the note target and the ask-here marker default to stage one.
+    expect(redone.manifest.feedback).toEqual({ stage: FLIGHT_STAGE_KEYS[0], note: 'start over properly' })
+    expect(redone.manifest.askAtStage).toBe(FLIGHT_STAGE_KEYS[0])
+  })
+
+  it('a jump over a stage the prior record never recorded marks it skipped', async () => {
+    // Records written before a stage existed lack its row; the jump has to
+    // synthesise a stage-entry skip rather than leave a hole in the rail.
+    const first = startFlight(args(), deps(allDone()))
+    await first.completion
+    const prior = store.get(first.manifest.flightId)!
+    store.save({ ...prior, stages: prior.stages.filter((s) => s.key !== 'scaffold') })
+
+    const redone = redoFlight(
+      first.manifest.flightId,
+      { ...deps(allDone()), validateStageEntry: () => null },
+      { fromStage: 'docs' },
+    )
+    await redone.completion
+
+    const scaffold = redone.manifest.stages.find((s) => s.key === 'scaffold')!
+    expect(scaffold).toMatchObject({ status: 'skipped', skipReason: 'stage-entry' })
+  })
+
+  it('resume replays nothing when the record has no open stage left', async () => {
+    const first = startFlight(args(), deps(allDone()))
+    await first.completion
+    // Every stage settled, but parked — there is no stage whose answer could
+    // be replayed, so resume must not read one off index -1.
+    const done = store.get(first.manifest.flightId)!
+    store.save({ ...done, status: 'paused', pauseReason: 'user' })
+
+    const resumed = resumeFlight(first.manifest.flightId, deps(allDone()))
+    await resumed.completion
+
+    expect(store.get(first.manifest.flightId)!.status).toBe('done')
   })
 
   it('a throwing reset never blocks the restart (best-effort, like interrupt)', async () => {

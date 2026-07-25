@@ -12,9 +12,9 @@ import type { ReactNode } from 'react'
 export type StepState = 'done' | 'active' | 'pending' | 'warn' | 'failed'
 
 const DOT_CLASS: Record<Exclude<StepState, 'pending' | 'done'>, string> = {
-  active: 'bg-sky-500 animate-pulse',
-  warn: 'bg-amber-500',
-  failed: 'bg-rose-500',
+  active: 'bg-running animate-pulse',
+  warn: 'bg-warning',
+  failed: 'bg-danger',
 }
 
 const TITLE_COLOR: Record<StepState, string> = {

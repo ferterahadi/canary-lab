@@ -4,6 +4,16 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
+// summarizePrd is LLM-only: it never fabricates requirements from headings, so
+// every failure path below must REJECT. Which message it rejects with is the
+// second half of the contract, and the two are not interchangeable:
+//
+//   an agent ran and failed  → `PRD summary failed: <the real cause>`
+//   no agent produced output → `PRD summary requires the claude or codex agent…`
+//
+// Asserting the real cause is the point — the generic "is on PATH" hint used to
+// mask things like an expired OAuth session. Only the three cases where no agent
+// ever produced a result should expect the generic message.
 const { mockSpawn } = vi.hoisted(() => ({ mockSpawn: vi.fn() }))
 vi.mock('child_process', () => ({ spawn: mockSpawn }))
 
@@ -119,7 +129,7 @@ describe('defaultRunAgent — claude non-zero exit', () => {
     await expect(summarizePrd(
       { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd summary agent failed with exit code 1/)
   })
 })
 
@@ -130,7 +140,7 @@ describe('defaultRunAgent — spawn error event', () => {
     await expect(summarizePrd(
       { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd summary agent failed: ENOENT/)
   })
 })
 
@@ -148,7 +158,7 @@ describe('defaultRunAgent — pre-aborted signal', () => {
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd summary cancelled/)
   })
 })
 
@@ -166,7 +176,7 @@ describe('defaultRunAgent — abort signal during run', () => {
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd summary cancelled/)
   })
 })
 
@@ -406,7 +416,7 @@ describe('defaultRunAgent — close with non-null signal (line 421 ?? branch)', 
     await expect(summarizePrd(
       { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd summary agent failed with SIGTERM/)
   })
 })
 
@@ -426,7 +436,7 @@ describe('defaultRunAgent — non-Error thrown in catch (line 477 String(err) br
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         runAgent: async () => { throw 'non-error string' },
       },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: non-error string/)
 
     // onOutput received the String(err) message before the throw
     expect(outputChunks.some((c) => c.includes('non-error string'))).toBe(true)
@@ -486,7 +496,7 @@ describe('defaultRunAgent — settled guard: finish called twice (line 376 true 
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd summary agent idle for/)
   })
 })
 
@@ -538,7 +548,7 @@ describe('defaultRunAgent — Error thrown in catch (line 477 err.message branch
         resolveAgents: () => ['claude'],
         runAgent: async () => { throw new Error('prd agent exploded') },
       },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd agent exploded/)
 
     expect(outputChunks.some((c) => c.includes('prd agent exploded'))).toBe(true)
   })
@@ -578,7 +588,7 @@ describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 394-395
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/PRD summary failed: prd summary agent idle for/)
     expect(child.kill).toHaveBeenCalledWith('SIGTERM')
   })
 })

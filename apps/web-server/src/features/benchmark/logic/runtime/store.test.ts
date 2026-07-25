@@ -117,6 +117,28 @@ describe('BenchmarkRunStore', () => {
     expect(statusOf(makeManifest({ status: 'done', endedAt: 'e' }))).toBe('done')
   })
 
+  it('renameFeature() re-homes matching benchmarks and reports the count', () => {
+    // A suite rename must carry the new name into the benchmark history rather
+    // than orphaning it behind the old one.
+    const store = new BenchmarkRunStore(logsDir)
+    store.save(makeManifest({ benchmarkId: 'b1', feature: 'old_name' }))
+    store.save(makeManifest({ benchmarkId: 'b2', feature: 'old_name', status: 'done', endedAt: 'e' }))
+    store.save(makeManifest({ benchmarkId: 'b3', feature: 'other' }))
+
+    expect(store.renameFeature('old_name', 'new_name')).toBe(2)
+    expect(store.get('b1')?.feature).toBe('new_name')
+    expect(store.get('b2')?.feature).toBe('new_name')
+    expect(store.get('b3')?.feature).toBe('other')
+    expect(store.list().map((e) => e.feature).sort()).toEqual(['new_name', 'new_name', 'other'])
+  })
+
+  it('renameFeature() is a no-op when nothing matches', () => {
+    const store = new BenchmarkRunStore(logsDir)
+    store.save(makeManifest({ feature: 'kept' }))
+    expect(store.renameFeature('absent', 'new_name')).toBe(0)
+    expect(store.get('b1')?.feature).toBe('kept')
+  })
+
   it('idOfEntry falls back to benchmarkId for legacy index rows that lack an id field', () => {
     const store = new BenchmarkRunStore(logsDir)
     store.save(makeManifest())

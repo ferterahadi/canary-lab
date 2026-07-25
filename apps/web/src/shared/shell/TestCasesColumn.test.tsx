@@ -258,7 +258,7 @@ describe('TestCasesColumn', () => {
 
     expect(container.textContent).toContain('loads checkout')
     expect(container.textContent).toContain('submits payment')
-    expect(container.querySelectorAll('.border-sky-500\\/50')).toHaveLength(2)
+    expect(container.querySelectorAll('.border-running\\/50')).toHaveLength(2)
   })
 
   it('shows the amber running-line highlight inside an expanded step body', async () => {
@@ -582,7 +582,7 @@ describe('TestCasesColumn', () => {
     expect(container.textContent).not.toContain('12/31')
     expect(container.textContent).toContain('workspace-only test 33')
     expect(container.textContent).toContain('validates duplicate')
-    expect(container.querySelectorAll('.border-emerald-500\\/40')).toHaveLength(12)
+    expect(container.querySelectorAll('.border-success\\/40')).toHaveLength(12)
   })
 })
 

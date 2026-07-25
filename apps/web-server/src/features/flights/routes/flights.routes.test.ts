@@ -402,6 +402,28 @@ describe('flights routes', () => {
     const del = await app.inject({ method: 'DELETE', url: '/api/flights/fl_x' })
     expect(del.statusCode).toBe(409)
     expect(del.json()).toMatchObject({ error: 'boom' })
+
+    const autopilot = await app.inject({ method: 'POST', url: '/api/flights/fl_x/autopilot', body: { autopilot: true } })
+    expect(autopilot.statusCode).toBe(409)
+    expect(autopilot.json()).toMatchObject({ error: 'boom' })
+  })
+
+  it('500s the remedy route when the resume behind it throws a bare value', async () => {
+    // The remedy handler honours an err.statusCode when there is one; a thrown
+    // non-Error with none must still surface as a server error, not a crash.
+    // A remedy-eligible record with no repos left to clean: the remedy itself
+    // is a no-op, so the throw can only come from the resume behind it.
+    const manifest = {
+      flightId: 'fl_x', feature: 'checkout', repoPaths: [], status: 'paused',
+      stages: [{ key: 'scout', status: 'failed', error: 'repo has uncommitted changes' }],
+    } as unknown as FlightManifest
+    const store: FlightStore = { ...throwingStore('unused'), get: () => manifest, save: () => { throw 'resume exploded' } }
+    app = await buildApp(allDone(), store)
+
+    const resp = await app.inject({ method: 'POST', url: '/api/flights/fl_x/remedy', body: { action: 'stash' } })
+
+    expect(resp.statusCode).toBe(500)
+    expect(resp.json()).toMatchObject({ error: 'resume exploded' })
   })
 
   it('404s a redo for an unknown flight (real "not found" Error)', async () => {
@@ -409,6 +431,28 @@ describe('flights routes', () => {
     const resp = await app.inject({ method: 'POST', url: '/api/flights/fl_nope/redo' })
     expect(resp.statusCode).toBe(404)
     expect(resp.json()).toMatchObject({ error: 'flight not found: fl_nope' })
+  })
+
+  it('400s a redo that jumps to a stage whose prerequisite is missing', async () => {
+    // The jump is rejected by the same validator the start route uses, and the
+    // dialog switches on `type` to show the prerequisite instead of a raw error.
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const resp = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo`, body: { fromStage: 'evaluation-export' } })
+
+    expect(resp.statusCode).toBe(400)
+    expect(resp.json()).toMatchObject({ type: 'stage_entry_rejected' })
+    expect(resp.json().error).toMatch(/evaluation-export/)
+  })
+
+  it('carries autopilot:false from the start payload into the flight options', async () => {
+    app = await buildApp(allDone())
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ autopilot: false, agent: 'codex' }) })
+    expect(started.statusCode).toBe(201)
+    expect((started.json() as { opts: { autopilot?: boolean; agent?: string } }).opts).toMatchObject({ autopilot: false, agent: 'codex' })
   })
 
   it('400s when repoPaths contains a non-string entry', async () => {
@@ -968,6 +1012,73 @@ describe('plan-features (R54)', () => {
       body: { features: task.result!.features },
     })
     expect(again.statusCode).toBe(409)
+  })
+
+  it('launch carries the dialog\'s autopilot + agent choice onto every minted flight', async () => {
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'one', description: 'test one' },
+      { name: 'two', description: 'test two' },
+    ])))
+    const task = await planAndWait(app)
+
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features, autopilot: false, agent: 'codex' },
+    })
+
+    expect(launched.statusCode).toBe(201)
+    const { flightIds } = launched.json() as { flightIds: string[] }
+    for (const id of flightIds) {
+      const manifest = (await app.inject({ method: 'GET', url: `/api/flights/${id}` })).json() as { opts: { autopilot?: boolean; agent?: string } }
+      expect(manifest.opts).toMatchObject({ autopilot: false, agent: 'codex' })
+    }
+  })
+
+  it('launch inherits the agent from the plan task when the body omits it', async () => {
+    // The proposal dialog only re-sends what the user changed, so the task's own
+    // agent choice has to be the fallback.
+    app = await buildApp(allDone(), undefined, agentReturning(planText([
+      { name: 'one', description: 'test one' },
+      { name: 'two', description: 'test two' },
+    ])))
+    const task = await planAndWait(app, { agent: 'codex', autopilot: false })
+
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${task.taskId}/launch`,
+      body: { features: task.result!.features },
+    })
+
+    expect(launched.statusCode).toBe(201)
+    const { flightIds } = launched.json() as { flightIds: string[] }
+    const manifest = (await app.inject({ method: 'GET', url: `/api/flights/${flightIds[0]}` })).json() as { opts: { autopilot?: boolean; agent?: string } }
+    expect(manifest.opts).toMatchObject({ autopilot: false, agent: 'codex' })
+  })
+
+  it('a single-feature proposal auto-launches with the autopilot + agent it was started with', async () => {
+    // The auto-launch path builds its own options off the settled task, so the
+    // dialog's choices have to survive that hop too (R71/W4).
+    app = await buildApp(allDone(), undefined, agentReturning(planText([{ name: 'solo', description: 'test the one thing' }])))
+
+    // A single-feature proposal launches itself, so the task settles straight
+    // into `launched` rather than waiting for a confirmation.
+    const task = await planAndWait(app, { autopilot: false, agent: 'codex' })
+    expect(task.status).toBe('launched')
+    expect(task.autopilot).toBe(false)
+    expect(task.agent).toBe('codex')
+
+    const deadline = Date.now() + 3000
+    for (;;) {
+      const flights = ((await app.inject({ method: 'GET', url: '/api/flights' })).json() as { flights: Array<{ flightId: string }> }).flights
+      if (flights.length === 1) {
+        const manifest = (await app.inject({ method: 'GET', url: `/api/flights/${flights[0].flightId}` })).json() as { opts: { autopilot?: boolean; agent?: string } }
+        expect(manifest.opts).toMatchObject({ autopilot: false, agent: 'codex' })
+        break
+      }
+      if (Date.now() > deadline) throw new Error('auto-launch never minted the flight')
+      await new Promise((r) => setTimeout(r, 10))
+    }
   })
 
   it('launch rejects name collisions with existing features/flights up front', async () => {

@@ -72,7 +72,7 @@ export function ShikiCode({
   return (
     <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
       <div
-        className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-sky-500/10' : ''}`}
+        className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
         onClick={(e) => {
           const line = (e.target as HTMLElement).closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
           if (line) void openAt(Number(line))
@@ -175,7 +175,7 @@ export function StepBlock({
   const activeLine = bodyLineForSourceLine(step.line, step.bodySource, runningSourceLine)
   const isRunningStep = activeLine != null
   const cardClass = isRunningStep
-    ? 'border-amber-500/60 bg-amber-400/15 dark:border-amber-400/60 dark:bg-amber-400/10'
+    ? 'border-warning/60 bg-warning/15 dark:bg-warning/10'
     : `${colorClassForStatus(status)} bg-[var(--bg-surface)]`
   return (
     <li

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractJsonCandidates } from './agent-json'
+import { extractJsonCandidates, extractJsonObject } from './agent-json'
 
 describe('extractJsonCandidates', () => {
   it('parses a bare JSON object', () => {
@@ -62,5 +62,31 @@ describe('extractJsonCandidates', () => {
   it('ignores a fence whose body is not JSON but still scans the rest', () => {
     const text = '```\nnot json\n```\n{"a": 1}'
     expect(extractJsonCandidates(text)).toContainEqual({ a: 1 })
+  })
+
+  it('ignores an empty fence — a blank block is not a candidate at all', () => {
+    // Agents sometimes open and close a fence with nothing in it; that must not
+    // become a candidate (and must not stop the scan).
+    expect(extractJsonCandidates('```json\n\n```\n{"a": 1}')).toEqual([{ a: 1 }])
+    expect(extractJsonCandidates('```\n   \n```')).toEqual([])
+  })
+})
+
+describe('extractJsonObject', () => {
+  it('returns the first plain object candidate', () => {
+    expect(extractJsonObject('```json\n{"ok": true}\n```')).toEqual({ ok: true })
+  })
+
+  // Agents answer with whatever they like; only a plain object can be read as a
+  // result envelope, so every other JSON shape has to be skipped, not returned.
+  it('skips null, scalar, and array candidates on the way to an object', () => {
+    expect(extractJsonObject('```json\nnull\n```')).toBeNull()
+    expect(extractJsonObject('```json\n42\n```')).toBeNull()
+    expect(extractJsonObject('```json\n[1, 2]\n```')).toBeNull()
+    expect(extractJsonObject('```json\n[1, 2]\n```\n\n```json\n{"ok": true}\n```')).toEqual({ ok: true })
+  })
+
+  it('returns null when the text carries no JSON at all', () => {
+    expect(extractJsonObject('I could not decide.')).toBeNull()
   })
 })

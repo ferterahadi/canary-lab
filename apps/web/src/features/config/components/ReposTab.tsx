@@ -946,20 +946,20 @@ export function PortSlotTable({
       )}
       {ports.length > 0 && (
         <div className="flex items-center gap-1.5 px-0.5 text-[9px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
-          <span className="flex-1">Slot name</span>
-          <span className="flex-1">Env var</span>
           <span className="flex-1">Reference</span>
+          <span className="flex-1">Env var</span>
         </div>
       )}
+      {/* Two columns, not three: the bare slot name ("mpass") was the same
+          identifier the `${port.mpass}` reference already carries. The token
+          cell (click-to-copy) is the one you paste elsewhere; env var is what
+          the service reads — the two genuinely distinct values. */}
       {ports.map((slot, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          <span className="flex-1 truncate px-0.5 py-1 text-[11px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} title={slot.name}>
-            {slot.name || '—'}
-          </span>
+          <PortSlotToken name={slot.name} env={slot.env} />
           <span className="flex-1 truncate px-0.5 py-1 text-[11px]" style={{ color: slot.env ? 'var(--text-primary)' : 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} title={slot.env ?? ''}>
             {slot.env || '—'}
           </span>
-          <PortSlotToken name={slot.name} env={slot.env} />
         </div>
       ))}
     </div>

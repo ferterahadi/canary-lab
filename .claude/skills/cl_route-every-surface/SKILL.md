@@ -1,6 +1,6 @@
 ---
 name: cl_route-every-surface
-description: Use whenever you add a new page/view OR a dialog/modal to the web UI (apps/web) — a new full-screen view, a new dialog rendered from App.tsx, a wizard, a config/settings panel, anything a user opens. Also use when a user says "I want to link to X", "refresh loses my place", "make this bookmarkable", or "this dialog doesn't survive reload". The rule: every page and every cold-load-coherent dialog gets a URL param so it is deep-linkable, refresh-survivable, and revisitable. New surface with no route → it vanishes on refresh, always.
+description: Use whenever you add a new page/view or a dialog/modal to the web UI (apps/web), or when a user says "I want to link to X", "refresh loses my place", "make this bookmarkable", "this dialog doesn't survive reload". Every page and cold-load-coherent dialog gets a URL param.
 ---
 
 # Route Every Surface — A New Page/Dialog Gets a URL
@@ -144,6 +144,6 @@ dialog values are ignored on read.
 - [[cl_ws-driven-state]] — that skill keeps UI state live after a server mutation;
   this skill keeps UI state addressable in the URL. Different axes, both required
   for a surface to feel native.
-- [[cl_verify-changes]] — `apps/web/**` changes need the canary-apply cycle (the
-  user runs it) to confirm refresh/deep-link behaviour end-to-end; unit tests cover
-  the serialization.
+- [[cl_verify-changes]] — `apps/web/**` changes need the canary-apply cycle (Tier 3
+  says who runs it) to confirm refresh/deep-link behaviour end-to-end; unit tests
+  cover the serialization.

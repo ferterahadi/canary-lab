@@ -90,7 +90,9 @@ const PORTIFY_INSTRUCTIONS = `Canary Lab — portify profile. Make a feature's p
 // on top. Keep these compositions in step with TOOLS_BY_PROFILE in tools.ts.
 const LIFECYCLE_INSTRUCTIONS = `${REPAIR_INSTRUCTIONS}\n\n${AUTHOR_INSTRUCTIONS}\n\n${COVERAGE_INSTRUCTIONS}\n\n${FLIGHT_INSTRUCTIONS}\n\n${EXPORT_INSTRUCTIONS}\n\n${VERIFY_INSTRUCTIONS}`
 
-const INSTRUCTIONS_BY_PROFILE: Record<CanaryLabMcpProfile, string> = {
+// Exported so `repair-guardrail.test.ts` can pin the repair rule ("fix
+// app/service code, not tests") on every profile that can drive a heal loop.
+export const INSTRUCTIONS_BY_PROFILE: Record<CanaryLabMcpProfile, string> = {
   repair: REPAIR_INSTRUCTIONS,
   verify: VERIFY_INSTRUCTIONS,
   author: AUTHOR_INSTRUCTIONS,

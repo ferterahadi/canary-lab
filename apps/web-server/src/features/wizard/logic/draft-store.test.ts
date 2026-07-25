@@ -14,6 +14,7 @@ import {
   paths,
   readDraft,
   reconcileInterruptedDrafts,
+  renameDraftFeature,
   slugifyFeatureName,
   transition,
   validateFeatureTarget,
@@ -379,5 +380,26 @@ describe('reconcileInterruptedDrafts (boot crash recovery)', () => {
     // An external draft is another process's live session — never touched.
     expect(readDraft(tmp, 'd-ext')?.status).toBe('generating')
     expect(readDraft(tmp, 'd-done')?.status).toBe('accepted')
+  })
+})
+
+describe('renameDraftFeature', () => {
+  it('re-homes drafts that target the renamed suite and reports the count', () => {
+    // A draft still authoring against the old name would apply into a suite
+    // that no longer exists, so a rename has to follow it.
+    createDraft(tmp, { ...baseInput, draftId: 'd1', featureName: 'old_name' })
+    createDraft(tmp, { ...baseInput, draftId: 'd2', featureName: 'old_name' })
+    createDraft(tmp, { ...baseInput, draftId: 'd3', featureName: 'other' })
+
+    expect(renameDraftFeature(tmp, 'old_name', 'new_name')).toBe(2)
+    expect(readDraft(tmp, 'd1')?.featureName).toBe('new_name')
+    expect(readDraft(tmp, 'd2')?.featureName).toBe('new_name')
+    expect(readDraft(tmp, 'd3')?.featureName).toBe('other')
+  })
+
+  it('is a no-op when no draft targets the old name', () => {
+    createDraft(tmp, { ...baseInput, draftId: 'd1', featureName: 'kept' })
+    expect(renameDraftFeature(tmp, 'absent', 'new_name')).toBe(0)
+    expect(readDraft(tmp, 'd1')?.featureName).toBe('kept')
   })
 })

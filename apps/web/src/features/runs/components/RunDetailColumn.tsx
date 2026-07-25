@@ -719,7 +719,7 @@ function PlaywrightPanel({
 function VerificationDiagnosticsPanel({ diagnostics }: { diagnostics: VerificationDiagnostics }) {
   return (
     <div className="border-b p-3 text-xs" style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)' }}>
-      <div className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+      <div className="mb-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-warning">
         {diagnostics.summary} Verify does not edit code or start a heal cycle.
       </div>
       {diagnostics.failedTests.length > 0 && (
@@ -892,17 +892,17 @@ function formatLifecycleDateTime(iso: string): string {
 }
 
 function alertClass(tone: 'info' | 'success' | 'warning' | 'error'): string {
-  if (tone === 'success') return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
-  if (tone === 'warning') return 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-  if (tone === 'error') return 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300'
-  return 'border-sky-500/40 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+  if (tone === 'success') return 'border-success/40 bg-success/10 text-success'
+  if (tone === 'warning') return 'border-warning/40 bg-warning/10 text-warning'
+  if (tone === 'error') return 'border-danger/40 bg-danger/10 text-danger'
+  return 'border-running/40 bg-running/10 text-running'
 }
 
 function dotClass(severity: RunLifecycleEvent['severity']): string {
-  if (severity === 'success') return 'bg-emerald-500'
-  if (severity === 'warning') return 'bg-amber-500'
-  if (severity === 'error') return 'bg-rose-500'
-  return 'bg-sky-500'
+  if (severity === 'success') return 'bg-success'
+  if (severity === 'warning') return 'bg-warning'
+  if (severity === 'error') return 'bg-danger'
+  return 'bg-running'
 }
 
 function formatRestartPlan(plan: NonNullable<RunLifecycleEvent['restartPlan']>): string {

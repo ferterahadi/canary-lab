@@ -443,7 +443,7 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
                     </div>
                     {rowError && (
                       <div
-                        className="mt-1 flex w-full items-center justify-between gap-2 rounded-md border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[10px] text-rose-700 dark:text-rose-300"
+                        className="mt-1 flex w-full items-center justify-between gap-2 rounded-md border border-danger/40 bg-danger/10 px-2 py-1 text-[10px] text-danger"
                         role="alert"
                       >
                         <span className="truncate">{rowError}</span>
@@ -863,8 +863,8 @@ function MenuItem({
   onClick: () => void
 }) {
   const color = variant === 'danger'
-    ? 'text-rose-500 hover:bg-rose-500/8 dark:text-rose-400 dark:hover:bg-rose-500/10'
-    : 'text-amber-600 hover:bg-amber-500/8 dark:text-amber-400 dark:hover:bg-amber-500/10'
+    ? 'text-danger hover:bg-danger/8 dark:hover:bg-danger/10'
+    : 'text-warning hover:bg-warning/8 dark:hover:bg-warning/10'
   return (
     <button
       type="button"
@@ -918,8 +918,8 @@ function ActionButton({
   onClick: (e: React.MouseEvent) => void
 }) {
   const tone = variant === 'danger'
-    ? 'text-rose-600/80 hover:bg-rose-500/12 hover:text-rose-600 dark:text-rose-400/80 dark:hover:text-rose-300'
-    : 'text-amber-600/80 hover:bg-amber-500/15 hover:text-amber-700 dark:text-amber-400/80 dark:hover:text-amber-300'
+    ? 'text-danger/80 hover:bg-danger/12 hover:text-danger'
+    : 'text-warning/80 hover:bg-warning/15 hover:text-warning'
   return (
     <span
       role="button"
@@ -982,8 +982,8 @@ function RetestIconButton({
       }}
       className={`inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
         spinning
-          ? 'cursor-wait text-blue-500/70 dark:text-blue-300/70'
-          : 'cursor-pointer text-blue-600/70 hover:bg-blue-500/12 hover:text-blue-600 dark:text-blue-400/70 dark:hover:text-blue-300'
+          ? 'cursor-wait text-accent/70'
+          : 'cursor-pointer text-accent/70 hover:bg-accent/12 hover:text-accent'
       }`}
     >
       <svg
@@ -1034,8 +1034,8 @@ function DeleteIconButton({
       }}
       className={`ml-0.5 inline-flex h-5 w-5 items-center justify-center rounded-md transition-colors duration-150 ${
         disabled
-          ? 'cursor-not-allowed text-zinc-400/50 dark:text-zinc-500/50'
-          : 'cursor-pointer text-rose-600/70 hover:bg-rose-500/12 hover:text-rose-600 dark:text-rose-400/70 dark:hover:text-rose-300'
+          ? 'cursor-not-allowed text-idle/50'
+          : 'cursor-pointer text-danger/70 hover:bg-danger/12 hover:text-danger'
       }`}
     >
       <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true">

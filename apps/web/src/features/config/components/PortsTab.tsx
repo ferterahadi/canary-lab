@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import * as api from '../../../shared/api/client'
 import type { ConfigValue, PortifyManifest } from '../../../shared/api/client'
-import { ConfirmModal, TrashIcon } from './atoms'
+import { ConfirmModal, Section, TrashIcon } from './atoms'
 import { SavedOverlayPanel } from '../../portify/components/SavedOverlayPanel'
 import { usePortify } from '../../portify/state/PortifyContext'
 import { isActivePortify, latestSavedWorkflowId } from '../../portify/state/portify-state'
 import { useInvalidationKey } from '../../../shared/state/invalidation'
+import { patchFileName } from '../../../../../../shared/portify-overlay'
 import {
   deriveRepoName,
   parseRepo,
@@ -120,6 +121,10 @@ export function PortsTab({
     : slotted.length === commands.length
     ? 'declared'
     : 'partial'
+  // Which services the saved overlay actually patched — used to fold the
+  // "stored in" patch path into each repo card header (verified state only),
+  // so the service list isn't enumerated a second time by SavedOverlayPanel.
+  const overlayRepoNames = new Set((overlay?.repos ?? []).map((r) => r.name))
 
   const removePortification = async (): Promise<void> => {
     setRemoving(true)
@@ -141,26 +146,21 @@ export function PortsTab({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        {/* Intro band: a glanceable Portified status + the primary action.
-            "Portified" = a saved overlay exists (overlay presence), not the
-            declared-slot count. Deliberately minimal — the slot table below and
-            its column ⓘ hints carry the detail. */}
-        <div
-          className="flex items-center justify-between gap-4 px-4 py-3"
-          style={{
-            borderBottom: '1px solid var(--border-default)',
-            borderLeft: `2px solid ${
-              activeHere ? 'var(--running)'
-              : bandState === 'verified' ? 'var(--success)'
-              : bandState === 'declared' ? 'color-mix(in srgb, var(--success) 45%, var(--border-default))'
-              : bandState === 'partial' ? 'var(--warning)'
-              : 'var(--border-default)'
-            }`,
-          }}
-        >
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+        {/* Same inset card stack every other config tab uses (General, Service,
+            Playwright): sibling Sections in a `flex flex-col gap-3 p-3` scroller,
+            so no block bleeds to the modal edge. */}
+        <div className="flex flex-col gap-3 p-3">
+        {/* Status card: a glanceable Portified status in the header (headline +
+            evidence dot) with the primary action in the header's right slot, and
+            the explanation + saved overlay in the body. "Portified" = a saved
+            overlay exists (overlay presence), not the declared-slot count.
+            The old 2px state-coloured left edge is gone — a card is rounded on
+            every side, and the dot + coloured headline already carry the state
+            (same call the test card made when it dropped its left accent). */}
+        <Section
+          title={
+            <span className="flex items-center gap-2">
               {/* Dot fill carries the evidence level: solid = machine-verified
                   (double-boot), hollow = declared in config, unproven. */}
               <span
@@ -180,7 +180,13 @@ export function PortsTab({
                     : bandState === 'verified' ? '0 0 8px color-mix(in srgb, var(--success) 40%, transparent)' : 'none',
                 }}
               />
-              <span style={{ fontSize: 13, fontWeight: 600, color: activeHere ? 'var(--running)' : bandState === 'verified' ? 'var(--success)' : 'var(--text-primary)' }}>
+              {/* No size/weight of its own — it inherits `Section`'s title type
+                  (12px / medium) so this card heads the same as every other
+                  config card (Envsets' "Env & slot", General's "Identity").
+                  Only the colour is overridden, because that carries the state.
+                  The header row's height is set by the taller right-slot button,
+                  so the type change moves nothing. */}
+              <span style={{ color: activeHere ? 'var(--running)' : bandState === 'verified' ? 'var(--success)' : 'var(--text-primary)' }}>
                 {activeHere
                   ? (activeHere.status === 'ready-to-save' ? 'Portify — ready to save' : 'Portify in progress')
                   : bandState === 'verified' ? 'Portified — boots concurrently'
@@ -188,24 +194,10 @@ export function PortsTab({
                   : bandState === 'partial' ? `Partially injectable — ${slotted.length} of ${commands.length} start commands have slots`
                   : 'Not injectable — no port slots declared'}
               </span>
-            </div>
-            {/* Active workflow (started here, from a flight, or by an agent)
-                owns the band; every resting state carries its own explanation. */}
-            <p className="mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 560 }}>
-              {activeHere
-                ? (activeHere.status === 'ready-to-save'
-                  ? 'The rewrite is verified and parked for review. Open it to review the diff and save the overlay.'
-                  : 'A port-ification workflow is running for this feature — it may have been started from a flight or by an agent. Open it to follow along.')
-                : bandState === 'verified'
-                ? 'Agent-rewritten and double-boot verified. Applied as an overlay on each run — the repo itself is never modified.'
-                : bandState === 'declared'
-                ? 'Every start command declares a port slot; Canary injects a free port through its env var at boot. Declared, not agent-verified — proven live whenever the feature boots twice.'
-                : bandState === 'partial'
-                ? 'Commands without a slot keep their fixed ports — two boots would clash there. Portify can cover the remaining commands.'
-                : 'Concurrent boots would clash on fixed ports. Portify rewrites listeners to read injected ports and saves the diff as an overlay — the repo itself is never modified.'}
-            </p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2 self-start">
+            </span>
+          }
+          right={
+            <div className="flex shrink-0 items-center gap-2">
             {/* An active workflow owns the whole action area: one button that
                 opens it in the wizard (follow progress / review & save). The
                 start/remove actions return once it settles. */}
@@ -286,51 +278,87 @@ export function PortsTab({
                 Portify
               </button>
             )}
-          </div>
-        </div>
-
-        {/* Verified → the saved overlay renders inline (the diff, the
-            open-in-editor control, the per-service stored-in + how-applied
-            rows, and the double-boot proof). Only rendered when a saved record
-            backs it — a pruned record leaves the band + slot cards as before. */}
-        {bandState === 'verified' && (overlayLoading || overlay) && (
-          <div className="px-4 py-3" style={{ borderBottom: '1px solid var(--border-default)' }}>
-            {overlay
-              ? <SavedOverlayPanel manifest={overlay} />
-              : <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading overlay…</div>}
-          </div>
-        )}
-
-        {/* The slot explainer — what a slot IS, and where slots live
-            (feature.config.cjs — also the escape hatch for editing or removing
-            hand-declared ones). Skipped in the verified state: the overlay panel
-            above already explains how ports get injected. */}
-        {bandState !== 'verified' && (
-          <p className="px-4 pt-3 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 640 }}>
-            A slot is a port Canary picks free at each boot and hands the service through its env var; {'${port.<name>}'} resolves to that number in commands and health checks. Slots are declared in feature.config.cjs — by you, or by Portify.
+            </div>
+          }
+        >
+          {/* Active workflow (started here, from a flight, or by an agent) owns
+              the card; every resting state carries its own explanation. */}
+          <p className="text-[11.5px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 560 }}>
+            {activeHere
+              ? (activeHere.status === 'ready-to-save'
+                ? 'The rewrite is verified and parked for review. Open it to review the diff and save the overlay.'
+                : 'A port-ification workflow is running for this feature — it may have been started from a flight or by an agent. Open it to follow along.')
+              : bandState === 'verified'
+              ? 'Rewritten by the agent, applied as an overlay each run.'
+              : bandState === 'declared'
+              ? 'Every start command declares a port slot; Canary injects a free port through its env var at boot. Declared, not agent-verified — proven live whenever the feature boots twice.'
+              : bandState === 'partial'
+              ? 'Commands without a slot keep their fixed ports — two boots would clash there. Portify can cover the remaining commands.'
+              : 'Concurrent boots would clash on fixed ports. Portify rewrites listeners to read injected ports and saves the diff as an overlay — the repo itself is never modified.'}
           </p>
-        )}
 
-        <div className="flex flex-col gap-3 px-4 py-3">
+          {/* Verified → the saved overlay renders in this same card, under the
+              status it belongs to (the diff, the open-in-editor control, the
+              stored-in path folded into the slot cards' headers, and the
+              double-boot proof). Only rendered when a saved record backs it — a
+              pruned record leaves the status + slot cards as before. */}
+          {bandState === 'verified' && (overlayLoading || overlay) && (
+            <div className="mt-3">
+              {overlay
+                ? <SavedOverlayPanel manifest={overlay} collapsibleDiff showServiceTable={false} />
+                : <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Loading overlay…</div>}
+            </div>
+          )}
+        </Section>
+
+        <Section title="Port slots" bodyClassName="px-3.5 py-3 flex flex-col gap-3">
+          {/* The slot explainer — what a slot IS, and where slots live
+              (feature.config.cjs — also the escape hatch for editing or removing
+              hand-declared ones). Lives inside the card it explains. Skipped in
+              the verified state: the status card's overlay panel above already
+              explains how ports get injected. */}
+          {bandState !== 'verified' && (
+            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)', maxWidth: 640 }}>
+              A slot is a port Canary picks free at each boot and hands the service through its env var; {'${port.<name>}'} resolves to that number in commands and health checks. Slots are declared in feature.config.cjs — by you, or by Portify.
+            </p>
+          )}
+
           {repos.length === 0 && (
             <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
               No services configured. Add services in the Service tab first.
             </div>
           )}
 
-          {repos.map((repo, ri) => (
+          {repos.map((repo, ri) => {
+            const repoName = repo.name || deriveRepoName(repo.localPath, repo.cloneUrl) || '(unnamed service)'
+            // Show where this service's patch lives right in the header, but only
+            // when the overlay actually patched it (verified state) — folds in
+            // what SavedOverlayPanel's per-service table used to carry.
+            const patchFile = bandState === 'verified' && overlayRepoNames.has(repoName)
+              ? patchFileName(repoName)
+              : null
+            return (
             <div
               key={ri}
               className="rounded-md"
               style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-default)' }}
             >
               <header
-                className="flex items-center gap-2 px-3 py-2"
+                className="flex items-center justify-between gap-2 px-3 py-2"
                 style={{ borderBottom: '1px solid var(--border-default)' }}
               >
                 <span className="truncate text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                  {repo.name || deriveRepoName(repo.localPath, repo.cloneUrl) || '(unnamed service)'}
+                  {repoName}
                 </span>
+                {patchFile && (
+                  <span
+                    className="shrink-0 truncate text-[10px]"
+                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', maxWidth: '55%' }}
+                    title="Stored inside your canary workspace — not the product repo"
+                  >
+                    ↳ portify/{patchFile}
+                  </span>
+                )}
               </header>
 
               <div className="flex flex-col gap-3 px-3 py-2.5">
@@ -364,9 +392,10 @@ export function PortsTab({
                 ))}
               </div>
             </div>
-          ))}
+            )
+          })}
+        </Section>
         </div>
-
       </div>
 
       <ConfirmModal

@@ -159,16 +159,18 @@ export function EnvsetsTab({ feature }: { feature: string }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div
-        className="px-4 py-2 text-[11px]"
-        style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-default)' }}
-      >
-        Envsets temporarily replace environment files in the linked repos during a run. Pick an env, then edit each slot's values.
-      </div>
-      <div
-        className="flex flex-col gap-1 px-4 py-3"
-        style={{ borderBottom: '1px solid var(--border-default)' }}
-      >
+      {/* The env/slot pickers live in a Section card like every other config tab
+          (General, Service, Playwright), and the intro caption sits inside the
+          card it explains instead of as a full-bleed strip at the modal edge.
+          `px-3 pt-3` (not the usual `p-3` scroller) because this block stays put
+          while SlotEditor below owns the scrolling — its own `p-3` supplies the
+          12px gap between the two cards. */}
+      <div className="px-3 pt-3">
+      <Section title="Env & slot">
+        <p className="mb-2.5 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+          Envsets temporarily replace environment files in the linked repos during a run. Pick an env, then edit each slot's values.
+        </p>
+      <div className="flex flex-col gap-1">
         {index.envs.length === 0 || !envObj ? (
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
@@ -277,8 +279,10 @@ export function EnvsetsTab({ feature }: { feature: string }) {
           </>
         )}
       </div>
+      </Section>
+      </div>
       {error && (
-        <div className="px-4 py-1.5 text-xs" style={{ color: 'var(--danger)' }}>{error}</div>
+        <div className="px-4 pt-2 text-xs" style={{ color: 'var(--danger)' }}>{error}</div>
       )}
       {envObj && slotName ? (
         <SlotEditor

@@ -263,6 +263,12 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('dr_abc123')
   })
 
+  it('reads the draft dialog with no draft id as a null qualifier', () => {
+    // A hand-typed or truncated link can open the dialog without naming a draft.
+    window.history.replaceState(null, '', '/?dialog=draft')
+    expect(readPersistedView()).toEqual(view({ dialog: 'draft', draft: null }))
+  })
+
   it('drops a draft param found in the URL when the dialog is not draft', () => {
     window.history.replaceState(null, '', '/?feature=checkout&dialog=config&draft=dr_stale')
     expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))

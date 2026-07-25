@@ -1,9 +1,13 @@
 ---
 name: cl_locate-agent-session-logs
-description: Use whenever you touch how Canary finds, reads, or builds a path to a claude/codex CLI session log (the JSONL transcript that feeds AgentSessionView), or when a user reports an agent view is "blank", "stuck", "shows nothing", or "only works on my machine". Covers where each CLI stores its logs, the env-aware config-dir resolvers (CLAUDE_CONFIG_DIR / CODEX_HOME), the one-home rule for path-building, and the boot-time shell hydration that keeps PTY + headless + read-side in agreement. Consult before recomputing any `~/.claude/projects/...` or `~/.codex/sessions/...` path by hand. NOT for designing what an agent viewer shows (that's cl_surfacing-agent-work), and note MCP external runs have no session log at all — a "blank" ExternalXXXPanel is not a path bug.
+description: Use whenever you touch how Canary finds, reads, or builds a path to a claude/codex CLI session log (the JSONL behind AgentSessionView), before recomputing any ~/.claude/projects/... or ~/.codex/sessions/... path by hand, or when an agent view is "blank" / "stuck" / "only works on my machine".
 ---
 
 # Canary Lab — Locating Agent Session Logs
+
+Not for designing what an agent viewer *shows* → `cl_surfacing-agent-work`. And note
+MCP external runs have no session log at all — a blank `ExternalXXXPanel` is not a
+path bug.
 
 Canary never scrapes a terminal to display agent output. Each agent CLI
 **writes its own JSONL transcript to disk**; Canary just needs the *path*, then
@@ -121,5 +125,5 @@ env already carries the vars (the common case — no shell spawned).
 - `agent-session-log.test.ts` and `agent-config-env.test.ts` cover the resolvers
   + hydration; run them plus `scripts/ui-command.test.ts` for the boot wiring.
 - `agent-session-log.ts` / `ui-command.ts` are `apps/web-server/**` + `scripts/`
-  changes → only take effect after the user's `canary-apply` cycle
-  (`cl_verify-changes`).
+  changes → only take effect after the `canary-apply` cycle (`cl_verify-changes`
+  Tier 3).

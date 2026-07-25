@@ -1,9 +1,12 @@
 ---
 name: cl_ws-driven-state
-description: Use whenever you add or modify a server-side mutation (new route, background job completion, MCP tool write) that changes something visible in the UI — feature list, badges, coverage icons, run states, anything. Also use when a user says "I had to refresh to see X" or "the badge didn't update until I reloaded". The rule: every mutation that affects UI state must emit a WorkspaceEvent so the client updates live. No broadcast event → stale UI, always. If the server already emits the event and only the client fails to react to it, use cl_live-state-sync instead.
+description: Use whenever you add or modify a server-side mutation (route, background job completion, MCP tool write) that changes something visible in the UI, or when a user says "I had to refresh to see X". Every mutation affecting UI state must emit a WorkspaceEvent.
 ---
 
 # WS-Driven State — Every Mutation Emits an Event
+
+If the server already emits the event and only the client fails to react →
+`cl_live-state-sync`.
 
 The pattern the project enforces: **UI state is never polled and never requires a
 manual refresh.** When the server mutates something visible, it emits a

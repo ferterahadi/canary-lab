@@ -258,8 +258,10 @@ async function resetStagesForRestart(
   entry: FlightStageKey,
   deps: FlightConductorDeps,
 ): Promise<void> {
+  // `entry` is always a real stage key here: `checkStageEntry` rejects an
+  // unknown `fromStage` before any restart path reaches this, so the index
+  // lookup cannot miss.
   const startIdx = FLIGHT_STAGE_KEYS.indexOf(entry)
-  if (startIdx < 0) return
   const flightDir = deps.store.flightDir(prior.flightId)
   const ctx: StageContext = {
     manifest: () => prior,

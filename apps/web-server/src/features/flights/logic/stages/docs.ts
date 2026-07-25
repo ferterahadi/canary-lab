@@ -100,6 +100,45 @@ function git(repo: string, args: string[]): string | null {
   }
 }
 
+const MODE_LABEL = {
+  'collect-repo-docs': 'collect repo docs',
+  'infer-from-diff': 'infer from diff',
+} as const
+
+/** Prose form of an attempt, for `message` (CLI/MCP + older clients). The
+ *  agent's reason is already a sentence, so it's emitted verbatim rather
+ *  than wrapped in punctuation we'd have to guess at — the previous version
+ *  appended a period and produced "…in either repo..".
+ *
+ *  Module-scoped and exported because `reason` is optional on the persisted
+ *  shape: a record written by an older build can carry `empty` with no reason,
+ *  which today's collector never produces, so the fallback is only reachable
+ *  (and only assertable) from here. */
+export function describeAttempt(attempt: PrdSourceAttempt): string {
+  if (attempt.outcome === 'no-diff') return 'No meaningful diff vs the base branch was found.'
+  if (attempt.outcome === 'no-output') return 'The agent did not produce a requirements doc.'
+  const reason = attempt.reason?.trim() ?? ''
+  if (!reason) return 'The agent searched and found nothing relevant.'
+  return `The agent found nothing relevant: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}`
+}
+
+/** Log form of a rejected attempt — deliberately NOT `describeAttempt`.
+ *  The activity band is append-only, so a rejected attempt sits above
+ *  whatever ran next with nothing marking it as finished business: three
+ *  bare "found nothing relevant" lines above a healthy distillation read as
+ *  a live failure. So each line names its attempt, states the verdict as
+ *  terminal, and says what the flight did about it (re-parked) plus the two
+ *  ways out — answering "what happens next?" in the line itself. */
+export function attemptLogLine(attempt: PrdSourceAttempt): string {
+  const why =
+    attempt.outcome === 'no-diff'
+      ? 'no meaningful diff vs the base branch in any repo'
+      : attempt.outcome === 'no-output'
+        ? 'the agent produced no requirements doc'
+        : attempt.reason?.trim() || 'the agent searched and found nothing relevant'
+  return `[docs] agent attempt (${MODE_LABEL[attempt.mode]}) came back empty — ${why.replace(/[.\s]+$/, '')}. Back to your choice: add docs yourself, or retry with feedback.\n`
+}
+
 function diffVsBase(repo: string, base: string): string | null {
   const current = git(repo, ['rev-parse', '--abbrev-ref', 'HEAD'])
   if (!current || current === base) return null
@@ -116,19 +155,22 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     return result.ok ? null : result.error
   }
 
-  const gather = (ctx: StageContext, source: string): StageOutcome => {
+  // Only ever called with `auto` (the yolo path) or `description-only` (the
+  // checkpoint choice). The legacy `use-repo-docs` source is gone — that choice
+  // now degrades to the collect-repo-docs AGENT path, see onCheckpointResponse.
+  const gather = (ctx: StageContext, source: 'auto' | 'description-only'): StageOutcome => {
     const m = ctx.manifest()
     const featureDir = featureDirFor(deps, m.feature)
     const written: string[] = []
+    let resolved: string = source
 
-    if (source === 'use-repo-docs' || source === 'auto') {
+    if (source === 'auto') {
       for (const { repo, file } of findRepoDocs(m.repoPaths)) {
         const rel = `${path.basename(repo)}-${path.basename(file)}`.toLowerCase()
         const err = write(m.feature, rel, fs.readFileSync(file, 'utf-8'))
         if (!err) written.push(rel)
       }
-      if (written.length > 0) source = 'repo-docs'
-      else if (source === 'use-repo-docs') ctx.appendLog('[docs] no requirement-bearing repo docs found — falling back\n')
+      if (written.length > 0) resolved = 'repo-docs'
     }
 
     if (written.length === 0 && source !== 'description-only') {
@@ -144,21 +186,21 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
           if (!err) written.push(rel)
         }
       }
-      if (written.length > 0) source = 'diff-vs-base'
+      if (written.length > 0) resolved = 'diff-vs-base'
     }
 
     if (written.length === 0) {
       const err = write(m.feature, 'description.md', `# ${m.feature}\n\n${m.description}\n`)
       if (err) return { kind: 'failed', error: err }
       written.push('description.md')
-      source = 'description-only'
+      resolved = 'description-only'
     }
 
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
-    ctx.appendLog(`[docs] ${written.length} doc(s) from ${source}\n`)
+    ctx.appendLog(`[docs] ${written.length} doc(s) from ${resolved}\n`)
     const docs = userDocs(featureDir)
     if (docs.length === 0) return { kind: 'failed', error: 'no docs landed in features/<f>/docs/' }
-    return { kind: 'done', evidence: { source, docs } }
+    return { kind: 'done', evidence: { source: resolved, docs } }
   }
 
   /** Rung 0.5 — symlink local docs the intent references into docs/. */
@@ -180,39 +222,6 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     return linked
   }
 
-  /** Prose form of an attempt, for `message` (CLI/MCP + older clients). The
-   *  agent's reason is already a sentence, so it's emitted verbatim rather
-   *  than wrapped in punctuation we'd have to guess at — the previous version
-   *  appended a period and produced "…in either repo..". */
-  const describeAttempt = (attempt: PrdSourceAttempt): string => {
-    if (attempt.outcome === 'no-diff') return 'No meaningful diff vs the base branch was found.'
-    if (attempt.outcome === 'no-output') return 'The agent did not produce a requirements doc.'
-    const reason = attempt.reason?.trim() ?? ''
-    if (!reason) return 'The agent searched and found nothing relevant.'
-    return `The agent found nothing relevant: ${/[.!?]$/.test(reason) ? reason : `${reason}.`}`
-  }
-
-  const MODE_LABEL = {
-    'collect-repo-docs': 'collect repo docs',
-    'infer-from-diff': 'infer from diff',
-  } as const
-
-  /** Log form of a rejected attempt — deliberately NOT `describeAttempt`.
-   *  The activity band is append-only, so a rejected attempt sits above
-   *  whatever ran next with nothing marking it as finished business: three
-   *  bare "found nothing relevant" lines above a healthy distillation read as
-   *  a live failure. So each line names its attempt, states the verdict as
-   *  terminal, and says what the flight did about it (re-parked) plus the two
-   *  ways out — answering "what happens next?" in the line itself. */
-  const attemptLogLine = (attempt: PrdSourceAttempt): string => {
-    const why =
-      attempt.outcome === 'no-diff'
-        ? 'no meaningful diff vs the base branch in any repo'
-        : attempt.outcome === 'no-output'
-          ? 'the agent produced no requirements doc'
-          : attempt.reason?.trim() || 'the agent searched and found nothing relevant'
-    return `[docs] agent attempt (${MODE_LABEL[attempt.mode]}) came back empty — ${why.replace(/[.\s]+$/, '')}. Back to your choice: add docs yourself, or retry with feedback.\n`
-  }
 
   /** Park on the two-path fork. `attempt` carries a prior collector run's
    *  outcome so a failed collection re-parks with the reason in the user's

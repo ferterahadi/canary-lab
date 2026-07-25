@@ -65,4 +65,23 @@ describe('detectRepoPushRights', () => {
     expect(r.pushable).toBe(false)
     expect(r.reason).toContain('Not Found')
   })
+
+  it('reads the reason off stdout when gh failed without writing to stderr', async () => {
+    const r = await detectRepoPushRights('o', 'r', async () => ({ code: 1, stdout: '  gh: Bad credentials\n', stderr: '' }))
+    expect(r).toEqual({ pushable: false, reason: 'gh: Bad credentials' })
+  })
+
+  it('supplies its own reason when gh failed silently on both streams', async () => {
+    const r = await detectRepoPushRights('o', 'r', async () => ({ code: 1, stdout: '', stderr: '' }))
+    expect(r).toEqual({ pushable: false, reason: 'repo not accessible under the signed-in account' })
+  })
+
+  it('reports only the first non-blank line of a multi-line gh error', async () => {
+    const r = await detectRepoPushRights('o', 'r', async () => ({
+      code: 1,
+      stdout: '',
+      stderr: '\n\ngh: Not Found (HTTP 404)\nTry authenticating with: gh auth login\n',
+    }))
+    expect(r.reason).toBe('gh: Not Found (HTTP 404)')
+  })
 })

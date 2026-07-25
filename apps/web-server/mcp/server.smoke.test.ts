@@ -150,7 +150,13 @@ const FULL_ONLY_TOOLS = [
 ]
 
 // lifecycle = everything except portify; full = lifecycle + portify.
+// Mirrors the composition in tools.ts exactly — REPAIR/VERIFY included. They were
+// omitted here and it happened to hold only because every repair/verify tool also
+// appears in another array; the first repair-only tool would have broken the count
+// with no hint as to why.
 const LIFECYCLE_TOOLS = uniqueSorted([
+  ...REPAIR_TOOLS,
+  ...VERIFY_TOOLS,
   ...AUTHOR_TOOLS,
   ...COVERAGE_TOOLS,
   ...EXPORT_TOOLS,

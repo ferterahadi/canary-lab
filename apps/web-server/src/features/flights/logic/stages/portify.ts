@@ -302,5 +302,6 @@ function errorBody(resp: { json: () => unknown }): string | null {
 }
 
 function firstLine(s: string): string {
-  return s.split('\n', 1)[0] ?? s
+  // `split` always yields at least one element, so index 0 is never undefined.
+  return s.split('\n', 1)[0]
 }

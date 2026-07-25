@@ -6,7 +6,8 @@ import { PanelCard } from '../../../shared/ui/PanelCard'
 import { RunRow } from '../../runs/components/RunRow'
 import { FixesCapturedPanel } from '../../runs/components/FixesCapturedPanel'
 import { clientLabel } from '../../runs/components/external-client-branding'
-import { FactTile, checkpointOptionLabel, healEndLine, healEndShort, type StageFact } from './stage-meta'
+import { FailingTests } from './FailingTests'
+import { FactTile, STAGE_COLUMN, checkpointOptionLabel, healEndLine, healEndShort, type StageFact } from './stage-meta'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
 // three-to-four times: the "At a glance" facts card, the RunRepairSummary's own
@@ -115,7 +116,7 @@ export function TestRunPanel({
   const report = (err: unknown): void => onError?.(err instanceof Error ? err.message : String(err))
 
   return (
-    <div className="flex w-full max-w-[76ch] flex-col gap-3" data-testid="test-run">
+    <div className={`flex flex-col gap-3 ${STAGE_COLUMN}`} data-testid="test-run">
       <PanelCard kicker="Latest run" testId="test-run-hero">
         <ul className="m-0 list-none p-0">
           <RunRow
@@ -139,44 +140,10 @@ export function TestRunPanel({
           </div>
         )}
 
-        {failing.length > 0 && (
-          <div className="mt-2.5 min-w-0" data-testid="run-hero-failing">
-            <h3 className="cl-rubric mb-1">Failing tests</h3>
-            <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
-              {failing.slice(0, 5).map((f, i) => {
-                // Failed entries are often location-only, with a long ABSOLUTE
-                // path (…/features/x/e2e/foo.spec.ts:199). Show the readable tail
-                // (last two segments + line) truncated, full path on hover — the
-                // row must never push the hero wider than its column.
-                const hasName = Boolean(f.name) && !f.name.startsWith('/')
-                const loc = shortLocation(f.location ?? (f.name?.startsWith('/') ? f.name : undefined))
-                return (
-                  <li key={`${f.name}-${i}`} className="flex min-w-0 items-baseline gap-2 text-[11.5px]">
-                    <span
-                      className="min-w-0 flex-1 truncate"
-                      style={{ color: 'var(--text-primary)' }}
-                      title={f.name || f.location}
-                    >
-                      {hasName ? f.name : loc}
-                    </span>
-                    {hasName && loc && (
-                      <span
-                        className="max-w-[45%] shrink-0 truncate"
-                        style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
-                        title={f.location}
-                      >
-                        {loc}
-                      </span>
-                    )}
-                  </li>
-                )
-              })}
-              {failing.length > 5 && (
-                <li className="text-[11px]" style={{ color: 'var(--text-muted)' }}>+{failing.length - 5} more</li>
-              )}
-            </ul>
-          </div>
-        )}
+        {/* What failed, and why. Every failure is expandable to its assertion
+            error + snippet — the summary has carried that all along and the
+            old truncated-slug list threw it away. */}
+        <FailingTests failing={failing} knownTests={summary?.knownTests} />
 
         <RunControls runId={runId} status={status} active={active} onError={report} />
 
@@ -184,7 +151,7 @@ export function TestRunPanel({
             is no Canary transcript to embed — an honest status line, with the
             full picture one drill-through away on the run detail. */}
         {manifest?.healMode === 'external' && (
-          <div data-testid="run-hero-external" className="mt-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          <div data-testid="run-hero-external" className="mt-2 text-[11px] text-muted">
             {externalHealNote(manifest.externalHealSession)}
           </div>
         )}
@@ -217,7 +184,7 @@ export function TestRunPanel({
       {earlier.length > 0 && (
         <div data-testid="earlier-runs">
           <h3 className="cl-rubric mb-1">Earlier runs</h3>
-          <ul className="m-0 flex list-none flex-col gap-1 rounded border p-1" style={{ borderColor: 'var(--border-default)' }}>
+          <ul className="m-0 flex list-none flex-col gap-1 rounded border border-line p-1">
             {earlier.map((r) => (
               <RunRow key={r.runId} run={r} detail={undefined} showPorts={false} onSelect={(run) => onOpenRun?.(feature, run.runId)} />
             ))}

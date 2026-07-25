@@ -191,4 +191,35 @@ describe('DirtySpecStore', () => {
     await store.recompute('checkout', featureDir)
     expect(events).toEqual([])
   })
+
+  it('renameFeature() moves the record to the new feature id', async () => {
+    // Here the feature name IS the record id, so a rename re-homes the record
+    // directory as well as the field — the dirty cue has to follow the suite.
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    expect(store.get('checkout')).not.toBeNull()
+
+    expect(store.renameFeature('checkout', 'checkout_v2')).toBe(1)
+    expect(store.get('checkout')).toBeNull()
+    const moved = store.get('checkout_v2')
+    expect(moved?.featureId).toBe('checkout_v2')
+    expect(moved?.id).toBe('checkout_v2')
+  })
+
+  it('renameFeature() is a no-op when no record matches', async () => {
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    expect(store.renameFeature('absent', 'other')).toBe(0)
+    expect(store.get('checkout')?.featureId).toBe('checkout')
+  })
+
+  it('remove() drops the record', async () => {
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    store.remove('checkout')
+    expect(store.get('checkout')).toBeNull()
+  })
 })

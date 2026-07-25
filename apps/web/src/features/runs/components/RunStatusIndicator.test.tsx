@@ -9,11 +9,11 @@ import type { RunStatus } from '../../../shared/api/types'
 
 describe('RunStatusIndicator', () => {
   it.each([
-    ['passed',  'bg-emerald-500'],
-    ['failed',  'bg-rose-500'],
-    ['aborted', 'bg-zinc-400'],
-    ['running', 'bg-sky-500'],
-    ['healing', 'bg-amber-500'],
+    ['passed',  'bg-success'],
+    ['failed',  'bg-danger'],
+    ['aborted', 'bg-idle'],
+    ['running', 'bg-running'],
+    ['healing', 'bg-warning'],
   ] as const)('renders %s with dot class %s', (status, dotClass) => {
     const html = renderToStaticMarkup(<RunStatusIndicator status={status as RunStatus} />)
     expect(html).toContain(dotClass)
@@ -34,18 +34,18 @@ describe('RunStatusIndicator', () => {
   it('renders nothing button-shaped: no border, no background pill', () => {
     const html = renderToStaticMarkup(<RunStatusIndicator status="failed" />)
     expect(html).not.toMatch(/\bborder(-|"|\s)/)
-    expect(html).not.toMatch(/\bbg-rose-500\/15\b/) // old badge fill
+    expect(html).not.toMatch(/\bbg-danger\/15\b/) // old badge fill
   })
 
   it('falls back to the aborted palette for an unknown status (defensive)', () => {
     const html = renderToStaticMarkup(<RunStatusIndicator status={'mystery' as RunStatus} />)
-    expect(html).toContain('bg-zinc-400')
+    expect(html).toContain('bg-idle')
   })
 
   it('renders a held boot run as teal "services up" (not sky "running")', () => {
     const html = renderToStaticMarkup(<RunStatusIndicator status="running" executionType="boot" />)
-    expect(html).toContain('bg-cyan-500')      // teal booted dot, not bg-sky-500
-    expect(html).not.toContain('bg-sky-500')
+    expect(html).toContain('bg-boot')      // teal booted dot, not bg-running
+    expect(html).not.toContain('bg-running')
     expect(html).toContain('services up')       // label override
     expect(html).toContain('cl-dot-breathe')    // calm breathe, not animate-pulse
     expect(html).not.toContain('animate-ping')  // no urgent halo
@@ -53,7 +53,7 @@ describe('RunStatusIndicator', () => {
 
   it('renders a stopped boot run as a neutral "stopped"', () => {
     const html = renderToStaticMarkup(<RunStatusIndicator status="aborted" executionType="boot" />)
-    expect(html).toContain('bg-zinc-400')
+    expect(html).toContain('bg-idle')
     expect(html).toContain('stopped')
   })
 })

@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import type { VerificationConfig, VerificationTarget } from '../../../shared/api/types'
-import { CloseIcon, useEscapeToClose } from '../../config/components/atoms'
+import { Modal, Section } from '../../config/components/atoms'
+
+// The dialog is built from the app's shared dialog chrome — `Modal` (backdrop,
+// eyebrow + title header, scrollable body, pinned footer) and `Section` (titled
+// bordered block) — so it reads as the same tool as the config editor and the
+// flight launcher. It used to carry its own `cl-verify-*` skin (gradient top
+// rail, tinted header wash, shadowed slab cards, green mode chips), which was
+// the only surface in the app styled that way.
 
 interface VerificationDialogProps {
   feature: string
@@ -41,6 +48,12 @@ export function VerificationDialog({
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // What the CURRENTLY selected envset seeded into the form — the baseline
+  // `reseedTargetUrls` compares against to tell "still the envset's value" from
+  // "the user's own". A ref, not state: the re-seed reads it inside a setState
+  // updater, and writing it must not re-fire the effect that maintains it.
+  const seededUrls = useRef<Record<string, string>>({})
+
   const selectedConfig = useMemo(
     () => configs.find((config) => config.id === selectedConfigId) ?? null,
     [configs, selectedConfigId],
@@ -69,10 +82,13 @@ export function VerificationDialog({
         setName(first.name)
         setPlaywrightEnvsetId(first.playwrightEnvsetId)
         setTargetUrls(first.targetUrls)
+        // Saved values, not an envset seed — see `selectConfig`.
+        seededUrls.current = {}
       } else {
         setSelectedConfigId(null)
         setName('')
         setTargetUrls(targetIndex.targetUrls)
+        seededUrls.current = targetIndex.targetUrls
       }
     }).catch((err) => {
       if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load verification settings')
@@ -101,6 +117,15 @@ export function VerificationDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey])
 
+  // `envs` arrives with the parent's async feature list, so the initial state is
+  // '' on first render. A `<select>` whose React value matches no option still
+  // DISPLAYS its first one, so the dialog claimed "local" while actually holding
+  // no envset — and the seeded URLs came from the server's no-envset fallback,
+  // which is not the same map. Adopt the first envset the moment the list lands.
+  useEffect(() => {
+    if (!playwrightEnvsetId && envs.length > 0) setPlaywrightEnvsetId(envs[0])
+  }, [envs, playwrightEnvsetId])
+
   useEffect(() => {
     if (!playwrightEnvsetId) return
     let cancelled = false
@@ -109,7 +134,17 @@ export function VerificationDialog({
         if (cancelled) return
         setTargets(targetIndex.targets)
         setDefaultTargetUrls(targetIndex.targetUrls)
-        setTargetUrls((prev) => ({ ...targetIndex.targetUrls, ...prev }))
+        // Switching envset actually swaps its URLs in. The old merge kept every
+        // previous value (`{...next, ...prev}`), so after the first load the
+        // picker only ever changed the target LIST — picking `staging` left the
+        // localhost URLs sitting there.
+        //
+        // Read the outgoing seed into a local FIRST: `setTargetUrls`'s updater
+        // runs later, during render, so advancing the ref before the call would
+        // hand the updater the new seed as the "previous" one and match nothing.
+        const previousSeed = seededUrls.current
+        seededUrls.current = targetIndex.targetUrls
+        setTargetUrls((prev) => reseedTargetUrls(prev, previousSeed, targetIndex.targetUrls))
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -120,6 +155,9 @@ export function VerificationDialog({
     setName(config.name)
     setPlaywrightEnvsetId(config.playwrightEnvsetId)
     setTargetUrls(config.targetUrls)
+    // A saved config's URLs are somebody's deliberate values, not an envset's
+    // seed — so a later envset switch must never overwrite them.
+    seededUrls.current = {}
     setError(null)
   }, [])
 
@@ -127,6 +165,7 @@ export function VerificationDialog({
     setSelectedConfigId(null)
     setName('')
     setTargetUrls(defaultTargetUrls)
+    seededUrls.current = defaultTargetUrls
     setError(null)
   }, [defaultTargetUrls])
 
@@ -136,7 +175,7 @@ export function VerificationDialog({
       return
     }
     if (!playwrightEnvsetId) {
-      setError('Choose a Playwright envset.')
+      setError('Choose an envset.')
       return
     }
     setSaving(true)
@@ -166,7 +205,7 @@ export function VerificationDialog({
 
   const start = useCallback(async (): Promise<void> => {
     if (!playwrightEnvsetId) {
-      setError('Choose a Playwright envset.')
+      setError('Choose an envset.')
       return
     }
     setStarting(true)
@@ -185,166 +224,206 @@ export function VerificationDialog({
     }
   }, [onClose, onStart, playwrightEnvsetId, selectedConfigId, targetUrls])
 
-  useEscapeToClose(onClose)
-
   return (
-    <div className="cl-modal-backdrop absolute inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      <div className="cl-modal cl-verify-modal flex max-h-[90vh] flex-col overflow-hidden p-0">
-        <div className="cl-verify-header flex items-start justify-between gap-4 px-5 py-4 sm:px-6">
-          <div className="min-w-0">
-            <div className="cl-rubric">Deployment check</div>
-            <h2 className="mt-1 truncate text-base font-semibold" style={{ color: 'var(--text-primary)' }}>Verify deployment</h2>
-            <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2">
-              <span className="truncate text-xs" style={{ color: 'var(--text-muted)' }}>{feature}</span>
-              <span className="cl-verify-mode-chip">No local boot</span>
-              <span className="cl-verify-mode-chip">No healing</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close verify deployment"
-            className="cl-icon-button h-8 w-8 shrink-0"
-          >
-            <CloseIcon size={14} />
-          </button>
+    <Modal
+      open
+      onClose={onClose}
+      eyebrow="Verify deployment"
+      title={feature}
+      // The two mode facts used to be green chips in the header. Green means
+      // "verified" everywhere else in the app, and these say what verification
+      // does NOT do — so they belong in the purpose line, as prose.
+      description="Health-checks a deployed environment, then runs the suite against it. No local boot, no healing."
+      width={580}
+      testId="verification-dialog"
+      footer={(
+        <div className="flex w-full items-center justify-between gap-3">
+          <span className="min-w-0 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            {selectedConfig
+              ? <>Using <span style={{ color: 'var(--text-primary)' }}>{selectedConfig.name}</span></>
+              : 'Unsaved verification settings'}
+          </span>
+          <span className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={onClose} className="cl-button px-3 py-1 text-xs">Cancel</button>
+            <button
+              type="button"
+              data-testid="verification-start"
+              onClick={() => void start()}
+              disabled={Boolean(disabled) || starting || loading}
+              title={disabled ? disabledReason : undefined}
+              className="cl-button-primary px-3.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {starting ? 'Starting…' : 'Start verify'}
+            </button>
+          </span>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto text-sm scrollbar-thin">
-          {loading ? (
-            <div className="px-6 py-10 text-xs" style={{ color: 'var(--text-muted)' }}>Loading verification settings...</div>
-          ) : (
-            <div className="space-y-4 p-4 sm:p-5">
-              <section className="cl-verify-section">
-                <SectionTitle>Start from</SectionTitle>
-                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>Reuse a saved setup, or start fresh.</p>
-                <select
-                  value={selectedConfigId ?? ''}
-                  onChange={(e) => {
-                    const id = e.target.value
-                    if (!id) {
-                      startNewConfig()
-                      return
-                    }
-                    const config = configs.find((item) => item.id === id)
-                    if (config) selectConfig(config)
-                  }}
-                  className="cl-input mt-2 w-full px-3 py-2 text-xs"
-                >
-                  <option value="">New configuration</option>
-                  {configs.map((config) => (
-                    <option key={config.id} value={config.id}>{config.name}</option>
-                  ))}
-                </select>
-              </section>
+      )}
+    >
+      {loading ? (
+        <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading verification settings…</div>
+      ) : (
+        <div className="flex flex-col gap-3 p-4">
+          <Section title="Start from">
+            <SectionHint>Reuse a saved setup, or start fresh.</SectionHint>
+            <select
+              aria-label="Start from"
+              value={selectedConfigId ?? ''}
+              onChange={(e) => {
+                const id = e.target.value
+                if (!id) {
+                  startNewConfig()
+                  return
+                }
+                const config = configs.find((item) => item.id === id)
+                if (config) selectConfig(config)
+              }}
+              className="themed-select cl-input mt-2 w-full px-2.5 py-1.5 pr-8 text-xs"
+            >
+              <option value="">New configuration</option>
+              {configs.map((config) => (
+                <option key={config.id} value={config.id}>{config.name}</option>
+              ))}
+            </select>
+          </Section>
 
-              <section className="cl-verify-section">
-                <div className="flex items-center justify-between gap-3">
-                  <SectionTitle>Services</SectionTitle>
-                  <span className="cl-verify-count">{configuredTargetCount} configured</span>
-                </div>
-                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>Health-check URL for each service.</p>
-                {targets.length === 0 ? (
-                  <div className="cl-verify-empty mt-2 rounded-md border border-dashed px-3 py-4 text-xs" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>No services discovered.</div>
-                ) : (
-                  <div className="mt-2 space-y-2">
-                    {targets.map((target) => (
-                      <div key={target.id} className="cl-verify-target-row">
-                        <div className="min-w-0">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="cl-verify-service-dot" aria-hidden="true" />
-                            <div className="truncate text-xs font-semibold" style={{ color: 'var(--text-primary)' }} title={target.name}>{target.name}</div>
-                          </div>
-                        </div>
-                        <input
-                          value={targetUrls[target.id] ?? ''}
-                          onChange={(e) => setTargetUrls((prev) => ({ ...prev, [target.id]: e.target.value }))}
-                          placeholder="https://service.example.com/health"
-                          className="cl-input min-w-0 px-3 py-2 text-xs"
-                          style={{ fontFamily: 'var(--font-mono)' }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="cl-verify-section">
-                <SectionTitle>Playwright</SectionTitle>
-                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>Which env file to run tests with.</p>
-                <select
-                  value={playwrightEnvsetId}
-                  onChange={(e) => setPlaywrightEnvsetId(e.target.value)}
-                  className="cl-input mt-2 w-full px-3 py-2 text-xs"
-                  disabled={envs.length === 0}
-                >
-                  {envs.length === 0 ? (
-                    <option value="">No envsets configured</option>
-                  ) : envs.map((env) => (
-                    <option key={env} value={env}>{env}</option>
-                  ))}
-                </select>
-              </section>
-
-              <section className="cl-verify-section">
-                <SectionTitle>Save this setup</SectionTitle>
-                <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                  {selectedConfigId ? 'Updates the loaded configuration.' : 'Name it to reuse later (optional).'}
-                </p>
-                <div className="mt-2 flex gap-2">
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Beta, Staging, Production..."
-                    className="cl-input min-w-0 flex-1 px-3 py-2 text-xs"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void save()}
-                    disabled={saving}
-                    className="cl-button px-3 py-2 text-xs disabled:cursor-wait disabled:opacity-60"
+          <Section
+            title="Services"
+            right={targets.length > 0 ? (
+              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                {configuredTargetCount} of {targets.length} with a URL
+              </span>
+            ) : undefined}
+          >
+            <SectionHint>Health-check URL for each service.</SectionHint>
+            {targets.length === 0 ? (
+              <div
+                className="mt-2 rounded-md border border-dashed px-3 py-3 text-[11.5px]"
+                style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}
+              >
+                No services discovered.
+              </div>
+            ) : (
+              // Rows sit on the section's own surface — hairline dividers, no
+              // per-row slab — the app's list anatomy (see the flight
+              // launcher's stage list).
+              <div className="mt-2 overflow-hidden rounded-md border" style={{ borderColor: 'var(--border-default)' }}>
+                {targets.map((target, i) => (
+                  <label
+                    key={target.id}
+                    className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 ${i > 0 ? 'border-t' : ''}`}
+                    style={{ borderColor: 'var(--border-default)' }}
                   >
-                    {saving ? 'Saving...' : selectedConfigId ? 'Update' : 'Save'}
-                  </button>
-                </div>
-              </section>
+                    <span
+                      className="w-[150px] shrink-0 truncate text-[12px]"
+                      style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+                      title={target.name}
+                    >
+                      {target.name}
+                    </span>
+                    <input
+                      value={targetUrls[target.id] ?? ''}
+                      onChange={(e) => setTargetUrls((prev) => ({ ...prev, [target.id]: e.target.value }))}
+                      placeholder="https://service.example.com/health"
+                      aria-label={`Health-check URL for ${target.name}`}
+                      spellCheck={false}
+                      className="cl-input min-w-[180px] flex-1 px-2.5 py-1.5 text-[11.5px]"
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+          </Section>
+
+          {/* "Envset" is the app's own noun for this thing — the Envsets config
+              tab creates them and the sibling Run menu picks one with "Choose
+              envset". It also no longer only feeds Playwright:
+              `deriveVerificationTargets` reads the envset to work out which
+              services exist and what env var each URL is injected as, so this
+              picker drives the Services list above too. */}
+          <Section title="Envset">
+            <SectionHint>Which env file the tests run with — it also decides which services appear above.</SectionHint>
+            <select
+              aria-label="Envset"
+              value={playwrightEnvsetId}
+              onChange={(e) => setPlaywrightEnvsetId(e.target.value)}
+              className="themed-select cl-input mt-2 w-full px-2.5 py-1.5 pr-8 text-xs"
+              disabled={envs.length === 0}
+            >
+              {envs.length === 0 ? (
+                <option value="">No envsets configured</option>
+              ) : envs.map((env) => (
+                <option key={env} value={env}>{env}</option>
+              ))}
+            </select>
+          </Section>
+
+          <Section title="Save this setup">
+            <SectionHint>
+              {selectedConfigId ? 'Updates the loaded configuration.' : 'Name it to reuse later (optional).'}
+            </SectionHint>
+            <div className="mt-2 flex gap-2">
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Beta, Staging, Production…"
+                aria-label="Configuration name"
+                className="cl-input min-w-0 flex-1 px-2.5 py-1.5 text-xs"
+              />
+              <button
+                type="button"
+                onClick={() => void save()}
+                disabled={saving}
+                className="cl-button shrink-0 px-3 py-1.5 text-xs disabled:cursor-wait disabled:opacity-60"
+              >
+                {saving ? 'Saving…' : selectedConfigId ? 'Update' : 'Save'}
+              </button>
             </div>
-          )}
+          </Section>
+
           {error && (
-            <div className="mx-5 mb-5 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-700 dark:text-rose-300">
+            <div
+              data-testid="verification-error"
+              className="rounded border px-2.5 py-2 text-[11.5px]"
+              style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}
+            >
               {error}
             </div>
           )}
         </div>
-        <div className="cl-verify-footer flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0 text-xs" style={{ color: 'var(--text-muted)' }}>
-            {selectedConfig ? (
-              <span className="truncate">Selected config: <span style={{ color: 'var(--text-primary)' }}>{selectedConfig.name}</span></span>
-            ) : (
-              <span className="truncate">Unsaved verification settings</span>
-            )}
-          </div>
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={onClose} className="cl-button px-3 py-1.5 text-xs">Cancel</button>
-            <button
-              type="button"
-              onClick={() => void start()}
-              disabled={Boolean(disabled) || starting || loading}
-              title={disabled ? disabledReason : undefined}
-              className="cl-button-primary px-3 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {starting ? 'Starting...' : 'Start Verify'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+      )}
+    </Modal>
   )
 }
 
-function SectionTitle({ children }: { children: ReactNode }) {
-  return (
-    <h3 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-      {children}
-    </h3>
-  )
+/** Fold a newly-picked envset's seeded URLs into the form.
+ *
+ *  A target still holding what the previous envset put there — or holding
+ *  nothing — takes the new envset's value, so switching `local` → `staging`
+ *  actually swaps the URLs. Anything else is the user's (typed by hand, or
+ *  loaded from a saved config, which seeds `previousSeed` as empty) and
+ *  survives untouched. A stale URL the previous envset seeded for a target the
+ *  new one doesn't know about is dropped rather than left behind pointing at
+ *  the wrong environment.
+ *
+ *  Exported for direct unit tests — the merge rule is the whole behavior. */
+export function reseedTargetUrls(
+  current: Record<string, string>,
+  previousSeed: Record<string, string>,
+  nextSeed: Record<string, string>,
+): Record<string, string> {
+  const next = { ...current }
+  for (const [id, url] of Object.entries(nextSeed)) {
+    const held = current[id]
+    if (held === undefined || held === '' || held === previousSeed[id]) next[id] = url
+  }
+  for (const [id, url] of Object.entries(previousSeed)) {
+    if (!(id in nextSeed) && current[id] === url) delete next[id]
+  }
+  return next
+}
+
+/** The one-line purpose note under a section's title. */
+function SectionHint({ children }: { children: ReactNode }) {
+  return <p className="text-[11px] leading-snug" style={{ color: 'var(--text-muted)' }}>{children}</p>
 }

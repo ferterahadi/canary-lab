@@ -107,6 +107,24 @@ describe('PortifyOrchestrator', () => {
     expect(deps.cleanup).toHaveBeenCalledOnce()
   })
 
+  it('attempt 0 aborts right after its verify when the workflow was stopped mid-boot', async () => {
+    // The seeded verify is a real double-boot; a Stop during it must land on
+    // `aborted`, not fall through into an agent attempt.
+    let calls = 0
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({
+      seeded: () => true,
+      runAgent,
+      // false after setup, true on the post-verify check.
+      isAborted: () => { calls += 1; return calls >= 2 },
+    })
+
+    const m = await new PortifyOrchestrator(deps).run()
+
+    expect(m.status).toBe('aborted')
+    expect(runAgent).not.toHaveBeenCalled()
+  })
+
   it('retries with failure context until verification passes', async () => {
     const verify = vi.fn()
       .mockResolvedValueOnce({ ok: false, instances: [], failureDetail: 'port 3007 still bound' })

@@ -90,7 +90,7 @@ function repoStartCommand(name: string, slot: string, env: string, withPorts: bo
   )
 }
 
-function buildConfigSource(repos: { name: string; localPath: string; slot: string; env: string }[], withPorts: boolean, name = 'myfeat'): string {
+function buildConfigSource(repos: { name: string; localPath: string; slot: string; env: string }[], withPorts: boolean, name = 'myfeat', envs: string[] = ['local']): string {
   const reposSrc = repos.map((r) =>
     `  {\n` +
     `    name: ${JSON.stringify(r.name)},\n` +
@@ -100,7 +100,7 @@ function buildConfigSource(repos: { name: string; localPath: string; slot: strin
   ).join(',\n')
   return (
     `const config = {\n` +
-    `  name: ${JSON.stringify(name)},\n  description: 'test',\n  envs: ['local'],\n` +
+    `  name: ${JSON.stringify(name)},\n  description: 'test',\n  envs: ${JSON.stringify(envs)},\n` +
     `  repos: [\n${reposSrc}\n  ],\n  featureDir: __dirname,\n}\n` +
     `module.exports = { config }\n`
   )
@@ -109,11 +109,11 @@ function buildConfigSource(repos: { name: string; localPath: string; slot: strin
 function writeConfig(
   featureDir: string,
   repos: { name: string; localPath: string; slot: string; env: string }[],
-  opts: { ext?: 'cjs' | 'js'; withPorts?: boolean; name?: string } = {},
+  opts: { ext?: 'cjs' | 'js'; withPorts?: boolean; name?: string; envs?: string[] } = {},
 ): void {
   fs.writeFileSync(
     path.join(featureDir, `feature.config.${opts.ext ?? 'cjs'}`),
-    buildConfigSource(repos, opts.withPorts ?? true, opts.name),
+    buildConfigSource(repos, opts.withPorts ?? true, opts.name, opts.envs),
   )
 }
 
@@ -305,6 +305,37 @@ describe('createPortifyRunner (integration)', () => {
     expect(branches.stdout.trim()).toBe('')
   })
 
+  it('save() after a restart rejects a pending-overlay capture that is unreadable or malformed', async () => {
+    // The capture is the ONLY thing standing in for the dead worktrees, so a
+    // truncated or wrong-shaped file has to read as "worktree gone" (409),
+    // never as an empty overlay silently saved over the feature.
+    for (const body of ['{ truncated', JSON.stringify({ version: 1, repos: 'not-an-array' })]) {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+      expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+      const paths = buildPortifyPaths(portifyDir(logsDir, workflowId))
+      fs.writeFileSync(paths.pendingOverlayPath, body)
+
+      await reclaimOrphanedPortify(new PortifyRunStore(logsDir), logsDir, () => '2026-06-07T02:00:00.000Z')
+      const fresh = makeRunner(featuresDir, logsDir)
+
+      await expect(fresh.runner.save(workflowId)).rejects.toMatchObject({ statusCode: 409 })
+    }
+  })
+
+  it('verifies without envset hydration when the feature declares no envs', async () => {
+    // Hydration only applies when there IS a captured envset to hydrate; a
+    // feature with no envs must still reach a verified review.
+    const { featuresDir, logsDir, appRepo } = await singleFixture()
+    writeConfig(path.join(featuresDir, 'myfeat'), [{ name: 'app', localPath: appRepo, slot: 'api', env: 'PORT' }], { envs: [] })
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+  })
+
   it('cancel() after a restart restores the pre-edit config from the on-disk snapshot', async () => {
     const { featuresDir, logsDir } = await singleFixture()
     const featureDir = path.join(featuresDir, 'myfeat')
@@ -327,6 +358,22 @@ describe('createPortifyRunner (integration)', () => {
     expect(cancelled.status).toBe('aborted')
     // Declining undid the config edit from the persisted snapshot.
     expect(fs.readFileSync(configPath, 'utf-8')).toBe(original)
+  })
+
+  it('cancel() after a restart still aborts when the config snapshot is gone', async () => {
+    // A logs cleanup can take the snapshot with it; declining must abort the
+    // workflow anyway rather than fail, even though the edit can't be undone.
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+    const paths = buildPortifyPaths(portifyDir(logsDir, workflowId))
+    fs.rmSync(paths.originalConfigPath, { force: true })
+
+    await reclaimOrphanedPortify(new PortifyRunStore(logsDir), logsDir, () => '2026-06-07T02:00:00.000Z')
+    const fresh = makeRunner(featuresDir, logsDir)
+
+    expect((await fresh.runner.cancel(workflowId)).status).toBe('aborted')
   })
 
   it('rejects a NEW workflow for a feature whose parked review survived a restart', async () => {

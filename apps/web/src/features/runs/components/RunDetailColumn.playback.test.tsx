@@ -145,7 +145,7 @@ describe('PlaywrightPlayback', () => {
     expect(container.textContent).not.toContain('Open video')
   })
 
-  it('renders skipped playback status in amber instead of failed red', () => {
+  it('renders skipped playback status as warning, not danger', () => {
     renderPlayback({
       events: events.map((event) => event.type === 'test-end'
         ? { ...event, status: 'skipped', passed: false }
@@ -155,8 +155,8 @@ describe('PlaywrightPlayback', () => {
     const skippedPill = [...container.querySelectorAll('span')]
       .find((candidate) => candidate.textContent === 'skipped')
     expect(skippedPill).toBeTruthy()
-    expect(skippedPill?.className).toContain('amber')
-    expect(skippedPill?.className).not.toContain('rose')
+    expect(skippedPill?.className).toContain('warning')
+    expect(skippedPill?.className).not.toContain('danger')
   })
 
   it('uses short artifact guidance and opens Playwright settings', () => {

@@ -151,15 +151,19 @@ export async function verifyDoubleBoot(
     try { resC?.teardown() } catch { /* ignore */ }
     releasePorts([...portMapC.values()])
   }
-  const failureClass = resC!.ok ? 'concurrency-failure' : 'baseline-boot-failed'
-  const triage =
-    failureClass === 'baseline-boot-failed'
-      ? `BASELINE CHECK: a SINGLE boot on its own ports ALSO fails — this failure is NOT caused by concurrency or port injection. Fix the boot blocker itself if it lives in the app code, or report it as not port-fixable if it is environmental. Solo-boot failure: ${resC!.ok ? '' : `${resC!.failedService} — ${resC!.detail}`}`
-      : 'BASELINE CHECK: a single boot on its own ports PASSES — the failure only appears when TWO instances boot concurrently. Look for per-boot state that is still shared: a build/cache dir both boots write, a port one of them still hardcodes, on-disk files both mutate.'
+  // Branch on the baseline result itself rather than on the derived label, so
+  // the failure arm keeps its narrowed `failedService`/`detail`.
+  const baseline = resC!
+  const failureClass = baseline.ok ? 'concurrency-failure' : 'baseline-boot-failed'
+  const triage = baseline.ok
+    ? 'BASELINE CHECK: a single boot on its own ports PASSES — the failure only appears when TWO instances boot concurrently. Look for per-boot state that is still shared: a build/cache dir both boots write, a port one of them still hardcodes, on-disk files both mutate.'
+    : `BASELINE CHECK: a SINGLE boot on its own ports ALSO fails — this failure is NOT caused by concurrency or port injection. Fix the boot blocker itself if it lives in the app code, or report it as not port-fixable if it is environmental. Solo-boot failure: ${baseline.failedService} — ${baseline.detail}`
   return {
     ok,
     instances,
-    failureDetail: failureDetail ? `${triage}\n\n${failureDetail}` : triage,
+    // We only get here with `ok === false`, and a not-ok verify always has at
+    // least one failed instance to describe — so `failureDetail` is set.
+    failureDetail: `${triage}\n\n${failureDetail}`,
     notPortFixable,
     failureClass,
   }

@@ -62,7 +62,7 @@ export function JournalTab({ feature, runId, refreshKey = 0 }: Props) {
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto p-4">
         {error && (
-          <div className="mb-3 rounded-md border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-300">
+          <div className="mb-3 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
             Failed to load journal: {error}
           </div>
         )}
@@ -124,7 +124,7 @@ function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => v
           type="button"
           onClick={onDelete}
           disabled={entry.iteration == null}
-          className="rounded-md border border-rose-500/30 px-2 py-0.5 text-[11px] text-rose-700 dark:text-rose-300 transition-colors duration-150 hover:bg-rose-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+          className="rounded-md border border-danger/30 px-2 py-0.5 text-[11px] text-danger transition-colors duration-150 hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
         >
           Delete
         </button>
@@ -190,7 +190,7 @@ function ConfirmDeleteDialog({
           This permanently removes only this iteration section from the diagnosis journal. The rest of the journal file stays intact.
         </p>
         {error && (
-          <div className="mt-2 rounded-md border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-700 dark:text-rose-300">
+          <div className="mt-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
             {error}
           </div>
         )}
@@ -206,7 +206,7 @@ function ConfirmDeleteDialog({
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-rose-700 dark:text-rose-300 transition-colors duration-150 hover:bg-rose-500/20"
+            className="rounded-md border border-danger/40 bg-danger/10 px-3 py-1.5 text-danger transition-colors duration-150 hover:bg-danger/20"
           >
             Delete
           </button>

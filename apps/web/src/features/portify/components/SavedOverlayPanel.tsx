@@ -6,11 +6,28 @@ import { patchFileName } from '../../../../../../shared/portify-overlay'
 
 // The one rendering of a feature's SAVED port overlay — the captured diff, the
 // open-in-editor control, the double-boot proof, and the per-service
-// stored-in + how-applied rows. Shared by the Portify wizard's saved Review
-// screen and the Ports tab's inline overlay detail, so the two surfaces can
-// never drift on what a saved overlay looks like or claims.
-export function SavedOverlayPanel({ manifest: m }: { manifest: PortifyManifest }) {
+// stored-in rows. Shared by the Portify wizard's saved Review screen and the
+// Ports tab's inline overlay detail, so the two surfaces can never drift on
+// what a saved overlay looks like or claims.
+export function SavedOverlayPanel({
+  manifest: m,
+  collapsibleDiff = false,
+  showServiceTable = true,
+}: {
+  manifest: PortifyManifest
+  /** Collapse the diff behind a "Show diff" toggle, closed by default. The Ports
+   *  tab passes true — in the verified state the overlay is already trusted (the
+   *  boot badge is the proof), so the diff is on-demand reference detail. The
+   *  wizard's saved-review screen leaves it expanded. */
+  collapsibleDiff?: boolean
+  /** Render the per-service "Stored in" table. The wizard shows it (it has no
+   *  other place for the patch paths); the Ports tab passes false and folds the
+   *  stored-in path into each repo card header instead, so the service list
+   *  isn't enumerated twice on that screen. */
+  showServiceTable?: boolean
+}) {
   const [openError, setOpenError] = useState<string | null>(null)
+  const [showDiff, setShowDiff] = useState(!collapsibleDiff)
   // For a saved workflow the server opens the overlay folder
   // (features/<feature>/portify/) — the scratch worktrees are long gone.
   // Best-effort: the route never rejects on a launch failure, it reports it.
@@ -24,12 +41,41 @@ export function SavedOverlayPanel({ manifest: m }: { manifest: PortifyManifest }
     }
   }
   const hasDiff = (m.diff ?? '').trim().length > 0
+  // Changed-line count for the collapsed toggle label — the +/- lines, minus the
+  // `+++`/`---` file headers, so "N lines" reads as churn, not raw line count.
+  const changedLines = hasDiff
+    ? m.diff!.split('\n').filter((l) => /^[+-]/.test(l) && !/^(\+\+\+|---)/.test(l)).length
+    : 0
   return (
     <div>
       <VerificationBadge m={m} />
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
-        <span style={sectionLabel}>Saved overlay</span>
+        {collapsibleDiff && hasDiff ? (
+          <button
+            type="button"
+            onClick={() => setShowDiff((v) => !v)}
+            aria-expanded={showDiff}
+            style={{
+              ...sectionLabel, display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: 'transparent', border: 'none', padding: 0, cursor: 'pointer',
+            }}
+          >
+            <span aria-hidden>{showDiff ? '▾' : '▸'}</span>
+            {showDiff ? 'Hide diff' : `Show diff${changedLines > 0 ? ` · ${changedLines} lines` : ''}`}
+          </button>
+        ) : collapsibleDiff ? (
+          /* No-op overlay in the compact surface: the same one-line slot the diff
+             toggle occupies, minus the chevron — there is nothing to expand. The
+             ✓ carries the "this is fine" (echoing the boot badge); the label stays
+             muted like every other section label so it reads as a state, not an alert. */
+          <span style={{ ...sectionLabel, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span aria-hidden style={{ color: 'var(--success)' }}>✓</span>
+            No changes needed
+          </span>
+        ) : (
+          <span style={sectionLabel}>Saved overlay</span>
+        )}
         <button
           type="button"
           onClick={openOverlay}
@@ -54,23 +100,34 @@ export function SavedOverlayPanel({ manifest: m }: { manifest: PortifyManifest }
           config:` markers (coloured by DiffView) — never split per service,
           which is lossy when services share a git root. A saved-but-empty diff
           is a valid no-op overlay: the apps already read injected ports. */}
-      {hasDiff ? <DiffView diff={m.diff!} /> : <NoChangesNeeded feature={m.feature} />}
+      {hasDiff
+        ? (showDiff ? <DiffView diff={m.diff!} /> : null)
+        : collapsibleDiff
+          ? <NoChangesReason feature={m.feature} />
+          : <NoChangesNeeded feature={m.feature} />}
 
-      {/* One row per service: where its patch lives + how it is applied —
-          answers "how does this act on MY service" without a click-out. */}
-      <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', padding: '13px 15px', marginTop: 12 }}>
-        <div style={{ ...sectionLabel, marginBottom: 8 }}>How this is used</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr) max-content', columnGap: 16, rowGap: 5, alignItems: 'baseline' }}>
-          <span style={colHeader}>Service</span>
-          <span style={colHeader}>Stored in</span>
-          <span style={colHeader}>Applied</span>
-          {m.repos.map((r) => (
-            <PerServiceRow key={r.name} feature={m.feature} repoName={r.name} />
-          ))}
+      {/* Where each patch lives — only when the surface has nowhere else to show
+          it (the wizard). The Ports tab folds this into its repo card headers, so
+          it passes showServiceTable=false to avoid enumerating the services twice. */}
+      {showServiceTable && (
+        <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)', background: 'var(--bg-elevated)', padding: '13px 15px', marginTop: 12 }}>
+          <div style={{ ...sectionLabel, marginBottom: 8 }}>Stored in</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0,1fr)', columnGap: 16, rowGap: 5, alignItems: 'baseline' }}>
+            <span style={colHeader}>Service</span>
+            <span style={colHeader}>Patch file</span>
+            {m.repos.map((r) => (
+              <PerServiceRow key={r.name} feature={m.feature} repoName={r.name} />
+            ))}
+          </div>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.55, marginTop: 9 }}>
-          Patches live inside your canary workspace — the product repo is never modified.
-        </div>
+      )}
+
+      {/* How the overlay is applied — one line, always. Replaces the old
+          per-service "Applied" column, whose value never varied per service,
+          and absorbs the "repo is never modified" reassurance so it's stated
+          once here rather than repeated across the band and a second caption. */}
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.55, marginTop: 12 }}>
+        Applied per-run in an isolated worktree, reversed at teardown. Your product repo is never touched.
       </div>
     </div>
   )
@@ -85,9 +142,6 @@ function PerServiceRow({ feature, repoName }: { feature: string; repoName: strin
         style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
       >
         {`features/${feature}/portify/${patchFileName(repoName)}`}
-      </span>
-      <span style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-        per-run worktree at boot · reversed at teardown
       </span>
     </>
   )
@@ -106,9 +160,24 @@ export function VerificationBadge({ m }: { m: PortifyManifest }) {
   )
 }
 
+// The compact twin of NoChangesNeeded, for surfaces where the diff collapses to a
+// single line (the Ports tab): the header slot already says "✓ No changes needed",
+// so all that's left is the *why*. One muted line keeps the fact a card would have
+// carried, at the density of the collapsed-diff state next to it.
+function NoChangesReason({ feature }: { feature: string }) {
+  return (
+    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.55 }}>
+      <b style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{feature}</b> already reads
+      injected ports — nothing to rewrite. Saved as a no-op overlay.
+    </div>
+  )
+}
+
 // Shown in place of the diff when the verified rewrite produced no edits — the
 // apps already read injected ports, so portify is a no-op overlay. A reassuring
-// success state, not a "missing data" apology.
+// success state, not a "missing data" apology. Used where the panel owns the view
+// and a review moment deserves the room (the wizard); compact surfaces get
+// NoChangesReason instead.
 export function NoChangesNeeded({ feature }: { feature: string }) {
   return (
     <div style={{

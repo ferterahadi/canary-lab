@@ -1,9 +1,13 @@
 ---
 name: cl_manage-prompts
-description: Use when adding, editing, or moving an LLM prompt an agent spawn sends (heal, wizard, portify, coverage/PRD, flights) — every prompt is a template file under apps/web-server/prompts/, never an inline string in a .ts file. NOT for MCP initialize instructions (REPAIR_INSTRUCTIONS etc. in apps/web-server/mcp/server.ts) or tool description fields in apps/web-server/mcp/tools.ts — those belong to cl_sync-agent-surfaces / cl_add-mcp-tool.
+description: Use when adding, editing, or moving an LLM prompt an agent spawn sends (heal, wizard, portify, coverage/PRD, flights) — every prompt is a template file under apps/web-server/prompts/, never an inline string in a .ts file.
 ---
 
 # Managing Canary Lab's LLM Prompts
+
+Not for MCP `initialize` instructions (`REPAIR_INSTRUCTIONS` etc. in
+`mcp/server.ts`) or tool `description:` fields (`mcp/tools.ts`) — those belong to
+`cl_sync-agent-surfaces` / `cl_add-mcp-tool`.
 
 Every prompt canary sends to a spawned agent (claude/codex) lives as a flat file
 in `apps/web-server/prompts/` — never as a template literal or string constant
@@ -60,6 +64,33 @@ buried in a `.ts` file. One home, one loader:
   is still left as literal text, same as the mixed-line case.
 - Pass JSON payloads pre-stringified (`JSON.stringify(x, null, 2)`) as a plain
   string var — the loader does no JSON-awareness, it's pure text substitution.
+
+## Guardrails that must survive any heal-prompt edit
+
+`heal-agent.md` is where an agent is told what it may change. The rule itself is
+**not literal text in the template** — it arrives through placeholders filled from
+`MODE_COPY` in
+[`auto-heal.ts`](../../../apps/web-server/src/features/runs/logic/runtime/auto-heal.ts):
+
+| Placeholder | `service` mode (has editable repos) | `test` mode (zero editable repos) |
+| --- | --- | --- |
+| `{{healingDirective}}` | "Fix service/app code, not tests." | "…no editable service repos. Fix the failing Playwright tests or their helpers." |
+| `{{testSpecRule}}` | Don't read the spec unless the failure can't be understood without it | Read the spec + helpers — they're what you fix |
+| `{{closingDirective}}` | Fix the root cause in service/app code | Fix the spec/helpers |
+
+So a rewrite of `heal-agent.md` can drop the guardrail **without deleting a single
+word of it** — just by dropping a placeholder. Rules:
+
+- Keep `{{healingDirective}}`, `{{testSpecRule}}`, and `{{closingDirective}}` in any
+  version of this template. Grep them after editing.
+- `test` mode is the one sanctioned "edit the test" path and it is gated on
+  `detectHealMode` finding **zero** editable repos (defaulting to `service` on any
+  read error). Never widen it, and never make the `service` copy softer.
+- `auto-heal.test.ts` asserts the service-mode directive is present and that test
+  mode does *not* carry it. If your edit makes those fail, the guardrail moved —
+  fix the guardrail, not the assertion.
+- The same rule on the external/MCP surfaces is pinned by
+  `mcp/repair-guardrail.test.ts`. Full context: `cl_run-evidence-invariants`.
 
 ## What does NOT belong in `prompts/`
 

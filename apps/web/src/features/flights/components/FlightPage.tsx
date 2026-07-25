@@ -751,7 +751,7 @@ function StagePausedPanel({ kind }: { kind: 'interrupted' | 'not-started' }) {
       }}
     >
       <div className="cl-rubric flex items-center gap-2">
-        <span aria-hidden="true" className="cl-status-dot bg-amber-500" style={{ height: '0.45rem', width: '0.45rem' }} />
+        <span aria-hidden="true" className="cl-status-dot bg-warning" style={{ height: '0.45rem', width: '0.45rem' }} />
         {interrupted ? 'Paused mid-step' : 'Paused before this step'}
       </div>
       <p className="m-0 text-[12px] leading-snug" style={{ color: 'var(--text-primary)' }}>

@@ -70,6 +70,25 @@ describe('parseAnnotateOutput', () => {
     expect(parseAnnotateOutput('not json at all', KNOWN)).toBeNull()
   })
 
+  it('steps over scalar and array JSON blocks to reach the real answer', () => {
+    // Agents fence more than one block; a scalar or an array carries no
+    // `mappings` key and must be stepped over, not treated as the answer.
+    // Fenced blocks are considered last-first, so the real answer goes first
+    // here and the shapes that must be skipped come after it.
+    const output = [
+      '```json',
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'] }] }),
+      '```',
+      '```json',
+      '[1, 2, 3]',
+      '```',
+      '```json',
+      '42',
+      '```',
+    ].join('\n')
+    expect(parseAnnotateOutput(output, KNOWN)).toMatchObject([{ testName: 't', requirements: ['R1'] }])
+  })
+
   it('returns null when mappings is not an array (line 114 branch)', () => {
     // `{ mappings: "string" }` → Array.isArray("string") is false → return null
     expect(parseAnnotateOutput(JSON.stringify({ mappings: 'not an array' }), KNOWN)).toBeNull()

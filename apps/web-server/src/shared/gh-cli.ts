@@ -99,6 +99,8 @@ export async function detectRepoPushRights(
   return { pushable: res.stdout.trim() === 'true' }
 }
 
+/** First non-blank line. The only caller passes an already-non-blank string
+ *  (see its `||` chain), so there is always a line to return. */
 function firstLine(s: string): string {
-  return s.split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? s
+  return s.split('\n').map((l) => l.trim()).filter(Boolean)[0]
 }

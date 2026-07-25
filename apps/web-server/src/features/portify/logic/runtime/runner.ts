@@ -457,7 +457,8 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
               `UNRESOLVED during the double-boot (one shared file cannot serve two port maps). If a service reads ` +
               `that wiring from the file, move it to per-process injection (CLI arg / env var) — that is what ` +
               `port-ification verifies.`
-            result.failureDetail = result.failureDetail ? `${result.failureDetail}\n\n${hint}` : hint
+            // A not-ok verify always carries a failure detail (see verifyDoubleBoot).
+            result.failureDetail = `${result.failureDetail}\n\n${hint}`
           }
           return result
         } finally {

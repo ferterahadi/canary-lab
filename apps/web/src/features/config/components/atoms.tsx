@@ -21,13 +21,13 @@ import type { CSSProperties, ReactNode } from 'react'
 export type StatusDotState = 'idle' | 'running' | 'success' | 'failed' | 'warning' | 'booted'
 
 const STATUS_DOT_BG: Record<StatusDotState, string> = {
-  idle:    'bg-zinc-400 dark:bg-zinc-500',
-  running: 'bg-sky-500',
-  success: 'bg-emerald-500',
-  failed:  'bg-rose-500',
-  warning: 'bg-amber-500',
+  idle:    'bg-idle',
+  running: 'bg-running',
+  success: 'bg-success',
+  failed:  'bg-danger',
+  warning: 'bg-warning',
   // Boot-only "services up" — teal, distinct from the sky running dot.
-  booted:  'bg-cyan-500',
+  booted:  'bg-boot',
 }
 
 export function StatusDot({

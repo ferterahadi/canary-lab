@@ -524,6 +524,74 @@ describe('tailAgentSession — subagent threads', () => {
     handle.close()
   })
 
+  it('never scans for a codex session — codex has no subagent dir', async () => {
+    const logPath = path.join(tmp, 'cx.jsonl')
+    fs.writeFileSync(logPath, `${JSON.stringify({ type: 'agent_message', payload: { message: 'hi' } })}\n`)
+    // A subagent dir shaped like claude's, which must be ignored outright.
+    const subDir = path.join(tmp, 'cx', 'subagents')
+    fs.mkdirSync(subDir, { recursive: true })
+    fs.writeFileSync(path.join(subDir, 'agent-c.meta.json'), JSON.stringify({ toolUseId: 'toolu_1' }))
+    fs.writeFileSync(path.join(subDir, 'agent-c.jsonl'), `${assistant('2026-07-21T11:00:01.000Z', 'nope')}\n`)
+    const subEvents: unknown[] = []
+
+    const handle = tailAgentSession({
+      ref: { agent: 'codex', sessionId: 'cx', logPath },
+      onEvent: () => { /* parent stream not under test here */ },
+      onSubagentEvent: (u) => subEvents.push(u),
+      subagentPollMs: 15,
+    })
+    await new Promise((r) => setTimeout(r, 250))
+
+    expect(subEvents).toEqual([])
+    handle.close()
+  })
+
+  it('skips a subagent log whose meta has not landed yet, then picks it up', async () => {
+    const logPath = path.join(tmp, 's4.jsonl')
+    fs.writeFileSync(logPath, `${assistant('2026-07-21T11:00:00.000Z', 'p')}\n`)
+    const subDir = path.join(tmp, 's4', 'subagents')
+    fs.mkdirSync(subDir, { recursive: true })
+    // Transcript first, meta later — the order a real fan-out can produce.
+    fs.writeFileSync(path.join(subDir, 'agent-w.jsonl'), `${assistant('2026-07-21T11:00:01.000Z', 'early')}\n`)
+    const seen: string[] = []
+    const handle = tailAgentSession({
+      ref: { agent: 'claude', sessionId: 's4', logPath },
+      onEvent: () => { /* ignore */ },
+      onSubagentEvent: (u) => seen.push((u.event as { text?: string }).text ?? ''),
+      subagentPollMs: 15,
+    })
+    await new Promise((r) => setTimeout(r, 60))
+    expect(seen).toEqual([])
+
+    fs.writeFileSync(path.join(subDir, 'agent-w.meta.json'), JSON.stringify({ toolUseId: 'toolu_w' }))
+    await until(() => seen.length >= 1)
+    expect(seen[0]).toBe('early')
+    handle.close()
+  })
+
+  it('stops scanning once the handle is closed', async () => {
+    const logPath = path.join(tmp, 's5.jsonl')
+    fs.writeFileSync(logPath, `${assistant('2026-07-21T11:00:00.000Z', 'p')}\n`)
+    const subDir = path.join(tmp, 's5', 'subagents')
+    fs.mkdirSync(subDir, { recursive: true })
+    fs.writeFileSync(path.join(subDir, 'agent-v.meta.json'), JSON.stringify({ toolUseId: 'toolu_v' }))
+    fs.writeFileSync(path.join(subDir, 'agent-v.jsonl'), `${assistant('2026-07-21T11:00:01.000Z', 'first')}\n`)
+    const seen: string[] = []
+    const handle = tailAgentSession({
+      ref: { agent: 'claude', sessionId: 's5', logPath },
+      onEvent: () => { /* ignore */ },
+      onSubagentEvent: (u) => seen.push((u.event as { text?: string }).text ?? ''),
+      subagentPollMs: 15,
+    })
+    await until(() => seen.length >= 1)
+
+    handle.close()
+    fs.appendFileSync(path.join(subDir, 'agent-v.jsonl'), `${assistant('2026-07-21T11:00:05.000Z', 'after close')}\n`)
+    await new Promise((r) => setTimeout(r, 60))
+
+    expect(seen).toEqual(['first'])
+  })
+
   it('does not scan for subagents when no handler is supplied', async () => {
     const logPath = path.join(tmp, 's3.jsonl')
     fs.writeFileSync(logPath, `${assistant('2026-07-21T11:00:00.000Z', 'p')}\n`)
