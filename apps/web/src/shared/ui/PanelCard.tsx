@@ -31,7 +31,8 @@ export function PanelCard({ kicker, aside, testId, title, children }: {
     <div data-testid={testId} title={title} className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
       {(kicker || aside) && (
         <div className="mb-1.5 flex min-w-0 items-center gap-2">
-          <div className={`min-w-0 truncate ${PANEL_KICKER_CLASS}`} style={{ color: 'var(--text-muted)' }}>{kicker}</div>
+          {/* `.cl-rubric` already carries the muted colour — no inline twin. */}
+          <div className={`min-w-0 truncate ${PANEL_KICKER_CLASS}`}>{kicker}</div>
           {aside && <><div className="flex-1" />{aside}</>}
         </div>
       )}

@@ -662,17 +662,17 @@ function FactBar({ frac, color }: { frac: number; color: string }) {
 export function FactTile({ fact: f }: { fact: StageFact }) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
   return (
-    <div className="min-w-0 rounded-md px-3 py-2.5" style={{ background: 'var(--bg-elevated)' }}>
+    <div className="min-w-0 rounded-md px-3 py-2.5 bg-elevated">
       <div className="cl-rubric">{f.label}</div>
       {f.big ? (
         <>
           <div className="mt-1 flex items-baseline gap-1 leading-none">
             <span className="text-[22px] font-medium" style={{ color: toneColor ?? 'var(--text-primary)' }}>{f.value}</span>
-            {f.stepper ? <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>{` of ${f.stepper[1]}`}</span> : null}
+            {f.stepper ? <span className="text-[12px] text-muted">{` of ${f.stepper[1]}`}</span> : null}
           </div>
           {f.stepper ? <FactStepper current={f.stepper[0]} total={f.stepper[1]} /> : null}
           {f.bar != null ? <FactBar frac={f.bar} color={toneColor ?? 'var(--accent)'} /> : null}
-          {f.sub ? <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-secondary)' }}>{f.sub}</div> : null}
+          {f.sub ? <div className="mt-1.5 text-[10.5px] text-secondary">{f.sub}</div> : null}
         </>
       ) : (
         <div

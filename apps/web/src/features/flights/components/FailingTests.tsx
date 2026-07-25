@@ -84,6 +84,7 @@ function FailureRow({ failure, defaultOpen }: { failure: ParsedFailure; defaultO
     <li className="border-t border-line-subtle first:border-t-0" data-testid={`failing-test-${entry.name}`}>
       <button
         type="button"
+        data-testid={`failing-toggle-${entry.name}`}
         aria-expanded={open}
         aria-controls={detailId}
         onClick={() => setOpen((v) => !v)}

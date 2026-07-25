@@ -1348,9 +1348,10 @@ describe('trailer model (R14–R18)', () => {
     const repoScanCard = container.querySelector<HTMLElement>('[data-testid="repo-scan-card"]')
     expect(repoScanCard?.textContent).toContain('Repos · 2 scanned')
     expect(repoScanCard?.className).toBe(intentCard?.className)
-    // R73: the panel fills a fixed 76ch column so the repo cards and a failed
-    // stage's error card line up as one column (no shrink-wrap asymmetry).
-    expect(container.querySelector('[data-testid="repo-scan-panel"]')?.className).toContain('max-w-[76ch]')
+    // R73: the panel fills the shared STAGE_COLUMN so the repo cards and a
+    // failed stage's error card line up as one column (no shrink-wrap
+    // asymmetry).
+    expect(container.querySelector('[data-testid="repo-scan-panel"]')?.className).toContain('max-w-[92ch]')
     const shopCard = container.querySelector('[data-testid="repo-card-shop"]')?.textContent ?? ''
     expect(shopCard).toContain('/repo/shop')
     expect(shopCard).toContain('.env')

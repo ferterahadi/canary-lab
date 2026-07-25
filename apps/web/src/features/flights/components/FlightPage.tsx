@@ -15,6 +15,7 @@ import { Modal, StatusDot, useEscapeToClose } from '../../config/components/atom
 import { Chip } from '../../../shared/ui/StatusChip'
 import { DiffView } from '../../../shared/ui/DiffView'
 import { StepList, StepRow } from '../../../shared/ui/StepList'
+import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '../../../shared/ui/PanelCard'
 import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
@@ -37,6 +38,7 @@ import {
   specsCoverageProgress,
   stageFacts,
   stageLabel,
+  STAGE_COLUMN,
   stageRailRows,
   stageRowKey,
   stageStateLine,
@@ -117,7 +119,7 @@ export function FlightPage({
   const configRefreshKey = useInvalidationKey('repos')
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
-    <div className="flex h-full w-full flex-col" style={{ background: 'var(--bg-base)', color: 'var(--text-primary)' }}>
+    <div className="flex h-full w-full flex-col bg-canvas text-primary">
       <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
     </div>
   )
@@ -267,14 +269,14 @@ function FlightDetail({
 
   if (error) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs" style={{ color: 'var(--text-muted)' }}>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-muted">
         <div>Flight {flightId} could not be loaded: {error}</div>
         <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1 text-xs">All flights</button>
       </div>
     )
   }
   if (!flight) {
-    return <div className="flex flex-1 items-center justify-center text-xs" style={{ color: 'var(--text-muted)' }}>Loading flight…</div>
+    return <div className="flex flex-1 items-center justify-center text-xs text-muted">Loading flight…</div>
   }
 
   const tone = FLIGHT_STATUS_TONE[flight.status]
@@ -294,13 +296,12 @@ function FlightDetail({
             type="button"
             data-testid="flight-breadcrumb"
             onClick={onBackToList}
-            className="shrink-0 font-normal underline-offset-2 transition-colors hover:underline"
-            style={{ color: 'var(--text-muted)' }}
+            className="shrink-0 font-normal underline-offset-2 transition-colors hover:underline text-muted"
             title="All flights"
           >
             Flights
           </button>
-          <span aria-hidden="true" className="shrink-0 font-normal" style={{ color: 'var(--text-muted)' }}>/</span>
+          <span aria-hidden="true" className="shrink-0 font-normal text-muted">/</span>
           <span className="min-w-0 truncate">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="mr-1.5 inline-block align-[-1px]">
               <path d="M22 2 11 13" />
@@ -393,8 +394,7 @@ function FlightDetail({
           aria-label="Close"
           title="Close (Esc)"
           onClick={onClose}
-          className="cl-icon-button h-7 w-7 shrink-0"
-          style={{ color: 'var(--text-muted)' }}
+          className="cl-icon-button h-7 w-7 shrink-0 text-muted"
         >
           ✕
         </button>
@@ -402,8 +402,7 @@ function FlightDetail({
       {actionError && (
         <div
           data-testid="flight-action-error"
-          className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px]"
-          style={{ borderColor: 'var(--border-default)', color: 'var(--danger)' }}
+          className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] border-line text-danger"
         >
           <span className="min-w-0 flex-1 truncate" title={actionError}>{actionError}</span>
           <button type="button" onClick={() => setActionError(null)} className="cl-button shrink-0 px-2 py-0.5 text-[10.5px]">Dismiss</button>
@@ -422,8 +421,8 @@ function FlightDetail({
       <div className="flex min-h-0 flex-1">
         <nav
           aria-label="Flight stages"
-          className="flex w-[240px] shrink-0 flex-col gap-0.5 overflow-auto border-r p-2 scrollbar-thin"
-          style={{ borderColor: 'var(--border-default)', scrollbarGutter: 'stable' }}
+          className="flex w-[240px] shrink-0 flex-col gap-0.5 overflow-auto border-r border-line p-2 scrollbar-thin"
+          style={{ scrollbarGutter: 'stable' }}
         >
           {/* R72 (restyled): follow-mode now reads as a real button, not a bare
               text link — the standard bordered `cl-button` chrome. Still
@@ -472,26 +471,26 @@ function FlightDetail({
                 aria-current={selected ? 'true' : undefined}
                 onClick={() => setSelectedStage(s.key)}
                 title={STAGE_BLURB[s.key]}
-                className="cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors"
-                style={{ background: selected ? 'var(--bg-selected)' : undefined }}
+                className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
               >
+                {/* Status hue stays a computed token string (one source of
+                    truth in stageStatusTone), so this one keeps `color`. */}
                 <span className="w-3 shrink-0 text-center font-semibold" style={{ color: t }} aria-hidden="true">
                   {STAGE_ICON[s.status]}
                 </span>
-                <span className="min-w-0 flex-1 truncate" style={{ color: s.status === 'pending' ? 'var(--text-muted)' : undefined }}>
+                <span className={`min-w-0 flex-1 truncate${s.status === 'pending' ? ' text-muted' : ''}`}>
                   {s.label}
                 </span>
                 {s.note && (
                   <span
                     data-testid={`stage-rail-note-${s.key}`}
-                    className="cl-rubric shrink-0 rounded px-1"
-                    style={{ color: 'var(--warning)', background: 'color-mix(in srgb, var(--warning) 12%, transparent)' }}
+                    className="cl-rubric shrink-0 rounded bg-warning/12 px-1 text-warning"
                   >
                     {s.note}
                   </span>
                 )}
                 {duration && s.status !== 'running' && (
-                  <span className="shrink-0 text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                  <span className="shrink-0 text-[10px] text-muted font-mono">
                     {duration}
                   </span>
                 )}
@@ -503,7 +502,7 @@ function FlightDetail({
 
         <main className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
           {!stage || !row ? (
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>Pick a stage.</div>
+            <div className="text-xs text-muted">Pick a stage.</div>
           ) : (
             <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
           )}
@@ -554,7 +553,7 @@ function stageDrillThrough(
  *  detail in a scrollable mono block (these messages run long). Recovery is the
  *  header's state primary (Continue / Repeat a step…), not a second button here
  *  — one Continue, no confusion. Width is capped to line up with the repo-scan
- *  cards above (both ~76ch) so the stage reads as one column, not a full-bleed
+ *  cards above (both on STAGE_COLUMN) so the stage reads as one column, not a full-bleed
  *  banner under narrow cards. */
 function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
   flightId: string
@@ -593,25 +592,20 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
   return (
     <section
       data-testid="stage-error"
-      className="flex w-full max-w-[76ch] flex-col gap-2.5 rounded border p-3"
-      style={{
-        borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))',
-        background: 'color-mix(in srgb, var(--danger) 6%, transparent)',
-      }}
+      className={`flex flex-col gap-2.5 rounded-lg border border-danger/45 bg-danger/6 p-3 ${STAGE_COLUMN}`}
     >
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" style={{ color: 'var(--danger)' }}>✕</span>
-        <span data-testid="stage-error-title" className="text-[12.5px] font-semibold" style={{ color: 'var(--danger)' }}>
+        <span aria-hidden="true" className="text-danger">✕</span>
+        <span data-testid="stage-error-title" className="text-[12.5px] font-semibold text-danger">
           {stageLabel} failed
         </span>
       </div>
-      <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+      <p className="text-[12px] text-secondary">
         The step stopped on the error below. Resolve the cause if needed, then Continue from the header to retry.
       </p>
       <pre
         data-testid="stage-error-detail"
-        className="max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded border p-2 text-[10.5px]"
-        style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+        className="max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded border p-2 text-[10.5px] border-line bg-canvas text-secondary font-mono"
       >
         {detail}
       </pre>
@@ -622,8 +616,7 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
           </div>
           <pre
             data-testid="stage-error-log-tail"
-            className="m-0 max-h-[220px] overflow-auto whitespace-pre rounded border p-2 text-[10.5px] leading-relaxed"
-            style={{ borderColor: 'var(--border-default)', background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+            className="m-0 max-h-[220px] overflow-auto whitespace-pre rounded border p-2 text-[10.5px] leading-relaxed border-line bg-canvas text-secondary font-mono"
           >
             {errorDetail.logTail}
           </pre>
@@ -635,32 +628,31 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
             type="button"
             data-testid="stage-error-open-log"
             onClick={() => { api.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
-            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-            style={{ color: 'var(--accent)' }}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px] text-accent"
           >
             Open full service log
           </button>
-          <span className="min-w-0 truncate text-[10px]" title={errorDetail.logPath} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+          <span className="min-w-0 truncate text-[10px] text-muted font-mono" title={errorDetail.logPath}>
             {errorDetail.logPath}
           </span>
         </div>
       )}
       {remedy && (
-        <div data-testid="stage-remedy" className="flex flex-col gap-2 border-t pt-2.5" style={{ borderColor: 'var(--border-default)' }}>
+        <div data-testid="stage-remedy" className="flex flex-col gap-2 border-t pt-2.5 border-line">
           <div className="cl-rubric">
             Recommended fix
           </div>
           {remedy.repos.length === 0 ? (
             // The error is stale: every repo is clean again (fixed by hand).
-            <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+            <p className="text-[12px] text-secondary">
               The repos are clean again — Continue from the header retries this step.
             </p>
           ) : (
             <>
-              <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+              <p className="text-[12px] text-secondary">
                 Clean the working trees, then the flight retries this step.
               </p>
-              <div className="rounded border" style={{ borderColor: 'var(--border-default)' }}>
+              <div className="rounded border border-line">
                 {remedy.repos.map((repo, i) => (
                   <div
                     key={repo.path}
@@ -668,9 +660,9 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
                     style={i > 0 ? { borderColor: 'var(--border-default)' } : undefined}
                     title={repo.path}
                   >
-                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'var(--warning)' }} />
-                    <span className="text-[11.5px]" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{repo.name}</span>
-                    <span className="ml-auto text-[10px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full bg-warning" />
+                    <span className="text-[11.5px] text-primary font-mono">{repo.name}</span>
+                    <span className="ml-auto text-[10px] text-muted font-mono">
                       {repo.modified} modified
                     </span>
                   </div>
@@ -691,19 +683,18 @@ function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
                   data-testid="stage-remedy-commit"
                   disabled={remedyBusy !== null}
                   onClick={() => runRemedy('commit')}
-                  className="cl-button px-2.5 py-1 text-xs"
-                  style={{ color: 'var(--accent)' }}
+                  className="cl-button px-2.5 py-1 text-xs text-accent"
                 >
                   {remedyBusy === 'commit' ? 'Committing…' : 'Commit and continue'}
                 </button>
               </div>
-              <p className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
-                Stash is undoable — <span style={{ fontFamily: 'var(--font-mono)' }}>git stash pop</span>. Commit uses <span style={{ fontFamily: 'var(--font-mono)' }}>"canary-lab: wip"</span>.
+              <p className="text-[10.5px] text-muted">
+                Stash is undoable — <span className="font-mono">git stash pop</span>. Commit uses <span className="font-mono">"canary-lab: wip"</span>.
               </p>
             </>
           )}
           {remedyError && (
-            <p data-testid="stage-remedy-error" className="text-[11px]" style={{ color: 'var(--danger)' }}>{remedyError}</p>
+            <p data-testid="stage-remedy-error" className="text-[11px] text-danger">{remedyError}</p>
           )}
         </div>
       )}
@@ -743,21 +734,19 @@ function StagePausedPanel({ kind }: { kind: 'interrupted' | 'not-started' }) {
   return (
     <section
       data-testid="stage-paused"
-      className="flex w-full max-w-[76ch] flex-col gap-2 rounded-lg border px-3.5 py-3"
-      style={{
-        borderColor: 'var(--border-default)',
-        background: 'var(--bg-surface)',
-        boxShadow: 'var(--shadow-panel)',
-      }}
+      /* Same slab as every other stage card (PanelCard's chrome), so a paused
+         step doesn't read as a different kind of object. */
+      className={`flex flex-col gap-2 ${PANEL_CARD_CLASS} ${STAGE_COLUMN}`}
+      style={PANEL_CARD_STYLE}
     >
       <div className="cl-rubric flex items-center gap-2">
         <span aria-hidden="true" className="cl-status-dot bg-warning" style={{ height: '0.45rem', width: '0.45rem' }} />
         {interrupted ? 'Paused mid-step' : 'Paused before this step'}
       </div>
-      <p className="m-0 text-[12px] leading-snug" style={{ color: 'var(--text-primary)' }}>
+      <p className="m-0 text-[12px] leading-snug text-primary">
         {/* An ↑ points at the header control by direction, not by a brittle
             "top-right" — matches the failed card's "Continue from the header". */}
-        Use <span className="whitespace-nowrap font-semibold" style={{ color: 'var(--accent)' }}>↑ Continue</span>{' '}
+        Use <span className="whitespace-nowrap font-semibold text-accent">↑ Continue</span>{' '}
         in the header{interrupted
           ? ' to resume this step from where it stopped — everything finished in earlier steps is kept.'
           : ' to start this step — the earlier steps are already done.'}
@@ -919,8 +908,7 @@ function StageDetail({
             type="button"
             data-testid={`stage-drill-${stage.key}`}
             onClick={drillThrough.onClick}
-            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-            style={{ color: 'var(--accent)' }}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px] text-accent"
           >
             {drillThrough.label}
           </button>
@@ -928,7 +916,7 @@ function StageDetail({
       </div>
 
       {/* Where are we — one plain sentence, always present. */}
-      <div data-testid="stage-state-line" className="max-w-[76ch] text-[12px]" style={{ color: 'var(--text-secondary)' }}>
+      <div data-testid="stage-state-line" className="max-w-[76ch] text-[12px] text-secondary">
         {stageStateLine(stage, flight, companion ?? undefined)}
       </div>
 
@@ -1144,8 +1132,7 @@ function StageActivity({
   return (
     <section
       data-testid="stage-activity"
-      className={`flex flex-col border-t ${open ? 'min-h-0 flex-1' : 'shrink-0'}`}
-      style={{ borderColor: 'var(--border-default)', background: 'color-mix(in srgb, var(--bg-elevated) 22%, transparent)' }}
+      className={`flex flex-col border-t border-line bg-elevated/22 ${open ? 'min-h-0 flex-1' : 'shrink-0'}`}
     >
       {/* R66: the boundary between the stage's detail (above) and its activity.
           One labelled bar for every stage; the toggle always rides it so the
@@ -1166,7 +1153,7 @@ function StageActivity({
             {live && <StatusDot state="running" className="shrink-0" />}
             Activity
           </span>
-          <span className="h-px flex-1" style={{ borderTop: '1px dashed var(--border-default)' }} />
+          <span className="h-px flex-1 border-t border-dashed border-line" />
           <span className="cl-button px-2 py-0.5 text-[11px]">
             {open ? '▾ Hide' : '▸ Show'}
           </span>
@@ -1274,7 +1261,7 @@ function ContinueMenu({
             <span className="block text-xs font-medium">
               {resumeTarget ? `▶ Resume at ${resumeTarget}` : '▶ Resume'}
             </span>
-            <span className="block text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+            <span className="block text-[10.5px] text-muted">
               Keeps every finished step; retries the first unfinished one
             </span>
           </button>
@@ -1286,7 +1273,7 @@ function ContinueMenu({
             className="cl-hover-row rounded px-2 py-1.5 text-left transition-colors"
           >
             <span className="block text-xs font-medium">↻ From a step…</span>
-            <span className="block text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+            <span className="block text-[10.5px] text-muted">
               Re-run a stage, optionally telling the agent what went wrong
             </span>
           </button>
@@ -1391,20 +1378,19 @@ function RedoFlightDialog({
           >
             <span
               aria-hidden="true"
-              className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[10px]"
-              style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}
+              className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full border text-[10px] border-line text-muted"
             >
               ✎
             </span>
             <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="text-[12.5px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+              <span className="text-[12.5px] font-medium text-secondary">
                 {START_FRESH_LABEL}
               </span>
-              <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+              <span className="text-[10.5px] leading-snug text-muted">
                 {START_FRESH_BLURB}
               </span>
             </span>
-            <span aria-hidden="true" className="shrink-0 self-center text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
+            <span aria-hidden="true" className="shrink-0 self-center text-[12px] text-muted">→</span>
           </button>
         )}
 
@@ -1416,8 +1402,7 @@ function RedoFlightDialog({
         <div
           role="radiogroup"
           aria-label="Step to re-run from"
-          className="flex flex-col overflow-hidden rounded-md border"
-          style={{ borderColor: 'var(--border-default)' }}
+          className="flex flex-col overflow-hidden rounded-md border border-line"
         >
           {REDO_STAGES.map((s, index) => {
             const { allowed, reason } = entryFor(s.key)
@@ -1436,16 +1421,14 @@ function RedoFlightDialog({
                 data-testid={`flight-redo-${s.key}`}
                 disabled={!allowed}
                 onClick={() => setFromStage(selected ? null : s.key)}
-                className={`cl-hover-row flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors ${index > 0 ? 'border-t' : ''}`}
-                style={{
-                  // Neutral surfaces only — rows sit on the modal's own grey;
-                  // selection = the app's selected-grey + one sky bar.
-                  borderColor: 'var(--border-default)',
-                  background: selected ? 'var(--bg-selected)' : 'transparent',
-                  opacity: allowed ? 1 : 0.55,
-                  cursor: allowed ? 'pointer' : 'not-allowed',
-                  boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
-                }}
+                /* Neutral surfaces only — rows sit on the modal's own grey;
+                   selection = the app's selected-grey + one accent bar. */
+                className={[
+                  'cl-hover-row flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors border-line',
+                  index > 0 ? 'border-t' : '',
+                  selected ? 'bg-selected shadow-[inset_2px_0_0_var(--accent)]' : 'bg-transparent',
+                  allowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-55',
+                ].filter(Boolean).join(' ')}
               >
                 <span
                   aria-hidden="true"
@@ -1459,10 +1442,10 @@ function RedoFlightDialog({
                   {settled ? STAGE_ICON[lastStatus] : index + 1}
                 </span>
                 <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="text-[12.5px] font-medium" style={{ color: allowed ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                  <span className={`text-[12.5px] font-medium ${allowed ? 'text-primary' : 'text-muted'}`}>
                     {s.label}
                   </span>
-                  <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-muted)' }}>
+                  <span className="text-[10.5px] leading-snug text-muted">
                     {!allowed && reason ? reason : STAGE_BLURB[s.key]}
                   </span>
                 </span>
@@ -1471,8 +1454,8 @@ function RedoFlightDialog({
           })}
         </div>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium" style={{ color: 'var(--text-secondary)' }}>
-            What went wrong last time? <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional — added to the agent's prompt)</span>
+          <span className="text-[11px] font-medium text-secondary">
+            What went wrong last time? <span className="font-normal text-muted">(optional — added to the agent's prompt)</span>
           </span>
           <textarea
             data-testid="flight-redo-feedback"
@@ -1679,8 +1662,7 @@ function FlightSummaryStrip({
   return (
     <div
       data-testid="flight-summary-strip"
-      className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b px-4 py-1.5"
-      style={{ borderColor: 'var(--border-default)' }}
+      className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b px-4 py-1.5 border-line"
     >
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
         {items.map((item) => {
@@ -1689,7 +1671,9 @@ function FlightSummaryStrip({
               <span className="cl-rubric">
                 {item.label}
               </span>
-              <span style={{ color: item.tone ?? 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{item.value}</span>
+              {/* `tone` is a computed status token from stageStatusTone — the
+                  one place a colour still arrives as a value, not a class. */}
+              <span className="font-mono text-secondary" style={item.tone ? { color: item.tone } : undefined}>{item.value}</span>
             </>
           )
           return item.stage && onSelectStage ? (
@@ -1711,7 +1695,7 @@ function FlightSummaryStrip({
         })}
       </div>
       {onToggleAutopilot && (
-        <div className="ml-auto flex items-center gap-2 pl-3" style={{ borderLeft: '1px solid var(--border-default)' }}>
+        <div className="ml-auto flex items-center gap-2 border-l border-line pl-3">
           <button
             type="button"
             data-testid="flight-autopilot-toggle"
@@ -1730,21 +1714,14 @@ function FlightSummaryStrip({
             </span>
             <span
               aria-hidden="true"
-              className="relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-all duration-150 group-hover:brightness-110 group-active:brightness-90 group-disabled:opacity-60"
-              style={{
-                background: autopilotActive ? 'var(--accent)' : 'var(--bg-elevated)',
-                borderColor: autopilotActive ? 'var(--accent)' : 'var(--border-default)',
-              }}
+              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-all duration-150 group-hover:brightness-110 group-active:brightness-90 group-disabled:opacity-60 ${autopilotActive ? 'border-accent bg-accent' : 'border-line bg-elevated'}`}
             >
               <span
-                className="inline-block h-3 w-3 rounded-full transition-transform duration-150"
-                style={{ background: 'var(--bg-base)', boxShadow: 'var(--shadow-panel)', transform: autopilotOn ? 'translateX(13px)' : 'translateX(2px)' }}
+                className="inline-block h-3 w-3 rounded-full bg-canvas transition-transform duration-150"
+                style={{ boxShadow: 'var(--shadow-panel)', transform: autopilotOn ? 'translateX(13px)' : 'translateX(2px)' }}
               />
             </span>
-            <span
-              className="font-mono"
-              style={{ color: autopilotOn ? 'var(--text-secondary)' : 'var(--text-muted)' }}
-            >
+            <span className={`font-mono ${autopilotOn ? 'text-secondary' : 'text-muted'}`}>
               {flight.opts.yolo ? 'yolo' : autopilotOn ? 'on' : 'off'}
             </span>
           </button>
@@ -1810,7 +1787,7 @@ export function configDigestFacts(config: unknown, playwright: unknown): StageFa
  *  its half of the stage pane; the rail's own header names the agent. */
 function AgentBlock({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border" style={{ borderColor: 'var(--border-default)' }}>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded border border-line">
       {children}
     </div>
   )
@@ -1960,11 +1937,10 @@ function CheckpointControls({
   return (
     <section
       data-testid="checkpoint-controls"
-      className="flex w-full max-w-[76ch] flex-col gap-2.5 rounded border p-3"
-      style={{ borderColor: 'color-mix(in srgb, var(--warning) 45%, var(--border-default))', background: 'var(--bg-surface)' }}
+      className={`flex flex-col gap-2.5 rounded-lg border border-warning/45 bg-surface p-3 ${STAGE_COLUMN}`}
     >
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" style={{ color: 'var(--warning)' }}>⏸</span>
+        <span aria-hidden="true" className="text-warning">⏸</span>
         <span
           data-testid="checkpoint-title"
           className="text-[12.5px] font-semibold"
@@ -1973,10 +1949,10 @@ function CheckpointControls({
           {checkpointTitle(checkpoint.kind)}
         </span>
       </div>
-      <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{checkpoint.message}</p>
+      <p className="text-[12px] text-secondary">{checkpoint.message}</p>
 
       {checkpoint.kind === 'config-approval' && configError && (
-        <p data-testid="checkpoint-config-error" className="text-[11px]" style={{ color: 'var(--danger)', fontFamily: 'var(--font-mono)' }}>
+        <p data-testid="checkpoint-config-error" className="text-[11px] text-danger font-mono">
           {configError}
         </p>
       )}
@@ -1988,7 +1964,7 @@ function CheckpointControls({
 
       {checkpoint.kind === 'missing-env' && (
         <div className="flex flex-col gap-1.5">
-          <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+          <div className="text-[11px] text-muted">
             Missing: {missing.join(', ')}
           </div>
           <textarea
@@ -1998,8 +1974,7 @@ function CheckpointControls({
             placeholder={'KEY=value\nANOTHER_KEY=value'}
             spellCheck={false}
             rows={4}
-            className="cl-input w-full p-2 text-[11px]"
-            style={{ fontFamily: 'var(--font-mono)' }}
+            className="cl-input w-full p-2 text-[11px] font-mono"
           />
           <button
             type="button"
@@ -2052,8 +2027,7 @@ function CheckpointControls({
             data-testid="checkpoint-more-options"
             disabled={busy}
             onClick={() => setShowAllOptions(true)}
-            className="cl-button px-2.5 py-1 text-xs"
-            style={{ color: 'var(--text-muted)' }}
+            className="cl-button px-2.5 py-1 text-xs text-muted"
           >
             More options ▾
           </button>
@@ -2069,8 +2043,7 @@ function CheckpointControls({
             placeholder="What should the agent change? The edits are re-verified with another double-boot."
             spellCheck={false}
             rows={3}
-            className="cl-input w-full p-2 text-[11px]"
-            style={{ fontFamily: 'var(--font-mono)' }}
+            className="cl-input w-full p-2 text-[11px] font-mono"
           />
           <button
             type="button"
@@ -2084,7 +2057,7 @@ function CheckpointControls({
         </div>
       )}
 
-      {failure && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{failure}</div>}
+      {failure && <div className="text-[11px] text-danger">{failure}</div>}
     </section>
   )
 }

@@ -285,8 +285,7 @@ function RunControls({
           type="button"
           data-testid="run-stage-stop"
           onClick={() => { api.stopRun(runId).catch(onError) }}
-          className="cl-button px-2 py-0.5 text-[11px]"
-          style={{ color: 'var(--danger)' }}
+          className="cl-button px-2 py-0.5 text-[11px] text-danger"
         >
           ⏹ Stop run
         </button>
@@ -296,8 +295,7 @@ function RunControls({
           type="button"
           data-testid="run-stage-restart"
           onClick={() => { api.restartRun(runId).catch(onError) }}
-          className="cl-button px-2 py-0.5 text-[11px]"
-          style={{ color: 'var(--accent)' }}
+          className="cl-button px-2 py-0.5 text-[11px] text-accent"
           title="Re-run the remaining/failed tests on the same run"
         >
           ▸ Restart run
@@ -335,10 +333,9 @@ function RunDecisionFooter({
   return (
     <div
       data-testid="run-decision-footer"
-      className="mt-2.5 flex flex-col gap-2 rounded-md px-3 py-2.5"
-      style={{ background: 'color-mix(in srgb, var(--warning) 10%, var(--bg-elevated))' }}
+      className="mt-2.5 flex flex-col gap-2 rounded-md border border-warning/25 bg-warning/8 px-3 py-2.5"
     >
-      <p className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>{whyLine}</p>
+      <p className="text-[12px] text-secondary">{whyLine}</p>
       <div className="flex flex-wrap items-center gap-1.5">
         {options.map((option, i) => (
           <button
@@ -347,18 +344,15 @@ function RunDecisionFooter({
             data-testid={`checkpoint-choice-${option}`}
             disabled={busy}
             onClick={() => respond(option)}
-            className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs"
+            className={`cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs${i === 0 ? ' border-accent/45 text-accent' : ''}`}
             title={option}
-            style={i === 0
-              ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
-              : undefined}
           >
             {checkpointOptionLabel('run-failed', option)}
             {i === 0 && <span data-testid="checkpoint-recommended" className="cl-badge-accent">Recommended</span>}
           </button>
         ))}
       </div>
-      {failure && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{failure}</div>}
+      {failure && <div className="text-[11px] text-danger">{failure}</div>}
     </div>
   )
 }
@@ -391,14 +385,14 @@ function RunActivityDisclosure({
         className="flex w-full items-center gap-2 text-left"
       >
         <span className="cl-rubric">Repairs</span>
-        <span className="h-px flex-1" style={{ borderTop: '1px dashed var(--border-default)' }} />
+        <span className="h-px flex-1 border-t border-dashed border-line" />
         <span className="cl-button px-2 py-0.5 text-[11px]">{isOpen ? '▾ Hide' : `▸ ${cycles.length}`}</span>
       </button>
       {isOpen && (
         <ul className="m-0 mt-1 flex list-none flex-col gap-1 p-0" data-testid="repair-journal">
           {cycles.map((entry) => (
-            <li key={entry.iteration ?? entry.timestamp ?? entry.body.slice(0, 24)} className="text-[11.5px]" style={{ color: 'var(--text-secondary)' }}>
-              <span style={{ color: entry.outcome === 'passed' ? 'var(--success)' : 'var(--text-muted)' }}>
+            <li key={entry.iteration ?? entry.timestamp ?? entry.body.slice(0, 24)} className="text-[11.5px] text-secondary">
+              <span className={entry.outcome === 'passed' ? 'text-success' : 'text-muted'}>
                 Cycle {entry.iteration ?? '?'}{entry.outcome ? ` · ${entry.outcome}` : ''}
               </span>
               {entry.hypothesis ? ` — ${truncate(entry.hypothesis, 90)}` : ''}
@@ -418,14 +412,6 @@ function externalHealNote(session: RunDetail['manifest']['externalHealSession'])
   const who = clientLabel(session.clientKind, 'an external client')
   const cycle = session.cycleCount > 0 ? ` · repair cycle ${session.cycleCount}` : ''
   return `Repaired by ${who} — ${session.status}${cycle}. Full transcript on the run detail.`
-}
-
-/** The readable tail of a test location — the last two path segments plus any
- *  `:line[:col]` suffix (`/Users/…/e2e/foo.spec.ts:199` → `e2e/foo.spec.ts:199`).
- *  The full path rides the row's `title`. */
-function shortLocation(loc: string | undefined): string {
-  if (!loc) return ''
-  return loc.split('/').slice(-2).join('/')
 }
 
 /** Short, stable run reference for the identity line — the trailing token of

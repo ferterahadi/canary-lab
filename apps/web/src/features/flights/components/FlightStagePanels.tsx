@@ -6,7 +6,7 @@ import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '../../c
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, readAsBase64, useDocDrop } from '../../coverage/components/CoverageDocsRail'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '../../../shared/ui/PanelCard'
 import { StepList, StepRow } from '../../../shared/ui/StepList'
-import { StageStatusChip } from './stage-meta'
+import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
 // lens onto the SAME data its full surface owns (feature.config.cjs via the
@@ -48,7 +48,7 @@ export function RepoScanPanel({
   return (
     <section
       data-testid="repo-scan-panel"
-      className="flex w-full max-w-[76ch] flex-col gap-2.5"
+      className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}
       title="Repos and intent froze when this flight started — Change… reopens them and re-flies from the beginning."
     >
       <div
@@ -57,7 +57,7 @@ export function RepoScanPanel({
         style={PANEL_CARD_STYLE}
       >
         <div className="flex items-baseline gap-2">
-          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          <div className={PANEL_KICKER_CLASS}>
             Flight input
           </div>
           <div className="flex-1" />
@@ -66,8 +66,7 @@ export function RepoScanPanel({
               type="button"
               data-testid="flight-inputs-change"
               onClick={onChangeInputs}
-              className="text-[10.5px] underline-offset-2 transition-colors hover:underline"
-              style={{ color: 'var(--accent)' }}
+              className="text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent"
               title="Change what this flight tests — opens the intent + repos prefilled; the flight re-flies from the beginning"
             >
               Change…
@@ -77,8 +76,7 @@ export function RepoScanPanel({
         <h3 className="mb-1.5 text-[12.5px] font-semibold">Intent · what to test</h3>
         <p
           data-testid="flight-intent"
-          className="m-0 max-w-[76ch] text-[12px] leading-relaxed"
-          style={{ color: 'var(--text-secondary)' }}
+          className="m-0 max-w-[76ch] text-[12px] leading-relaxed text-secondary"
         >
           {flight.description}
         </p>
@@ -89,7 +87,7 @@ export function RepoScanPanel({
         className={PANEL_CARD_CLASS}
         style={PANEL_CARD_STYLE}
       >
-        <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+        <div className={PANEL_KICKER_CLASS}>
           {flight.repoPaths.length === 1 ? 'Repo · scanned' : `Repos · ${flight.repoPaths.length} scanned`}
         </div>
         <StepList>
@@ -104,13 +102,13 @@ export function RepoScanPanel({
                 sub={
                   <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">
                     <span className="cl-rubric">Location</span>
-                    <span className="max-w-[340px] truncate text-[10px]" title={p} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                    <span className="max-w-[340px] truncate text-[10px] text-secondary font-mono" title={p}>
                       {p}
                     </span>
                     {envs.length > 0 && (
                       <>
                         <span className="cl-rubric">Env</span>
-                        <span className="max-w-[340px] truncate text-[10px]" title={envs.join('\n')} style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                        <span className="max-w-[340px] truncate text-[10px] text-secondary font-mono" title={envs.join('\n')}>
                           {envs.join(' · ')}
                         </span>
                       </>
@@ -122,7 +120,7 @@ export function RepoScanPanel({
           })}
         </StepList>
         {orphans.length > 0 && (
-          <div className="mt-2 border-t pt-2 text-[10px]" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }} title={orphans.join('\n')}>
+          <div className="mt-2 border-t pt-2 text-[10px] border-line text-muted font-mono" title={orphans.join('\n')}>
             env outside repos: {orphans.map(repoBaseName).join(' · ')}
           </div>
         )}
@@ -280,13 +278,13 @@ export function FeatureSetupPanel({
   if (!cfg && !pw) return null
 
   return (
-    <section data-testid="feature-setup-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
+    <section data-testid="feature-setup-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
       {/* R58 + Repo-scan shape: ONE services card mirroring the repos card —
           kicker, then a block per repo (the Advanced setup Service unit):
           editable name, location, branch picker, start command(s). */}
       {blocks.length > 0 && (
         <div data-testid="setup-services-card" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          <div className={PANEL_KICKER_CLASS}>
             {blocks.length === 1 ? 'Service' : `Services · ${blocks.length}`}
           </div>
           <div className="flex flex-col">
@@ -309,7 +307,7 @@ export function FeatureSetupPanel({
 
       {pw && (
         <div data-testid="setup-playwright" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          <div className={PANEL_KICKER_CLASS}>
             Playwright
           </div>
           <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
@@ -325,15 +323,14 @@ export function FeatureSetupPanel({
       )}
 
       {editable && (
-        <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+        <div className="text-[10.5px] text-muted">
           Synced live with{' '}
           {onOpenAdvanced ? (
             <button
               type="button"
               data-testid="setup-open-advanced"
               onClick={onOpenAdvanced}
-              className="underline underline-offset-2"
-              style={{ color: 'var(--accent)' }}
+              className="underline underline-offset-2 text-accent"
             >
               Advanced setup
             </button>
@@ -343,7 +340,7 @@ export function FeatureSetupPanel({
           {' '}— the full config editor. Edits apply both ways.
         </div>
       )}
-      {error && <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{error}</div>}
+      {error && <div className="text-[11px] text-danger">{error}</div>}
     </section>
   )
 }
@@ -356,8 +353,7 @@ function RowLabel({ label, info }: { label: string; info?: string }) {
         <span
           aria-label={`${label} explained`}
           title={info}
-          className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full text-[9px] font-semibold"
-          style={{ color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 40%, transparent)' }}
+          className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-accent/40 text-[9px] font-semibold text-accent"
         >
           i
         </span>
@@ -374,9 +370,8 @@ function ReadRow({ label, value, mono, info }: { label: string; value: string; m
           chrome transparent — arming ✎ swaps text for inputs WITHOUT the rows
           jumping (no height or x-offset change). */}
       <span
-        className="min-w-0 truncate rounded border border-transparent px-2 py-1"
+        className={`min-w-0 truncate rounded border border-transparent px-2 py-1 text-secondary${mono ? ' font-mono' : ''}`}
         title={value}
-        style={{ color: 'var(--text-secondary)', fontFamily: mono ? 'var(--font-mono)' : undefined }}
       >
         {value}
       </span>
@@ -418,7 +413,7 @@ function ServiceBlock({ feature, block, allowEdit, refreshKey, divider, onRename
               <NameInput value={block.name} onSave={onRename} testId={`setup-service-name-${block.name}`} />
             ) : (
               // Input-matching metrics (transparent chrome) — see ReadRow.
-              <span className="block truncate rounded border border-transparent px-2 py-1 text-[11.5px] font-semibold" title={block.name} style={{ fontFamily: 'var(--font-mono)' }}>
+              <span className="block truncate rounded border border-transparent px-2 py-1 text-[11.5px] font-semibold font-mono" title={block.name}>
                 {block.name}
               </span>
             )}
@@ -484,8 +479,7 @@ function NameInput({ value, onSave, testId }: {
       onBlur={() => { if (draft.trim() !== '' && draft.trim() !== value) onSave(draft.trim()) }}
       onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       spellCheck={false}
-      className="cl-input w-full px-2 py-1 text-[11.5px]"
-      style={{ fontFamily: 'var(--font-mono)' }}
+      className="cl-input w-full px-2 py-1 text-[11.5px] font-mono"
     />
   )
 }
@@ -549,8 +543,7 @@ function SetupField({ label, value, editable, onSave, testId }: {
         onBlur={() => { if (draft.trim() !== '' && draft !== value) onSave(draft) }}
         onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
         spellCheck={false}
-        className="w-full rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none"
-        style={{ borderColor: 'var(--border-default)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}
+        className="w-full rounded border bg-transparent px-2 py-1 text-[11.5px] outline-none border-line text-primary font-mono"
       />
     </>
   )
@@ -705,25 +698,24 @@ export function FlightDocsPanel({
   const docs = useFlightDocs(feature, refreshKey)
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
-    <section data-testid="flight-docs-panel" className="flex w-full max-w-[76ch] flex-col gap-2.5">
+    <section data-testid="flight-docs-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
       <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
         <div className="flex items-center gap-2">
-          <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+          <div className={PANEL_KICKER_CLASS}>
             {docs.sourceDocs.length > 0 ? `Requirement docs · ${docs.sourceDocs.length}` : 'Requirement docs'}
           </div>
           <div className="flex-1" />
           {approved && (
             <span
               data-testid="docs-locked-chip"
-              className="mb-1 rounded border px-1.5 py-px text-[9.5px] font-medium"
-              style={{ color: 'var(--text-muted)', borderColor: 'var(--border-default)' }}
+              className="mb-1 rounded border px-1.5 py-px text-[9.5px] font-medium text-muted border-line"
             >
               Locked — approved
             </span>
           )}
         </div>
         {docs.sourceDocs.length === 0 ? (
-          <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>No source docs.</div>
+          <div className="text-[11px] text-muted">No source docs.</div>
         ) : (
           <div className="flex flex-col gap-2">
             {docs.sourceDocs.map((d) => (
@@ -744,11 +736,11 @@ export function FlightDocsPanel({
           </div>
         )}
         {approved && (
-          <p className="mt-2 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
+          <p className="mt-2 text-[10.5px] text-muted">
             To change these, use Continue → from a step → Requirements — later results are discarded from that point.
           </p>
         )}
-        {docs.error && <div className="mt-2 text-[11px]" style={{ color: 'var(--danger)' }}>{docs.error}</div>}
+        {docs.error && <div className="mt-2 text-[11px] text-danger">{docs.error}</div>}
       </div>
 
       {/* The output half. Rendered from `summaryStatus` alone (not from the
@@ -758,11 +750,11 @@ export function FlightDocsPanel({
       {showDistilled && (
         <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE} data-testid="flight-distilled-panel">
           <div className="flex items-center gap-2">
-            <div className={PANEL_KICKER_CLASS} style={{ color: 'var(--text-muted)' }}>
+            <div className={PANEL_KICKER_CLASS}>
               {requirementCount != null ? `Distilled requirements · ${requirementCount}` : 'Distilled requirements'}
             </div>
             <div className="flex-1" />
-            <span className="mb-1 flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }} data-testid="docs-summary-chip">
+            <span className="mb-1 flex items-center gap-1.5 text-[10px] text-muted" data-testid="docs-summary-chip">
               Summary
               <StageStatusChip status={summaryStatus} />
             </span>
@@ -787,7 +779,7 @@ export function FlightDocsPanel({
               ))}
             </div>
           ) : (
-            <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+            <div className="text-[11px] text-muted">
               {summaryStatus === 'running'
                 ? 'Distilling the source docs into requirements — the agent’s progress is in Activity below.'
                 : summaryStatus === 'failed'
@@ -818,8 +810,7 @@ function IntentRow({ description }: { description: string }) {
       type="button"
       data-testid="fork-intent"
       onClick={() => setOpen(!open)}
-      className="flex w-full items-center gap-2 rounded border px-2.5 py-1.5 text-left"
-      style={{ borderColor: 'var(--border-default)', background: 'transparent', cursor: 'pointer' }}
+      className="flex w-full cursor-pointer items-center gap-2 rounded border border-line bg-transparent px-2.5 py-1.5 text-left"
       title={open ? 'Fold the intent' : 'View the full intent'}
     >
       <span className="cl-rubric shrink-0">
@@ -829,12 +820,11 @@ function IntentRow({ description }: { description: string }) {
           sentence on the page (mono stays reserved for paths/commands). */}
       <span
         data-testid="fork-intent-text"
-        className={`min-w-0 flex-1 text-[12px] ${open ? 'leading-relaxed' : 'truncate'}`}
-        style={{ color: 'var(--text-secondary)' }}
+        className={`min-w-0 flex-1 text-[12px] text-secondary ${open ? 'leading-relaxed' : 'truncate'}`}
       >
         {description}
       </span>
-      <span className="shrink-0 text-[10.5px]" style={{ color: 'var(--accent)' }}>
+      <span className="shrink-0 text-[10.5px] text-accent">
         {open ? 'Fold' : 'View'}
       </span>
     </button>
@@ -867,23 +857,18 @@ function ForkPathCard({ testId, title, blurb, recommended, note, selected, dimme
       aria-checked={Boolean(selected)}
       disabled={disabled}
       onClick={onPick}
-      className="relative flex min-w-0 flex-1 items-start gap-2.5 rounded-md border p-3 text-left transition-all"
-      style={{
-        // Neutral surfaces — the sky lives in the border + radio dot only.
-        borderColor: selected
-          ? 'color-mix(in srgb, var(--accent) 60%, var(--border-default))'
-          : 'var(--border-default)',
-        background: selected ? 'var(--bg-selected)' : 'transparent',
-        opacity: dimmed ? 0.6 : 1,
-        cursor: 'pointer',
-      }}
+      /* Neutral surfaces — the accent lives in the border + radio dot only. */
+      className={[
+        'relative flex min-w-0 flex-1 cursor-pointer items-start gap-2.5 rounded-md border p-3 text-left transition-all',
+        selected ? 'border-accent/60 bg-selected' : 'border-line bg-transparent',
+        dimmed ? 'opacity-60' : '',
+      ].filter(Boolean).join(' ')}
     >
       <span
         aria-hidden="true"
-        className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border"
-        style={{ borderColor: selected ? 'var(--accent)' : 'var(--border-default)' }}
+        className={`mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border ${selected ? 'border-accent' : 'border-line'}`}
       >
-        {selected && <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--accent)' }} />}
+        {selected && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
       </span>
       <span className="flex min-w-0 flex-col gap-0.5">
         <span className="flex items-center gap-1.5 text-[12.5px] font-semibold">
@@ -896,14 +881,13 @@ function ForkPathCard({ testId, title, blurb, recommended, note, selected, dimme
           {note && !selected && (
             <span
               data-testid={`${testId}-note`}
-              className="rounded-full px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide"
-              style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+              className="rounded-full border border-line px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-muted"
             >
               {note}
             </span>
           )}
         </span>
-        <span className="text-[11px] leading-snug" style={{ color: 'var(--text-secondary)' }}>{blurb}</span>
+        <span className="text-[11px] leading-snug text-secondary">{blurb}</span>
       </span>
     </button>
   )
@@ -936,22 +920,17 @@ function AttemptVerdict({ attempt }: { attempt: PrdSourceAttempt }) {
   return (
     <div
       data-testid="prd-source-verdict"
-      className="flex items-start gap-2 px-2.5 py-2"
-      style={{
-        borderLeft: '2px solid var(--warning)',
-        background: 'color-mix(in srgb, var(--warning) 7%, transparent)',
-      }}
+      className="flex items-start gap-2 border-l-2 border-warning bg-warning/7 px-2.5 py-2"
     >
-      <span aria-hidden="true" className="mt-px text-[11px]" style={{ color: 'var(--warning)' }}>⊘</span>
+      <span aria-hidden="true" className="mt-px text-[11px] text-warning">⊘</span>
       <div className="flex min-w-0 flex-col gap-1">
         <span
-          className="cl-rubric"
-          style={{ color: 'var(--warning)' }}
+          className="cl-rubric text-warning"
         >
           {attemptHeadline(attempt)}
         </span>
         {attempt.reason && (
-          <span className="text-[12px] leading-snug" style={{ color: 'var(--text-primary)' }}>{attempt.reason}</span>
+          <span className="text-[12px] leading-snug text-primary">{attempt.reason}</span>
         )}
       </div>
     </div>
@@ -1004,13 +983,12 @@ export function RequirementsFork({
   return (
     <section
       data-testid="requirements-fork"
-      className="relative flex w-full max-w-[76ch] flex-col gap-2.5 rounded border p-3"
-      style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
+      className={`relative flex flex-col gap-2.5 rounded-lg border p-3 border-line bg-surface ${STAGE_COLUMN}`}
       {...dropHandlers}
     >
       {lastAttempt && <AttemptVerdict attempt={lastAttempt} />}
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="text-[11px]" style={{ color: 'var(--warning)' }}>⏸</span>
+        <span aria-hidden="true" className="text-[11px] text-warning">⏸</span>
         <span className="text-[12.5px] font-semibold">Where should requirements come from?</span>
       </div>
       <IntentRow description={flight.description} />
@@ -1137,8 +1115,7 @@ export function RequirementsFork({
               <span
                 key={startedFlash}
                 data-testid="fork-start-agent-flash"
-                className="cl-flash-fade text-[11px] font-medium"
-                style={{ color: 'var(--accent)' }}
+                className="cl-flash-fade text-[11px] font-medium text-accent"
                 onAnimationEnd={() => setStartedFlash(null)}
               >
                 Agent started — output streams in the activity band below
@@ -1163,7 +1140,7 @@ export function RequirementsFork({
       )}
 
       {(failure ?? docs.error) && (
-        <div className="text-[11px]" style={{ color: 'var(--danger)' }}>{failure ?? docs.error}</div>
+        <div className="text-[11px] text-danger">{failure ?? docs.error}</div>
       )}
       {dragging && mode === 'manual' && <DocsDropOverlay label="Drop to add requirement docs" />}
     </section>
