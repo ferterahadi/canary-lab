@@ -3,7 +3,8 @@
 **Scope:** repository layout and module ownership. **No behavior changes.**
 Every item below is a move, a rename, a generator, or a declaration.
 
-**Status:** Phases 0–7 are **done and committed**. Phases 8–9 remain. The one
+**Status:** Phases 0–7 are **done and committed**. Phase 8 is **step 1 of 6**
+(`dd9ade7`); Phase 9 has not started. The one
 non-layout item (a public-repo privacy exposure) is **resolved** — the history
 was rewritten on 2026-07-26, so **every SHA below is post-rewrite**.
 
@@ -27,23 +28,24 @@ worktrees exist there and are behind.
 | `143e461` | 7 | `client.ts` 2,195 ln → a 24-line barrel + 13 domain modules + `internal.ts`, all still under `shared/api/`; zero call sites changed |
 | `d93871b` | — | fallout fix: `run-primitives.ts` had shipped untested in `b8faded`, holding the gate red at 99.95% ever since |
 
-`origin/release/1.6.0` is at `846328b`; **`3a6fbcc`, `143e461` and `d93871b` are
+`origin/release/1.6.0` is at `8c7d6c5`; **only `dd9ade7` (Phase 8 step 1) is
 unpushed.** These SHAs replaced the pre-rewrite ones (`2140974`, `4421b81`,
 `02ddf2a`, `f8438d8`, `459fb0f`, `d14ad04`, `a0107e7`, `a4bb2f0`, `298378a`); the
 old hashes no longer resolve. `.git/filter-repo/commit-map` holds the full mapping
 if an old SHA turns up in a doc or a note.
 
-### Current numbers (measured at `d93871b`)
+### Current numbers (measured at `dd9ade7`)
 
 | Metric | Value |
 | --- | --- |
-| Coverage gate | 100/100/100/100 — **177 files**, 12,124 stmts / 8,144 branches / 2,284 funcs / 10,475 lines |
-| Tests | 289 files, 5,538 passing, 1 skipped |
+| Coverage gate | 100/100/100/100 — **178 files**, 12,390 stmts / 8,343 branches / 2,333 funcs / 10,682 lines |
+| Tests | 303 files, 5,568 passing, 1 skipped |
 | `tsc -p tsconfig.build.json` | clean |
 | `typecheck:web` / `:server` | 5 / 17 pre-existing errors, **all in `*.test.ts(x)`** (the build config excludes tests) — this is the baseline, not a regression. Count *errors* (`grep -cE "^[^ ].*error TS"`), not output lines; multi-line errors inflate a `wc -l`. |
 | `server.ts` | 447 ln, 58 imports, 15 dep constructions, 10 register calls |
 | `shared/api/` | 15 modules, largest `config.ts` at 373 ln (was one 2,195-ln `client.ts`) |
-| server `runs` | 15,970 ln ← Phase 8 target |
+| server `runs` | 15,970 ln ← Phase 8 target; **4,546 ln of it excluded from the gate** (was 5,068) |
+| `orchestrator.ts` | 2,986 ln, still excluded — largest file in the repo |
 | Feature barrels | server 10/10 · **web 0/10** ← Phase 9 target |
 | Cross-feature imports | **web 57** (aliased `@/features/<other>/…`) · **server 257** |
 
@@ -145,10 +147,56 @@ hand-pruned and not regex-stripped.
 
 ---
 
-## Phase 8 — Split `runs` (~4 h)
+## Phase 8 — Split `runs` (in progress)
 
-Server `runs` is 15,970 lines holding four separable concerns that already live in
-separate subdirs:
+> **⚠ The stated goal was already met before Phase 8 started.** `runtime/`,
+> `routes/`, `heal/`, `dirty-specs/` and `ws/` all exist and always did — there is
+> no directory split to perform. Re-derived from the code, the debt Phase 8 was
+> pointing at is that **5,068 lines of `runs` sit outside the coverage gate**, all
+> four excluded files being here, and `orchestrator.ts` is the largest file in the
+> repo. That is the thing to finish. Likewise the claimed `runs ⇄ config` cycle is
+> **one** back-edge (`loadFeatures` in the registrar) against 12 imports the other
+> way — real, but not the structural knot the plan described.
+
+### Remaining work, measured
+
+| # | Item | Size | State |
+| --- | --- | --- | --- |
+| 1 | `run-verdict.ts` — verdict layer out of `orchestrator.ts` | 558 ln | ✅ `dd9ade7`, gated at 100% |
+| 2 | `RunOrchestrator` class (lines 459–2862) | 2,404 ln, 68 methods | the real monolith |
+| 3 | Orchestrator tail — spawner, PTY, prompts | ~124 ln | untouched |
+| 4 | `log-enrichment.ts` | 1,094 ln, excluded | untouched |
+| 5 | `runs → config` back-edge | 1 import | untouched |
+| 6 | Tier-4 live proof + DoD checklist | — | do once, at the end of the phase |
+
+The class has five clusters worth separating: heal-agent PTY + session refs
+(1553–2104, ~550 ln), auto/manual heal loops (2325–2725, ~400 ln), service boot
+and readiness polling (880–1126, ~250 ln), Playwright invocation and artifacts
+(1179–1436, ~250 ln), and repo snapshot / fix capture / overlay (693–853 plus
+2105–2172, ~230 ln).
+
+### Step 1 — `run-verdict.ts` ✅ done (`dd9ade7`)
+
+`orchestrator.ts` 3,508 → 2,986 ln; the excluded surface shrank 522 lines with
+**no new exclude**. Nine module-private functions became exported, which is the
+only reason they had never been unit-tested — previously they were reachable
+solely by driving a live orchestrator. 31 tests took the new module to 100%.
+
+Two findings worth carrying into steps 2–4:
+
+- **"Unreachable" is a claim to test, not to assert.** Six of the ten open
+  branches were written off as unreachable in an earlier pass; five turned out to
+  be reachable with a real input. The parser only sets `parseError` on a source
+  deep enough to overflow its own recursion (plain bad syntax returns a test-less
+  tree through a different arm), and the `file:line` de-duplication fires when two
+  tests are declared on **one source line**. Probe the collaborator before
+  concluding an arm is dead.
+- **Genuinely dead arms get deleted, not excluded** — matching the six defensive
+  arms already removed this release. `grepForKnownTests` could not return null, so
+  its guard and the `if (!grep)` fallback are gone and the return type is now
+  `string`, making a regression a compile error.
+
+Server `runs` is 15,970 lines across these subdirs:
 
 | Subdir | Lines |
 | --- | --- |
@@ -345,8 +393,9 @@ prose over an enumeration.
 
 ## Definition of done (Phases 8–9)
 
-- [ ] Coverage 100/100/100/100 **and** the covered-file count still 177 (percentage
-      alone does not prove scope was preserved)
+- [ ] Coverage 100/100/100/100 **and** the covered-file count at least 178
+      (percentage alone does not prove scope was preserved; every file a split
+      lifts out of an exclude should push this number *up*)
 - [ ] All three typechecks at baseline (0 / 5 / 17, the latter two test-only)
 - [ ] `npm run smoke:pack` passes
 - [ ] Both generator `--check`s pass
