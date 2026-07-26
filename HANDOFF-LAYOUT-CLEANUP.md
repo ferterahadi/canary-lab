@@ -3,8 +3,9 @@
 **Scope:** repository layout and module ownership. **No behavior changes.**
 Every item below is a move, a rename, a generator, or a declaration.
 
-**Status:** Phases 0–7 are **done and committed**. Phase 8 is **step 1 of 6**
-(`dd9ade7`); Phase 9 has not started. The one
+**Status:** Phases 0–7 are **done and committed**. Phase 8 has **steps 1, 3, 4, 5
+and 6 done** and step 2 partly done (one of five clusters); Phase 9 has not
+started. The one
 non-layout item (a public-repo privacy exposure) is **resolved** — the history
 was rewritten on 2026-07-26, so **every SHA below is post-rewrite**.
 
@@ -28,24 +29,25 @@ worktrees exist there and are behind.
 | `143e461` | 7 | `client.ts` 2,195 ln → a 24-line barrel + 13 domain modules + `internal.ts`, all still under `shared/api/`; zero call sites changed |
 | `d93871b` | — | fallout fix: `run-primitives.ts` had shipped untested in `b8faded`, holding the gate red at 99.95% ever since |
 
-`origin/release/1.6.0` is at `8c7d6c5`; **only `dd9ade7` (Phase 8 step 1) is
+`origin/release/1.6.0` is at `8c7d6c5`; **everything from `dd9ade7` onward is
 unpushed.** These SHAs replaced the pre-rewrite ones (`2140974`, `4421b81`,
 `02ddf2a`, `f8438d8`, `459fb0f`, `d14ad04`, `a0107e7`, `a4bb2f0`, `298378a`); the
 old hashes no longer resolve. `.git/filter-repo/commit-map` holds the full mapping
 if an old SHA turns up in a doc or a note.
 
-### Current numbers (measured at `dd9ade7`)
+### Current numbers (measured at `5195214`)
 
 | Metric | Value |
 | --- | --- |
-| Coverage gate | 100/100/100/100 — **178 files**, 12,390 stmts / 8,343 branches / 2,333 funcs / 10,682 lines |
-| Tests | 303 files, 5,568 passing, 1 skipped |
+| Coverage gate | 100/100/100/100 — **182 files**, 12,997 stmts / 8,718 branches / 2,431 funcs / 11,202 lines |
+| Tests | 305 files, 5,603 passing, 1 skipped |
 | `tsc -p tsconfig.build.json` | clean |
 | `typecheck:web` / `:server` | 5 / 17 pre-existing errors, **all in `*.test.ts(x)`** (the build config excludes tests) — this is the baseline, not a regression. Count *errors* (`grep -cE "^[^ ].*error TS"`), not output lines; multi-line errors inflate a `wc -l`. |
 | `server.ts` | 447 ln, 58 imports, 15 dep constructions, 10 register calls |
 | `shared/api/` | 15 modules, largest `config.ts` at 373 ln (was one 2,195-ln `client.ts`) |
-| server `runs` | 15,970 ln ← Phase 8 target; **4,546 ln of it excluded from the gate** (was 5,068) |
-| `orchestrator.ts` | 2,986 ln, still excluded — largest file in the repo |
+| server `runs` | **2,781 ln excluded from the gate**, down from 5,068 at the start of Phase 8 |
+| `orchestrator.ts` | 2,781 ln — the only file in `runs` still excluded, and still the largest file in the repo |
+| `apps/web-server/src/shared/` | 15 modules; gained `feature-loader`, `ast-extractor`, `config-ast`, `launcher-startup` |
 | Feature barrels | server 10/10 · **web 0/10** ← Phase 9 target |
 | Cross-feature imports | **web 57** (aliased `@/features/<other>/…`) · **server 257** |
 
@@ -163,11 +165,36 @@ hand-pruned and not regex-stripped.
 | # | Item | Size | State |
 | --- | --- | --- | --- |
 | 1 | `run-verdict.ts` — verdict layer out of `orchestrator.ts` | 558 ln | ✅ `dd9ade7`, gated at 100% |
-| 2 | `RunOrchestrator` class (lines 459–2862) | 2,404 ln, 68 methods | the real monolith |
-| 3 | Orchestrator tail — spawner, PTY, prompts | ~124 ln | untouched |
-| 4 | `log-enrichment.ts` | 1,094 ln, excluded | untouched |
-| 5 | `runs → config` back-edge | 1 import | untouched |
-| 6 | Tier-4 live proof + DoD checklist | — | do once, at the end of the phase |
+| 2 | `RunOrchestrator` class | 2,404 → 2,323 ln, 62 methods | 🔶 first cluster out (`5195214`); four remain |
+| 3 | Orchestrator tail — spawner, PTY, prompts | 146 ln | ✅ `253027b`, gated at 100% |
+| 4 | `log-enrichment.ts` | 1,094 ln | ✅ `659d167`, exclude deleted |
+| 5 | `runs → config` coupling | 8 imports → 0 | ✅ `f1f960c` |
+| 6 | Tier-4 live proof + DoD checklist | — | ✅ 3/3 passed on run `2026-07-26T1322-3eg4` |
+
+**Net so far:** `runs` outside the gate **5,068 → 2,781 ln** (−45%), gated files
+**177 → 182**, and **no new exclude was added at any step**. `orchestrator.ts` is
+the only file in `runs` still excluded.
+
+### What remains — step 2, clusters 2–5
+
+Measured with its exclude lifted, `orchestrator.ts` is at **95.3% statements /
+89.2% branches**, and the uncovered arms are *concentrated in the heal loops*,
+not spread evenly. So the way forward is to keep lifting out clusters that can
+stand alone, exactly as clusters already landed did — not to chase arms inside
+the class.
+
+| Cluster | Lines | Note |
+| --- | --- | --- |
+| ✅ Agent session refs | ~90 | done — `AgentSessionRefStore`, 18 tests |
+| Heal-agent PTY (spawn, cleanup, output tail) | ~460 | biggest remaining |
+| Auto/manual heal loops | ~400 | **where the uncovered branches are**; hardest, do last |
+| Service boot + readiness polling | ~250 | mostly covered already; low risk |
+| Playwright invocation + artifacts | ~250 | mostly covered already; low risk |
+| Repo snapshot / fix capture / overlay | ~230 | — |
+
+Take the low-risk covered clusters first: moving already-covered code out of an
+excluded file still *adds* it to the gate, so each one is a win with almost no
+regression surface. Leave the heal loops for last.
 
 The class has five clusters worth separating: heal-agent PTY + session refs
 (1553–2104, ~550 ln), auto/manual heal loops (2325–2725, ~400 ln), service boot
