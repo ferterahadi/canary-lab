@@ -1,7 +1,10 @@
 ---
 name: cl_async-task-ux
-description: Use when adding a long-running background task to Canary Lab (anything that shouldn't block a REST request or the UI) — coverage generation, port-ification, spec/eval generation. Defines the non-blocking · persistent · recoverable · re-openable · single-flight contract and the file-backed store pattern to copy.
+description: Use when adding a long-running background task to Canary Lab (anything that shouldn't block a REST request or the UI) — coverage generation, port-ification, spec/eval generation.
 ---
+
+<!-- GENERATED FROM .claude/skills — DO NOT EDIT.
+     Run `npm run gen:skills` after editing the source skill (the build does this too). -->
 
 # Canary Lab Async-Task UX
 

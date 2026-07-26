@@ -3,6 +3,9 @@ name: cl_flight-progress-model
 description: Project-specific corrections about what counts as a flight in Canary Lab and how flight progress is represented. Consult before changing flight records, the flights index, the picker's stage rails, or any UI that decides whether a feature "has flown". Learned conventions for canary-lab.
 ---
 
+<!-- GENERATED FROM .claude/skills — DO NOT EDIT.
+     Run `npm run gen:skills` after editing the source skill (the build does this too). -->
+
 # Flight progress model — learned conventions
 
 Corrections captured via /todo-learn. Each is a standing rule for this repo.

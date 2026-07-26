@@ -3,6 +3,9 @@ name: cl_add-sample-feature
 description: Use when creating or editing a sample feature under templates/project/features/ — feature.config.cjs, envsets, e2e specs — or when a template change doesn't show up in a scaffolded workspace (for general pre-claim verification checks use cl_verify-changes).
 ---
 
+<!-- GENERATED FROM .claude/skills — DO NOT EDIT.
+     Run `npm run gen:skills` after editing the source skill (the build does this too). -->
+
 # Authoring Canary Lab Sample Features
 
 Sample features are the scaffold every consumer starts from, and they only ship via

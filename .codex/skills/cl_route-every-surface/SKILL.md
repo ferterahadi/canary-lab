@@ -1,7 +1,10 @@
 ---
 name: cl_route-every-surface
-description: Use whenever you add a new page/view OR a dialog/modal to the web UI (apps/web) — a new full-screen view, a new dialog rendered from App.tsx, a wizard, a config/settings panel, anything a user opens. Also use when a user says "I want to link to X", "refresh loses my place", "make this bookmarkable", or "this dialog doesn't survive reload". The rule: every page and every cold-load-coherent dialog gets a URL param so it is deep-linkable, refresh-survivable, and revisitable. New surface with no route → it vanishes on refresh, always.
+description: Use whenever you add a new page/view or a dialog/modal to the web UI (apps/web), or when a user says "I want to link to X", "refresh loses my place", "make this bookmarkable", "this dialog doesn't survive reload". Every page and cold-load-coherent dialog gets a URL param.
 ---
+
+<!-- GENERATED FROM .claude/skills — DO NOT EDIT.
+     Run `npm run gen:skills` after editing the source skill (the build does this too). -->
 
 # Route Every Surface — A New Page/Dialog Gets a URL
 
@@ -57,7 +60,8 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ```
 ?view=coverage&feature=checkout                    → coverage page
 ?feature=checkout&run=7cvh                          → run selected in detail pane
-?feature=checkout&dialog=config                     → Playwright settings
+?feature=checkout&dialog=config                     → feature config (Playwright — the no-tab default)
+?feature=checkout&dialog=config&tab=ports           → feature config, on a named tab
 ?feature=checkout&dialog=verification               → Verify-config dialog
 ?feature=checkout&dialog=flight-start               → flight stage-entry launcher (feature-scoped)
 ?dialog=flight-new                                  → new-flight launcher (intent + repo picker)
@@ -65,8 +69,14 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ```
 
 `RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new'`.
-`flight` is the one live id-qualifier: it only qualifies `view=flights` (absent =
-the flights landing list), gated the same way in `persistView`/`readPersistedView`.
+`flight`, `draft` and `tab` are the live id/name qualifiers, each gated to its own
+view/dialog in `persistView`/`readPersistedView`: `flight` only qualifies
+`view=flights` (absent = the flights landing list), `draft` only `dialog=draft`,
+`tab` only `dialog=config` (`ConfigTab`; an unknown name reads as null so the
+mount's own default wins). Because the config dialog is qualified by the DURABLE
+`feature` param, any opener that opens it for a feature other than the selected
+one must `setSelectedFeature` too — otherwise the deep link names the wrong
+suite (this bit the flight's Ports drill-through).
 `wf` (old portify-revisit id) and `task` (old evaluation-dialog id) are
 tombstoned — `persistView` force-deletes both on every write so no stale deep
 link carries them forward; never reuse either name for a new qualifier. Unknown
@@ -144,6 +154,6 @@ dialog values are ignored on read.
 - [[cl_ws-driven-state]] — that skill keeps UI state live after a server mutation;
   this skill keeps UI state addressable in the URL. Different axes, both required
   for a surface to feel native.
-- [[cl_verify-changes]] — `apps/web/**` changes need the canary-apply cycle (the
-  user runs it) to confirm refresh/deep-link behaviour end-to-end; unit tests cover
-  the serialization.
+- [[cl_verify-changes]] — `apps/web/**` changes need the canary-apply cycle (Tier 3
+  says who runs it) to confirm refresh/deep-link behaviour end-to-end; unit tests
+  cover the serialization.

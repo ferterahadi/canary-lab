@@ -3,6 +3,9 @@ name: cl_verify-the-premise
 description: Use the moment you're about to act on a claim about the code you didn't confirm yourself — a plan/spec/"follow-up" item, a "known gap", a bug report ("doesn't update live", "only works after refresh", "isn't wired", "X is missing"), or a "these N are identical, migrate them the same way" assumption. Any "fix X" where you haven't watched X actually fail right now.
 ---
 
+<!-- GENERATED FROM .claude/skills — DO NOT EDIT.
+     Run `npm run gen:skills` after editing the source skill (the build does this too). -->
+
 # Verify the Premise, Not Just the Mechanism
 
 A plan, spec, follow-up item, or bug report is a **hypothesis about the code**,

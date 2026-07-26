@@ -1,13 +1,19 @@
 ---
 name: cl_ui-design-philosophy
-description: Use when building or restyling any Canary Lab web UI (apps/web) — a new panel, dialog, pill, card, or full-screen view. Captures the design language so new surfaces feel native instead of bolted on: reuse the token system, the established layout precedents, and the meaning-carries-the-style rule. No new component library.
+description: Use when building or restyling any Canary Lab web UI (apps/web) — a new panel, dialog, pill, card, or full-screen view. The design language that makes a new surface feel native: the token system, the layout precedents, and meaning-carries-the-style.
 ---
+
+<!-- GENERATED FROM .claude/skills — DO NOT EDIT.
+     Run `npm run gen:skills` after editing the source skill (the build does this too). -->
 
 # Canary Lab UI Design Philosophy
 
 Canary Lab's UI is a dense, information-first operator console — not a marketing
 page. New surfaces must read as part of the same tool. The bar is *intentional and
 native*, not *novel*. Apply `frontend-design` polish **inside** these constraints.
+
+Critique-only requests ("review this design", "design feedback") → `cl_design-feedback`.
+Terminal/CLI output styling is out of scope.
 
 ## Non-negotiables
 
@@ -29,8 +35,8 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 | Full-screen workspace view | `CoverageLedgerPage`, `LogCleanupPage` (`fixed inset-0`, header bar + panes) |
 | Modal with tabs | `FeatureConfigEditor` (`.cl-modal-backdrop` + `.cl-modal` + `<nav>` tabs) |
 | Status-bar launcher | the `*Pill` components in `GlobalStatusBar` |
-| Background-task surface | the Portify pill + dialog (see `cl_async-task-ux`) |
-| Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + live agent log) that OWNS the view while a job runs; not a banner over a dimmed result |
+| Background-task surface | `FlightsPill` + `FlightPage` (`features/flights/components/`) (see `cl_async-task-ux`) |
+| Long async generation | the Coverage **Generating** screen — a dedicated full pane (phase stepper + the agent timeline via `AgentSessionView`, always on) that OWNS the view while a job runs; not a banner over a dimmed result |
 | Live agent progress / CLI output | **`AgentSessionView`** — never a raw log `<pre>` |
 
 ## Principles that make it feel designed
@@ -43,16 +49,10 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
   `/ws/.../agent-session` tail, exactly like the coverage job (see `cl_async-task-ux`).
   A new `kind` on `AgentSessionSource` is the whole UI cost; the win is structured
   thinking/tool/result rows, collapse, model+session header, and live tail for free.
-- **A live UI transition needs a reliable trigger, not just a push.** When a panel
-  must flip state mid-job (text progress → `AgentSessionView` once the rewrite agent
-  pins its session), don't gate it solely on a one-shot broadcast like a
-  workspace-event push — that channel can silently fail to deliver while the
-  per-task log WS (the one already streaming the agent's lines) keeps working. Back
-  the transition off the proven stream: when the log marks the agent starting and
-  the task still lacks its session ref, refetch the task once (self-limiting — stop
-  refetching the moment the ref lands). Symptom this prevents: "only swaps after I
-  refresh the page" — refresh works because the REST list carries the ref the lost
-  push didn't. The full pattern + diagnostic fingerprint lives in [[cl_live-state-sync]].
+- **A live UI transition needs a reliable trigger, not just a push.** A panel that
+  must flip state mid-job may not depend solely on a best-effort broadcast — back it
+  off the per-task stream you already hold. Pattern, worked example, and the
+  "only updates after I refresh" fingerprint: [[cl_live-state-sync]].
 - **Meaning carries the style, not decoration.** Prefer a status dot, a coloured
   border-inset, or a typed chip over a heavy accent. (R9 dropped the TestCard's
   decorative left-accent — the verified dot + `@req-*` chips already say it.)
@@ -70,7 +70,7 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
   to persist (which feature, which full-screen view, which sub-tab) lives in the URL
   (source of truth) + `localStorage`, NOT only React state — so a refresh restores
   it and a second tab reflects it. Broadcast cross-tab changes via `storage` events;
-  see `lib/workspace-view-state.ts`. Ephemeral UI (hover, transient filters) stays
+  see `shared/lib/workspace-view-state.ts`. Ephemeral UI (hover, transient filters) stays
   in React state.
 - **One owner for a long-lived lifecycle; don't split it across views.** A background
   job (or any cross-view live state) must be owned ONCE at the screen level — one
@@ -92,12 +92,11 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 - **Two-way affordances.** Hovering one side of a relation lights the other and
   dims the rest (the ledger's test↔requirement highlight) — makes structure legible.
 - **No layout shift from a scrollbar.** On any scroller whose content grows/shrinks
-  with a toggle or filter (a disclosure, a gap filter, the generating "show agent
-  activity"), set `scrollbar-gutter: stable` so the appearing scrollbar doesn't eat
-  content width and jump the layout sideways.
+  with a toggle or filter (a disclosure, a gap filter), set `scrollbar-gutter: stable`
+  so the appearing scrollbar doesn't eat content width and jump the layout sideways.
 
 ## Verify
 
-Component behaviour is happy-dom-tested (`*.test.tsx`); the live look is the user's
-`canary-apply` trial (never run it — see `cl_verify-changes`). Typecheck with
+Component behaviour is happy-dom-tested (`*.test.tsx`); the live look needs the
+`canary-apply` cycle — see `cl_verify-changes` Tier 3 for who runs it. Typecheck with
 `tsconfig.build.json`.

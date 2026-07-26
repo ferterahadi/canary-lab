@@ -36,6 +36,12 @@ function run(command, args, cwd, extraEnv = {}) {
   }
 }
 
+// Both freshness checks must run BEFORE the build: `npm run build` regenerates
+// AGENTS.md and .codex/skills, so a check placed after it can only ever pass.
+// Run first, they assert what's committed already matches the source of truth.
+run('node', ['tools/gen-agents-md.mjs', '--check'], repoRoot)
+run('node', ['tools/gen-codex-skills.mjs', '--check'], repoRoot)
+
 run('npm', ['run', 'build'], repoRoot)
 run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)
 
