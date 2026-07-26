@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ execFileSync: vi.fn() }))
 vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
-const { refreshCanaryLabMcp } = await import('./mcp-refresh')
+const { refreshCanaryLabMcp, findStaleCanaryLabMcp } = await import('./mcp-refresh')
 
 const tmpDirs: string[] = []
 function tmpConfig(): string {
@@ -124,5 +124,43 @@ describe('refreshCanaryLabMcp', () => {
     refreshCanaryLabMcp({ execPath: EXEC, cliPath: CLI, claudeDesktopConfigPath: desktopConfigPath, log: () => {} })
 
     expect(fs.existsSync(desktopConfigPath)).toBe(false)
+  })
+})
+
+describe('findStaleCanaryLabMcp', () => {
+  // The point of this check: every failure path in the refresh is quiet, so the
+  // only reliable signal that a client is broken is the registered path itself
+  // no longer existing on disk.
+  it('reports a client whose registered cli.js was deleted by an upgrade', () => {
+    const stale = findStaleCanaryLabMcp({
+      readRegisteredCliPath: (target) =>
+        target === 'claude' ? '/old/dist/scripts/cli.js' : null,
+      exists: () => false,
+    })
+
+    expect(stale).toEqual([{ client: 'Claude', cliPath: '/old/dist/scripts/cli.js' }])
+  })
+
+  it('reports both clients independently', () => {
+    const stale = findStaleCanaryLabMcp({
+      readRegisteredCliPath: () => '/gone/cli.js',
+      exists: () => false,
+    })
+
+    expect(stale.map((s) => s.client)).toEqual(['Codex', 'Claude'])
+  })
+
+  it('stays quiet when the registered path still resolves', () => {
+    expect(findStaleCanaryLabMcp({
+      readRegisteredCliPath: () => '/live/dist/apps/cli/cli.js',
+      exists: () => true,
+    })).toEqual([])
+  })
+
+  it('stays quiet when a client has no Canary Lab entry at all', () => {
+    const exists = vi.fn(() => false)
+
+    expect(findStaleCanaryLabMcp({ readRegisteredCliPath: () => null, exists })).toEqual([])
+    expect(exists).not.toHaveBeenCalled()
   })
 })

@@ -151,6 +151,23 @@ function getExistingConfig(
   }
 }
 
+// The absolute cli.js path a client currently has registered, or null when it
+// has no Canary Lab entry / the client CLI is unavailable. Used to detect a
+// registration left pointing at a path a package upgrade deleted — see
+// findStaleCanaryLabMcp in mcp-refresh.ts.
+export function registeredCliPath(target: McpRegistrationTarget): string | null {
+  if (!commandAvailable(target)) return null
+  try {
+    const output = execFileSync(target, ['mcp', 'get', SERVER_NAME], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return output.match(/[^\s"',]*[/\\]cli\.js/)?.[0] ?? null
+  } catch {
+    return null
+  }
+}
+
 // True when the client has any entry under `name` (used to detect legacy keys
 // to migrate). A non-zero `mcp get` exit means no such server.
 function clientHasServer(target: McpRegistrationTarget, name: string): boolean {

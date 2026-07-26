@@ -11,7 +11,7 @@ import {
   type MigrationReport,
 } from './upgrade-migration'
 import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
-import { refreshCanaryLabMcp } from './mcp-refresh'
+import { refreshCanaryLabMcp, findStaleCanaryLabMcp } from './mcp-refresh'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -331,8 +331,18 @@ export async function main(
       homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
       log: (msg) => log(`  ${msg}`, opts),
     })
-  } catch {
-    /* MCP refresh is best-effort */
+  } catch (err) {
+    // Best-effort, but never silent: this runs as the workspace postinstall, so
+    // swallowing the reason leaves a broken MCP entry and no way to find out.
+    console.warn(`  Canary Lab: MCP client refresh failed — ${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  // Deliberately console.warn, not log(): `--silent` is the postinstall's normal
+  // mode, and a registration pointing at a deleted cli.js is exactly the thing a
+  // quiet upgrade must still surface.
+  for (const stale of findStaleCanaryLabMcp()) {
+    console.warn(`  Canary Lab: ${stale.client} MCP points at ${stale.cliPath}, which no longer exists.`)
+    console.warn('  Canary Lab: run `npx canary-lab setup` to re-point it at this install.')
   }
 
   if (updated > 0) {

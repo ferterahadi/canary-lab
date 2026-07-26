@@ -1,4 +1,9 @@
-import { registerCanaryLabMcp } from './mcp-registration'
+import fs from 'fs'
+import {
+  registerCanaryLabMcp,
+  registeredCliPath,
+  type McpRegistrationTarget,
+} from './mcp-registration'
 import {
   registerClaudeDesktopMcp,
   claudeDesktopConfigPath,
@@ -42,4 +47,33 @@ export function refreshCanaryLabMcp(opts: RefreshOptions = {}): void {
   if (claudeDesktopInstalled(desktopConfigPath)) {
     registerClaudeDesktopMcp({ ...base, configPath: desktopConfigPath })
   }
+}
+
+export interface StaleMcpRegistration {
+  client: string
+  cliPath: string
+}
+
+// Every failure path in the refresh above is quiet: registerCanaryLabMcp reports
+// "CLI not found on PATH" through a logger `upgrade --silent` suppresses, and
+// upgrade wraps the whole call in a best-effort catch that discards the error.
+// A refresh that does not land leaves the client invoking a cli.js the upgrade
+// just deleted — the client then fails with no hint why.
+//
+// Checking the registered path against the filesystem catches that broken state
+// whatever caused it, instead of trying to enumerate the causes.
+export function findStaleCanaryLabMcp(deps: {
+  readRegisteredCliPath?: (target: McpRegistrationTarget) => string | null
+  exists?: (candidate: string) => boolean
+} = {}): StaleMcpRegistration[] {
+  const read = deps.readRegisteredCliPath ?? registeredCliPath
+  const exists = deps.exists ?? ((candidate: string) => fs.existsSync(candidate))
+  const stale: StaleMcpRegistration[] = []
+  for (const target of ['codex', 'claude'] as const) {
+    const cliPath = read(target)
+    if (cliPath && !exists(cliPath)) {
+      stale.push({ client: target === 'codex' ? 'Codex' : 'Claude', cliPath })
+    }
+  }
+  return stale
 }
