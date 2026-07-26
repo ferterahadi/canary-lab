@@ -52,7 +52,7 @@ export default defineConfig({
           // process.stderr.write + unhandled-rejection dumps). See file header.
           setupFiles: ['./vitest.setup.ts'],
           include: [
-            'scripts/**/*.test.ts',
+            'apps/cli/**/*.test.ts',
             'shared/**/*.test.ts',
             'tools/**/*.test.ts',
             'apps/web-server/**/*.test.{ts,tsx}',
@@ -99,8 +99,8 @@ export default defineConfig({
         'apps/web/src/features/benchmark/state/**/*.ts',
         'apps/web/src/shared/shell/McpPromoContext.tsx',
         // 0.9.x → 0.10.x migration: pure detection + report rendering.
-        'scripts/upgrade-migration.ts',
-        'scripts/upgrade-known-prompts.ts',
+        'apps/cli/upgrade-migration.ts',
+        'apps/cli/upgrade-known-prompts.ts',
       ],
       exclude: [
         '**/*.test.{ts,tsx}',

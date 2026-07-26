@@ -62,7 +62,7 @@ describe('canary-lab agent install', () => {
   })
 
   it('instructs agents to verify fixes with signal_run instead of start_run', () => {
-    const assets = path.resolve(__dirname, '..', 'agent-integrations')
+    const assets = path.resolve(__dirname, '..', '..', 'agent-integrations')
     const mirrors = (skill: string) => [
       path.join(assets, 'codex', 'skills', skill, 'SKILL.md'),
       path.join(assets, 'claude', 'skills', skill, 'SKILL.md'),

@@ -3,8 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { Writable } from 'stream'
-import { createServer } from '../apps/web-server/src/server'
-import type { PtyFactory } from '../apps/web-server/src/features/runs/logic/runtime/pty-spawner'
+import { createServer } from '../web-server/src/server'
+import type { PtyFactory } from '../web-server/src/features/runs/logic/runtime/pty-spawner'
 import {
   bridge,
   doctor,
@@ -42,7 +42,7 @@ class BufferWritable extends Writable {
 
 describe('canary-lab mcp', () => {
   it('doctor verifies a running UI MCP server and the default lifecycle profile', async () => {
-    const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const stdout = new BufferWritable()
     const stderr = new BufferWritable()
@@ -68,7 +68,7 @@ describe('canary-lab mcp', () => {
     ['author', 'create_feature'],
     ['full', 'execute_verification'],
   ] as const)('doctor verifies the %s profile', async (profile, requiredTool) => {
-    const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const stdout = new BufferWritable()
     const stderr = new BufferWritable()
@@ -182,8 +182,8 @@ describe('canary-lab mcp', () => {
   })
 
   it('resolves MCP UI autostart from the current workspace before falling back to registry', () => {
-    const cwdWorkspace = path.resolve(__dirname, '..', 'templates', 'project')
-    const registered = path.resolve(__dirname, '..')
+    const cwdWorkspace = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const registered = path.resolve(__dirname, '..', '..')
 
     expect(resolveUiProjectRootForMcpAutostart({
       cwd: cwdWorkspace,
@@ -287,7 +287,7 @@ describe('canary-lab mcp', () => {
   })
 
   it('routes doctor through main and exits 0 on success', async () => {
-    const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const exits: number[] = []
     try {
@@ -300,7 +300,7 @@ describe('canary-lab mcp', () => {
   })
 
   it('routes doctor profile through main', async () => {
-    const projectRoot = path.resolve(__dirname, '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     const exits: number[] = []
     try {

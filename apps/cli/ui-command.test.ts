@@ -8,8 +8,8 @@ const mocks = vi.hoisted(() => ({
   openBrowser: vi.fn(),
 }))
 
-vi.mock('../apps/web-server/src/server', () => ({ createServer: mocks.createServer }))
-vi.mock('../apps/web-server/src/shared/open-browser', () => ({ openBrowser: mocks.openBrowser }))
+vi.mock('../web-server/src/server', () => ({ createServer: mocks.createServer }))
+vi.mock('../web-server/src/shared/open-browser', () => ({ openBrowser: mocks.openBrowser }))
 
 const { parsePort, runUi } = await import('./ui-command')
 

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { getProjectRoot, getFeaturesDir } from '../shared/runtime/project-root'
-import { ok, warn, info, bullet, fail, section, line, dim, path as ansiPath } from '../shared/cli-ui/ui'
+import { getProjectRoot, getFeaturesDir } from '../../shared/runtime/project-root'
+import { ok, warn, info, bullet, fail, section, line, dim, path as ansiPath } from '../../shared/cli-ui/ui'
 
 const LEGACY_PLAYWRIGHT_CONFIG = `import { defineConfig } from '@playwright/test'
 import { baseConfig } from 'canary-lab/feature-support/playwright-base'

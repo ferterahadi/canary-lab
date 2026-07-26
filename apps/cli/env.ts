@@ -1,5 +1,5 @@
-import { main as switchEnv } from '../apps/web-server/src/features/runs/logic/runtime/env-switcher/switch'
-import { fail } from '../shared/cli-ui/ui'
+import { main as switchEnv } from '../web-server/src/features/runs/logic/runtime/env-switcher/switch'
+import { fail } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 
 export async function main(args = process.argv.slice(2)): Promise<void> {

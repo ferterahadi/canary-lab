@@ -15,19 +15,19 @@ import {
   DEFAULT_CANARY_LAB_MCP_PROFILE,
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
-} from '../apps/web-server/src/mcp/tools'
-import { isClientKind, type ClientKind } from '../shared/run-mode'
-import { looksLikeProjectRoot } from '../shared/runtime/project-root'
+} from '../web-server/src/mcp/tools'
+import { isClientKind, type ClientKind } from '../../shared/run-mode'
+import { looksLikeProjectRoot } from '../../shared/runtime/project-root'
 import {
   canaryLabHome,
   readWorkspaceRegistry,
   type CanaryLabWorkspaceRegistry,
-} from '../shared/runtime/workspace-registry'
+} from '../../shared/runtime/workspace-registry'
 import {
   resolveActiveServer,
   type ActiveServerEntry,
-} from '../shared/runtime/active-servers'
-import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
+} from '../../shared/runtime/active-servers'
+import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 
 // Resolve the bridge's target /mcp URL with no explicit --url. A *live* server
 // (recorded in ~/.canary-lab/active-servers.json by `canary-lab ui`) always

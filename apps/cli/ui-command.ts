@@ -5,12 +5,12 @@
 import path from 'path'
 import readline from 'readline'
 import { spawn } from 'child_process'
-import { createServer } from '../apps/web-server/src/server'
-import { getProjectRoot, isCanaryLabWorkspace } from '../shared/runtime/project-root'
-import { openBrowser } from '../apps/web-server/src/shared/open-browser'
-import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
-import { registerActiveServer, unregisterActiveServer } from '../shared/runtime/active-servers'
-import { hydrateAgentConfigEnvFromShell } from '../apps/web-server/src/features/agent-sessions/logic/agent-config-env'
+import { createServer } from '../web-server/src/server'
+import { getProjectRoot, isCanaryLabWorkspace } from '../../shared/runtime/project-root'
+import { openBrowser } from '../web-server/src/shared/open-browser'
+import { loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
+import { registerActiveServer, unregisterActiveServer } from '../../shared/runtime/active-servers'
+import { hydrateAgentConfigEnvFromShell } from '../web-server/src/features/agent-sessions/logic/agent-config-env'
 import { refreshAgentIntegrationsQuietly } from './agent'
 
 // Graceful-teardown ceiling. Long enough for an honest run abort + app.close,

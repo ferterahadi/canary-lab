@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { getProjectRoot } from '../shared/runtime/project-root'
-import { getInstalledPackageVersion, writeStamp } from '../shared/runtime/upgrade-check'
+import { getProjectRoot } from '../../shared/runtime/project-root'
+import { getInstalledPackageVersion, writeStamp } from '../../shared/runtime/upgrade-check'
 import {
   detectMigrations,
   applyArchive,
@@ -69,8 +69,8 @@ function resolveFirstExisting(pathsToTry: string[]): string {
 
 function getTemplateRoot(): string {
   return resolveFirstExisting([
-    path.resolve(__dirname, '../templates/project'),
     path.resolve(__dirname, '../../templates/project'),
+    path.resolve(__dirname, '../../../templates/project'),
   ])
 }
 

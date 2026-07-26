@@ -1,11 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import { execFileSync } from 'child_process'
-import { ok, section, step, line, path as ansiPath } from '../shared/cli-ui/ui'
-import { fail } from '../shared/cli-ui/ui'
+import { ok, section, step, line, path as ansiPath } from '../../shared/cli-ui/ui'
+import { fail } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import { setup as setupCanaryLab } from './setup'
-import { isValidPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
+import { isValidPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 
 export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
@@ -16,16 +16,18 @@ export function resolveFirstExisting(pathsToTry: string[]): string {
 }
 
 function getPackageJsonPath(): string {
+  // apps/cli/ → repo root in source; dist/apps/cli/ → the installed package root
+  // (node_modules/canary-lab/) once compiled, which is one level further.
   return resolveFirstExisting([
-    path.resolve(__dirname, '../package.json'),
     path.resolve(__dirname, '../../package.json'),
+    path.resolve(__dirname, '../../../package.json'),
   ])
 }
 
 function getTemplateRoot(): string {
   return resolveFirstExisting([
-    path.resolve(__dirname, '../templates/project'),
     path.resolve(__dirname, '../../templates/project'),
+    path.resolve(__dirname, '../../../templates/project'),
   ])
 }
 

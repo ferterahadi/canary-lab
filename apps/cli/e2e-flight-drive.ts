@@ -25,15 +25,15 @@ import Fastify from 'fastify'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { flightsRoutes } from '../apps/web-server/src/features/flights/routes/flights'
-import { FlightRunStore } from '../apps/web-server/src/features/flights/logic/store'
-import { buildFlightStageAdapters } from '../apps/web-server/src/features/flights/logic/stages'
-import type { FlightStageDeps } from '../apps/web-server/src/features/flights/logic/stages/context'
-import { WorkspaceEventBus } from '../apps/web-server/src/shared/workspace-events'
-import { writeEvaluationExportTask } from '../apps/web-server/src/features/evaluation/logic/evaluation-export-store'
-import type { FlightManifest, PlanFeaturesTask } from '../shared/flights/types'
+import { flightsRoutes } from '../web-server/src/features/flights/routes/flights'
+import { FlightRunStore } from '../web-server/src/features/flights/logic/store'
+import { buildFlightStageAdapters } from '../web-server/src/features/flights/logic/stages/index'
+import type { FlightStageDeps } from '../web-server/src/features/flights/logic/stages/context'
+import { WorkspaceEventBus } from '../web-server/src/shared/workspace-events'
+import { writeEvaluationExportTask } from '../web-server/src/features/evaluation/logic/evaluation-export-store'
+import type { FlightManifest, PlanFeaturesTask } from '../../shared/flights/types'
 
-const FIXTURE = path.resolve(__dirname, '../tools/fixtures/first-flight-app')
+const FIXTURE = path.resolve(__dirname, '../../tools/fixtures/first-flight-app')
 const DEADLINE_MS = 60_000
 
 let passed = 0

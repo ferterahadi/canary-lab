@@ -1,6 +1,6 @@
 import { execFileSync } from 'child_process'
 import path from 'path'
-import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/src/mcp/tools'
+import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../web-server/src/mcp/tools'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
 
@@ -36,7 +36,7 @@ const PACKAGE_NAME = 'canary-lab'
 // automatically — no manual `claude mcp remove canary-lab -s user` needed.
 export const LEGACY_SERVER_NAMES = ['canary-lab']
 
-// After build, dist/scripts/mcp-registration.js sits next to cli.js, so the
+// After build, dist/apps/cli/mcp-registration.js sits next to cli.js, so the
 // running install can hand clients an absolute path to the exact version that
 // ran `setup` — no npx version resolution, no PATH dependence, no skew with
 // whatever npm `latest` happens to be.

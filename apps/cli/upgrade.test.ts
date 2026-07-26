@@ -9,7 +9,7 @@ const mcpRefreshMocks = vi.hoisted(() => ({ refreshCanaryLabMcp: vi.fn() }))
 vi.mock('./mcp-refresh', () => ({ refreshCanaryLabMcp: mcpRefreshMocks.refreshCanaryLabMcp }))
 
 import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
-import { readWorkspaceRegistry } from '../shared/runtime/workspace-registry'
+import { readWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
 
 const tmpDirs: string[] = []
 function mkProjectRoot(): string {

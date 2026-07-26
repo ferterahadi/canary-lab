@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { readWorkspaceRegistry } from '../shared/runtime/workspace-registry'
+import { readWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
 
 const mocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),

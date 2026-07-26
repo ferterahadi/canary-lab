@@ -276,8 +276,8 @@ function gatherCiPathHints(repoRoot: string): CiPathHint[] {
 }
 
 export function loadTemplateHealPrompt(candidates: string[] = [
-  path.resolve(__dirname, '../templates/project/CLAUDE.md'),
   path.resolve(__dirname, '../../templates/project/CLAUDE.md'),
+  path.resolve(__dirname, '../../../templates/project/CLAUDE.md'),
 ]): string {
   const found = candidates.find((c) => fs.existsSync(c))
   if (!found) return ''

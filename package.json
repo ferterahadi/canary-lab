@@ -42,7 +42,7 @@
     "npm": ">=9.0.0"
   },
   "bin": {
-    "canary-lab": "dist/scripts/cli.js"
+    "canary-lab": "dist/apps/cli/cli.js"
   },
   "//exports": "Semver surface. Every scaffolded workspace on disk imports these four specifiers; renaming a source file or changing a signature is a breaking release, not a refactor. Read shared/README.md first.",
   "exports": {
@@ -75,7 +75,7 @@
     "dev:web": "vite --config apps/web/vite.config.ts",
     "postinstall": "node tools/fix-node-pty-permissions.mjs",
     "prepack": "npm run build",
-    "e2e:flight": "tsx scripts/e2e-flight-drive.ts",
+    "e2e:flight": "tsx apps/cli/e2e-flight-drive.ts",
     "smoke:pack": "node tools/smoke-pack.mjs",
     "publish:package": "node tools/publish-package.mjs",
     "changelog": "node tools/generate-changelog.mjs",

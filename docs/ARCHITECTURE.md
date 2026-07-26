@@ -30,7 +30,7 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
   packaging-level check.
 - The only public import surface for generated projects is
   `canary-lab/feature-support/...` (via `package.json` exports). Everything under
-  `apps/`, `scripts/`, and `shared/` is internal.
+  `apps/` and `shared/` is internal.
 
 ### Import aliases are bundler-only
 
@@ -43,7 +43,7 @@ emitted by `tsc -p tsconfig.build.json`, and TypeScript does *not* rewrite path
 aliases on emit — `package.json` declares no `imports` field, so an aliased
 specifier there would ship to `dist/` as a literal `require("@server/…")` and fail
 at runtime in the installed package. `tsc` pulls the whole server tree into the
-build through `scripts/ui-command.ts`, so this covers all of `apps/web-server/`.
+build through `apps/cli/ui-command.ts`, so this covers all of `apps/web-server/`.
 
 Lifting the restriction means adding a resolver (a post-build specifier rewrite, or
 Node subpath `imports` plus a `moduleResolution` bump) — not just another `paths`
@@ -55,7 +55,7 @@ entry. The three places that must agree for the web aliases are
 
 | Path | What lives there |
 | --- | --- |
-| `scripts/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`scripts/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
+| `apps/cli/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`apps/cli/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/src/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
 | `apps/web-server/src/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions); `tools.ts` builds the profile gate and delegates to `tool-groups/{reads,authoring,run-lifecycle,heal-flow}.ts`; `tool-support.ts` holds the input schemas, profile arrays, deps interface, and result helpers |
 | `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `wizard` (draft + wizard-agent pipeline, tests-draft route), `evaluation` (export archive/store, test-review export), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark` |
@@ -274,7 +274,7 @@ everything else fails *open* so a person can always heal. Override via
    broker → return `claimSuppressed: true` and omit the heal-wait next-step instead
    of claiming).
 
-Client kind is heuristically detected from process lineage in `scripts/mcp.ts`
+Client kind is heuristically detected from process lineage in `apps/cli/mcp.ts`
 (`inferMcpClientKind`).
 
 **Trigger source decides the heal mode** (not the claim). Any run started by an MCP

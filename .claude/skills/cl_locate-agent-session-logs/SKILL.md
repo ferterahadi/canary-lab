@@ -63,8 +63,8 @@ otherwise.)
   back* to find a log, it's a stray; fold it into the resolver. (Two such
   strays existed: `portify/agent.ts` and `agent-session-tailer.ts`.)
   Known occurrences *outside* this rule's scope: the skill-install destination
-  paths in `scripts/agent.ts` (`path.join(home, '.codex'|'.claude', 'skills',
-  …)`) and the CLI-presence detection checks in `scripts/setup.ts`
+  paths in `apps/cli/agent.ts` (`path.join(home, '.codex'|'.claude', 'skills',
+  …)`) and the CLI-presence detection checks in `apps/cli/setup.ts`
   (`fs.existsSync(path.join(homeDir, '.codex'|'.claude'))`). These are
   install-time paths, not session-log lookups — but note they currently
   ignore `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, so a relocated config home gets
@@ -91,7 +91,7 @@ home while the server looks under the default.
 ## The fix for that gap: hydrate at boot, once
 
 `hydrateAgentConfigEnvFromShell()` (`agent-config-env.ts`), called from
-`scripts/ui-command.ts` before any agent spawns:
+`apps/cli/ui-command.ts` before any agent spawns:
 
 - probes the interactive shell **once** (`$SHELL -i -c`, marker-fenced output,
   bounded timeout) for the vars **missing** from the launching env;
@@ -123,7 +123,7 @@ env already carries the vars (the common case — no shell spawned).
 
 ## Verify
 - `agent-session-log.test.ts` and `agent-config-env.test.ts` cover the resolvers
-  + hydration; run them plus `scripts/ui-command.test.ts` for the boot wiring.
-- `agent-session-log.ts` / `ui-command.ts` are `apps/web-server/**` + `scripts/`
+  + hydration; run them plus `apps/cli/ui-command.test.ts` for the boot wiring.
+- `agent-session-log.ts` / `ui-command.ts` are `apps/web-server/**` + `apps/cli/`
   changes → only take effect after the `canary-apply` cycle (`cl_verify-changes`
   Tier 3).

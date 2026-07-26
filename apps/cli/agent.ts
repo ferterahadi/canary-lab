@@ -4,7 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
-import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/src/mcp/tools'
+import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../web-server/src/mcp/tools'
 
 type Target = 'codex' | 'claude' | 'all'
 export type AgentInstallTarget = Target
@@ -239,9 +239,12 @@ function parseArgs(argv: string[]):
 }
 
 function resolveAgentAssetsDir(): string {
+  // Two levels up from apps/cli/ reaches the repo root in source and the dist
+  // root once compiled (dist/apps/cli/ → dist/). The extra level is a spare for
+  // any deeper packaging layout.
   const candidates = [
-    path.resolve(__dirname, '..', 'agent-integrations'),
     path.resolve(__dirname, '..', '..', 'agent-integrations'),
+    path.resolve(__dirname, '..', '..', '..', 'agent-integrations'),
   ]
   const found = candidates.find((dir) => fs.existsSync(dir))
   if (!found) throw new Error('could not locate packaged agent integrations')

@@ -18,11 +18,11 @@ import {
 } from './desktop-registration'
 import { verifyMcpRegistration, type VerifyResult } from './mcp-verify'
 import { runAsScript } from './run-as-script'
-import { getProjectRoot, looksLikeProjectRoot } from '../shared/runtime/project-root'
+import { getProjectRoot, looksLikeProjectRoot } from '../../shared/runtime/project-root'
 import {
   registryPath,
   upsertWorkspace,
-} from '../shared/runtime/workspace-registry'
+} from '../../shared/runtime/workspace-registry'
 
 type SetupAgentTarget = 'auto' | AgentInstallTarget
 type DetectedAgent = 'codex' | 'claude'

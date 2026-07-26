@@ -3,9 +3,9 @@ import {
   buildFeatureScaffold,
   canonicalScaffoldPaths,
   isValidFeatureName,
-} from '../shared/feature-scaffold'
-import { getProjectRoot } from '../shared/runtime/project-root'
-import { bullet, dim, fail, ok, path as ansiPath, section, step, line } from '../shared/cli-ui/ui'
+} from '../../shared/feature-scaffold'
+import { getProjectRoot } from '../../shared/runtime/project-root'
+import { bullet, dim, fail, ok, path as ansiPath, section, step, line } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 
 interface ParsedArgs {

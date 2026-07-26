@@ -2,7 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { canonicalScaffoldPaths } from '../shared/feature-scaffold'
+import { canonicalScaffoldPaths } from '../../shared/feature-scaffold'
 
 let tmp: string
 

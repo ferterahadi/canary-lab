@@ -9,8 +9,8 @@
 Both apps are organized **by feature, not by layer**. `apps/web-server/src/features/`
 and `apps/web/src/features/` share one taxonomy — `runs`, `agent-sessions`,
 `coverage`, `wizard`, `evaluation`, `config`, `portify`, `benchmark` (web also has
-UI-only `logs`) — so a feature traces client↔server. Cross-feature infra lives in
-each app's `src/shared/`.
+`cleanup`, whose `/api/cleanup/*` routes are owned by `runs` and `portify`) — so a
+feature traces client↔server. Cross-feature infra lives in each app's `src/shared/`.
 
 | Entry point | What it does |
 |---|---|
@@ -20,7 +20,7 @@ each app's `src/shared/`.
 | `…/runs/logic/runtime/env-switcher/switch.ts` | env-file apply/revert |
 | `feature-support/` | public import surface for generated projects |
 
-Everything under `apps/`, `scripts/`, `shared/` is **internal** unless exposed via
+Everything under `apps/` and `shared/` is **internal** unless exposed via
 `canary-lab/feature-support/...`. Full map: [ARCHITECTURE.md → Module Map](ARCHITECTURE.md#module-map).
 Run path + diagram: [ARCHITECTURE.md → Run Lifecycle](ARCHITECTURE.md#run-lifecycle).
 

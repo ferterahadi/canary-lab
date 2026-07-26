@@ -10,7 +10,7 @@ import { main as createFeature } from './new-feature'
 import { main as runEnv } from './env'
 import { main as runBoot } from './boot'
 import { main as runFlight } from './flight'
-import { banner, section, dim, fail, line } from '../shared/cli-ui/ui'
+import { banner, section, dim, fail, line } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
 import readline from 'readline'
 

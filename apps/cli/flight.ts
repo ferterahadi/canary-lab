@@ -1,14 +1,14 @@
 import fs from 'fs'
 import path from 'path'
 import readline from 'readline'
-import { banner, section, ok, fail, info, dim, line } from '../shared/cli-ui/ui'
+import { banner, section, ok, fail, info, dim, line } from '../../shared/cli-ui/ui'
 import { runAsScript } from './run-as-script'
-import { isCanaryLabWorkspace } from '../shared/runtime/project-root'
+import { isCanaryLabWorkspace } from '../../shared/runtime/project-root'
 import {
   DEFAULT_PORT,
   loadProjectConfig,
   resolveProjectPort,
-} from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'
+} from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { relaunchUiDetached } from './ui-command'
 import { main as initProject } from './init-project'
 import {
@@ -18,7 +18,7 @@ import {
   type FlightIndexEntry,
   type FlightManifest,
   type FlightStageStatus,
-} from '../shared/flights/types'
+} from '../../shared/flights/types'
 
 // `canary-lab flight <repo...> "<what to test>"` — the one-command entry that
 // takes a bare product repo to a green, covered, healed run ending in an
