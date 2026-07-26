@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { stripPortSlots, revertPortification } from './unportify'
 import { writeOverlay, overlayDir } from './overlay'
-import type { ConfigValue } from '../../../config/logic/config-ast'
+import type { ConfigValue } from '../../../../shared/config-ast'
 
 let tmpDir: string
 beforeEach(() => {

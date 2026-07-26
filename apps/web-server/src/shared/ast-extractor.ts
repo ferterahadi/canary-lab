@@ -1,6 +1,6 @@
 import ts from 'typescript'
-import { formatSourceSnippetForDisplay } from '../../../../../../shared/code-display-format'
-import type { PathType } from '../../../../../../shared/coverage/types'
+import { formatSourceSnippetForDisplay } from '../../../../shared/code-display-format'
+import type { PathType } from '../../../../shared/coverage/types'
 
 // Parse Playwright spec source and return every `test('name', …)` call along
 // with the `test.step('label', …)` invocations nested inside (recursively).

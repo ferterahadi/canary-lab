@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import type { OrchestratorLike, RunStore } from '../../runs/logic/run-store'
 import {
   createVerificationConfig,

@@ -1,34 +1,34 @@
 import type { FastifyInstance } from 'fastify'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../../../../shared/run-state'
-import { runsRoutes, type ExternalHealAgentRequest } from '../../features/runs/routes/runs'
-import { testsDraftRoutes, type TestsDraftRouteDeps } from '../../features/wizard/routes/tests-draft'
-import { externalHealRoutes, makeExternalHealAuditLogger } from '../../features/runs/routes/external-heal'
-import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from '../../features/runs/logic/run-store'
-import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../../features/benchmark/logic/runtime/skills'
+import { runsRoutes, type ExternalHealAgentRequest } from '../runs/routes/runs'
+import { testsDraftRoutes, type TestsDraftRouteDeps } from './routes/tests-draft'
+import { externalHealRoutes, makeExternalHealAuditLogger } from '../runs/routes/external-heal'
+import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from '../runs/logic/run-store'
+import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../benchmark/logic/runtime/skills'
 import {
   buildAgentSessionResponse,
   resolveWorkflowAgentRef,
-} from '../../features/agent-sessions/logic/agent-session-log'
+} from '../agent-sessions/logic/agent-session-log'
 import { allocateRunPorts, applyFeatureEnvset } from '../runs/logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../../../shared/runtime/upgrade-check'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
-} from '../../features/wizard/logic/wizard-agent-runner'
-import { generateRunId } from '../../features/runs/logic/runtime/run-id'
-import { runDirFor, buildRunPaths } from '../../features/runs/logic/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from '../../features/runs/logic/runtime/orchestrator'
-import { RunScheduler, type SchedulerActiveRun } from '../../features/runs/logic/runtime/run-scheduler'
-import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from '../../features/runs/logic/runtime/admission'
-import { detectRepoCollision, normalizeRepoPaths } from '../../features/runs/logic/runtime/repo-collision'
-import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from '../../features/runs/logic/runtime/repo-worktree'
+} from './logic/wizard-agent-runner'
+import { generateRunId } from '../runs/logic/runtime/run-id'
+import { runDirFor, buildRunPaths } from '../runs/logic/runtime/run-paths'
+import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from '../runs/logic/runtime/orchestrator'
+import { RunScheduler, type SchedulerActiveRun } from '../runs/logic/runtime/run-scheduler'
+import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from '../runs/logic/runtime/admission'
+import { detectRepoCollision, normalizeRepoPaths } from '../runs/logic/runtime/repo-collision'
+import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from '../runs/logic/runtime/repo-worktree'
 import {
   pickAvailableHealAgent,
-} from '../../features/runs/logic/runtime/auto-heal'
-import { loadProjectConfig } from '../../features/runs/logic/runtime/launcher/project-config'
+} from '../runs/logic/runtime/auto-heal'
+import { loadProjectConfig } from '../runs/logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
-import { realPtyFactory, type PtyFactory } from '../../features/runs/logic/runtime/pty-spawner'
+import { realPtyFactory, type PtyFactory } from '../runs/logic/runtime/pty-spawner'
 import {
   applySet,
   backup,
@@ -36,12 +36,12 @@ import {
   loadConfig,
   resolveVars,
   restore,
-} from '../../features/runs/logic/runtime/env-switcher/switch'
+} from '../runs/logic/runtime/env-switcher/switch'
 import {
   buildVerificationDiagnostics,
   resolveVerificationRun,
   type ResolveVerificationInput,
-} from '../../features/coverage/logic/verification'
+} from '../coverage/logic/verification'
 
 /**
  * Test authoring: the draft pipeline and the plan/spec agent spawns behind it. Production picks a real agent from project settings; tests inject `testsDraftDepsOverride`.

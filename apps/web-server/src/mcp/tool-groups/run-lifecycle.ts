@@ -22,7 +22,7 @@ import {
   type ExternalHealContext,
   type NormalizedRunCounts,
 } from '../../features/runs/logic/heal/external-heal-surface'
-import { loadFeatures } from '../../features/config/logic/feature-loader'
+import { loadFeatures } from '../../shared/feature-loader'
 import type { DirtySpecStore } from '../../features/runs/logic/dirty-specs/store'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { computePortPreflight } from '../../features/runs/logic/runtime/port-preflight'

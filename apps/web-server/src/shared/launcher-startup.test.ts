@@ -15,8 +15,8 @@ import {
   isValidTcpPort,
   resolveHealthProbe,
   validateHealthCheck,
-} from './startup'
-import type { HealthCheck } from '../../../../../../../../shared/launcher/types'
+} from './launcher-startup'
+import type { HealthCheck } from '../../../../shared/launcher/types'
 
 function mockHttpGet(
   mod: typeof http | typeof https,

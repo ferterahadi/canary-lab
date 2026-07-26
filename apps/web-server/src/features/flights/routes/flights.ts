@@ -40,7 +40,7 @@ import { PlanFeaturesStore, startPlanFeatures, type PlanAutoLaunchOutcome } from
 import type { FlightAgentSpawner } from '../logic/stages/context'
 import { hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
 import { applyFlightStageRemedy, flightStageRemedy } from '../logic/stage-remedy'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 

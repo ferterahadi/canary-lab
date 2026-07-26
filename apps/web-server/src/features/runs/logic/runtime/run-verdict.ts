@@ -17,8 +17,8 @@ import {
   type StoppedEarlyReason,
 } from './manifest'
 import { slugify } from './summary-reporter'
-import { listSpecFiles, loadFeatures } from '../../../config/logic/feature-loader'
-import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
+import { listSpecFiles, loadFeatures } from '../../../../shared/feature-loader'
+import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 
 export type PlaywrightRerunSelection =
   | {

@@ -21,7 +21,7 @@ import {
   normalizeStartCommand,
   resolveHealthProbe,
   resolvePath,
-} from './launcher/startup'
+} from '../../../../shared/launcher-startup'
 import {
   buildRunPaths,
   type RunPaths,

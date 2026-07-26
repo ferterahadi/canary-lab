@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
+import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import {
   restartPlanDetail,
   finalLifecyclePhase,

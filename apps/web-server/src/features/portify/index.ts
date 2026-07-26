@@ -4,7 +4,7 @@ import { portifyRoutes } from './routes/portify'
 import { portifyStreamRoutes } from './ws/portify-stream'
 import { createPortifyRunner } from './logic/runtime/runner'
 import { portifyDir } from './logic/runtime/paths'
-import { loadFeatures } from '../config/logic/feature-loader'
+import { loadFeatures } from '../../shared/feature-loader'
 import { pickAvailableHealAgent } from '../runs/logic/runtime/auto-heal'
 import {
   resolveWorkflowAgentRef,

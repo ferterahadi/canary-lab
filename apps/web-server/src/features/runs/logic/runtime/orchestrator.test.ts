@@ -12,7 +12,7 @@ import {
   type ServiceSpec,
 } from './orchestrator'
 import * as sessionLog from '../../../agent-sessions/logic/agent-session-log'
-import * as featureLoader from '../../../config/logic/feature-loader'
+import * as featureLoader from '../../../../shared/feature-loader'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './pty-spawner'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { runDirFor, buildRunPaths } from './run-paths'

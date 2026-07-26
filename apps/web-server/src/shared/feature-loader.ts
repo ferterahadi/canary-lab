@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
-import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, type FeatureConfig } from '../../../../../../shared/launcher/types'
-import { normalizeStartCommand, validateHealthCheck } from '../../runs/logic/runtime/launcher/startup'
+import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, type FeatureConfig } from '../../../../shared/launcher/types'
+import { normalizeStartCommand, validateHealthCheck } from './launcher-startup'
 
 // Discover features by scanning <featuresDir>/<feature>/feature.config.{cjs,js,ts}.
 // Takes an explicit featuresDir so tests can point at a fixture tree.

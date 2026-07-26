@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { loadFeatures } from '../../../config/logic/feature-loader'
+import { loadFeatures } from '../../../../shared/feature-loader'
 import { getGitRoot } from '../../../../shared/git-repo'
 import type { DirtySpecStore } from './store'
 

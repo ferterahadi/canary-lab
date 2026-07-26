@@ -1,5 +1,5 @@
 import path from 'path'
-import { readFeatureConfig } from '../../../config/logic/config-ast'
+import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent } from './context'

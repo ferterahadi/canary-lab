@@ -2,7 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { ServiceSpec } from './orchestrator'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
-import { coerceTcpPort, isHealthy, isTcpListening } from './launcher/startup'
+import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
 import { compressLogByTemplate } from './log-template'
 
 // Standalone "boot these services, wait for health, then tear down" primitive,

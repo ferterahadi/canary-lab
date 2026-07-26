@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { readPlaywrightConfig, type ConfigValue } from '../../../config/logic/config-ast'
+import { readPlaywrightConfig, type ConfigValue } from '../../../../shared/config-ast'
 import type { PlaywrightArtifactPolicy } from './manifest'
 
 const PLAYWRIGHT_CONFIG_NAMES = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.cjs']

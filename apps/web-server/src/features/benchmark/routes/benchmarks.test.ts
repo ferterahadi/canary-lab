@@ -8,7 +8,7 @@ import { launchEditorDir } from '../../../shared/editor-launch'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import { getGitRoot } from '../../../shared/git-repo'
 import type { BenchmarkStore } from '../logic/runtime/store'
 import type { SabotageSkill } from '../logic/runtime/skills'
@@ -17,7 +17,7 @@ import type { BenchmarkManifest, StartBenchmarkInput } from '../logic/runtime/ty
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 vi.mock('../../runs/logic/runtime/repo-worktree', () => ({ addWorktree: vi.fn(), removeWorktree: vi.fn(async () => {}) }))
 vi.mock('../../runs/logic/runtime/worktree-inventory', () => ({ listWorktrees: vi.fn(async () => []) }))
-vi.mock('../../config/logic/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
+vi.mock('../../../shared/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
 vi.mock('../../../shared/git-repo', async (orig) => ({
   ...(await orig<typeof import('../../../shared/git-repo')>()),
   getGitRoot: vi.fn().mockResolvedValue(null),

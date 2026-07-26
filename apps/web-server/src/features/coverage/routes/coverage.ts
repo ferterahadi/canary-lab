@@ -15,7 +15,7 @@ import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc } from '../../config/
 import { reopenStages } from '../../flights/logic/conductor'
 import type { FlightStore } from '../../flights/logic/store'
 import { extractPrdDocument } from '../logic/prd-document-extractor'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import {
   findClaudeLogBySessionId,
   buildAgentSessionResponse,

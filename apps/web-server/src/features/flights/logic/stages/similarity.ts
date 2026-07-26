@@ -1,7 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { loadFeatures } from '../../../config/logic/feature-loader'
+import { loadFeatures } from '../../../../shared/feature-loader'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightStageDeps } from './context'
 

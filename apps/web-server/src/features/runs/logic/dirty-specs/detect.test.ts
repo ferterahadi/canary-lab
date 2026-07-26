@@ -12,7 +12,7 @@ import {
   promoteGreen,
   type DirtyBaseline,
 } from './detect'
-import * as astExtractor from '../../../config/logic/ast-extractor'
+import * as astExtractor from '../../../../shared/ast-extractor'
 
 const EMPTY: DirtyBaseline = { lastGreenHashes: {}, runStartHashes: {}, approvedHashes: {} }
 

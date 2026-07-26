@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { createFeatureSkeleton, deleteFeature } from '../../../config/logic/feature-authoring'
-import { readFeatureConfig } from '../../../config/logic/config-ast'
+import { readFeatureConfig } from '../../../../shared/config-ast'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightCheckpoint } from '../types'

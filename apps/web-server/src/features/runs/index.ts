@@ -2,35 +2,35 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../../../../shared/run-state'
 import type { ClientKind } from '../../../../../shared/run-mode'
-import { runsRoutes } from '../../features/runs/routes/runs'
-import { journalRoutes } from '../../features/runs/routes/journal'
-import { testsDraftRoutes, type TestsDraftRouteDeps } from '../../features/wizard/routes/tests-draft'
-import { externalHealRoutes } from '../../features/runs/routes/external-heal'
-import { paneStreamRoutes } from '../../features/runs/ws/pane-stream'
-import { runsStreamRoutes } from '../../features/runs/ws/runs-stream'
-import { type OrchestratorLike, type StartRunOutcome } from '../../features/runs/logic/run-store'
-import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../../features/benchmark/logic/runtime/skills'
+import { runsRoutes } from './routes/runs'
+import { journalRoutes } from './routes/journal'
+import { testsDraftRoutes, type TestsDraftRouteDeps } from '../wizard/routes/tests-draft'
+import { externalHealRoutes } from './routes/external-heal'
+import { paneStreamRoutes } from './ws/pane-stream'
+import { runsStreamRoutes } from './ws/runs-stream'
+import { type OrchestratorLike, type StartRunOutcome } from './logic/run-store'
+import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../benchmark/logic/runtime/skills'
 import {
   buildAgentSessionResponse,
   resolveWorkflowAgentRef,
-} from '../../features/agent-sessions/logic/agent-session-log'
+} from '../agent-sessions/logic/agent-session-log'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../../../shared/runtime/upgrade-check'
-import { PaneBroker } from '../../features/runs/logic/pane-broker'
-import { loadFeatures } from '../../features/config/logic/feature-loader'
+import { PaneBroker } from './logic/pane-broker'
+import { loadFeatures } from '../../shared/feature-loader'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
-} from '../../features/wizard/logic/wizard-agent-runner'
-import { generateRunId } from '../../features/runs/logic/runtime/run-id'
-import { runDirFor, buildRunPaths } from '../../features/runs/logic/runtime/run-paths'
-import { RunOrchestrator, buildServiceSpecs, buildQueuedServiceEntries } from '../../features/runs/logic/runtime/orchestrator'
-import { RunScheduler, type SchedulerActiveRun } from '../../features/runs/logic/runtime/run-scheduler'
-import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from '../../features/runs/logic/runtime/admission'
-import { detectRepoCollision, normalizeRepoPaths } from '../../features/runs/logic/runtime/repo-collision'
-import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from '../../features/runs/logic/runtime/repo-worktree'
-import { overlayExists as portifyOverlayExists } from '../../features/portify/logic/runtime/overlay'
+} from '../wizard/logic/wizard-agent-runner'
+import { generateRunId } from './logic/runtime/run-id'
+import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
+import { RunOrchestrator, buildServiceSpecs, buildQueuedServiceEntries } from './logic/runtime/orchestrator'
+import { RunScheduler, type SchedulerActiveRun } from './logic/runtime/run-scheduler'
+import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './logic/runtime/admission'
+import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-collision'
+import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './logic/runtime/repo-worktree'
+import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
 import type { QueueReason } from '../../../../../shared/run-state'
 import type { FeatureConfig } from '../../../../../shared/launcher/types'
 import {
@@ -40,22 +40,22 @@ import {
   resolveAgentBinary,
   type BuildHealCyclePrompt,
   type HealAgent,
-} from '../../features/runs/logic/runtime/auto-heal'
-import { loadProjectConfig } from '../../features/runs/logic/runtime/launcher/project-config'
+} from './logic/runtime/auto-heal'
+import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
-import { RunnerLog } from '../../features/runs/logic/runtime/runner-log'
-import { realPtyFactory, type PtyFactory } from '../../features/runs/logic/runtime/pty-spawner'
+import { RunnerLog } from './logic/runtime/runner-log'
+import { realPtyFactory, type PtyFactory } from './logic/runtime/pty-spawner'
 import {
   restore,
-} from '../../features/runs/logic/runtime/env-switcher/switch'
-import type { BackupRecord } from '../../features/runs/logic/runtime/env-switcher/types'
+} from './logic/runtime/env-switcher/switch'
+import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import {
   buildVerificationDiagnostics,
   resolveVerificationRun,
   type ResolveVerificationInput,
-} from '../../features/coverage/logic/verification'
-import type { HealAgentChoice } from '../../features/runs/logic/runtime/launcher/project-config'
-import type { LocalHealAgent } from '../../features/runs/logic/runtime/manifest'
+} from '../coverage/logic/verification'
+import type { HealAgentChoice } from './logic/runtime/launcher/project-config'
+import type { LocalHealAgent } from './logic/runtime/manifest'
 import type { ExecutionType } from '../../../../../shared/verification'
 
 function pickConfiguredHealAgent(
@@ -199,7 +199,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     }
 
     const nowIso = new Date().toISOString()
-    const externalHealSession: import('../../features/runs/logic/runtime/manifest').ExternalHealSession | undefined = canClaim
+    const externalHealSession: import('./logic/runtime/manifest').ExternalHealSession | undefined = canClaim
       ? {
           sessionId: healAgentReq.sessionId,
           clientKind: healAgentReq.clientKind,
@@ -427,7 +427,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
       const projectConfig = loadProjectConfig(projectRoot)
       const externalOrigin = healAgentReq?.kind === 'external'
       const canClaim = externalOrigin && healAgentReq?.claimable !== false
-      let externalHealSession: import('../../features/runs/logic/runtime/manifest').ExternalHealSession | undefined
+      let externalHealSession: import('./logic/runtime/manifest').ExternalHealSession | undefined
       if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
         externalHealSession = {

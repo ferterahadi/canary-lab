@@ -10,7 +10,7 @@ import type {
   VerificationTargetSnapshot,
 } from '../../../../../../shared/verification'
 import type { PlaywrightArtifactGroup, RunDetail, RunSummaryFailedEntry } from '../../runs/logic/run-store'
-import { normalizeStartCommand, resolveHealthProbe } from '../../runs/logic/runtime/launcher/startup'
+import { normalizeStartCommand, resolveHealthProbe } from '../../../shared/launcher-startup'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]

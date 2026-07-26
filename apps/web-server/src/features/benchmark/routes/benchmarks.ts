@@ -12,7 +12,7 @@ import type {
 import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
 import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
 import { launchEditorDir } from '../../../shared/editor-launch'

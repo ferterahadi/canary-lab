@@ -6,8 +6,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 
-vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../../config/logic/ast-extractor')>()
+vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../../shared/ast-extractor')>()
   return {
     ...original,
     extractTestsFromSource: vi.fn(original.extractTestsFromSource),
@@ -15,7 +15,7 @@ vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
 })
 
 import { computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings, applyExternalSummary, listFeatureDocs } from './service'
-import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
+import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
 // Coverage generation is LLM-only; inject the fake agent via the dep seams.

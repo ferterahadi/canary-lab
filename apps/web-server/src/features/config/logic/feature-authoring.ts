@@ -9,9 +9,9 @@ import {
   type GeneratedFeatureFile,
 } from '../../../../../../shared/feature-scaffold'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
-import { loadFeatures } from './feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from './config-ast'
+import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
 
 export interface FeatureAuthoringContext {
   projectRoot: string
