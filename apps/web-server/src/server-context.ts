@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import type { CreateServerOptions } from './server'
 import type { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import type { OrchestratorRegistry, RunStore } from './features/runs/logic/run-store'
 import type { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
@@ -25,6 +26,13 @@ import type { BackupRecord } from './features/runs/logic/runtime/env-switcher/ty
  * it inside that feature's `register`.
  */
 export interface ServerContext {
+  /**
+   * The raw createServer options. Features read the test seams from here
+   * (ptyFactory override, testsDraftDepsOverride, onPortChange); the derived
+   * paths below are the resolved forms and should be preferred.
+   */
+  options: CreateServerOptions
+
   /** Resolved once in createServer; features must not re-derive them. */
   projectRoot: string
   featuresDir: string
