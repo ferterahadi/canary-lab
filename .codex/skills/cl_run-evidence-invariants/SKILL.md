@@ -59,8 +59,24 @@ green.** A test edited into passing is the exact failure this product exists to 
 ## 4. Exports preserve status
 
 - A failed or aborted run exports **as-is**. Never heal first, never soften the
-  status in the wording, never drop/merge/dedupe cases to make the report read better
-  — case count and order mirror the run entries exactly.
+  status in the wording, never drop/merge/dedupe cases to make the report read better.
+- **The case list mirrors the DECLARED roster, not the executed set.**
+  `buildTestReviewPacket`
+  (`apps/web-server/src/features/evaluation/logic/test-review-export.ts`) enumerates
+  `summary.knownTests` — Playwright's own reporter walk of the whole suite, taken
+  before the first test starts — and keeps that order. A test the run never reached is
+  **present and labelled `NOT_RUN_STATUS` (`'not run'`)**: never dropped, and never
+  rounded into a pass or a fail. A 23-test suite that stopped at the failure limit
+  after 6 reports **23 cases with 17 marked never-run**; building the roster from
+  `playbackEvents` instead (the old behavior) silently reported it as a 6-test suite.
+  - Anything the run actually reported that the roster misses is **appended, not
+    discarded** — evidence is never dropped in either direction.
+  - Status conflicts resolve **downward**: a per-test playback verdict beats the
+    summary lists, and failed/skipped are checked before passed.
+  - Runs recorded before the reporter emitted `knownTests` have none — those **fall
+    back to the executed set**, which is all the evidence that exists for them.
+  - Pinned by the `declared-test roster` describe block in
+    `apps/web-server/src/features/evaluation/logic/test-review-export.test.ts`.
 - External export wording is **client-authored**; Canary renders and stores it, and
   never agent-generates or rewrites the report content.
 
