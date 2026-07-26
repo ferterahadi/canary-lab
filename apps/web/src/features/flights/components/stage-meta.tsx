@@ -740,7 +740,11 @@ function skippedLine(reason: string | undefined): string {
  *  the sentence and the tile can't disagree. A run with no counts (older flight,
  *  never-listed suite) falls back to naming the verdict. */
 function runOutcomeLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
-  const ev = evidenceOf(stage)
+  // A PARKED stage has no evidence yet — the run adapter returns its evidence as
+  // the checkpoint's `data` (a checkpoint outcome doesn't settle the stage), and
+  // run-failed is precisely the state this sentence matters most in. Read
+  // whichever one this stage actually has.
+  const ev = { ...(stage.checkpoint?.data as Record<string, unknown> | undefined ?? {}), ...evidenceOf(stage) }
   const counts = ev.counts as { passed?: number; total?: number; failed?: number } | undefined
   // healCycles lives on whichever half of the merged run↔heal row carries it.
   const cycles = num(ev, 'healCycles') ?? num(evidenceOf(companion), 'healCycles')

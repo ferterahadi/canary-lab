@@ -972,7 +972,12 @@ export function PlaywrightPlayback({
   const focusRef = useRef<HTMLDivElement | null>(null)
   useEffect(() => {
     if (!focusTest) return
-    focusRef.current?.scrollIntoView({ block: 'center' })
+    // `start`, not `center`: these cards run taller than the run-detail panel is
+    // (error block + snippet + artifact sections), and centering a 265px card in a
+    // ~200px panel scrolls its own title and status pill off the top — you land
+    // mid-evidence with no idea which test you're looking at. Aligning the top
+    // edge puts the header first, which is the point of landing here.
+    focusRef.current?.scrollIntoView({ block: 'start' })
   }, [focusTest, events])
 
   const tests = playbackTests(events)

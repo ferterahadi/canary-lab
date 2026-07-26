@@ -1209,12 +1209,15 @@ describe('trailer model (R14–R18)', () => {
         status: key === 'run' ? ('waiting-for-approval' as const) : ('done' as const),
         ...(key === 'run'
           ? {
-              evidence: { runId: 'run-9', status: 'failed', healCycles: 1, counts: { passed: 2, total: 23, failed: 4 } },
+              // A PARKED run stage has NO evidence — the adapter hands its
+              // evidence over as the checkpoint's `data` instead (verified
+              // against a live run-failed record). Putting counts in `evidence`
+              // here would pass while the real screen fell back to the verdict.
               checkpoint: {
                 kind: 'run-failed',
                 message: 'Run run-9 ended failed after 1 heal cycle(s).',
                 options: ['rerun', 'export-as-is'],
-                data: { runId: 'run-9' },
+                data: { runId: 'run-9', status: 'failed', healCycles: 1, counts: { passed: 2, total: 23, failed: 4 } },
               },
             }
           : {}),
