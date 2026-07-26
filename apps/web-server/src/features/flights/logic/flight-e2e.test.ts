@@ -200,7 +200,11 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
     expect(final.stages.find((s) => s.key === 'heal')!.evidence).toMatchObject({ healCycles: 1 })
 
     expect(spawnAgent).toHaveBeenCalledTimes(2) // scout + one specs round
-  })
+    // 15s, matching the 20 other heavyweight suites here. This drives every real
+    // stage adapter over a git fixture and lands ~2.5s on a dev machine — no
+    // headroom under the 5s default, which is exactly how it timed out on a
+    // slower CI runner while passing locally. No assertion is relaxed by this.
+  }, 15000)
 
   it('R57/R67 over real adapters: redo reuses the record with stored args, frozen args reject, delete frees the feature', async () => {
     const { deps } = buildDeps('first-flight-app')
