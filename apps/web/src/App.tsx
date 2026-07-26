@@ -21,7 +21,7 @@ import { useFeatureActivity, type FeatureActivity } from './features/flights/sta
 import { useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
-import { ToastHost } from './features/config/components/atoms'
+import { ToastHost } from '@/shared/ui/atoms'
 import { useFlightToasts } from './features/flights/state/use-flight-toasts'
 import { useInvalidation } from './shared/state/invalidation'
 import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'

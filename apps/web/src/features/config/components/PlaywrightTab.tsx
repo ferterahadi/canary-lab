@@ -7,7 +7,7 @@ import {
   Section,
   Select,
   Toggle,
-} from './atoms'
+} from '@/shared/ui/atoms'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 

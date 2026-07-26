@@ -1,5 +1,5 @@
 import type { AuditEntry, ExternalHealClientKind, RunLifecycleEvent } from '@/shared/api/types'
-import { clientLabel as brandingClientLabel } from '../components/external-client-branding'
+import { clientLabel as brandingClientLabel } from '@/shared/ui/external-client-branding'
 import type { RunLifecyclePhase, RunLifecycleSeverity } from '@shared/run-state'
 import { formatDuration } from '@/shared/lib/format'
 

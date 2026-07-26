@@ -5,8 +5,8 @@ import type {
   RunStatus,
 } from '@/shared/api/types'
 import { isTerminalRunStatus } from '@shared/run-state'
-import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from './external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from './ExternalAgentCard'
+import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
 
 interface Props {
   runId: string

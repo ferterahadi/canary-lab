@@ -81,7 +81,7 @@ vi.mock('@/shared/api/client', () => ({
 // It now also receives the conductor's system lines (R66) as `systemRows`, split
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
-vi.mock('@/features/agent-sessions/components/AgentSessionView', () => ({
+vi.mock('@/shared/ui/AgentSessionView', () => ({
   AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
     <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}

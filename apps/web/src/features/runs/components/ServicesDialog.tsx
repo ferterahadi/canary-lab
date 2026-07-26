@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
 import { useActiveBootSessions, useRun, useRuns } from '../state/RunsContext'
-import { SlideOverPanel, StatusDot } from '@/features/config/components/atoms'
+import { SlideOverPanel, StatusDot } from '@/shared/ui/atoms'
 import { RunDetailColumn } from './RunDetailColumn'
 
 interface Props {

@@ -14,7 +14,7 @@ vi.mock('@/shared/api/client', () => ({
   openPortifyProject: vi.fn(),
 }))
 // AgentSessionView opens a WS / fetches — stub it out in the wizard test.
-vi.mock('@/features/agent-sessions/components/AgentSessionView', () => ({ AgentSessionView: () => null }))
+vi.mock('@/shared/ui/AgentSessionView', () => ({ AgentSessionView: () => null }))
 
 // The wizard reads the single in-flight workflow to gate the Plan screen.
 // Default to "nothing active" so existing Plan/Start tests are unaffected.

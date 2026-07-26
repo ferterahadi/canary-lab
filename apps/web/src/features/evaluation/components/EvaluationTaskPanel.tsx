@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { EvaluationExportTask } from '@/shared/api/types'
-import { StatusDot, type StatusDotState } from '@/features/config/components/atoms'
+import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { useEvaluationExports } from '../state/EvaluationExportContext'
 import { EvaluationTaskOutput, modeLabel } from './EvaluationExportTaskToast'
 

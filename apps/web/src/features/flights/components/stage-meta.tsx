@@ -1,6 +1,6 @@
 import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, PrdSourceCheckpointData, SpecsCoverageProgress } from '@/shared/api/client'
 import type { HealEnd } from '@/shared/api/types'
-import { StatusDot } from '@/features/config/components/atoms'
+import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { PanelCard } from '@/shared/ui/PanelCard'
 

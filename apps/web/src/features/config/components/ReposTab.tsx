@@ -14,7 +14,7 @@ import {
   Segmented,
   TextInput,
   TrashIcon,
-} from './atoms'
+} from '@/shared/ui/atoms'
 import { BranchSuggestInput, branchSuggestions } from './BranchSuggestInput'
 import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { SaveBar } from './SaveBar'

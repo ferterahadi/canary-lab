@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ConfirmModal } from './atoms'
+import { ConfirmModal } from '@/shared/ui/atoms'
 import * as api from '@/shared/api/client'
 
 /** R76: THE suite deletion confirm — one home (per the reuse rule), opened

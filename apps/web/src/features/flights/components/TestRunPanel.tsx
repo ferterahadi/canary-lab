@@ -4,7 +4,7 @@ import type { HealEnd, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { RunRow } from '@/features/runs/components/RunRow'
 import { FixesCapturedPanel } from '@/features/runs/components/FixesCapturedPanel'
-import { clientLabel } from '@/features/runs/components/external-client-branding'
+import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
 import { FactTile, STAGE_COLUMN, healEndShort, type StageFact } from './stage-meta'
 

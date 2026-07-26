@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { FlightIndexEntry, FlightPauseReason, FlightStageKey, FlightStageStatus, FlightStatus, PlanFeaturesTask } from '@/shared/api/client'
-import { ChevronRightIcon, SlideOverPanel } from '@/features/config/components/atoms'
+import { ChevronRightIcon, SlideOverPanel } from '@/shared/ui/atoms'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'

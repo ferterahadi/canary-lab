@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { EditorChoice, GhStatus, HealAgentChoice, ProjectConfig } from '@/shared/api/client'
-import { Modal } from './atoms'
+import { Modal } from '@/shared/ui/atoms'
 import { FolderPicker } from './FolderPicker'
 
 // Read-only "which GitHub account is connected" surface (R80). Detect-and-

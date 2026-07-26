@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as api from '@/shared/api/client'
 import type { AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
-import { connectAgentSessionStream } from '../api/agent-session-socket'
+import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 
 // Single agent viewer for the wizard (draft planning/generating) and the run
 // detail page. Renders the agent CLI's JSONL as a chat-style timeline:

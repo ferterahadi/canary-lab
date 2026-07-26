@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ApiError, asBranchMismatch, type RepoBranchMismatch } from '@/shared/api/client'
-import { Modal } from '@/features/config/components/atoms'
+import { Modal } from '@/shared/ui/atoms'
 
 // Maps a failed `POST /api/runs` into a human headline, the raw server reason,
 // and a "what to do next" hint. Kept pure + exported so it's unit-testable

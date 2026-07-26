@@ -10,8 +10,8 @@ import type {
   FlightStageStatus,
   SpecsCoverageProgress as SpecsCoverageProgressT,
 } from '@/shared/api/client'
-import { AgentSessionView, type AgentSessionSource } from '@/features/agent-sessions/components/AgentSessionView'
-import { Modal, StatusDot, useEscapeToClose } from '@/features/config/components/atoms'
+import { AgentSessionView, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
+import { Modal, StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { DiffView } from '@/shared/ui/DiffView'
 import { StepList, StepRow } from '@/shared/ui/StepList'

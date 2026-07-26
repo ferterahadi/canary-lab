@@ -42,7 +42,7 @@ vi.mock('@/shared/shell/McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
 
-vi.mock('@/features/agent-sessions/components/AgentSessionView', () => ({
+vi.mock('@/shared/ui/AgentSessionView', () => ({
   AgentSessionView: () => <div>agent session</div>,
 }))
 

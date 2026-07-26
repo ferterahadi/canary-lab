@@ -1,5 +1,5 @@
 import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
-import { StatusDot, type StatusDotState } from '@/features/config/components/atoms'
+import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { shortTime } from '@/shared/lib/format'
 

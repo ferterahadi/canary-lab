@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { CoverageJobManifest } from '@/shared/api/types'
-import { AgentSessionView } from '@/features/agent-sessions/components/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/features/runs/components/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill, useOpenAgentApp } from '@/features/runs/components/ExternalAgentCard'
+import { AgentSessionView } from '@/shared/ui/AgentSessionView'
+import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the
 // Coverage tab shows THIS and nothing else — never the ledger, never the empty

@@ -11,7 +11,7 @@ exists**; the skill says **how to decide**. Neither replaces the other.
 | --- | --- |
 | Tokens + CSS primitives | [`apps/web/src/styles.css`](../apps/web/src/styles.css) (single stylesheet, no per-component CSS) |
 | React primitives | [`apps/web/src/shared/ui/`](../apps/web/src/shared/ui/) |
-| Status atoms (`StatusDot`, form atoms, icons) | [`apps/web/src/features/config/components/atoms.tsx`](../apps/web/src/features/config/components/atoms.tsx) |
+| Status atoms (`StatusDot`, form atoms, icons) | [`apps/web/src/shared/ui/atoms.tsx`](../apps/web/src/shared/ui/atoms.tsx) |
 | Agent output | `AgentSessionView` (`features/agent-sessions/`) — the only agent renderer |
 
 Styling stack: **Tailwind v4** (CSS-first, `@import "tailwindcss"`) + hand-written

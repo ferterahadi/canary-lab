@@ -1,6 +1,6 @@
 import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/types'
-import { AgentSessionView } from '@/features/agent-sessions/components/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/features/runs/components/external-client-branding'
+import { AgentSessionView } from '@/shared/ui/AgentSessionView'
+import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
   ExternalAgentCard,
   ExternalClientCta,
@@ -8,7 +8,7 @@ import {
   pillPalette,
   useOpenAgentApp,
   type PillPalette,
-} from '@/features/runs/components/ExternalAgentCard'
+} from '@/shared/ui/ExternalAgentCard'
 
 // R29 (canary-first-flight): the standalone evaluation-export dialog is gone —
 // export progress/output renders WHERE the export lives: the flight detail's

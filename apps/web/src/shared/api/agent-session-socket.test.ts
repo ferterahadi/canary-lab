@@ -103,6 +103,49 @@ describe('connectAgentSessionStream', () => {
     expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/evaluation-exports/task%2F1/agent-session')
   })
 
+  it('opens /ws/flights/:flightId/agent-session with the stage for flight sources', () => {
+    reset()
+    connectAgentSessionStream({
+      source: { kind: 'flight', flightId: 'fl/1', stage: 'run tests' },
+      onEvent: () => {},
+      wsBase: 'ws://h',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    expect(FakeWebSocket.instances[0].url).toBe(
+      'ws://h/ws/flights/fl%2F1/agent-session?stage=run%20tests',
+    )
+  })
+
+  it('opens /ws/flight-plans/:taskId/agent-session for flight-plan sources', () => {
+    reset()
+    connectAgentSessionStream({
+      source: { kind: 'flight-plan', taskId: 'plan/1' },
+      onEvent: () => {},
+      wsBase: 'ws://h',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/flight-plans/plan%2F1/agent-session')
+  })
+
+  it('forwards subagent frames with their per-thread index', () => {
+    reset()
+    const onSubagentEvent = vi.fn()
+    connectAgentSessionStream({
+      source: { kind: 'run', runId: 'r' },
+      onEvent: () => {},
+      onSubagentEvent,
+      wsBase: 'ws://h',
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+    })
+    const ev = { kind: 'text', text: 'hi' } as unknown as AgentSessionEvent
+    FakeWebSocket.instances[0].onmessage?.({
+      data: JSON.stringify({ type: 'subagent', thread: 't-1', index: 2, event: ev }),
+    })
+    // The index is per-thread — arrival-count dedupe breaks nested subagents,
+    // so it has to survive the transport rather than be recomputed.
+    expect(onSubagentEvent).toHaveBeenCalledWith({ thread: 't-1', event: ev, index: 2 })
+  })
+
   it('forwards event messages to onEvent', () => {
     reset()
     const onEvent = vi.fn()

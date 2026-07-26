@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
-import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, Section, TextInput, TrashIcon } from './atoms'
+import { ConfirmModal, FieldRow, FolderIcon, HintIcon, IconButton, Modal, PlusIcon, Section, TextInput, TrashIcon } from '@/shared/ui/atoms'
 import { FileBrowserList } from './FolderPicker'
 import { TemplatedInput } from './TemplatedInput'
 import { SaveBar } from './SaveBar'

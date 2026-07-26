@@ -1,4 +1,4 @@
-import { TextInput, IconButton, PlusIcon, TrashIcon } from './atoms'
+import { TextInput, IconButton, PlusIcon, TrashIcon } from '@/shared/ui/atoms'
 
 interface Props {
   values: string[]

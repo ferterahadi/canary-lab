@@ -7,7 +7,7 @@ import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StepStatusBadge, StepBlock } from '../ui/TestCodeBlock'
 import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
-import { ChevronRightIcon, StatusDot } from '@/features/config/components/atoms'
+import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
 type DirtyDiff = { name: string; changedLines: number[] }[]
 

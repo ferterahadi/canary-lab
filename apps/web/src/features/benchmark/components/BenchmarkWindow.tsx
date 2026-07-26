@@ -4,7 +4,7 @@ import type { Feature } from '@/shared/api/types'
 import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
 import { RunDetailColumn } from '@/features/runs/components/RunDetailColumn'
-import { AgentSessionView } from '@/features/agent-sessions/components/AgentSessionView'
+import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { PortifyWizard } from '@/features/portify/components/PortifyWizard'
 
 // The benchmark workspace window: a large portal-style overlay (config → setup →

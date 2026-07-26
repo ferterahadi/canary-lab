@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { RunIndexEntry, RunStatus } from '@/shared/api/types'
-import { ChevronRightIcon, SlideOverPanel } from '@/features/config/components/atoms'
+import { ChevronRightIcon, SlideOverPanel } from '@/shared/ui/atoms'
 import { useRunDetails, useRuns } from '../state/RunsContext'
 import { RunRow } from './RunRow'
 

@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { StatusDot, type StatusDotState } from '@/features/config/components/atoms'
+import { StatusDot, type StatusDotState } from './atoms'
 
 /** The shared non-interactive status badge — the small core behind every
  *  read-only "coloured dot/icon + label" chip in the app (`StatusChip`,

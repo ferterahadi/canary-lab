@@ -4,7 +4,7 @@ import { ReposTab } from './ReposTab'
 import { PortsTab } from './PortsTab'
 import { EnvsetsTab } from './EnvsetsTab'
 import { PlaywrightTab } from './PlaywrightTab'
-import { Modal, TrashIcon } from './atoms'
+import { Modal, TrashIcon } from '@/shared/ui/atoms'
 import { DeleteSuiteConfirm } from './DeleteSuiteConfirm'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 

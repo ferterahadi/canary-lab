@@ -175,26 +175,39 @@ hand-pruned and not regex-stripped.
 **177 → 182**, and **no new exclude was added at any step**. `orchestrator.ts` is
 the only file in `runs` still excluded.
 
-### What remains — step 2, clusters 2–5
+### Step 2 — stopped deliberately, and why
 
-Measured with its exclude lifted, `orchestrator.ts` is at **95.3% statements /
-89.2% branches**, and the uncovered arms are *concentrated in the heal loops*,
-not spread evenly. So the way forward is to keep lifting out clusters that can
-stand alone, exactly as clusters already landed did — not to chase arms inside
-the class.
+Five clusters came out (`run-verdict`, `run-spawn`, `heal-agent-text`,
+`agent-session-refs`, `feature-repo-diff`). Clusters were picked by **measuring
+`this`-coupling per method**, not by reading the file — that is what identified
+`feature-repo-diff` as 96 lines with almost no coupling.
 
-| Cluster | Lines | Note |
-| --- | --- | --- |
-| ✅ Agent session refs | ~90 | done — `AgentSessionRefStore`, 18 tests |
-| Heal-agent PTY (spawn, cleanup, output tail) | ~460 | biggest remaining |
-| Auto/manual heal loops | ~400 | **where the uncovered branches are**; hardest, do last |
-| Service boot + readiness polling | ~250 | mostly covered already; low risk |
-| Playwright invocation + artifacts | ~250 | mostly covered already; low risk |
-| Repo snapshot / fix capture / overlay | ~230 | — |
+Re-measured after those five, the class body is:
 
-Take the low-risk covered clusters first: moving already-covered code out of an
-excluded file still *adds* it to the gate, so each one is a win with almost no
-regression surface. Leave the heal loops for last.
+| Remaining | Lines | Share | Methods |
+| --- | --- | --- | --- |
+| liftable as-is (0 `this` refs) | **0** | 0% | 0 |
+| liftable with args (1–2 refs) | 292 | 14% | 22 |
+| needs a dependency-injection surface (3–8 refs) | 617 | 29% | 26 |
+| owns run state outright (9+ refs) | 1,226 | **57%** | 15 |
+
+**86% of the remainder is not a layout move.** Lifting it means redesigning who
+owns run state — pty handles, heal-cycle counters, stop flags — which is a
+behaviour-affecting refactor needing live heal-loop proof, not the "move, rename,
+generator, declaration" this document scopes itself to. The 14% that *is*
+liftable is 22 methods averaging 13 lines; pulling them into one module would
+produce a grab-bag, not a seam.
+
+`orchestrator.ts` therefore stays excluded at 2,685 ln, and that is the correct
+stopping point for a layout phase. Taking it further is its own project: the
+natural first piece is a `HealAgentPty` owning the pty handle, output tail,
+session id and cause classification (~460 ln today, 12+ `this` refs in
+`runHealAgent` alone), and it needs a live heal cycle to prove, not just the
+unit suite.
+
+One measurement worth carrying forward: moving *already-covered* code out of an
+excluded file still adds it to the gate, so a low-coupling cluster is a win even
+when its tests already existed.
 
 The class has five clusters worth separating: heal-agent PTY + session refs
 (1553–2104, ~550 ln), auto/manual heal loops (2325–2725, ~400 ln), service boot

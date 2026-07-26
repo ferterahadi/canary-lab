@@ -9,8 +9,8 @@ import type {
   PlannedFeature,
 } from '@/shared/api/client'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
-import { AgentSessionView } from '@/features/agent-sessions/components/AgentSessionView'
-import { ChevronRightIcon, Modal, Textarea, Toggle } from '@/features/config/components/atoms'
+import { AgentSessionView } from '@/shared/ui/AgentSessionView'
+import { ChevronRightIcon, Modal, Textarea, Toggle } from '@/shared/ui/atoms'
 import { STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 

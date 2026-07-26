@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { StatusDot, type StatusDotState } from '@/features/config/components/atoms'
+import { StatusDot, type StatusDotState } from './atoms'
 
 // Tone of the trailing count badge. Kept small + semantic so every pill in the
 // status bar's action cluster reads as a sibling.

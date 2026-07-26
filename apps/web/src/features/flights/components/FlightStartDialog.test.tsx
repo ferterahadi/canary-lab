@@ -32,7 +32,7 @@ vi.mock('@/shared/api/client', async (importOriginal) => ({
 
 // The planning view embeds the live agent timeline — its transports are its
 // own tested concern; stub it.
-vi.mock('@/features/agent-sessions/components/AgentSessionView', () => ({
+vi.mock('@/shared/ui/AgentSessionView', () => ({
   AgentSessionView: ({ source }: { source: { kind: string } }) => (
     <div data-testid="agent-session-view" data-kind={source.kind} />
   ),

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { VerificationConfig, VerificationTarget } from '@/shared/api/types'
-import { Modal, Section } from '@/features/config/components/atoms'
+import { Modal, Section } from '@/shared/ui/atoms'
 
 // The dialog is built from the app's shared dialog chrome — `Modal` (backdrop,
 // eyebrow + title header, scrollable body, pinned footer) and `Section` (titled

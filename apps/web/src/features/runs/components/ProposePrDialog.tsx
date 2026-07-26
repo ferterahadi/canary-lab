@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { PrBlockedReason, PrPreflight, ProposePrResult } from '@/shared/api/client'
-import { Modal } from '@/features/config/components/atoms'
+import { Modal } from '@/shared/ui/atoms'
 
 // R80 — the PR confirm dialog. Pushing to origin is teammate-visible, so a PR is
 // never automatic: this is the explicit gate. It re-runs the preflight on open

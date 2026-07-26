@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Feature } from '@/shared/api/types'
 import * as api from '@/shared/api/client'
-import { SlideOverPanel } from '@/features/config/components/atoms'
+import { SlideOverPanel } from '@/shared/ui/atoms'
 
 interface Props {
   features: Feature[]

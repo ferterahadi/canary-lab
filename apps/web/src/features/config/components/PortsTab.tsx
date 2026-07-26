@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { ConfigValue, PortifyManifest } from '@/shared/api/client'
-import { ConfirmModal, Section, TrashIcon } from './atoms'
+import { ConfirmModal, Section, TrashIcon } from '@/shared/ui/atoms'
 import { ReadOnlyBar } from './SaveBar'
 import { SavedOverlayPanel } from '@/features/portify/components/SavedOverlayPanel'
 import { usePortify } from '@/features/portify/state/PortifyContext'

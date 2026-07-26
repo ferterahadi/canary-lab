@@ -6,7 +6,7 @@ import { FeatureConfigEditor } from '@/features/config/components/FeatureConfigE
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { SettingsModal } from '@/features/config/components/SettingsModal'
-import { ChevronRightIcon } from '@/features/config/components/atoms'
+import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Tooltip } from '../ui/Tooltip'
 import { readGroupOpen, writeGroupOpen } from '@/features/flights/lib/group-open-state'
 import { FlightStatusChip } from '@/features/flights/components/FlightsPill'

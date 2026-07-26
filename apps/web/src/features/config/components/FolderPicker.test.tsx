@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { listWorkspaceDirs } from '@/shared/api/client'
 import { FolderPickerModal } from './FolderPicker'
-import { Modal } from './atoms'
+import { Modal } from '@/shared/ui/atoms'
 
 vi.mock('@/shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')

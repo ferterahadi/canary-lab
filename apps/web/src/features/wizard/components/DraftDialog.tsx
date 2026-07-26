@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Modal } from '@/features/config/components/atoms'
+import { Modal } from '@/shared/ui/atoms'
 import { ExternalDraftAgentPanel } from '@/features/runs/components/ExternalDraftAgentPanel'
 import { isActiveWizardTask, useWizardDrafts } from '../state/WizardDraftContext'
 

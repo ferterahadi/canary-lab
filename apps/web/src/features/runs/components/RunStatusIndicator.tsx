@@ -1,5 +1,5 @@
 import type { DisplayStatus, ExecutionType } from '@/shared/api/types'
-import { StatusDot, type StatusDotState } from '@/features/config/components/atoms'
+import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 
 // Linear-style status indicator: a coloured dot + muted uppercase label.
 // Reads as data, not a button. Active states (`running`, `healing`) and

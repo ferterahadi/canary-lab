@@ -4,7 +4,7 @@
  */
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
-import { ChevronRightIcon, FolderIcon, Modal } from './atoms'
+import { ChevronRightIcon, FolderIcon, Modal } from '@/shared/ui/atoms'
 
 interface Props {
   /** The path currently saved in the config — string literal absolute path
