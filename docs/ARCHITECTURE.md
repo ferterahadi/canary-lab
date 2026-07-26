@@ -68,6 +68,15 @@ entry. The three places that must agree for the web aliases are
 | `templates/project/` | Scaffolded workspace files, incl. four sample features: `example_todo_api` (happy path), `broken_todo_api` (heal target), `flaky_orders_api`, `tricky_checkout_api` |
 | `tools/` | Build/publish utilities: `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions` |
 
+**Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
+feature consumes `/api/cleanup/*`, but those routes stay with the features that own
+the data being deleted — `/api/cleanup/runs` and `/api/cleanup/worktrees` in
+`features/runs/routes/runs.ts`, `/api/cleanup/portify` in
+`features/portify/routes/portify.ts`. Do not go looking for a `cleanup` server
+feature, and do not create one: it would pull run and portify deletion away from the
+stores that back them, for nothing but symmetry. The web side is named after the API
+surface it consumes so the two are greppable together.
+
 Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 
 | Module | Role |

@@ -11,7 +11,7 @@ import { CollisionConfirmDialog } from './features/runs/components/CollisionConf
 import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
 import { PortifyWizard } from './features/portify/components/PortifyWizard'
 import { DraftDialog } from './features/wizard/components/DraftDialog'
-import { LogCleanupPage } from './features/logs/components/LogCleanupPage'
+import { LogCleanupPage } from './features/cleanup/components/LogCleanupPage'
 import { CoverageLedgerPage } from './features/coverage/components/CoverageLedgerPage'
 import { FlightPage } from './features/flights/components/FlightPage'
 import { FlightStartDialog } from './features/flights/components/FlightStartDialog'

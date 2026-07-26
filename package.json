@@ -44,6 +44,7 @@
   "bin": {
     "canary-lab": "dist/scripts/cli.js"
   },
+  "//exports": "Semver surface. Every scaffolded workspace on disk imports these four specifiers; renaming a source file or changing a signature is a breaking release, not a refactor. Read shared/README.md first.",
   "exports": {
     "./feature-support/playwright-base": "./dist/shared/configs/playwright.base.js",
     "./feature-support/load-env": "./dist/shared/configs/loadEnv.js",
