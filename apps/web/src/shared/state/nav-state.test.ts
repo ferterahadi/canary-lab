@@ -15,6 +15,7 @@ const base: NavState = {
   run: null,
   flight: null,
   configFor: null,
+  configTab: null,
   verifyOpen: false,
   flightStartFor: null,
   flightStartFresh: false,
@@ -31,6 +32,7 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   dialog: null,
   flight: null,
   draft: null,
+  configTab: null,
   ...over,
 })
 
@@ -38,6 +40,13 @@ describe('initialNavState', () => {
   it('carries view/feature/run/flight straight through', () => {
     const s = initialNavState(persisted({ view: 'coverage', feature: 'checkout', run: 'run-1', flight: 'fl_1' }))
     expect(s).toMatchObject({ view: 'coverage', feature: 'checkout', run: 'run-1', flight: 'fl_1' })
+  })
+
+  it('opens the config dialog on the persisted feature + tab', () => {
+    const s = initialNavState(persisted({ dialog: 'config', feature: 'checkout', configTab: 'ports' }))
+    expect(s.configTab).toBe('ports')
+    // A tab that outlived its dialog is dropped, not carried onto another one.
+    expect(initialNavState(persisted({ dialog: 'draft', configTab: 'ports' })).configTab).toBeNull()
   })
 
   it('opens the config dialog on the persisted feature', () => {
@@ -105,13 +114,13 @@ describe('routedDialog precedence (z-order)', () => {
 
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
-    const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null })
+    const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null, configTab: 'ports' })
   })
 
   it('projects the open draft id + dialog=draft', () => {
     const s: NavState = { ...base, draftFor: 'dr_9' }
-    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9' })
+    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9', configTab: null })
   })
 })
 

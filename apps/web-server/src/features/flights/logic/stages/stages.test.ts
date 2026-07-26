@@ -2880,6 +2880,53 @@ describe('run + heal stages', () => {
     expect(current().links?.runId).toBe('run-1')
   })
 
+  // R82: the score rides in the evidence so the flight stage's one-sentence
+  // state line can report the outcome. Read off the summary artifact the verdict
+  // poll already fetched — NEVER derived, because a test missing from every
+  // result list is not-run, and `total - failed` would count it as passed.
+  it('carries the run score in its evidence, read off the summary', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
+      if (call.method === 'GET') {
+        return {
+          statusCode: 200,
+          body: {
+            manifest: { status: 'failed', healCycles: 1, services: [] },
+            summary: { complete: true, total: 23, passed: 2, failed: [{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }] },
+          },
+        }
+      }
+      return undefined
+    })
+    const outcome = await runStage(deps({ inject })).run(ctxFor(manifest({ opts: { env: 'local', yolo: true } })).ctx)
+    expect(outcome).toMatchObject({
+      kind: 'done',
+      evidence: { runId: 'run-1', status: 'failed', counts: { passed: 2, total: 23, failed: 4 } },
+    })
+  })
+
+  it('omits the score entirely when the run has no summary', async () => {
+    const outcome = await runStage(deps({ inject: runInject('passed', 0) })).run(ctxFor(manifest()).ctx)
+    // No zeros — "0 of 0 failed" would read as a clean run that never ran.
+    expect((outcome as { evidence?: Record<string, unknown> }).evidence).not.toHaveProperty('counts')
+  })
+
+  it('reports zero failures when a green summary carries no failed list at all', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-1' } }
+      if (call.method === 'GET') {
+        return {
+          statusCode: 200,
+          // A fully green run may omit `failed` rather than send `[]`.
+          body: { manifest: { status: 'passed', healCycles: 0, services: [] }, summary: { complete: true, total: 8, passed: 8 } },
+        }
+      }
+      return undefined
+    })
+    const outcome = await runStage(deps({ inject })).run(ctxFor(manifest()).ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { counts: { passed: 8, total: 8, failed: 0 } } })
+  })
+
   it('a non-green run parks on run-failed; export-as-is settles with status preserved', async () => {
     const adapter = runStage(deps({ inject: runInject('failed', 3) }))
     const { ctx, setStage, current } = ctxFor(manifest())

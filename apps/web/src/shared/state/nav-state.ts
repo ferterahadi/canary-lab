@@ -1,4 +1,4 @@
-import type { PersistedView, RouteDialog, WorkspaceView } from '../lib/workspace-view-state'
+import type { ConfigTab, PersistedView, RouteDialog, WorkspaceView } from '../lib/workspace-view-state'
 import type { FeatureActivity } from '../../features/flights/state/feature-activity'
 import type { FlightIndexEntry } from '../api/client'
 
@@ -8,9 +8,11 @@ import type { FlightIndexEntry } from '../api/client'
 // and unit-tested, and the state + URL persistence live in one hook
 // (use-workspace-navigation) instead of a dozen useState in the 800-line shell.
 
-/** The port-ification workflow view — an EMBEDDED surface (flight drill-through,
- *  collision recovery, benchmark), never routed. 'new' starts a fresh workflow
- *  for a feature; 'revisit' reopens one by id. */
+/** The port-ification workflow view — an EMBEDDED surface (the Ports tab's
+ *  active-workflow button, collision recovery, benchmark), never routed. The
+ *  flight is NOT one of these any more: Parallel readiness drills to the Ports
+ *  tab instead. 'new' starts a fresh workflow for a feature; 'revisit' reopens
+ *  one by id. */
 export type PortifyTarget =
   | { kind: 'new'; feature: string }
   | { kind: 'revisit'; workflowId: string }
@@ -29,6 +31,10 @@ export interface NavState {
   flight: string | null
   /** The Feature-config dialog (routed as ?dialog=config), by feature. */
   configFor: string | null
+  /** Which tab that dialog is on (routed as ?tab=…). Null = the entry point's
+   *  own default; every opener that cares passes one (run detail → playwright,
+   *  a flight's Parallel-readiness drill-through → ports). */
+  configTab: ConfigTab | null
   /** The Verify-config dialog in the runs column (routed ?dialog=verification). */
   verifyOpen: boolean
   /** The flight stage-entry launcher (routed ?dialog=flight-start), by feature. */
@@ -58,6 +64,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     run: persisted.run,
     flight: persisted.flight,
     configFor: persisted.dialog === 'config' ? persisted.feature : null,
+    configTab: persisted.dialog === 'config' ? persisted.configTab : null,
     verifyOpen: persisted.dialog === 'verification',
     flightStartFor: persisted.dialog === 'flight-start' || persisted.dialog === 'flight-fresh'
       ? persisted.feature
@@ -91,6 +98,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     dialog: routedDialog(state),
     flight: state.flight,
     draft: state.draftFor,
+    configTab: state.configTab,
   }
 }
 

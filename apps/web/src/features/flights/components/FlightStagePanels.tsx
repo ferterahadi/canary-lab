@@ -680,7 +680,6 @@ export function FlightDocsPanel({
   refreshKey,
   summaryStatus,
   requirementCount,
-  onOpenCoverage,
 }: {
   feature: string
   /** Stage settled done — requirements approved, the doc set is frozen. */
@@ -691,9 +690,6 @@ export function FlightDocsPanel({
   summaryStatus?: FlightStageStatus
   /** Live requirement count from the folded prd-summary's evidence. */
   requirementCount?: number
-  /** Drill to the coverage ledger, where the requirements are browsable —
-   *  the distilled card's next action so it never dead-ends on a file pill. */
-  onOpenCoverage?: () => void
 }) {
   const docs = useFlightDocs(feature, refreshKey)
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
@@ -785,14 +781,6 @@ export function FlightDocsPanel({
                 : summaryStatus === 'failed'
                   ? 'Distillation failed before writing a summary — see Activity below.'
                   : 'No summary artifact on disk.'}
-            </div>
-          )}
-
-          {onOpenCoverage && summaryStatus === 'done' && (
-            <div className="mt-2.5 flex">
-              <button type="button" className="cl-button px-2 py-0.5 text-[11px]" onClick={onOpenCoverage} data-testid="distilled-open-ledger">
-                Open coverage ledger →
-              </button>
             </div>
           )}
         </div>

@@ -6,9 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunSummary, RunSummaryFailedEntry } from '../../../shared/api/types'
 import { FailingTests } from './FailingTests'
 
-const mocks = vi.hoisted(() => ({ openEditor: vi.fn() }))
-vi.mock('../../../shared/api/client', () => mocks)
-
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 let container: HTMLDivElement
@@ -18,7 +15,7 @@ beforeEach(() => {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  mocks.openEditor.mockReset().mockResolvedValue({ opened: true, editor: 'vscode' })
+  onOpenTest.mockReset()
 })
 afterEach(() => {
   act(() => root.unmount())
@@ -34,8 +31,10 @@ const failed = (over: Partial<RunSummaryFailedEntry> = {}): RunSummaryFailedEntr
   ...over,
 })
 
+const onOpenTest = vi.fn()
+
 const render = (entries: RunSummaryFailedEntry[], knownTests?: RunSummary['knownTests']): void => {
-  act(() => root.render(<FailingTests failing={entries} knownTests={knownTests} />))
+  act(() => root.render(<FailingTests failing={entries} knownTests={knownTests} onOpenTest={onOpenTest} />))
 }
 
 describe('FailingTests', () => {
@@ -68,19 +67,24 @@ describe('FailingTests', () => {
     expect(text).toContain('@path-sad')
   })
 
-  it('shows the assertion error and snippet for the first (worst) failure without a click', () => {
+  // R82: the stage is the run's SUMMARY. The assertion error, the code snippet
+  // and the spec are run-detail content, so no row expands and none of that is
+  // rendered here — clicking a row goes to the run detail instead.
+  it('renders no expandable detail — no assertion error, snippet or open-spec control', () => {
     render([failed()])
-    const detail = container.querySelector('[data-testid^="failure-detail-"]')?.textContent ?? ''
-    expect(detail).toContain('Expected: 429')
-    expect(detail).toContain('expect(res.status()).toBe(429)')
+    expect(container.querySelector('[data-testid^="failure-detail-"]')).toBeNull()
+    expect(container.querySelector('[data-testid^="failing-toggle-"]')).toBeNull()
+    expect(container.querySelector('[data-testid^="failure-open-"]')).toBeNull()
+    const text = container.textContent ?? ''
+    expect(text).not.toContain('Expected: 429')
+    expect(text).not.toContain('expect(res.status()).toBe(429)')
   })
 
-  it('keeps later failures collapsed until they are expanded', () => {
-    const second = failed({ id: 't2', name: 'test-case-req-r5-path-happy-clean-number-is-allowed', error: { message: 'timed out waiting for the OTP' } })
+  it('opens the clicked failure on the run detail, keyed by the failed entry name', () => {
+    const second = failed({ id: 't2', name: 'test-case-req-r5-path-happy-clean-number-is-allowed' })
     render([failed(), second])
-    expect(container.querySelector('[data-testid="failure-detail-test-case-req-r5-path-happy-clean-number-is-allowed"]')).toBeNull()
-    act(() => { container.querySelector<HTMLElement>('[data-testid="failing-toggle-test-case-req-r5-path-happy-clean-number-is-allowed"]')?.click() })
-    expect(container.textContent).toContain('timed out waiting for the OTP')
+    act(() => { container.querySelector<HTMLElement>('[data-testid="failing-open-test-case-req-r5-path-happy-clean-number-is-allowed"]')?.click() })
+    expect(onOpenTest).toHaveBeenCalledWith('test-case-req-r5-path-happy-clean-number-is-allowed')
   })
 
   it('shows the readable location tail, duration and retry count', () => {
@@ -91,17 +95,9 @@ describe('FailingTests', () => {
     expect(text).toContain('retry 1')
   })
 
-  it('opens the failing spec at its line', () => {
-    render([failed()])
-    act(() => { container.querySelector<HTMLElement>('[data-testid^="failure-open-"]')?.click() })
-    expect(mocks.openEditor).toHaveBeenCalledWith({
-      file: '/Users/me/ws/features/otp/e2e/otp-abuse-guards.spec.ts',
-      line: 199,
-    })
-  })
-
-  it('never dead-ends on a failure with no captured error', () => {
-    render([failed({ error: undefined })])
-    expect(container.textContent).toContain('No assertion error was captured')
+  it('renders rows as inert text when no opener is supplied', () => {
+    act(() => root.render(<FailingTests failing={[failed()]} />))
+    expect(container.querySelector('[data-testid^="failing-open-"]')).toBeNull()
+    expect(container.textContent).toContain('a request with no bot challenge token is refused')
   })
 })

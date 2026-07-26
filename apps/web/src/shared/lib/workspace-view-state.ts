@@ -27,8 +27,10 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // the run detail's Evaluation panel (?feature=…&run=…), both already routed.
 // `add-test` and `portify` are gone too (R50): flight is the one GUI entry —
 // AddTestWizard was deleted outright, and the portify workflow view survives
-// only as an EMBEDDED surface (flight drill-through, collision recovery,
-// benchmark), opened ephemerally, never by URL.
+// only as an EMBEDDED surface (the Ports tab's active-workflow button,
+// collision recovery, benchmark), opened ephemerally, never by URL. The flight
+// stopped being one of those entries: Parallel readiness drills to the Ports
+// tab (?dialog=config&tab=ports), not the wizard.
 // `draft` reopens a live external authoring draft (an MCP agent authoring a
 // feature's specs) by its `draft` id qualifier — the draft record is
 // server-persisted (GET /api/tests/draft), so a cold load rebuilds it.
@@ -37,6 +39,12 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // its own route value so a refresh restores that intent instead of dropping the
 // user back into the re-entry picker.
 export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'draft'
+
+/** The Feature-config dialog's tabs — the `tab` qualifier for `dialog=config`.
+ *  Routed because entry points land on different tabs (the run detail opens
+ *  Playwright, a flight's Parallel-readiness stage opens Ports), and switching
+ *  tabs inside the dialog is a place you can come back to. */
+export type ConfigTab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
 
 export interface PersistedView {
   view: WorkspaceView
@@ -51,6 +59,9 @@ export interface PersistedView {
   /** Draft id qualifier for `dialog: 'draft'` — which authoring draft to reopen
    *  (URL only; dropped unless the draft dialog is the open one). */
   draft: string | null
+  /** Tab qualifier for `dialog: 'config'` — which config tab is open
+   *  (URL only; dropped unless the config dialog is the open one). */
+  configTab: ConfigTab | null
 }
 
 /** The cross-tab/localStorage-mirrored subset — the durable nav tier only. */
@@ -59,6 +70,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
 const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'draft']
+const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)
@@ -68,12 +80,16 @@ function parseDialog(v: string | null): RouteDialog | null {
   return v != null && (DIALOGS as string[]).includes(v) ? (v as RouteDialog) : null
 }
 
+function parseConfigTab(v: string | null): ConfigTab | null {
+  return v != null && (CONFIG_TABS as string[]).includes(v) ? (v as ConfigTab) : null
+}
+
 function setOrDelete(params: URLSearchParams, key: string, value: string | null): void {
   if (value) params.set(key, value)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog are never mirrored there). */
@@ -89,10 +105,13 @@ export function readPersistedView(): PersistedView {
     const flight = v === 'flights' ? params.get('flight') || null : null
     // `draft` only qualifies the draft dialog — dropped elsewhere.
     const draft = dialog === 'draft' ? params.get('draft') || null : null
+    // `tab` only qualifies the config dialog — dropped elsewhere, and an
+    // unknown tab name is ignored (falls back to the entry point's default).
+    const configTab = dialog === 'config' ? parseConfigTab(params.get('tab')) : null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight, draft }
-    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null, draft }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, draft, configTab }
+    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null, draft, configTab }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -124,6 +143,8 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
     // `draft` only qualifies the draft dialog — drop it otherwise.
     setOrDelete(params, 'draft', state.dialog === 'draft' ? state.draft : null)
+    // `tab` only qualifies the config dialog — drop it otherwise.
+    setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)

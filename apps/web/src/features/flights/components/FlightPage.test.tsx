@@ -565,6 +565,43 @@ describe('FlightPage', () => {
     expect(card?.textContent).toContain('Paused before this step')
   })
 
+  it('R82: pausing on the Test Run step KEEPS the run on screen — the pane never goes blank', async () => {
+    // The "I lost my progress" report. Pausing flips the open row back to
+    // `pending` (keeping its startedAt) but deliberately does NOT abort the run,
+    // so the run and its evidence are still there — the old gate
+    // (`row.status !== 'pending'`) unmounted the whole hero anyway and left the
+    // resume card alone on an empty pane.
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: { runId: 'run-9', status: 'running', healCycles: 1 },
+      summary: { complete: false, total: 23, passed: 2, failed: [{ name: 'otp guard', location: 'e2e/otp.spec.ts:9' }] },
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'user',
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'run' || key === 'heal' || key === 'evaluation-export'
+          ? ('pending' as const)
+          : ('done' as const),
+        ...(key === 'run' ? { startedAt: '2026-01-01T00:05:00Z', evidence: { runId: 'run-9', healCycles: 1 } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    const hero = container.querySelector('[data-testid="test-run-hero"]')
+    expect(hero).toBeTruthy()
+    expect(hero?.textContent).toContain('Run run-9')
+    expect(hero?.textContent).toContain('2/23')
+    expect(container.querySelector('[data-testid="run-hero-failing"]')?.textContent).toContain('otp guard')
+    // The resume note is still there, but as ONE line above real evidence —
+    // not a card filling a void, so it carries no PanelCard slab.
+    const paused = container.querySelector('[data-testid="stage-paused"]')!
+    expect(paused.textContent).toContain('Paused mid-step')
+    expect(paused.textContent).toContain('↑ Continue')
+    expect(paused.querySelector('button')).toBeNull()
+  })
+
   it('paused resume card: never on a running flight', async () => {
     // A running flight has an obvious in-progress narrative — no resume card,
     // even though the step carries a startedAt.
@@ -660,7 +697,7 @@ describe('FlightPage', () => {
 })
 
 describe('stage summary + drill-through (R6)', () => {
-  async function renderWithDrill(m: FlightManifest, drill: { onOpenRun?: ReturnType<typeof vi.fn>; onOpenCoverage?: ReturnType<typeof vi.fn>; onOpenPortify?: ReturnType<typeof vi.fn> }) {
+  async function renderWithDrill(m: FlightManifest, drill: { onOpenRun?: ReturnType<typeof vi.fn>; onOpenCoverage?: ReturnType<typeof vi.fn>; onOpenConfig?: ReturnType<typeof vi.fn> }) {
     mocks.getFlight.mockResolvedValue(m)
     await render('fl_1', { ...drill })
   }
@@ -741,9 +778,9 @@ describe('stage summary + drill-through (R6)', () => {
     expect(container.querySelector('[data-testid="run-hero-external"]')).toBeNull()
   })
 
-  it('specs-coverage drills through to the coverage ledger; portify to its workflow', async () => {
+  it('specs-coverage drills through to the coverage ledger; portify to the feature\'s Ports tab', async () => {
     const onOpenCoverage = vi.fn()
-    const onOpenPortify = vi.fn()
+    const onOpenConfig = vi.fn()
     await renderWithDrill(manifest({
       status: 'done',
       currentStage: null,
@@ -752,7 +789,7 @@ describe('stage summary + drill-through (R6)', () => {
         status: 'done' as const,
         ...(key === 'portify' ? { evidence: { workflowId: 'wf-3', edits: false } } : {}),
       })),
-    }), { onOpenCoverage, onOpenPortify })
+    }), { onOpenCoverage, onOpenConfig })
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
     })
@@ -765,14 +802,16 @@ describe('stage summary + drill-through (R6)', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('no edits needed')
+    expect(container.querySelector('[data-testid="stage-drill-portify"]')?.textContent).toBe('Open ports config →')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
     })
-    expect(onOpenPortify).toHaveBeenCalledWith('wf-3')
+    // The Ports tab, NOT the portify wizard — FlightPage never opens the wizard.
+    expect(onOpenConfig).toHaveBeenCalledWith('checkout', 'ports')
   })
 
-  it('portify drill is HIDDEN while running (the embedded rail is the live view) and unlocks when parked mid-step via live progress', async () => {
-    const onOpenPortify = vi.fn()
+  it('portify drill is HIDDEN while running (the embedded rail is the live view) and unlocks when parked mid-step', async () => {
+    const onOpenConfig = vi.fn()
     const before = FLIGHT_STAGE_KEYS.indexOf('portify')
     const stagesWith = (portifyStatus: 'running' | 'pending') =>
       FLIGHT_STAGE_KEYS.map((key, i) => ({
@@ -783,22 +822,39 @@ describe('stage summary + drill-through (R6)', () => {
           ? { progress: { workflowId: 'wf-live' }, log: '[portify] workflow wf-live started\n', startedAt: '2026-01-01T00:05:00Z' }
           : {}),
       }))
-    await renderWithDrill(manifest({ status: 'running', currentStage: 'portify', stages: stagesWith('running') }), { onOpenPortify })
+    await renderWithDrill(manifest({ status: 'running', currentStage: 'portify', stages: stagesWith('running') }), { onOpenConfig })
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
     expect(container.querySelector('[data-testid="stage-drill-portify"]')).toBeNull()
 
-    // Paused mid-step (interrupted → pending with startedAt): no evidence yet,
-    // but the progress pin lets the user open the workflow it was driving.
-    await renderWithDrill(manifest({ status: 'paused', currentStage: 'portify', stages: stagesWith('pending') }), { onOpenPortify })
+    // Paused mid-step (interrupted → pending, but startedAt survives): the tab
+    // still opens — that's where an unfinished workflow is picked back up.
+    await renderWithDrill(manifest({ status: 'paused', currentStage: 'portify', stages: stagesWith('pending') }), { onOpenConfig })
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
     })
-    expect(onOpenPortify).toHaveBeenCalledWith('wf-live')
+    expect(onOpenConfig).toHaveBeenCalledWith('checkout', 'ports')
+  })
+
+  it('portify drill stays hidden on a stage that never ran (no startedAt)', async () => {
+    const onOpenConfig = vi.fn()
+    const before = FLIGHT_STAGE_KEYS.indexOf('portify')
+    await renderWithDrill(manifest({
+      status: 'paused',
+      currentStage: 'portify',
+      stages: FLIGHT_STAGE_KEYS.map((key, i) => ({
+        key,
+        status: i < before ? ('done' as const) : ('pending' as const),
+      })),
+    }), { onOpenConfig })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="stage-drill-portify"]')).toBeNull()
   })
 
   it('running portify tails its workflow agent session in the activity rail', async () => {
@@ -1057,15 +1113,12 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
-  it('R80: while the run is live the hero shows the repair state, pass count, and what each repair fixed', async () => {
+  it('R82: while the run is live the hero shows the repair state and the failures found so far — no repair journal', async () => {
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: { runId: 'run-9', status: 'healing', healCycles: 1 },
       summary: { complete: false, total: 3, passed: 1, failed: [{ name: 'checkout flow' }] },
     })
-    mocks.listJournal.mockResolvedValue([
-      { iteration: 1, timestamp: '2026-01-01T00:00:00Z', feature: 'checkout', run: 'run-9', outcome: 'passed', hypothesis: 'create handler dropped the note title', body: '' },
-    ])
     mocks.getFlight.mockResolvedValue(manifest({
       currentStage: 'run',
       links: { runId: 'run-9' },
@@ -1077,13 +1130,20 @@ describe('trailer model (R14–R18)', () => {
     await render('fl_1')
     const hero = container.querySelector('[data-testid="test-run-hero"]')?.textContent ?? ''
     expect(hero).toContain('healing')
-    expect(hero).toContain('1/3 passed')
+    // The score is stated ONCE — by the Tests-passed tile, not also promoted
+    // onto the identity row beside the status chip.
+    expect(hero).toContain('1/3')
+    expect(hero).not.toContain('1/3 passed')
     expect(container.querySelector('[data-testid="run-hero-failing"]')?.textContent).toContain('checkout flow')
-    expect(container.querySelector('[data-testid="repair-journal"]')?.textContent).toContain('create handler dropped the note title')
+    // R82: the repair transcript is run-detail content — the stage no longer
+    // carries a journal disclosure (nor polls for it).
+    expect(container.querySelector('[data-testid="repair-journal"]')).toBeNull()
+    expect(container.querySelector('[data-testid="run-activity"]')).toBeNull()
+    expect(mocks.listJournal).not.toHaveBeenCalled()
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
-  it('R80: a failed run fuses the run-failed decision into the hero with the give-up reason as its why-line', async () => {
+  it('R82: a failed run asks through the SAME generic checkpoint card every other kind uses', async () => {
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: {
@@ -1110,7 +1170,7 @@ describe('trailer model (R14–R18)', () => {
         status: key === 'run' ? ('waiting-for-approval' as const) : ('done' as const),
         ...(key === 'run'
           ? {
-              evidence: { runId: 'run-9', status: 'failed', healCycles: 1 },
+              evidence: { runId: 'run-9', status: 'failed', healCycles: 1, counts: { passed: 2, total: 23, failed: 4 } },
               checkpoint: {
                 kind: 'run-failed',
                 message: 'Run run-9 ended failed after 1 heal cycle(s).',
@@ -1122,12 +1182,19 @@ describe('trailer model (R14–R18)', () => {
       })),
     }))
     await render('fl_1')
-    const footer = container.querySelector('[data-testid="run-decision-footer"]')
-    expect(footer).toBeTruthy()
-    // The give-up reason is the why-line — not a generic "did not pass".
-    expect(footer?.textContent).toContain('usage limit')
-    // The hero owns the decision; the generic checkpoint card is NOT also shown.
-    expect(container.querySelector('[data-testid="checkpoint-controls"]')).toBeNull()
+    // R82: the bespoke amber slab inside the hero is gone; the fork renders as
+    // CheckpointControls, below the run, exactly like config-approval does.
+    expect(container.querySelector('[data-testid="run-decision-footer"]')).toBeNull()
+    const card = container.querySelector('[data-testid="checkpoint-controls"]')
+    expect(card).toBeTruthy()
+    expect(container.querySelector('[data-testid="checkpoint-title"]')?.textContent).toContain('The test run did not pass')
+    // The stage sentence spends itself on the OUTCOME (counts off the run
+    // summary, carried in the stage's evidence) instead of pointing at the card
+    // below, which already asks the question.
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
+      .toBe('4 of 23 tests failed after 1 repair cycle.')
+    // And no `Restart run` beside the checkpoint's own "Start a new run".
+    expect(container.querySelector('[data-testid="run-stage-restart"]')).toBeNull()
     const rerun = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-choice-rerun"]')
     expect(rerun?.textContent).toContain('Start a new run')
     await act(async () => { rerun?.click() })
@@ -1849,8 +1916,10 @@ describe('checkpoint display language (R71/W3)', () => {
     // The summary chip rides the card it describes, not the inputs card.
     expect(distilled?.querySelector('[data-testid="docs-summary-chip"]')).toBeTruthy()
     expect(sourceCard?.querySelector('[data-testid="docs-summary-chip"]')).toBeNull()
-    // Never dead-end: the card drills to where the requirements are browsable.
-    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="distilled-open-ledger"]')?.click() })
+    // Never dead-end: the stage drills to where the requirements are browsable,
+    // from the SAME header slot every other stage's drill-through uses.
+    expect(distilled?.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-docs"]')?.click() })
     expect(onOpenCoverage).toHaveBeenCalledWith('checkout')
   })
 
@@ -1870,13 +1939,15 @@ describe('checkpoint display language (R71/W3)', () => {
       sourceDocCount: 1,
       docsDrift: false,
     })
-    await render('fl_1')
+    // Drill wired, so the gate below is what's under test — not a missing prop.
+    await render('fl_1', { onOpenCoverage: vi.fn() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
     const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
     expect(distilled?.textContent).toContain('Distilling the source docs')
-    // No count yet, and no drill to a ledger that has nothing in it.
+    // No count yet, and no drill to a ledger that has nothing in it — the docs
+    // row is already `done` here, so only the folded summary can gate it.
     expect(distilled?.textContent).not.toContain('·')
-    expect(container.querySelector('[data-testid="distilled-open-ledger"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
   })
 
   it('an unmapped kind/option degrades to its raw key, never blank', async () => {
@@ -1959,7 +2030,7 @@ describe('detail redesign (R53–R68)', () => {
     expect(mocks.deleteFlight).not.toHaveBeenCalled()
   })
 
-  it('R80: a live run flips the settled run row to running; the hero shows the run and lists the earlier runs', async () => {
+  it('R82: a live run flips the settled run row to running; the hero shows the run and lists the previous runs', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       currentStage: null,
@@ -1985,14 +2056,19 @@ describe('detail redesign (R53–R68)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
-    // The flight's run is the hero (run-9, 8/8 passed).
-    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('8/8 passed')
-    // The feature's other real runs list below — boot sessions stay hidden.
-    const earlier = container.querySelector('[data-testid="earlier-runs"]')
-    expect(earlier).toBeTruthy()
-    const earlierButtons = earlier!.querySelectorAll('button')
-    expect(earlierButtons.length).toBe(1)
-    await act(async () => { earlierButtons[0]?.click() })
+    // The flight's run is the hero (run-9, 8/8 — stated once, by the tile).
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('8/8')
+    // The feature's other real runs list below — boot sessions stay hidden. Each
+    // row is labelled by its run REF and ordinal, not by the feature name every
+    // row shares (R82).
+    const previous = container.querySelector('[data-testid="previous-runs"]')
+    expect(previous).toBeTruthy()
+    expect(previous?.textContent).toContain('Previous runs')
+    expect(previous?.textContent).toContain('run 2 of 2')
+    expect(previous?.textContent).not.toContain('checkout')
+    const previousButtons = previous!.querySelectorAll('button')
+    expect(previousButtons.length).toBe(1)
+    await act(async () => { previousButtons[0]?.click() })
     expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-live')
   })
 

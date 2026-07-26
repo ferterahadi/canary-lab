@@ -321,7 +321,8 @@ ol.procedure > li strong { color: var(--text); font-weight: 600; }
             <!-- flight → targets -->
             <path class="edge b" d="M560,170 C700,170 720,70 840,64" marker-end="url(#arrb)"/><text class="elbl b" x="660" y="120">Open run detail → · run cards</text>
             <path class="edge b" d="M560,196 C700,196 720,158 840,156" marker-end="url(#arrb)"/><text class="elbl b" x="660" y="182">Open coverage ledger →</text>
-            <path class="edge b" d="M560,222 C700,222 720,244 840,246" marker-end="url(#arrb)"/><text class="elbl b" x="660" y="230">Open portify workflow →</text>
+            <path class="edge b" d="M560,222 C700,222 720,320 840,322" marker-end="url(#arrb)"/><text class="elbl b" x="652" y="250">Open ports config →</text>
+            <path class="edge" d="M880,310 V278" marker-end="url(#arr)"/><text class="elbl" x="890" y="298">Ports tab: Review &amp; save / Portify</text>
             <path class="edge b" d="M560,248 C700,248 720,334 840,336" marker-end="url(#arrb)"/><text class="elbl b" x="660" y="290">⚙ Advanced setup</text>
             <path class="edge" d="M560,262 C700,300 720,424 840,426" marker-end="url(#arr)"/><text class="elbl" x="642" y="382">⬇ Download evaluation (.zip)</text>
           </svg>
@@ -341,10 +342,11 @@ ol.procedure > li strong { color: var(--text); font-weight: 600; }
 <span class="com"># dialogs (dialog tier) — precedence: config &gt; draft &gt; flight-start &gt; flight-new &gt; verification</span>
 ?dialog=flight-start&amp;feature=&lt;f&gt;                   <span class="com"># start dialog, feature-scoped ("Repeat a step…")</span>
 ?dialog=flight-new                                 <span class="com"># start dialog, new-flight mode ("+ New")</span>
-?dialog=config&amp;feature=&lt;f&gt;                         <span class="com"># feature config editor ("Advanced setup")</span>
+?dialog=config&amp;feature=&lt;f&gt;                         <span class="com"># feature config editor ("Advanced setup") — Playwright by default</span>
+?dialog=config&amp;feature=&lt;f&gt;&amp;tab=ports               <span class="com"># …on a named tab; `tab` follows tab clicks, dropped on close</span>
 ?dialog=draft&amp;draft=&lt;id&gt;                           <span class="com"># draft dialog (authoring activity)</span></pre>
         </div>
-        <p>Everything above survives refresh and is deep-linkable. The portify wizard is the one deliberate exception (embedded only, <code>nav-state.ts:11-16</code>).</p>
+        <p>Everything above survives refresh and is deep-linkable. The portify wizard is the one deliberate exception (embedded only, <code>nav-state.ts:11-16</code>) — and the flight no longer opens it: Parallel readiness drills to <code>?dialog=config&amp;tab=ports</code>, and the wizard is reached from that tab when a workflow is live. Because the config dialog is qualified by the durable <code>feature</code> param, an opener targeting another feature must select it too, or the deep link names the wrong suite.</p>
       </section>
 
       <!-- ══════════════════════ 03 ══════════════════════ -->
@@ -540,7 +542,7 @@ ol.procedure > li strong { color: var(--text); font-weight: 600; }
             <tr><td><strong>Feature setup</strong></td><td class="mono">scaffold + env-capture</td><td>Creates the feature in the workspace, captures env files, dry-run boots to prove the config.</td><td>FeatureSetupPanel: editable digest (start command, ports, Playwright workers/retries/video/trace) — same on-disk doc as Advanced setup, two-way live. Locked while running. Checkpoints: <code>config-approval</code>, <code>missing-env</code>.</td><td><strong>⚙ Advanced setup</strong> → config editor (<code>?dialog=config</code>)</td></tr>
             <tr><td><strong>Requirements</strong></td><td class="mono">docs + prd-summary</td><td>Collects requirement docs, then an agent distills them into a testable requirements summary.</td><td>FlightDocsPanel: list / <strong>Add files…</strong> / <strong>Link</strong> path / remove; linked docs marked ↗; summary status chip. Checkpoint: <code>prd-source</code> (always pauses here non-yolo).</td><td class="dim">—</td></tr>
             <tr><td><strong>Test authoring &amp; coverage</strong></td><td class="mono">specs-coverage</td><td>Author↔map loop: writes Playwright specs, maps them to requirements, repeats up to 5 passes until the coverage target.</td><td>SpecsPassTimeline: each pass "authored → mapped: N% covered, M gaps open"; live pass shows authoring / validating / mapping. Checkpoint: <code>coverage-stuck</code>.</td><td><strong>Open coverage ledger →</strong> (<code>?view=coverage</code>)</td></tr>
-            <tr><td><strong>Parallel readiness</strong></td><td class="mono">portify</td><td>Verifies services boot concurrently (port injection); proposes edits when needed, proven by a concurrent double boot.</td><td>Facts: verdict → proof → edits. Checkpoint: <code>portify-apply</code>. Skipped row when already verified.</td><td><strong>Open portify workflow →</strong> (embedded wizard)</td></tr>
+            <tr><td><strong>Parallel readiness</strong></td><td class="mono">portify</td><td>Verifies services boot concurrently (port injection); proposes edits when needed, proven by a concurrent double boot.</td><td>Facts: verdict → proof → edits. Checkpoint: <code>portify-apply</code>. Skipped row when already verified.</td><td><strong>Open ports config →</strong> (<code>?dialog=config&amp;tab=ports</code>)</td></tr>
             <tr><td><strong>Test Run</strong></td><td class="mono">run + heal</td><td>Boots the app, runs the suite, auto-repairs failures (repair cycles), settles a verdict.</td><td>RunRepairSummary: Now-line, services + status, pass counts, failing tests, last repair cycles with hypotheses. Controls: <strong>Cancel repair</strong> · <strong>⏹ Stop run</strong> · <strong>▸ Restart run</strong> (see below). FeatureRunsPanel: every past run as clickable cards. External heal shows an honest <code>[external]</code> status row. Checkpoint: <code>run-failed</code>.</td><td><strong>Open run detail →</strong>; run cards → run detail</td></tr>
             <tr><td><strong>Evaluation Report</strong></td><td class="mono">evaluation-export</td><td>Packages the finished run into a scored, downloadable report.</td><td>Checkpoint: <code>export-mode</code> (raw / localized). Primary action: <strong>⬇ Download evaluation (.zip)</strong>.</td><td class="dim">file download</td></tr>
           </tbody>

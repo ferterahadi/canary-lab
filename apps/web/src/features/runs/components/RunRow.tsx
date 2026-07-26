@@ -49,7 +49,8 @@ export function RunRow({
   primaryLabel,
   marker,
   showPorts = true,
-  promotePassCount = false,
+  passCount = 'meta',
+  arrow = 'hover',
 }: {
   run: RunIndexEntry
   detail: RunDetail | undefined
@@ -62,10 +63,17 @@ export function RunRow({
   /** Show the allocated-ports meta segment. The hero hides it (ports belong on
    *  the Services tile's tooltip, not the identity line). */
   showPorts?: boolean
-  /** Render the pass count as its own segment beside the status chip instead of
-   *  inside the meta line — the hero promotes it so the verdict + count read
-   *  together at the top-right. */
-  promotePassCount?: boolean
+  /** Where the pass count goes. 'meta' (default) puts it in the meta line with
+   *  the timestamp; 'promoted' gives it its own segment beside the status chip.
+   *  'hidden' drops it — for a surface that already states the score bigger
+   *  elsewhere (the flight run stage's Tests-passed tile), where repeating it a
+   *  hand's width away just reads as two different facts. */
+  passCount?: 'meta' | 'promoted' | 'hidden'
+  /** When the trailing `→` shows. Default 'hover' (the runs list, where rows are
+   *  scanned in bulk and a column of arrows would be noise). 'always' is for a
+   *  short list whose whole point is going somewhere — the flight run stage's
+   *  Previous runs — so the affordance reads at rest. */
+  arrow?: 'hover' | 'always'
 }) {
   const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
@@ -78,7 +86,7 @@ export function RunRow({
   if (marker) meta.push({ text: marker })
   const summary = detail?.summary
   const passLabel = summary && summary.total > 0 ? `${summary.passed}/${summary.total} passed` : null
-  if (passLabel && !promotePassCount) meta.push({ text: passLabel })
+  if (passLabel && passCount === 'meta') meta.push({ text: passLabel })
   return (
     <li>
       <button
@@ -106,7 +114,7 @@ export function RunRow({
             ))}
           </span>
         </span>
-        {promotePassCount && passLabel && (
+        {passCount === 'promoted' && passLabel && (
           <span
             className="shrink-0 text-[11px] tabular-nums"
             style={{ color: 'var(--text-secondary)' }}
@@ -116,7 +124,7 @@ export function RunRow({
         )}
         <RunStatusChip status={run.status} executionType={run.executionType} />
         <span
-          className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+          className={`shrink-0 transition-opacity ${arrow === 'always' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           style={{ color: 'var(--accent)' }}
           aria-hidden="true"
         >

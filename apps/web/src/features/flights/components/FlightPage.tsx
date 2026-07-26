@@ -24,6 +24,7 @@ import { DeleteSuiteConfirm } from '../../config/components/DeleteSuiteConfirm'
 import { useInvalidationKey } from '../../../shared/state/invalidation'
 import type { FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '../../../shared/state/nav-state'
+import type { ConfigTab } from '../../../shared/lib/workspace-view-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import {
   FactsGrid,
@@ -76,12 +77,13 @@ const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
 }
 
 /** Drill-through targets: each stage view is a LENS onto the real underlying
- *  surface — the actual run detail, coverage ledger, portify workflow — never
- *  a re-implementation of them (R6). */
+ *  surface — the actual run detail, coverage ledger, ports config — never a
+ *  re-implementation of them (R6). Parallel readiness has no entry here: it
+ *  drills through `onOpenConfig` to the Ports tab, so FlightPage never opens
+ *  the portify wizard itself. */
 export interface FlightDrillThroughs {
   onOpenRun?: (feature: string, runId: string) => void
   onOpenCoverage?: (feature: string) => void
-  onOpenPortify?: (workflowId: string) => void
 }
 
 export function FlightPage({
@@ -94,7 +96,6 @@ export function FlightPage({
   onOpenConfig,
   onOpenRun,
   onOpenCoverage,
-  onOpenPortify,
 }: {
   /** A real flight id, or a `feature:<name>` derived token (R81). */
   flightId: string
@@ -110,8 +111,9 @@ export function FlightPage({
    *  (R75): full restart with editable intent + repos lives THERE, never in
    *  the re-run dialog. */
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
-  /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup. */
-  onOpenConfig?: (feature: string) => void
+  /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup, and
+   *  the Parallel-readiness drill-through (which aims at the Ports tab). */
+  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
 } & FlightDrillThroughs) {
   // The flight detail refetches on `flights-changed`; the setup digest on
   // `features-changed` (repos); the Requirements docs list on `coverage-changed`.
@@ -120,7 +122,7 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col bg-canvas text-primary">
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage, onOpenPortify }} />
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} />
     </div>
   )
 }
@@ -146,7 +148,7 @@ function FlightDetail({
   onNavigateFlight?: (flightId: string | null) => void
   onClose: () => void
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
-  onOpenConfig?: (feature: string) => void
+  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
   configRefreshKey?: number
   docsRefreshKey?: number
   /** Per-feature live activity — drives the run row's live icon (R64). */
@@ -520,6 +522,8 @@ function stageDrillThrough(
   stage: FlightStage,
   flight: FlightManifest,
   drill: FlightDrillThroughs,
+  companion: FlightStage | null,
+  onOpenConfig?: (feature: string, tab?: ConfigTab) => void,
 ): { label: string; onClick: () => void } | null {
   if (stage.status === 'running') return null
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
@@ -527,22 +531,36 @@ function stageDrillThrough(
     const runId = typeof ev.runId === 'string' ? ev.runId : flight.links?.runId
     if (runId && drill.onOpenRun) {
       const open = drill.onOpenRun
-      return { label: 'Open run detail →', onClick: () => open(flight.feature, runId) }
+      // R82: names WHICH run it opens. The stage now lists the previous runs
+      // underneath (each with its own open action), so a bare "run detail" left
+      // the user guessing which of them this button meant.
+      return { label: 'Latest run →', onClick: () => open(flight.feature, runId) }
     }
+  }
+  // Requirements drills to the same ledger — that's where the distilled
+  // requirements become browsable rows. Gated on the folded prd-summary
+  // companion, NOT on the docs row: the docs stage is `done` the moment its
+  // source docs are approved, and offering a ledger then opens an empty one.
+  if (stage.key === 'docs' && drill.onOpenCoverage && companion?.status === 'done') {
+    const open = drill.onOpenCoverage
+    return { label: 'Open coverage ledger →', onClick: () => open(flight.feature) }
   }
   if (stage.key === 'specs-coverage' && drill.onOpenCoverage && stage.status !== 'pending') {
     const open = drill.onOpenCoverage
     return { label: 'Open coverage ledger →', onClick: () => open(flight.feature) }
   }
-  if (stage.key === 'portify' && drill.onOpenPortify) {
-    // Evidence carries the id once the stage settles; progress pins it the
-    // moment the workflow starts, so a stage parked mid-step (paused, or the
-    // portify-apply checkpoint) can still open the workflow it was driving.
-    const workflowId = portifyWorkflowId(stage)
-    if (workflowId) {
-      const open = drill.onOpenPortify
-      return { label: 'Open portify workflow →', onClick: () => open(workflowId) }
-    }
+  // Parallel readiness drills to the feature's Ports tab — the resting surface
+  // that OWNS injectability: the saved overlay (diff + double-boot proof), the
+  // per-service patch paths, the slot ↔ env-var map, and the remove control.
+  // Not the portify wizard: FlightPage doesn't open it any more. A workflow
+  // still mid-flight is reachable from that tab's own Review & save / View
+  // progress button, so nothing is stranded — and the wizard stays one
+  // surface's business instead of two.
+  // Unlocks once the stage has been touched at all — settled, skipped, or
+  // parked. `pending` alone isn't "never ran": an interrupted stage reverts to
+  // pending and keeps its startedAt, and that's exactly when you want the tab.
+  if (stage.key === 'portify' && onOpenConfig && (stage.status !== 'pending' || stage.startedAt != null)) {
+    return { label: 'Open ports config →', onClick: () => onOpenConfig(flight.feature, 'ports') }
   }
   return null
 }
@@ -729,8 +747,36 @@ function pausedResumeKind(stage: FlightStage, flight: FlightManifest): 'interrup
  *  control the void otherwise left the user hunting for. Quiet neutral card —
  *  a single amber status dot says "waiting on you"; no tinted band or wash
  *  (neutral surfaces, one accent). */
-function StagePausedPanel({ kind }: { kind: 'interrupted' | 'not-started' }) {
+function StagePausedPanel({ kind, compact = false }: {
+  kind: 'interrupted' | 'not-started'
+  /** R82: the stage already shows its own work below (the Test Run hero keeps
+   *  the run on screen through a pause), so there is no void to fill — the same
+   *  words render as ONE line instead of a full card that would push the actual
+   *  evidence down. Card form is for a stage with nothing else to show. */
+  compact?: boolean
+}) {
   const interrupted = kind === 'interrupted'
+  const heading = interrupted ? 'Paused mid-step' : 'Paused before this step'
+  const rest = interrupted
+    ? ' to resume this step from where it stopped — everything finished in earlier steps is kept.'
+    : ' to start this step — the earlier steps are already done.'
+  // An ↑ points at the header control by direction, not by a brittle
+  // "top-right" — matches the failed card's "Continue from the header".
+  const sentence = (
+    <>
+      Use <span className="whitespace-nowrap font-semibold text-accent">↑ Continue</span> in the header{rest}
+    </>
+  )
+  if (compact) {
+    return (
+      <div data-testid="stage-paused" className={`flex items-start gap-2 text-[12px] leading-snug text-secondary ${STAGE_COLUMN}`}>
+        <span aria-hidden="true" className="cl-status-dot mt-[5px] shrink-0 bg-warning" style={{ height: '0.45rem', width: '0.45rem' }} />
+        <span className="min-w-0">
+          <span className="text-primary">{heading}.</span> {sentence}
+        </span>
+      </div>
+    )
+  }
   return (
     <section
       data-testid="stage-paused"
@@ -741,16 +787,9 @@ function StagePausedPanel({ kind }: { kind: 'interrupted' | 'not-started' }) {
     >
       <div className="cl-rubric flex items-center gap-2">
         <span aria-hidden="true" className="cl-status-dot bg-warning" style={{ height: '0.45rem', width: '0.45rem' }} />
-        {interrupted ? 'Paused mid-step' : 'Paused before this step'}
+        {heading}
       </div>
-      <p className="m-0 text-[12px] leading-snug text-primary">
-        {/* An ↑ points at the header control by direction, not by a brittle
-            "top-right" — matches the failed card's "Continue from the header". */}
-        Use <span className="whitespace-nowrap font-semibold text-accent">↑ Continue</span>{' '}
-        in the header{interrupted
-          ? ' to resume this step from where it stopped — everything finished in earlier steps is kept.'
-          : ' to start this step — the earlier steps are already done.'}
-      </p>
+      <p className="m-0 text-[12px] leading-snug text-primary">{sentence}</p>
     </section>
   )
 }
@@ -793,7 +832,7 @@ function StageDetail({
   onActionError?: (msg: string) => void
   /** R75: the Repo scan panel's "Change…" → launcher handoff. */
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
-  onOpenConfig?: (feature: string) => void
+  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
   configRefreshKey?: number
   docsRefreshKey?: number
   drill: FlightDrillThroughs
@@ -815,7 +854,7 @@ function StageDetail({
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
   const facts = stageFacts(stage, flight, companion ?? undefined)
-  const drillThrough = stageDrillThrough(stage, flight, drill)
+  const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
     ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
@@ -930,7 +969,10 @@ function StageDetail({
           not `paused` + `pending`). */}
       {(() => {
         const kind = pausedResumeKind(stage, flight)
-        return kind ? <StagePausedPanel kind={kind} /> : null
+        if (!kind) return null
+        // R82: the run stage keeps its hero mounted through a pause, so the
+        // resume note is a line above real evidence, not a card filling a void.
+        return <StagePausedPanel kind={kind} compact={runMerged && Boolean(runId)} />
       })()}
 
       {/* Repo scan (R72c): one intent card, then one repo card per inspected
@@ -988,28 +1030,29 @@ function StageDetail({
                 ? ((companion!.evidence as Record<string, unknown>).requirementCount as number)
                 : undefined
             }
-            onOpenCoverage={drill.onOpenCoverage ? () => drill.onOpenCoverage!(flight.feature) : undefined}
           />
         )
       )}
 
       {/* Test Run (R80): the run rendered ONCE as the Latest-run hero —
-          identity, metric tiles, failing tests, controls, the fused run-failed
-          decision, and the earlier runs. Owns its own run-detail/journal/runs
-          poll; the run detail page holds the full agent transcript. */}
-      {runMerged && runId && row.status !== 'pending' && (
+          identity, metric tiles, failing tests, live controls, and the previous
+          runs. Owns its own run-detail/runs poll; the run detail page holds the
+          failure evidence and the full agent transcript.
+
+          R82 — mounted whenever the stage HAS a run, not only while the row is
+          non-pending. A flight pause flips the open row back to `pending` (it
+          keeps its startedAt), and the old gate unmounted the whole hero with
+          it: the pane went blank and read as "I lost my progress". Nothing was
+          lost — pause deliberately does NOT abort the run (see the run stage
+          adapter's `interrupt`), so the run is often still going. Keeping it
+          mounted keeps its verdict, its score and its failing tests on screen,
+          and the poll alive, while the flight waits for Continue. */}
+      {runMerged && runId && (
         <TestRunPanel
-          flightId={flightId}
           feature={flight.feature}
           runId={runId}
           live={Boolean(runLive) || live}
           evidence={runEvidence}
-          checkpoint={
-            flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint?.kind === 'run-failed'
-              ? checkpointStage.checkpoint
-              : null
-          }
-          onResponded={onResponded}
           onOpenRun={drill.onOpenRun}
           onError={onActionError}
         />
@@ -1023,13 +1066,15 @@ function StageDetail({
         <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} />
       )}
 
-      {/* prd-source renders as the RequirementsFork above; run-failed is fused
-          into the Test Run hero's decision footer (R80) — every OTHER checkpoint
-          kind keeps the generic card. Gated on the flight being parked:
-          responding to a paused/aborted record's stale checkpoint can only 409. */}
+      {/* prd-source renders as the RequirementsFork above; EVERY other kind —
+          run-failed included, as of R82 — keeps the generic card. The run-failed
+          fork used to be a bespoke amber slab fused inside the Test Run hero
+          (R80); it now sits here, in the one place a flight asks its questions,
+          so a run's decision looks and lands like a config approval or a portify
+          save. Gated on the flight being parked: responding to a paused/aborted
+          record's stale checkpoint can only 409. */}
       {flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint
-        && checkpointStage.checkpoint.kind !== 'prd-source'
-        && checkpointStage.checkpoint.kind !== 'run-failed' && (
+        && checkpointStage.checkpoint.kind !== 'prd-source' && (
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
       )}
 

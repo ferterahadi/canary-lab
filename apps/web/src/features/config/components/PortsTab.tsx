@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '../../../shared/api/client'
 import type { ConfigValue, PortifyManifest } from '../../../shared/api/client'
 import { ConfirmModal, Section, TrashIcon } from './atoms'
+import { ReadOnlyBar } from './SaveBar'
 import { SavedOverlayPanel } from '../../portify/components/SavedOverlayPanel'
 import { usePortify } from '../../portify/state/PortifyContext'
 import { isActivePortify, latestSavedWorkflowId } from '../../portify/state/portify-state'
@@ -13,6 +14,29 @@ import {
   PortSlotTable,
   type RepoSlice,
 } from './ReposTab'
+
+/**
+ * The frame every state of this tab shares: the inset scroller plus the footer
+ * bar the writable tabs fill with their SaveBar. Loading, error, and loaded all
+ * render through it, so the modal's bottom edge sits where it does on General /
+ * Service / Envsets / Playwright instead of jumping when you switch to Ports.
+ */
+function PortsFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+        {children}
+      </div>
+      {/* Read-only, so no Save / Discard: this tab reports slots, it never
+          writes them. The line says where they DO get written instead. */}
+      <ReadOnlyBar>
+        Read-only — slots are declared in
+        {' '}
+        <code style={{ fontFamily: 'var(--font-mono)' }}>feature.config.cjs</code>, by you or by Portify.
+      </ReadOnlyBar>
+    </div>
+  )
+}
 
 /**
  * Read-only view of a feature's injectable port slots, and the home for Portify.
@@ -98,10 +122,10 @@ export function PortsTab({
   const blockedBy = activeEntry && activeEntry.feature !== feature ? activeEntry : undefined
 
   if (loadError) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{loadError}</div>
+    return <PortsFrame><div className="p-4 text-xs" style={{ color: 'var(--danger)' }}>{loadError}</div></PortsFrame>
   }
   if (repos === null) {
-    return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div>
+    return <PortsFrame><div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>Loading…</div></PortsFrame>
   }
 
   // The band reports INJECTABILITY with its evidence level, not portify status:
@@ -145,8 +169,8 @@ export function PortsTab({
 
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+    <>
+      <PortsFrame>
         {/* Same inset card stack every other config tab uses (General, Service,
             Playwright): sibling Sections in a `flex flex-col gap-3 p-3` scroller,
             so no block bleeds to the modal edge. */}
@@ -396,7 +420,7 @@ export function PortsTab({
           })}
         </Section>
         </div>
-      </div>
+      </PortsFrame>
 
       <ConfirmModal
         open={confirmRemove}
@@ -418,6 +442,6 @@ export function PortsTab({
         onCancel={() => { if (!removing) { setConfirmRemove(false); setRemoveError(null) } }}
         onConfirm={removePortification}
       />
-    </div>
+    </>
   )
 }

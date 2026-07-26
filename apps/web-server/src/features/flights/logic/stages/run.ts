@@ -1,4 +1,5 @@
 import { isTerminalRunStatus } from '../../../../../../../shared/run-state'
+import type { RunSummary } from '../../../runs/logic/run-store'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
@@ -14,26 +15,56 @@ import { pollUntil, type FlightStageDeps } from './context'
 
 const RUN_TIMEOUT_MS = 90 * 60 * 1000
 
-async function readManifest(deps: FlightStageDeps, runId: string): Promise<RunManifest | undefined> {
+/** The run's detail — `GET /api/runs/:id` carries the manifest AND the summary in
+ *  one response, so the verdict poll gets the score for free. */
+async function readRun(
+  deps: FlightStageDeps,
+  runId: string,
+): Promise<{ manifest?: RunManifest; summary?: RunSummary }> {
   const resp = await deps.inject({ method: 'GET', url: `/api/runs/${encodeURIComponent(runId)}` })
-  return (resp.json() as { manifest?: RunManifest }).manifest
+  return resp.json() as { manifest?: RunManifest; summary?: RunSummary }
+}
+
+async function readManifest(deps: FlightStageDeps, runId: string): Promise<RunManifest | undefined> {
+  return (await readRun(deps, runId)).manifest
+}
+
+/** The run's score, straight off the summary artifact — `passed` and `total` are
+ *  read, never derived (a test absent from every result list is NOT RUN, so
+ *  `total - failed` would silently count it as passed). `failed` is the length of
+ *  the failed list, which is what the stage sentence and the flight's evidence
+ *  report. Absent summary (older run, never listed) → no count keys at all
+ *  rather than zeros that would read as "nothing failed". */
+function runCounts(summary: RunSummary | undefined): { passed: number; total: number; failed: number } | undefined {
+  if (!summary || typeof summary.total !== 'number' || typeof summary.passed !== 'number') return undefined
+  return { passed: summary.passed, total: summary.total, failed: summary.failed?.length ?? 0 }
 }
 
 export function runStage(deps: FlightStageDeps): StageAdapter {
   const waitForVerdict = async (ctx: StageContext, runId: string): Promise<StageOutcome> => {
     const m = ctx.manifest()
-    const manifest = await pollUntil(
-      () => readManifest(deps, runId),
-      (man) => Boolean(man && isTerminalRunStatus(man.status)),
+    // `readRun` always resolves to an object, so the readiness test lives where
+    // it always did — in the predicate, which already had to tolerate a run whose
+    // manifest isn't written yet.
+    const detail = await pollUntil(
+      () => readRun(deps, runId),
+      (d) => Boolean(d?.manifest && isTerminalRunStatus(d.manifest.status)),
       { what: `run ${runId}`, intervalMs: 3000, timeoutMs: RUN_TIMEOUT_MS, signal: ctx.signal },
     )
+    const manifest = detail!.manifest
     const status = manifest!.status as 'passed' | 'failed' | 'aborted'
     ctx.patchFlight({ runVerdict: status })
     // `healEnd` (why auto-heal stopped) rides along in the evidence + checkpoint
     // data so the Test Run hero and the run-failed decision footer can state the
     // give-up reason without a second fetch.
+    //
+    // R82: the SCORE rides along too (`counts`), so the stage's one-sentence
+    // state line can report what actually happened ("4 of 23 tests failed after
+    // 1 repair cycle") instead of pointing at a decision below it. Same response
+    // the verdict poll already reads — no extra fetch.
     const healEnd = manifest!.healEnd
-    const evidence = { runId, status, healCycles: manifest!.healCycles, healEnd }
+    const counts = runCounts(detail!.summary)
+    const evidence = { runId, status, healCycles: manifest!.healCycles, healEnd, ...(counts ? { counts } : {}) }
 
     if (status === 'passed') return { kind: 'done', evidence }
     if (m.opts.yolo) {

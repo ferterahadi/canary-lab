@@ -732,6 +732,31 @@ function skippedLine(reason: string | undefined): string {
  *  For a merged pair row (R22/R32/R33) pass the companion: while the companion
  *  is the active/blocking half its line speaks ("Repair agent is fixing…",
  *  "Capturing env files…"); once both settle the pair gets one combined line. */
+/** The run's one-sentence outcome, from the run stage's own evidence (R82).
+ *  Counts ride in `evidence.counts` (written by the run adapter off the run's
+ *  summary artifact): `failed` and `total` are REPORTED, never inferred, because
+ *  a test absent from every result list is not-run rather than passed. The
+ *  repair-cycle tail reads the same `healCycles` the Repair cycles tile shows, so
+ *  the sentence and the tile can't disagree. A run with no counts (older flight,
+ *  never-listed suite) falls back to naming the verdict. */
+function runOutcomeLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
+  const ev = evidenceOf(stage)
+  const counts = ev.counts as { passed?: number; total?: number; failed?: number } | undefined
+  // healCycles lives on whichever half of the merged run↔heal row carries it.
+  const cycles = num(ev, 'healCycles') ?? num(evidenceOf(companion), 'healCycles')
+  const tail = cycles != null && cycles > 0 ? ` after ${cycles} repair cycle${cycles === 1 ? '' : 's'}` : ''
+  const total = counts && typeof counts.total === 'number' ? counts.total : null
+  if (total != null && typeof counts?.failed === 'number' && counts.failed > 0) {
+    return `${counts.failed} of ${total} test${total === 1 ? '' : 's'} failed${tail}.`
+  }
+  if (total != null && total > 0 && counts?.passed === total) {
+    return `All ${total} test${total === 1 ? '' : 's'} passed${tail}.`
+  }
+  const runStatus = str(ev, 'status') ?? flight.runVerdict
+  const runId = str(ev, 'runId') ?? flight.links?.runId
+  return `Run ${runId ?? ''}${runStatus ? ` ${runStatus}` : ''}`.trim() + '.'
+}
+
 export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
   const { key, status } = stage
@@ -774,11 +799,12 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     if (stage.checkpoint?.kind === 'prd-source') {
       return 'Paused — choose where requirements come from below.'
     }
-    // R80: the run-failed decision is fused into the Test Run hero's footer
-    // (with the give-up reason as its why-line), so the state line stays terse
-    // instead of echoing the whole checkpoint message a second time.
+    // R82: the run-failed decision renders as the SAME generic checkpoint card
+    // every other kind gets, and that card already carries the question — so the
+    // state line spends its one sentence on the outcome instead of echoing the
+    // ask ("review it and decide below", pointing at a card that says so itself).
     if (stage.checkpoint?.kind === 'run-failed') {
-      return 'The run did not pass — review it and decide below.'
+      return runOutcomeLine(stage, flight, companion)
     }
     return stage.checkpoint?.message ?? 'Paused — your decision is needed below.'
   }
@@ -877,9 +903,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     }
     case 'run': {
       if (running) return 'Tests are running…'
-      const runId = str(ev, 'runId') ?? flight.links?.runId
-      const runStatus = str(ev, 'status') ?? flight.runVerdict
-      return `Run ${runId ?? ''}${runStatus ? ` ${runStatus}` : ''}`.trim() + '.'
+      return runOutcomeLine(stage, flight, companion)
     }
     case 'heal': {
       if (running) return 'Repair agent is fixing the failure…'

@@ -3,6 +3,7 @@ import {
   onViewChangedInOtherTab,
   persistView,
   readPersistedView,
+  type ConfigTab,
   type RouteDialog,
   type WorkspaceView,
 } from '../lib/workspace-view-state'
@@ -33,6 +34,8 @@ export interface WorkspaceNavigation {
   selectedRunId: string | null
   selectedFlightId: string | null
   configFor: string | null
+  /** Which tab the config dialog is on (null = the default the mount picks). */
+  configTab: ConfigTab | null
   verifyOpen: boolean
   flightStartFor: string | null
   flightStartFresh: boolean
@@ -45,7 +48,12 @@ export interface WorkspaceNavigation {
   setSelectedFeature: (f: string | null) => void
   setSelectedRunId: (r: string | null) => void
   setSelectedFlightId: (f: string | null) => void
-  setConfigFor: (f: string | null) => void
+  /** Open (feature) / close (null) the Feature-config dialog. `tab` picks which
+   *  tab it lands on; omitting it resets to the mount's default, so a later
+   *  open can't inherit the tab a previous one left behind. */
+  setConfigFor: (f: string | null, tab?: ConfigTab | null) => void
+  /** Follow the dialog's own tab switches into the route. */
+  setConfigTab: (tab: ConfigTab) => void
   setVerifyOpen: (open: boolean) => void
   /** Open (feature) / close (null) the flight launcher. `intent` picks which job
    *  it opens for — 're-fly' (the stage-entry picker, default) or 'fresh' (edit
@@ -80,7 +88,14 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [selectedFeature, setSelectedFeature] = useState<string | null>(SEED.feature)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(SEED.run)
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(SEED.flight)
-  const [configFor, setConfigFor] = useState<string | null>(SEED.configFor)
+  const [configFor, setConfigForState] = useState<string | null>(SEED.configFor)
+  const [configTab, setConfigTab] = useState<ConfigTab | null>(SEED.configTab)
+  // One opener for the dialog + its tab so the tab can never outlive the open
+  // that set it (the same rule setFlightStartFor follows for its intent flag).
+  const setConfigFor = useCallback((f: string | null, tab: ConfigTab | null = null) => {
+    setConfigForState(f)
+    setConfigTab(f !== null ? tab : null)
+  }, [])
   const [verifyOpen, setVerifyOpen] = useState<boolean>(SEED.verifyOpen)
   const [flightStartFor, setFlightStartForState] = useState<string | null>(SEED.flightStartFor)
   const [flightStartFresh, setFlightStartFresh] = useState<boolean>(SEED.flightStartFresh)
@@ -110,6 +125,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     run: selectedRunId,
     flight: selectedFlightId,
     configFor,
+    configTab,
     verifyOpen,
     flightStartFor,
     flightStartFresh,
@@ -128,9 +144,10 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // object (new identity every render).
     // draftFor is listed explicitly: the `dialog` value stays 'draft' when the
     // open draft changes id-to-id, so keying on `dialog` alone would leave the
-    // URL's `draft` param stale.
+    // URL's `draft` param stale. configTab is listed for the same reason — the
+    // dialog stays 'config' while the user switches tabs inside it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor, configTab])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -161,6 +178,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     selectedRunId,
     selectedFlightId,
     configFor,
+    configTab,
     verifyOpen,
     flightStartFor,
     flightStartFresh,
@@ -175,6 +193,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setSelectedRunId,
     setSelectedFlightId,
     setConfigFor,
+    setConfigTab,
     setVerifyOpen,
     setFlightStartFor,
     setFlightStartNew,

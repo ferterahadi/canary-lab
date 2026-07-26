@@ -109,8 +109,13 @@ describe('PortsTab', () => {
     const buttons = [...container.querySelectorAll('button')]
     expect(buttons.some((b) => b.textContent?.includes('Add port slot'))).toBe(false)
     expect(buttons.some((b) => b.getAttribute('aria-label')?.startsWith('Remove port slot'))).toBe(false)
-    // No Save bar — the tab never writes config.
+    // No Save bar — the tab never writes config. It still ends in the footer
+    // the writable tabs fill with SaveBar, so the modal edge doesn't move on a
+    // tab switch; the line points at where slots ARE written.
     expect(buttons.some((b) => b.textContent?.trim() === 'Save')).toBe(false)
+    expect(buttons.some((b) => b.textContent?.trim() === 'Discard')).toBe(false)
+    expect(container.textContent).toContain('Read-only — slots are declared in')
+    expect(container.textContent).toContain('feature.config.cjs')
   })
 
   it('verified state: portified headline + Remove only — no Portify button, no re-run', async () => {

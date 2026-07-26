@@ -40,7 +40,7 @@ export function App() {
     selectedFeature, setSelectedFeature,
     selectedRunId, setSelectedRunId,
     selectedFlightId, setSelectedFlightId,
-    configFor, setConfigFor,
+    configFor, setConfigFor, configTab, setConfigTab,
     verifyOpen, setVerifyOpen,
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
@@ -294,7 +294,7 @@ export function App() {
               onVerifyOpenChange={setVerifyOpen}
             />
           )}
-          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={setConfigFor} totalTests={specTotalTests} />}
+          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={(f) => setConfigFor(f, 'playwright')} totalTests={specTotalTests} />}
         />
       ),
     },
@@ -353,7 +353,11 @@ export function App() {
               flightId={selectedFlightId}
               activity={featureActivity}
               derivedStages={derivedStages}
-              onOpenConfig={(feature) => setConfigFor(feature)}
+              // Select the feature too: the config dialog is qualified by the
+              // durable `feature` param, so opening it for a flight's feature
+              // while a DIFFERENT one is selected would deep-link to the wrong
+              // suite. Same alignment onStartFlight already does below.
+              onOpenConfig={(feature, tab) => { setSelectedFeature(feature); setConfigFor(feature, tab ?? null) }}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
               onOpenRun={(feature, runId) => {
@@ -363,7 +367,6 @@ export function App() {
                 setView('workspace')
               }}
               onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
-              onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
             />
           : <ResizablePanels panels={panels} />}
@@ -390,7 +393,12 @@ export function App() {
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
-          initialTab="playwright"
+          // Routed mount: the open tab lives in the URL (?dialog=config&tab=…),
+          // so a drill-through can aim at one and a refresh lands back on it.
+          // No tab from the opener = Playwright, this mount's long-standing
+          // default (the run detail's artifact-settings entry point).
+          tab={configTab ?? 'playwright'}
+          onTabChange={setConfigTab}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
@@ -398,7 +406,9 @@ export function App() {
           onRenamed={(_, nextFeature) => {
             // refreshFeatures(nextFeature) refetches the list and re-selects the
             // renamed feature + its latest run (same as the old inline handler).
-            setConfigFor(nextFeature)
+            // Carry the open tab across the rename — reopening bare would snap
+            // the user from General (where the rename happens) to the default.
+            setConfigFor(nextFeature, configTab)
             refreshFeatures(nextFeature)
           }}
           onDeleted={() => {

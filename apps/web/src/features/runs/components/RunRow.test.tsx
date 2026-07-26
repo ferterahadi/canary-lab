@@ -61,8 +61,8 @@ describe('RunRow (R80 hero props)', () => {
     expect(container.textContent).toContain('run 2 of 2')
   })
 
-  it('promotePassCount lifts the pass count out of the meta line', () => {
-    renderRow({ promotePassCount: true })
+  it("passCount 'promoted' lifts the pass count out of the meta line", () => {
+    renderRow({ passCount: 'promoted' })
     // Still shown once, as its own promoted segment.
     expect(container.textContent).toContain('9/12 passed')
     const occurrences = (container.textContent?.match(/9\/12 passed/g) ?? []).length

@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, ...partial }
 }
 
 beforeEach(() => {
@@ -280,5 +280,34 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(window.location.search).not.toContain('draft=')
     persistView(view({ dialog: 'draft', draft: 'dr_abc123' }))
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: null })
+  })
+
+  it('round-trips the config dialog + its tab qualifier (URL-only, not mirrored)', () => {
+    persistView(view({ feature: 'checkout', dialog: 'config', configTab: 'ports' }))
+    expect(window.location.search).toContain('dialog=config')
+    expect(window.location.search).toContain('tab=ports')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config', configTab: 'ports' }))
+    expect(localStorage.getItem(KEY)).not.toContain('ports')
+  })
+
+  it('reads the config dialog with no tab as a null qualifier (the mount picks its default)', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&dialog=config')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config', configTab: null }))
+  })
+
+  it('ignores an unknown tab name', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&dialog=config&tab=bogus')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config', configTab: null }))
+  })
+
+  it('drops a tab param found in the URL when the dialog is not config', () => {
+    window.history.replaceState(null, '', '/?dialog=draft&draft=dr_1&tab=ports')
+    expect(readPersistedView()).toEqual(view({ dialog: 'draft', draft: 'dr_1' }))
+  })
+
+  it('drops the tab param on close', () => {
+    persistView(view({ feature: 'checkout', dialog: 'config', configTab: 'ports' }))
+    persistView(view({ feature: 'checkout', dialog: null }))
+    expect(window.location.search).not.toContain('tab=')
   })
 })

@@ -57,7 +57,8 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ```
 ?view=coverage&feature=checkout                    → coverage page
 ?feature=checkout&run=7cvh                          → run selected in detail pane
-?feature=checkout&dialog=config                     → Playwright settings
+?feature=checkout&dialog=config                     → feature config (Playwright — the no-tab default)
+?feature=checkout&dialog=config&tab=ports           → feature config, on a named tab
 ?feature=checkout&dialog=verification               → Verify-config dialog
 ?feature=checkout&dialog=flight-start               → flight stage-entry launcher (feature-scoped)
 ?dialog=flight-new                                  → new-flight launcher (intent + repo picker)
@@ -65,8 +66,14 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ```
 
 `RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new'`.
-`flight` is the one live id-qualifier: it only qualifies `view=flights` (absent =
-the flights landing list), gated the same way in `persistView`/`readPersistedView`.
+`flight`, `draft` and `tab` are the live id/name qualifiers, each gated to its own
+view/dialog in `persistView`/`readPersistedView`: `flight` only qualifies
+`view=flights` (absent = the flights landing list), `draft` only `dialog=draft`,
+`tab` only `dialog=config` (`ConfigTab`; an unknown name reads as null so the
+mount's own default wins). Because the config dialog is qualified by the DURABLE
+`feature` param, any opener that opens it for a feature other than the selected
+one must `setSelectedFeature` too — otherwise the deep link names the wrong
+suite (this bit the flight's Ports drill-through).
 `wf` (old portify-revisit id) and `task` (old evaluation-dialog id) are
 tombstoned — `persistView` force-deletes both on every write so no stale deep
 link carries them forward; never reuse either name for a new qualifier. Unknown

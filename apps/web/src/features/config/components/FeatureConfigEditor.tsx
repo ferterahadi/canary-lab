@@ -6,8 +6,9 @@ import { EnvsetsTab } from './EnvsetsTab'
 import { PlaywrightTab } from './PlaywrightTab'
 import { Modal, TrashIcon } from './atoms'
 import { DeleteSuiteConfirm } from './DeleteSuiteConfirm'
+import type { ConfigTab } from '../../../shared/lib/workspace-view-state'
 
-type Tab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
+type Tab = ConfigTab
 
 interface Props {
   feature: string
@@ -17,15 +18,24 @@ interface Props {
   onClose: () => void
   onDeleted?: (feature: string) => void
   onRenamed?: (oldFeature: string, nextFeature: string) => void
+  /** Uncontrolled seed — the tab this dialog opens on when the mount doesn't
+   *  own the selection. Ignored once `tab` is supplied. */
   initialTab?: Tab
+  /** Controlled tab + its setter. The routed mount (App) passes both so the
+   *  open tab lives in the URL; the unrouted mount (the features list gear)
+   *  passes neither and keeps the internal state. */
+  tab?: Tab
+  onTabChange?: (tab: Tab) => void
   /** Launch the port-ification wizard for this feature (from the Ports tab). */
   onStartPortify?: (feature: string) => void
   /** Reopen a past/active port-ification workflow (by id) from the Ports tab. */
   onOpenPortify?: (workflowId: string) => void
 }
 
-export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', onStartPortify, onOpenPortify }: Props) {
-  const [tab, setTab] = useState<Tab>(initialTab)
+export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', tab: tabProp, onTabChange, onStartPortify, onOpenPortify }: Props) {
+  const [internalTab, setInternalTab] = useState<Tab>(initialTab)
+  const tab = tabProp ?? internalTab
+  const setTab = (next: Tab) => { setInternalTab(next); onTabChange?.(next) }
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
