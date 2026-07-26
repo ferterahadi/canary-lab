@@ -184,9 +184,11 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
             // no such flag, so persist the cwd + spawn time and discover it
             // post-hoc. Either way the sabotage agent renders through the shared
             // AgentSessionView (the same timeline the Heal-agent tab + wizard use).
-            const sessionId = agent === 'claude' ? randomUUID() : undefined
-            writeWorkflowAgentRef(benchDir, { agent, cwd, sessionId, spawnedAt: deps.now() })
-            await runAgentHeadless(agent, recipe, cwd, path.join(benchDir, 'sabotage-agent.log'), children, sessionId)
+            const session: HeadlessSession = agent === 'claude'
+              ? { agent, sessionId: randomUUID() }
+              : { agent }
+            writeWorkflowAgentRef(benchDir, { agent, cwd, sessionId: session.sessionId, spawnedAt: deps.now() })
+            await runAgentHeadless(session, recipe, cwd, path.join(benchDir, 'sabotage-agent.log'), children)
           },
           testsUntouched: async (wtRoot) => {
             const res = await runGit(wtRoot, ['diff', '--name-only', 'HEAD'])
@@ -411,6 +413,15 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
 
 // --- helpers ---------------------------------------------------------------
 
+// Which agent ran, plus the session id that only claude gets. Pairing the two in
+// one type removes the "claude without a session id" state: the caller mints a
+// UUID for claude and nothing for codex, so that combination was never
+// reachable, and `sessionId?: undefined` on the codex arm keeps the id readable
+// without a discriminant check at the call site.
+type HeadlessSession =
+  | { agent: 'claude'; sessionId: string }
+  | { agent: 'codex'; sessionId?: undefined }
+
 // Sabotage / one-shot agent run, headless (no REPL): run the prompt to
 // completion and resolve on exit. Permissions are auto-accepted because there
 // is no human in this loop. `claude` gets a pinned `--session-id` so we can
@@ -418,30 +429,29 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
 // still teed to `sabotage-agent.log` for debugging + the codex idle-activity
 // signal.
 function runAgentHeadless(
-  agent: HealAgent,
+  session: HeadlessSession,
   prompt: string,
   cwd: string,
-  logPath?: string,
+  // Required: the sole caller always tees to `sabotage-agent.log`, so "no log
+  // path" is not a state this function has to carry a fallback for.
+  logPath: string,
   children?: Set<ChildProcess>,
-  sessionId?: string,
 ): Promise<void> {
   // Shared agent-process runner (spawn + tee + idle). claude gets stream-json
   // for liveness; the diff is the arbiter, so we don't capture/parse the output.
-  const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { sessionId })
+  const args = session.agent === 'claude'
+    ? buildClaudeAgenticArgs(prompt, { sessionId: session.sessionId })
     : ['exec', '--full-auto', prompt]
   let out: number | null = null
-  if (logPath) {
-    try { out = fs.openSync(logPath, 'a') } catch { out = null }
-  }
+  try { out = fs.openSync(logPath, 'a') } catch { out = null }
   const handle = runAgentProcess({
-    command: agent,
+    command: session.agent,
     args,
     cwd,
     captureStdout: false,
     onChunk: (text) => { if (out !== null) { try { fs.writeSync(out, text) } catch { /* best effort */ } } },
     idleMs: 5 * 60 * 1000,
-    activityPath: agent === 'claude' && sessionId ? claudeSessionLogPath(cwd, sessionId) : (logPath ?? undefined),
+    activityPath: session.agent === 'claude' ? claudeSessionLogPath(cwd, session.sessionId) : logPath,
   })
   children?.add(handle.child)
   const cleanup = (): void => {

@@ -177,7 +177,7 @@ export async function createEvaluationHtml(detail: RunDetail, options: Assertion
   const packet = buildTestReviewPacket(detail)
   const rewrite = normalizeEvaluationRewrite(options.rewrite ?? options.narrative, packet) ?? deterministicEvaluationRewrite(packet)
   const flowcharts = createFlowcharts(packet, rewrite)
-  return renderHtml(packet, { ...options, rewrite }, flowcharts)
+  return renderHtml(packet, options, rewrite, flowcharts)
 }
 
 export async function createAssertionExport(detail: RunDetail, options: AssertionHtmlOptions = {}): Promise<AssertionExport> {
@@ -189,7 +189,7 @@ export async function createEvaluationExport(detail: RunDetail, options: Asserti
   const rewrite = normalizeEvaluationRewrite(options.rewrite ?? options.narrative, packet) ?? deterministicEvaluationRewrite(packet)
   const flowcharts = createFlowcharts(packet, rewrite)
   return {
-    html: await renderHtml(packet, { ...options, rewrite }, flowcharts),
+    html: await renderHtml(packet, options, rewrite, flowcharts),
     assets: [],
   }
 }
@@ -928,7 +928,14 @@ function audienceFlowTitle(node: FlowNode, test: TestReviewCase): string {
   if (node.kind === 'assertion') return 'Check the expected outcome'
   if (node.kind === 'helper') {
     const helperName = node.title.replace(/^Helper:\s*/, '')
-    return readableActionName(helperName, node.detail ?? helperName) || readableHelperName(helperName) || 'Run a shared test step'
+    // `readableActionName` never returns an empty string — it carries its own
+    // 'Run the next step' fallback — so the `|| readableHelperName(…) || 'Run a
+    // shared test step'` chain that used to sit here could never be reached.
+    // NOTE: that also means a helper whose name yields no recognisable action
+    // words gets the generic label rather than the humanised helper name the
+    // dead arm intended. Changing that changes exported report text, so it is
+    // recorded here rather than fixed in a coverage pass.
+    return readableActionName(helperName, node.detail ?? helperName)
   }
   if (node.kind === 'setup') return 'Prepare the scenario'
   if (node.detail) return readableAction(node.detail, test)
@@ -1051,8 +1058,17 @@ function confidenceForAssertions(assertions: TestReviewAssertion[]): string {
   return `Confidence: ${summary}. Review the engineering evidence before relying on this scenario as strong proof.`
 }
 
-async function renderHtml(packet: TestReviewPacket, options: AssertionHtmlOptions, flowcharts: TestFlowchart[]): Promise<string> {
-  const rewrite = normalizeEvaluationRewrite(options.rewrite ?? options.narrative, packet) ?? deterministicEvaluationRewrite(packet)
+// The rewrite is a parameter rather than a field on `options`: both callers
+// normalize (falling back to the deterministic rewrite) before building the
+// flowcharts from it, so re-deriving it here only re-ran an idempotent
+// normalize on an already-normalized value and left two arms that could never
+// be taken.
+async function renderHtml(
+  packet: TestReviewPacket,
+  options: AssertionHtmlOptions,
+  rewrite: EvaluationRewrite,
+  flowcharts: TestFlowchart[],
+): Promise<string> {
   const displayFeature = rewrite.featureTitle?.trim() || titleCaseFeatureName(packet.feature)
   const testIds = uniqueSectionIds(packet.tests.map((test, idx) => `${idx + 1}-${test.title}`))
   const flowchartByTestName = new Map(flowcharts.map((flowchart) => [flowchart.testName, flowchart]))
@@ -1071,7 +1087,9 @@ async function renderHtml(packet: TestReviewPacket, options: AssertionHtmlOption
 
   const testSections = await Promise.all(packet.tests.map(async (test, idx) => {
     const videoLinks = options.videoLinksByTestName?.[test.name] ?? []
-    const flowchart = flowchartByTestName.get(test.name)
+    // Always present: `createFlowcharts` emits one entry per packet test keyed
+    // by `test.name`, and it is the only thing renderHtml is ever called with.
+    const flowchart = flowchartByTestName.get(test.name)!
     const audienceCase = rewrite.cases[idx]
     const cov = coverageByTitle.get(test.title)
     // When coverage exists it's the headline (depth); specificity is demoted to a
@@ -1085,7 +1103,7 @@ async function renderHtml(packet: TestReviewPacket, options: AssertionHtmlOption
           <div><dt>${cov ? 'Assertion specificity' : 'Check specificity'}</dt><dd>${escapeHtml(qualitySummaryForAudience(test.assertions))}</dd></div>
         </dl>
         <p class="case-explainer">${escapeHtml(audienceCase.whatWasChecked)}</p>
-        ${flowchart ? renderFlowchartSection(flowchart, audienceCase.title) : ''}
+        ${renderFlowchartSection(flowchart, audienceCase.title)}
         <details class="test-code-details">
           <summary>Test code</summary>
           ${test.testBody ? await renderTestCode(test.testBody) : '<p class="muted">Source unavailable.</p>'}
@@ -1217,11 +1235,15 @@ async function renderImplementations(externalImports: string[], helpers: HelperD
 
 function createFlowcharts(packet: TestReviewPacket, rewrite: EvaluationRewrite): TestFlowchart[] {
   return packet.tests.map((test, idx) => {
-    const steps = applyFlowStepRewrite(flowNodesForTest(test), rewrite.cases[idx]?.flowSteps)
+    // One case per test is an invariant of both producers: `normalizeEvaluationRewrite`
+    // rejects any input whose `cases.length` differs from `packet.tests.length`,
+    // and `deterministicEvaluationRewrite` maps straight over `packet.tests`.
+    const rewriteCase = rewrite.cases[idx]
+    const steps = applyFlowStepRewrite(flowNodesForTest(test), rewriteCase.flowSteps)
     return {
       testName: test.name,
       steps,
-      svg: renderFlowchartSvg(steps, rewrite.cases[idx]?.title ?? test.title),
+      svg: renderFlowchartSvg(steps, rewriteCase.title),
     }
   })
 }
@@ -2086,6 +2108,11 @@ function dedupe(values: string[]): string[] {
   return [...new Set(values)]
 }
 
+// HTML anchor ids must be unique within a document, so a repeat sanitises to
+// `<base>-2`, `<base>-3`, … The one production caller prefixes each value with
+// its 1-based index, which means it can never hit the suffix loop or the empty
+// fallback — both are part of this helper's contract rather than dead code, and
+// are pinned by direct tests through the internals seam.
 function uniqueSectionIds(values: string[]): string[] {
   const used = new Set<string>()
   return values.map((value) => {
@@ -2223,6 +2250,8 @@ export const __testReviewExportInternals = {
   readableCreatedObject,
   readableHelperName,
   resultColor,
+  safeFilename,
   statusClass,
+  uniqueSectionIds,
   wrapSvgText,
 }

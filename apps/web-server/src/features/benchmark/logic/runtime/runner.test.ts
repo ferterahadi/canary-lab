@@ -321,6 +321,39 @@ describe('createBenchmarkRunner', () => {
     })
   })
 
+  describe('fire-and-forget pipeline', () => {
+    it('swallows a rejected orchestrator run so the route still returns an id', async () => {
+      // startBenchmark kicks the pipeline off with `void orchestrator.run().catch()`.
+      // The orchestrator turns its own phase failures into an 'error' manifest,
+      // but its very FIRST persist happens before that try block — so a manifest
+      // write that throws rejects run() itself. Without the .catch that is an
+      // unhandled rejection, which is why this asserts on the absence of one.
+      const { appRepo, logsDir } = await flatFixture()
+      const { store, deps } = makeDeps({
+        logsDir,
+        loadFeatures: () => [feat({ featureDir: appRepo, repos: [{ name: 'app', localPath: appRepo }] })],
+      })
+      const realSave = store.save.bind(store)
+      let saves = 0
+      vi.spyOn(store, 'save').mockImplementation((m) => {
+        saves += 1
+        // Save 1 is startBenchmark's own initial manifest — let it through so
+        // the id is readable. Every later one is the orchestrator's persist.
+        if (saves > 1) throw new Error('manifest write failed')
+        realSave(m)
+      })
+      const { startBenchmark } = createBenchmarkRunner(deps)
+
+      const { benchmarkId } = await startBenchmark({ feature: 'bench-feat', agent: 'claude', iterations: 1, ...OFF_BY_ONE })
+      expect(benchmarkId).toBeTruthy()
+      // The caller got its id even though the background pipeline died.
+      expect(store.get(benchmarkId)).toBeTruthy()
+      // Give the rejected run() a turn to settle.
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(saves).toBeGreaterThan(1)
+    })
+  })
+
   describe('sabotage failures (no arms are ever started)', () => {
     it('errors when the agent makes no edits at all (freeze finds nothing to commit)', async () => {
       const { appRepo, logsDir } = await flatFixture()

@@ -1554,6 +1554,120 @@ test('phantom dependency', async ({ page }) => {
     expect(internals.functionLikeBody(numDecl)).toBeUndefined()
     expect(internals.functionLikeBody(exprStmt)).toBeUndefined()
   })
+
+  it('ignores a JSON candidate that is an object without a `cases` array', () => {
+    // The rewrite envelope is anchored on `cases`, so an agent answer whose only
+    // parseable object is some other shape must not be mistaken for a rewrite.
+    expect(__testReviewExportInternals.parseEvaluationRewrite('{"summary":"looks fine","tests":3}'))
+      .toBeUndefined()
+  })
+
+  it('ignores a JSON candidate that is not an object at all', () => {
+    // extractJsonCandidates parses whatever a fenced block contains, including a
+    // bare scalar or null — neither of which can carry a `slots` array.
+    expect(__testReviewExportInternals.parseEvaluationTextSlotRewrite('```json\n42\n```')).toBeUndefined()
+    expect(__testReviewExportInternals.parseEvaluationTextSlotRewrite('```json\nnull\n```')).toBeUndefined()
+  })
+
+  it('grades a bare boolean toBe as moderate rather than strict', () => {
+    // `tobe` sits in the exact-matcher table, but `toBe(true)` pins almost
+    // nothing — so the demotion has to happen before that table is consulted.
+    expect(__testReviewExportInternals.classifyAssertion('await expect(ok).toBe(true)', 'toBe')).toBe('moderate')
+    expect(__testReviewExportInternals.classifyAssertion('await expect(v).toBe(null)', 'toBe')).toBe('moderate')
+    // The complement: a concrete expected value keeps the strict grade.
+    expect(__testReviewExportInternals.classifyAssertion('await expect(total).toBe(42)', 'toBe')).toBe('strict')
+  })
+
+  it('suffixes repeated section ids and falls back for a value that sanitises to nothing', () => {
+    // Both arms belong to the helper's contract (anchor ids must be unique and
+    // non-empty); the production caller index-prefixes every value, so neither
+    // is reachable through it.
+    expect(__testReviewExportInternals.uniqueSectionIds(['Checkout flow', 'Checkout flow', 'checkout   flow']))
+      .toEqual(['checkout-flow', 'checkout-flow-2', 'checkout-flow-3'])
+    expect(__testReviewExportInternals.safeFilename('!!!')).toBe('section')
+    expect(__testReviewExportInternals.safeFilename('Checkout Flow')).toBe('checkout-flow')
+  })
+
+  it('reconstructs cases from the summary when a run detail has no playback events', () => {
+    // `playbackEvents` is optional on RunDetail. Rather than reporting zero
+    // tests, the packet falls back to summary.passedNames and says plainly that
+    // no playback evidence was available — the count stays honest either way.
+    const base = detail({ featureDir: tmpDir })
+    const packet = buildTestReviewPacket({ ...base, playbackEvents: undefined })
+
+    expect(packet.runId).toBe('run-1')
+    expect(packet.tests).toHaveLength(1)
+    expect(packet.tests[0].name).toBe('test-case-passes-checkout')
+    expect(packet.tests[0].assertions).toEqual([expect.objectContaining({
+      quality: 'unknown',
+      rationale: 'No playback event or source match was available for this passed test.',
+    })])
+  })
+
+  it('omits the Ended row when the run has no end timestamp', async () => {
+    // A run still in flight has no manifest.endedAt, so the header drops the row
+    // instead of rendering an empty definition.
+    const base = detail({ featureDir: tmpDir })
+    const running: RunDetail = { ...base, manifest: { ...base.manifest, endedAt: undefined } }
+    const html = await createEvaluationHtml(running)
+
+    expect(html).not.toContain('<dt>Ended</dt>')
+    // The sibling rows that don't depend on endedAt are still there.
+    expect(html).toContain('<dt>Started</dt>')
+  })
+
+  it('counts assertions from a helper reached through another helper', () => {
+    // `outer` holds no assertions itself; the count has to walk into its
+    // dependency chain to find `inner`'s.
+    const featureDir = path.join(tmpDir, 'nested-assertions')
+    const helperDir = path.join(featureDir, 'e2e', 'helpers')
+    fs.mkdirSync(helperDir, { recursive: true })
+    fs.writeFileSync(path.join(helperDir, 'inner.ts'), `import { expect } from '@playwright/test'
+
+export function inner(page) {
+  return expect(page.locator('.done')).toHaveText('Done')
+}
+`)
+    fs.writeFileSync(path.join(helperDir, 'outer.ts'), `import { inner } from './inner'
+
+export function outer(page) {
+  return inner(page)
+}
+`)
+    const spec = path.join(featureDir, 'e2e', 'nested.spec.ts')
+    // The direct `toBeVisible` is load-bearing: with no assertion of its own the
+    // test gets a placeholder whose empty snippet substring-matches every
+    // statement, so `outer(page)` would render as an assertion step instead of a
+    // helper one and the nested walk would never run.
+    const specSource = `import { test, expect } from '@playwright/test'
+import { outer } from './helpers/outer'
+
+test('nested helper assertions', async ({ page }) => {
+  await expect(page.getByText('Ready')).toBeVisible()
+  outer(page)
+})
+`
+    fs.writeFileSync(spec, specSource)
+    const packet = buildTestReviewPacket(detail({
+      featureDir,
+      eventLocation: `${spec}:${lineOf(specSource, "test('nested helper assertions'")}`,
+      title: 'nested helper assertions',
+    }))
+    const outerDef = packet.tests[0].helperDefinitions.find((h) => h.name === 'outer')
+
+    expect(outerDef?.assertions).toEqual([])
+    expect(outerDef?.dependencies.map((dep) => dep.name)).toEqual(['inner'])
+    const helperNode = __testReviewExportInternals.flowNodesForTest(packet.tests[0])
+      .find((node) => node.title === 'Helper: outer')
+    expect(helperNode?.detail).toBe('1 nested assertion')
+
+    // `detail` is optional on a FlowNode, so the audience title reads the helper
+    // name when there is nothing else to describe the step with.
+    expect(__testReviewExportInternals.audienceFlowTitle(
+      { kind: 'helper', title: 'Helper: openVoucherModal' },
+      packet.tests[0],
+    )).toBe('Open voucher modal')
+  })
 })
 
 describe('evaluation rewrite agent + highlight fallback (isolated module mocks)', () => {

@@ -122,13 +122,13 @@ export default defineConfig({
         //   fallthrough, non-finite-startedAt tag, spawn-failed null-pty return,
         //   plus mid-heal-loop cancel paths only reachable via racy timing.
         'apps/web-server/src/features/runs/logic/runtime/orchestrator.ts',
-        // benchmark runner: `if (logPath)` false arm (always a truthy path.join)
-        //   and the `claude && !sessionId` sub-arm (claude always gets a UUID).
-        'apps/web-server/src/features/benchmark/logic/runtime/runner.ts',
-        // test-review-export: section-id dedup loop + empty-filename fallback
-        //   (ids are index-prefixed, never collide/empty), pre-normalized `??`,
-        //   always-present flowchart else, `cases[idx]` always-defined nullish.
-        'apps/web-server/src/features/evaluation/logic/test-review-export.ts',
+        // NOTE: benchmark/logic/runtime/runner.ts and
+        //   evaluation/logic/test-review-export.ts used to be listed here. Both
+        //   are now fully gated: the unreachable arms were removed at the source
+        //   (a required `logPath`, an agent/session-id discriminated union, a
+        //   rewrite passed in rather than re-derived) and the rest turned out to
+        //   be reachable and got real tests. Deleting the arm beats excluding
+        //   the file.
         // feature-config route: value-type guards against a non-object config
         //   (readFeatureConfig always yields a plain object) + the `isWithin`
         //   path-traversal guards the slot-name regex already makes unreachable
