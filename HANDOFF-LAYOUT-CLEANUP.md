@@ -3,9 +3,9 @@
 **Scope:** repository layout and module ownership. **No behavior changes.**
 Every item below is a move, a rename, a generator, or a declaration.
 
-**Status:** Phases 0–6 are **done and committed**. Phases 7–9 remain. One
-non-layout item (a public-repo privacy exposure) is **blocked on a permission**
-and needs the owner, not an agent.
+**Status:** Phases 0–6 are **done and committed**. Phases 7–9 remain. The one
+non-layout item (a public-repo privacy exposure) is **resolved** — the history
+was rewritten on 2026-07-26, so **every SHA below is post-rewrite**.
 
 **Branch:** `release/1.6.0`. Work in the **main checkout** at
 `/Users/oddle/Documents/canary-lab`, never in `.claude/worktrees/*` — three stale
@@ -17,17 +17,21 @@ worktrees exist there and are behind.
 
 | Commit | Phase | Result |
 | --- | --- | --- |
-| `2140974` | 1 | `tools/gen-codex-skills.mjs` mirrors `.claude/skills` → `.codex/skills` (19 files, `cl_apply-local` excluded); `.agents/` + `yarn.lock` removed; `History` untracked |
-| `4421b81` | 2 | 406 boundary-crossing imports in `apps/web` → `@/…` / `@shared/…`; zero 3+-level relative imports remain |
-| `02ddf2a` | 3 | web feature `logs` → `cleanup`; `shared/README.md` marks the 4 published paths |
-| `f8438d8` | 4 | `server.ts` + `mcp/` moved under `src/`; `tools.ts` 2,740 ln split into `tool-support.ts` + 4 `tool-groups/` |
-| `459fb0f` | 5 | `scripts/` → `apps/cli/`; `bin` → `dist/apps/cli/cli.js` |
-| `d14ad04`, `a0107e7` | — | fallout fix: a stale MCP registration is now reported instead of failing silently |
-| `a4bb2f0`, `298378a` | 6 | all 10 server features expose `register(app, ctx)`; `server.ts` 1,523 → 447 ln |
+| `70c3a68` | 1 | `tools/gen-codex-skills.mjs` mirrors `.claude/skills` → `.codex/skills` (19 files, `cl_apply-local` excluded); `.agents/` + `yarn.lock` removed; `History` untracked |
+| `c074457` | 2 | 406 boundary-crossing imports in `apps/web` → `@/…` / `@shared/…`; zero 3+-level relative imports remain |
+| `1c95ab8` | 3 | web feature `logs` → `cleanup`; `shared/README.md` marks the 4 published paths |
+| `5f4f525` | 4 | `server.ts` + `mcp/` moved under `src/`; `tools.ts` 2,740 ln split into `tool-support.ts` + 4 `tool-groups/` |
+| `3037458` | 5 | `scripts/` → `apps/cli/`; `bin` → `dist/apps/cli/cli.js` |
+| `1162462`, `9c332cd` | — | fallout fix: a stale MCP registration is now reported instead of failing silently |
+| `14c4d77`, `b8faded` | 6 | all 10 server features expose `register(app, ctx)`; `server.ts` 1,523 → 447 ln |
 
-`origin/release/1.6.0` is at `a4bb2f0`; **`298378a` is unpushed.**
+`origin/release/1.6.0` and local `release/1.6.0` are both at `846328b` — **nothing
+unpushed.** These SHAs replaced the pre-rewrite ones (`2140974`, `4421b81`,
+`02ddf2a`, `f8438d8`, `459fb0f`, `d14ad04`, `a0107e7`, `a4bb2f0`, `298378a`); the
+old hashes no longer resolve. `.git/filter-repo/commit-map` holds the full mapping
+if an old SHA turns up in a doc or a note.
 
-### Current numbers (measured at `298378a`)
+### Current numbers (measured at `b8faded`)
 
 | Metric | Value |
 | --- | --- |
@@ -141,7 +145,7 @@ if tool paths move.
 > grep -oE "'apps/web-server/src/features/runs/[^']*'" vitest.config.ts
 > ```
 >
-> As of `298378a` that is `logic/runtime/orchestrator.ts`,
+> As of `b8faded` that is `logic/runtime/orchestrator.ts`,
 > `logic/runtime/log-enrichment.ts`, `logic/runtime/env-switcher/switch.ts`,
 > `logic/playwright-list.ts`. (`logic/heal/` is **not** excluded — fully gated.)
 > Move any of them and the exclude goes stale → the file re-enters the gate below
@@ -190,34 +194,41 @@ ctx)` plus a returned handle. If you add re-exports, don't break that contract.
 
 ---
 
-## ⛔ Blocked — needs the owner, not an agent
+## ✅ Resolved — `History` blob purged (2026-07-26)
 
-**`History` is a Chromium browsing-history database** (56 URLs, 74 visits) committed
-in `c5f0395` and pushed to **github.com/ferterahadi/canary-lab, which is PUBLIC**.
-Phase 1 untracked and gitignored it, which stops future commits but does **not**
-remove it from the published history.
+**`History` was a Chromium browsing-history database** (320 KB SQLite: `urls`,
+`visits`, `downloads`, `keyword_search_terms`) committed in the old `c5f0395` and
+pushed to **github.com/ferterahadi/canary-lab, which is PUBLIC**. Phase 1 untracked
+and gitignored it; that stopped future commits but left it in the published history.
 
-An agent attempt to run `git filter-repo` was **denied by the permission
-classifier**, correctly — it rewrites published history. Do not try to route around
-it with `filter-branch`; that is the same destructive operation.
+Content reviewed before removal: expired Google OAuth/session tokens (~3 months
+old — `rapt`/`sidt`/`part`, all short-lived), a personal Gmail session, TikTok
+developer app + org IDs, and a handful of searches. **No passwords, API keys, or
+long-lived credentials.** A privacy exposure, not a credential leak.
 
-Everything is staged for whoever runs it:
+Removed by the repo owner with `git filter-repo --path History --invert-paths
+--force --refs release/1.6.0 ui-skin-unify`, then force-pushed. Verified: no ref or
+reflog reaches `History`, and the two old commits are absent from the object store.
 
-- Scope confirmed: blob exists only between `c5f0395` and `2140974`, on
-  `release/1.6.0` only — **not on `main`**, no tags, **0 forks**, no open PRs
-- A full backup bundle of all refs was taken during the session (regenerate with
-  `git bundle create <path> --all` before starting)
+**Two things that nearly hid the blob after the rewrite** — both worth knowing if a
+similar purge is ever needed:
 
-```bash
-git filter-repo --path History --invert-paths --force --refs release/1.6.0
-```
+1. **An orphaned `refs/stash`.** `git reflog expire --expire=now --all` wipes the
+   stash *reflog*, so `git stash list` prints nothing while `refs/stash` still
+   points at a stash commit rooted in the old history. Clear it with
+   `git update-ref -d refs/stash`, not `git stash drop`.
+2. **The remote-tracking reflog.** `.git/logs/refs/remotes/origin/<branch>` records
+   `<old> <new>` for the force-push, and its **old** side pins the entire
+   pre-rewrite chain. `reflog expire` cannot remove it — git never expires a
+   reflog's newest entry. Delete the log file, then `git gc --prune=now`.
 
-Then force-push. Three caveats:
+Diagnose both with `git log --all --reflog --oneline -- <path>` (the `--reflog` is
+the part that catches them) rather than `git log --all`.
 
-1. `ui-skin-unify` also contains the blob locally — it must not be pushed as-is.
-2. A force-push does **not** immediately purge GitHub: unreferenced objects stay
-   reachable by SHA until GC. Ask GitHub Support to purge cached views.
-3. Treat anything reachable from those 56 URLs as disclosed.
+Residual, by design: `~/canary-lab-backup-20260726.bundle` still contains the blob —
+delete it once you're confident. Unreferenced objects also stay fetchable by SHA on
+GitHub until their GC; ask Support to purge cached views if that matters. Treat
+anything in those URLs as disclosed regardless — the repo was public the whole time.
 
 ---
 
