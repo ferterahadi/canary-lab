@@ -5,8 +5,14 @@ import path from 'path'
 
 // Stub the MCP refresh so upgrade tests never shell out to the real
 // claude/codex CLIs (which would mutate the developer's actual config).
-const mcpRefreshMocks = vi.hoisted(() => ({ refreshCanaryLabMcp: vi.fn() }))
-vi.mock('./mcp-refresh', () => ({ refreshCanaryLabMcp: mcpRefreshMocks.refreshCanaryLabMcp }))
+const mcpRefreshMocks = vi.hoisted(() => ({
+  refreshCanaryLabMcp: vi.fn(),
+  findStaleCanaryLabMcp: vi.fn(() => [] as { client: string; cliPath: string }[]),
+}))
+vi.mock('./mcp-refresh', () => ({
+  refreshCanaryLabMcp: mcpRefreshMocks.refreshCanaryLabMcp,
+  findStaleCanaryLabMcp: mcpRefreshMocks.findStaleCanaryLabMcp,
+}))
 
 import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
 import { readWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
@@ -31,6 +37,8 @@ beforeEach(() => {
   tmpDirs.push(home)
   vi.stubEnv('CANARY_LAB_AGENT_HOME', home)
   mcpRefreshMocks.refreshCanaryLabMcp.mockClear()
+  mcpRefreshMocks.findStaleCanaryLabMcp.mockClear()
+  mcpRefreshMocks.findStaleCanaryLabMcp.mockReturnValue([])
 })
 
 const START = '<!-- managed:canary-lab:start -->'
@@ -177,6 +185,36 @@ describe("main (upgrade orchestration)", () => {
     await main([])
 
     expect(mcpRefreshMocks.refreshCanaryLabMcp).toHaveBeenCalledTimes(1)
+  })
+
+  // --silent is the postinstall's normal mode, so these two have to reach the
+  // user through console.warn or a broken MCP entry stays invisible.
+  it("warns about a registration pointing at a deleted cli.js, even under --silent", async () => {
+    const root = mkProjectRoot()
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    mcpRefreshMocks.findStaleCanaryLabMcp.mockReturnValue([
+      { client: 'Claude', cliPath: '/old/dist/scripts/cli.js' },
+    ])
+
+    await main(['--silent'])
+
+    const said = warn.mock.calls.flat().join('\n')
+    expect(said).toContain('/old/dist/scripts/cli.js')
+    expect(said).toContain('canary-lab setup')
+  })
+
+  it("warns when the MCP refresh itself throws, instead of swallowing it", async () => {
+    const root = mkProjectRoot()
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    mcpRefreshMocks.refreshCanaryLabMcp.mockImplementation(() => {
+      throw new Error('codex mcp add exploded')
+    })
+
+    await main(['--silent'])
+
+    expect(warn.mock.calls.flat().join('\n')).toContain('codex mcp add exploded')
   })
 
   it("refreshes only existing user-level agent integrations on upgrade", async () => {
