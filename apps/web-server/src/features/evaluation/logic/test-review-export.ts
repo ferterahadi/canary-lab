@@ -47,7 +47,19 @@ export interface TestReviewCase {
   helperDefinitions: HelperDefinition[]
   externalImports: string[]
   assertions: TestReviewAssertion[]
+  /** `file:line` the test is declared at, when the roster or playback knows it.
+   *  Drives the per-spec-file grouping in the report's navigation. */
+  location?: string
+  /** Playwright's own failure message + code frame, when the run reported one.
+   *  A report about failures that hides the reason isn't evidence. */
+  error?: { message: string; snippet?: string }
 }
+
+/** Status carried by a declared test the run never reached. Deliberately NOT
+ *  'skipped' (Playwright reached it and chose to skip) and never folded into
+ *  passed or failed — a never-run test is neither, and the report has to say so.
+ *  See the `cl_run-evidence-invariants` skill, "Honest counts". */
+export const NOT_RUN_STATUS = 'not run'
 
 export interface TestReviewPacket {
   runId: string
@@ -131,12 +143,6 @@ interface TestFlowchart {
   steps: FlowNode[]
 }
 
-interface TocItem {
-  level: 1 | 2 | 3
-  id: string
-  label: string
-}
-
 interface FlowNode {
   kind: 'start' | 'setup' | 'action' | 'helper' | 'assertion' | 'end'
   title: string
@@ -175,7 +181,7 @@ export async function createAssertionHtml(detail: RunDetail, options: AssertionH
 
 export async function createEvaluationHtml(detail: RunDetail, options: AssertionHtmlOptions = {}): Promise<string> {
   const packet = buildTestReviewPacket(detail)
-  const rewrite = normalizeEvaluationRewrite(options.rewrite ?? options.narrative, packet) ?? deterministicEvaluationRewrite(packet)
+  const rewrite = resolveRewrite(detail, packet, options)
   const flowcharts = createFlowcharts(packet, rewrite)
   return renderHtml(packet, options, rewrite, flowcharts)
 }
@@ -186,12 +192,62 @@ export async function createAssertionExport(detail: RunDetail, options: Assertio
 
 export async function createEvaluationExport(detail: RunDetail, options: AssertionHtmlOptions = {}): Promise<AssertionExport> {
   const packet = buildTestReviewPacket(detail)
-  const rewrite = normalizeEvaluationRewrite(options.rewrite ?? options.narrative, packet) ?? deterministicEvaluationRewrite(packet)
+  const rewrite = resolveRewrite(detail, packet, options)
   const flowcharts = createFlowcharts(packet, rewrite)
   return {
     html: await renderHtml(packet, options, rewrite, flowcharts),
     assets: [],
   }
+}
+
+function resolveRewrite(detail: RunDetail, packet: TestReviewPacket, options: AssertionHtmlOptions): EvaluationRewrite {
+  const supplied = options.rewrite ?? options.narrative
+  const widened = widenRewriteToRoster(supplied, detail, packet)
+  return normalizeEvaluationRewrite(widened, packet) ?? deterministicEvaluationRewrite(packet)
+}
+
+/** Rewrites stored before the report listed never-run tests have one case per
+ *  EXECUTED test, so they no longer line up with the full roster and would be
+ *  rejected wholesale — every past export would lose its authored wording.
+ *
+ *  The old case order is not a guess: it was `playbackTests(events)` followed by
+ *  summary-only passes, all of which are still on disk, so it can be rebuilt
+ *  exactly and each case re-attached to the test it was written about. Cases with
+ *  no counterpart (the never-run ones) take deterministic wording.
+ *
+ *  The run-level `summary` is NOT carried over — the stored one describes a
+ *  6-scenario report ("of the six scenarios shown here…") and would misstate a
+ *  23-test one. It is recomputed from the evidence instead. */
+function widenRewriteToRoster(
+  input: EvaluationRewrite | undefined,
+  detail: RunDetail,
+  packet: TestReviewPacket,
+): EvaluationRewrite | undefined {
+  if (!input || !Array.isArray(input.cases)) return input
+  if (input.cases.length === packet.tests.length) return input
+  const legacy = legacyCaseOrder(detail)
+  if (legacy.length !== input.cases.length) return input
+  const caseByKey = new Map(legacy.map((key, idx) => [key, input.cases[idx]]))
+  const fallback = deterministicEvaluationRewrite(packet)
+  const featureTitle = typeof input.featureTitle === 'string' ? input.featureTitle : undefined
+  return {
+    ...(featureTitle ? { featureTitle } : {}),
+    summary: deterministicSummary(packet, featureTitle?.trim() || titleCaseFeatureName(packet.feature)),
+    cases: packet.tests.map((test, idx) => caseByKey.get(rosterKey(test)) ?? fallback.cases[idx]),
+  }
+}
+
+/** The roster the report built before it enumerated declared tests: executed
+ *  tests in playback order, then summary-only passes. */
+function legacyCaseOrder(detail: RunDetail): string[] {
+  const out = playbackTests(detail.playbackEvents ?? []).map(rosterKey)
+  const titles = new Set(playbackTests(detail.playbackEvents ?? []).map((test) => test.title))
+  for (const passedName of detail.summary?.passedNames ?? []) {
+    if ([...titles].some((title) => slugFromTitle(title) === passedName || title === passedName)) continue
+    titles.add(passedName)
+    out.push(rosterKey({ name: passedName }))
+  }
+  return out
 }
 
 export function buildEvaluationLlmPrompt(input: EvaluationLlmPromptInput): string {
@@ -202,6 +258,9 @@ export function buildEvaluationLlmPrompt(input: EvaluationLlmPromptInput): strin
       total: input.packet.total,
       passed: input.packet.passed,
       failed: input.packet.failed,
+      // Per-test breakdown so the narrative can't describe an abandoned suite as
+      // a completed one. `notRun` tests were declared but never executed.
+      breakdown: testStatusCounts(input.packet.tests),
     },
     tests: input.packet.tests.map((test) => ({
       title: test.title,
@@ -470,36 +529,29 @@ export function buildTestReviewPacket(detail: RunDetail): TestReviewPacket {
   const events = detail.playbackEvents ?? []
   const sourceTests = loadSourceTests(detail.manifest.featureDir)
   const eventTests = playbackTests(events)
-  const tests = eventTests.map((eventTest) => {
-    const source = sourceTests.get(sourceKey(eventTest.location))
+  const verdicts = runVerdicts(detail)
+  const eventByKey = new Map(eventTests.map((eventTest) => [rosterKey(eventTest), eventTest]))
+  const tests = declaredRoster(detail, eventTests).map((entry) => {
+    const eventTest = eventByKey.get(rosterKey(entry))
+    const source = entry.location ? sourceTests.get(sourceKey(entry.location)) : undefined
+    const status = eventTest?.status ?? summaryStatusFor(entry, verdicts)
+    const error = verdicts.errorByName.get(entry.name) ?? eventTest?.error
     return {
-      name: eventTest.name,
-      title: eventTest.title,
-      status: eventTest.status,
-      ...(typeof eventTest.durationMs === 'number' ? { durationMs: eventTest.durationMs } : {}),
+      name: entry.name,
+      title: entry.title,
+      status,
+      ...(typeof eventTest?.durationMs === 'number' ? { durationMs: eventTest.durationMs } : {}),
+      ...(entry.location ? { location: entry.location } : {}),
+      ...(error ? { error } : {}),
       testBody: source?.bodySource ?? '',
       helperCalls: source?.helperCalls ?? [],
       helperDefinitions: source?.helperDefinitions ?? [],
       externalImports: source?.externalImports ?? [],
       assertions: source?.assertions.length
         ? source.assertions
-        : [unknownAssertion('No static assertion detected in the matched test body.')],
+        : [unknownAssertion(missingAssertionReason(status, Boolean(source)))],
     }
   })
-
-  for (const passedName of detail.summary?.passedNames ?? []) {
-    if (tests.some((test) => slugFromTitle(test.title) === passedName || test.title === passedName)) continue
-    tests.push({
-      title: passedName,
-      name: passedName,
-      status: 'passed',
-      testBody: '',
-      helperCalls: [],
-      helperDefinitions: [],
-      externalImports: [],
-      assertions: [unknownAssertion('No playback event or source match was available for this passed test.')],
-    })
-  }
 
   return {
     runId: detail.runId,
@@ -512,6 +564,130 @@ export function buildTestReviewPacket(detail: RunDetail): TestReviewPacket {
     ...(detail.manifest.endedAt ? { endedAt: detail.manifest.endedAt } : {}),
     tests,
   }
+}
+
+function missingAssertionReason(status: string, hasSource: boolean): string {
+  if (status === NOT_RUN_STATUS) return 'This test was never executed, so the run produced no evidence for it.'
+  if (hasSource) return 'No static assertion detected in the matched test body.'
+  if (status === 'passed') return 'No playback event or source match was available for this passed test.'
+  return 'No source match was available for this test.'
+}
+
+interface RosterEntry {
+  id?: string
+  name: string
+  title: string
+  location?: string
+}
+
+/** The tests the run DECLARED, not the ones it got around to executing.
+ *
+ *  `summary.knownTests` is the harness's own enumeration — Playwright's reporter
+ *  walks the whole suite before the first test starts — so it still lists tests
+ *  a run abandoned when it stopped at the failure limit. Building the roster from
+ *  playback events instead (what this used to do) silently deleted those tests
+ *  from the report, which is exactly the rounding-up the evidence rules forbid:
+ *  a 23-test suite that stopped after 6 reported as a 6-test suite.
+ *
+ *  Runs recorded before the reporter emitted `knownTests` have none, so those
+ *  fall back to the executed set — the old behavior, and still all the evidence
+ *  that exists for them. */
+function declaredRoster(detail: RunDetail, eventTests: ReturnType<typeof playbackTests>): RosterEntry[] {
+  const out: RosterEntry[] = []
+  const seen = new Set<string>()
+  const add = (entry: RosterEntry): void => {
+    const key = rosterKey(entry)
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push(entry)
+  }
+  for (const known of detail.summary?.knownTests ?? []) {
+    add({
+      ...(known.id ? { id: known.id } : {}),
+      name: known.name,
+      title: known.title ?? known.name,
+      ...(known.location ? { location: known.location } : {}),
+    })
+  }
+  // Append rather than replace: anything the run actually reported that the
+  // roster somehow misses is evidence, and evidence is never dropped.
+  for (const eventTest of eventTests) add(eventTest)
+  for (const passedName of detail.summary?.passedNames ?? []) {
+    // Match on name first: a roster entry and a `passedNames` entry are the same
+    // test when the names agree, even though the roster's title may carry
+    // annotations that no longer slugify back to it.
+    if (out.some((entry) => entry.name === passedName || slugFromTitle(entry.title) === passedName || entry.title === passedName)) continue
+    add({ name: passedName, title: passedName })
+  }
+  return out
+}
+
+/** Name is `test-case-${slugify(title)}`, so two tests can share one only by
+ *  sharing a title — the location disambiguates them. Matches `playbackTests`. */
+function rosterKey(entry: { name: string; location?: string }): string {
+  return `${entry.name}@${entry.location ? sourceKey(entry.location) : ''}`
+}
+
+interface RunVerdicts {
+  passedIds: Set<string>
+  passedNames: Set<string>
+  skippedIds: Set<string>
+  skippedNames: Set<string>
+  failedIds: Set<string>
+  failedNames: Set<string>
+  errorByName: Map<string, { message: string; snippet?: string }>
+}
+
+function runVerdicts(detail: RunDetail): RunVerdicts {
+  const failed = detail.summary?.failed ?? []
+  const errorByName = new Map<string, { message: string; snippet?: string }>()
+  for (const entry of failed) if (entry.error) errorByName.set(entry.name, entry.error)
+  return {
+    passedIds: new Set(detail.summary?.passedIds ?? []),
+    passedNames: new Set(detail.summary?.passedNames ?? []),
+    skippedIds: new Set(detail.summary?.skippedIds ?? []),
+    skippedNames: new Set(detail.summary?.skippedNames ?? []),
+    failedIds: new Set(failed.map((entry) => entry.id).filter((id): id is string => typeof id === 'string')),
+    failedNames: new Set(failed.map((entry) => entry.name)),
+    errorByName,
+  }
+}
+
+/** Status for a roster entry with no playback event of its own. Failed and
+ *  skipped are checked before passed so a name that somehow lands in two lists
+ *  resolves downward — the report never rounds a test up into a pass. */
+function summaryStatusFor(entry: RosterEntry, verdicts: RunVerdicts): string {
+  if ((entry.id && verdicts.failedIds.has(entry.id)) || verdicts.failedNames.has(entry.name)) return 'failed'
+  if ((entry.id && verdicts.skippedIds.has(entry.id)) || verdicts.skippedNames.has(entry.name)) return 'skipped'
+  if ((entry.id && verdicts.passedIds.has(entry.id)) || verdicts.passedNames.has(entry.name)) return 'passed'
+  return NOT_RUN_STATUS
+}
+
+export interface TestStatusCounts {
+  passed: number
+  failed: number
+  interrupted: number
+  skipped: number
+  notRun: number
+}
+
+/** Per-test breakdown, derived from each test's own recorded verdict rather than
+ *  from arithmetic on the totals. `summary.failed` lumps interrupted tests in with
+ *  real failures, so this is the only place the two are told apart — and unlike
+ *  `total - failed` it can never turn a never-run test into a pass. */
+export function testStatusCounts(tests: TestReviewCase[]): TestStatusCounts {
+  const counts: TestStatusCounts = { passed: 0, failed: 0, interrupted: 0, skipped: 0, notRun: 0 }
+  for (const test of tests) counts[statusBucket(test.status)] += 1
+  return counts
+}
+
+export function statusBucket(status: string): keyof TestStatusCounts {
+  const normalized = status.toLowerCase()
+  if (normalized === 'passed') return 'passed'
+  if (normalized === 'skipped') return 'skipped'
+  if (normalized === NOT_RUN_STATUS) return 'notRun'
+  if (normalized === 'interrupted') return 'interrupted'
+  return 'failed'
 }
 
 function loadSourceTests(featureDir: string | undefined): Map<string, SourceTest> {
@@ -843,22 +1019,32 @@ function rationaleFor(quality: AssertionQuality, snippet: string, matcher?: stri
   return 'Static analysis could not confidently classify this assertion.'
 }
 
+/** Run-level wording computed from the evidence. Takes the display name so a
+ *  report that kept an authored feature title doesn't open with the raw slug. */
+function deterministicSummary(packet: TestReviewPacket, feature: string): string {
+  const result = `${packet.passed}/${packet.total} checks passed`
+  const notRun = testStatusCounts(packet.tests).notRun
+  // Never-run scenarios are the headline when they exist: a reader who only sees
+  // the pass ratio would otherwise assume the rest of the suite was exercised.
+  const unrun = notRun > 0 ? ` ${notRun} of the ${packet.tests.length} declared scenarios never ran, so they are neither passing nor failing evidence.` : ''
+  return packet.failed > 0
+    ? `${feature} was evaluated with ${packet.tests.length} scenarios. ${result}, so review the failed scenarios before treating this behavior as ready.${unrun}`
+    : `${feature} was evaluated with ${packet.tests.length} scenarios. ${result}, so the tested behavior matched the expected outcomes for this run.${unrun}`
+}
+
 export function deterministicEvaluationRewrite(packet: TestReviewPacket): EvaluationRewrite {
   const feature = titleCaseFeatureName(packet.feature)
-  const result = `${packet.passed}/${packet.total} checks passed`
   return {
     featureTitle: feature,
-    summary: packet.failed > 0
-      ? `${feature} was evaluated with ${packet.tests.length} scenarios. ${result}, so review the failed scenarios before treating this behavior as ready.`
-      : `${feature} was evaluated with ${packet.tests.length} scenarios. ${result}, so the tested behavior matched the expected outcomes for this run.`,
+    summary: deterministicSummary(packet, feature),
     cases: packet.tests.map((test) => {
       const title = audienceTitle(test.title)
       return {
         title,
-        whatWasChecked: `This scenario checks whether "${title}" behaves as expected.`,
-        whyItMatters: test.status === 'passed'
-          ? 'This matters because it shows the covered user or business path worked during this run.'
-          : 'This matters because a failed scenario may point to behavior that users or operations teams could experience.',
+        whatWasChecked: test.status === NOT_RUN_STATUS
+          ? `This scenario would check whether "${title}" behaves as expected, but the run stopped before reaching it.`
+          : `This scenario checks whether "${title}" behaves as expected.`,
+        whyItMatters: whyItMattersFor(test.status),
         confidence: confidenceForAssertions(test.assertions),
         flowSteps: flowNodesForTest(test).map((node) => ({
           title: audienceFlowTitle(node, test),
@@ -867,6 +1053,12 @@ export function deterministicEvaluationRewrite(packet: TestReviewPacket): Evalua
       }
     }),
   }
+}
+
+function whyItMattersFor(status: string): string {
+  if (status === 'passed') return 'This matters because it shows the covered user or business path worked during this run.'
+  if (status === NOT_RUN_STATUS) return 'This matters because the behavior it covers is still unverified — the run produced no result for it either way.'
+  return 'This matters because a failed scenario may point to behavior that users or operations teams could experience.'
 }
 
 export function normalizeEvaluationRewrite(input: EvaluationRewrite | undefined, packet: TestReviewPacket): EvaluationRewrite | null {
@@ -914,12 +1106,37 @@ function audienceTitle(title: string): string {
     .replace(/\bauto-resolved\b/gi, 'automatically resolved')
     .replace(/\bwarn\b/gi, 'warning')
     .replace(/[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?/g, (match) => {
-      return humanizeIdentifier(match)
+      return looksLikeIdentifier(match) ? humanizeIdentifier(match) : match
     })
     .replace(/\s*-\s*>|\s*→\s*/g, ' then ')
     .replace(/\s+/g, ' ')
     .trim()
   return sentenceCase(cleaned)
+}
+
+/** Only rewrite words that actually look like code — dotted paths, snake_case,
+ *  $-prefixed, or camelCase. Ordinary prose has to survive verbatim: splitting
+ *  every capitalised run turned "stops issuing OTPs" into "stops issuing ot ps". */
+function looksLikeIdentifier(word: string): boolean {
+  if (/[_$]/.test(word)) return true
+  // A dotted word is only a property path when both sides are real names —
+  // otherwise prose abbreviations ("e.g.", "i.e.") get split into "e g".
+  if (word.includes('.')) return word.split('.').every((part) => part.length > 1)
+  return /^[a-z][\w$]*[A-Z]/.test(word)
+}
+
+const ANNOTATION_TAG = /@[A-Za-z][\w]*-[\w.-]+/g
+
+/** Playwright titles carry the coverage annotations inline (`@req-R3 @path-sad …`).
+ *  They are metadata, not prose — the report shows them as tags beside the case
+ *  and keeps the headline readable. */
+function splitAnnotations(title: string): { text: string; tags: string[] } {
+  const tags = dedupe(title.match(ANNOTATION_TAG) ?? [])
+  return { text: title.replace(ANNOTATION_TAG, '').replace(/\s+/g, ' ').trim(), tags }
+}
+
+function comparableTitle(title: string): string {
+  return splitAnnotations(title).text.toLowerCase().replace(/[^a-z0-9]+/g, '')
 }
 
 function audienceFlowTitle(node: FlowNode, test: TestReviewCase): string {
@@ -1076,47 +1293,82 @@ async function renderHtml(
   const coverageByTitle = new Map<string, TestCoverage>()
   if (options.coverage) for (const t of options.coverage.tests) coverageByTitle.set(t.name, t)
   const implementationId = 'local-codebase-implementations'
-  const tocItems: TocItem[] = [
-    { level: 1, id: 'evaluation-report', label: displayFeature },
-    { level: 2, id: 'test-cases', label: 'Test Cases' },
-    ...rewrite.cases.map((test, idx) => ({ level: 3 as const, id: testIds[idx], label: `${idx + 1}. ${test.title}` })),
-  ]
+  const counts = testStatusCounts(packet.tests)
+  const groups = groupTestsBySpec(packet.tests, testIds, rewrite)
   const externalImports = dedupe(packet.tests.flatMap((test) => test.externalImports)).sort()
   const helpers = flattenHelpers(packet.tests.flatMap((test) => test.helperDefinitions))
-  if (externalImports.length || helpers.length) tocItems.push({ level: 2, id: implementationId, label: 'Helper functions used' })
 
-  const testSections = await Promise.all(packet.tests.map(async (test, idx) => {
+  const caseCards = await Promise.all(packet.tests.map(async (test, idx) => {
     const videoLinks = options.videoLinksByTestName?.[test.name] ?? []
     // Always present: `createFlowcharts` emits one entry per packet test keyed
     // by `test.name`, and it is the only thing renderHtml is ever called with.
     const flowchart = flowchartByTestName.get(test.name)!
     const audienceCase = rewrite.cases[idx]
     const cov = coverageByTitle.get(test.title)
+    const bucket = statusBucket(test.status)
+    const reqs = cov?.requirements ?? []
+    const raw = splitAnnotations(test.title)
+    const headline = displayCaseTitle(audienceCase.title, test.title)
+    // The raw Playwright title only earns a line when it says something the
+    // headline doesn't — otherwise it is the same sentence twice.
+    const showSubline = comparableTitle(test.title) !== comparableTitle(headline)
     // When coverage exists it's the headline (depth); specificity is demoted to a
     // secondary, clearly-different axis. Without coverage, specificity stands alone.
     return `
-      <section class="test-case" id="${escapeAttr(testIds[idx])}">
-        <h2>${idx + 1}. ${escapeHtml(audienceCase.title)}</h2>
-        <dl class="case-meta">
-          <div><dt>Result</dt><dd><span class="status status-${escapeAttr(statusClass(test.status))}">${escapeHtml(test.status)}</span>${typeof test.durationMs === 'number' ? ` <span class="muted">(${escapeHtml(formatMs(test.durationMs))})</span>` : ''}</dd></div>
-          ${cov ? `<div><dt>Coverage strength</dt><dd>${renderCoverageStrength(cov)}</dd></div>` : ''}
-          <div><dt>${cov ? 'Assertion specificity' : 'Check specificity'}</dt><dd>${escapeHtml(qualitySummaryForAudience(test.assertions))}</dd></div>
-        </dl>
-        <p class="case-explainer">${escapeHtml(audienceCase.whatWasChecked)}</p>
-        ${renderFlowchartSection(flowchart, audienceCase.title)}
-        <details class="test-code-details">
-          <summary>Test code</summary>
-          ${test.testBody ? await renderTestCode(test.testBody) : '<p class="muted">Source unavailable.</p>'}
-        </details>
-        <details class="checks-details">
-          <summary>Checks</summary>
-          <p class="confidence-note">${escapeHtml(audienceCase.confidence)}</p>
-          <ul class="assertions">${test.assertions.map(renderAssertionHtml).join('')}</ul>
-        </details>
-        ${videoLinks.length ? renderVideoSection(videoLinks) : ''}
-      </section>
+      <article class="case" id="${escapeAttr(testIds[idx])}" data-status="${escapeAttr(bucket)}" data-open="true" data-search="${escapeAttr(searchIndexFor(test, audienceCase.title, reqs))}">
+        <div class="case-head">
+          <button class="case-toggle" type="button" aria-expanded="true" aria-controls="${escapeAttr(testIds[idx])}-body">
+            <span class="case-index">${String(idx + 1).padStart(2, '0')}</span>
+            <span class="case-headline">
+              <span class="case-title">${escapeHtml(headline)}</span>
+              ${showSubline ? `<span class="case-subline">${escapeHtml(raw.text)}</span>` : ''}
+              ${raw.tags.length ? `<span class="tags">${raw.tags.map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join('')}</span>` : ''}
+            </span>
+            <span class="case-head-right">
+              ${renderStatusPill(test.status)}
+              ${typeof test.durationMs === 'number' ? `<span class="case-duration">${escapeHtml(formatMs(test.durationMs))}</span>` : ''}
+              <span class="case-chevron" aria-hidden="true"></span>
+            </span>
+          </button>
+        </div>
+        <div class="case-body" id="${escapeAttr(testIds[idx])}-body">
+          <dl class="facts">
+            ${cov ? `<div><dt>Coverage strength</dt><dd>${renderCoverageStrength(cov)}</dd></div>` : ''}
+            <div><dt>${cov ? 'Assertion specificity' : 'Check specificity'}</dt><dd>${escapeHtml(qualitySummaryForAudience(test.assertions))}</dd></div>
+            ${test.location ? `<div><dt>Declared at</dt><dd><code>${escapeHtml(shortLocation(test.location))}</code></dd></div>` : ''}
+          </dl>
+          <p class="case-explainer">${escapeHtml(audienceCase.whatWasChecked)}</p>
+          ${bucket === 'notRun' ? NEVER_RAN_CALLOUT : ''}
+          ${renderFailureDetail(test)}
+          ${renderFlowchartSection(flowchart, audienceCase.title)}
+          <div class="drawers">
+            <details class="drawer test-code-details">
+              <summary>Test code</summary>
+              <div class="drawer-body">${test.testBody ? await renderTestCode(test.testBody) : '<p class="muted">Source unavailable.</p>'}</div>
+            </details>
+            <details class="drawer checks-details">
+              <summary>Checks</summary>
+              <div class="drawer-body">
+                <p class="confidence-note">${escapeHtml(audienceCase.confidence)}</p>
+                <ul class="assertions">${test.assertions.map(renderAssertionHtml).join('')}</ul>
+              </div>
+            </details>
+          </div>
+          ${videoLinks.length ? renderVideoSection(videoLinks) : ''}
+        </div>
+      </article>
     `
   }))
+
+  const caseSections = groups.map((group) => `
+    <section class="spec-group" data-group>
+      <h2 class="spec-heading" id="${escapeAttr(group.id)}">
+        <span class="spec-name">${escapeHtml(group.label)}</span>
+        <span class="spec-count">${group.items.length} ${group.items.length === 1 ? 'test' : 'tests'}</span>
+      </h2>
+      ${group.items.map((item) => caseCards[item.index]).join('')}
+    </section>
+  `).join('')
 
   const implementations = await renderImplementations(externalImports, helpers, implementationId)
 
@@ -1125,42 +1377,244 @@ async function renderHtml(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>Evaluation Report: ${escapeHtml(displayFeature)}</title>
   <style>${ASSERTION_HTML_CSS}</style>
+  <script>${THEME_BOOT_SCRIPT}</script>
 </head>
 <body>
-  <div class="page-shell">
-    ${renderToc(tocItems)}
-    <main>
-      <header class="page-header">
-        <p class="eyebrow">Test Results</p>
-        <h1 id="evaluation-report">${escapeHtml(displayFeature)}</h1>
-        <p class="report-summary">${escapeHtml(rewrite.summary)}</p>
-        <div class="summary-strip">
-          <div><span class="summary-value">${packet.passed}/${packet.total}</span><span class="summary-label">passed</span></div>
-          <div><span class="summary-value">${escapeHtml(packet.status)}</span><span class="summary-label">run status</span></div>
-          <div><span class="summary-value">${packet.tests.length}</span><span class="summary-label">test cases</span></div>
+  <a class="skip-link" href="#report">Skip to report</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">Canary Lab<span class="brand-sub">Evaluation report</span></span>
+      </span>
+      <span class="topbar-now" data-topbar-now aria-live="polite"></span>
+      <div class="topbar-tools">
+        <code class="run-chip" title="Run id">${escapeHtml(packet.runId)}</code>
+        ${THEME_SWITCH_HTML}
+      </div>
+    </div>
+  </header>
+  <div class="shell">
+    <aside class="rail">
+      <nav class="nav" aria-label="Test cases">
+        <div class="nav-search">
+          <input type="search" id="case-search" placeholder="Search tests…" autocomplete="off" aria-label="Search test cases">
         </div>
+        ${renderFilterChips(counts)}
+        <p class="nav-count" data-nav-count>${packet.tests.length} of ${packet.tests.length} shown</p>
+        <div class="nav-actions">
+          <button type="button" data-expand-all>Expand all</button>
+          <button type="button" data-collapse-all>Collapse all</button>
+        </div>
+        ${renderNavGroups(groups)}
+        <p class="nav-empty" data-nav-empty hidden>No test matches this filter.</p>
+      </nav>
+    </aside>
+    <main id="report">
+      <header class="masthead">
+        <p class="eyebrow">Evaluation report</p>
+        <h1>${escapeHtml(displayFeature)}</h1>
+        <p class="lede">${escapeHtml(rewrite.summary)}</p>
+        ${renderVerdict(packet, counts)}
+        ${counts.notRun > 0 ? renderNeverRanNotice(counts.notRun, packet.tests.length) : ''}
         <dl class="run-meta">
           <div><dt>Run</dt><dd><code>${escapeHtml(packet.runId)}</code></dd></div>
-          <div><dt>Status</dt><dd><span class="status status-${escapeAttr(statusClass(packet.status))}">${escapeHtml(packet.status)}</span></dd></div>
+          <div><dt>Status</dt><dd>${renderStatusPill(packet.status)}</dd></div>
           <div><dt>Result</dt><dd>${packet.passed}/${packet.total} passed</dd></div>
           <div><dt>Started</dt><dd>${escapeHtml(packet.startedAt)}</dd></div>
           ${packet.endedAt ? `<div><dt>Ended</dt><dd>${escapeHtml(packet.endedAt)}</dd></div>` : ''}
         </dl>
-        ${options.coverage ? renderCoverageOverview(options.coverage) : ''}
       </header>
-      <section aria-labelledby="test-cases" id="test-cases">
-        <h2 class="section-title">Test Cases</h2>
-        ${testSections.join('')}
+      ${options.coverage ? renderCoverageOverview(options.coverage) : ''}
+      ${renderMatrix(groups, packet.tests)}
+      <section id="test-cases" aria-label="Test cases">
+        <h2 class="rule-heading">Test cases<span>${packet.tests.length}</span></h2>
+        ${caseSections}
       </section>
       ${implementations}
+      <footer class="report-foot">
+        <span>Generated by Canary Lab from run <code>${escapeHtml(packet.runId)}</code>.</span>
+        <span>Every case below is a test declared by this feature — including the ones this run never reached.</span>
+      </footer>
     </main>
   </div>
+  <button class="to-top" type="button" data-to-top aria-label="Back to top"></button>
   <script>${ASSERTION_HTML_SCRIPT}</script>
 </body>
 </html>
 `
+}
+
+interface NavItem {
+  index: number
+  id: string
+  label: string
+  status: keyof TestStatusCounts
+  rawTitle: string
+}
+
+interface NavGroup {
+  id: string
+  label: string
+  items: NavItem[]
+}
+
+/** Cases are grouped by the spec file they're declared in — with 20+ tests a flat
+ *  list stops being navigable, and the spec file is the grouping a reader already
+ *  has in their head. Tests with no known location fall into one trailing group. */
+function groupTestsBySpec(tests: TestReviewCase[], testIds: string[], rewrite: EvaluationRewrite): NavGroup[] {
+  const groups = new Map<string, NavGroup>()
+  tests.forEach((test, index) => {
+    const label = test.location ? specFileLabel(test.location) : 'Other tests'
+    let group = groups.get(label)
+    if (!group) {
+      group = { id: `spec-${statusClass(label)}`, label, items: [] }
+      groups.set(label, group)
+    }
+    group.items.push({
+      index,
+      id: testIds[index],
+      label: displayCaseTitle(rewrite.cases[index].title, test.title),
+      status: statusBucket(test.status),
+      rawTitle: test.title,
+    })
+  })
+  return [...groups.values()]
+}
+
+/** The headline a reader sees. Annotation tags are stripped (they render as tags),
+ *  and a rewrite that stripped down to nothing falls back to the raw title rather
+ *  than leaving the case unlabelled. */
+function displayCaseTitle(audienceTitleText: string, rawTitle: string): string {
+  // Sentence-cased AFTER the tags come off: `@req-R5 @path-sad refuses to …`
+  // otherwise renders with a lowercase opening word.
+  return sentenceCase(splitAnnotations(audienceTitleText).text || splitAnnotations(rawTitle).text || rawTitle)
+}
+
+function specFileLabel(location: string): string {
+  const file = sourceKey(location).replace(/:\d+$/, '')
+  return file.split(/[\\/]/).pop() || file
+}
+
+/** `/very/long/abs/path/e2e/foo.spec.ts:138` → `e2e/foo.spec.ts:138`. The absolute
+ *  prefix is machine-specific noise in a document meant to be read by a person. */
+function shortLocation(location: string): string {
+  const parts = location.split(/[\\/]/)
+  return parts.slice(-2).join('/')
+}
+
+function searchIndexFor(test: TestReviewCase, audienceTitleText: string, requirements: string[]): string {
+  return [audienceTitleText, test.title, test.status, ...requirements.map((id) => `@req-${id}`)]
+    .join(' ')
+    .toLowerCase()
+}
+
+const VERDICT_SEGMENTS: Array<{ key: keyof TestStatusCounts; label: string }> = [
+  { key: 'passed', label: 'Passed' },
+  { key: 'failed', label: 'Failed' },
+  { key: 'interrupted', label: 'Interrupted' },
+  { key: 'skipped', label: 'Skipped' },
+  { key: 'notRun', label: 'Never ran' },
+]
+
+/** The headline the old report couldn't show: every declared test placed in exactly
+ *  one bucket, summing to the declared total. The pass fraction is read straight
+ *  off the run summary — never derived as `total - failed`. */
+function renderVerdict(packet: TestReviewPacket, counts: TestStatusCounts): string {
+  const declared = packet.tests.length || 1
+  const bar = VERDICT_SEGMENTS
+    .filter((segment) => counts[segment.key] > 0)
+    .map((segment) => `<span class="bar-seg bar-${escapeAttr(statusClass(segment.key))}" style="flex-grow:${counts[segment.key]}" title="${escapeAttr(`${segment.label}: ${counts[segment.key]}`)}"></span>`)
+    .join('')
+  const legend = VERDICT_SEGMENTS
+    .map((segment) => `<li class="legend-item${counts[segment.key] === 0 ? ' is-zero' : ''}" data-legend="${escapeAttr(segment.key)}">
+      <span class="legend-dot dot-${escapeAttr(statusClass(segment.key))}"></span>
+      <span class="legend-value">${counts[segment.key]}</span>
+      <span class="legend-label">${escapeHtml(segment.label)}</span>
+    </li>`)
+    .join('')
+  return `<section class="verdict" aria-label="Run verdict">
+    <div class="verdict-figure">
+      <span class="verdict-ratio"><strong>${packet.passed}</strong><span class="verdict-slash">/</span>${packet.total}</span>
+      <span class="verdict-caption">tests passed of ${packet.total} declared</span>
+    </div>
+    <div class="verdict-chart">
+      <div class="bar" role="img" aria-label="${escapeAttr(VERDICT_SEGMENTS.map((s) => `${s.label} ${counts[s.key]}`).join(', '))}">${bar}</div>
+      <ul class="legend">${legend}</ul>
+    </div>
+  </section>`
+}
+
+function renderNeverRanNotice(notRun: number, declared: number): string {
+  return `<aside class="notice notice-notrun" role="note">
+    <span class="notice-badge">Incomplete run</span>
+    <p><strong>${notRun} of ${declared} declared tests never ran.</strong> Execution stopped before reaching them, so they carry no result in either direction — they are listed below as evidence of what this run did <em>not</em> verify, not as passes.</p>
+  </aside>`
+}
+
+const NEVER_RAN_CALLOUT = `<div class="case-notrun">This test was declared but never executed in this run. Everything shown below is read from its source — there is no recorded result.</div>`
+
+function renderFailureDetail(test: TestReviewCase): string {
+  if (!test.error) return ''
+  return `<section class="failure">
+    <h3>Why it failed</h3>
+    <pre class="failure-message">${escapeHtml(test.error.message.trim())}</pre>
+    ${test.error.snippet ? `<pre class="failure-snippet">${escapeHtml(test.error.snippet.replace(/\s+$/, ''))}</pre>` : ''}
+  </section>`
+}
+
+function renderStatusPill(status: string): string {
+  return `<span class="pill pill-${escapeAttr(statusClass(statusBucket(status)))}">${escapeHtml(status)}</span>`
+}
+
+function renderFilterChips(counts: TestStatusCounts): string {
+  const chips = [
+    { key: 'all', label: 'All', count: Object.values(counts).reduce((a, b) => a + b, 0) },
+    ...VERDICT_SEGMENTS.map((segment) => ({ key: segment.key as string, label: segment.label, count: counts[segment.key] })),
+  ].filter((chip) => chip.count > 0)
+  return `<div class="filters" role="group" aria-label="Filter by result">
+    ${chips.map((chip) => `<button type="button" class="chip chip-${escapeAttr(statusClass(chip.key))}" data-filter="${escapeAttr(chip.key)}"${chip.key === 'all' ? ' aria-pressed="true"' : ' aria-pressed="false"'}>
+      <span class="chip-dot dot-${escapeAttr(statusClass(chip.key))}"></span>${escapeHtml(chip.label)}<span class="chip-count">${chip.count}</span>
+    </button>`).join('')}
+  </div>`
+}
+
+function renderNavGroups(groups: NavGroup[]): string {
+  return `<div class="nav-groups">
+    ${groups.map((group) => `<section class="nav-group" data-nav-group>
+      <h3>${escapeHtml(group.label)}</h3>
+      <ol>
+        ${group.items.map((item) => `<li data-nav-item data-status="${escapeAttr(item.status)}">
+          <a href="#${escapeAttr(item.id)}" data-section-id="${escapeAttr(item.id)}">
+            <span class="nav-dot dot-${escapeAttr(statusClass(item.status))}"></span>
+            <span class="nav-num">${String(item.index + 1).padStart(2, '0')}</span>
+            <span class="nav-label">${escapeHtml(item.label)}</span>
+          </a>
+        </li>`).join('')}
+      </ol>
+    </section>`).join('')}
+  </div>`
+}
+
+/** A one-screen map of the whole suite: one cell per declared test, coloured by
+ *  result. With 23 cases this is the fastest read in the document — and the only
+ *  place the never-ran block is visible as a block. */
+function renderMatrix(groups: NavGroup[], tests: TestReviewCase[]): string {
+  if (tests.length < 2) return ''
+  return `<section class="matrix" aria-label="Result map">
+    <h2 class="rule-heading">Result map<span>${tests.length}</span></h2>
+    <div class="matrix-groups">
+      ${groups.map((group) => `<div class="matrix-group">
+        <p class="matrix-label">${escapeHtml(group.label)}</p>
+        <div class="matrix-cells">
+          ${group.items.map((item) => `<a class="cell cell-${escapeAttr(statusClass(item.status))}" href="#${escapeAttr(item.id)}" data-matrix-cell data-status="${escapeAttr(item.status)}" title="${escapeAttr(`${item.index + 1}. ${item.rawTitle} — ${item.status === 'notRun' ? 'never ran' : item.status}`)}"><span>${item.index + 1}</span></a>`).join('')}
+        </div>
+      </div>`).join('')}
+    </div>
+  </section>`
 }
 
 // Per-test coverage strength (depth) + the requirements it maps to. The headline
@@ -1178,24 +1632,15 @@ function renderCoverageStrength(tc: TestCoverage): string {
 // (covered), independent of whether the run passed.
 function renderCoverageOverview(coverage: CoverageLedger): string {
   const t = coverage.totals
-  return `<section class="coverage-overview" aria-label="Semantic coverage">
-    <h2>Semantic Coverage</h2>
-    <div class="summary-strip">
-      <div><span class="summary-value">${coverage.coveragePct}%</span><span class="summary-label">covered (every path)</span></div>
-      <div><span class="summary-value">${coverage.mappedPct}%</span><span class="summary-label">mapped (has a test)</span></div>
-      <div><span class="summary-value">${t.covered}/${t.total}</span><span class="summary-label">requirements covered</span></div>
+  return `<section class="coverage" aria-label="Semantic coverage">
+    <h2 class="rule-heading">Semantic coverage<span>run-free</span></h2>
+    <div class="stat-row">
+      <div class="stat"><span class="stat-value">${coverage.coveragePct}<span class="stat-unit">%</span></span><span class="stat-label">covered · every path</span></div>
+      <div class="stat"><span class="stat-value">${coverage.mappedPct}<span class="stat-unit">%</span></span><span class="stat-label">mapped · has a test</span></div>
+      <div class="stat"><span class="stat-value">${t.covered}<span class="stat-unit">/${t.total}</span></span><span class="stat-label">requirements covered</span></div>
     </div>
-    <p class="muted">Coverage is run-free — it measures whether a test maps to each requirement's declared paths, separate from whether the run passed (${t.untested} untested, ${t.pathIncomplete} path-incomplete).</p>
+    <p class="muted">Coverage measures whether a test maps to each requirement's declared paths. It is independent of this run — a requirement can be fully covered by a test that never executed (${t.untested} untested, ${t.pathIncomplete} path-incomplete).</p>
   </section>`
-}
-
-function renderToc(items: TocItem[]): string {
-  return `<nav class="toc" aria-label="Table of contents">
-    <h2>Contents</h2>
-    <ol>
-      ${items.map((item, idx) => `<li class="toc-level-${item.level}"><a href="#${escapeAttr(item.id)}" data-section-id="${escapeAttr(item.id)}"${idx === 0 ? ' aria-current="true"' : ''}>${escapeHtml(item.label)}</a></li>`).join('')}
-    </ol>
-  </nav>`
 }
 
 function renderFlowchartSection(flowchart: TestFlowchart, title: string): string {
@@ -1226,9 +1671,9 @@ async function renderImplementations(externalImports: string[], helpers: HelperD
     ...helpers.map((helper) => helper.snippet),
   ].join('\n\n')
   return `<section class="implementations" id="${escapeAttr(id)}">
-    <details>
-      <summary><span class="section-title">Helper functions used</span></summary>
-      ${await highlightCode(source)}
+    <details class="drawer">
+      <summary>Helper functions used</summary>
+      <div class="drawer-body">${await highlightCode(source)}</div>
     </details>
   </section>`
 }
@@ -1243,7 +1688,7 @@ function createFlowcharts(packet: TestReviewPacket, rewrite: EvaluationRewrite):
     return {
       testName: test.name,
       steps,
-      svg: renderFlowchartSvg(steps, rewriteCase.title),
+      svg: renderFlowchartSvg(steps, rewriteCase.title, idx),
     }
   })
 }
@@ -1379,7 +1824,13 @@ function setupLikeStatement(statement: string): boolean {
   return /\b(route|mock|intercept|fixture|seed|login|storageState|setExtraHTTPHeaders|addInitScript)\b/i.test(statement)
 }
 
-function renderFlowchartSvg(nodes: FlowNode[], title: string): string {
+function renderFlowchartSvg(nodes: FlowNode[], title: string, chartIndex: number): string {
+  // Every chart owns its <defs> ids. Sharing one `#nodeShadow` across all charts
+  // means the whole report's node shapes vanish the moment the case that happens
+  // to hold the first definition is collapsed — a `display:none` subtree stops
+  // providing a usable filter, and every reference to it renders as nothing.
+  const arrowId = `arrow-${chartIndex}`
+  const shadowId = `node-shadow-${chartIndex}`
   const width = 1280
   const nodesPerRow = 4
   const rowHeight = 150
@@ -1390,13 +1841,16 @@ function renderFlowchartSvg(nodes: FlowNode[], title: string): string {
   const gap = 62
   const startX = 50
   const startY = 38
+  // Every colour is a CSS custom property so the inline SVG recolours with the
+  // document's light/dark switch — an SVG with baked hex fills is a white slab
+  // in dark mode.
   const colors: Record<FlowNode['kind'], { fill: string; stroke: string; text: string }> = {
-    start: { fill: '#f8fafc', stroke: '#64748b', text: '#334155' },
-    setup: { fill: '#f8fafc', stroke: '#64748b', text: '#334155' },
-    action: { fill: '#eff6ff', stroke: '#2563eb', text: '#1e3a8a' },
-    helper: { fill: '#faf5ff', stroke: '#7c3aed', text: '#4c1d95' },
-    assertion: { fill: '#fffbeb', stroke: '#d97706', text: '#78350f' },
-    end: { fill: '#f8fafc', stroke: '#64748b', text: '#334155' },
+    start: { fill: 'var(--flow-neutral-fill)', stroke: 'var(--flow-neutral-line)', text: 'var(--flow-neutral-text)' },
+    setup: { fill: 'var(--flow-neutral-fill)', stroke: 'var(--flow-neutral-line)', text: 'var(--flow-neutral-text)' },
+    action: { fill: 'var(--flow-action-fill)', stroke: 'var(--flow-action-line)', text: 'var(--flow-action-text)' },
+    helper: { fill: 'var(--flow-helper-fill)', stroke: 'var(--flow-helper-line)', text: 'var(--flow-helper-text)' },
+    assertion: { fill: 'var(--flow-assert-fill)', stroke: 'var(--flow-assert-line)', text: 'var(--flow-assert-text)' },
+    end: { fill: 'var(--flow-neutral-fill)', stroke: 'var(--flow-neutral-line)', text: 'var(--flow-neutral-text)' },
   }
   const body = nodes.map((node, idx) => {
     const row = Math.floor(idx / nodesPerRow)
@@ -1413,32 +1867,60 @@ function renderFlowchartSvg(nodes: FlowNode[], title: string): string {
     } : null
     const arrow = next
       ? next.row === row
-        ? `<path class="connector" d="M${x + nodeWidth + 10} ${y + nodeHeight / 2} L${x + nodeWidth + gap - 12} ${y + nodeHeight / 2}" marker-end="url(#arrow)" />`
-        : `<path class="connector" d="M${x + nodeWidth / 2} ${y + nodeHeight + 10} C${x + nodeWidth / 2} ${y + 124}, ${startX + nodeWidth / 2} ${startY + next.row * rowHeight - 22}, ${startX + nodeWidth / 2} ${startY + next.row * rowHeight - 8}" marker-end="url(#arrow)" />`
+        ? `<path class="connector" d="M${x + nodeWidth + 10} ${y + nodeHeight / 2} L${x + nodeWidth + gap - 12} ${y + nodeHeight / 2}" marker-end="url(#${arrowId})" />`
+        : rowWrapConnector({ x, y, nodeWidth, nodeHeight, rowHeight, startX, nextTop: startY + next.row * rowHeight, arrowId })
       : ''
     const codeAttr = typeof node.codeLine === 'number' ? ` data-code-line="${node.codeLine}" tabindex="0"` : ''
     return `<g class="flow-node"${codeAttr}>
       <title>${escapeHtml(node.detail ? `${node.title}: ${node.detail}` : node.title)}</title>
-      ${nodeShape(node.kind, x, y, nodeWidth, nodeHeight, color.fill, color.stroke)}
+      ${nodeShape(node.kind, x, y, nodeWidth, nodeHeight, color.fill, color.stroke, shadowId)}
       ${text}
       ${arrow}
     </g>`
   }).join('\n')
   return `<svg class="flowchart" xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Evaluation flow for ${escapeAttr(title)}">
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L0,6 L7,3 z" fill="#64748b" />
+    <marker id="${arrowId}" markerWidth="10" markerHeight="10" refX="6" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L7,3 z" class="arrowhead" />
     </marker>
-    <filter id="nodeShadow" x="-10%" y="-20%" width="120%" height="150%">
-      <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0f172a" flood-opacity="0.10" />
+    <filter id="${shadowId}" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="5" />
     </filter>
   </defs>
-  <rect width="100%" height="100%" rx="14" fill="#ffffff" />
-  <style>.connector{fill:none;stroke:#64748b;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.flow-node{cursor:pointer}.flow-node:focus{outline:none}.flow-node.is-active rect,.flow-node.is-active polygon,.flow-node.is-active path{stroke-width:3}</style>
-  <style>text{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}</style>
+  <rect width="100%" height="100%" rx="14" fill="var(--flow-bg)" />
+  <style>.connector{fill:none;stroke:var(--flow-line);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.arrowhead{fill:var(--flow-line)}feDropShadow{flood-color:var(--flow-shadow);flood-opacity:1}.flow-node{cursor:pointer}.flow-node:focus{outline:none}.flow-node.is-active rect,.flow-node.is-active polygon,.flow-node.is-active path{stroke-width:3}</style>
+  <style>text{font-family:var(--font-sans)}</style>
   ${body}
 </svg>
 `
+}
+
+/** The step that carries on to the next row. Drawn as a stepped path down into
+ *  the gutter, back along it and down into the next row's first node — a single
+ *  bezier across the full width read as a stray swoop under the diagram. */
+function rowWrapConnector(args: {
+  x: number
+  y: number
+  nodeWidth: number
+  nodeHeight: number
+  rowHeight: number
+  startX: number
+  nextTop: number
+  arrowId: string
+}): string {
+  const radius = 10
+  const from = args.x + args.nodeWidth / 2
+  const to = args.startX + args.nodeWidth / 2
+  const gutter = args.y + args.nodeHeight + (args.rowHeight - args.nodeHeight) / 2
+  const d = [
+    `M${from} ${args.y + args.nodeHeight + 6}`,
+    `V${gutter - radius}`,
+    `Q${from} ${gutter} ${from - radius} ${gutter}`,
+    `H${to + radius}`,
+    `Q${to} ${gutter} ${to} ${gutter + radius}`,
+    `V${args.nextTop - 10}`,
+  ].join(' ')
+  return `<path class="connector" d="${d}" marker-end="url(#${args.arrowId})" />`
 }
 
 function renderNodeText(args: {
@@ -1467,7 +1949,7 @@ function renderNodeText(args: {
   })
   if (blockGap) cursor += blockGap
   const detail = args.detailLines.map((line) => {
-    const out = `<text x="${args.x + args.width / 2}" y="${cursor}" text-anchor="middle" font-size="${detailSize}" fill="#475569">${escapeHtml(line)}</text>`
+    const out = `<text x="${args.x + args.width / 2}" y="${cursor}" text-anchor="middle" font-size="${detailSize}" fill="var(--flow-detail-text)">${escapeHtml(line)}</text>`
     cursor += detailGap
     return out
   })
@@ -1477,15 +1959,15 @@ function renderNodeText(args: {
 function resultColor(title: string): { fill: string; stroke: string; text: string } {
   const normalized = title.toLowerCase()
   if (normalized.includes('passed') || normalized.includes('succeed') || normalized.includes('success')) {
-    return { fill: '#ecfdf5', stroke: '#16a34a', text: '#14532d' }
+    return { fill: 'var(--flow-pass-fill)', stroke: 'var(--flow-pass-line)', text: 'var(--flow-pass-text)' }
   }
   if (normalized.includes('failed') || normalized.includes('fail')) {
-    return { fill: '#fff1f2', stroke: '#e11d48', text: '#881337' }
+    return { fill: 'var(--flow-fail-fill)', stroke: 'var(--flow-fail-line)', text: 'var(--flow-fail-text)' }
   }
-  return { fill: '#f8fafc', stroke: '#64748b', text: '#334155' }
+  return { fill: 'var(--flow-neutral-fill)', stroke: 'var(--flow-neutral-line)', text: 'var(--flow-neutral-text)' }
 }
 
-function nodeShape(kind: FlowNode['kind'], x: number, y: number, width: number, height: number, fill: string, stroke: string): string {
+function nodeShape(kind: FlowNode['kind'], x: number, y: number, width: number, height: number, fill: string, stroke: string, filterId: string): string {
   if (kind === 'assertion') {
     const points = [
       `${x + 18},${y}`,
@@ -1495,18 +1977,18 @@ function nodeShape(kind: FlowNode['kind'], x: number, y: number, width: number, 
       `${x + 18},${y + height}`,
       `${x},${y + height / 2}`,
     ].join(' ')
-    return `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#nodeShadow)" />`
+    return `<polygon points="${points}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#${filterId})" />`
   }
   if (kind === 'start' || kind === 'end') {
-    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#nodeShadow)" />`
+    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${height / 2}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#${filterId})" />`
   }
   if (kind === 'setup') {
-    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="18" fill="${fill}" stroke="${stroke}" stroke-width="1.5" stroke-dasharray="6 5" filter="url(#nodeShadow)" />`
+    return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="18" fill="${fill}" stroke="${stroke}" stroke-width="1.5" stroke-dasharray="6 5" filter="url(#${filterId})" />`
   }
   if (kind === 'helper') {
-    return `<path d="M${x} ${y + 10} Q${x} ${y} ${x + 10} ${y} H${x + width - 10} Q${x + width} ${y} ${x + width} ${y + 10} V${y + height - 10} Q${x + width} ${y + height} ${x + width - 10} ${y + height} H${x + 10} Q${x} ${y + height} ${x} ${y + height - 10} Z M${x + 12} ${y} V${y + height}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#nodeShadow)" />`
+    return `<path d="M${x} ${y + 10} Q${x} ${y} ${x + 10} ${y} H${x + width - 10} Q${x + width} ${y} ${x + width} ${y + 10} V${y + height - 10} Q${x + width} ${y + height} ${x + width - 10} ${y + height} H${x + 10} Q${x} ${y + height} ${x} ${y + height - 10} Z M${x + 12} ${y} V${y + height}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#${filterId})" />`
   }
-  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#nodeShadow)" />`
+  return `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="10" fill="${fill}" stroke="${stroke}" stroke-width="1.5" filter="url(#${filterId})" />`
 }
 
 function wrapSvgText(text: string, maxChars: number): string[] {
@@ -1574,7 +2056,14 @@ function rationaleForAudience(rationale: string): string {
 async function highlightCode(source: string): Promise<string> {
   const formatted = formatCodeForDisplay(source)
   try {
-    return await codeToHtml(formatted, { lang: 'typescript', theme: 'one-light' })
+    // `defaultColor: false` makes shiki emit both palettes as --shiki-light /
+    // --shiki-dark custom properties instead of baking one in, so the report's
+    // theme switch recolors the code with it. Offline-safe: no runtime shiki.
+    return await codeToHtml(formatted, {
+      lang: 'typescript',
+      themes: { light: 'one-light', dark: 'one-dark-pro' },
+      defaultColor: false,
+    })
   } catch {
     return `<pre class="fallback-code"><code>${escapeHtml(formatted)}</code></pre>`
   }
@@ -1609,294 +2098,985 @@ function statusClass(status: string): string {
   return status.toLowerCase().replace(/[^a-z0-9_-]+/g, '-') || 'unknown'
 }
 
-const ASSERTION_HTML_CSS = `
-:root {
-  color-scheme: light;
-  --bg: #f7f8fb;
-  --surface: #ffffff;
-  --surface-muted: #f8fafc;
-  --border: #d9e0ea;
-  --border-strong: #b9c4d4;
-  --text: #111827;
-  --muted: #64748b;
-  --accent: #0f766e;
-  --danger: #b42318;
-  --ok: #16794c;
-  --warn: #a16207;
-  --code-border: #d7dde7;
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-main {
-  min-width: 0;
-  padding: 28px 0 48px;
-}
-.page-shell {
-  display: grid;
-  grid-template-columns: 232px minmax(0, 1180px);
-  gap: 22px;
-  width: min(1450px, calc(100vw - 28px));
-  margin: 0 auto;
-}
-h1, h2, h3, p { margin-top: 0; }
-.page-header, .test-case, .implementations {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
-}
-.page-header { padding: 24px; margin-bottom: 18px; }
-.implementations { padding: 18px; margin-top: 14px; }
-.toc {
-  position: sticky;
-  top: 14px;
-  align-self: start;
-  max-height: calc(100vh - 28px);
-  overflow: auto;
-  padding: 14px;
-  margin-top: 28px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
-}
-.toc h2 { margin-bottom: 10px; font-size: 11px; color: var(--text); font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
-.toc ol { list-style: none; margin: 0; padding: 0; }
-.toc li { margin: 3px 0; }
-.toc a {
-  display: block;
-  color: var(--muted);
-  text-decoration: none;
-  overflow-wrap: anywhere;
-  border-radius: 6px;
-  padding: 6px 8px;
-  border-left: 3px solid transparent;
-  font-weight: 600;
-}
-.toc a:hover { color: var(--text); background: var(--surface-muted); }
-.toc a[aria-current="true"] {
-  color: var(--accent);
-  background: #ecfdf5;
-  border-left-color: var(--accent);
-  font-weight: 700;
-}
-.toc-level-1 a { color: var(--text); font-size: 15px; font-weight: 850; line-height: 1.35; }
-.toc-level-2 { padding-left: 6px; margin-top: 10px !important; }
-.toc-level-2 a { color: var(--text); font-size: 14px; font-weight: 850; line-height: 1.3; }
-.toc-level-3 { padding-left: 14px; font-size: 11px; }
-.toc-level-3 a { padding: 4px 8px; font-size: 11px; font-weight: 650; line-height: 1.35; }
-.eyebrow {
-  margin-bottom: 4px;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-h1 { font-size: 28px; line-height: 1.15; margin-bottom: 16px; }
-.report-summary {
-  max-width: 820px;
-  margin-bottom: 16px;
-  color: var(--muted);
-  font-size: 14px;
-}
-.summary-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.coverage-overview { margin-top: 18px; }
-.coverage-overview h2 { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
-.coverage-overview .summary-strip { margin-bottom: 8px; }
-.coverage-overview p { font-size: 12.5px; color: var(--muted); }
-.strength { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; border: 1px solid; }
-.strength-strong { color: #047857; background: #ecfdf5; border-color: #6ee7b7; }
-.strength-solid  { color: #0369a1; background: #f0f9ff; border-color: #7dd3fc; }
-.strength-basic  { color: #92400e; background: #fffbeb; border-color: #fcd34d; }
-.strength-shallow{ color: #c2410c; background: #fff7ed; border-color: #fdba74; }
-.summary-strip div {
-  padding: 10px 12px;
-  background: linear-gradient(180deg, #ffffff, #f8fafc);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.summary-value { display: block; font-size: 18px; line-height: 1.15; font-weight: 800; color: var(--text); }
-.summary-label { display: block; margin-top: 2px; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-.section-title { font-size: 18px; margin: 20px 0 10px; }
-.test-case { padding: 18px; margin-bottom: 14px; }
-.test-case > h2 { font-size: 17px; margin-bottom: 10px; }
-.case-explainer, .case-impact, .confidence-note { margin-bottom: 10px; }
-.case-impact, .confidence-note { color: var(--muted); }
-.subsection { margin-top: 14px; }
-.subsection h3 { font-size: 12px; margin-bottom: 7px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
-.run-meta, .case-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 8px;
-  margin: 0;
-}
-.run-meta div, .case-meta div {
-  min-width: 0;
-  padding: 8px 10px;
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-}
-dt { color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
-dd { margin: 2px 0 0; overflow-wrap: anywhere; }
-.scope { margin: 18px 0 0; color: var(--muted); }
-.muted { color: var(--muted); }
-.status, .quality {
-  display: inline-flex;
-  align-items: center;
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
-  font-weight: 700;
-  border: 1px solid currentColor;
-}
-.status-passed, .quality-strict { color: var(--ok); background: #e8f7ef; }
-.status-failed, .quality-unknown { color: var(--danger); background: #fff0ee; }
-.status-aborted, .quality-shallow { color: var(--warn); background: #fff8e6; }
-.quality-moderate { color: #1d4ed8; background: #eff6ff; }
-.flow-frame { margin: 0; }
-.flow-frame svg {
-  display: block;
-  width: 100%;
-  height: auto;
-  max-height: 340px;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.video-frame { margin: 0 0 14px; }
-video {
-  display: block;
-  width: 100%;
-  max-height: 520px;
-  background: #020617;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-figcaption { margin-top: 6px; font-size: 12px; }
-a { color: var(--accent); }
-.assertions { padding-left: 20px; }
-.assertions li { margin: 8px 0; }
-.assertions code, dd code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  background: var(--surface-muted);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 1px 4px;
-}
-.helper-ref { margin-top: 4px; color: var(--muted); }
-details > summary {
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-}
-details > summary::-webkit-details-marker { display: none; }
-.test-code-details,
-.checks-details {
-  margin-top: 12px;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-.test-code-details > summary,
-.checks-details > summary,
-.implementations details > summary {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-.test-code-details > summary::before,
-.checks-details > summary::before,
-.implementations details > summary::before,
-.check-code > summary::before {
-  content: ">";
-  display: inline-block;
-  margin-right: 6px;
-  color: var(--muted);
-}
-.test-code-details[open] > summary::before,
-.checks-details[open] > summary::before,
-.implementations details[open] > summary::before,
-.check-code[open] > summary::before {
-  transform: rotate(90deg);
-}
-.implementations details > summary .section-title { display: inline; margin: 0; }
-.check-code {
-  display: block;
-  margin-top: 4px;
-}
-.check-code > summary {
-  display: inline-block;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-  text-transform: none;
-  letter-spacing: 0;
-}
-.check-code code { display: inline-block; margin-top: 4px; }
-.shiki, .fallback-code {
-  border: 1px solid var(--code-border);
-  border-radius: 7px;
-  overflow: auto;
-  padding: 10px !important;
-  margin: 0 !important;
-  font-size: 12px;
-  line-height: 1.55;
-}
-.shiki code, .fallback-code code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-}
-.code-line {
-  display: grid;
-  grid-template-columns: 38px minmax(0, 1fr);
-  min-width: max-content;
-}
-.line-number {
-  padding-right: 10px;
-  color: #94a3b8;
-  text-align: right;
-  user-select: none;
-}
-.line-source { white-space: pre; }
-.code-line.is-highlighted {
-  background: #fef3c7;
-  box-shadow: inset 3px 0 0 #d97706;
-}
-@media (max-width: 900px) {
-  .page-shell { display: block; width: min(100vw - 20px, 1120px); }
-  main { padding-top: 18px; }
-  .toc { position: static; max-height: none; margin: 18px 0 0; }
-  .summary-strip { grid-template-columns: 1fr; }
-  .page-header, .test-case { padding: 16px; }
-  h1 { font-size: 24px; }
-}
+/** Runs before first paint so a dark-mode reader never sees a white flash, and so
+ *  a stored preference wins over the OS setting. Kept tiny and dependency-free —
+ *  the report is a single file that has to work from a zip, offline. */
+const THEME_BOOT_SCRIPT = `
+(() => {
+  try {
+    const stored = localStorage.getItem('canary-evaluation-theme')
+    if (stored === 'light' || stored === 'dark') document.documentElement.setAttribute('data-theme', stored)
+  } catch (err) { /* private mode / file:// with storage blocked — fall back to the OS setting */ }
+})()
 `
 
+const THEME_SWITCH_HTML = `<div class="theme-switch" role="radiogroup" aria-label="Colour theme">
+  <button type="button" data-theme-set="light" role="radio" aria-checked="false" title="Light"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.6"/><g stroke-linecap="round"><path d="M10 2.2v2M10 15.8v2M2.2 10h2M15.8 10h2M4.5 4.5l1.4 1.4M14.1 14.1l1.4 1.4M15.5 4.5l-1.4 1.4M5.9 14.1l-1.4 1.4"/></g><span></span></svg><span class="sr-only">Light</span></button>
+  <button type="button" data-theme-set="auto" role="radio" aria-checked="true" title="Match system"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.4" y="3.6" width="15.2" height="10.4" rx="1.6"/><path d="M6.5 16.8h7" stroke-linecap="round"/></svg><span class="sr-only">System</span></button>
+  <button type="button" data-theme-set="dark" role="radio" aria-checked="false" title="Dark"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.2 12.3A6.8 6.8 0 0 1 7.7 3.8a6.9 6.9 0 1 0 8.5 8.5Z"/></svg><span class="sr-only">Dark</span></button>
+</div>`
+
+const ASSERTION_HTML_CSS = `
+/* ------------------------------------------------------------------ *
+   Canary Lab evaluation report — "field dossier"
+
+   An evidence document, not a dashboard: a serif masthead voice, a humanist
+   sans for prose, and monospace for anything the machine produced. Saturated
+   colour is reserved entirely for test status, so a glance at the page reads
+   as results rather than decoration.
+
+   Both palettes are declared twice on purpose — once under
+   prefers-color-scheme (so a JS-less open still respects the OS) and once
+   under [data-theme] (so the switch wins in both directions).
+ * ------------------------------------------------------------------ */
+:root {
+  color-scheme: light;
+
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Charter, Georgia, "Times New Roman", serif;
+  --font-sans: "Avenir Next", Avenir, "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", SFMono-Regular, "JetBrains Mono", "IBM Plex Mono", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --paper: #edeae4;
+  --surface: #fbfaf7;
+  --surface-2: #f4f1ec;
+  --surface-3: #e9e5dd;
+  --ink: #15171b;
+  --ink-2: #565d67;
+  --ink-3: #838a94;
+  --rule: #dcd7cd;
+  --rule-2: #c7c0b3;
+  --accent: #0c6b60;
+  --accent-soft: #e0efec;
+  --shadow: 0 1px 2px rgba(28, 25, 20, 0.05), 0 12px 28px -18px rgba(28, 25, 20, 0.35);
+  --grain-opacity: 0.4;
+
+  --ok: #1d7a4c;        --ok-soft: #e2f0e6;
+  --bad: #b02a1f;       --bad-soft: #f8e5e2;
+  --warn: #97620a;      --warn-soft: #f8ecd9;
+  --skip: #5a636e;      --skip-soft: #eaebed;
+  --none: #8a8f98;      --none-soft: #eeece8;
+
+  --flow-bg: #fbfaf7;
+  --flow-line: #9aa1ab;
+  --flow-shadow: rgba(28, 25, 20, 0.10);
+  --flow-neutral-fill: #f2efe9;  --flow-neutral-line: #a9a397;  --flow-neutral-text: #3a3f47;
+  --flow-action-fill: #e8f0f9;   --flow-action-line: #4a7fb5;   --flow-action-text: #1d3f63;
+  --flow-helper-fill: #efeaf7;   --flow-helper-line: #7a63b0;   --flow-helper-text: #3c2f5e;
+  --flow-assert-fill: #f9f0dc;   --flow-assert-line: #b98a2b;   --flow-assert-text: #5c4310;
+  --flow-pass-fill: #e2f0e6;     --flow-pass-line: #2f8558;     --flow-pass-text: #14472e;
+  --flow-fail-fill: #f8e5e2;     --flow-fail-line: #bd4136;     --flow-fail-text: #6d1d16;
+  --flow-detail-text: #5b626c;
+}
+
+:root[data-theme="dark"] { color-scheme: dark; }
+
+/* The dark palette, declared once per signal. The OS block is scoped with
+   :not([data-theme="light"]) so an explicit "light" choice still wins on a
+   dark-mode machine. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #0c0e11;
+    --surface: #14171c;
+    --surface-2: #1a1e24;
+    --surface-3: #222831;
+    --ink: #e9e7e2;
+    --ink-2: #9aa2ad;
+    --ink-3: #6f7883;
+    --rule: #262c34;
+    --rule-2: #39414c;
+    --accent: #46c8b8;
+    --accent-soft: #10312e;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 34px -20px rgba(0, 0, 0, 0.9);
+    --grain-opacity: 0.22;
+
+    --ok: #4cc07f;        --ok-soft: #12271b;
+    --bad: #ff7a6b;       --bad-soft: #2e1512;
+    --warn: #e0a640;      --warn-soft: #2c2010;
+    --skip: #939dab;      --skip-soft: #1d2229;
+    --none: #6c757f;      --none-soft: #191d23;
+
+    --flow-bg: #14171c;
+    --flow-line: #5b6470;
+    --flow-shadow: rgba(0, 0, 0, 0.55);
+    --flow-neutral-fill: #1c2129;  --flow-neutral-line: #59626e;  --flow-neutral-text: #ccd3db;
+    --flow-action-fill: #142433;   --flow-action-line: #5591cc;   --flow-action-text: #b5d5f2;
+    --flow-helper-fill: #1f1b2e;   --flow-helper-line: #8f79c9;   --flow-helper-text: #d3c6f2;
+    --flow-assert-fill: #2b2210;   --flow-assert-line: #c99a3b;   --flow-assert-text: #f0d9a4;
+    --flow-pass-fill: #12271b;     --flow-pass-line: #3f9c68;     --flow-pass-text: #a9e6c1;
+    --flow-fail-fill: #2e1512;     --flow-fail-line: #cf5a4c;     --flow-fail-text: #f7b9b0;
+    --flow-detail-text: #98a1ac;
+  }
+}
+
+:root[data-theme="dark"] {
+  --paper: #0c0e11;
+  --surface: #14171c;
+  --surface-2: #1a1e24;
+  --surface-3: #222831;
+  --ink: #e9e7e2;
+  --ink-2: #9aa2ad;
+  --ink-3: #6f7883;
+  --rule: #262c34;
+  --rule-2: #39414c;
+  --accent: #46c8b8;
+  --accent-soft: #10312e;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 34px -20px rgba(0, 0, 0, 0.9);
+  --grain-opacity: 0.22;
+
+  --ok: #4cc07f;        --ok-soft: #12271b;
+  --bad: #ff7a6b;       --bad-soft: #2e1512;
+  --warn: #e0a640;      --warn-soft: #2c2010;
+  --skip: #939dab;      --skip-soft: #1d2229;
+  --none: #6c757f;      --none-soft: #191d23;
+
+  --flow-bg: #14171c;
+  --flow-line: #5b6470;
+  --flow-shadow: rgba(0, 0, 0, 0.55);
+  --flow-neutral-fill: #1c2129;  --flow-neutral-line: #59626e;  --flow-neutral-text: #ccd3db;
+  --flow-action-fill: #142433;   --flow-action-line: #5591cc;   --flow-action-text: #b5d5f2;
+  --flow-helper-fill: #1f1b2e;   --flow-helper-line: #8f79c9;   --flow-helper-text: #d3c6f2;
+  --flow-assert-fill: #2b2210;   --flow-assert-line: #c99a3b;   --flow-assert-text: #f0d9a4;
+  --flow-pass-fill: #12271b;     --flow-pass-line: #3f9c68;     --flow-pass-text: #a9e6c1;
+  --flow-fail-fill: #2e1512;     --flow-fail-line: #cf5a4c;     --flow-fail-text: #f7b9b0;
+  --flow-detail-text: #98a1ac;
+}
+
+/* One line per status; every dot, pill, chip, bar segment and matrix cell
+   reads --st / --st-soft, so a status never needs its own component rule. */
+.dot-passed, .pill-passed, .chip-passed, .bar-passed, .cell-passed { --st: var(--ok); --st-soft: var(--ok-soft); }
+.dot-failed, .pill-failed, .chip-failed, .bar-failed, .cell-failed { --st: var(--bad); --st-soft: var(--bad-soft); }
+.dot-interrupted, .pill-interrupted, .chip-interrupted, .bar-interrupted, .cell-interrupted { --st: var(--warn); --st-soft: var(--warn-soft); }
+.dot-skipped, .pill-skipped, .chip-skipped, .bar-skipped, .cell-skipped { --st: var(--skip); --st-soft: var(--skip-soft); }
+.dot-notrun, .pill-notrun, .chip-notrun, .bar-notrun, .cell-notrun { --st: var(--none); --st-soft: var(--none-soft); }
+.dot-all, .chip-all { --st: var(--ink-2); --st-soft: var(--surface-2); }
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; scroll-padding-top: 84px; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 14px/1.62 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Paper tooth. Pure decoration, kept far below the content. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.32'/%3E%3C/svg%3E");
+}
+:root[data-theme="dark"] body::before { mix-blend-mode: screen; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body::before { mix-blend-mode: screen; }
+}
+
+h1, h2, h3, p, ol, ul, dl, figure, pre { margin-top: 0; }
+
+a { color: var(--accent); text-underline-offset: 2px; }
+
+code, kbd { font-family: var(--font-mono); font-size: 0.9em; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.skip-link {
+  position: absolute; left: 12px; top: -60px; z-index: 60;
+  padding: 9px 14px; border-radius: 8px;
+  background: var(--surface); border: 1px solid var(--rule-2);
+  font-weight: 600; text-decoration: none;
+  transition: top .16s ease;
+}
+.skip-link:focus { top: 12px; }
+
+:where(a, button, input, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------------------------------------------------------------- topbar */
+
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  background: color-mix(in srgb, var(--paper) 84%, transparent);
+  backdrop-filter: saturate(1.4) blur(12px);
+  -webkit-backdrop-filter: saturate(1.4) blur(12px);
+  border-bottom: 1px solid var(--rule);
+}
+.topbar-inner {
+  display: flex; align-items: center; gap: 16px;
+  width: min(1420px, 100% - 40px); margin: 0 auto;
+  height: 56px;
+}
+.brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.brand-mark {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.brand-text {
+  display: flex; flex-direction: column; line-height: 1.15;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.brand-sub { color: var(--ink-3); font-size: 10px; letter-spacing: 0.11em; font-weight: 500; }
+
+.topbar-now {
+  flex: 1 1 auto; min-width: 0;
+  color: var(--ink-2); font-size: 12.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0; transition: opacity .2s ease;
+}
+.topbar-now:not(:empty) { opacity: 1; }
+
+.topbar-tools { display: flex; align-items: center; gap: 10px; flex: none; }
+.run-chip {
+  padding: 4px 9px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--rule);
+  color: var(--ink-2); font-size: 11px; letter-spacing: 0.02em;
+}
+
+.theme-switch {
+  display: inline-flex; padding: 2px; gap: 1px;
+  background: var(--surface-2); border: 1px solid var(--rule);
+  border-radius: 999px;
+}
+.theme-switch button {
+  display: grid; place-items: center;
+  width: 28px; height: 24px; padding: 0;
+  border: 0; border-radius: 999px; background: transparent;
+  color: var(--ink-3); cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.theme-switch button:hover { color: var(--ink); }
+.theme-switch button[aria-checked="true"] {
+  background: var(--surface); color: var(--accent);
+  box-shadow: 0 1px 2px rgba(0,0,0,.12);
+}
+.theme-switch svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+
+/* ----------------------------------------------------------------- shell */
+
+.shell {
+  position: relative; z-index: 1;
+  display: grid; grid-template-columns: 268px minmax(0, 1fr);
+  gap: 34px;
+  width: min(1420px, 100% - 40px); margin: 0 auto;
+  align-items: start;
+}
+main { min-width: 0; padding: 40px 0 96px; }
+
+/* ------------------------------------------------------------------ rail */
+
+.rail { position: sticky; top: 56px; align-self: start; padding-top: 40px; }
+.nav {
+  max-height: calc(100vh - 112px);
+  display: flex; flex-direction: column; gap: 12px;
+  overflow: auto; overscroll-behavior: contain;
+  padding-right: 6px;
+}
+.nav-search input {
+  width: 100%; padding: 8px 11px;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 9px;
+  font: 400 13px var(--font-sans);
+}
+.nav-search input::placeholder { color: var(--ink-3); }
+
+.filters { display: flex; flex-wrap: wrap; gap: 5px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px 4px 7px;
+  background: transparent; border: 1px solid var(--rule);
+  border-radius: 999px; color: var(--ink-2);
+  font: 500 11.5px var(--font-sans); cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.chip:hover { border-color: var(--rule-2); color: var(--ink); }
+.chip[aria-pressed="true"] {
+  background: var(--st-soft); border-color: color-mix(in srgb, var(--st) 45%, transparent);
+  color: var(--ink);
+}
+.chip-dot, .nav-dot, .legend-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--st); flex: none;
+}
+.chip-count { color: var(--ink-3); font-family: var(--font-mono); font-size: 10.5px; }
+.chip[aria-pressed="true"] .chip-count { color: var(--ink-2); }
+
+.nav-count {
+  margin: 0; color: var(--ink-3);
+  font-family: var(--font-mono); font-size: 10.5px;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.nav-actions { display: flex; gap: 6px; }
+.nav-actions button {
+  flex: 1; padding: 5px 8px;
+  background: transparent; border: 1px solid var(--rule); border-radius: 7px;
+  color: var(--ink-2); font: 500 11px var(--font-sans); cursor: pointer;
+  transition: border-color .15s ease, color .15s ease;
+}
+.nav-actions button:hover { border-color: var(--rule-2); color: var(--ink); }
+
+.nav-groups { display: flex; flex-direction: column; gap: 14px; }
+.nav-group h3 {
+  margin: 0 0 5px;
+  color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 10px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
+}
+.nav-group ol { list-style: none; margin: 0; padding: 0; }
+.nav-group li { margin: 0; }
+.nav-group a {
+  display: grid; grid-template-columns: 7px 18px minmax(0, 1fr);
+  align-items: baseline; gap: 8px;
+  padding: 5px 8px 5px 6px; border-radius: 7px;
+  color: var(--ink-2); text-decoration: none; font-size: 12.2px; line-height: 1.35;
+  border-left: 2px solid transparent;
+  transition: background .13s ease, color .13s ease;
+}
+.nav-group a .nav-dot { align-self: center; }
+.nav-num { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
+.nav-label { overflow-wrap: anywhere; }
+.nav-group a:hover { background: var(--surface-2); color: var(--ink); }
+.nav-group a[aria-current="true"] {
+  background: var(--surface); color: var(--ink);
+  border-left-color: var(--accent); font-weight: 600;
+}
+.nav-empty { color: var(--ink-3); font-size: 12px; font-style: italic; }
+
+/* -------------------------------------------------------------- masthead */
+
+.masthead { margin-bottom: 44px; }
+.eyebrow {
+  margin-bottom: 12px; color: var(--accent);
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  letter-spacing: 0.16em; text-transform: uppercase;
+}
+h1 {
+  margin-bottom: 16px;
+  font-family: var(--font-display); font-weight: 400;
+  font-size: clamp(30px, 4.6vw, 46px); line-height: 1.08;
+  letter-spacing: -0.015em; text-wrap: balance;
+}
+.lede {
+  max-width: 68ch; margin-bottom: 30px;
+  color: var(--ink-2); font-size: 15.5px; line-height: 1.65;
+}
+
+/* --------------------------------------------------------------- verdict */
+
+.verdict {
+  display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 30px; align-items: center;
+  padding: 22px 26px;
+  background: var(--surface); border: 1px solid var(--rule);
+  border-radius: 14px; box-shadow: var(--shadow);
+}
+.verdict-figure { display: flex; flex-direction: column; gap: 3px; }
+.verdict-ratio {
+  font-family: var(--font-display); font-size: 46px; line-height: 1;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.verdict-ratio strong { font-weight: 400; color: var(--ink); }
+.verdict-slash { margin: 0 2px; color: var(--ink-3); font-size: 34px; }
+.verdict-caption {
+  color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.verdict-chart { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.bar {
+  display: flex; gap: 2px; height: 12px;
+  border-radius: 999px; overflow: hidden;
+  background: var(--surface-3);
+}
+.bar-seg {
+  background: var(--st); min-width: 4px;
+  transition: flex-grow .4s cubic-bezier(.2,.7,.3,1);
+}
+.legend {
+  display: flex; flex-wrap: wrap; gap: 4px 22px;
+  list-style: none; margin: 0; padding: 0;
+}
+.legend-item { display: flex; align-items: baseline; gap: 7px; }
+.legend-item .legend-dot { align-self: center; }
+.legend-item.is-zero { opacity: 0.35; }
+.legend-value {
+  font-family: var(--font-mono); font-size: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--ink);
+}
+.legend-label {
+  color: var(--ink-2); font-size: 11px;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+
+/* --------------------------------------------------------------- notices */
+
+.notice {
+  display: flex; gap: 14px; align-items: flex-start;
+  margin-top: 18px; padding: 15px 18px;
+  border: 1px solid color-mix(in srgb, var(--none) 40%, transparent);
+  border-left-width: 3px;
+  border-radius: 10px; background: var(--none-soft);
+}
+.notice p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.notice p strong { color: var(--ink); }
+.notice-badge {
+  flex: none; padding: 3px 9px; border-radius: 999px;
+  background: color-mix(in srgb, var(--none) 20%, transparent);
+  color: var(--ink); font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------------------- run meta */
+
+.run-meta {
+  display: flex; flex-wrap: wrap; gap: 0;
+  margin: 22px 0 0; padding: 0;
+  border-top: 1px solid var(--rule);
+}
+.run-meta div {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 12px 22px 12px 0; margin-right: 22px;
+  border-right: 1px solid var(--rule);
+}
+.run-meta div:last-child { border-right: 0; margin-right: 0; }
+dt {
+  color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 9.5px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
+}
+dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+
+/* ------------------------------------------------------- section heading */
+
+.rule-heading {
+  display: flex; align-items: baseline; gap: 12px;
+  margin: 0 0 18px; padding-bottom: 9px;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--font-display); font-weight: 400; font-size: 22px;
+  letter-spacing: -0.01em;
+}
+.rule-heading span {
+  margin-left: auto;
+  color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+}
+
+/* -------------------------------------------------------------- coverage */
+
+.coverage { margin-bottom: 44px; }
+.stat-row { display: flex; flex-wrap: wrap; gap: 0 44px; margin-bottom: 12px; }
+.stat { display: flex; flex-direction: column; gap: 2px; }
+.stat-value {
+  font-family: var(--font-display); font-size: 32px; line-height: 1.05;
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.stat-unit { color: var(--ink-3); font-size: 20px; }
+.stat-label {
+  color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase;
+}
+.muted { color: var(--ink-2); font-size: 12.5px; max-width: 78ch; }
+
+/* ---------------------------------------------------------------- matrix */
+
+.matrix { margin-bottom: 48px; }
+.matrix-groups { display: flex; flex-wrap: wrap; gap: 22px 32px; }
+.matrix-group { display: flex; flex-direction: column; gap: 7px; }
+.matrix-label {
+  margin: 0; color: var(--ink-3); font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.07em;
+}
+.matrix-cells { display: flex; flex-wrap: wrap; gap: 4px; max-width: 260px; }
+.cell {
+  display: grid; place-items: center;
+  width: 26px; height: 26px; border-radius: 6px;
+  background: var(--st-soft);
+  border: 1px solid color-mix(in srgb, var(--st) 42%, transparent);
+  color: var(--st); text-decoration: none;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  transition: transform .13s ease, box-shadow .13s ease;
+}
+.cell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 10px -4px color-mix(in srgb, var(--st) 55%, transparent);
+}
+.cell-notrun { border-style: dashed; }
+
+/* ------------------------------------------------------------ spec group */
+
+.spec-group { margin-bottom: 34px; }
+.spec-heading {
+  display: flex; align-items: baseline; gap: 10px;
+  margin: 0 0 12px;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3);
+}
+.spec-heading::after {
+  content: ""; flex: 1; height: 1px; background: var(--rule);
+}
+.spec-count { order: 3; color: var(--ink-3); font-weight: 500; }
+
+/* ------------------------------------------------------------ case cards */
+
+.case {
+  margin-bottom: 10px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  scroll-margin-top: 76px;
+  overflow: hidden;
+}
+.case[data-status="failed"] { border-left: 3px solid var(--bad); }
+.case[data-status="interrupted"] { border-left: 3px solid var(--warn); }
+.case[data-status="notRun"] {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+}
+.case.is-target { border-color: var(--accent); }
+
+.case-toggle {
+  display: grid; grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center; gap: 14px; width: 100%;
+  padding: 15px 18px; border: 0; background: transparent;
+  color: inherit; text-align: left; cursor: pointer; font: inherit;
+}
+.case-toggle:hover { background: var(--surface-2); }
+.case-index {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  color: var(--ink-3); font-variant-numeric: tabular-nums;
+}
+.case-headline { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.case-title {
+  font-family: var(--font-display); font-size: 18px; line-height: 1.28;
+  letter-spacing: -0.006em; overflow-wrap: anywhere;
+}
+.case-subline {
+  color: var(--ink-3); font-family: var(--font-mono); font-size: 10.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.tag {
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--surface-2); border: 1px solid var(--rule);
+  color: var(--ink-3); font-family: var(--font-mono); font-size: 9.5px;
+  letter-spacing: 0.03em;
+}
+.case-head-right { display: flex; align-items: center; gap: 10px; flex: none; }
+.case-duration {
+  color: var(--ink-3); font-family: var(--font-mono); font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.case-chevron {
+  width: 8px; height: 8px; border-right: 1.6px solid var(--ink-3); border-bottom: 1.6px solid var(--ink-3);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .18s ease;
+}
+.case[data-open="false"] .case-chevron { transform: rotate(-45deg) translate(-2px, 2px); }
+.case[data-open="false"] .case-body { display: none; }
+
+.pill {
+  display: inline-flex; align-items: center;
+  padding: 3px 9px; border-radius: 999px;
+  background: var(--st-soft); color: var(--st);
+  border: 1px solid color-mix(in srgb, var(--st) 38%, transparent);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.07em; text-transform: uppercase; white-space: nowrap;
+}
+
+.case-body { padding: 4px 18px 20px; border-top: 1px solid var(--rule); }
+.case[data-status="notRun"] .case-body { border-top-style: dashed; }
+
+.facts {
+  display: flex; flex-wrap: wrap; gap: 0;
+  margin: 16px 0 14px;
+}
+.facts div {
+  display: flex; flex-direction: column; gap: 3px;
+  padding-right: 20px; margin-right: 20px;
+  border-right: 1px solid var(--rule);
+}
+.facts div:last-child { border-right: 0; margin-right: 0; padding-right: 0; }
+
+.case-explainer { margin-bottom: 16px; max-width: 74ch; font-size: 14px; }
+
+.case-notrun {
+  margin-bottom: 16px; padding: 11px 14px;
+  border-left: 2px solid var(--none); border-radius: 0 8px 8px 0;
+  background: var(--none-soft); color: var(--ink-2); font-size: 12.5px;
+}
+
+.strength {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase; border: 1px solid;
+}
+.strength-strong  { color: var(--ok);   background: var(--ok-soft);   border-color: color-mix(in srgb, var(--ok) 38%, transparent); }
+.strength-solid   { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 38%, transparent); }
+.strength-basic   { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in srgb, var(--warn) 38%, transparent); }
+.strength-shallow { color: var(--bad);  background: var(--bad-soft);  border-color: color-mix(in srgb, var(--bad) 38%, transparent); }
+
+/* --------------------------------------------------------------- failure */
+
+.failure {
+  margin: 0 0 18px; padding: 14px 16px;
+  background: var(--bad-soft);
+  border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
+  border-radius: 10px;
+}
+.failure h3 {
+  margin: 0 0 9px; color: var(--bad);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.failure-message, .failure-snippet {
+  margin: 0; padding: 10px 12px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bad) 18%, transparent);
+  border-radius: 7px;
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55;
+  white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: auto;
+}
+.failure-snippet { margin-top: 8px; white-space: pre; overflow-wrap: normal; color: var(--ink-2); }
+
+/* ------------------------------------------------------------ subsection */
+
+.subsection { margin-top: 18px; }
+.subsection h3 {
+  margin-bottom: 8px; color: var(--ink-3);
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.1em; text-transform: uppercase;
+}
+.flow-frame { margin: 0; }
+.flow-frame svg {
+  display: block; width: 100%; height: auto; max-height: 340px;
+  background: var(--flow-bg);
+  border: 1px solid var(--rule); border-radius: 10px;
+}
+
+.video-frame { margin: 0 0 12px; }
+video {
+  display: block; width: 100%; max-height: 520px;
+  background: #05070a; border: 1px solid var(--rule); border-radius: 10px;
+}
+figcaption { margin-top: 6px; font-size: 12px; color: var(--ink-2); }
+
+/* --------------------------------------------------------------- drawers */
+
+.drawers { display: flex; flex-direction: column; gap: 0; margin-top: 18px; }
+.drawer { border-top: 1px solid var(--rule); }
+.drawer > summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 11px 0; list-style: none; cursor: pointer; user-select: none;
+  color: var(--ink-2); font-family: var(--font-mono);
+  font-size: 10.5px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase;
+}
+.drawer > summary::-webkit-details-marker { display: none; }
+.drawer > summary::before {
+  content: ""; flex: none;
+  width: 6px; height: 6px;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .18s ease;
+}
+.drawer[open] > summary::before { transform: rotate(45deg); }
+.drawer > summary:hover { color: var(--ink); }
+.drawer-body { padding-bottom: 14px; }
+
+.implementations { margin-top: 34px; }
+.implementations .drawer { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+
+/* ---------------------------------------------------------------- checks */
+
+.assertions { margin: 0; padding-left: 18px; }
+.assertions li { margin: 9px 0; }
+.confidence-note { margin-bottom: 10px; color: var(--ink-2); font-size: 13px; }
+.quality {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; border-radius: 999px; border: 1px solid;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600;
+  letter-spacing: 0.07em; text-transform: uppercase;
+}
+.quality-strict   { color: var(--ok);     background: var(--ok-soft);     border-color: color-mix(in srgb, var(--ok) 36%, transparent); }
+.quality-moderate { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 36%, transparent); }
+.quality-shallow  { color: var(--warn);   background: var(--warn-soft);   border-color: color-mix(in srgb, var(--warn) 36%, transparent); }
+.quality-unknown  { color: var(--skip);   background: var(--skip-soft);   border-color: color-mix(in srgb, var(--skip) 36%, transparent); }
+
+.assertions code, dd code {
+  background: var(--surface-2); border: 1px solid var(--rule);
+  border-radius: 4px; padding: 1px 4px; font-size: 11.5px;
+}
+.check-code { display: block; margin-top: 5px; }
+.check-code > summary {
+  display: inline-block; list-style: none; cursor: pointer;
+  color: var(--ink-3); font-size: 11px;
+}
+.check-code > summary::-webkit-details-marker { display: none; }
+.check-code > summary::before { content: "+ "; }
+.check-code[open] > summary::before { content: "- "; }
+.check-code code { display: inline-block; margin-top: 5px; }
+.helper-ref { margin-top: 4px; color: var(--ink-3); font-size: 12px; }
+
+/* ------------------------------------------------------------------ code */
+
+.shiki, .fallback-code {
+  border: 1px solid var(--rule); border-radius: 9px;
+  overflow: auto; padding: 12px !important; margin: 0 !important;
+  font-size: 11.8px; line-height: 1.6;
+}
+.shiki code, .fallback-code code { font-family: var(--font-mono); font-size: inherit; }
+/* Shiki emits both palettes as custom properties (defaultColor:false), so the
+   theme switch recolours the highlighted code with everything else. */
+.shiki, .shiki span { color: var(--shiki-light); background-color: var(--shiki-light-bg); }
+:root[data-theme="dark"] .shiki, :root[data-theme="dark"] .shiki span { color: var(--shiki-dark); background-color: var(--shiki-dark-bg); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shiki, :root:not([data-theme="light"]) .shiki span {
+    color: var(--shiki-dark); background-color: var(--shiki-dark-bg);
+  }
+}
+.fallback-code { background: var(--surface-2); }
+
+.code-line { display: grid; grid-template-columns: 34px minmax(0, 1fr); min-width: max-content; }
+.line-number { padding-right: 10px; color: var(--ink-3); text-align: right; user-select: none; opacity: .7; }
+.line-source { white-space: pre; }
+.code-line.is-highlighted {
+  background: color-mix(in srgb, var(--warn) 20%, transparent) !important;
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+/* ----------------------------------------------------------------- misc. */
+
+.report-foot {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 48px; padding-top: 18px;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-3); font-size: 12px;
+}
+
+.to-top {
+  position: fixed; right: 22px; bottom: 22px; z-index: 30;
+  width: 38px; height: 38px; padding: 0;
+  display: grid; place-items: center;
+  background: var(--surface); color: var(--ink-2);
+  border: 1px solid var(--rule-2); border-radius: 50%;
+  box-shadow: var(--shadow); cursor: pointer;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+  transform: translateY(6px);
+}
+.to-top::before {
+  content: ""; width: 8px; height: 8px;
+  border-left: 1.6px solid currentColor; border-top: 1.6px solid currentColor;
+  transform: rotate(45deg) translate(1px, 1px);
+}
+.to-top.is-visible { opacity: 1; pointer-events: auto; transform: none; }
+.to-top:hover { color: var(--accent); border-color: var(--accent); }
+
+.is-hidden { display: none !important; }
+
+/* --------------------------------------------------------------- motion */
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.masthead > *, .coverage, .matrix { animation: rise .5s cubic-bezier(.2,.7,.3,1) both; }
+.masthead > *:nth-child(2) { animation-delay: .04s; }
+.masthead > *:nth-child(3) { animation-delay: .08s; }
+.masthead > *:nth-child(4) { animation-delay: .12s; }
+.masthead > *:nth-child(5) { animation-delay: .16s; }
+.coverage { animation-delay: .18s; }
+.matrix { animation-delay: .22s; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 1080px) {
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .rail {
+    position: static; padding-top: 24px;
+    border-bottom: 1px solid var(--rule); padding-bottom: 20px;
+  }
+  .nav { max-height: none; overflow: visible; }
+  .nav-groups { display: none; }
+  main { padding-top: 28px; }
+}
+
+@media (max-width: 720px) {
+  .topbar-inner, .shell { width: min(100%, 100% - 24px); }
+  .topbar-now { display: none; }
+  .verdict { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .run-meta div { border-right: 0; margin-right: 0; padding: 8px 0; }
+  .facts div { border-right: 0; margin-right: 0; padding: 6px 0; }
+  .case-toggle { grid-template-columns: 24px minmax(0, 1fr); row-gap: 8px; }
+  .case-head-right { grid-column: 2; justify-content: flex-start; }
+  .matrix-cells { max-width: none; }
+}
+
+/* ----------------------------------------------------------------- print */
+
+@media print {
+  :root { --paper: #fff; --surface: #fff; --shadow: none; --grain-opacity: 0; }
+  .topbar, .rail, .to-top, .skip-link { display: none !important; }
+  .shell { display: block; width: 100%; }
+  main { padding: 0; }
+  .case { break-inside: avoid; box-shadow: none; }
+  .case[data-open="false"] .case-body { display: block !important; }
+  .drawer > summary { display: none; }
+  .drawer-body { display: block !important; }
+  .is-hidden { display: block !important; }
+}`
+
 const ASSERTION_HTML_SCRIPT = `
-(() => {
-  const links = [...document.querySelectorAll('.toc a[data-section-id]')]
-  const sections = links
-    .map((link) => document.getElementById(link.dataset.sectionId))
-    .filter(Boolean)
+/* Theme switch: light / system / dark, persisted per reader. The document
+   renders correctly with none of this running — the OS media query already
+   picked a palette and every case is expanded in the markup. */
+;(() => {
+  const KEY = 'canary-evaluation-theme'
+  const root = document.documentElement
+  const buttons = [...document.querySelectorAll('[data-theme-set]')]
+  if (!buttons.length) return
+  const read = () => {
+    try { return localStorage.getItem(KEY) || 'auto' } catch (err) { return 'auto' }
+  }
+  const paint = (mode) => {
+    if (mode === 'auto') root.removeAttribute('data-theme')
+    else root.setAttribute('data-theme', mode)
+    for (const button of buttons) {
+      button.setAttribute('aria-checked', String(button.dataset.themeSet === mode))
+    }
+  }
+  for (const button of buttons) {
+    button.addEventListener('click', () => {
+      const mode = button.dataset.themeSet
+      try {
+        if (mode === 'auto') localStorage.removeItem(KEY)
+        else localStorage.setItem(KEY, mode)
+      } catch (err) { /* storage blocked — the switch still works for this session */ }
+      paint(mode)
+    })
+  }
+  paint(read())
+})()
+
+/* Expand / collapse. The markup ships expanded so a JS-less reader sees
+   everything; on load we fold away the cases that carry no news — passing,
+   skipped and never-run — and leave failures open. */
+;(() => {
+  const cases = [...document.querySelectorAll('.case')]
+  if (!cases.length) return
+  const setOpen = (node, open) => {
+    node.dataset.open = String(open)
+    const toggle = node.querySelector('.case-toggle')
+    if (toggle) toggle.setAttribute('aria-expanded', String(open))
+  }
+  for (const node of cases) {
+    const noteworthy = node.dataset.status === 'failed' || node.dataset.status === 'interrupted'
+    setOpen(node, noteworthy)
+    const toggle = node.querySelector('.case-toggle')
+    if (toggle) toggle.addEventListener('click', () => setOpen(node, node.dataset.open !== 'true'))
+  }
+  const all = (open) => { for (const node of cases) setOpen(node, open) }
+  document.querySelector('[data-expand-all]')?.addEventListener('click', () => all(true))
+  document.querySelector('[data-collapse-all]')?.addEventListener('click', () => all(false))
+  // A deep link should land on an open case, however the reader got there.
+  const openTarget = () => {
+    const id = decodeURIComponent(location.hash.slice(1))
+    if (!id) return
+    const node = document.getElementById(id)?.closest('.case')
+    if (node) setOpen(node, true)
+  }
+  window.addEventListener('hashchange', openTarget)
+  openTarget()
+  // Print with everything visible — a folded report prints as a list of titles.
+  window.addEventListener('beforeprint', () => all(true))
+})()
+
+/* Filter + search. Hides cases, their nav entries and their matrix cells
+   together, so the three views never disagree about what is on screen. */
+;(() => {
+  const cases = [...document.querySelectorAll('.case')]
+  const chips = [...document.querySelectorAll('[data-filter]')]
+  const search = document.getElementById('case-search')
+  const count = document.querySelector('[data-nav-count]')
+  const empty = document.querySelector('[data-nav-empty]')
+  if (!cases.length) return
+  const navItems = new Map()
+  for (const item of document.querySelectorAll('[data-nav-item]')) {
+    const id = item.querySelector('a')?.dataset.sectionId
+    if (id) navItems.set(id, item)
+  }
+  const cells = new Map()
+  for (const cell of document.querySelectorAll('[data-matrix-cell]')) {
+    cells.set(decodeURIComponent(cell.getAttribute('href').slice(1)), cell)
+  }
+  let status = 'all'
+  let term = ''
+  const apply = () => {
+    let shown = 0
+    for (const node of cases) {
+      const matches = (status === 'all' || node.dataset.status === status)
+        && (!term || (node.dataset.search || '').includes(term))
+      node.classList.toggle('is-hidden', !matches)
+      navItems.get(node.id)?.classList.toggle('is-hidden', !matches)
+      cells.get(node.id)?.classList.toggle('is-hidden', !matches)
+      if (matches) shown += 1
+    }
+    // A group whose every child is filtered out is noise, not structure.
+    for (const group of document.querySelectorAll('[data-group], [data-nav-group]')) {
+      const children = [...group.querySelectorAll('.case, [data-nav-item]')]
+      group.classList.toggle('is-hidden', children.length > 0 && children.every((child) => child.classList.contains('is-hidden')))
+    }
+    if (count) count.textContent = shown + ' of ' + cases.length + ' shown'
+    if (empty) empty.hidden = shown !== 0
+  }
+  for (const chip of chips) {
+    chip.addEventListener('click', () => {
+      status = chip.dataset.filter === status ? 'all' : chip.dataset.filter
+      for (const other of chips) other.setAttribute('aria-pressed', String(other.dataset.filter === status))
+      apply()
+    })
+  }
+  search?.addEventListener('input', () => {
+    term = search.value.trim().toLowerCase()
+    apply()
+  })
+  apply()
+})()
+
+/* Scroll spy: highlights the nav entry for the case in view and mirrors its
+   title into the sticky top bar, so the reader always knows where they are. */
+;(() => {
+  const links = [...document.querySelectorAll('.nav a[data-section-id]')]
+  const now = document.querySelector('[data-topbar-now]')
+  const sections = links.map((link) => document.getElementById(link.dataset.sectionId)).filter(Boolean)
   if (!links.length || !sections.length || !('IntersectionObserver' in window)) return
   const setActive = (id) => {
     for (const link of links) {
       const active = link.dataset.sectionId === id
-      if (active) link.setAttribute('aria-current', 'true')
-      else link.removeAttribute('aria-current')
+      if (active) {
+        link.setAttribute('aria-current', 'true')
+        if (now) now.textContent = link.querySelector('.nav-label')?.textContent || ''
+      } else {
+        link.removeAttribute('aria-current')
+      }
     }
   }
   const visible = new Set()
@@ -1909,10 +3089,24 @@ const ASSERTION_HTML_SCRIPT = `
       .map((el) => ({ id: el.id, top: el.getBoundingClientRect().top }))
       .sort((a, b) => Math.abs(a.top) - Math.abs(b.top))[0]
     if (active) setActive(active.id)
-  }, { rootMargin: '-20% 0px -65% 0px', threshold: 0 })
+    else if (now && !visible.size && window.scrollY < 200) now.textContent = ''
+  }, { rootMargin: '-15% 0px -70% 0px', threshold: 0 })
   for (const section of sections) observer.observe(section)
-  if (location.hash) setActive(location.hash.slice(1))
+  if (location.hash) setActive(decodeURIComponent(location.hash.slice(1)))
 })()
+
+/* Back to top. */
+;(() => {
+  const button = document.querySelector('[data-to-top]')
+  if (!button) return
+  button.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }))
+  const sync = () => button.classList.toggle('is-visible', window.scrollY > 600)
+  window.addEventListener('scroll', sync, { passive: true })
+  sync()
+})()
+
+/* Flow node ↔ source line. Hovering a step in the diagram opens the test code
+   and highlights the statement it came from. */
 ;(() => {
   const clear = (testCase) => {
     testCase.querySelectorAll('.flow-node.is-active, .code-line.is-highlighted').forEach((el) => {
@@ -1920,7 +3114,7 @@ const ASSERTION_HTML_SCRIPT = `
     })
   }
   const activate = (node) => {
-    const testCase = node.closest('.test-case')
+    const testCase = node.closest('.case')
     if (!testCase) return
     clear(testCase)
     const line = node.getAttribute('data-code-line')
@@ -1936,12 +3130,11 @@ const ASSERTION_HTML_SCRIPT = `
     node.addEventListener('mouseenter', () => activate(node))
     node.addEventListener('focus', () => activate(node))
     node.addEventListener('mouseleave', () => {
-      const testCase = node.closest('.test-case')
+      const testCase = node.closest('.case')
       if (testCase) clear(testCase)
     })
   })
-})()
-`
+})()`
 
 function playbackTests(events: PlaywrightPlaybackEvent[]): Array<{
   name: string
@@ -1949,13 +3142,14 @@ function playbackTests(events: PlaywrightPlaybackEvent[]): Array<{
   location: string
   status: string
   durationMs?: number
+  error?: { message: string; snippet?: string }
 }> {
   // One entry per (name, location). Retries and heal-cycle reruns share both
   // and fold into the latest test-end. Two distinct tests that share a title
   // (and therefore a name, since name = `test-case-${slugify(title)}`) but
   // live at different locations stay separate — the HTML export disambiguates
   // them via positional anchor IDs. Map preserves first-seen insertion order.
-  const latest = new Map<string, { name: string; title: string; location: string; status: string; durationMs?: number }>()
+  const latest = new Map<string, { name: string; title: string; location: string; status: string; durationMs?: number; error?: { message: string; snippet?: string } }>()
   for (const event of events) {
     if (event.type !== 'test-end') continue
     const key = `${event.test.name}@${event.test.location}`
@@ -1965,6 +3159,7 @@ function playbackTests(events: PlaywrightPlaybackEvent[]): Array<{
       location: event.test.location,
       status: event.status,
       durationMs: event.durationMs,
+      ...(event.error ? { error: event.error } : {}),
     })
   }
   return [...latest.values()]

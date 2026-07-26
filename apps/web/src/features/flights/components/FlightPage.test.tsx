@@ -257,6 +257,10 @@ describe('FlightPage', () => {
     expect(toggle.getAttribute('aria-pressed')).toBe('true')
     await act(async () => { toggle.click() })
     expect(mocks.setFlightAutopilot).toHaveBeenCalledWith('fl_1', false)
+    // The state word reserves the widest option's width ('off'), so flipping
+    // on↔off cannot resize the strip's right-aligned cluster. happy-dom has no
+    // layout engine, so the reservation is pinned by class, not by measurement.
+    expect(toggle.lastElementChild?.className).toContain('min-w-[3ch]')
   })
 
   it('R78: a yolo flight shows autopilot as inert — yolo already skips the checkpoints', async () => {

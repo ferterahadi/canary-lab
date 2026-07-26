@@ -1766,7 +1766,9 @@ function FlightSummaryStrip({
                 style={{ boxShadow: 'var(--shadow-panel)', transform: autopilotOn ? 'translateX(13px)' : 'translateX(2px)' }}
               />
             </span>
-            <span className={`font-mono ${autopilotOn ? 'text-secondary' : 'text-muted'}`}>
+            {/* Reserve the widest state word ('off') so toggling on↔off can't
+                resize the group and slide the whole ml-auto cluster sideways. */}
+            <span className={`inline-block min-w-[3ch] text-left font-mono ${autopilotOn ? 'text-secondary' : 'text-muted'}`}>
               {flight.opts.yolo ? 'yolo' : autopilotOn ? 'on' : 'off'}
             </span>
           </button>
