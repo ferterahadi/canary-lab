@@ -153,7 +153,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // open draft changes id-to-id, so keying on `dialog` alone would leave the
     // URL's `draft` param stale. configTab is listed for the same reason — the
     // dialog stays 'config' while the user switches tabs inside it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     // focusTest is listed for the same reason as draftFor/configTab: the run
     // stays the same while the focused test changes, so keying on selectedRunId
     // alone would leave the URL's `test` param stale.

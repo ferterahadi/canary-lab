@@ -112,7 +112,7 @@ export function classifyHealFailure(
 // Terminal capture is full of SGR/erase escape sequences that can split a
 // fingerprint across control bytes ("usage\x1b[0m limit"). Strip them before
 // matching so a colorized "usage limit" banner still classifies.
-// eslint-disable-next-line no-control-regex
+ 
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g
 
 function stripAnsi(s: string): string {

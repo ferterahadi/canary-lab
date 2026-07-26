@@ -102,11 +102,12 @@ export function findLegacyCurrentPointer(repoRoot: string): string | undefined {
 /** Lint a single feature.config.cjs file. Returns issue list (empty if clean). */
 export function lintFeatureConfig(configPath: string): string[] {
   const issues: string[] = []
+  // The shape of a required CJS feature config is exactly what this function is
+  // checking, so there is nothing narrower to assert here.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let mod: any
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     delete require.cache[require.resolve(configPath)]
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     mod = require(configPath)
   } catch (err) {
     issues.push(`failed to load: ${(err as Error).message}`)

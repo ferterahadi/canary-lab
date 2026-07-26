@@ -48,6 +48,9 @@ run('node', ['tools/gen-codex-skills.mjs', '--check'], repoRoot)
 // Codex session actually runs locally. Both are sub-second.
 run('node', ['tools/check-conventions.mjs'], repoRoot)
 run('node', ['tools/check-feature-boundaries.mjs'], repoRoot)
+// ESLint covers only what needs a type checker or the React plugin (see
+// eslint.config.mjs); 3.7s, so it belongs in the same local gate.
+run('npx', ['eslint', '.'], repoRoot)
 
 run('npm', ['run', 'build'], repoRoot)
 run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)

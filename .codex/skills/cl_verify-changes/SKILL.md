@@ -28,8 +28,9 @@ npx tsc -p tsconfig.build.json --noEmit
   SIGTERM'd on the wall clock (exit **143/144**) while reporting 0 failures.
   Exit 143/144 = *inconclusive*; re-run scoped before claiming anything passes.
 - Tests are co-located `*.test.ts`; component tests use happy-dom.
-- **Never add `/* v8 ignore */` pragmas** — write a real test or use a config-level
-  exclude.
+- **Don't reach for a `/* v8 ignore */` pragma** — write a real test, delete the
+  arm, or make the state unrepresentable in the type. The one permitted exception
+  and how it's policed live in `cl_code-conventions`.
 - Coverage (`npm run test:coverage`) has a known race: intermittent ENOENT on
   `coverage/.tmp`. Recover with `rm -rf coverage && npx vitest run --coverage --no-file-parallelism`.
 
@@ -105,5 +106,5 @@ command in the prose over an enumeration.
 | Running `canary-apply` when `cl_apply-local` is absent | That's the shipped rule — the user controls the cycle; hand off |
 | Handing off when `cl_apply-local` IS present | You're stalling on work this machine authorized you to do |
 | Verifying a template or prompt edit with unit tests only | Consumers get `dist/`; only `smoke:pack` proves the copy |
-| Adding v8 ignore pragmas to make coverage pass | Forbidden in this repo; write the test |
+| Adding a v8 ignore pragma to make coverage pass | Almost always wrong — delete the arm or write the test. The one exception (an unreachable defence-in-depth guard) needs a `-- reason` AND a `check:conventions` allowlist entry; see `cl_code-conventions` |
 | Retrying flaky coverage as-is | Known `.tmp` race — use `--no-file-parallelism` |

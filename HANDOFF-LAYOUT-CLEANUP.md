@@ -83,7 +83,7 @@ matching area.
 | Rule | Why it matters here |
 | --- | --- |
 | **Never weaken, skip, or delete a test to make something pass** | Pinned by `apps/web-server/src/mcp/repair-guardrail.test.ts`. A layout refactor has no excuse to touch an assertion. |
-| **Never add `/* v8 ignore */` pragmas** | Forbidden repo-wide. If a move drops coverage, fix the config glob, not the gate. |
+| **Don't reach for a `/* v8 ignore */` pragma** | If a move drops coverage, fix the config glob, not the gate. The one permitted exception (an unreachable defence-in-depth guard, with a `-- reason` and a `check:conventions` allowlist entry) is spelled out in `cl_code-conventions`. |
 | **Never edit the prose telling agents to fix the app, not the test** | `REPAIR_INSTRUCTIONS`, heal `MODE_COPY`, shipped `canary-lab-run` skills. |
 | **Don't move `apps/web-server/prompts/`** | `tools/prepare-assets.mjs` hardcodes it → `dist/apps/web-server/prompts`. Prompts are assets, not source. |
 | **Don't move `templates/`** | Ships only through the build; template-adjacent changes need `npm run smoke:pack`. |

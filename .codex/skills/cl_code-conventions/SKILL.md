@@ -104,7 +104,13 @@ The gate is 100% over a floor of gated files. Both halves matter — a file lift
 out of the gate keeps the percentage at 100% while covering less.
 
 - **An unreachable arm gets deleted, or made unrepresentable in the type. Never
-  tested around, never pragma'd.** `/* v8 ignore */` is banned repo-wide.
+  tested around.** A `/* v8 ignore */` pragma is the last resort, not the first:
+  it is permitted only for a defence-in-depth guard an earlier validator makes
+  unreachable — where deleting it weakens a security property and testing it would
+  mean proving that validator broken. It must carry a `-- reason`, and the file
+  must stay in the gate. `check:conventions` requires an allowlist entry, so a new
+  one is a deliberate act. Two files qualify today; everything else was deleted,
+  tested, or made unrepresentable.
 - **A file-level exclude is the last resort, and carries a per-arm rationale.**
 - **That rationale is a hypothesis, not a fact.** Re-measure before trusting it.
   Both files closed in `0e3d9bf` had *more* uncovered than their comment listed —

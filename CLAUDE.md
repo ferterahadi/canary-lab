@@ -20,8 +20,13 @@ copied to `dist/templates/` during build.
   (see the `cl_verify-changes` skill for the hand-off). Sole exception: a checkout
   that carries a gitignored `cl_apply-local` skill has opted in locally — follow that
   skill instead of handing off.
-- **Never add `/* v8 ignore */` pragmas** — write a real test or use a config-level
-  exclude.
+- **Don't reach for a `/* v8 ignore */` pragma.** Write a real test, or delete the
+  arm, or make the state unrepresentable in the type. A pragma is allowed for one
+  case only: a defence-in-depth guard that an earlier validator makes unreachable,
+  where deleting it would weaken a security property and testing it would mean
+  proving that validator broken. It must carry a `-- reason`, and the file stays in
+  the coverage gate. `npm run check:conventions` holds the line — new pragma files
+  need a deliberate allowlist entry.
 - **The repair rule is load-bearing: agents fix the app, not the test.** Never
   weaken, delete, skip, or loosen a test to make a run green, and never soften the
   prose that tells an agent so (`REPAIR_INSTRUCTIONS`, the heal `MODE_COPY`, the

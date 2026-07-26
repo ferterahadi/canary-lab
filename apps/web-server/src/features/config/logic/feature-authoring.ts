@@ -236,10 +236,11 @@ export async function checkoutFeatureRepoBranch(ctx: FeatureAuthoringContext, in
       expectedBranch: repo.branch ?? null,
     }
   } catch (err) {
+    // A rejection value is `unknown`, so neither an Error shape nor a statusCode
+    // is guaranteed here — both fallbacks are real. Pinned in
+    // feature-authoring.mock.test.ts.
     return {
-      /* v8 ignore next 2 -- checkoutBranch rejects with Error instances. */
       error: err instanceof Error ? err.message : String(err),
-      /* v8 ignore next 3 -- checkoutBranch attaches statusCode to expected failures. */
       statusCode: typeof (err as { statusCode?: unknown }).statusCode === 'number'
         ? (err as { statusCode: number }).statusCode
         : 500,

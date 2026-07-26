@@ -93,7 +93,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     let cancelled = false
 
     const connect = (): void => {
-      /* v8 ignore next -- cleanup clears reconnect timers before this closure can run cancelled. */
+      // Cleanup clears the reconnect timers before this closure can run.
       if (cancelled) return
       try {
         socket = new Ctor(url)
@@ -127,7 +127,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     }
 
     const scheduleReconnect = (): void => {
-      /* v8 ignore next -- callers guard cleanup through cleared timers or socket close. */
+      // Callers guard cleanup through cleared timers or a closed socket.
       if (cancelled) return
       reconnectTimer = setTimeout(() => {
         // After multiple rounds of growing backoff, surface the
@@ -427,7 +427,7 @@ export function useRunDetails(): Record<string, RunDetail> {
 // ─── Internals ───────────────────────────────────────────────────────────
 
 function defaultWsUrl(): string {
-  /* v8 ignore next -- React DOM tests require a browser-like window. */
+  // Non-browser callers (SSR, a bare node import) have no window to read.
   if (typeof window === 'undefined') return 'ws://localhost/ws/runs'
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
   return `${proto}//${window.location.host}/ws/runs`

@@ -642,7 +642,7 @@ function readManifest(file: string = MANIFEST_PATH): Manifest {
 // erases `J`/`K`, …), OSC (`ESC ] … BEL/ST`), charset designation (`ESC ( B`),
 // and keypad-mode toggles (`ESC =`/`ESC >`). Services run under a PTY, so their
 // captured output carries the full set, not just colors.
-// eslint-disable-next-line no-control-regex
+ 
 const TERM_ESCAPE_RE = /\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Za-z0-9]|[=>])/g
 
 // Strip ANSI/terminal control sequences from a string. Playwright emits color

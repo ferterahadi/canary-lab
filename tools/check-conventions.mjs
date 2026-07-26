@@ -53,11 +53,14 @@ const BASELINE = {
     ['shared/configs/loadEnv.ts', 'rename crosses a published path — do it deliberately, not in passing'],
     ['apps/web/src/features/config/components/useEditableSlice.ts', 'the other four hooks are use-*.ts; this one predates them'],
   ]),
+  // A pragma is allowed only where an earlier validator makes a defence-in-depth
+  // guard unreachable: deleting it weakens a security property, and testing it
+  // would mean proving the validator broken. The rule's other escape hatch — a
+  // file-level coverage exclude — is strictly coarser here, since it would drop
+  // a 530-line file out of the gate to excuse four lines.
   'no-v8-ignore': new Map([
-    ['apps/web-server/src/features/config/logic/feature-authoring.ts', '6 pragmas — path-traversal + validated-scaffold guards'],
-    ['apps/web-server/src/features/runs/logic/runtime/trace-enrichment.ts', '1 pragma — corrupt-install branch'],
-    ['apps/web/src/features/runs/state/RunsContext.tsx', '3 pragmas — timer/socket cleanup closures'],
-    ['apps/web/src/shared/shell/McpPromoContext.tsx', '1 pragma — callback only wired while a dialog is mounted'],
+    ['apps/web-server/src/features/config/logic/feature-authoring.ts', '4 pragmas — 3 isWithin path-traversal guards behind sanitizeSlotName/validateGeneratedSpecFiles, 1 non-object-config guard the AST locator cannot produce'],
+    ['apps/web-server/src/features/runs/logic/runtime/trace-enrichment.ts', '1 pragma — corrupt-install branch; reachable with a mocked fs, so this one is real debt'],
   ]),
   'no-console': new Map([
     ['apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts', 'is itself a CLI entry point'],
@@ -121,9 +124,28 @@ for (const rel of sources) {
 
   if (isTool) continue // a checker's own source contains the patterns below
 
-  // ── banned coverage pragma ───────────────────────────────────────────────
-  if (/v8 ignore/.test(text)) {
-    check('no-v8-ignore', rel, 'uses a /* v8 ignore */ pragma', 'delete the unreachable arm, or make it unrepresentable in the type; a file-level exclude carrying a per-arm rationale is the last resort')
+  // ── coverage pragmas ─────────────────────────────────────────────────────
+  // Two separate failures. A pragma in a file that is not allowlisted is the
+  // rule; a pragma with no `-- reason` is a failure even in an allowlisted file,
+  // because an unexplained pragma is exactly the invisible exception the rule
+  // exists to prevent.
+  //
+  // Source only: a pragma in a test file suppresses nothing (test files are not
+  // in the gate), and scanning them means matching any test whose comment
+  // DISCUSSES pragmas — which is how this rule first flagged
+  // feature-authoring.mock.test.ts for explaining itself.
+  const pragmas = isTest ? [] : [...text.matchAll(/\/\* v8 ignore[^*]*\*\//g)]
+  for (const m of pragmas) {
+    if (!/--\s*\S/.test(m[0])) {
+      failures.push({
+        file: `${rel}:${lineOf(m.index)}`,
+        message: 'v8 ignore pragma with no reason',
+        fix: 'a pragma must say why: /* v8 ignore next -- <what makes this unreachable> */',
+      })
+    }
+  }
+  if (pragmas.length > 0) {
+    check('no-v8-ignore', rel, `uses ${pragmas.length} /* v8 ignore */ pragma(s)`, 'delete the arm, make the state unrepresentable in the type, or write the test. A pragma is only for a defence-in-depth guard an earlier validator makes unreachable — add the file to BASELINE with that reason if so')
   }
 
   // ── console.* belongs to the CLI ─────────────────────────────────────────

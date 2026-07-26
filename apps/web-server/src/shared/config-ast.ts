@@ -11,7 +11,7 @@
 import * as recast from 'recast'
 import { namedTypes as N } from 'ast-types'
 import type * as K from 'ast-types/lib/gen/kinds'
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+ 
 const tsParser = require('recast/parsers/babel-ts')
 
 const b = recast.types.builders

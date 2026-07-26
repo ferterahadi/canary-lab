@@ -31,7 +31,7 @@ let cachedRealFactory: PtyFactory | null = null
 // don't crash on import.
 function loadRealFactory(): PtyFactory {
   if (cachedRealFactory) return cachedRealFactory
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
+   
   const pty = require('node-pty') as typeof import('node-pty')
   cachedRealFactory = (opts: PtySpawnOptions): PtyHandle => {
     // Respect the user's $SHELL so commands run with the same config as

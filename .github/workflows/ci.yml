@@ -35,6 +35,8 @@ jobs:
         run: npm run check:conventions
       - name: Feature boundaries
         run: npm run check:boundaries
+      - name: Lint
+        run: npm run lint
       # Both generators must be checked BEFORE any build: `npm run build`
       # regenerates AGENTS.md and .codex/skills, so a check placed after it can
       # only ever pass.
@@ -50,9 +52,17 @@ jobs:
   # The coverage gate is the repo's real quality bar: 100/100/100/100 over a floor
   # of gated files. --no-file-parallelism is not a tuning knob — the v8 provider
   # intermittently ENOENTs on coverage/.tmp when workers race.
+  #
+  # macOS, not ubuntu, and NOT a preference: the suite carries platform assumptions
+  # from having only ever run on a Mac. The first ubuntu run failed on four of them
+  # — `open` vs `xdg-open` in editor-launch, `mkdtemp('/tmpXXXXXX')` resolving under
+  # `/` instead of a real temp dir in boot-probe, `~/` expansion in project-config,
+  # and a 5s agent-SIGTERM timeout that a slower runner misses. None are caused by
+  # the code under test. Running here matches the only environment the suite has
+  # ever been verified in; making it OS-agnostic is its own piece of work.
   coverage:
     name: tests and coverage gate
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4

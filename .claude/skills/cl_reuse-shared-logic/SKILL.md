@@ -64,6 +64,8 @@ runner can't express a need, add a param to it.
 - Adding a spawn/tee/idle block → use (or extend) the shared runner; don't copy.
 - Adding a claude argv → use the shared arg builder; don't re-list the flags.
 - Adding a UI surface → `cl_ui-design-philosophy`. Background task → `cl_async-task-ux`.
+- Writing the code itself → `cl_code-conventions` (comments, errors, types, tests,
+  coverage). The mechanical half is `npm run check:conventions`, not reading.
 - When the shared thing doesn't *quite* fit, **extend it with a parameter** — do
   not fork a copy. If extending would make it a god-function, split a small shared
   core with thin adapters (see the runner sketch above), still not copies.
