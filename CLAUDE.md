@@ -59,6 +59,9 @@ are easy to miss by hand. (Claude: via the Skill tool. Codex: skills load
 natively.)
 
 **Process / how to work**
+- `cl_code-conventions` — writing or reviewing any code here: the comment,
+  error, type, test and coverage conventions a linter can't express. The
+  mechanical half is enforced by `npm run check:conventions`, not by reading.
 - `cl_reuse-shared-logic` — about to add code/UI that resembles something already
   here (a 2nd agent spawn, pill/dialog, store, parser, timeout): reuse or extend
   one shared helper/component/primitive instead of copy-pasting a variant. Lists

@@ -1,0 +1,101 @@
+# The backstop. Every gate here already exists as an npm script — the point of
+# this file is that they stop depending on someone remembering to run them.
+#
+# The Claude hook in .claude/settings.json runs check:conventions on every edit,
+# but hooks are Claude-only: Codex sessions, other agents, and humans never fire
+# them. This job is what actually holds the line for everyone.
+name: CI
+
+on:
+  push:
+    branches: [main, 'release/**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast, hermetic gates. Nothing here needs a network or a packed tarball, so a
+  # convention slip or a type error is reported in ~2 minutes rather than after
+  # the full suite.
+  checks:
+    name: checks and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.x
+          cache: npm
+      - run: npm ci
+      - name: Conventions
+        run: npm run check:conventions
+      - name: Feature boundaries
+        run: npm run check:boundaries
+      # Both generators must be checked BEFORE any build: `npm run build`
+      # regenerates AGENTS.md and .codex/skills, so a check placed after it can
+      # only ever pass.
+      - name: AGENTS.md is in sync with CLAUDE.md
+        run: node tools/gen-agents-md.mjs --check
+      - name: .codex/skills is in sync with .claude/skills
+        run: node tools/gen-codex-skills.mjs --check
+      - name: Typecheck (build config)
+        run: npm run typecheck
+      - name: Production build
+        run: npm run build
+
+  # The coverage gate is the repo's real quality bar: 100/100/100/100 over a floor
+  # of gated files. --no-file-parallelism is not a tuning knob — the v8 provider
+  # intermittently ENOENTs on coverage/.tmp when workers race.
+  coverage:
+    name: tests and coverage gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.x
+          cache: npm
+      - run: npm ci
+      # Suites shell out to git and assert on real working trees; git refuses to
+      # commit without an identity.
+      - name: Give git an identity
+        run: |
+          git config --global user.email ci@canary-lab.invalid
+          git config --global user.name "canary-lab ci"
+      - name: Coverage gate
+        run: npm run test:coverage -- --no-file-parallelism
+      # Only meaningful after a FULL run — a scoped coverage run leaves a
+      # one-file lcov.info, so the floor is opt-in rather than always-on.
+      - name: Coverage scope floor
+        run: npm run check:conventions -- --coverage
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/lcov.info
+          retention-days: 7
+
+  # Packaging is the only check that proves dist/, bin, templates, prompts and the
+  # export map. It packs a tarball, installs it into a scratch project and scaffolds
+  # a feature, so it is slow and touches the network — hence its own job.
+  pack:
+    name: tarball smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.x
+          cache: npm
+      - run: npm ci
+      - name: Give git an identity
+        run: |
+          git config --global user.email ci@canary-lab.invalid
+          git config --global user.name "canary-lab ci"
+      - run: npm run smoke:pack

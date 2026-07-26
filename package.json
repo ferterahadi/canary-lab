@@ -69,6 +69,7 @@
     "gen:agents": "node tools/gen-agents-md.mjs",
     "gen:skills": "node tools/gen-codex-skills.mjs",
     "check:boundaries": "node tools/check-feature-boundaries.mjs",
+    "check:conventions": "node tools/check-conventions.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
