@@ -77,6 +77,13 @@ jobs:
         run: |
           git config --global user.email ci@canary-lab.invalid
           git config --global user.name "canary-lab ci"
+      # The suite needs a built dist/. Not obvious, and it cost a red CI run to
+      # find: several tests shell out to the real Playwright CLI, which resolves
+      # `dist/shared/configs/playwright.base.js`. Without it those calls fail on a
+      # different path than intended and coverage lands at 99.98% with every test
+      # passing. Locally dist/ is always present, so the dependency was invisible.
+      - name: Build (the suite resolves dist/ at runtime)
+        run: npm run build
       - name: Coverage gate
         run: npm run test:coverage -- --no-file-parallelism
       # Only meaningful after a FULL run — a scoped coverage run leaves a
