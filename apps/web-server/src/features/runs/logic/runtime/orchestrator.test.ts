@@ -2893,7 +2893,8 @@ describe('RunOrchestrator.runHealAgent', () => {
 
 describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultSpawnCommand / defaultHealPrompt', () => {
   it('readSummary tolerates missing file', async () => {
-    const { defaultPlaywrightSpawner, defaultSpawnCommand, defaultHealPrompt } = await import('./orchestrator')
+    const { defaultPlaywrightSpawner, defaultSpawnCommand } = await import('./run-spawn')
+    const { defaultHealPrompt } = await import('./heal-agent-text')
     const { readSummary, extractFailedSlugs, extractFailedLocations } = await import('./run-verdict')
     expect(readSummary(path.join(tmpDir, 'nope.json'))).toEqual({})
     expect(extractFailedSlugs({ failed: [{ name: 'a' }, { name: '' }, {}] })).toEqual(['a'])
@@ -4634,21 +4635,21 @@ describe('RunOrchestrator runFullCycle stoppedEarly', () => {
 
 describe('defaultPlaywrightSpawner --max-failures', () => {
   it('appends --max-failures with feature threshold', async () => {
-    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const { defaultPlaywrightSpawner } = await import('./run-spawn')
     const f = makeFeature({ healOnFailureThreshold: 3 })
     const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
     expect(inv.command).toContain('--max-failures=3')
   })
 
   it('omits --max-failures when threshold is unset', async () => {
-    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const { defaultPlaywrightSpawner } = await import('./run-spawn')
     const f = makeFeature()
     const inv = defaultPlaywrightSpawner({ feature: f, paths: buildRunPaths(runDir) })
     expect(inv.command).not.toContain('--max-failures=')
   })
 
   it('keeps --max-failures on reruns when threshold is set', async () => {
-    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const { defaultPlaywrightSpawner } = await import('./run-spawn')
     const f = makeFeature({ healOnFailureThreshold: 5 })
     const inv = defaultPlaywrightSpawner({
       feature: f,
@@ -4660,7 +4661,7 @@ describe('defaultPlaywrightSpawner --max-failures', () => {
   })
 
   it('supports grep-based rerun selectors for factory-generated tests', async () => {
-    const { defaultPlaywrightSpawner } = await import('./orchestrator')
+    const { defaultPlaywrightSpawner } = await import('./run-spawn')
     const f = makeFeature({ healOnFailureThreshold: 2 })
     const inv = defaultPlaywrightSpawner({
       feature: f,
@@ -4734,7 +4735,7 @@ describe('module-helper edge branches', () => {
   }
 
   it('defaultHealPrompt echoes guidance and prior-session flags when supplied', async () => {
-    const { defaultHealPrompt } = await import('./orchestrator')
+    const { defaultHealPrompt } = await import('./heal-agent-text')
     const out = defaultHealPrompt({
       cycle: 3,
       outputDir: '/out',

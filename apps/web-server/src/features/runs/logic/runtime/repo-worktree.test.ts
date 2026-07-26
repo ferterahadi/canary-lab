@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { addWorktree, hydrateWorkingTreeDiff, isGitWorktreeCapable, linkNodeModules, removeWorktree } from './repo-worktree'
+import { addWorktree, hydrateWorkingTreeDiff, isGitWorktreeCapable, linkNodeModules, listUntracked, removeWorktree, sanitizeRepoFileName } from './repo-worktree'
 
 let root: string
 let repo: string
@@ -164,5 +164,49 @@ describe('addWorktree / removeWorktree', () => {
       expect(res.untrackedCopied).toBe(0)
       expect(fs.existsSync(path.join(handle.worktreeRoot, '.env'))).toBe(false)
     })
+  })
+})
+
+describe('sanitizeRepoFileName', () => {
+  it('leaves an already-safe name alone', () => {
+    expect(sanitizeRepoFileName('my-api_v2.1')).toBe('my-api_v2.1')
+  })
+
+  it('collapses path separators and spaces so a name cannot escape the fixes dir', () => {
+    expect(sanitizeRepoFileName('org/repo name')).toBe('org-repo-name')
+    // Dots are legal in a filename and survive; what matters is that every
+    // separator is gone, so the result cannot traverse out of the fixes dir.
+    expect(sanitizeRepoFileName('../../etc/passwd')).toBe('..-..-etc-passwd')
+    expect(sanitizeRepoFileName('../../etc/passwd')).not.toContain('/')
+  })
+
+  it('falls back to "repo" when nothing usable survives', () => {
+    expect(sanitizeRepoFileName('///')).toBe('repo')
+    expect(sanitizeRepoFileName('')).toBe('repo')
+  })
+})
+
+describe('listUntracked', () => {
+  it('lists non-ignored untracked files and skips ignored ones', async () => {
+    const dir = path.join(root, 'untracked-repo')
+    fs.mkdirSync(dir, { recursive: true })
+    gitInit(dir)
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'ignored.txt\n')
+    fs.writeFileSync(path.join(dir, 'ignored.txt'), 'x')
+    fs.writeFileSync(path.join(dir, 'fresh.txt'), 'x')
+
+    const out = await listUntracked(dir)
+
+    expect(out.has('fresh.txt')).toBe(true)
+    expect(out.has('ignored.txt')).toBe(false)
+  })
+
+  it('returns an empty set when the path is not a git repo', async () => {
+    // The fix-capture baseline runs before we know a repo is usable, so a
+    // non-repo must read as "nothing untracked" rather than throw mid-run.
+    const dir = path.join(root, 'not-a-repo')
+    fs.mkdirSync(dir, { recursive: true })
+
+    expect(await listUntracked(dir)).toEqual(new Set())
   })
 })

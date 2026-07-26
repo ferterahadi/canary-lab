@@ -152,3 +152,19 @@ export async function removeWorktree(handle: Pick<WorktreeHandle, 'sourceRoot' |
     try { fs.rmSync(handle.worktreeRoot, { recursive: true, force: true }) } catch { /* ignore */ }
   }
 }
+
+// Repo name → safe patch filename (`fixes/<name>.patch`). Mirrors the worktree
+// dir sanitizer above so a repo name with slashes/spaces can't escape the fixes
+// dir.
+export function sanitizeRepoFileName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'repo'
+}
+
+// Non-ignored untracked files in a working tree, as a set of repo-relative
+// paths. Used by the fix-capture baseline/teardown to tell agent-created files
+// apart from WIP/docs that were already present before the run.
+export async function listUntracked(worktreeRoot: string): Promise<Set<string>> {
+  const res = await runGit(worktreeRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
+  if (res.code !== 0) return new Set()
+  return new Set(res.stdout.split('\0').filter(Boolean))
+}

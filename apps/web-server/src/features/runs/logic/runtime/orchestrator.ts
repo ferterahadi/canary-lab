@@ -107,6 +107,23 @@ import {
   summaryHasPassingEvidence,
   type PlaywrightRerunSelection,
 } from './run-verdict'
+import {
+  BRACKETED_PASTE_BEGIN,
+  BRACKETED_PASTE_END,
+  defaultPlaywrightSpawner,
+  defaultSpawnCommand,
+  killTree,
+  scheduleSigkillFallback,
+} from './run-spawn'
+import {
+  HEAL_AGENT_TAIL_BYTES,
+  defaultHealPrompt,
+  formatUserInterjectBlock,
+  healAgentCauseSuffix,
+} from './heal-agent-text'
+import { listUntracked, sanitizeRepoFileName } from './repo-worktree'
+import type { PlaywrightInvocation, PlaywrightSpawner } from './run-spawn'
+export type { PlaywrightInvocation, PlaywrightSpawner } from './run-spawn'
 export interface ServiceSpec {
   repoName: string
   name: string
@@ -329,19 +346,6 @@ export interface AutoHealConfig {
   buildCyclePrompt?: BuildHealCyclePrompt
 }
 
-export interface PlaywrightInvocation {
-  command: string
-  cwd: string
-}
-
-
-export type PlaywrightSpawner = (args: {
-  feature: FeatureConfig
-  paths: RunPaths
-  rerunTargets?: readonly string[]
-  rerunGrep?: string
-  rerunSelection?: PlaywrightRerunSelection
-}) => PlaywrightInvocation
 
 export interface BuildServiceSpecsOptions {
   /** Per-run allocated ports keyed by slot name. Resolves `${port.<slot>}`
@@ -2855,132 +2859,4 @@ export class RunOrchestrator extends EventEmitter {
     }
     this.emit('run-complete', { status: finalStatus })
   }
-}
-
-// ─── Module helpers ─────────────────────────────────────────────────────────
-
-
-const SUMMARY_REPORTER_PATH = path.resolve(__dirname, 'summary-reporter.js')
-
-// How much of the heal agent's terminal output to keep for the no-signal
-// give-up classifier. ~16 KB is plenty to catch a usage-limit / auth banner at
-// the tail without holding the whole conversation in memory.
-const HEAL_AGENT_TAIL_BYTES = 16 * 1024
-
-// Repo name → safe patch filename (`fixes/<name>.patch`). Mirrors the worktree
-// dir sanitizer so a repo name with slashes/spaces can't escape the fixes dir.
-function sanitizeRepoFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'repo'
-}
-
-// Non-ignored untracked files in a working tree, as a set of repo-relative
-// paths. Used by the fix-capture baseline/teardown to tell agent-created files
-// apart from WIP/docs that were already present before the run.
-async function listUntracked(worktreeRoot: string): Promise<Set<string>> {
-  const res = await runGit(worktreeRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
-  if (res.code !== 0) return new Set()
-  return new Set(res.stdout.split('\0').filter(Boolean))
-}
-
-// Human-readable suffix appended to the no-signal give-up message when the
-// classifier recognized why the agent went quiet. `unknown`/undefined add
-// nothing (we only editorialize when we actually recognized the cause).
-function healAgentCauseSuffix(cause: HealEnd['agentCause']): string {
-  switch (cause) {
-    case 'usage-limit':
-      return ' Its last output suggests the agent hit a usage limit.'
-    case 'auth':
-      return ' Its last output suggests the agent is not signed in.'
-    case 'rate-limit':
-      return ' Its last output suggests the agent was rate-limited or the model was overloaded.'
-    case 'crash':
-      return ' Its last output suggests the agent crashed or failed to start.'
-    default:
-      return ''
-  }
-}
-
-// Bracketed-paste sequences. Modern TUIs (claude REPL included) toggle
-// `\x1b[?2004h` on init to opt into "this is a paste" framing — text
-// between the markers is inserted into the input field as a single block
-// instead of being processed by the line editor character-by-character.
-// Without these wrappers, every word the orchestrator writes via
-// `pty.write` shows up in the transcript as `<word>\x1b[1C<word>...`,
-// producing messy output and ballooning the log size.
-const BRACKETED_PASTE_BEGIN = '\x1b[200~'
-const BRACKETED_PASTE_END = '\x1b[201~'
-
-// Production Playwright invocation. Uses `npx playwright test` with our custom
-// summary reporter, rooted at the feature dir. Tests inject their own.
-export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets, rerunGrep }) => {
-  const reporter = SUMMARY_REPORTER_PATH
-  const threshold = feature.healOnFailureThreshold
-  const maxFailures = typeof threshold === 'number' && threshold > 0
-    ? ` --max-failures=${threshold}`
-    : ''
-  const targets = rerunTargets && rerunTargets.length > 0
-    ? ` ${rerunTargets.map((target) => JSON.stringify(target)).join(' ')}`
-    : ''
-  const grep = rerunGrep ? ` --grep=${JSON.stringify(rerunGrep)}` : ''
-  return {
-    command: `npx playwright test${targets}${grep} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
-    cwd: feature.featureDir,
-  }
-}
-
-// Send `signal` to the entire process group of `pty`. node-pty spawns its
-// child in a fresh session, so the pty's pid is the pgid — `process.kill(-pid, ...)`
-// hits the shell AND its pipeline children (claude, formatter). Falls back to
-// the pty's own kill (which only signals the shell) if pgkill fails — better
-// than nothing.
-function killTree(pty: PtyHandle, signal: NodeJS.Signals | number): void {
-  try {
-    process.kill(-pty.pid, signal)
-    return
-  } catch { /* fall through */ }
-  try { pty.kill(typeof signal === 'string' ? signal : undefined) } catch { /* already dead */ }
-}
-
-// SIGTERM gives the agent time to flush. If it's still alive 2s later, SIGKILL
-// the group so a wedged child doesn't outlive the run.
-function scheduleSigkillFallback(pty: PtyHandle, ms = 2000): void {
-  setTimeout(() => {
-    try { process.kill(-pty.pid, 'SIGKILL') } catch { /* already dead */ }
-  }, ms).unref?.()
-}
-
-function formatUserInterjectBlock(text: string, startedAt: string, now: Date = new Date()): string {
-  const tag = formatElapsedTag(startedAt, now)
-  const body = text.split(/\r?\n/).map((line) => `  │ ${line}`).join('\n')
-  return `\n${tag} user interject\n${body}\n\n`
-}
-
-function formatElapsedTag(startedAt: string, now: Date): string {
-  const started = new Date(startedAt).getTime()
-  const elapsedMs = Number.isFinite(started) ? Math.max(0, now.getTime() - started) : 0
-  const s = Math.floor(elapsedMs / 1000)
-  const mm = Math.floor(s / 60)
-  const ss = (s % 60).toString().padStart(2, '0')
-  return `[${mm}:${ss}]`
-}
-
-// Production wires `buildAgentSpawnCommand` / `buildOrchestratorHealPrompt`
-// from auto-heal.ts; these defaults are intentionally minimal so unit tests
-// never silently run a real claude/codex REPL when an override is missing.
-export function defaultSpawnCommand(_args: {
-  sessionId?: string
-  resume?: boolean
-  mcpOutputDir?: string
-  promptFile?: string
-}): string {
-  // A `cat` keeps the pty alive (so the orchestrator can write prompts to
-  // its stdin and pty.onExit doesn't fire mid-loop) and echoes everything we
-  // type, which is enough for assertions about prompt content in tests.
-  return 'cat'
-}
-
-export function defaultHealPrompt(args: BuildHealCyclePromptArgs): string {
-  const guidance = args.userGuidance ? ` guidance="${args.userGuidance}"` : ''
-  const prior = args.priorAgentSessionContext ? ' prior-session=true' : ''
-  return `[heal-agent placeholder cycle=${args.cycle} mcp-out=${args.outputDir}${guidance}${prior}]`
 }
