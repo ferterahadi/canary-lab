@@ -42,6 +42,13 @@ function run(command, args, cwd, extraEnv = {}) {
 run('node', ['tools/gen-agents-md.mjs', '--check'], repoRoot)
 run('node', ['tools/gen-codex-skills.mjs', '--check'], repoRoot)
 
+// Conventions + boundaries run here, not only in CI and the Claude edit hook,
+// because CONTRIBUTING.md points everyone at `npm run smoke:pack` before a PR.
+// The hook is Claude-only and CI needs a push; this is the one gate a human or a
+// Codex session actually runs locally. Both are sub-second.
+run('node', ['tools/check-conventions.mjs'], repoRoot)
+run('node', ['tools/check-feature-boundaries.mjs'], repoRoot)
+
 run('npm', ['run', 'build'], repoRoot)
 run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)
 
