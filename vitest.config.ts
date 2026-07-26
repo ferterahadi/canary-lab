@@ -129,9 +129,6 @@ export default defineConfig({
         //   (ids are index-prefixed, never collide/empty), pre-normalized `??`,
         //   always-present flowchart else, `cases[idx]` always-defined nullish.
         'apps/web-server/src/features/evaluation/logic/test-review-export.ts',
-        // heal-index enrichment: `path.relative(ROOT, x) || x` fallbacks (x is
-        //   never === ROOT) and `??`/ternary defaults the callers can't produce.
-        'apps/web-server/src/features/runs/logic/runtime/log-enrichment.ts',
         // feature-config route: value-type guards against a non-object config
         //   (readFeatureConfig always yields a plain object) + the `isWithin`
         //   path-traversal guards the slot-name regex already makes unreachable

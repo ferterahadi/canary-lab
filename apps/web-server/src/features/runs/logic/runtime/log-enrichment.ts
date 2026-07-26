@@ -41,9 +41,11 @@ export function capSliceWithMeta(
   const { text: compact, collapsedLines } = compressLogByTemplate(snippet)
   const compactBytes = Buffer.byteLength(compact, 'utf-8')
   if (compactBytes <= SLICE_HALF_BYTES * 2) {
-    const text = collapsedLines > 0
-      ? `${compact}\n… [${collapsedLines} repeated line(s) collapsed by template — full log at ${fullLogRelPath}] …`
-      : compact
+    // Getting here means the collapse shrank an over-budget slice, and the only
+    // way it can shrink one is by collapsing at least one line — otherwise it
+    // reproduces every line and merely appends a count suffix, so `compact`
+    // would be no smaller than the input we already know is over budget.
+    const text = `${compact}\n… [${collapsedLines} repeated line(s) collapsed by template — full log at ${fullLogRelPath}] …`
     return { text, capped: false, windowBytes: bytes }
   }
 
@@ -134,7 +136,9 @@ export function extractLogsForTest(
   slug: string,
   serviceLogs: string[],
 ): Record<string, string> {
-  return extractAllSlices([slug], serviceLogs).get(slug) ?? {}
+  // Always present: extractAllSliceRecords seeds an entry for every slug it is
+  // given before it reads a single log.
+  return extractAllSlices([slug], serviceLogs).get(slug)!
 }
 
 // Write per-failure slice files under <runDir>/failed/<slug>/<svc>.log and return
@@ -217,8 +221,11 @@ export function writeErrorFile(
     const dir = path.join(failedDir, slug)
     fs.mkdirSync(dir, { recursive: true })
     const filePath = path.join(dir, 'error.txt')
-    fs.writeFileSync(filePath, body.endsWith('\n') ? body : `${body}\n`)
-    return path.relative(ROOT, filePath) || filePath
+    // `body` joins trimmed parts, so it never already ends in a newline.
+    fs.writeFileSync(filePath, `${body}\n`)
+    // filePath always ends in /error.txt, so it is never ROOT itself and
+    // path.relative never returns the empty string here.
+    return path.relative(ROOT, filePath)
   } catch {
     return null
   }
@@ -379,7 +386,9 @@ export function enrichSummaryWithLogs(): { manifest: Manifest; summary: Enriched
 // ─── Heal Index ─────────────────────────────────────────────────────────────
 
 interface JournalEntry {
-  iteration?: number
+  // Always set: parseJournalMarkdown is the only producer and it reads the
+  // number straight out of a `\d+` capture in the heading.
+  iteration: number
   timestamp?: string
   hypothesis?: string
   outcome?: string | null
@@ -423,7 +432,8 @@ export function writeFullDiffPatch(
     fs.mkdirSync(dir, { recursive: true })
     const file = path.join(dir, `iteration-${iteration}.patch`)
     fs.writeFileSync(file, diff.endsWith('\n') ? diff : `${diff}\n`)
-    return path.relative(ROOT, file) || file
+    // Always diffs/iteration-N.patch under the journal dir, never ROOT itself.
+    return path.relative(ROOT, file)
   } catch {
     return null
   }
@@ -702,8 +712,8 @@ function readCrossRunFailureHistory(opts: {
     } catch { continue }
     inspected += 1
     for (const slug of opts.slugs) {
-      const c = counts.get(slug)
-      if (!c) continue
+      // `counts` was seeded from this same list, so every slug has an entry.
+      const c = counts.get(slug)!
       c.total += 1
       if (failedNames.has(slug)) c.failed += 1
     }
@@ -773,12 +783,11 @@ export function writeHealIndex(parsed?: {
   }
   if (manifest.featureDir) {
     lines.push(`Feature: ${path.relative(ROOT, manifest.featureDir) || manifest.featureDir}`)
-  } else if (manifest.feature ?? manifest.featureName) {
-    if (manifest.feature) {
-      lines.push(`Feature: ${manifest.feature}`)
-    } else if (manifest.featureName) {
-      lines.push(`Feature: ${manifest.featureName}`)
-    }
+  } else {
+    // `??` and not `||`: an explicitly empty `feature` means "no name", it does
+    // not fall through to `featureName`.
+    const name = manifest.feature ?? manifest.featureName
+    if (name) lines.push(`Feature: ${name}`)
   }
   if (manifest.repoPaths && manifest.repoPaths.length > 0) {
     lines.push(`Repos:   ${manifest.repoPaths.join(', ')}`)
@@ -857,12 +866,12 @@ export function writeHealIndex(parsed?: {
   const journalTail = readJournalTail(journalPath)
   if (journalTail.length > 0) {
     const parts = journalTail.map((e) => {
-      const iter = e.iteration !== undefined ? `#${e.iteration}` : ''
+      const iter = `#${e.iteration}`
       const outcome = e.outcome === null || e.outcome === undefined ? 'pending' : e.outcome
       const hyp = e.hypothesis ? truncateOneLine(e.hypothesis, 100) : '(no hypothesis)'
       return `${iter} ${hyp} → ${outcome}`.trim()
     })
-    lines.push(`Journal: ${parts.join('; ')}.  Full history: \`${path.relative(ROOT, journalPath) || journalPath}\`.`)
+    lines.push(`Journal: ${parts.join('; ')}.  Full history: \`${path.relative(ROOT, journalPath)}\`.`)
     lines.push('')
   }
 

@@ -92,7 +92,7 @@ describe('parseJournalMarkdown', () => {
     expect(entries[0].hypothesis).toBe('broke')
     expect(entries[0].signal).toBe('.restart')
     // The unrecognized field produced no property on the entry.
-    expect((entries[0] as Record<string, unknown>).customKey).toBeUndefined()
+    expect((entries[0] as unknown as Record<string, unknown>).customKey).toBeUndefined()
   })
 })
 
@@ -1746,6 +1746,31 @@ describe('enrichSummaryWithLogs', () => {
       if (prevEnv === undefined) delete process.env.CANARY_LAB_SUMMARY_PATH
       else process.env.CANARY_LAB_SUMMARY_PATH = prevEnv
       try { fs.rmSync(runDir, { recursive: true, force: true }) } catch { /* ignore */ }
+    }
+  })
+})
+
+describe('cross-run flake history when the runs root is unreadable', () => {
+  it('omits the history rather than failing the heal index', () => {
+    // The heal index is written into a run dir whose PARENT (the runs root the
+    // history scan walks) does not exist. A run that cannot look at its
+    // siblings must still get an index — losing the flake line is acceptable,
+    // losing the agent's instructions is not.
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-le-'))
+    const healIndexPath = path.join(base, 'missing-root', 'run-1', 'heal-index.md')
+    try {
+      writeHealIndex({
+        manifest: { feature: 'demo' },
+        summary: { failed: [{ name: 'test-case-a', error: { message: 'boom' } }] },
+        healIndexPath,
+        journalPath: path.join(base, 'missing-root', 'run-1', 'journal.md'),
+      })
+
+      const written = fs.readFileSync(healIndexPath, 'utf-8')
+      expect(written).toContain('## Failures')
+      expect(written).not.toContain('flaky')
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true })
     }
   })
 })
