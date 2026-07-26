@@ -36,7 +36,7 @@ beforeEach(() => {
   vi.mocked(api.getProjectConfig).mockReset()
   vi.mocked(api.putProjectConfig).mockReset()
   vi.mocked(api.changeProjectPort).mockReset()
-  vi.mocked(api.getGhStatus).mockReset().mockResolvedValue({ installed: true, authenticated: true, account: 'ferterahadi-oddle', host: 'github.com' })
+  vi.mocked(api.getGhStatus).mockReset().mockResolvedValue({ installed: true, authenticated: true, account: 'ferterahadi-acme', host: 'github.com' })
   vi.mocked(api.listWorkspaceDirs).mockReset().mockResolvedValue({
     root: '/tmp/wiki',
     at: '',
@@ -59,7 +59,7 @@ describe('SettingsModal', () => {
     await act(async () => { root.render(<SettingsModal onClose={vi.fn()} />) })
     await act(async () => {})
     const gh = container.querySelector('[data-testid="settings-github"]')
-    expect(gh?.textContent).toContain('Connected as ferterahadi-oddle')
+    expect(gh?.textContent).toContain('Connected as ferterahadi-acme')
     // Auth can change outside the app — the Refresh button re-detects.
     vi.mocked(api.getGhStatus).mockResolvedValue({ installed: true, authenticated: false })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="settings-github-refresh"]')?.click() })

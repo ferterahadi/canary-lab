@@ -27,8 +27,8 @@ let root: Root
 
 const TARGETS = {
   targets: [
-    { id: 'api', name: 'oddle-merchant-pass' },
-    { id: 'oms', name: 'oddlefnb' },
+    { id: 'api', name: 'acme-merchant-pass' },
+    { id: 'oms', name: 'acmefnb' },
   ],
   targetUrls: { api: 'http://localhost:3000' },
 }
@@ -107,7 +107,7 @@ describe('VerificationDialog', () => {
     await render()
 
     // Hand-edit one URL; the other keeps what `local` seeded.
-    const edited = dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for oddle-merchant-pass"]')!
+    const edited = dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for acme-merchant-pass"]')!
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
     await act(async () => {
       setter.call(edited, 'https://mine.example.com/health')
@@ -116,8 +116,8 @@ describe('VerificationDialog', () => {
 
     vi.mocked(getVerificationTargets).mockResolvedValue({
       targets: [
-        { id: 'api', name: 'oddle-merchant-pass' },
-        { id: 'oms', name: 'oddlefnb' },
+        { id: 'api', name: 'acme-merchant-pass' },
+        { id: 'oms', name: 'acmefnb' },
         { id: 'gateway', name: 'gateway' },
       ],
       targetUrls: {
@@ -134,11 +134,11 @@ describe('VerificationDialog', () => {
     })
 
     // The hand-edited URL survives…
-    expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for oddle-merchant-pass"]')?.value)
+    expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for acme-merchant-pass"]')?.value)
       .toBe('https://mine.example.com/health')
     // …the untouched one is actually SWAPPED for staging's (the whole point —
     // the old merge left it on localhost forever)…
-    expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for oddlefnb"]')?.value)
+    expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for acmefnb"]')?.value)
       .toBe('https://oms.staging.example.com')
     // …and a service only staging knows about arrives seeded.
     expect(dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for gateway"]')?.value)
@@ -167,9 +167,9 @@ describe('VerificationDialog', () => {
   it('lists each service with its health-check URL and counts the configured ones', async () => {
     await render()
 
-    const urlInput = dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for oddle-merchant-pass"]')
+    const urlInput = dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for acme-merchant-pass"]')
     expect(urlInput?.value).toBe('http://localhost:3000')
-    const empty = dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for oddlefnb"]')
+    const empty = dialog().querySelector<HTMLInputElement>('input[aria-label="Health-check URL for acmefnb"]')
     expect(empty?.value).toBe('')
     expect(dialog().textContent).toContain('1 of 2 with a URL')
   })

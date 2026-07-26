@@ -26,13 +26,13 @@ const fixCapture: RunFixCapture = {
   repos: [{ repoName: 'fnb', patchPath: '/r/fixes/fnb.patch', patchFile: 'fnb.patch', repoRoot: '/repos/fnb', baseSha: 'abc', files: 2 }],
 }
 
-const connected: GhStatus = { installed: true, authenticated: true, account: 'ferterahadi-oddle', host: 'github.com' }
+const connected: GhStatus = { installed: true, authenticated: true, account: 'ferterahadi-acme', host: 'github.com' }
 
 function deps(over: Partial<PrPreflightDeps> = {}): PrPreflightDeps {
   return {
     ghStatus: async () => connected,
     pushRights: async () => ({ pushable: true }),
-    originUrl: () => 'git@github.com:oddle-engineering/oddlefnb.git',
+    originUrl: () => 'git@github.com:acme-engineering/acmefnb.git',
     baseBranch: () => 'development',
     ...over,
   }
@@ -46,7 +46,7 @@ describe('buildPrPreflight', () => {
       repoName: 'fnb',
       pushable: true,
       base: 'development',
-      origin: { owner: 'oddle-engineering', name: 'oddlefnb', host: 'github.com' },
+      origin: { owner: 'acme-engineering', name: 'acmefnb', host: 'github.com' },
     })
     expect(pre.repos[0].blocked).toBeUndefined()
   })
@@ -73,7 +73,7 @@ describe('buildPrPreflight', () => {
     const pre = await buildPrPreflight(fixCapture, deps({ pushRights: async () => ({ pushable: false }) }))
     expect(pre.repos[0].pushable).toBe(false)
     expect(pre.repos[0].blocked?.reason).toBe('wrong-account')
-    expect(pre.repos[0].blocked?.detail).toContain('ferterahadi-oddle')
+    expect(pre.repos[0].blocked?.detail).toContain('ferterahadi-acme')
   })
 
   it('prefers the push-rights reason, and omits detail when neither it nor an account is known', async () => {
@@ -119,9 +119,9 @@ describe('buildPrPreflight — uninjected git probes', () => {
   const ghDeps = { ghStatus: async () => connected, pushRights: async () => ({ pushable: true }) }
 
   it('reads origin and the base branch straight off the repo', async () => {
-    const root = tmpRepo('git@github.com:oddle-engineering/oddlefnb.git')
+    const root = tmpRepo('git@github.com:acme-engineering/acmefnb.git')
     const pre = await buildPrPreflight(captureFor(root), ghDeps)
-    expect(pre.repos[0].origin).toEqual({ owner: 'oddle-engineering', name: 'oddlefnb', host: 'github.com' })
+    expect(pre.repos[0].origin).toEqual({ owner: 'acme-engineering', name: 'acmefnb', host: 'github.com' })
     expect(pre.repos[0].base).toBe('main')
     expect(pre.anyPushable).toBe(true)
   })
@@ -142,12 +142,12 @@ describe('buildPrPreflight — uninjected git probes', () => {
     // under test here — not just unused fallbacks.
     ghMocks.detectGhStatus.mockClear()
     ghMocks.detectRepoPushRights.mockClear()
-    const root = tmpRepo('git@github.com:oddle-engineering/oddlefnb.git')
+    const root = tmpRepo('git@github.com:acme-engineering/acmefnb.git')
 
     const pre = await buildPrPreflight(captureFor(root))
 
     expect(ghMocks.detectGhStatus).toHaveBeenCalledTimes(1)
-    expect(ghMocks.detectRepoPushRights).toHaveBeenCalledWith('oddle-engineering', 'oddlefnb')
+    expect(ghMocks.detectRepoPushRights).toHaveBeenCalledWith('acme-engineering', 'acmefnb')
     expect(pre.gh.account).toBe('default-account')
     expect(pre.anyPushable).toBe(true)
   })

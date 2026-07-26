@@ -16,10 +16,10 @@ function fakeRunner(map: Record<string, GhResult>): (args: string[]) => Promise<
 
 describe('parseGitHubRemote', () => {
   it('parses ssh and https github remotes', () => {
-    expect(parseGitHubRemote('git@github.com:oddle-engineering/oddlefnb.git'))
-      .toEqual({ host: 'github.com', owner: 'oddle-engineering', name: 'oddlefnb' })
-    expect(parseGitHubRemote('https://github.com/oddle-engineering/oddle-merchant-pass'))
-      .toEqual({ host: 'github.com', owner: 'oddle-engineering', name: 'oddle-merchant-pass' })
+    expect(parseGitHubRemote('git@github.com:acme-engineering/acmefnb.git'))
+      .toEqual({ host: 'github.com', owner: 'acme-engineering', name: 'acmefnb' })
+    expect(parseGitHubRemote('https://github.com/acme-engineering/acme-merchant-pass'))
+      .toEqual({ host: 'github.com', owner: 'acme-engineering', name: 'acme-merchant-pass' })
   })
   it('returns null for an unrecognized remote', () => {
     expect(parseGitHubRemote('file:///tmp/local-repo')).toBeNull()
@@ -38,9 +38,9 @@ describe('detectGhStatus', () => {
   it('parses the account + host from auth status (newer phrasing)', async () => {
     const status = detectGhStatus(fakeRunner({
       '--version': ok('gh 2.62'),
-      'auth status': ok('', 'github.com\n  ✓ Logged in to github.com account ferterahadi-oddle (keyring)\n  - Token: gho_****'),
+      'auth status': ok('', 'github.com\n  ✓ Logged in to github.com account ferterahadi-acme (keyring)\n  - Token: gho_****'),
     }))
-    expect(await status).toEqual({ installed: true, authenticated: true, host: 'github.com', account: 'ferterahadi-oddle' })
+    expect(await status).toEqual({ installed: true, authenticated: true, host: 'github.com', account: 'ferterahadi-acme' })
   })
   it('parses the older "as <user>" phrasing', async () => {
     const status = await detectGhStatus(fakeRunner({

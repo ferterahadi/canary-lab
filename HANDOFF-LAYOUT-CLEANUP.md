@@ -18,7 +18,7 @@ are path-traversal or CLI-boot guards that should stay excluded rather than be
 deleted for a percentage. See the closing sections.
 
 **Branch:** `release/1.6.0`, pushed and in sync with `origin` at `39bbacc`. Work
-in the **main checkout** at `/Users/oddle/Documents/canary-lab` — `git worktree
+in the **main checkout** at `~/Documents/canary-lab` — `git worktree
 list` should show it alone; the three stale worktrees this document used to warn
 about are gone.
 

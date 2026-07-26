@@ -10,7 +10,7 @@ describe('portify overlay naming', () => {
 
   it('slugifies a repo name into a filesystem-safe patch filename', () => {
     expect(patchFileName('todo-api')).toBe('todo-api.patch')
-    expect(patchFileName('Oddle FnB')).toBe('oddle-fnb.patch')
+    expect(patchFileName('Acme FnB')).toBe('acme-fnb.patch')
     expect(patchFileName('acme_web.service')).toBe('acme-web-service.patch')
   })
 
