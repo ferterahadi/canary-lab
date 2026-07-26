@@ -3,9 +3,10 @@
 **Scope:** repository layout and module ownership. **No behavior changes.**
 Every item below is a move, a rename, a generator, or a declaration.
 
-**Status:** Phases 0–7 are **done and committed**. Phase 8 has **steps 1, 3, 4, 5
-and 6 done** and step 2 partly done (one of five clusters); Phase 9 has not
-started. The one
+**Status:** **All phases are done.** Phase 8 step 2 stopped deliberately at the
+point where the remainder stops being a layout move — see the coupling table
+below. Phase 9 is complete: 9 web barrels, `npm run check:boundaries`, and the
+convention section in `docs/ARCHITECTURE.md`. The one
 non-layout item (a public-repo privacy exposure) is **resolved** — the history
 was rewritten on 2026-07-26, so **every SHA below is post-rewrite**.
 
@@ -289,41 +290,79 @@ against the `broken_todo_api` sample (`start_run` with `claim_heal` →
 
 ---
 
-## Phase 9 — Barrels + boundary lint (~2 h)
+## Phase 9 — Barrels + boundary lint ✅ done (`08dcc8d`, `4452875`)
 
-**Do this last.** Server features already have barrels (Phase 6 gave all 10 an
-`index.ts`), so the remaining work is:
+**The framing was wrong: most of the 57 cross-feature imports were not
+coupling.** They were shared modules filed inside whichever feature needed them
+first — the same shape as the server-side `feature-loader` in Phase 8 step 5.
+Enumerating them before writing any lint is what surfaced this.
 
-1. **Web barrels — 0 of 10 features expose an `index.ts`.** Give each one a public
-   surface.
-2. **Boundary lint** forbidding cross-feature imports so the seam cannot re-erode.
+| Moved to `shared/` | Edges removed |
+| --- | --- |
+| `config/components/atoms.tsx` → `shared/ui/atoms.tsx` | 17 |
+| `features/agent-sessions/**` → `shared/ui/` + `shared/api/` | 6 |
+| `runs/components/external-client-branding` → `shared/ui/` | 4 |
+| `runs/api/workspace-socket` → `shared/api/` | 2 |
+| `runs/components/ExternalAgentCard` → `shared/ui/` | 1 |
 
-   > **⚠ "web 0" was a measurement artifact — web has 57.** The earlier count
-   > looked for the relative spelling `../../<other-feature>/…`, which is genuinely
-   > 0 — but only because the Phase 2 codemod rewrote every one of them to
-   > `@/features/<other>/…`. The coupling was renamed, not removed. **A lint
-   > written against `../../` passes trivially while changing nothing.** Target the
-   > aliased form:
-   >
-   > ```bash
-   > for d in apps/web/src/features/*/; do n=$(basename "$d");
-   >   grep -rhoE "from '@/features/[a-z-]+" "$d" --include='*.ts*' \
-   >     | sed "s|from '@/features/||" | grep -v "^$n\$"; done | wc -l
-   > ```
-   >
-   > Today: flights 23, runs 11, coverage 5, evaluation 5, config 4, benchmark 3,
-   > portify 3, wizard 3 — **57 total**, vs **server 257**. Some are deliberate
-   > (`TestRunPanel.tsx` in flights reuses the runs feature's `RunRow` on purpose),
-   > so decide what the rule permits before writing it.
-3. **The missing convention doc** in `docs/ARCHITECTURE.md`: which per-feature
-   subdirs are required and which are optional. Today the convention is nominal —
-   `logic/` is universal, `routes/` is absent from `agent-sessions`, `ws/` exists in
-   4 of 10 server features, and web `config` is ~6,000 lines of components with no
-   state or api layer. A feature with no realtime surface *should not* have an empty
-   `ws/`; the problem is that nothing says so, so nothing can check it.
+`atoms.tsx` was the clearest: 17 importers from features with nothing to do with
+config, exporting `StatusDot`, `TextInput`, `Toggle`, `Select`, `Section`,
+`IconButton` and the icon set. `DESIGN-SYSTEM.md` already called it a shared
+primitive while linking into the config feature.
 
-Note the server barrels are **registrars**, not re-export barrels — `register(app,
-ctx)` plus a returned handle. If you add re-exports, don't break that contract.
+**`agent-sessions` was not a feature** — one component, one socket module,
+imported nothing from any feature, consumed by six. It is now two files under
+`shared/` and web is down to **9 features**.
+
+| Metric | Before | After |
+| --- | --- | --- |
+| cross-feature imports | 57 | **20** (18 via barrel, 2 exempt) |
+| mutual pairs | 3 | **1** |
+| web barrels | 0/10 | **9/9** |
+| web features | 10 | 9 |
+
+### Why the mutual pairs had to go first
+
+Routing **both** directions of a mutually-dependent pair through barrels is an
+ESM module-init cycle, so the barrels would have been unsafe. Two pairs dissolved
+because the module in the middle was shared infrastructure. The survivor,
+`coverage ⇄ flights`, is real domain interlinking (the flight page embeds
+coverage's docs rail; the coverage page renders flight stage chips) and stays
+deep as the single recorded exemption.
+
+### The check
+
+`npm run check:boundaries` (`tools/check-feature-boundaries.mjs`) fails on three
+things, **all three mutation-tested rather than assumed**:
+
+1. a deep cross-feature import
+2. a consumed feature with no barrel
+3. a **stale entry in its own `ALLOWED_DEEP` allowlist** — an allowlist nothing
+   checks is exactly how this rule would have rotted
+
+Barrels were **generated from the surface other features already import**, not
+hand-written: a barrel re-exporting more than is consumed is a wish, not a public
+API. `runs` is widest at 20 symbols across 10 modules, which reflects flights
+deliberately mirroring the run feature.
+
+### Traps this phase hit
+
+- **Two shared aliases.** `@shared/` is the repo-root `shared/` package; the web
+  app's own is `@/shared/`. Using the wrong one produced 54 "cannot find module"
+  errors — loud, but a *lint* written against the wrong alias would instead pass
+  while enforcing nothing.
+- **`shared/api/**` is inside the coverage gate; `features/*/api/**` is not.**
+  Moving a module there pulls it into the gate. `workspace-socket` was already at
+  100%; `agent-session-socket` needed three tests first.
+- **Verify with a real production build**, not just the unit suite — an init
+  cycle need not show up in tests.
+
+### Known gate flake (pre-existing, unrelated)
+
+`dirty-specs/watcher.ts:45` — the debounce-coalescing arm only fires when two
+filesystem events land inside the debounce window, so a run can report 99.99%
+with that one branch missed. Passes on a re-run. Worth pinning with a
+deterministic test rather than living with it.
 
 ---
 
