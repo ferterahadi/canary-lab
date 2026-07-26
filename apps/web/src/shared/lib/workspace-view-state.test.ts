@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null, ...partial }
 }
 
 beforeEach(() => {
@@ -30,6 +30,31 @@ describe('workspace-view-state (R12)', () => {
     expect(window.location.search).toContain('feature=checkout')
     // A fresh read (as on refresh) recovers the same state from the URL.
     expect(readPersistedView()).toEqual(view({ view: 'coverage', feature: 'checkout' }))
+  })
+
+  // R82: `test` names WHICH failing test the run detail lands on. It qualifies a
+  // selected run, so it round-trips with one and is dropped without one.
+  it('round-trips the focused test alongside its run', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', focusTest: 'test-case-req-r4-otp-guard' }))
+    expect(window.location.search).toContain('run=7cvh')
+    expect(window.location.search).toContain('test=test-case-req-r4-otp-guard')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: '7cvh', focusTest: 'test-case-req-r4-otp-guard' }))
+  })
+
+  it('drops the focused test when no run is selected', () => {
+    persistView(view({ feature: 'checkout', focusTest: 'test-case-req-r4-otp-guard' }))
+    expect(window.location.search).not.toContain('test=')
+    expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  it('ignores a stray test param on a URL with no run', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&test=test-case-orphan')
+    expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  it('keeps the focused test OUT of localStorage (URL-only tier)', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', focusTest: 'test-case-req-r4-otp-guard' }))
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: 'checkout' })
   })
 
   it('mirrors the durable tier to localStorage so other tabs can read it', () => {

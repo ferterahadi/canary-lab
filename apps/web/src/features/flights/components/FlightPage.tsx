@@ -82,7 +82,7 @@ const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
  *  drills through `onOpenConfig` to the Ports tab, so FlightPage never opens
  *  the portify wizard itself. */
 export interface FlightDrillThroughs {
-  onOpenRun?: (feature: string, runId: string) => void
+  onOpenRun?: (feature: string, runId: string, focusTest?: string) => void
   onOpenCoverage?: (feature: string) => void
 }
 

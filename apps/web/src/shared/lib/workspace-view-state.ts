@@ -62,6 +62,14 @@ export interface PersistedView {
   /** Tab qualifier for `dialog: 'config'` — which config tab is open
    *  (URL only; dropped unless the config dialog is the open one). */
   configTab: ConfigTab | null
+  /** Test qualifier for `run` — WHICH failing test the run detail should land on
+   *  (URL only; dropped unless a run is selected). R82: a flight's Test Run stage
+   *  lists the failures as a summary and clicking one opens it here, so the
+   *  destination has to carry which one was clicked. The value is the run
+   *  summary's failed-entry `name`, the same key the Playwright tab matches
+   *  playback tests on. An unknown name simply doesn't match — the tab opens
+   *  unscrolled rather than blank. */
+  focusTest: string | null
 }
 
 /** The cross-tab/localStorage-mirrored subset — the durable nav tier only. */
@@ -89,7 +97,7 @@ function setOrDelete(params: URLSearchParams, key: string, value: string | null)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog are never mirrored there). */
@@ -108,10 +116,12 @@ export function readPersistedView(): PersistedView {
     // `tab` only qualifies the config dialog — dropped elsewhere, and an
     // unknown tab name is ignored (falls back to the entry point's default).
     const configTab = dialog === 'config' ? parseConfigTab(params.get('tab')) : null
+    // `test` only qualifies a selected run — dropped elsewhere.
+    const focusTest = run ? params.get('test') || null : null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight, draft, configTab }
-    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null, draft, configTab }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, draft, configTab, focusTest }
+    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null, draft, configTab, focusTest }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -145,6 +155,9 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'draft', state.dialog === 'draft' ? state.draft : null)
     // `tab` only qualifies the config dialog — drop it otherwise.
     setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
+    // `test` only qualifies a selected run — drop it otherwise, so switching runs
+    // can't leave a previous run's failure pinned in the URL.
+    setOrDelete(params, 'test', state.run ? state.focusTest : null)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)

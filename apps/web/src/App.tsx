@@ -47,6 +47,7 @@ export function App() {
     draftFor, setDraftFor,
     resumePlanTaskId, setResumePlanTaskId,
     portifyTarget, setPortifyTarget,
+    focusTest,
     openFlight, navigateToRun, selectStartedRun,
     pendingRunSelectionRef, selectedFeatureRef, selectedRunIdRef,
   } = nav
@@ -294,7 +295,16 @@ export function App() {
               onVerifyOpenChange={setVerifyOpen}
             />
           )}
-          bottom={<RunDetailColumn runId={selectedRunId} onOpenPlaywrightSettings={(f) => setConfigFor(f, 'playwright')} totalTests={specTotalTests} />}
+          bottom={(
+            <RunDetailColumn
+              runId={selectedRunId}
+              onOpenPlaywrightSettings={(f) => setConfigFor(f, 'playwright')}
+              totalTests={specTotalTests}
+              /* Honoured only when the focus belongs to the run being shown, so a
+                 stale pair from a previous selection can't scroll this one. */
+              {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test } : {})}
+            />
+          )}
         />
       ),
     },
@@ -360,12 +370,11 @@ export function App() {
               onOpenConfig={(feature, tab) => { setSelectedFeature(feature); setConfigFor(feature, tab ?? null) }}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
-              onOpenRun={(feature, runId) => {
-                pendingRunSelectionRef.current = null
-                setSelectedFeature(feature)
-                setSelectedRunId(runId)
-                setView('workspace')
-              }}
+              /* R82: `focusTest` is a run-summary failed-entry name — the flight's
+                 Test Run stage passes the failure the user clicked, and the run
+                 detail lands on it. navigateToRun does exactly what this handler
+                 used to inline, plus the focus pairing. */
+              onOpenRun={(feature, runId, focusTest) => navigateToRun(feature, runId, focusTest)}
               onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
             />

@@ -717,11 +717,50 @@ describe('stage summary + drill-through (R6)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
     })
+    // No counts in this stage's evidence (older flight) → falls back to naming
+    // the verdict rather than inventing a score.
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Run run-9 passed.')
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-run"]')?.click()
-    })
+    const drill = container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-run"]')
+    // R82: the drill names WHICH run it opens, now that previous runs list below.
+    expect(drill?.textContent).toContain('Latest run')
+    await act(async () => { drill?.click() })
     expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9')
+  })
+
+  it('R82: clicking a failing test drills to the run detail carrying that test as the focus', async () => {
+    const onOpenRun = vi.fn()
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: { runId: 'run-9', status: 'failed', healCycles: 1 },
+      summary: {
+        complete: true,
+        total: 23,
+        passed: 2,
+        failed: [
+          { id: 'f1', name: 'test-case-req-r4-path-sad-otp-guard', location: '/ws/e2e/otp.spec.ts:199' },
+          { id: 'f2', name: 'test-case-req-r5-path-happy-clean-number', location: '/ws/e2e/blocklist.spec.ts:176' },
+        ],
+      },
+    })
+    await renderWithDrill(manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'failed', healCycles: 1 } } : {}),
+      })),
+    }), { onOpenRun })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    // The SECOND failure, to prove the clicked row's identity travels — not just
+    // "some test" or the first one.
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="failing-open-test-case-req-r5-path-happy-clean-number"]')?.click()
+    })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', 'test-case-req-r5-path-happy-clean-number')
   })
 
   it('R80: a run repaired by an external client shows an honest external-heal note in the hero', async () => {

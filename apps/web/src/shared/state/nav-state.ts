@@ -54,6 +54,11 @@ export interface NavState {
   resumePlanTaskId: string | null
   /** The embedded portify workflow, if open. */
   portifyTarget: PortifyTarget | null
+  /** R82: which failing test the run detail should land on, paired with the run
+   *  it belongs to. Stored as a PAIR so selecting a different run makes the focus
+   *  inert automatically — no clearing effect to keep in sync, and the run detail
+   *  only honours a focus whose `runId` is the run it is showing. */
+  focusTest: { runId: string; test: string } | null
 }
 
 /** Build the initial nav state from a hydrated PersistedView (URL/localStorage). */
@@ -74,6 +79,9 @@ export function initialNavState(persisted: PersistedView): NavState {
     draftFor: persisted.dialog === 'draft' ? persisted.draft : null,
     resumePlanTaskId: null,
     portifyTarget: null,
+    focusTest: persisted.run && persisted.focusTest
+      ? { runId: persisted.run, test: persisted.focusTest }
+      : null,
   }
 }
 
@@ -99,6 +107,9 @@ export function navToPersistedView(state: NavState): PersistedView {
     flight: state.flight,
     draft: state.draftFor,
     configTab: state.configTab,
+    // Only the CURRENT run's focus reaches the URL — a stale pair from a
+    // previously-selected run is dropped rather than pinned.
+    focusTest: state.focusTest?.runId === state.run ? state.focusTest.test : null,
   }
 }
 

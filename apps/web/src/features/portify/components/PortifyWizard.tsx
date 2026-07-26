@@ -805,29 +805,4 @@ function FailedScreen({ m, onClose }: { m: PortifyManifest; onClose: () => void 
   )
 }
 
-// Shown in place of the diff when the verified rewrite produced no edits — the
-// apps already read injected ports, so portify is a no-op overlay. A reassuring
-// success state, not a "missing data" apology.
-function NoChangesNeeded({ feature }: { feature: string }) {
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: 9,
-      padding: '30px 26px', background: 'var(--bg-base)',
-      border: '1px solid var(--border-default)', borderRadius: 'var(--radius-md)',
-    }}>
-      <span style={{
-        width: 36, height: 36, borderRadius: 9999, display: 'grid', placeItems: 'center',
-        background: 'color-mix(in srgb, var(--success) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
-        color: 'var(--success)', fontSize: 17, lineHeight: 1,
-      }}>✓</span>
-      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>
-        No changes needed
-      </div>
-      <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6, maxWidth: 380 }}>
-        <b style={{ color: 'var(--text-secondary)' }}>{feature}</b> already reads injected ports — nothing to rewrite. Saved as a no-op overlay.
-      </div>
-    </div>
-  )
-}
-
 const mono: React.CSSProperties = { fontFamily: 'var(--font-mono)', fontSize: 12, background: 'var(--bg-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-sm)', padding: '1px 5px' }

@@ -23,6 +23,7 @@ const base: NavState = {
   draftFor: null,
   resumePlanTaskId: null,
   portifyTarget: null,
+  focusTest: null,
 }
 
 const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
@@ -33,6 +34,7 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   flight: null,
   draft: null,
   configTab: null,
+  focusTest: null,
   ...over,
 })
 
@@ -80,6 +82,27 @@ describe('initialNavState', () => {
   })
 })
 
+// R82: the focused test is stored as a PAIR with its run, so a focus can never
+// apply to a run it did not come from — no clearing effect to keep in sync.
+describe('focused test (R82)', () => {
+  it('pairs the persisted test with the persisted run', () => {
+    const s = initialNavState(persisted({ feature: 'checkout', run: 'run-1', focusTest: 'test-case-otp' }))
+    expect(s.focusTest).toEqual({ runId: 'run-1', test: 'test-case-otp' })
+  })
+
+  it('drops a test that arrived without a run', () => {
+    expect(initialNavState(persisted({ feature: 'checkout', focusTest: 'test-case-otp' })).focusTest).toBeNull()
+  })
+
+  it('serializes only a focus belonging to the CURRENT run', () => {
+    const mine: NavState = { ...base, run: 'run-1', focusTest: { runId: 'run-1', test: 'test-case-otp' } }
+    expect(navToPersistedView(mine).focusTest).toBe('test-case-otp')
+    // Selecting another run makes the stale pair inert rather than pinning it.
+    const stale: NavState = { ...base, run: 'run-2', focusTest: { runId: 'run-1', test: 'test-case-otp' } }
+    expect(navToPersistedView(stale).focusTest).toBeNull()
+  })
+})
+
 describe('routedDialog precedence (z-order)', () => {
   it('is null with nothing open', () => {
     expect(routedDialog(base)).toBeNull()
@@ -115,12 +138,12 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null, configTab: 'ports' })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null, configTab: 'ports', focusTest: null })
   })
 
   it('projects the open draft id + dialog=draft', () => {
     const s: NavState = { ...base, draftFor: 'dr_9' }
-    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9', configTab: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9', configTab: null, focusTest: null })
   })
 })
 

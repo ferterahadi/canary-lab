@@ -52,15 +52,23 @@ export function RunDetailColumn({
   runId,
   onOpenPlaywrightSettings,
   totalTests,
+  focusTest,
 }: {
   runId: string | null
   onOpenPlaywrightSettings?: (feature: string) => void
   totalTests?: number
+  /** R82: a failing test to land on — the run-summary failed-entry `name` a
+   *  flight's Test Run stage was clicked on. Opens the Playwright tab and scrolls
+   *  that test's card into view. Routed as `?run=…&test=…`, so a refresh or a
+   *  pasted link lands in the same place. */
+  focusTest?: string
 }) {
   // The journal refetches on `journal-changed` for THIS run (scoped so a bump
   // for another run doesn't reload it).
   const journalRefreshKey = useInvalidationKey('journal', runId ?? undefined)
-  const [tab, setTab] = useState<Tab>('overview')
+  // Arriving with a focused failure means the Playwright tab IS the destination —
+  // opening on Overview would hide the thing that was clicked.
+  const [tab, setTab] = useState<Tab>(focusTest ? 'playwright' : 'overview')
   const [serviceIdx, setServiceIdx] = useState(0)
   const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
   const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
@@ -109,6 +117,11 @@ export function RunDetailColumn({
   const executionType = detail?.manifest.executionType ?? 'run'
   const isVerifyRun = executionType === 'verify'
   const isBootRun = executionType === 'boot'
+  // A later focus (clicking a second failure while this run is already open)
+  // switches back to the tab that can show it.
+  useEffect(() => {
+    if (focusTest) setTab('playwright')
+  }, [focusTest, runId])
   useEffect(() => {
     if (isVerifyRun && tab !== 'overview' && tab !== 'playwright') setTab('overview')
     // A boot-only session has no Playwright / heal / journal — keep the user on
@@ -232,6 +245,7 @@ export function RunDetailColumn({
             summary={detail.summary}
             diagnostics={m.verification?.diagnostics}
             totalTests={totalTests}
+            {...(focusTest ? { focusTest } : {})}
           />
         )}
         {/* Always rendered, hidden via display:none when another tab is active.
@@ -679,6 +693,7 @@ function PlaywrightPanel({
   summary,
   diagnostics,
   totalTests,
+  focusTest,
 }: {
   runId: string
   view: PlaywrightView
@@ -690,6 +705,8 @@ function PlaywrightPanel({
   summary?: RunSummary
   diagnostics?: VerificationDiagnostics
   totalTests?: number
+  /** R82: forwarded to the playback list, which scrolls this test into view. */
+  focusTest?: string
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -708,7 +725,7 @@ function PlaywrightPanel({
         {view === 'playback' && (
           <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
             {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
-            <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} totalTests={totalTests} embedded />
+            <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
           </div>
         )}
       </div>
@@ -934,6 +951,7 @@ export function PlaywrightPlayback({
   summary,
   totalTests,
   embedded = false,
+  focusTest,
 }: {
   events?: PlaywrightPlaybackEvent[]
   artifactGroups?: PlaywrightArtifactGroup[]
@@ -942,7 +960,21 @@ export function PlaywrightPlayback({
   summary?: RunSummary
   totalTests?: number
   embedded?: boolean
+  /** R82: land on this test — matched against the playback test `name`, the same
+   *  key `currentPlaybackIndex` compares against `summary.running`. An unknown
+   *  name matches nothing and the list simply renders unscrolled. */
+  focusTest?: string
 }) {
+  // Scroll the focused test into view once it exists. Keyed on the name (not a
+  // mount-once effect) so clicking a SECOND failure while this list is already
+  // open re-scrolls, and so the scroll still happens when playback events arrive
+  // after the first render.
+  const focusRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!focusTest) return
+    focusRef.current?.scrollIntoView({ block: 'center' })
+  }, [focusTest, events])
+
   const tests = playbackTests(events)
   if (tests.length === 0) {
     return <EmptyPane title="No playback events captured yet." body="Use Terminal for older runs or runs that ended before structured Playwright events were written." />
@@ -966,10 +998,15 @@ export function PlaywrightPlayback({
           const traceArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'trace')
           const videoArtifacts = playbackArtifacts.links.filter((artifact) => artifact.kind === 'video')
           const isCurrent = idx === activeIndex
+          const isFocused = focusTest != null && test.name === focusTest
           return (
             <div
               key={`${test.name}:${test.retry ?? 0}:${test.startedAt ?? ''}`}
-              className="cl-card p-3"
+              {...(isFocused ? { 'data-focus-test': test.name } : {})}
+              ref={isFocused ? focusRef : undefined}
+              /* The landing marker: a left accent edge, not a wash — enough to
+                 catch the eye after the scroll without recolouring the card. */
+              className={`cl-card p-3${isFocused ? ' border-l-2 border-l-accent' : ''}`}
             >
               <div className="flex min-w-0 flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">

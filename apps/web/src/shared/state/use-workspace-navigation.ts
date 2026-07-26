@@ -72,8 +72,13 @@ export interface WorkspaceNavigation {
   setPortifyTarget: (t: PortifyTarget | null) => void
   /** Open a flight's detail (null = the flights landing list). */
   openFlight: (flightId: string | null) => void
-  /** Select a run in the workspace (clears any pending selection guard). */
-  navigateToRun: (feature: string, runId: string) => void
+  /** Select a run in the workspace (clears any pending selection guard).
+   *  `focusTest` (R82) is a run-summary failed-entry name: the run detail opens on
+   *  its Playwright tab, scrolled to that test. */
+  navigateToRun: (feature: string, runId: string, focusTest?: string) => void
+  /** R82: which failing test the open run detail should land on, or null. Paired
+   *  with its run so a stale focus can never apply to a different one. */
+  focusTest: { runId: string; test: string } | null
   /** Select a freshly-started run into the detail pane (seeds the pending ref). */
   selectStartedRun: (runId: string) => void
   /** Mirror refs read synchronously by the WS handler / refreshFeatures so those
@@ -112,6 +117,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [draftFor, setDraftFor] = useState<string | null>(SEED.draftFor)
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
+  const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
 
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED.run)
   const selectedFeatureRef = useRef<string | null>(null)
@@ -133,6 +139,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     draftFor,
     resumePlanTaskId,
     portifyTarget,
+    focusTest,
   }
   const dialog = routedDialog(state)
 
@@ -147,7 +154,10 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // URL's `draft` param stale. configTab is listed for the same reason — the
     // dialog stays 'config' while the user switches tabs inside it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor, configTab])
+    // focusTest is listed for the same reason as draftFor/configTab: the run
+    // stays the same while the focused test changes, so keying on selectedRunId
+    // alone would leave the URL's `test` param stale.
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor, configTab, focusTest])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -160,10 +170,13 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setView('flights')
   }, [])
 
-  const navigateToRun = useCallback((feature: string, runId: string) => {
+  const navigateToRun = useCallback((feature: string, runId: string, focus?: string) => {
     pendingRunSelectionRef.current = null
     setSelectedFeature(feature)
     setSelectedRunId(runId)
+    // Always written, so navigating to a run WITHOUT a focus clears a previous
+    // one instead of inheriting it.
+    setFocusTest(focus ? { runId, test: focus } : null)
     setView('workspace')
   }, [])
 
@@ -187,6 +200,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     draftFor,
     resumePlanTaskId,
     portifyTarget,
+    focusTest,
     routedDialog: dialog,
     setView,
     setSelectedFeature,
