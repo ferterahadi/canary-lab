@@ -51,15 +51,7 @@ import {
   type BuildHealCyclePromptArgs,
 } from './auto-heal'
 import { appendJournalIteration as appendJournalIterationToFile, type JournalAppendInput } from './log-enrichment'
-import {
-  locateClaudeSessionLog,
-  locateCodexSessionLog,
-  locateLatestSessionLogForAgent,
-  parseAgentSessionRefFile,
-  renderAgentSessionContext,
-  type AgentSessionRef,
-  type AgentSessionRefFile,
-} from '../../../agent-sessions/logic/agent-session-log'
+import { AgentSessionRefStore } from './agent-session-refs'
 import type { RunnerLog } from './runner-log'
 import {
   resolveMcpOutputDir,
@@ -555,11 +547,7 @@ export class RunOrchestrator extends EventEmitter {
   // is the only evidence of WHY the agent went quiet, so it's written to
   // `paths.healAgentTailPath` and classified into `HealEnd.agentCause`.
   private healAgentOutputTail = ''
-  // In-memory mirror of `paths.agentSessionRefPath`. `undefined` means we
-  // haven't read disk yet; `null` means we read and the file is missing or
-  // invalid. The orchestrator is the only writer, so once seeded we trust the
-  // cache and update it in lockstep with writeAgentSessionRef.
-  private cachedRefFile: AgentSessionRefFile | null | undefined = undefined
+  private readonly agentSessionRefs: AgentSessionRefStore
   // Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
   // racing toward another Playwright rerun.
   private healCancelled = false
@@ -580,6 +568,11 @@ export class RunOrchestrator extends EventEmitter {
     this.runId = opts.runId
     this.runDir = opts.runDir
     this.paths = buildRunPaths(opts.runDir, opts.signalsDir ? { signalsDir: opts.signalsDir } : undefined)
+    this.agentSessionRefs = new AgentSessionRefStore({
+      runDir: this.runDir,
+      agentSessionRefPath: this.paths.agentSessionRefPath,
+      agentSessionIdPath: this.paths.agentSessionIdPath,
+    })
     this.portMap = opts.portMap
     this.worktreeHandles = opts.worktrees ?? []
     this.repoPathOverrides = {}
@@ -1827,7 +1820,7 @@ export class RunOrchestrator extends EventEmitter {
       stuckSlugs: args.stuckSlugs,
       maxSlugStreak: args.maxSlugStreak,
       priorAgentSessionContext: !this.healAgentPty
-        ? this.readCrossAgentSessionContext(cfg.agent)
+        ? this.agentSessionRefs.crossAgentContext(cfg.agent)
         : undefined,
     })
 
@@ -1910,7 +1903,7 @@ export class RunOrchestrator extends EventEmitter {
     // conversation with full history. Without this, every restart would
     // orphan the previous turns and start the agent's investigation from
     // scratch.
-    let sessionId: string | undefined = this.readPriorAgentSessionId(cfg.agent) ?? undefined
+    let sessionId: string | undefined = this.agentSessionRefs.priorSessionId(cfg.agent) ?? undefined
     let resume = sessionId !== undefined
     if (!sessionId && cfg.agent === 'claude') sessionId = randomUUID()
     this.healAgentSessionId = sessionId ?? null
@@ -2002,87 +1995,13 @@ export class RunOrchestrator extends EventEmitter {
     this.healAgentStartedAt = null
   }
 
-  // Write `<runDir>/agent-session.json` pointing at the agent CLI's own
-  // JSONL session log. The UI's structured-view historical replay reads
-  // from that JSONL — way more reliable than our PTY byte capture.
-  //
-  // - claude: log path is fully determined by runDir + sessionId, so we
-  //   just verify the file exists at the predicted location.
-  // - codex: first launch has no `--session-id` flag, so we discover by
-  //   matching cwd + timestamp; locateCodexSessionLog does the directory
-  //   scan. After discovery, persist the id for future `codex resume <id>`.
-  //
-  // Silently skips when the agent never spawned (manual mode, no failure)
-  // or when the locator can't find the file (race, user moved it).
   private persistAgentSessionRef(): void {
     if (!this.autoHeal) return
-    const agent = this.autoHeal.agent
-    let ref: AgentSessionRef | null = null
-    if (agent === 'claude' && this.healAgentSessionId) {
-      const logPath = locateClaudeSessionLog(this.runDir, this.healAgentSessionId)
-      if (logPath) ref = { agent: 'claude', sessionId: this.healAgentSessionId, logPath }
-    } else if (agent === 'codex' && this.healAgentStartedAt) {
-      const found = locateCodexSessionLog(this.runDir, this.healAgentStartedAt)
-      if (found) ref = found
-    }
-    if (!ref) return
-    this.writeAgentSessionRef(ref)
-  }
-
-  private readPriorAgentSessionId(agent: AutoHealAgent): string | null {
-    const refFile = this.readAgentSessionRefFile()
-    const typed = refFile?.sessions[agent]
-    if (typed) return readPriorSessionIdFromValue(typed.sessionId)
-
-    if (!refFile) {
-      const direct = readPriorSessionId(this.paths.agentSessionIdPath)
-      if (direct) return direct
-    }
-
-    const found = locateLatestSessionLogForAgent(agent, this.runDir)
-    if (found) {
-      this.writeAgentSessionRef(found)
-      return found.sessionId
-    }
-    return null
-  }
-
-  private readCrossAgentSessionContext(targetAgent: AutoHealAgent): string | undefined {
-    const previous = this.findPriorAgentSessionRef(targetAgent)
-    if (!previous) return undefined
-    const rendered = renderAgentSessionContext(previous)
-    return rendered || undefined
-  }
-
-  private findPriorAgentSessionRef(targetAgent: AutoHealAgent): AgentSessionRef | null {
-    const otherAgent: AutoHealAgent = targetAgent === 'claude' ? 'codex' : 'claude'
-    const other = this.readAgentSessionRefFile()?.sessions[otherAgent]
-    if (other) return other
-    return locateLatestSessionLogForAgent(otherAgent, this.runDir)
-  }
-
-  private writeAgentSessionRef(ref: AgentSessionRef): void {
-    const existing = this.readAgentSessionRefFile() ?? { sessions: {} }
-    const next: AgentSessionRefFile = {
-      activeAgent: ref.agent,
-      sessions: { ...existing.sessions, [ref.agent]: ref },
-    }
-    try {
-      fs.mkdirSync(path.dirname(this.paths.agentSessionRefPath), { recursive: true })
-      fs.writeFileSync(this.paths.agentSessionRefPath, JSON.stringify(next, null, 2))
-      fs.writeFileSync(this.paths.agentSessionIdPath, ref.sessionId)
-      this.cachedRefFile = next
-    } catch { /* best-effort */ }
-  }
-
-  private readAgentSessionRefFile(): AgentSessionRefFile | null {
-    if (this.cachedRefFile !== undefined) return this.cachedRefFile
-    try {
-      this.cachedRefFile = parseAgentSessionRefFile(fs.readFileSync(this.paths.agentSessionRefPath, 'utf-8'))
-    } catch {
-      this.cachedRefFile = null
-    }
-    return this.cachedRefFile
+    this.agentSessionRefs.persistActive({
+      agent: this.autoHeal.agent,
+      ...(this.healAgentSessionId ? { sessionId: this.healAgentSessionId } : {}),
+      ...(this.healAgentStartedAt ? { startedAt: this.healAgentStartedAt } : {}),
+    })
   }
 
   // Snapshot every git-tracked edit surface in the feature just before the
