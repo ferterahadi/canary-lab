@@ -1,21 +1,21 @@
 import { useEffect, useState } from 'react'
 import type { Feature, RunDetail } from '../api/types'
-import { useActiveBootSessions, useActiveVerifyRuns, useRuns } from '@/features/runs/state/RunsContext'
+import { BenchmarkPill, BenchmarkWindow, useBenchmarks } from '@/features/benchmark'
+import { CleanupPill } from '@/features/cleanup'
+import { type DerivedStage, type FeatureActivity, FlightsPill } from '@/features/flights'
+import {
+  DirtyReviewDialog,
+  DirtyTestsPill,
+  ServicesDialog,
+  useActiveBootSessions,
+  useActiveVerifyRuns,
+  useRuns,
+} from '@/features/runs'
 import { StatusPill } from '../ui/StatusPill'
-import { useBenchmarks } from '@/features/benchmark/state/BenchmarkContext'
 import { isActiveRunStatus } from '@shared/run-state'
-import { ServicesDialog } from '@/features/runs/components/ServicesDialog'
-import { BenchmarkWindow } from '@/features/benchmark/components/BenchmarkWindow'
 import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
-import { DirtyTestsPill } from '@/features/runs/components/DirtyTestsPill'
-import { DirtyReviewDialog } from '@/features/runs/components/DirtyReviewDialog'
-import { BenchmarkPill } from '@/features/benchmark/components/BenchmarkPill'
-import { CleanupPill } from '@/features/cleanup/components/CleanupPill'
-import { FlightsPill } from '@/features/flights/components/FlightsPill'
-import type { DerivedStage } from '@/features/flights/lib/derived-stages'
-import type { FeatureActivity } from '@/features/flights/state/feature-activity'
 import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
 
 interface Props {

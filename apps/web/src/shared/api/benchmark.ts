@@ -1,12 +1,12 @@
 // Benchmark arms: sabotage skills, preflight, start/abort, worktrees.
 // Split out of client.ts; see that barrel for the shared surface.
 
-import type {
-  BenchmarkIndexEntry,
-  BenchmarkManifest,
-  SabotageLevel,
-  SabotageSkillSummary,
-} from '@/features/benchmark/api/benchmark-types'
+import {
+  type BenchmarkIndexEntry,
+  type BenchmarkManifest,
+  type SabotageLevel,
+  type SabotageSkillSummary,
+} from '@/features/benchmark'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
 import type { AgentSessionResponse } from './agent-sessions'
 

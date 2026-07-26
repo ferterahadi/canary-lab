@@ -95,6 +95,56 @@ Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 | `features/benchmark/logic/runtime/` | Multi-arm self-heal benchmarking, its own feature (retired in 1.0.0, **revived in 1.3.0** as a preview behind `?showBenchmark=true`) |
 | `apps/web-server/src/features/coverage/logic/coverage/` | Coverage ledger: PRD summarization (`prd-summary.ts`), docs collection (`docs-collection.ts`), breadth computation (`ledger.ts`), strictness grading (`strength.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Requirement Coverage](#requirement-coverage). |
 
+### Feature boundaries and per-feature layout
+
+Both apps use the same 8-feature taxonomy, but the two sides enforce it
+differently.
+
+**Server features are registrars, not re-export barrels.** Each
+`apps/web-server/src/features/<name>/index.ts` exports `register(app, ctx)` and
+returns a handle other features consume — `runs` returns
+`{ scheduler, attachRunStreams, restartExternalRun }`, which `benchmark`,
+`coverage` and the MCP mount all take. Don't turn one into a re-export barrel;
+`server.ts` depends on the register/handle contract.
+
+**Web features are re-export barrels.** Each
+`apps/web/src/features/<name>/index.ts` names that feature's public surface. A
+feature may import another only through its barrel, never a path inside it:
+
+```
+✔  import { RunRow } from '@/features/runs'
+✘  import { RunRow } from '@/features/runs/components/RunRow'
+```
+
+`npm run check:boundaries` enforces this and fails on three things: a deep
+cross-feature import, a feature that is consumed but has no barrel, and a stale
+entry in its `ALLOWED_DEEP` allowlist. The allowlist exists because routing
+**both** directions of a mutually-dependent pair through barrels is an ESM
+module-init cycle; `coverage ⇄ flights` is the one surviving pair (the flight
+page embeds coverage's docs rail, the coverage page renders flight stage chips).
+Shrink that list, don't grow it.
+
+**Two shared aliases, easily confused.** `@shared/` is the repo-root `shared/`
+package (published types, shared with the CLI). `@/shared/` is the web app's own
+`apps/web/src/shared/`. A lint or codemod written against the wrong one passes
+while enforcing nothing.
+
+**Which subdirs a feature has is deliberate, not uniform.** `logic/` is
+universal on the server; `routes/` and `ws/` exist only where the feature serves
+HTTP or streams. On the web, `components/` is universal while `state/`, `api/`,
+`lib/` and `utils/` appear only where needed — web `config` is ~6,000 lines of
+components with no state or api layer, and that is correct. A feature with no
+realtime surface should **not** carry an empty `ws/`.
+
+**When a module belongs in `shared/`, not a feature.** If two or more features
+import it and it imports no feature itself, it is infrastructure that was filed
+wherever it was first needed. Phase 9 moved five such modules out of `apps/web`
+features (`atoms.tsx`, `AgentSessionView`, `agent-session-socket`,
+`workspace-socket`, `ExternalAgentCard`, `external-client-branding`), which cut
+cross-feature imports from 57 to 20 — and all but 2 of those now go through a barrel. Note that `apps/web/src/shared/api/**` and
+`shared/lib/**` are inside the coverage gate while `features/*/api/**` is not —
+moving a module there brings it into the gate and it must reach 100%.
+
 ## Run Lifecycle
 
 Code path for a run started from `canary-lab ui`:

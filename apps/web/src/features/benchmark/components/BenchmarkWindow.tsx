@@ -3,9 +3,9 @@ import * as api from '@/shared/api/client'
 import type { Feature } from '@/shared/api/types'
 import type { BenchmarkArm, BenchmarkManifest, BenchmarkReport, SabotageLevel, SabotageSkillSummary } from '../api/benchmark-types'
 import { useBenchmark, useBenchmarks } from '../state/BenchmarkContext'
-import { RunDetailColumn } from '@/features/runs/components/RunDetailColumn'
+import { PortifyWizard } from '@/features/portify'
+import { RunDetailColumn } from '@/features/runs'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
-import { PortifyWizard } from '@/features/portify/components/PortifyWizard'
 
 // The benchmark workspace window: a large portal-style overlay (config → setup →
 // race → report). Per-arm monitoring reuses the real RunDetailColumn.

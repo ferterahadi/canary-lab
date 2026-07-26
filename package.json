@@ -68,6 +68,7 @@
     "typecheck:all": "npm run typecheck && npm run typecheck:web && npm run typecheck:server",
     "gen:agents": "node tools/gen-agents-md.mjs",
     "gen:skills": "node tools/gen-codex-skills.mjs",
+    "check:boundaries": "node tools/check-feature-boundaries.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",

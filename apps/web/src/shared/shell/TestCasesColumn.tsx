@@ -2,7 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import * as api from '../api/client'
 import { useInvalidationKey } from '../state/invalidation'
 import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
-import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '@/features/runs/utils/test-step-status'
+import {
+  activeBodyLineForTest,
+  colorClassForStatus,
+  runningTestForSummaryName,
+  statusForTest,
+  type StepStatus,
+  summaryEntryName,
+} from '@/features/runs'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
 import { ShikiCode, StepStatusBadge, StepBlock } from '../ui/TestCodeBlock'
 import { TestIdBadge } from '../ui/TestIdBadge'

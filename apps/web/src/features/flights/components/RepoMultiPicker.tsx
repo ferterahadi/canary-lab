@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { IconButton, PlusIcon, TrashIcon } from '@/shared/ui/atoms'
-import { FolderPicker, FolderPickerModal } from '@/features/config/components/FolderPicker'
+import { FolderPicker, FolderPickerModal } from '@/features/config'
 
 // R40/R69: the flight dialog's repo selection — the SAME building blocks Feature
 // configuration uses. Each selected repo is a `FolderPicker` button (shows the

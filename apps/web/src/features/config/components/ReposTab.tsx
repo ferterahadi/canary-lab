@@ -20,7 +20,7 @@ import { FolderPicker, FolderPickerModal } from './FolderPicker'
 import { SaveBar } from './SaveBar'
 import { TemplatedInput } from './TemplatedInput'
 import { useEditableSlice } from './useEditableSlice'
-import { useRuns } from '@/features/runs/state/RunsContext'
+import { useRuns } from '@/features/runs'
 import { isActiveRunStatus } from '@shared/run-state'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 
