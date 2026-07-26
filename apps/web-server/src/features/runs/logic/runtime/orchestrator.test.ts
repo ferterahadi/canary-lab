@@ -2893,8 +2893,8 @@ describe('RunOrchestrator.runHealAgent', () => {
 
 describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultSpawnCommand / defaultHealPrompt', () => {
   it('readSummary tolerates missing file', async () => {
-    const { readSummary, extractFailedSlugs, extractFailedLocations, defaultPlaywrightSpawner, defaultSpawnCommand, defaultHealPrompt } =
-      await import('./orchestrator')
+    const { defaultPlaywrightSpawner, defaultSpawnCommand, defaultHealPrompt } = await import('./orchestrator')
+    const { readSummary, extractFailedSlugs, extractFailedLocations } = await import('./run-verdict')
     expect(readSummary(path.join(tmpDir, 'nope.json'))).toEqual({})
     expect(extractFailedSlugs({ failed: [{ name: 'a' }, { name: '' }, {}] })).toEqual(['a'])
     expect(extractFailedSlugs({})).toEqual([])
@@ -2933,7 +2933,7 @@ describe('computeNonPassedTargets', () => {
   }
 
   it('returns failed + pending tests, skipping the ones already passed', async () => {
-    const { computeNonPassedTargets } = await import('./orchestrator')
+    const { computeNonPassedTargets } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -2961,7 +2961,7 @@ describe('computeNonPassedTargets', () => {
   })
 
   it('returns no-passed-yet on a fresh run with no passedNames', async () => {
-    const { computeNonPassedTargets } = await import('./orchestrator')
+    const { computeNonPassedTargets } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -2973,7 +2973,7 @@ describe('computeNonPassedTargets', () => {
   })
 
   it('returns all-passed when every test is in passedNames', async () => {
-    const { computeNonPassedTargets } = await import('./orchestrator')
+    const { computeNonPassedTargets } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -2987,7 +2987,7 @@ describe('computeNonPassedTargets', () => {
   })
 
   it('returns extraction-failed when no spec files exist', async () => {
-    const { computeNonPassedTargets } = await import('./orchestrator')
+    const { computeNonPassedTargets } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'empty')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeNonPassedTargets(featureDir, { passedNames: ['x'] })
@@ -3005,7 +3005,7 @@ describe('computeRerunTargetsOrdered', () => {
   }
 
   it('orders previously-failed tests first, then pending in source order', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-ordered')
     fs.mkdirSync(featureDir, { recursive: true })
     // Spec layout: pending at line 2, failed at line 3 (failure comes AFTER
@@ -3036,7 +3036,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('drops failed slugs that no longer exist in the AST and reports them', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-dropped')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -3064,7 +3064,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('returns pending-only when every prior-failed slug has since passed', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-recovered')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -3088,7 +3088,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('handles empty passedNames by listing failed-first then everything else', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-no-passed')
     fs.mkdirSync(featureDir, { recursive: true })
     const specA = writeSpec(featureDir, 'a.spec.ts',
@@ -3110,7 +3110,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('returns all-passed when every AST test is in passedNames', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-all-passed')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -3124,7 +3124,7 @@ describe('computeRerunTargetsOrdered', () => {
   })
 
   it('returns extraction-failed when there are no spec files', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-empty')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeRerunTargetsOrdered(featureDir, { passedNames: ['x'] })
@@ -3134,7 +3134,7 @@ describe('computeRerunTargetsOrdered', () => {
 
 describe('computeVerificationPlan', () => {
   it('uses knownTests to target factory-generated failed and pending tests by title', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-known')
     fs.mkdirSync(featureDir, { recursive: true })
 
@@ -3164,7 +3164,7 @@ describe('computeVerificationPlan', () => {
 	  })
 
   it('orders remaining known tests as failed, skipped, then pending', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-known-order')
     fs.mkdirSync(featureDir, { recursive: true })
 
@@ -3193,7 +3193,7 @@ describe('computeVerificationPlan', () => {
   })
 
   it('falls back to full-suite when failed tests cannot be safely selected', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo-unsafe')
     fs.mkdirSync(featureDir, { recursive: true })
 
@@ -3226,7 +3226,7 @@ describe('decideRunStatus', () => {
   }
 
   it('returns failed on any non-zero exit code regardless of summary', async () => {
-    const { decideRunStatus } = await import('./orchestrator')
+    const { decideRunStatus } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -3239,7 +3239,7 @@ describe('decideRunStatus', () => {
   })
 
   it('returns passed when exit 0 and every AST test is in passedNames', async () => {
-    const { decideRunStatus } = await import('./orchestrator')
+    const { decideRunStatus } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -3253,7 +3253,7 @@ describe('decideRunStatus', () => {
   })
 
   it('returns failed on exit 0 when summary still has a failed entry', async () => {
-    const { decideRunStatus } = await import('./orchestrator')
+    const { decideRunStatus } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     const spec = writeSpec(featureDir, 'a.spec.ts',
@@ -3270,7 +3270,7 @@ describe('decideRunStatus', () => {
   })
 
   it('returns failed on exit 0 when an AST test is pending (missing from summary)', async () => {
-    const { decideRunStatus } = await import('./orchestrator')
+    const { decideRunStatus } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -3285,7 +3285,7 @@ describe('decideRunStatus', () => {
   })
 
   it('returns failed on exit 0 when an AST test is in skippedNames', async () => {
-    const { decideRunStatus } = await import('./orchestrator')
+    const { decideRunStatus } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'demo')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -3303,7 +3303,7 @@ describe('decideRunStatus', () => {
   })
 
   it('falls back to summarizeFailures when AST extraction fails (no parseable specs)', async () => {
-    const { decideRunStatus } = await import('./orchestrator')
+    const { decideRunStatus } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'no-specs')
     fs.mkdirSync(featureDir, { recursive: true })
     const summaryPath = path.join(tmpDir, 'summary.json')
@@ -4674,7 +4674,7 @@ describe('defaultPlaywrightSpawner --max-failures', () => {
 
 describe('stoppedEarlyReasonOf / countPassed', () => {
   it('returns undefined for a missing manifest', async () => {
-    const { stoppedEarlyReasonOf, countPassed } = await import('./orchestrator')
+    const { stoppedEarlyReasonOf, countPassed } = await import('./run-verdict')
     expect(stoppedEarlyReasonOf(path.join(tmpDir, 'nope.json'))).toBeUndefined()
     expect(countPassed({})).toBe(0)
     expect(countPassed({ passed: 4 })).toBe(4)
@@ -4684,7 +4684,7 @@ describe('stoppedEarlyReasonOf / countPassed', () => {
   it('returns the persisted reason', async () => {
     const file = path.join(tmpDir, 'm.json')
     fs.writeFileSync(file, JSON.stringify({ stoppedEarly: { reason: 'user-pause' } }))
-    const { stoppedEarlyReasonOf } = await import('./orchestrator')
+    const { stoppedEarlyReasonOf } = await import('./run-verdict')
     expect(stoppedEarlyReasonOf(file)).toBe('user-pause')
   })
 })
@@ -4747,13 +4747,13 @@ describe('module-helper edge branches', () => {
   })
 
   it('extractFailedLocations returns [] when failed is not an array', async () => {
-    const { extractFailedLocations } = await import('./orchestrator')
+    const { extractFailedLocations } = await import('./run-verdict')
     expect(extractFailedLocations({})).toEqual([])
     expect(extractFailedLocations({ failed: 'nope' as unknown as [] })).toEqual([])
   })
 
   it('computeVerificationPlan sanitizes malformed knownTests entries and dedupes failedFirst', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'known-sanitize')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeVerificationPlan(featureDir, {
@@ -4785,7 +4785,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeVerificationPlan falls back to full-suite when a failed slug is absent from knownTests', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'known-missing')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeVerificationPlan(featureDir, {
@@ -4799,7 +4799,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeVerificationPlan targets summary-provided failed locations when the AST is unavailable', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'no-ast-targeted')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeVerificationPlan(featureDir, {
@@ -4817,7 +4817,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeVerificationPlan falls back to full-suite when summary locations are incomplete', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'no-ast-fullsuite')
     fs.mkdirSync(featureDir, { recursive: true })
     const result = computeVerificationPlan(featureDir, {
@@ -4832,7 +4832,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeVerificationPlan drops AST-missing failed slugs into a full-suite rerun', async () => {
-    const { computeVerificationPlan } = await import('./orchestrator')
+    const { computeVerificationPlan } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'ast-dropped')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'a.spec.ts',
@@ -4849,7 +4849,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeRerunTargetsOrdered skips unparseable specs but still targets the parseable ones', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'partial-parse')
     fs.mkdirSync(featureDir, { recursive: true })
     // A syntactically-broken spec that yields zero tests is skipped.
@@ -4865,7 +4865,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeRerunTargetsOrdered returns extraction-failed when every spec fails to parse', async () => {
-    const { computeRerunTargetsOrdered } = await import('./orchestrator')
+    const { computeRerunTargetsOrdered } = await import('./run-verdict')
     const featureDir = path.join(tmpDir, 'features', 'all-broken')
     fs.mkdirSync(featureDir, { recursive: true })
     writeSpec(featureDir, 'broken.spec.ts', 'nope ((( <<< not valid\n')
@@ -4874,7 +4874,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('computeNonPassedTargets skips unparseable specs and reports extraction-failed when all fail', async () => {
-    const { computeNonPassedTargets } = await import('./orchestrator')
+    const { computeNonPassedTargets } = await import('./run-verdict')
     const partialDir = path.join(tmpDir, 'features', 'npt-partial')
     fs.mkdirSync(partialDir, { recursive: true })
     writeSpec(partialDir, 'broken.spec.ts', 'this ((( is <<< broken\n')
@@ -4894,7 +4894,7 @@ describe('module-helper edge branches', () => {
   })
 
   it('readLatestHealOnFailureThreshold falls back to the in-memory threshold when the loader throws', async () => {
-    const { readLatestHealOnFailureThreshold } = await import('./orchestrator')
+    const { readLatestHealOnFailureThreshold } = await import('./run-verdict')
     const spy = vi.spyOn(featureLoader, 'loadFeatures').mockImplementation(() => {
       throw new Error('disk exploded')
     })
