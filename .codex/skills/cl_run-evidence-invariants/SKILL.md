@@ -69,7 +69,7 @@ green.** A test edited into passing is the exact failure this product exists to 
 1. Did you change how a verdict is *derived*? Then a unit test must pin the new
    derivation against a real fixture, not a hand-built object.
 2. Did you touch prompt/instruction prose carrying rule 1 or 2? Run
-   `npx vitest run apps/web-server/mcp apps/web-server/src/features/runs/logic/runtime/auto-heal.test.ts`
+   `npx vitest run apps/web-server/src/mcp apps/web-server/src/features/runs/logic/runtime/auto-heal.test.ts`
    and then `cl_sync-agent-surfaces` for the surfaces that must agree.
 3. Did you change the run loop's observable behavior? Tier 4 in `cl_verify-changes` —
    drive `broken_todo_api` end to end and read the counts off a real result.

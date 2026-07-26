@@ -6,7 +6,7 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { featureConfigRoutes } from './feature-config'
 import * as gitRepo from '../../../shared/git-repo'
-import * as configAst from '../../config/logic/config-ast'
+import * as configAst from '../logic/config-ast'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
 import { writeOverlay, overlayExists } from '../../portify/logic/runtime/overlay'
 

@@ -6,15 +6,15 @@ import {
   featureExists,
   listFeatureDocs,
   regeneratePrdSummary,
-} from '../../coverage/logic/coverage/service'
-import type { SummarizeAdapter } from '../../coverage/logic/coverage/prd-summary'
-import { CoverageJobRunStore, type CoverageJobStore } from '../../coverage/logic/coverage/jobs/store'
-import { startCoverageJob, CoverageJobConflictError } from '../../coverage/logic/coverage/jobs/runner'
-import type { CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
+} from '../logic/coverage/service'
+import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
+import { CoverageJobRunStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
+import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
+import type { CoverageJobKind } from '../logic/coverage/jobs/types'
 import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc } from '../../config/logic/feature-authoring'
 import { reopenStages } from '../../flights/logic/conductor'
 import type { FlightStore } from '../../flights/logic/store'
-import { extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
+import { extractPrdDocument } from '../logic/prd-document-extractor'
 import { loadFeatures } from '../../config/logic/feature-loader'
 import {
   findClaudeLogBySessionId,

@@ -11,7 +11,7 @@ import {
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { loadFeatures } from './feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../config/logic/config-ast'
+import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from './config-ast'
 
 export interface FeatureAuthoringContext {
   projectRoot: string

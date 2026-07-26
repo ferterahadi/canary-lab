@@ -1,15 +1,15 @@
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
-import type { BenchmarkStore } from '../../benchmark/logic/runtime/store'
-import type { SabotageSkill } from '../../benchmark/logic/runtime/skills'
+import type { BenchmarkStore } from '../logic/runtime/store'
+import type { SabotageSkill } from '../logic/runtime/skills'
 import type {
   BenchmarkManifest,
   SabotageLevel,
   StartBenchmarkInput,
   StartBenchmarkResult,
-} from '../../benchmark/logic/runtime/types'
-import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
+} from '../logic/runtime/types'
+import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
 import { loadFeatures } from '../../config/logic/feature-loader'

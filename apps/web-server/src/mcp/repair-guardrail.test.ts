@@ -18,7 +18,7 @@ import { INSTRUCTIONS_BY_PROFILE } from './server'
 //
 // Procedure for changing any of this: `cl_sync-agent-surfaces`.
 
-const REPO_ROOT = path.resolve(__dirname, '..', '..', '..')
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const AGENT_INTEGRATIONS = path.join(REPO_ROOT, 'agent-integrations')
 
 /** Every SKILL.md shipped to a client channel, discovered — never hardcoded. */

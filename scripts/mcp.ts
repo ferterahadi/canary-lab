@@ -15,7 +15,7 @@ import {
   DEFAULT_CANARY_LAB_MCP_PROFILE,
   normalizeCanaryLabMcpProfile,
   type CanaryLabMcpProfile,
-} from '../apps/web-server/mcp/tools'
+} from '../apps/web-server/src/mcp/tools'
 import { isClientKind, type ClientKind } from '../shared/run-mode'
 import { looksLikeProjectRoot } from '../shared/runtime/project-root'
 import {

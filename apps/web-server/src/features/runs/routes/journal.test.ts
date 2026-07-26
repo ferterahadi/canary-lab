@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
 import { journalRoutes } from './journal'
-import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 
 let tmpDir: string
 let logsDir: string

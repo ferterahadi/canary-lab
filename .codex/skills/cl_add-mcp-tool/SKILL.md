@@ -1,6 +1,6 @@
 ---
 name: cl_add-mcp-tool
-description: Use when adding, removing, renaming, or moving an MCP tool between profiles in apps/web-server/mcp/tools.ts, when sizing what a tool RETURNS into the agent's context, or when the MCP smoke test fails with a tool-count or unknown-tool mismatch.
+description: Use when adding, removing, renaming, or moving an MCP tool between profiles in apps/web-server/src/mcp/tool-groups/, when sizing what a tool RETURNS into the agent's context, or when the MCP smoke test fails with a tool-count or unknown-tool mismatch.
 ---
 
 <!-- GENERATED FROM .claude/skills — DO NOT EDIT.
@@ -8,7 +8,7 @@ description: Use when adding, removing, renaming, or moving an MCP tool between 
 
 # Adding or Moving a Canary Lab MCP Tool
 
-A tool change touches a sync triangle: the profile arrays in `tools.ts`, the mirror
+A tool change touches a sync triangle: the profile arrays in `tool-support.ts`, the mirror
 arrays in the smoke test, and (sometimes) the agent-facing instructions. The mirror
 arrays are the #1 forgotten step. Background: [docs/ARCHITECTURE.md → MCP Layer +
 Keep-in-Sync Invariants](../../../docs/ARCHITECTURE.md#keep-in-sync-invariants).
@@ -18,23 +18,27 @@ Run-loop *semantic* changes (collision/queue/heal-claim/pass-count rules) →
 
 ## Checklist
 
-1. **Implement as a thin wrapper** in `apps/web-server/mcp/tools.ts`. Reuse the REST
-   route via `app.inject()` — never duplicate orchestrator logic. Author-profile
-   tools call `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
-2. **Add the name to the `CanaryLabMcpToolName` union** (top of `tools.ts`).
+1. **Implement as a thin wrapper** in the `apps/web-server/src/mcp/tool-groups/`
+   module for its domain — `reads.ts`, `authoring.ts`, `run-lifecycle.ts`, or
+   `heal-flow.ts`. Reuse the REST route via `app.inject()` — never duplicate
+   orchestrator logic. Author-profile tools call
+   `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
+   Groups are domain sections, **not** profiles: a tool in several profiles still
+   gets exactly one registration in one group.
+2. **Add the name to the `CanaryLabMcpToolName` union** (in `tool-support.ts`).
 3. **Add to every workflow array the tool genuinely belongs to (usually one)** —
    `REPAIR_TOOLS`, `VERIFY_TOOLS`, `AUTHOR_TOOLS`, `COVERAGE_TOOLS`,
    `EXPORT_TOOLS`, `FLIGHT_TOOLS`, `PORTIFY_TOOLS`, or `FULL_ONLY_TOOLS` (all in
-   `tools.ts`). Cross-workflow tools appear in several arrays (e.g.
+   `tool-support.ts`). Cross-workflow tools appear in several arrays (e.g.
    `list_features`). `LIFECYCLE_TOOLS` and `FULL_TOOLS` are both computed
    deduped unions — never edit either (lifecycle = repair + verify + author +
    coverage + export + flight + full_only; full = lifecycle + portify).
    `registerCanaryLabTools` throws at registration if a tool is in no profile.
-4. **Mirror the name in `apps/web-server/mcp/server.smoke.test.ts`** — the test keeps
+4. **Mirror the name in `apps/web-server/src/mcp/server.smoke.test.ts`** — the test keeps
    its **own hand-authored copies** of the eight workflow arrays *plus* its own
    `LIFECYCLE_TOOLS` union (nine authored lists; only its `FULL_TOOLS` is derived), so
    SDK shape changes are caught. Update every array you touched in step 3. The mirror's
-   lifecycle union must keep matching `tools.ts` — if you add a tool that lives *only*
+   lifecycle union must keep matching `tool-support.ts` — if you add a tool that lives *only*
    in `REPAIR_TOOLS` or `VERIFY_TOOLS`, check it still does.
 5. **Size the result to the agent's token budget, not the transport limit** — see
    below.
@@ -46,7 +50,7 @@ Run-loop *semantic* changes (collision/queue/heal-claim/pass-count rules) →
 8. **Decision gate**: does the change alter run-loop *behavior* an external agent
    sees (new result shape, new next step, changed semantics)? If yes → invoke
    `cl_sync-agent-surfaces` before finishing.
-9. **Verify**: `npx vitest run apps/web-server/mcp` (smoke test + repair guardrail),
+9. **Verify**: `npx vitest run apps/web-server/src/mcp` (smoke test + repair guardrail),
    then the tiers `cl_verify-changes` calls for.
 
 ## Sizing a tool result (the inline-vs-path rule)
@@ -69,7 +73,7 @@ huge slice of the window burned on one call.
 | Mistake | Consequence |
 | --- | --- |
 | Skipping the smoke-test mirror arrays | Smoke test fails with a tool-count mismatch — or silently passes with stale coverage if you also "fixed" the count |
-| Editing `FULL_TOOLS` or `LIFECYCLE_TOOLS` in `tools.ts` | Both are computed there; the edit is dead code and the next reader is misled (the *smoke test's* lifecycle union IS hand-authored — that one you do update) |
+| Editing `FULL_TOOLS` or `LIFECYCLE_TOOLS` in `tool-support.ts` | Both are computed there; the edit is dead code and the next reader is misled (the *smoke test's* lifecycle union IS hand-authored — that one you do update) |
 | Sizing a payload against the transport limit | A single tool call eats the agent's context; the fix is a path, not a bigger inline blob |
 | Duplicating route logic inside the tool | Drifts from the REST behavior (admission, collision, envset apply all live in the route) |
 | New result shape without updating instructions/skills | External agents invent their own loop — that's the bug `INSTRUCTIONS_BY_PROFILE` exists to prevent |

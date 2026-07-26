@@ -33,7 +33,7 @@ slightly different" is how five slightly-different copies are born.
 | Recover claude's answer from stream-json stdout | `recoverClaudeFinalText` (`agent-sessions/logic/agent-stream.ts`) | re-parse envelopes inline |
 | Path of claude's session JSONL | `claudeSessionLogPath` (`agent-sessions/logic/agent-session-log.ts`) | recompute `~/.claude/projects/...` |
 | Show an agent's progress/output | `AgentSessionView` + `tailAgentSession` → `cl_surfacing-agent-work` | a new viewer |
-| MCP tool surface | `mcp/tools.ts` registry → `cl_add-mcp-tool` | a parallel tool path |
+| MCP tool surface | `mcp/tool-groups/` + `tool-support.ts` registry → `cl_add-mcp-tool` | a parallel tool path |
 
 ## The agent-process runner (consolidated — keep it that way)
 

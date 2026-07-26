@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { CoverageJobRunStore } from './store'
-import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from '../../../../coverage/logic/coverage/jobs/paths'
+import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from './paths'
 import type { CoverageJobManifest } from './types'
 
 let tmpDir: string

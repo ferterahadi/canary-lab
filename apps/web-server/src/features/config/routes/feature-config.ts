@@ -9,9 +9,9 @@ import {
   readPlaywrightConfig,
   writePlaywrightConfig,
   type ConfigValue,
-} from '../../config/logic/config-ast'
-import { parseDotenv, writeDotenv, type KvEntry } from '../../config/logic/dotenv-edit'
-import { loadFeatures } from '../../config/logic/feature-loader'
+} from '../logic/config-ast'
+import { parseDotenv, writeDotenv, type KvEntry } from '../logic/dotenv-edit'
+import { loadFeatures } from '../logic/feature-loader'
 import { resolveVars } from '../../runs/logic/runtime/env-switcher/switch'
 import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'

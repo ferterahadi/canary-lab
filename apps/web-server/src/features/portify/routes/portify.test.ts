@@ -3,9 +3,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { portifyRoutes, type PortifyRouteDeps } from '../../portify/routes/portify'
-import type { PortifyStore } from '../../portify/logic/runtime/store'
-import type { PortifyManifest } from '../../portify/logic/runtime/types'
+import { portifyRoutes, type PortifyRouteDeps } from './portify'
+import type { PortifyStore } from '../logic/runtime/store'
+import type { PortifyManifest } from '../logic/runtime/types'
 import { launchEditorDir } from '../../../shared/editor-launch'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))

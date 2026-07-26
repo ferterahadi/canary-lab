@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { classifyWaitForHealTask, type CanaryLabMcpDeps } from './tools'
-import type { RunStore, RunDetail } from '../src/features/runs/logic/run-store'
-import type { ExternalHealBroker } from '../src/features/runs/logic/heal/external-heal-broker'
-import type { DirtySpecStore, DirtySpecRecord } from '../src/features/runs/logic/dirty-specs/store'
+import type { RunStore, RunDetail } from '../features/runs/logic/run-store'
+import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
+import type { DirtySpecStore, DirtySpecRecord } from '../features/runs/logic/dirty-specs/store'
 
 // The dirtyTests warning is wired into the wait_for_heal_task result so the
 // agent (Surface 2) relays it. These tests assert the field rides along with a

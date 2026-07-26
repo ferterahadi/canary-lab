@@ -14,7 +14,7 @@ each app's `src/shared/`.
 
 | Entry point | What it does |
 |---|---|
-| `apps/web-server/server.ts` | Fastify app, UI assets, routes, WebSocket streams |
+| `apps/web-server/src/server.ts` | Fastify app, UI assets, routes, WebSocket streams |
 | `…/runs/logic/runtime/orchestrator.ts` | services, health checks, Playwright runs, heal signals |
 | `…/runs/logic/run-store.ts` | per-run manifests, summaries, events, artifacts |
 | `…/runs/logic/runtime/env-switcher/switch.ts` | env-file apply/revert |

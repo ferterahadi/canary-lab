@@ -18,8 +18,8 @@ import {
   RunStore,
   type RunStoreEvent,
 } from './run-store'
-import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from '../../runs/logic/runtime/manifest'
-import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import { readManifest, writeManifest, writeRunsIndex, readRunsIndex } from './runtime/manifest'
+import { buildRunPaths, runDirFor } from './runtime/run-paths'
 import { HEARTBEAT_STALE_MS } from '../../../../../../shared/run-state'
 
 let tmpDir: string

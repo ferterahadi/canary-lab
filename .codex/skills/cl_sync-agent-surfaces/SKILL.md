@@ -39,8 +39,8 @@ families (`canary-lab`, `-run`, `-verify`, `-author`, `-coverage`, `-portify`,
 
 | # | Surface | Where | Owns |
 | --- | --- | --- | --- |
-| 1 | Profile instructions (`INSTRUCTIONS_BY_PROFILE`) | `apps/web-server/mcp/server.ts` | What a skill-less client reads at `initialize` |
-| 2 | Tool-result steering (`healWaitNext`, `bootSessionValue`, collision/queued shapes) | `apps/web-server/mcp/tools.ts` | What a result-driven agent follows next |
+| 1 | Profile instructions (`INSTRUCTIONS_BY_PROFILE`) | `apps/web-server/src/mcp/server.ts` | What a skill-less client reads at `initialize` |
+| 2 | Tool-result steering (`healWaitNext`, `bootSessionValue`, collision/queued shapes) | `apps/web-server/src/mcp/tool-support.ts` (helpers) + `tool-groups/` (call sites) | What a result-driven agent follows next |
 | 3 | Shipped run-loop skills | `canary-lab-run/SKILL.md` in all three channels (locate them with the grep) | The full external loop: claim → wait → fix → signal |
 | 4 | Other shipped skill families | `canary-lab{,-verify,-author,-coverage,-portify,-export}/SKILL.md` | Touch only when the changed semantic is theirs — grep decides |
 
@@ -63,7 +63,7 @@ Channel differences to preserve when editing #3/#4:
   The one deliberate exception is auto-heal's `test` mode, which activates only when a
   feature has **zero editable repos**, so the spec is the only fixable code — see
   `cl_manage-prompts`. Never widen that exception to a feature that has app code.
-  Enforced by `apps/web-server/mcp/repair-guardrail.test.ts`.
+  Enforced by `apps/web-server/src/mcp/repair-guardrail.test.ts`.
 - **Pass counts**: `result.counts.statusLine` / `counts.passed`; never `total - failed`;
   tests absent from all result lists are *not run*, not passed.
 - Collision choice: `repo_collision_requires_choice` → ask the user → re-call with
@@ -86,14 +86,14 @@ Channel differences to preserve when editing #3/#4:
 2. **Enumerate the surfaces with the two commands above.** Do not start from a list.
 3. Grep for where the old semantic is expressed across code + shipped skills:
    ```bash
-   grep -rn '<keyword>' apps/web-server/mcp/server.ts apps/web-server/mcp/tools.ts agent-integrations/
+   grep -rn '<keyword>' apps/web-server/src/mcp/ agent-integrations/
    ```
    (useful keywords: `repo_collision_requires_choice`, `boot_session`, `queued`,
    `claimSuppressed`, `statusLine`, `wait_for_heal_task`, `isolation`, `provably wrong`)
 4. Update every hit, preserving the channel differences above.
 5. Tick a checklist with **one row per file the grep returned** — a file that should
    express the semantic and has zero hits is a *finding*, not a pass.
-6. Verify: `npx vitest run apps/web-server/mcp` (includes the repair-guardrail test),
+6. Verify: `npx vitest run apps/web-server/src/mcp` (includes the repair-guardrail test),
    then read the changed SKILL.md diffs side by side.
 
 ## Common mistakes

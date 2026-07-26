@@ -1,10 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
-import type { PaneBroker, PaneId, PaneSubscriber } from '../../runs/logic/pane-broker'
-import type { OrchestratorRegistry } from '../../runs/logic/run-store'
-import { readManifest } from '../../runs/logic/runtime/manifest'
-import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
+import type { PaneBroker, PaneId, PaneSubscriber } from '../logic/pane-broker'
+import type { OrchestratorRegistry } from '../logic/run-store'
+import { readManifest } from '../logic/runtime/manifest'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 
 // Wires Fastify's WebSocket plugin to the per-run PaneBroker. Coverage is

@@ -3,8 +3,8 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { formatHistoricalPaneReplay, resolveLogPath, shouldPreferLogReplay, shouldReplayLogFile } from './pane-stream'
-import { writeManifest } from '../../runs/logic/runtime/manifest'
-import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
+import { writeManifest } from '../logic/runtime/manifest'
+import { runDirFor, buildRunPaths } from '../logic/runtime/run-paths'
 
 let logsDir: string
 const runId = 'r-pane-test'

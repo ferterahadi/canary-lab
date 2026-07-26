@@ -1,12 +1,12 @@
 import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
-import type { PortifyStore } from '../../portify/logic/runtime/store'
-import { portifyCleanupListing } from '../../portify/logic/runtime/cleanup'
-import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../../portify/logic/runtime/types'
+import type { PortifyStore } from '../logic/runtime/store'
+import { portifyCleanupListing } from '../logic/runtime/cleanup'
+import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../logic/runtime/types'
 import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { launchEditorDir } from '../../../shared/editor-launch'
-import { overlayDir } from '../../portify/logic/runtime/overlay'
+import { overlayDir } from '../logic/runtime/overlay'
 import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.

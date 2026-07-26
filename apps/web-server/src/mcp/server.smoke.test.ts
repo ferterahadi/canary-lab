@@ -5,10 +5,10 @@ import os from 'os'
 import Fastify from 'fastify'
 import { createServer } from '../server'
 import { registerMcpRoutes } from './server'
-import { createRegistry, RunStore } from '../src/features/runs/logic/run-store'
-import { ExternalHealBroker } from '../src/features/runs/logic/heal/external-heal-broker'
-import type { PtyFactory } from '../src/features/runs/logic/runtime/pty-spawner'
-import { runDirFor } from '../src/features/runs/logic/runtime/run-paths'
+import { createRegistry, RunStore } from '../features/runs/logic/run-store'
+import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
+import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
+import { runDirFor } from '../features/runs/logic/runtime/run-paths'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { decode } from '@toon-format/toon'
@@ -234,7 +234,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('exposes /mcp/health with profile-specific tool counts', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     try {
       const res = await app.inject({ method: 'GET', url: '/mcp/health' })
@@ -310,7 +310,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('rejects invalid MCP profiles before creating sessions', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     try {
       const health = await app.inject({ method: 'GET', url: '/mcp/health?profile=nope' })
@@ -346,7 +346,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('answers tools/list with the default lifecycle profile and tools/call over the streamable HTTP transport', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -372,7 +372,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('tools/call list_portify_status returns each feature with a portified flag + summary', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -399,7 +399,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('answers tools/list with the full profile', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -415,7 +415,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('answers tools/list with the verify profile', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -431,7 +431,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('answers tools/list with the author profile', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -687,7 +687,7 @@ describe('MCP HTTP server (smoke)', () => {
     // first handshake and rejects every later initialize with -32600
     // "Server already initialized". That meant exactly one MCP client per
     // Fastify boot. The route must mint a fresh transport per session.
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
@@ -728,7 +728,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('rejects abort_run without confirm: true (schema-level gate)', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let client: Client | null = null
     try {
@@ -756,7 +756,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('get_heal_context returns compact context and get_run_snapshot returns the full fallback', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-context-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -896,7 +896,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('get_run omits raw arrays by default and inlines them with includeRaw, list_runs honors limit', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-getrun-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -952,7 +952,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('get_failure_detail returns one failure slice and errors on an unknown failureId', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-failure-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1020,7 +1020,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('signal_run writes canonical restart/rerun journal payloads', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-signal-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1065,7 +1065,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('rejects signal_run restart/rerun calls without journal fields', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-signal-validation-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1099,7 +1099,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('advertises the repair loop via server initialize instructions', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     let repairClient: Client | null = null
     let authorClient: Client | null = null
@@ -1265,7 +1265,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('wait_for_heal_task reports needs_heal, terminal states, and still_waiting', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1460,7 +1460,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('wait_for_heal_task claims an unclaimed external run with the MCP client kind', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-claim-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1516,7 +1516,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run reuses a healing feature run instead of creating a duplicate', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-reuse-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1569,7 +1569,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run starts a fresh runner-PTY run as external-origin with claimable:false (denylist policy)', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-cli-fresh-')))
     const featuresDir = path.join(projectRoot, 'features')
     const calls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['startRun']>>> = []
@@ -1620,7 +1620,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run starts a fresh interactive Claude run as claimable external origin', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-desktop-fresh-')))
     const featuresDir = path.join(projectRoot, 'features')
     const calls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['startRun']>>> = []
@@ -1664,7 +1664,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run restarts a failed run for a runner PTY agent as external-origin (claimable:false, not refused)', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-restart-cli-')))
     const featuresDir = path.join(projectRoot, 'features')
     const restartCalls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']>>> = []
@@ -1726,7 +1726,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run suppresses the heal claim for a runner PTY agent (denylist policy)', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-suppress-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1777,7 +1777,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run asks for a collision choice when a run is already using the same app', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-block-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1826,7 +1826,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run prefers an existing run that is waiting for heal over a newer running run', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-heal-first-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -1888,7 +1888,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run restarts a failed or aborted run by unique suffix when no run is healing', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-ref-')))
     const featuresDir = path.join(projectRoot, 'features')
     const restarted: Array<{ runId: string; sessionId: string }> = []
@@ -1958,7 +1958,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run reports a held boot session instead of claiming heal', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-boot-')))
     const featuresDir = path.join(projectRoot, 'features')
     const { app, runStore } = await createMcpHarness({ logsDir, projectRoot, featuresDir })
@@ -2009,7 +2009,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('wait_for_heal_task returns boot_session immediately for a held boot run', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-wait-boot-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -2048,7 +2048,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run returns candidates for an ambiguous run suffix', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-ambiguous-')))
     const featuresDir = path.join(projectRoot, 'features')
     const { app, runStore } = await createMcpHarness({ logsDir, projectRoot, featuresDir })
@@ -2101,7 +2101,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run starts a new run when no matching run is healing and no run ref is provided', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-new-')))
     const featuresDir = path.join(projectRoot, 'features')
     const starts: string[] = []
@@ -2147,7 +2147,7 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('boot_services starts a boot-mode run with no heal agent', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-boot-')))
     const featuresDir = path.join(projectRoot, 'features')
     const calls: Array<{ feature: string; env?: string; healAgent: unknown; isolation?: string; executionType?: string }> = []

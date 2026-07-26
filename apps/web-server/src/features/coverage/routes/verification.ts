@@ -8,7 +8,7 @@ import {
   listVerificationConfigs,
   updateVerificationConfig,
   type ResolveVerificationInput,
-} from '../../coverage/logic/verification'
+} from '../logic/verification'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 

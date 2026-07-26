@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { Writable } from 'stream'
-import { createServer } from '../apps/web-server/server'
+import { createServer } from '../apps/web-server/src/server'
 import type { PtyFactory } from '../apps/web-server/src/features/runs/logic/runtime/pty-spawner'
 import {
   bridge,

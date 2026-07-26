@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { PRD_SUMMARY_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
-import type { CoverageAgentSession } from '../../../coverage/logic/coverage/annotate-engine'
+import type { CoverageAgentSession } from './annotate-engine'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
@@ -20,8 +20,8 @@ import type {
 import {
   docsDirFor,
   type DocsCollection,
-} from '../../../coverage/logic/coverage/docs-collection'
-import { withFingerprints } from '../../../coverage/logic/coverage/fingerprints'
+} from './docs-collection'
+import { withFingerprints } from './fingerprints'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 
 // PRD summarization: turn a feature's source docs into structured requirements

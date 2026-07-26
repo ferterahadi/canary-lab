@@ -1,16 +1,16 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import type { RunStore } from '../../runs/logic/run-store'
+import type { RunStore } from '../logic/run-store'
 import {
   ExternalHealBroker,
   type ClaimInput,
   type ExternalHealAuditEntry,
-} from '../../runs/logic/heal/external-heal-broker'
-import type { ExternalHealSessionStatus } from '../../runs/logic/runtime/manifest'
+} from '../logic/heal/external-heal-broker'
+import type { ExternalHealSessionStatus } from '../logic/runtime/manifest'
 import { isClientKind, type ClientKind } from '../../../../../../shared/run-mode'
-import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../../runs/logic/heal/external-heal-surface'
-import { runDirFor } from '../../runs/logic/runtime/run-paths'
+import { buildExternalHealContext, buildExternalRunSnapshot, writeHealSignal } from '../logic/heal/external-heal-surface'
+import { runDirFor } from '../logic/runtime/run-paths'
 import {
   isActiveRunStatus,
   isRestartableRunStatus,

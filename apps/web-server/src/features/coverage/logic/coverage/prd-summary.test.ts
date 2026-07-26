@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { computeDocsHash, type DocsCollection } from '../../../coverage/logic/coverage/docs-collection'
+import { computeDocsHash, type DocsCollection } from './docs-collection'
 import {
   assembleSummary,
   buildPrdSummaryPrompt,

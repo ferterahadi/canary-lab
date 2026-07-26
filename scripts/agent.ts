@@ -4,7 +4,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
-import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/mcp/tools'
+import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/src/mcp/tools'
 
 type Target = 'codex' | 'claude' | 'all'
 export type AgentInstallTarget = Target

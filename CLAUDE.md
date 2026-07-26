@@ -26,9 +26,9 @@ copied to `dist/templates/` during build.
   weaken, delete, skip, or loosen a test to make a run green, and never soften the
   prose that tells an agent so (`REPAIR_INSTRUCTIONS`, the heal `MODE_COPY`, the
   shipped `canary-lab-run` skills). Pinned by
-  `apps/web-server/mcp/repair-guardrail.test.ts` + `auto-heal.test.ts`; rationale in
+  `apps/web-server/src/mcp/repair-guardrail.test.ts` + `auto-heal.test.ts`; rationale in
   the `cl_run-evidence-invariants` skill.
-- Touching `apps/web-server/mcp/tools.ts` or any run-loop semantics (collision,
+- Touching `apps/web-server/src/mcp/` tools or any run-loop semantics (collision,
   queue, boot sessions, heal claims, pass counts) → use the `cl_add-mcp-tool` /
   `cl_sync-agent-surfaces` skills. The sync invariants are easy to miss by hand.
 - Changes under `templates/` only ship via the build — finish with
@@ -82,7 +82,7 @@ natively.)
   verdict (counts, heal prompts/modes, run artifacts, exports, coverage math):
   the rules that keep the output evidence rather than an agent's self-report.
 - `cl_add-mcp-tool` — add/remove/rename/move a tool in
-  `apps/web-server/mcp/tools.ts`, size what a tool returns into the agent's
+  `apps/web-server/src/mcp/tool-groups/`, size what a tool returns into the agent's
   context, or fix tool-count / unknown-tool smoke fails.
 - `cl_sync-agent-surfaces` — after changing run-loop semantics (collision,
   queue, boot sessions, heal claims, signal/rerun, pass counts, the repair

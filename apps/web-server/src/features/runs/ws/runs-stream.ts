@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
-import type { RunStore, RunStoreEvent, RunDetail } from '../../runs/logic/run-store'
-import type { RunIndexEntry } from '../../runs/logic/runtime/manifest'
+import type { RunStore, RunStoreEvent, RunDetail } from '../logic/run-store'
+import type { RunIndexEntry } from '../logic/runtime/manifest'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 
 // `/ws/runs` — push channel that replaces the browser's polling. On connect,

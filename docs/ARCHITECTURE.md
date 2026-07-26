@@ -56,8 +56,8 @@ entry. The three places that must agree for the web aliases are
 | Path | What lives there |
 | --- | --- |
 | `scripts/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`scripts/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
-| `apps/web-server/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
-| `apps/web-server/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions) and tools (`tools.ts`: thin wrappers + profile arrays) |
+| `apps/web-server/src/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
+| `apps/web-server/src/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions); `tools.ts` builds the profile gate and delegates to `tool-groups/{reads,authoring,run-lifecycle,heal-flow}.ts`; `tool-support.ts` holds the input schemas, profile arrays, deps interface, and result helpers |
 | `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `wizard` (draft + wizard-agent pipeline, tests-draft route), `evaluation` (export archive/store, test-review export), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark` |
 | `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `ring-buffer`, `simple-zip`, `workspace-events`, `editor-launch`, `open-browser`, and `ws/workspace-stream` |
 | `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
@@ -150,7 +150,7 @@ flowchart TD
     class state,logs,evidence,healctx,session,signals artifact
 ```
 
-In prose: the `startRun` factory in `apps/web-server/server.ts` admits/queues the run
+In prose: the `startRun` factory in `apps/web-server/src/server.ts` admits/queues the run
 (see [Concurrency](#concurrency)), then `orchestrator.ts` applies the selected envset,
 boots services through the launcher/PTY layer (each service's PTY output is captured
 programmatically into `svc-<name>.log` — never echoed to the server's stdout), runs
@@ -305,10 +305,15 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   `portify` (port-injection workflow), `lifecycle` (everyday end-to-end loop —
   repair + author + verify, no portify), `full` (lifecycle + portify). Optional
   `?client_kind=claude|codex|other|...` (the `*-pty` kinds are set by the runner, not passed by clients).
-- Tools live in `apps/web-server/mcp/tools.ts` — thin wrappers over existing REST
-  routes/helpers. `start_run`/`write_envset`/etc. reuse handlers via `app.inject()`;
-  don't duplicate orchestrator logic. Author-profile tools call
+- Tools live in `apps/web-server/src/mcp/tool-groups/` — one module per domain
+  section (`reads`, `authoring`, `run-lifecycle`, `heal-flow`), each a thin wrapper
+  over existing REST routes/helpers. `start_run`/`write_envset`/etc. reuse handlers
+  via `app.inject()`; don't duplicate orchestrator logic. Author-profile tools call
   `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
+  `tools.ts` itself only builds the profile gate and calls the four registrars.
+  The grouping is **by domain, not by profile** — seven tools (`list_features` in
+  six) belong to several profiles at once, so profile membership is data in
+  `tool-support.ts`, never file layout.
 - Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`
   arrays (`tools.ts`). `LIFECYCLE_TOOLS` auto-dedupes repair+verify+author union +
   `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`); `FULL_TOOLS`
@@ -323,11 +328,11 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   instructions + tool *results*, not the Canary Lab skill. The server sends
   profile-aware `instructions` (`INSTRUCTIONS_BY_PROFILE`, `mcp/server.ts`); `repair`
   carries the External Run Loop. `start_run`/`signal_run` results add
-  `nextSteps: ['wait_for_heal_task']` (`healWaitNext`, `mcp/tools.ts`) so a
+  `nextSteps: ['wait_for_heal_task']` (`healWaitNext`, `mcp/tool-support.ts`) so a
   result-driven agent blocks on `wait_for_heal_task` instead of polling
   `get_run_snapshot`. Following or waiting on a **boot-only run**
   (`executionType: 'boot'`, started via `boot_services`) instead returns
-  `type: 'boot_session'` (`bootSessionValue`/`isActiveBootRun`, `mcp/tools.ts`) from
+  `type: 'boot_session'` (`bootSessionValue`/`isActiveBootRun`, `mcp/tool-support.ts`) from
   `start_run` and `wait_for_heal_task` — no heal claim, no `healWaitNext`, and
   `wait_for_heal_task` returns immediately rather than dead-waiting until timeout.
 - **Feature docs convention**: feature-scoped prose (distilled sessions, plans,
@@ -429,12 +434,12 @@ procedure.
 
 | Invariant | Files involved | Enforced by | Owning skill |
 | --- | --- | --- | --- |
-| MCP tool ↔ profile membership | `apps/web-server/mcp/tools.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
-| Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/tools.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | nothing automated — discipline only | `cl_sync-agent-surfaces` |
-| Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tools.ts`) ↔ instructions ↔ the same discovered skill set | partial: tool unit tests | `cl_sync-agent-surfaces` |
+| MCP tool ↔ profile membership | `apps/web-server/src/mcp/tool-support.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/src/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/src/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
+| Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/src/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/tool-support.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | nothing automated — discipline only | `cl_sync-agent-surfaces` |
+| Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tool-groups/`) ↔ instructions ↔ the same discovered skill set | partial: tool unit tests | `cl_sync-agent-surfaces` |
 | **Repair rule + honest counts on every agent surface** | `MODE_COPY` (`runs/logic/runtime/auto-heal.ts`) ↔ `REPAIR_INSTRUCTIONS` (`mcp/server.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "fix app/service code, not tests, unless provably wrong"; counts from `statusLine`, never `total - failed` | `mcp/repair-guardrail.test.ts` + `auto-heal.test.ts` | `cl_run-evidence-invariants` |
 | Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
-| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST, server-spawned) ↔ `get_feature_coverage`/`list_feature_docs`/`start_external_summary`/`start_external_coverage` (`mcp/tools.ts`, external-only) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
+| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST, server-spawned) ↔ `get_feature_coverage`/`list_feature_docs`/`start_external_summary`/`start_external_coverage` (`mcp/tool-groups/`, external-only) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
 | Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) ↔ the `.claude/skills/` index in `CLAUDE.md` — AGENTS.md is a pointer only | the grep audit in `cl_verify-changes` → "Contributor-docs audit" | `cl_verify-changes` |

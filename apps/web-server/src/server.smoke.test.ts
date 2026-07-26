@@ -3,10 +3,10 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { createServer } from './server'
-import type { TestsDraftRouteDeps } from './src/features/wizard/routes/tests-draft'
-import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './src/features/runs/logic/runtime/manifest'
-import { runDirFor } from './src/features/runs/logic/runtime/run-paths'
-import type { PtyFactory } from './src/features/runs/logic/runtime/pty-spawner'
+import type { TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
+import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './features/runs/logic/runtime/manifest'
+import { runDirFor } from './features/runs/logic/runtime/run-paths'
+import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 
 // Smoke test: exercises createServer() against the real templates/project
 // tree, hitting every read-side endpoint via inject(). Lives next to the
@@ -25,7 +25,7 @@ const inertPtyFactory: PtyFactory = () => ({
 
 describe('createServer smoke (templates/project)', () => {
   it('binds to a real port and answers a request over HTTP', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
     try {
       const address = await app.listen({ port: 0, host: '127.0.0.1' })
@@ -42,7 +42,7 @@ describe('createServer smoke (templates/project)', () => {
   })
 
   it('serves all read-side endpoints (features, runs, journal, drafts)', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({
       projectRoot,
       ptyFactory: inertPtyFactory,
@@ -118,7 +118,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
       { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
 
-    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
@@ -150,7 +150,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
       { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
 
-    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
@@ -179,7 +179,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
       { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
 
-    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
@@ -215,7 +215,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
       },
     ])
 
-    const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))

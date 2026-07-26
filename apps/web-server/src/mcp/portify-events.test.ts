@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { registerCanaryLabTools, type CanaryLabMcpDeps } from './tools'
-import type { WorkspaceEvent, WorkspaceEventPublisher } from '../src/shared/workspace-events'
+import type { WorkspaceEvent, WorkspaceEventPublisher } from '../shared/workspace-events'
 
 // The MCP portify tools mutate feature state (save_portify writes an overlay;
 // remove_portification reverts the config + deletes it). When driven from an

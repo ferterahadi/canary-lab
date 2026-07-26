@@ -1,6 +1,6 @@
 import { execFileSync } from 'child_process'
 import path from 'path'
-import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/mcp/tools'
+import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../apps/web-server/src/mcp/tools'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
 

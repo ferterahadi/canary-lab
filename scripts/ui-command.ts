@@ -5,7 +5,7 @@
 import path from 'path'
 import readline from 'readline'
 import { spawn } from 'child_process'
-import { createServer } from '../apps/web-server/server'
+import { createServer } from '../apps/web-server/src/server'
 import { getProjectRoot, isCanaryLabWorkspace } from '../shared/runtime/project-root'
 import { openBrowser } from '../apps/web-server/src/shared/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../apps/web-server/src/features/runs/logic/runtime/launcher/project-config'

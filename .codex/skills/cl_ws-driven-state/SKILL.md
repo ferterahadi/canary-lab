@@ -133,7 +133,7 @@ When reviewing a mutation that is NOT yours, check **both** surfaces:
 
 ```
 grep -rn "publishWorkspaceEvent" apps/web-server/src/features/   # REST routes + job runners
-grep -rn "publishWorkspaceEvent" apps/web-server/mcp/tools.ts    # MCP tools (Desktop/Codex/CLI)
+grep -rn "publishWorkspaceEvent" apps/web-server/src/mcp/tool-groups/  # MCP tools (Desktop/Codex/CLI)
 ```
 
 Anything that writes to disk but has no `publishWorkspaceEvent` call is a candidate

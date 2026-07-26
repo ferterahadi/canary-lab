@@ -38,8 +38,8 @@ vi.mock('../../../agent-sessions/logic/agent-binary', () => ({
 }))
 
 import { summarizePrd, renderPrdSummaryMarkdown, buildPrdSummaryPrompt, readPrdSummary, PRD_SUMMARY_JSON } from './prd-summary'
-import { computeDocsHash } from '../../../coverage/logic/coverage/docs-collection'
-import type { DocsCollection } from '../../../coverage/logic/coverage/docs-collection'
+import { computeDocsHash } from './docs-collection'
+import type { DocsCollection } from './docs-collection'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
 

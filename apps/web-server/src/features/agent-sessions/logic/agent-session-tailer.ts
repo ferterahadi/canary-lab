@@ -10,7 +10,7 @@ import {
   locateLatestSessionLogForAgent,
   parseAgentSessionLine,
   subagentDirFor,
-} from '../../agent-sessions/logic/agent-session-log'
+} from './agent-session-log'
 
 // Tails an agent CLI's JSONL session log and emits normalized events as new
 // lines are appended.

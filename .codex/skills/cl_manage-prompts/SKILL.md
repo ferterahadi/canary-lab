@@ -9,7 +9,7 @@ description: Use when adding, editing, or moving an LLM prompt an agent spawn se
 # Managing Canary Lab's LLM Prompts
 
 Not for MCP `initialize` instructions (`REPAIR_INSTRUCTIONS` etc. in
-`mcp/server.ts`) or tool `description:` fields (`mcp/tools.ts`) — those belong to
+`mcp/server.ts`) or tool `description:` fields (`mcp/tool-groups/`) — those belong to
 `cl_sync-agent-surfaces` / `cl_add-mcp-tool`.
 
 Every prompt canary sends to a spawned agent (claude/codex) lives as a flat file
@@ -99,8 +99,8 @@ word of it** — just by dropping a placeholder. Rules:
 
 | Lives here instead | Why it's a different thing |
 | --- | --- |
-| `apps/web-server/mcp/server.ts` — `REPAIR_INSTRUCTIONS`, `AUTHOR_INSTRUCTIONS`, etc. | MCP **protocol** instructions returned from `initialize` — part of the server's versioned API surface, not a per-spawn agent prompt. See `cl_sync-agent-surfaces`. |
-| `apps/web-server/mcp/tools.ts` — tool `description:` fields | MCP tool schema metadata, not text sent to steer an agent's task. |
+| `apps/web-server/src/mcp/server.ts` — `REPAIR_INSTRUCTIONS`, `AUTHOR_INSTRUCTIONS`, etc. | MCP **protocol** instructions returned from `initialize` — part of the server's versioned API surface, not a per-spawn agent prompt. See `cl_sync-agent-surfaces`. |
+| `apps/web-server/src/mcp/tool-groups/` — tool `description:` fields | MCP tool schema metadata, not text sent to steer an agent's task. |
 | `templates/project/` | Scaffold files copied into a user's *workspace* (feature configs, sample specs) — ships via the same build step, but it's product output, not a prompt. See `cl_add-sample-feature`. |
 | `.codex/skills/**/SKILL.md` | Claude Code skill definitions for contributors working on canary-lab itself, not agent-spawn prompts. |
 

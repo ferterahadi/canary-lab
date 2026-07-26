@@ -11,9 +11,9 @@ import {
   resolveManifestSessionRef,
   resolveWorkflowAgentRef,
   selectAgentSessionRef,
-} from '../../agent-sessions/logic/agent-session-log'
+} from '../logic/agent-session-log'
 import { readEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
-import { tailAgentSession } from '../../agent-sessions/logic/agent-session-tailer'
+import { tailAgentSession } from '../logic/agent-session-tailer'
 import { resolveDraftStageSessionRef } from '../../wizard/logic/draft-agent-session'
 import { readDraft, paths as draftPaths } from '../../wizard/logic/draft-store'
 import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'

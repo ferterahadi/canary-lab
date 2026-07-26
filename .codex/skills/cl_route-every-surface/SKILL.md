@@ -42,7 +42,7 @@ mechanism, and **never** react-router (deliberate: query-param style, no router
 dependency). See [[cl_reuse-shared-logic]].
 
 The server already serves `index.html` for any deep link (catch-all in
-`apps/web-server/server.ts`) — refreshing `/?...` never 404s. No server change is
+`apps/web-server/src/server.ts`) — refreshing `/?...` never 404s. No server change is
 needed for new routes.
 
 ## Two tiers — pick the right one

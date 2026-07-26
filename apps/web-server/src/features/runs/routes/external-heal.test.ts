@@ -8,11 +8,11 @@ import {
   ExternalHealBroker,
   type ExternalHealAuditEntry,
   type ExternalHealBrokerDeps,
-} from '../../runs/logic/heal/external-heal-broker'
-import { createRegistry, RunStore } from '../../runs/logic/run-store'
-import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-import { writeManifest, writeRunsIndex, type RunManifest } from '../../runs/logic/runtime/manifest'
-import type { RunStoreEvent } from '../../runs/logic/run-store'
+} from '../logic/heal/external-heal-broker'
+import { createRegistry, RunStore } from '../logic/run-store'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
+import { writeManifest, writeRunsIndex, type RunManifest } from '../logic/runtime/manifest'
+import type { RunStoreEvent } from '../logic/run-store'
 import type { HealSignalKind, RunStatus } from '../../../../../../shared/run-state'
 
 let tmpDir: string

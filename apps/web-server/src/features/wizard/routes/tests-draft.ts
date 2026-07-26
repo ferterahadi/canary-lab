@@ -17,25 +17,25 @@ import {
   type DraftRecord,
   type DraftPrdDocument,
   type DraftRepo,
-} from '../../wizard/logic/draft-store'
+} from '../logic/draft-store'
 import {
   extractGeneratedSpecOutput,
   extractIntentSummary,
   extractPlan,
-} from '../../wizard/logic/wizard-output-parser'
+} from '../logic/wizard-output-parser'
 import {
   STAGE1_DIFF_TEMPLATE,
   STAGE1_TEMPLATE,
   resolveWizardSessionId,
-} from '../../wizard/logic/wizard-agent-spawner'
+} from '../logic/wizard-agent-spawner'
 import { refForAgentSpawn } from '../../agent-sessions/logic/agent-session-tailer'
 import {
   buildAgentSessionResponse,
 } from '../../agent-sessions/logic/agent-session-log'
-import { resolveDraftStageSessionRef } from '../../wizard/logic/draft-agent-session'
+import { resolveDraftStageSessionRef } from '../logic/draft-agent-session'
 import { randomUUID } from 'crypto'
 import { validateGeneratedFeatureFiles } from '../../../../../../shared/feature-scaffold'
-import { resolveDraftFile } from '../../wizard/logic/draft-file-resolver'
+import { resolveDraftFile } from '../logic/draft-file-resolver'
 import { combinePrdText, extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 

@@ -3,77 +3,77 @@ import fs from 'fs'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
-import { isActiveRunStatus, isRestartableRunStatus } from '../../shared/run-state'
-import type { ClientKind } from '../../shared/run-mode'
-import { featuresRoutes } from './src/features/config/routes/features'
-import { coverageRoutes } from './src/features/coverage/routes/coverage'
-import { featureConfigRoutes } from './src/features/config/routes/feature-config'
-import { verificationRoutes } from './src/features/coverage/routes/verification'
-import { projectConfigRoutes } from './src/features/config/routes/project-config'
-import { runsRoutes, type ExternalHealAgentRequest } from './src/features/runs/routes/runs'
-import { evaluationRoutes } from './src/features/evaluation/routes/evaluation'
-import { journalRoutes } from './src/features/runs/routes/journal'
-import { testsDraftRoutes, type TestsDraftRouteDeps } from './src/features/wizard/routes/tests-draft'
-import { externalHealRoutes, makeExternalHealAuditLogger } from './src/features/runs/routes/external-heal'
-import { ExternalHealBroker } from './src/features/runs/logic/heal/external-heal-broker'
+import { isActiveRunStatus, isRestartableRunStatus } from '../../../shared/run-state'
+import type { ClientKind } from '../../../shared/run-mode'
+import { featuresRoutes } from './features/config/routes/features'
+import { coverageRoutes } from './features/coverage/routes/coverage'
+import { featureConfigRoutes } from './features/config/routes/feature-config'
+import { verificationRoutes } from './features/coverage/routes/verification'
+import { projectConfigRoutes } from './features/config/routes/project-config'
+import { runsRoutes, type ExternalHealAgentRequest } from './features/runs/routes/runs'
+import { evaluationRoutes } from './features/evaluation/routes/evaluation'
+import { journalRoutes } from './features/runs/routes/journal'
+import { testsDraftRoutes, type TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
+import { externalHealRoutes, makeExternalHealAuditLogger } from './features/runs/routes/external-heal'
+import { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
-import { paneStreamRoutes } from './src/features/runs/ws/pane-stream'
-import { runsStreamRoutes } from './src/features/runs/ws/runs-stream'
-import { agentSessionStreamRoutes } from './src/features/agent-sessions/ws/agent-session-stream'
-import { workspaceStreamRoutes } from './src/shared/ws/workspace-stream'
-import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './src/features/runs/logic/run-store'
-import { benchmarkRoutes } from './src/features/benchmark/routes/benchmarks'
-import { benchmarkStreamRoutes } from './src/features/benchmark/ws/benchmark-stream'
-import { BenchmarkRunStore } from './src/features/benchmark/logic/runtime/store'
-import { createBenchmarkRunner } from './src/features/benchmark/logic/runtime/runner'
-import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './src/features/benchmark/logic/runtime/skills'
-import { benchmarkDir } from './src/features/benchmark/logic/runtime/paths'
-import { portifyRoutes } from './src/features/portify/routes/portify'
-import { portifyStreamRoutes } from './src/features/portify/ws/portify-stream'
-import { PortifyRunStore } from './src/features/portify/logic/runtime/store'
-import { CoverageJobRunStore } from './src/features/coverage/logic/coverage/jobs/store'
-import { FlightRunStore } from './src/features/flights/logic/store'
-import { removeFlightRecordsForFeature } from './src/features/flights/logic/conductor'
-import { isActiveFlightStatus } from '../../shared/flights/types'
-import { renameFeatureRecords } from './src/features/config/logic/feature-rename'
-import { PlanFeaturesStore } from './src/features/flights/logic/plan-features'
-import { flightsRoutes } from './src/features/flights/routes/flights'
-import { buildFlightStageAdapters } from './src/features/flights/logic/stages'
-import { DirtySpecStore } from './src/features/runs/logic/dirty-specs/store'
-import { startDirtySpecWatcher } from './src/features/runs/logic/dirty-specs/watcher'
-import { createPortifyRunner } from './src/features/portify/logic/runtime/runner'
-import { reclaimOrphanedPortify } from './src/features/portify/logic/runtime/reclaim'
-import { portifyDir } from './src/features/portify/logic/runtime/paths'
+import { paneStreamRoutes } from './features/runs/ws/pane-stream'
+import { runsStreamRoutes } from './features/runs/ws/runs-stream'
+import { agentSessionStreamRoutes } from './features/agent-sessions/ws/agent-session-stream'
+import { workspaceStreamRoutes } from './shared/ws/workspace-stream'
+import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './features/runs/logic/run-store'
+import { benchmarkRoutes } from './features/benchmark/routes/benchmarks'
+import { benchmarkStreamRoutes } from './features/benchmark/ws/benchmark-stream'
+import { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
+import { createBenchmarkRunner } from './features/benchmark/logic/runtime/runner'
+import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './features/benchmark/logic/runtime/skills'
+import { benchmarkDir } from './features/benchmark/logic/runtime/paths'
+import { portifyRoutes } from './features/portify/routes/portify'
+import { portifyStreamRoutes } from './features/portify/ws/portify-stream'
+import { PortifyRunStore } from './features/portify/logic/runtime/store'
+import { CoverageJobRunStore } from './features/coverage/logic/coverage/jobs/store'
+import { FlightRunStore } from './features/flights/logic/store'
+import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
+import { isActiveFlightStatus } from '../../../shared/flights/types'
+import { renameFeatureRecords } from './features/config/logic/feature-rename'
+import { PlanFeaturesStore } from './features/flights/logic/plan-features'
+import { flightsRoutes } from './features/flights/routes/flights'
+import { buildFlightStageAdapters } from './features/flights/logic/stages'
+import { DirtySpecStore } from './features/runs/logic/dirty-specs/store'
+import { startDirtySpecWatcher } from './features/runs/logic/dirty-specs/watcher'
+import { createPortifyRunner } from './features/portify/logic/runtime/runner'
+import { reclaimOrphanedPortify } from './features/portify/logic/runtime/reclaim'
+import { portifyDir } from './features/portify/logic/runtime/paths'
 import {
   buildAgentSessionResponse,
   resolveWorkflowAgentRef,
-} from './src/features/agent-sessions/logic/agent-session-log'
-import { WorkspaceEventBus } from './src/shared/workspace-events'
-import { UpdateJobStore } from './src/features/version/logic/update-job'
-import { VersionState } from './src/features/version/logic/version-state'
-import { versionRoutes } from './src/features/version/routes/version'
-import { getInstalledPackageName, getInstalledPackageVersion } from '../../shared/runtime/upgrade-check'
-import { PaneBroker } from './src/features/runs/logic/pane-broker'
-import { loadFeatures } from './src/features/config/logic/feature-loader'
+} from './features/agent-sessions/logic/agent-session-log'
+import { WorkspaceEventBus } from './shared/workspace-events'
+import { UpdateJobStore } from './features/version/logic/update-job'
+import { VersionState } from './features/version/logic/version-state'
+import { versionRoutes } from './features/version/routes/version'
+import { getInstalledPackageName, getInstalledPackageVersion } from '../../../shared/runtime/upgrade-check'
+import { PaneBroker } from './features/runs/logic/pane-broker'
+import { loadFeatures } from './features/config/logic/feature-loader'
 import {
   spawnPlanAgent as makePlanAgentSpawner,
   spawnSpecAgent as makeSpecAgentSpawner,
-} from './src/features/wizard/logic/wizard-agent-runner'
-import { WizardAgentRegistry } from './src/features/wizard/logic/wizard-agent-registry'
-import { reconcileInterruptedDrafts } from './src/features/wizard/logic/draft-store'
-import { generateRunId } from './src/features/runs/logic/runtime/run-id'
-import { runDirFor, buildRunPaths } from './src/features/runs/logic/runtime/run-paths'
-import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './src/features/runs/logic/runtime/orchestrator'
-import { allocatePorts } from './src/features/runs/logic/runtime/port-allocator'
-import { resolvePortTokens } from './src/features/runs/logic/runtime/launcher/interpolate'
-import { RunScheduler, type SchedulerActiveRun } from './src/features/runs/logic/runtime/run-scheduler'
-import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './src/features/runs/logic/runtime/admission'
-import { detectRepoCollision, normalizeRepoPaths } from './src/features/runs/logic/runtime/repo-collision'
-import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './src/features/runs/logic/runtime/repo-worktree'
-import { overlayExists as portifyOverlayExists } from './src/features/portify/logic/runtime/overlay'
-import { revertPortification } from './src/features/portify/logic/runtime/unportify'
-import type { QueueReason } from '../../shared/run-state'
-import type { FeatureConfig } from '../../shared/launcher/types'
+} from './features/wizard/logic/wizard-agent-runner'
+import { WizardAgentRegistry } from './features/wizard/logic/wizard-agent-registry'
+import { reconcileInterruptedDrafts } from './features/wizard/logic/draft-store'
+import { generateRunId } from './features/runs/logic/runtime/run-id'
+import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
+import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './features/runs/logic/runtime/orchestrator'
+import { allocatePorts } from './features/runs/logic/runtime/port-allocator'
+import { resolvePortTokens } from './features/runs/logic/runtime/launcher/interpolate'
+import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/runtime/run-scheduler'
+import { estimateRunCost, resolveAdmissionConfig, readSystemResources } from './features/runs/logic/runtime/admission'
+import { detectRepoCollision, normalizeRepoPaths } from './features/runs/logic/runtime/repo-collision'
+import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './features/runs/logic/runtime/repo-worktree'
+import { overlayExists as portifyOverlayExists } from './features/portify/logic/runtime/overlay'
+import { revertPortification } from './features/portify/logic/runtime/unportify'
+import type { QueueReason } from '../../../shared/run-state'
+import type { FeatureConfig } from '../../../shared/launcher/types'
 import {
   buildAgentSpawnCommand,
   buildOrchestratorHealPrompt,
@@ -81,11 +81,11 @@ import {
   resolveAgentBinary,
   type BuildHealCyclePrompt,
   type HealAgent,
-} from './src/features/runs/logic/runtime/auto-heal'
-import { loadProjectConfig } from './src/features/runs/logic/runtime/launcher/project-config'
-import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './src/shared/git-repo'
-import { RunnerLog } from './src/features/runs/logic/runtime/runner-log'
-import { realPtyFactory, type PtyFactory } from './src/features/runs/logic/runtime/pty-spawner'
+} from './features/runs/logic/runtime/auto-heal'
+import { loadProjectConfig } from './features/runs/logic/runtime/launcher/project-config'
+import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './shared/git-repo'
+import { RunnerLog } from './features/runs/logic/runtime/runner-log'
+import { realPtyFactory, type PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import {
   applySet,
   backup,
@@ -93,16 +93,16 @@ import {
   loadConfig,
   resolveVars,
   restore,
-} from './src/features/runs/logic/runtime/env-switcher/switch'
-import type { BackupRecord } from './src/features/runs/logic/runtime/env-switcher/types'
+} from './features/runs/logic/runtime/env-switcher/switch'
+import type { BackupRecord } from './features/runs/logic/runtime/env-switcher/types'
 import {
   buildVerificationDiagnostics,
   resolveVerificationRun,
   type ResolveVerificationInput,
-} from './src/features/coverage/logic/verification'
-import type { HealAgentChoice } from './src/features/runs/logic/runtime/launcher/project-config'
-import type { LocalHealAgent } from './src/features/runs/logic/runtime/manifest'
-import type { ExecutionType } from '../../shared/verification'
+} from './features/coverage/logic/verification'
+import type { HealAgentChoice } from './features/runs/logic/runtime/launcher/project-config'
+import type { LocalHealAgent } from './features/runs/logic/runtime/manifest'
+import type { ExecutionType } from '../../../shared/verification'
 
 // Allocate one free TCP port per declared port slot for this run so concurrent
 // runs (even of the same app) never clash on a hardcoded port. Returns
@@ -596,7 +596,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
 
     const nowIso = new Date().toISOString()
-    const externalHealSession: import('./src/features/runs/logic/runtime/manifest').ExternalHealSession | undefined = canClaim
+    const externalHealSession: import('./features/runs/logic/runtime/manifest').ExternalHealSession | undefined = canClaim
       ? {
           sessionId: healAgentReq.sessionId,
           clientKind: healAgentReq.clientKind,
@@ -824,7 +824,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const projectConfig = loadProjectConfig(opts.projectRoot)
       const externalOrigin = healAgentReq?.kind === 'external'
       const canClaim = externalOrigin && healAgentReq?.claimable !== false
-      let externalHealSession: import('./src/features/runs/logic/runtime/manifest').ExternalHealSession | undefined
+      let externalHealSession: import('./features/runs/logic/runtime/manifest').ExternalHealSession | undefined
       if (canClaim && healAgentReq) {
         const nowIso = new Date().toISOString()
         externalHealSession = {
@@ -1479,7 +1479,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // Serve the built React frontend if it exists. In development the dist dir
   // is missing — fall back to a placeholder so `GET /` still returns something
   // meaningful instead of crashing the server boot.
-  const webDist = path.resolve(__dirname, '..', 'web', 'dist')
+  const webDist = path.resolve(__dirname, '..', '..', 'web', 'dist')
   const indexHtmlPath = path.join(webDist, 'index.html')
   if (fs.existsSync(indexHtmlPath)) {
     await app.register(fastifyStatic, {

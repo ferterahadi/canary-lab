@@ -9,27 +9,27 @@ import type {
   Requirement,
   VariantDimension,
 } from '../../../../../../../shared/coverage/types'
-import { computeCoverageLedger, type CoverageTestInput } from '../../../coverage/logic/coverage/ledger'
+import { computeCoverageLedger, type CoverageTestInput } from './ledger'
 import { lastRunOutcomeForTitle, readLatestRunOutcomes } from '../../../runs/logic/runtime/run-outcomes'
-import { applyTestStrength, hasNegativeAssertion, type TestAssertions } from '../../../coverage/logic/coverage/strength'
+import { applyTestStrength, hasNegativeAssertion, type TestAssertions } from './strength'
 import {
   buildAnnotatePrompt,
   proposeCoverageMappings,
   type AnnotateAdapter,
   type AnnotateTestInput,
   type CoverageAgentSession,
-} from '../../../coverage/logic/coverage/annotate-engine'
+} from './annotate-engine'
 import { writeCoversTag, stripCoverageTags } from './tag-writer'
-import { changedDocPaths, changedRequirementIds, diffDocs, fingerprintDocs, requirementFingerprintMap, requirementsSetHash } from '../../../coverage/logic/coverage/fingerprints'
+import { changedDocPaths, changedRequirementIds, diffDocs, fingerprintDocs, requirementFingerprintMap, requirementsSetHash } from './fingerprints'
 import { deriveCoverageStateView, type DeriveStateInput } from './state'
-import { COVERAGE_STATE_JSON, readCoverageRunState, writeCoverageRunState } from '../../../coverage/logic/coverage/run-state'
-import { CoverageJobRunStore } from '../../../coverage/logic/coverage/jobs/store'
+import { COVERAGE_STATE_JSON, readCoverageRunState, writeCoverageRunState } from './run-state'
+import { CoverageJobRunStore } from './jobs/store'
 import {
   GENERATED_DOC_PREFIX,
   docsDirFor,
   isGeneratedDoc,
   readDocsCollection,
-} from '../../../coverage/logic/coverage/docs-collection'
+} from './docs-collection'
 import {
   PRD_SUMMARY_JSON,
   PRD_SUMMARY_MD,
@@ -40,7 +40,7 @@ import {
   writePrdSummary,
   type ParsedRequirement,
   type SummarizeAdapter,
-} from '../../../coverage/logic/coverage/prd-summary'
+} from './prd-summary'
 
 // The single computation layer for the Requirement Coverage Ledger. Both the REST
 // route (routes/coverage.ts) and the MCP tools (mcp/tools.ts) call these — so

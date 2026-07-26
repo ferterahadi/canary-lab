@@ -5,7 +5,7 @@ import {
   type RegeneratePrdSummaryResult,
   type RunCoverageEngineResult,
 } from '../service'
-import type { AnnotateAdapter } from '../../../../coverage/logic/coverage/annotate-engine'
+import type { AnnotateAdapter } from '../annotate-engine'
 import type { SummarizeAdapter } from '../prd-summary'
 import type { CoverageJobStore } from './store'
 import type { CoverageJobKind, CoverageJobManifest } from './types'

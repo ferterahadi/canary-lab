@@ -13,22 +13,22 @@ import Fastify, { type FastifyInstance } from 'fastify'
 // mock factory deadlocks instead: the factory would await an import of the fixture,
 // which re-enters the very module being mocked while its factory is still running.
 const { fakeSummarize, fakePropose } = await vi.hoisted(
-  async () => import('../../coverage/logic/coverage/__fixtures__/fake-coverage-agents'),
+  async () => import('../logic/coverage/__fixtures__/fake-coverage-agents'),
 )
-vi.mock('../../coverage/logic/coverage/prd-summary', async (importActual) => {
-  const actual = await importActual<typeof import('../../coverage/logic/coverage/prd-summary')>()
+vi.mock('../logic/coverage/prd-summary', async (importActual) => {
+  const actual = await importActual<typeof import('../logic/coverage/prd-summary')>()
   return { ...actual, summarizePrd: fakeSummarize }
 })
-vi.mock('../../coverage/logic/coverage/annotate-engine', async (importActual) => {
-  const actual = await importActual<typeof import('../../coverage/logic/coverage/annotate-engine')>()
+vi.mock('../logic/coverage/annotate-engine', async (importActual) => {
+  const actual = await importActual<typeof import('../logic/coverage/annotate-engine')>()
   return { ...actual, proposeCoverageMappings: fakePropose }
 })
 
 import { coverageRoutes } from './coverage'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
-import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../../coverage/logic/coverage/jobs/store'
+import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../logic/coverage/jobs/store'
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
-import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
+import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from '../logic/coverage/jobs/types'
 import { FlightRunStore } from '../../flights/logic/store'
 import { FLIGHT_STAGE_KEYS } from '../../flights/logic/types'
 

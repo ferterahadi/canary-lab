@@ -1,8 +1,8 @@
 import fs from 'fs'
 import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
-import { modelArgs } from '../../agent-sessions/logic/agent-models'
-import { startIdleTimer, type IdleTimer } from '../../agent-sessions/logic/agent-idle-timer'
-import { resolveAgentBinary, isAgentKind, type HealAgent } from '../../agent-sessions/logic/agent-binary'
+import { modelArgs } from './agent-models'
+import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
+import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
 
 // One home for spawning an agent CLI (the Portify model): pipe stdout/stderr,
 // reset the idle clock on every chunk (the liveness signal), kill on a genuine

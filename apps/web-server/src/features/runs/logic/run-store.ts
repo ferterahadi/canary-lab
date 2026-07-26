@@ -13,9 +13,9 @@ import {
   type RunIndexEntry,
   type RunManifest,
   type ServiceStatus,
-} from '../../runs/logic/runtime/manifest'
-import { buildRunPaths, runDirFor, runsRoot } from '../../runs/logic/runtime/run-paths'
-import { FileRunStateSink, type RunStateSink } from '../../runs/logic/runtime/run-state-sink'
+} from './runtime/manifest'
+import { buildRunPaths, runDirFor, runsRoot } from './runtime/run-paths'
+import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import {
   HEARTBEAT_STALE_MS,
@@ -1013,4 +1013,4 @@ export class RunStore extends EventEmitter implements RunStateSink {
 
 // Re-export the manifest types most callers will want alongside RunStore so
 // they don't need a second import.
-export type { RunIndexEntry, RunManifest, ServiceManifestEntry } from '../../runs/logic/runtime/manifest'
+export type { RunIndexEntry, RunManifest, ServiceManifestEntry } from './runtime/manifest'
