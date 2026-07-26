@@ -19,7 +19,7 @@ import { ExternalHealBroker } from './features/runs/logic/heal/external-heal-bro
 import { registerMcpRoutes } from './mcp/server'
 import { paneStreamRoutes } from './features/runs/ws/pane-stream'
 import { runsStreamRoutes } from './features/runs/ws/runs-stream'
-import { agentSessionStreamRoutes } from './features/agent-sessions/ws/agent-session-stream'
+import { register as registerAgentSessions } from './features/agent-sessions'
 import { workspaceStreamRoutes } from './shared/ws/workspace-stream'
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from './features/runs/logic/run-store'
 import { benchmarkRoutes } from './features/benchmark/routes/benchmarks'
@@ -28,8 +28,7 @@ import { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
 import { createBenchmarkRunner } from './features/benchmark/logic/runtime/runner'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from './features/benchmark/logic/runtime/skills'
 import { benchmarkDir } from './features/benchmark/logic/runtime/paths'
-import { portifyRoutes } from './features/portify/routes/portify'
-import { portifyStreamRoutes } from './features/portify/ws/portify-stream'
+import { register as registerPortify } from './features/portify'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import { CoverageJobRunStore } from './features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './features/flights/logic/store'
@@ -41,7 +40,6 @@ import { flightsRoutes } from './features/flights/routes/flights'
 import { buildFlightStageAdapters } from './features/flights/logic/stages/index'
 import { DirtySpecStore } from './features/runs/logic/dirty-specs/store'
 import { startDirtySpecWatcher } from './features/runs/logic/dirty-specs/watcher'
-import { createPortifyRunner } from './features/portify/logic/runtime/runner'
 import { reclaimOrphanedPortify } from './features/portify/logic/runtime/reclaim'
 import { portifyDir } from './features/portify/logic/runtime/paths'
 import {
@@ -49,9 +47,10 @@ import {
   resolveWorkflowAgentRef,
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
+import type { ServerContext } from './server-context'
 import { UpdateJobStore } from './features/version/logic/update-job'
 import { VersionState } from './features/version/logic/version-state'
-import { versionRoutes } from './features/version/routes/version'
+import { register as registerVersion } from './features/version'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../shared/runtime/upgrade-check'
 import { PaneBroker } from './features/runs/logic/pane-broker'
 import { loadFeatures } from './features/config/logic/feature-loader'
@@ -302,6 +301,36 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // Tracks runs with an active envset so we can revert on run-complete or on
   // process termination. Cleared as runs finish.
   const activeEnvsets = new Map<string, BackupRecord[]>()
+  // Real `claude -p` via node-pty in production; tests inject a fake. Shared by
+  // every feature that spawns an agent, so it belongs to the boot core.
+  const ptyFactory = opts.ptyFactory ?? realPtyFactory()
+
+  // Everything above is process-lifetime state this composition root owns.
+  // Below, features register themselves against it — a feature's `register`
+  // reads what it needs from `ctx` instead of createServer knowing its shape.
+  // Registration order is Fastify plugin order, so it is load-bearing.
+  const ctx: ServerContext = {
+    projectRoot: opts.projectRoot,
+    featuresDir,
+    logsDir,
+    journalPath,
+    registry,
+    runStore,
+    benchmarkStore,
+    portifyStore,
+    coverageJobStore,
+    flightStore,
+    planStore,
+    dirtySpecStore,
+    updateStore,
+    versionState,
+    workspaceEvents,
+    externalHealBroker,
+    wizardAgents,
+    brokers,
+    activeEnvsets,
+    ptyFactory,
+  }
 
   await app.register(featuresRoutes, { featuresDir, dirtySpecStore })
   await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: opts.projectRoot, coverageJobStore, flightStore, workspaceEvents })
@@ -444,12 +473,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     countActiveRuns: () => runStore.list().filter((run) => isActiveRunStatus(run.status)).length,
     onPortChange: opts.onPortChange,
   })
-  await app.register(versionRoutes, {
-    projectRoot: opts.projectRoot,
-    state: versionState,
-    updateStore,
-    workspaceEvents,
-  })
+  await registerVersion(app, ctx)
   await app.register(journalRoutes, { logsDir, journalPath, workspaceEvents })
   // `restartLocalHeal` deferred until after the runs route declares its
   // production restartHeal closure — defined below and threaded back in via
@@ -461,8 +485,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   await app.register(externalHealRoutes, externalHealDeps)
 
   // Wizard route deps. Production: real claude -p via node-pty + on-demand
-  const ptyFactory = opts.ptyFactory ?? realPtyFactory()
-
   const productionTestsDraftDeps: TestsDraftRouteDeps = {
     logsDir,
     projectRoot: opts.projectRoot,
@@ -1331,37 +1353,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // proven by a concurrent double-boot, ending at a user commit. Same agent
   // selection policy as the benchmark (pin the chosen CLI; ignore global heal
   // setting).
-  const portifyRunner = createPortifyRunner({
-    logsDir,
-    store: portifyStore,
-    ptyFactory,
-    loadFeatures: () => loadFeatures(featuresDir),
-    pickAgent: (preferred) => pickAvailableHealAgent(preferred),
-    now: () => new Date().toISOString(),
-  })
-  await app.register(portifyRoutes, {
-    store: portifyStore,
-    logsDir,
-    startPortify: portifyRunner.startPortify,
-    savePortify: portifyRunner.save,
-    cancelPortify: portifyRunner.cancel,
-    revisePortify: portifyRunner.revise,
-    removePortify: portifyRunner.remove,
-    workspaceEvents,
-    projectRoot: opts.projectRoot,
-    loadAgentSession: (id) => {
-      const ref = resolveWorkflowAgentRef(portifyDir(logsDir, id))
-      return ref ? buildAgentSessionResponse(ref) : null
-    },
-  })
-  await app.register(portifyStreamRoutes, { store: portifyStore })
+  const { runner: portifyRunner } = await registerPortify(app, ctx)
 
   await app.register(workspaceStreamRoutes, { events: workspaceEvents })
-  await app.register(agentSessionStreamRoutes, {
-    store: runStore,
-    logsDir,
-    coverageProjectRoot: opts.projectRoot,
-  })
+  await registerAgentSessions(app, ctx)
 
   // MCP HTTP server — mounts at /mcp so Claude/Codex Desktop/CLI can connect
   // over the streamable HTTP transport. Tools wrap the REST endpoints
