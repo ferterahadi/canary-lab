@@ -3,16 +3,24 @@
 **Scope:** repository layout and module ownership. **No behavior changes.**
 Every item below is a move, a rename, a generator, or a declaration.
 
-**Status:** **All phases are done.** Phase 8 step 2 stopped deliberately at the
-point where the remainder stops being a layout move — see the coupling table
-below. Phase 9 is complete: 9 web barrels, `npm run check:boundaries`, and the
-convention section in `docs/ARCHITECTURE.md`. The one
+**Status:** **All phases are done, and the Definition of done is met.** Phase 8
+step 2 stopped deliberately at the point where the remainder stops being a layout
+move — see the coupling table below. Phase 9 is complete: 9 web barrels,
+`npm run check:boundaries`, and the convention section in
+`docs/ARCHITECTURE.md`. Two follow-on commits after the phases closed took the
+coverage gate to 187 files and killed the `watcher.ts:45` flake. The one
 non-layout item (a public-repo privacy exposure) is **resolved** — the history
 was rewritten on 2026-07-26, so **every SHA below is post-rewrite**.
 
-**Branch:** `release/1.6.0`. Work in the **main checkout** at
-`/Users/oddle/Documents/canary-lab`, never in `.claude/worktrees/*` — three stale
-worktrees exist there and are behind.
+**What is left is no longer layout work.** `orchestrator.ts` (2,685 ln) needs a
+redesign of who owns run state, and three of the five remaining coverage excludes
+are path-traversal or CLI-boot guards that should stay excluded rather than be
+deleted for a percentage. See the closing sections.
+
+**Branch:** `release/1.6.0`, pushed and in sync with `origin` at `39bbacc`. Work
+in the **main checkout** at `/Users/oddle/Documents/canary-lab` — `git worktree
+list` should show it alone; the three stale worktrees this document used to warn
+about are gone.
 
 ---
 
@@ -30,32 +38,40 @@ worktrees exist there and are behind.
 | `143e461` | 7 | `client.ts` 2,195 ln → a 24-line barrel + 13 domain modules + `internal.ts`, all still under `shared/api/`; zero call sites changed |
 | `d93871b` | — | fallout fix: `run-primitives.ts` had shipped untested in `b8faded`, holding the gate red at 99.95% ever since |
 
-`origin/release/1.6.0` is at `8c7d6c5`; **everything from `dd9ade7` onward is
-unpushed.** These SHAs replaced the pre-rewrite ones (`2140974`, `4421b81`,
+Everything through `39bbacc` is **pushed** — `origin/release/1.6.0` matches the
+local branch. These SHAs replaced the pre-rewrite ones (`2140974`, `4421b81`,
 `02ddf2a`, `f8438d8`, `459fb0f`, `d14ad04`, `a0107e7`, `a4bb2f0`, `298378a`); the
 old hashes no longer resolve. `.git/filter-repo/commit-map` holds the full mapping
 if an old SHA turns up in a doc or a note.
 
-### Current numbers (measured at `5195214`)
+### Current numbers (measured at `39bbacc`)
 
 | Metric | Value |
 | --- | --- |
-| Coverage gate | 100/100/100/100 — **182 files**, 12,997 stmts / 8,718 branches / 2,431 funcs / 11,202 lines |
-| Tests | 305 files, 5,603 passing, 1 skipped |
+| Coverage gate | 100/100/100/100 — **187 files**, 14,064 stmts / 9,565 branches / 2,675 funcs / 12,090 lines |
+| Tests | 307 files, 5,626 passing, 1 skipped |
 | `tsc -p tsconfig.build.json` | clean |
 | `typecheck:web` / `:server` | 5 / 17 pre-existing errors, **all in `*.test.ts(x)`** (the build config excludes tests) — this is the baseline, not a regression. Count *errors* (`grep -cE "^[^ ].*error TS"`), not output lines; multi-line errors inflate a `wc -l`. |
-| `server.ts` | 447 ln, 58 imports, 15 dep constructions, 10 register calls |
-| `shared/api/` | 15 modules, largest `config.ts` at 373 ln (was one 2,195-ln `client.ts`) |
-| server `runs` | **2,781 ln excluded from the gate**, down from 5,068 at the start of Phase 8 |
-| `orchestrator.ts` | 2,781 ln — the only file in `runs` still excluded, and still the largest file in the repo |
-| `apps/web-server/src/shared/` | 15 modules; gained `feature-loader`, `ast-extractor`, `config-ast`, `launcher-startup` |
-| Feature barrels | server 10/10 · **web 0/10** ← Phase 9 target |
-| Cross-feature imports | **web 57** (aliased `@/features/<other>/…`) · **server 257** |
+| `server.ts` | 446 ln, 58 imports, 15 dep constructions, 10 register calls |
+| `shared/api/` | 19 modules (was one 2,195-ln `client.ts`); largest is `types.ts` at 608 ln, largest with logic is `config.ts` at 373 |
+| Coverage excludes | **5 files, 4,190 ln** — was 7 files / 6,885 ln; `runner.ts` and `test-review-export.ts` closed in `0e3d9bf` |
+| server `runs` | **2,685 ln excluded from the gate**, down from 5,068 at the start of Phase 8 |
+| `orchestrator.ts` | 2,685 ln — the only file in `runs` still excluded, and still the largest file in the repo |
+| `apps/web-server/src/shared/` | 14 modules + `ws/`; gained `feature-loader`, `ast-extractor`, `config-ast`, `launcher-startup` |
+| Feature barrels | server 10/10 (registrars) · web **9/9** (re-export barrels) |
+| Cross-feature imports | **web 20** (18 via barrel, 2 exempt) · **server 256** across 48 pairs |
 
-The earlier revision of this table claimed 162 files / 100% at `b8faded`. Both were
-wrong: the gate had been red since Phase 6 (`run-primitives.ts` shipped untested),
-and "web 0 cross-feature imports" counted only the pre-codemod `../../` spelling.
-Re-measure rather than copying a number forward.
+Two earlier revisions of this table were wrong, in both directions:
+
+- It claimed 162 files / 100% at `b8faded`. The gate had actually been **red**
+  since Phase 6 (`run-primitives.ts` shipped untested).
+- It claimed "web 0 cross-feature imports". That counted only the pre-codemod
+  `../../` spelling; the real figure was 57.
+
+Re-measure rather than copying a number forward — and state the counting method,
+because "modules" and "cross-feature imports" both have more than one defensible
+definition (the server figure here counts *import statements* resolving into
+another feature's directory, not distinct symbols).
 
 ---
 
@@ -172,9 +188,10 @@ hand-pruned and not regex-stripped.
 | 5 | `runs → config` coupling | 8 imports → 0 | ✅ `f1f960c` |
 | 6 | Tier-4 live proof + DoD checklist | — | ✅ 3/3 passed on run `2026-07-26T1322-3eg4` |
 
-**Net so far:** `runs` outside the gate **5,068 → 2,781 ln** (−45%), gated files
-**177 → 182**, and **no new exclude was added at any step**. `orchestrator.ts` is
-the only file in `runs` still excluded.
+**Net for the phase:** `runs` outside the gate **5,068 → 2,685 ln** (−47%), gated
+files **177 → 182**, and **no new exclude was added at any step**.
+`orchestrator.ts` is the only file in `runs` still excluded. (The gate reached 187
+files after the phase closed — see the follow-on table under Definition of done.)
 
 ### Step 2 — stopped deliberately, and why
 
@@ -357,12 +374,20 @@ deliberately mirroring the run feature.
 - **Verify with a real production build**, not just the unit suite — an init
   cycle need not show up in tests.
 
-### Known gate flake (pre-existing, unrelated)
+### ✅ Resolved — gate flake at `dirty-specs/watcher.ts:45` (`39bbacc`)
 
-`dirty-specs/watcher.ts:45` — the debounce-coalescing arm only fires when two
-filesystem events land inside the debounce window, so a run can report 99.99%
-with that one branch missed. Passes on a re-run. Worth pinning with a
-deterministic test rather than living with it.
+The debounce-coalescing arm only fired when two filesystem events landed inside
+the window, so a run could report 99.99% with that one branch missed. The
+end-to-end test wrote the spec file twice, but the OS is free to coalesce those
+writes into a single `fs.watch` event — in which case `scheduleRecompute` ran
+once, no timer existed to clear, and the arm went uncovered.
+
+Pinned by driving the captured `fs.watch` listener twice in one tick, so the
+second call must find the first's pending timer. The assertion is the observable
+consequence (exactly one recompute after a further full window), not the branch.
+Verified deterministic: the new test alone covers both arms on three consecutive
+runs. The listener capture is now a shared `captureE2eWatch` helper — the
+close()-guard test had the same 20-line spy inline.
 
 ---
 
@@ -470,16 +495,39 @@ prose over an enumeration.
   gate was not at 100% (`run-primitives.ts` shipped untested in Phase 6), and web's
   cross-feature import count was 57, not 0. **Verify before building.**
 
-## Definition of done (Phases 8–9)
+## Definition of done (Phases 8–9) — ✅ all met
 
-- [ ] Coverage 100/100/100/100 **and** the covered-file count at least 178
+- [x] Coverage 100/100/100/100 **and** the covered-file count at least 178
       (percentage alone does not prove scope was preserved; every file a split
-      lifts out of an exclude should push this number *up*)
-- [ ] All three typechecks at baseline (0 / 5 / 17, the latter two test-only)
-- [ ] `npm run smoke:pack` passes
-- [ ] Both generator `--check`s pass
-- [ ] No test assertion changed. Mechanical edits to test files (import paths,
+      lifts out of an exclude should push this number *up*) — **187**
+- [x] All three typechecks at baseline (0 / 5 / 17, the latter two test-only)
+- [x] `npm run smoke:pack` passes
+- [x] Both generator `--check`s pass
+- [x] No test assertion changed. Mechanical edits to test files (import paths,
       `__dirname` depth) are expected when files move — changing what a test
       *asserts* is not.
-- [ ] One commit per phase, prefixed `chore:` or `refactor:`
-- [ ] Live proof captured via `cl_apply-local`
+- [x] One commit per phase, prefixed `chore:` or `refactor:`
+- [x] Live proof captured via `cl_apply-local` — Phase 8: a 3/3-passing run
+      through the MCP loop (`2026-07-26T1322-3eg4`); Phase 9: the rebuilt UI on
+      the derived port with zero console errors, including a barrel-routed
+      Settings modal built from the moved `atoms.tsx`
+
+### Follow-on work after the phases closed
+
+| Commit | Result |
+| --- | --- |
+| `0e3d9bf` | `runner.ts` + `test-review-export.ts` closed; both coverage excludes deleted. Gate 185 → **187 files**, excluded source 6,885 → 4,190 ln. Six unreachable arms removed at the source (a required `logPath`, an agent/session-id discriminated union, a rewrite passed in rather than re-derived); the rest were reachable and got real tests. Output proven unchanged: the same real run renders **byte-identical** HTML (36,866 bytes) through the built `dist/` before and after. |
+| `39bbacc` | The `watcher.ts:45` gate flake pinned deterministically (see above). |
+
+**The excludes' own rationale comments were only partly right** — `runner.ts`
+listed 2 arms but had 2 arms + an uncovered function, and `test-review-export.ts`
+listed 5 arms but had 12 arms + 6 statements + 2 functions, six of those sites
+unmentioned and most of them *reachable*. Re-measure from `coverage-final.json`
+before trusting any "we audited this" note; a `statementMap` gap does not show up
+in an lcov `DA:`/`BRDA:` read.
+
+One behaviour finding was recorded rather than fixed: `audienceFlowTitle`'s
+`|| readableHelperName(…)` fallback is unreachable because `readableActionName`
+carries its own, so a helper whose name yields no recognisable action words gets
+a generic label instead of the humanised name that chain intended. Changing it
+changes exported report text, so it does not belong in a coverage pass.
