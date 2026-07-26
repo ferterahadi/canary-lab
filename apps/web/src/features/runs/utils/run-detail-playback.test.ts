@@ -4,7 +4,7 @@ import type {
   PlaywrightPlaybackEvent,
   RepoBranchSnapshot,
   ServiceManifestEntry,
-} from '../../../shared/api/types'
+} from '@/shared/api/types'
 import {
   DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY,
   artifactsForPlayback,

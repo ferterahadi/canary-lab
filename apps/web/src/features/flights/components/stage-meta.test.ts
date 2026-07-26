@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
-import type { FlightManifest, FlightStage } from '../../../shared/api/client'
-import type { HealEnd } from '../../../shared/api/types'
+import type { FlightManifest, FlightStage } from '@/shared/api/client'
+import type { HealEnd } from '@/shared/api/types'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   return {

@@ -6,7 +6,7 @@ import {
   isActivePortify,
   latestSavedWorkflowId,
 } from './portify-state'
-import type { PortifyIndexEntry, PortifyManifest } from '../../../shared/api/client'
+import type { PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
 
 function m(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {

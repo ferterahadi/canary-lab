@@ -7,8 +7,8 @@ import {
   derivedFlightToken,
   latestTerminalRunByFeature,
 } from './derived-stages'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
-import type { RunIndexEntry } from '../../../shared/api/types'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import type { RunIndexEntry } from '@/shared/api/types'
 
 function run(over: Partial<RunIndexEntry>): RunIndexEntry {
   return {

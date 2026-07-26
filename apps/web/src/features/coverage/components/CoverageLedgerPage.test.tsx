@@ -3,8 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '../../../shared/api/client'
-import type { CoverageLedger } from '../../../shared/api/types'
+import * as api from '@/shared/api/client'
+import type { CoverageLedger } from '@/shared/api/types'
 import { CoverageLedgerPage } from './CoverageLedgerPage'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -27,8 +27,8 @@ vi.mock('shiki/themes/one-dark-pro.mjs', () => ({ default: {} }))
 vi.mock('shiki/themes/one-light.mjs', () => ({ default: {} }))
 vi.mock('shiki/wasm', () => ({ default: {} }))
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     getFeatureCoverage: vi.fn(),
@@ -347,7 +347,7 @@ describe('CoverageLedgerPage', () => {
   })
 
   it('shows the dedicated Generating screen while a job runs, not the ledger (R13)', async () => {
-    let resolveJob: (m: import('../../../shared/api/types').CoverageJobManifest) => void = () => {}
+    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
@@ -365,7 +365,7 @@ describe('CoverageLedgerPage', () => {
   })
 
   it('puts the Tests pane (3rd column) in a loading state while generating — skeleton cards, no real test cases', async () => {
-    let resolveJob: (m: import('../../../shared/api/types').CoverageJobManifest) => void = () => {}
+    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
     vi.mocked(api.getFeatureCoverage).mockResolvedValue(structuredClone(ABSENT_LEDGER))
     vi.mocked(api.startCoverageJob).mockResolvedValue({ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running', startedAt: 'now', log: 'summarizing…' })
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
@@ -414,7 +414,7 @@ describe('CoverageLedgerPage', () => {
     vi.mocked(api.listCoverageJobs).mockResolvedValue([
       { jobId: 'jX', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:01Z' },
     ])
-    let resolveJob: (m: import('../../../shared/api/types').CoverageJobManifest) => void = () => {}
+    let resolveJob: (m: import('@/shared/api/types').CoverageJobManifest) => void = () => {}
     vi.mocked(api.getCoverageJob).mockImplementation(() => new Promise((res) => { resolveJob = res }))
     await mount()
     await act(async () => { await Promise.resolve(); await Promise.resolve() })

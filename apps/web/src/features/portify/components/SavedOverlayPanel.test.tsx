@@ -3,12 +3,12 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { openPortifyProject, type PortifyManifest } from '../../../shared/api/client'
+import { openPortifyProject, type PortifyManifest } from '@/shared/api/client'
 import { SavedOverlayPanel } from './SavedOverlayPanel'
 
 // The panel opens the saved overlay folder via the client; stub it.
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return { ...actual, openPortifyProject: vi.fn() }
 })
 

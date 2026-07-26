@@ -1,5 +1,5 @@
-import { connectReconnectingSocket, defaultWsBase } from '../../../shared/api/reconnecting-socket'
-import type { AgentSessionEvent, SubagentIdentity } from '../../../shared/api/client'
+import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/client'
 
 // WebSocket wrapper for live structured agent-session events. Source is
 // either a run id or a (draftId, stage) pair — the server routes are

@@ -4,8 +4,8 @@ import { useTheme } from '../lib/theme'
 import type { ExtractedStep } from '../api/types'
 import * as api from '../api/client'
 import { getCodeHighlighter, codeThemeFor } from './code-highlighter'
-import { sourceLineForBodyLine } from '../../features/runs/utils/editor-location'
-import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '../../features/runs/utils/test-step-status'
+import { sourceLineForBodyLine } from '@/features/runs/utils/editor-location'
+import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '@/features/runs/utils/test-step-status'
 
 interface SourceLocation {
   file: string

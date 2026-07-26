@@ -1,5 +1,5 @@
 import { useEffect, useState, type CSSProperties } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 
 // One home for the branch-picking UI: the Advanced setup Service tab
 // (BranchControl) and the flight Suite setup panel render the SAME input +

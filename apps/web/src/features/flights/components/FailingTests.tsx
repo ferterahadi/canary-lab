@@ -1,4 +1,4 @@
-import type { RunSummary, RunSummaryFailedEntry } from '../../../shared/api/types'
+import type { RunSummary, RunSummaryFailedEntry } from '@/shared/api/types'
 
 // The failing tests, rendered as evidence instead of a list of truncated slugs.
 //

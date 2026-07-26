@@ -6,13 +6,13 @@ import type {
   RunLifecycleEvent,
   RunStatus,
   TransientAction,
-} from '../../../shared/api/types'
+} from '@/shared/api/types'
 import {
   deriveDisplayStatus,
   deriveRunActionAvailability,
   isTerminalRunStatus,
-} from '../../../../../../shared/run-state'
-import type { RunActionAvailability } from '../../../../../../shared/run-state'
+} from '@shared/run-state'
+import type { RunActionAvailability } from '@shared/run-state'
 
 export interface RunViewModel {
   displayStatus: DisplayStatus

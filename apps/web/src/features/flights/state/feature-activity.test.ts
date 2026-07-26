@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { DraftRecord, RunIndexEntry } from '../../../shared/api/types'
-import type { PortifyIndexEntry } from '../../../shared/api/client'
+import type { DraftRecord, RunIndexEntry } from '@/shared/api/types'
+import type { PortifyIndexEntry } from '@/shared/api/client'
 import { deriveFeatureActivity } from './feature-activity'
 
 const run = (over: Partial<RunIndexEntry>): RunIndexEntry => ({

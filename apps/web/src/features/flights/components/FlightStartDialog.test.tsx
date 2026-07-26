@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightEntryOptions } from '../../../shared/api/client'
+import type { FlightEntryOptions } from '@/shared/api/client'
 
 const mocks = vi.hoisted(() => ({
   getFlightEntryOptions: vi.fn(),
@@ -16,9 +16,9 @@ const mocks = vi.hoisted(() => ({
   abortFlight: vi.fn(),
 }))
 
-vi.mock('../../../shared/api/client', async (importOriginal) => ({
+vi.mock('@/shared/api/client', async (importOriginal) => ({
   // Keep ApiError (the dialog branches on it for the server's error body).
-  ...(await importOriginal<typeof import('../../../shared/api/client')>()),
+  ...(await importOriginal<typeof import('@/shared/api/client')>()),
   getFlightEntryOptions: mocks.getFlightEntryOptions,
   startFlight: mocks.startFlight,
   planFeatures: mocks.planFeatures,
@@ -32,13 +32,13 @@ vi.mock('../../../shared/api/client', async (importOriginal) => ({
 
 // The planning view embeds the live agent timeline — its transports are its
 // own tested concern; stub it.
-vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
+vi.mock('@/features/agent-sessions/components/AgentSessionView', () => ({
   AgentSessionView: ({ source }: { source: { kind: string } }) => (
     <div data-testid="agent-session-view" data-kind={source.kind} />
   ),
 }))
 
-import { ApiError } from '../../../shared/api/client'
+import { ApiError } from '@/shared/api/client'
 import { FlightStartDialog } from './FlightStartDialog'
 import { STAGE_BLURB } from './stage-meta'
 

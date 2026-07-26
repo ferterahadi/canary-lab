@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   checkoutRepoBranch: vi.fn(),
   pinFeatureBranchesToCurrent: vi.fn(),
 }))
-vi.mock('../../../shared/api/client', () => ({
+vi.mock('@/shared/api/client', () => ({
   asRepoCollision: mocks.asRepoCollision,
   asBranchMismatch: mocks.asBranchMismatch,
   benchmarkPreflight: mocks.benchmarkPreflight,

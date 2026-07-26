@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunDetail } from '../../../shared/api/types'
+import type { RunDetail } from '@/shared/api/types'
 import { RunDetailColumn } from './RunDetailColumn'
 import { RunsColumn } from './RunsColumn'
 
@@ -26,7 +26,7 @@ vi.mock('../state/RunsContext', () => ({
   })),
 }))
 
-vi.mock('../../evaluation/state/EvaluationExportContext', () => ({
+vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: vi.fn(() => ({
     startExport: vi.fn(),
     taskForRun: vi.fn(() => null),
@@ -38,11 +38,11 @@ vi.mock('../../evaluation/state/EvaluationExportContext', () => ({
 }))
 
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
-vi.mock('../../../shared/shell/McpPromoContext', () => ({
+vi.mock('@/shared/shell/McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
 
-vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
+vi.mock('@/features/agent-sessions/components/AgentSessionView', () => ({
   AgentSessionView: () => <div>agent session</div>,
 }))
 
@@ -53,7 +53,7 @@ vi.mock('./PaneTerminal', () => ({
   },
 }))
 
-vi.mock('../../coverage/components/VerificationDialog', () => ({
+vi.mock('@/features/coverage/components/VerificationDialog', () => ({
   VerificationDialog: () => <div data-testid="verification-dialog">verification dialog</div>,
 }))
 
@@ -252,7 +252,7 @@ describe('run launch controls', () => {
 describe('run overview', () => {
   it('gates raw and localized evaluation exports through the MCP promo', async () => {
     const { useRun } = await import('../state/RunsContext')
-    const { useEvaluationExports } = await import('../../evaluation/state/EvaluationExportContext')
+    const { useEvaluationExports } = await import('@/features/evaluation/state/EvaluationExportContext')
     const startExport = vi.fn()
     vi.mocked(useEvaluationExports).mockReturnValue({ startExport, taskForRun: () => null } as unknown as ReturnType<typeof useEvaluationExports>)
     vi.mocked(useRun).mockReturnValue({

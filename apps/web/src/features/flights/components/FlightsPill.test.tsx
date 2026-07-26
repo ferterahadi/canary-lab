@@ -3,8 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightIndexEntry, PlanFeaturesTask } from '../../../shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import type { FlightIndexEntry, PlanFeaturesTask } from '@/shared/api/client'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows } from './FlightsPill'
 

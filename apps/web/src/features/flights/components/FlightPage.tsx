@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 import type {
   FlightCheckpoint,
   FlightManifest,
@@ -9,22 +9,22 @@ import type {
   FlightStageRemedy,
   FlightStageStatus,
   SpecsCoverageProgress as SpecsCoverageProgressT,
-} from '../../../shared/api/client'
-import { AgentSessionView, type AgentSessionSource } from '../../agent-sessions/components/AgentSessionView'
-import { Modal, StatusDot, useEscapeToClose } from '../../config/components/atoms'
-import { Chip } from '../../../shared/ui/StatusChip'
-import { DiffView } from '../../../shared/ui/DiffView'
-import { StepList, StepRow } from '../../../shared/ui/StepList'
-import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '../../../shared/ui/PanelCard'
-import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
+} from '@/shared/api/client'
+import { AgentSessionView, type AgentSessionSource } from '@/features/agent-sessions/components/AgentSessionView'
+import { Modal, StatusDot, useEscapeToClose } from '@/features/config/components/atoms'
+import { Chip } from '@/shared/ui/StatusChip'
+import { DiffView } from '@/shared/ui/DiffView'
+import { StepList, StepRow } from '@/shared/ui/StepList'
+import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
-import { DeleteSuiteConfirm } from '../../config/components/DeleteSuiteConfirm'
-import { useInvalidationKey } from '../../../shared/state/invalidation'
+import { DeleteSuiteConfirm } from '@/features/config/components/DeleteSuiteConfirm'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 import type { FeatureActivity } from '../state/feature-activity'
-import type { FlightLauncherIntent } from '../../../shared/state/nav-state'
-import type { ConfigTab } from '../../../shared/lib/workspace-view-state'
+import type { FlightLauncherIntent } from '@/shared/state/nav-state'
+import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import {
   FactsGrid,
@@ -47,7 +47,7 @@ import {
   type StageFact,
   type StageRailRow,
 } from './stage-meta'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import {
   buildDerivedManifest,
   derivedEntryStage,

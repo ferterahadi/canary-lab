@@ -3,8 +3,8 @@ import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
   RunStatus,
-} from '../../../shared/api/types'
-import { isTerminalRunStatus } from '../../../../../../shared/run-state'
+} from '@/shared/api/types'
+import { isTerminalRunStatus } from '@shared/run-state'
 import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from './external-client-branding'
 import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from './ExternalAgentCard'
 

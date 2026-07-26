@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import * as api from '../../../shared/api/client'
-import { ApiError } from '../../../shared/api/client'
-import type { ExecutionType, RunIndexEntry } from '../../../shared/api/types'
-import { formatDuration, durationBetween, shortTime } from '../../../shared/lib/format'
+import * as api from '@/shared/api/client'
+import { ApiError } from '@/shared/api/client'
+import type { ExecutionType, RunIndexEntry } from '@/shared/api/types'
+import { formatDuration, durationBetween, shortTime } from '@/shared/lib/format'
 import { deriveRunViewModel, type RunViewModel } from '../utils/run-view-model'
-import { useMcpPromo } from '../../../shared/shell/McpPromoContext'
+import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 import { useRuns } from '../state/RunsContext'
 import { RunStatusIndicator } from './RunStatusIndicator'
-import { VerificationDialog } from '../../coverage/components/VerificationDialog'
-import { useInvalidationKey } from '../../../shared/state/invalidation'
+import { VerificationDialog } from '@/features/coverage/components/VerificationDialog'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 
 interface Props {
   feature: string | null
@@ -738,8 +738,8 @@ function RunActionsKebab({
   onCancelHeal,
 }: {
   view: RunViewModel
-  displayStatus: import('../../../shared/api/types').DisplayStatus
-  executionType?: import('../../../shared/api/types').ExecutionType
+  displayStatus: import('@/shared/api/types').DisplayStatus
+  executionType?: import('@/shared/api/types').ExecutionType
   open: boolean
   onOpenToggle: (e: React.MouseEvent) => void
   onClose: () => void

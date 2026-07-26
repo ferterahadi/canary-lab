@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Modal } from '../../config/components/atoms'
-import { ExternalDraftAgentPanel } from '../../runs/components/ExternalDraftAgentPanel'
+import { Modal } from '@/features/config/components/atoms'
+import { ExternalDraftAgentPanel } from '@/features/runs/components/ExternalDraftAgentPanel'
 import { isActiveWizardTask, useWizardDrafts } from '../state/WizardDraftContext'
 
 // The routed home for a live external authoring draft (?dialog=draft&draft=<id>).

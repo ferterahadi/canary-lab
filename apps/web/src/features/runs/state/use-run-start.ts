@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
-import * as api from '../../../shared/api/client'
-import type { RepoCollisionChoice } from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
+import type { RepoCollisionChoice } from '@/shared/api/client'
 
 // The run-start flow, lifted out of App so its branching (collision → isolate/
 // queue prompt, branch-mismatch recovery, silent-failure guard) is exercised on

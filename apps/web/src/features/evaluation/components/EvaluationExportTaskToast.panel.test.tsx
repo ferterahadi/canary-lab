@@ -3,14 +3,14 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { EvaluationExportTask } from '../../../shared/api/types'
+import type { EvaluationExportTask } from '@/shared/api/types'
 import { ExternalEvaluationPanel } from './EvaluationExportTaskToast'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 // The open-client CTA calls api.openAgentApp on click; stub it so the mount is inert.
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return { ...actual, openAgentApp: vi.fn(async () => {}) }
 })
 

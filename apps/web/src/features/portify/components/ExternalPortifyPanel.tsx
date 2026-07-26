@@ -1,6 +1,6 @@
-import type { PortifyManifest, PortifyStatus } from '../../../shared/api/client'
-import { clientLabel, clientTint, shortSession, type ExternalClientKind } from '../../runs/components/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from '../../runs/components/ExternalAgentCard'
+import type { PortifyManifest, PortifyStatus } from '@/shared/api/client'
+import { clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/features/runs/components/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from '@/features/runs/components/ExternalAgentCard'
 
 // Portify-side analog of ExternalDraftAgentPanel / ExternalHealPanel. When a
 // port-ification workflow is driven by an external MCP client (the agent runs

@@ -1,8 +1,8 @@
-import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, PrdSourceCheckpointData, SpecsCoverageProgress } from '../../../shared/api/client'
-import type { HealEnd } from '../../../shared/api/types'
-import { StatusDot } from '../../config/components/atoms'
-import { Chip } from '../../../shared/ui/StatusChip'
-import { PanelCard } from '../../../shared/ui/PanelCard'
+import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, PrdSourceCheckpointData, SpecsCoverageProgress } from '@/shared/api/client'
+import type { HealEnd } from '@/shared/api/types'
+import { StatusDot } from '@/features/config/components/atoms'
+import { Chip } from '@/shared/ui/StatusChip'
+import { PanelCard } from '@/shared/ui/PanelCard'
 
 // One home for the flight-stage presentation vocabulary (R14/R16/R18): the
 // user-facing stage labels, the status tone/icon treatment, the shared status

@@ -21,6 +21,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
+      // Repo-root shared/. Aliased for apps/web only: Vite inlines these at bundle
+      // time, so nothing alias-shaped survives into output. The server and CLI are
+      // emitted by tsc, which does not rewrite specifiers — see tsconfig.build.json.
+      '@shared': path.resolve(__dirname, '../../shared'),
     },
   },
   server: {

@@ -1,6 +1,6 @@
-import type { FlightIndexEntry } from '../../../../../../shared/flights/types'
-import { isTerminalFlightStatus } from '../../../../../../shared/flights/types'
-import type { Feature } from '../../../shared/api/types'
+import type { FlightIndexEntry } from '@shared/flights/types'
+import { isTerminalFlightStatus } from '@shared/flights/types'
+import type { Feature } from '@/shared/api/types'
 
 /**
  * A First-Flight batch launch (`Start N flights`) mints N flight records

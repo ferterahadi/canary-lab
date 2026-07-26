@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import * as api from '../../../shared/api/client'
-import type { PortifyManifest } from '../../../shared/api/client'
-import { DiffView } from '../../../shared/ui/DiffView'
-import { patchFileName } from '../../../../../../shared/portify-overlay'
+import * as api from '@/shared/api/client'
+import type { PortifyManifest } from '@/shared/api/client'
+import { DiffView } from '@/shared/ui/DiffView'
+import { patchFileName } from '@shared/portify-overlay'
 
 // The one rendering of a feature's SAVED port overlay — the captured diff, the
 // open-in-editor control, the double-boot proof, and the per-service

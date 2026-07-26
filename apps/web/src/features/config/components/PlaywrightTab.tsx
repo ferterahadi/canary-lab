@@ -1,5 +1,5 @@
-import * as api from '../../../shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
+import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
 import {
   ComplexValueBadge,
   FieldRow,

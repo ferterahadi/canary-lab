@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import * as api from '../../../shared/api/client'
-import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
+import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '@/shared/api/client'
 import { useActivePortify } from '../state/PortifyContext'
-import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
-import { DiffView } from '../../../shared/ui/DiffView'
+import { AgentSessionView } from '@/features/agent-sessions/components/AgentSessionView'
+import { DiffView } from '@/shared/ui/DiffView'
 import { ExternalPortifyPanel } from './ExternalPortifyPanel'
 import { NoChangesNeeded, SavedOverlayPanel, VerificationBadge } from './SavedOverlayPanel'
 

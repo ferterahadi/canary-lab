@@ -1,11 +1,11 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import * as api from '../../../shared/api/client'
-import type { FlightManifest, FlightStageStatus, PrdSourceAttempt, PrdSourceCheckpointData } from '../../../shared/api/client'
-import type { FeatureDocsListing } from '../../../shared/api/types'
-import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '../../config/components/BranchSuggestInput'
-import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, readAsBase64, useDocDrop } from '../../coverage/components/CoverageDocsRail'
-import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '../../../shared/ui/PanelCard'
-import { StepList, StepRow } from '../../../shared/ui/StepList'
+import * as api from '@/shared/api/client'
+import type { FlightManifest, FlightStageStatus, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
+import type { FeatureDocsListing } from '@/shared/api/types'
+import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '@/features/config/components/BranchSuggestInput'
+import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, readAsBase64, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
+import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '@/shared/ui/PanelCard'
+import { StepList, StepRow } from '@/shared/ui/StepList'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a

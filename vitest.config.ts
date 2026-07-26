@@ -1,4 +1,14 @@
+import path from 'node:path'
 import { defineConfig } from 'vitest/config'
+
+// Mirrors apps/web/vite.config.ts. `projects` entries are standalone configs, so a
+// root-level `resolve` would not reach them — each project declares its own. Only
+// apps/web uses these aliases; server/CLI code is emitted by tsc, which leaves
+// specifiers untouched, so an alias there would ship unresolvable to dist/.
+const webAliases = {
+  '@': path.resolve(import.meta.dirname, 'apps/web/src'),
+  '@shared': path.resolve(import.meta.dirname, 'shared'),
+}
 
 // Known, intentional test noise. Each entry collapses a class of expected
 // log lines (asserted-around or deliberately provoked by tests) into a single
@@ -35,6 +45,7 @@ export default defineConfig({
     },
     projects: [
       {
+        resolve: { alias: webAliases },
         test: {
           name: 'node',
           // Filters expected stderr noise that bypasses onConsoleLog (direct
@@ -54,6 +65,7 @@ export default defineConfig({
         },
       },
       {
+        resolve: { alias: webAliases },
         test: {
           name: 'dom',
           setupFiles: ['./vitest.setup.ts'],

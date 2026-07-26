@@ -2,11 +2,11 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { JournalTab } from './JournalTab'
-import type { JournalEntry } from '../../../shared/api/types'
+import type { JournalEntry } from '@/shared/api/types'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('../../../shared/api/client', () => ({
+vi.mock('@/shared/api/client', () => ({
   listJournal: vi.fn(),
   deleteJournalEntry: vi.fn(),
 }))
@@ -28,7 +28,7 @@ afterEach(() => {
 
 describe('JournalTab live refresh', () => {
   it('refetches the selected run journal when refreshKey changes', async () => {
-    const api = await import('../../../shared/api/client')
+    const api = await import('@/shared/api/client')
     vi.mocked(api.listJournal)
       .mockResolvedValueOnce([entry(1, 'first')])
       .mockResolvedValueOnce([entry(2, 'second')])

@@ -1,9 +1,9 @@
 import { useMemo } from 'react'
-import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../../../../../../shared/flights/types'
-import type { FlightStageKey, FlightStageStatus } from '../../../shared/api/client'
-import type { EvaluationExportTask, Feature, RunIndexEntry } from '../../../shared/api/types'
-import { useRuns } from '../../runs/state/RunsContext'
-import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '@shared/flights/types'
+import type { FlightStageKey, FlightStageStatus } from '@/shared/api/client'
+import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
+import { useRuns } from '@/features/runs/state/RunsContext'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
 
 // Evidence-derived stage rail for a feature with NO flight record: what has
 // actually been done to this suite, regardless of who did it (flight, wizard,

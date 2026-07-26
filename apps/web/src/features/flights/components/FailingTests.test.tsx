@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunSummary, RunSummaryFailedEntry } from '../../../shared/api/types'
+import type { RunSummary, RunSummaryFailedEntry } from '@/shared/api/types'
 import { FailingTests } from './FailingTests'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true

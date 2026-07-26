@@ -3,7 +3,7 @@
  * navigate anywhere on the user's filesystem via /api/workspace/dirs.
  */
 import { useEffect, useState } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 import { ChevronRightIcon, FolderIcon, Modal } from './atoms'
 
 interface Props {

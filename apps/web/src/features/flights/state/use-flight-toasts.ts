@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { FlightIndexEntry } from '../../../shared/api/client'
+import type { FlightIndexEntry } from '@/shared/api/client'
 import { STAGE_LABEL } from '../components/stage-meta'
-import type { ToastItem } from '../../config/components/atoms'
+import type { ToastItem } from '@/features/config/components/atoms'
 import { attentionKeyMap, diffFlightToasts } from './flight-toasts'
 
 // R51/R68 attention toasts. The decision of WHICH flights to toast, the seed

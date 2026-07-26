@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import * as api from '../../../shared/api/client'
-import type { RunFixCapture, RunProposedPr } from '../../../shared/api/types'
-import { PanelCard } from '../../../shared/ui/PanelCard'
+import * as api from '@/shared/api/client'
+import type { RunFixCapture, RunProposedPr } from '@/shared/api/types'
+import { PanelCard } from '@/shared/ui/PanelCard'
 import { ProposePrDialog } from './ProposePrDialog'
 
 // R80 — "Fixes captured": the never-dead-end surface for a run's heal edits.

@@ -5,7 +5,7 @@
 // reconnect. After that, give up — the caller can re-invoke connectPane(). The
 // open/reconnect/close scaffold + send guards live in connectReconnectingSocket.
 
-import { connectReconnectingSocket, defaultWsBase } from '../../../shared/api/reconnecting-socket'
+import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 
 export interface PaneSocketMessage {
   type: 'data' | 'exit' | 'error' | 'reset'

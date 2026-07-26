@@ -3,9 +3,9 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '../../../shared/api/client'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
-import { InvalidationProvider } from '../../../shared/state/invalidation'
+import type { FlightManifest } from '@/shared/api/client'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { InvalidationProvider } from '@/shared/state/invalidation'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => ({
   taskForRun: vi.fn(),
 }))
 
-vi.mock('../../../shared/api/client', () => ({
+vi.mock('@/shared/api/client', () => ({
   listFlights: mocks.listFlights,
   getFlight: mocks.getFlight,
   getFlightRemedy: mocks.getFlightRemedy,
@@ -81,7 +81,7 @@ vi.mock('../../../shared/api/client', () => ({
 // It now also receives the conductor's system lines (R66) as `systemRows`, split
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
-vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
+vi.mock('@/features/agent-sessions/components/AgentSessionView', () => ({
   AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
     <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
@@ -92,7 +92,7 @@ vi.mock('../../agent-sessions/components/AgentSessionView', () => ({
 
 // The export stage reads the download action + task lookups from the export
 // context; the provider needs live sockets, so stub the hook.
-vi.mock('../../evaluation/state/EvaluationExportContext', () => ({
+vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: () => ({
     downloadTask: mocks.downloadTask,
     taskById: mocks.taskById,

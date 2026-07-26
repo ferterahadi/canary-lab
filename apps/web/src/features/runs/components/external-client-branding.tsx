@@ -4,7 +4,7 @@
 // shortener, and brand monogram live here once instead of being copied per
 // panel.
 
-import type { ClientKind } from '../../../../../../shared/run-mode'
+import type { ClientKind } from '@shared/run-mode'
 
 export type ExternalClientKind = ClientKind
 

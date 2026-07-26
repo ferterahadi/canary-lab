@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { FLIGHT_STAGE_KEYS } from '../../../../../../shared/flights/types'
-import type { FlightIndexEntry } from '../../../../../../shared/flights/types'
-import type { Feature } from '../../../shared/api/types'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import type { FlightIndexEntry } from '@shared/flights/types'
+import type { Feature } from '@/shared/api/types'
 import { derivePendingFeatures } from './pending-features'
 
 const flight = (over: Partial<FlightIndexEntry>): FlightIndexEntry => ({

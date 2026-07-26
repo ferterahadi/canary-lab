@@ -1,5 +1,5 @@
-import type { RepoCollisionChoice } from '../../../shared/api/client'
-import { Modal } from '../../config/components/atoms'
+import type { RepoCollisionChoice } from '@/shared/api/client'
+import { Modal } from '@/features/config/components/atoms'
 
 interface Props {
   info: RepoCollisionChoice

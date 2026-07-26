@@ -2,7 +2,7 @@
 // functions — they accept a `fetch` impl via injection so tests can stub it.
 // Production callers use the default (the global `fetch`).
 
-import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
+import type { ClientKind, RunProducer } from '@shared/run-mode'
 import type {
   FlightCheckpointResponse as FlightCheckpointResponseT,
   FlightEntryOptions as FlightEntryOptionsT,
@@ -11,7 +11,7 @@ import type {
   FlightStageKey as FlightStageKeyT,
   PlannedFeature as PlannedFeatureT,
   PlanFeaturesTask as PlanFeaturesTaskT,
-} from '../../../../../shared/flights/types'
+} from '@shared/flights/types'
 import type {
   AuditList,
   Feature,
@@ -46,7 +46,7 @@ import type {
   BenchmarkManifest,
   SabotageLevel,
   SabotageSkillSummary,
-} from '../../features/benchmark/api/benchmark-types'
+} from '@/features/benchmark/api/benchmark-types'
 
 export class ApiError extends Error {
   readonly status: number
@@ -1909,8 +1909,8 @@ export type {
   PrdSourceAttempt,
   PrdSourceCheckpointData,
   FlightStageRemedy,
-} from '../../../../../shared/flights/types'
-export { deriveFeatureSlug } from '../../../../../shared/flights/types'
+} from '@shared/flights/types'
+export { deriveFeatureSlug } from '@shared/flights/types'
 
 /** Stage-entry menu for one feature: latest flight record, per-stage
  *  allowed/blocked verdicts (server-computed), and the start-form prefill. */
@@ -1993,7 +1993,7 @@ export function respondFlightCheckpoint(
 export function getFlightRemedy(
   flightId: string,
   opts?: ClientOptions,
-): Promise<{ remedy: import('../../../../../shared/flights/types').FlightStageRemedy | null }> {
+): Promise<{ remedy: import('@shared/flights/types').FlightStageRemedy | null }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request(
     `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/remedy`,

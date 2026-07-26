@@ -1,5 +1,5 @@
 import { type KeyboardEvent as ReactKeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 import type {
   CoverageJobKind,
   CoverageJobManifest,
@@ -10,15 +10,15 @@ import type {
   RequirementCoverage,
   TestCoverage,
   TestStrength,
-} from '../../../shared/api/types'
-import type { FlightStageKey, FlightStageStatus } from '../../../shared/api/client'
-import { StageStatusChip, stageLabel } from '../../flights/components/stage-meta'
+} from '@/shared/api/types'
+import type { FlightStageKey, FlightStageStatus } from '@/shared/api/client'
+import { StageStatusChip, stageLabel } from '@/features/flights/components/stage-meta'
 import { CoverageDocsRail } from './CoverageDocsRail'
 import { CoverageGeneratingPane } from './CoverageGeneratingPane'
-import { ShikiCode } from '../../../shared/ui/TestCodeBlock'
-import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
-import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
-import { useInvalidationKey } from '../../../shared/state/invalidation'
+import { ShikiCode } from '@/shared/ui/TestCodeBlock'
+import { TestIdBadge } from '@/shared/ui/TestIdBadge'
+import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '@/shared/test-numbering'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 
 interface Props {
   feature: string

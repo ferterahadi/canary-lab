@@ -7,8 +7,8 @@ import type {
   PlaywrightScreenshotMode,
   RepoBranchSnapshot,
   ServiceManifestEntry,
-} from '../../../shared/api/types'
-import { parseLocation } from '../../../shared/test-numbering'
+} from '@/shared/api/types'
+import { parseLocation } from '@/shared/test-numbering'
 
 export interface PlaybackTest {
   name: string

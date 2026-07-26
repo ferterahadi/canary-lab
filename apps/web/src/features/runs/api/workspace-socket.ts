@@ -1,5 +1,5 @@
-import { connectReconnectingSocket, defaultWsBase } from '../../../shared/api/reconnecting-socket'
-import type { DraftRecord, EvaluationExportTask } from '../../../shared/api/types'
+import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
+import type { DraftRecord, EvaluationExportTask } from '@/shared/api/types'
 
 export type WorkspaceEvent =
   | { type: 'connected' }

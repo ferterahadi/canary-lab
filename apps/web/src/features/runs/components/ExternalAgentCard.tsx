@@ -1,5 +1,5 @@
 import { useCallback, useState, type ReactNode } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 import { BrandMark, clientTint, type ExternalClientKind } from './external-client-branding'
 
 // The shared shell for every "an external MCP client is driving this in its own

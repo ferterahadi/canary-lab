@@ -6,7 +6,7 @@ import { EnvsetsTab } from './EnvsetsTab'
 import { PlaywrightTab } from './PlaywrightTab'
 import { Modal, TrashIcon } from './atoms'
 import { DeleteSuiteConfirm } from './DeleteSuiteConfirm'
-import type { ConfigTab } from '../../../shared/lib/workspace-view-state'
+import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 
 type Tab = ConfigTab
 

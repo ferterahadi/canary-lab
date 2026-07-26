@@ -1,4 +1,4 @@
-import { StatusDot, type StatusDotState } from '../../features/config/components/atoms'
+import { StatusDot, type StatusDotState } from '@/features/config/components/atoms'
 import { Chip } from '../ui/StatusChip'
 
 // Compact pill: green = WS open, amber pulse = reconnecting/connecting,

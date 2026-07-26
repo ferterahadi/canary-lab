@@ -13,9 +13,9 @@ import {
   removePortifyOverlay,
   type ParsedConfigDoc,
   type PortifyManifest,
-} from '../../../shared/api/client'
+} from '@/shared/api/client'
 import { PortsTab } from './PortsTab'
-import { InvalidationProvider, useInvalidation } from '../../../shared/state/invalidation'
+import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 
 // Captures the bus dispatch so a test can bump a topic the way the WS handler
 // does — the leaf reads its refetch key from context now, not a prop.
@@ -25,8 +25,8 @@ function CaptureInvalidate() {
   return null
 }
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     checkPathExists: vi.fn(),
@@ -40,14 +40,14 @@ vi.mock('../../../shared/api/client', async () => {
 })
 
 // PortsTab imports parsers/components from ReposTab, which imports RunsContext.
-vi.mock('../../runs/state/RunsContext', () => ({
+vi.mock('@/features/runs/state/RunsContext', () => ({
   useRuns: vi.fn(() => ({ runs: [] })),
 }))
 
 // PortsTab reads the live workflow index from PortifyContext (active workflow
 // + latest saved overlay). Tests set `mockWorkflows` to simulate the WS feed.
 let mockWorkflows: { workflowId: string; feature: string; status: string; startedAt: string }[] = []
-vi.mock('../../portify/state/PortifyContext', () => ({
+vi.mock('@/features/portify/state/PortifyContext', () => ({
   usePortify: () => ({ workflows: mockWorkflows }),
 }))
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
-import * as api from '../../../shared/api/client'
-import type { FeatureDocsListing } from '../../../shared/api/types'
+import * as api from '@/shared/api/client'
+import type { FeatureDocsListing } from '@/shared/api/types'
 
 export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

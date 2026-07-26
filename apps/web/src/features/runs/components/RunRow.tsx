@@ -1,7 +1,7 @@
-import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '../../../shared/api/types'
-import { StatusDot, type StatusDotState } from '../../config/components/atoms'
-import { Chip } from '../../../shared/ui/StatusChip'
-import { shortTime } from '../../../shared/lib/format'
+import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
+import { StatusDot, type StatusDotState } from '@/features/config/components/atoms'
+import { Chip } from '@/shared/ui/StatusChip'
+import { shortTime } from '@/shared/lib/format'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
 // so the flight's run stage can render the same row as the runs list. Chrome

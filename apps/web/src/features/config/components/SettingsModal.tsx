@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import * as api from '../../../shared/api/client'
-import type { EditorChoice, GhStatus, HealAgentChoice, ProjectConfig } from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
+import type { EditorChoice, GhStatus, HealAgentChoice, ProjectConfig } from '@/shared/api/client'
 import { Modal } from './atoms'
 import { FolderPicker } from './FolderPicker'
 

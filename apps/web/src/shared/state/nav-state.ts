@@ -1,5 +1,5 @@
 import type { ConfigTab, PersistedView, RouteDialog, WorkspaceView } from '../lib/workspace-view-state'
-import type { FeatureActivity } from '../../features/flights/state/feature-activity'
+import type { FeatureActivity } from '@/features/flights/state/feature-activity'
 import type { FlightIndexEntry } from '../api/client'
 
 // The workspace's navigation state — what view is open, which feature / run /

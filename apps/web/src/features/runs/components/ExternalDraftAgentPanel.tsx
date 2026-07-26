@@ -1,4 +1,4 @@
-import type { DraftRecord, ExternalDraftStage } from '../../../shared/api/types'
+import type { DraftRecord, ExternalDraftStage } from '@/shared/api/types'
 import { clientLabel, clientTint, shortSession, type ExternalClientKind } from './external-client-branding'
 import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from './ExternalAgentCard'
 

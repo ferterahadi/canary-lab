@@ -8,11 +8,11 @@ import {
   listVerificationConfigs,
   createVerificationConfig,
   updateVerificationConfig,
-} from '../../../shared/api/client'
+} from '@/shared/api/client'
 import { VerificationDialog, reseedTargetUrls } from './VerificationDialog'
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     getVerificationTargets: vi.fn(),

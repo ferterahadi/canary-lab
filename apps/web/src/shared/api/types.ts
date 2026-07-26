@@ -12,20 +12,20 @@ import type {
   RunLifecycleSnapshot,
   RunStatus,
   ServiceStatus,
-} from '../../../../../shared/run-state'
+} from '@shared/run-state'
 import type {
   ExecutionType,
   VerificationConfig,
   VerificationDiagnostics,
   VerificationRunMetadata,
   VerificationTarget,
-} from '../../../../../shared/verification'
-import type { ClientKind, RunProducer } from '../../../../../shared/run-mode'
+} from '@shared/verification'
+import type { ClientKind, RunProducer } from '@shared/run-mode'
 import type {
   FlightPauseReason,
   FlightStageKey,
   FlightStatus,
-} from '../../../../../shared/flights/types'
+} from '@shared/flights/types'
 export type {
   DisplayStatus,
   HealEnd,
@@ -45,14 +45,14 @@ export type {
   RunStatus,
   ServiceStatus,
   TransientAction,
-} from '../../../../../shared/run-state'
+} from '@shared/run-state'
 export type {
   ExecutionType,
   VerificationConfig,
   VerificationDiagnostics,
   VerificationRunMetadata,
   VerificationTarget,
-} from '../../../../../shared/verification'
+} from '@shared/verification'
 
 export interface FeatureRepo {
   name: string
@@ -558,7 +558,7 @@ export type {
   CoverageState,
   TestCoverage,
   TestStrength,
-} from '../../../../../shared/coverage/types'
+} from '@shared/coverage/types'
 
 export interface FeatureDoc {
   relPath: string

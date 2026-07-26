@@ -3,11 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { RunFixCapture } from '../../../shared/api/types'
+import type { RunFixCapture } from '@/shared/api/types'
 import { FixesCapturedPanel } from './FixesCapturedPanel'
 
 const mocks = vi.hoisted(() => ({ applyRunFixes: vi.fn(), openEditor: vi.fn(), getRunPrPreflight: vi.fn(), proposeRunPr: vi.fn() }))
-vi.mock('../../../shared/api/client', () => mocks)
+vi.mock('@/shared/api/client', () => mocks)
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 

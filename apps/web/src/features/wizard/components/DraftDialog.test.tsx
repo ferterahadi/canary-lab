@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { DraftRecord } from '../../../shared/api/types'
+import type { DraftRecord } from '@/shared/api/types'
 
 // Control the WizardDraftContext the dialog reads from. isActiveWizardTask is a
 // pure status check — reproduce it rather than pulling the real module in.

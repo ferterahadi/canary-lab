@@ -14,9 +14,9 @@ import type {
   RunStatus,
   RunSummary,
   VerificationDiagnostics,
-} from '../../../shared/api/types'
-import { getRunAudit } from '../../../shared/api/client'
-import { formatDuration, durationBetween } from '../../../shared/lib/format'
+} from '@/shared/api/types'
+import { getRunAudit } from '@/shared/api/client'
+import { formatDuration, durationBetween } from '@/shared/lib/format'
 import { buildTimelineRows, isTerminalLifecyclePhase, type TimelineRow } from '../utils/run-timeline'
 import {
   artifactsForPlayback,
@@ -27,23 +27,23 @@ import {
   type PlaybackTest,
 } from '../utils/run-detail-playback'
 import { statusFromPlaybackResult, statusLabel, statusPillClassForStatus } from '../utils/test-step-status'
-import { TestIdBadge } from '../../../shared/ui/TestIdBadge'
-import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '../../../shared/test-numbering'
+import { TestIdBadge } from '@/shared/ui/TestIdBadge'
+import { buildTestNumbering, parseLocation, stripLeadingTestOrdinal, testNumberKey } from '@/shared/test-numbering'
 import { useRun } from '../state/RunsContext'
-import { useInvalidationKey } from '../../../shared/state/invalidation'
-import { useEvaluationExports } from '../../evaluation/state/EvaluationExportContext'
-import { useMcpPromo } from '../../../shared/shell/McpPromoContext'
+import { useInvalidationKey } from '@/shared/state/invalidation'
+import { useEvaluationExports } from '@/features/evaluation/state/EvaluationExportContext'
+import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 import { deriveRunViewModel, type RunViewModel } from '../utils/run-view-model'
 import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
-import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
+import { AgentSessionView } from '@/features/agent-sessions/components/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import {
   isRestartableRunStatus,
   isTerminalRunStatus as isSharedTerminalRunStatus,
-} from '../../../../../../shared/run-state'
+} from '@shared/run-state'
 
 type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal'
 type PlaywrightView = 'terminal' | 'playback'

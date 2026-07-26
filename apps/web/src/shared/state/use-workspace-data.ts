@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 
 import * as api from '../api/client'
 import type { Feature, RunIndexEntry, VersionStatus } from '../api/types'
 import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
-import { connectWorkspaceEvents } from '../../features/runs/api/workspace-socket'
+import { connectWorkspaceEvents } from '@/features/runs/api/workspace-socket'
 import type { InvalidationTopic } from './invalidation-bus'
 
 // Owns the workspace's server-sourced data — the features list, the flights +

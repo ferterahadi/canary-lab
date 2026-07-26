@@ -32,6 +32,25 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
   `canary-lab/feature-support/...` (via `package.json` exports). Everything under
   `apps/`, `scripts/`, and `shared/` is internal.
 
+### Import aliases are bundler-only
+
+`apps/web` may import across boundaries by alias — `@/…` for `apps/web/src/…`,
+`@shared/…` for repo-root `shared/…`. Vite resolves both at bundle time, so no
+alias-shaped specifier survives into the output.
+
+**Nothing else in the repo may use them.** The server, CLI, and `shared/` are
+emitted by `tsc -p tsconfig.build.json`, and TypeScript does *not* rewrite path
+aliases on emit — `package.json` declares no `imports` field, so an aliased
+specifier there would ship to `dist/` as a literal `require("@server/…")` and fail
+at runtime in the installed package. `tsc` pulls the whole server tree into the
+build through `scripts/ui-command.ts`, so this covers all of `apps/web-server/`.
+
+Lifting the restriction means adding a resolver (a post-build specifier rewrite, or
+Node subpath `imports` plus a `moduleResolution` bump) — not just another `paths`
+entry. The three places that must agree for the web aliases are
+`apps/web/tsconfig.json`, `apps/web/vite.config.ts`, and `vitest.config.ts` (whose
+`projects` entries are standalone configs and each need their own `resolve.alias`).
+
 ## Module Map
 
 | Path | What lives there |

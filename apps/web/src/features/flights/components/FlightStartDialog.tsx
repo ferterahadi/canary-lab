@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 import type {
   FlightEntryOptions,
   FlightStageEntryOption,
@@ -7,10 +7,10 @@ import type {
   FlightStageStatus,
   PlanFeaturesTask,
   PlannedFeature,
-} from '../../../shared/api/client'
-import type { FlightLauncherIntent } from '../../../shared/state/nav-state'
-import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
-import { ChevronRightIcon, Modal, Textarea, Toggle } from '../../config/components/atoms'
+} from '@/shared/api/client'
+import type { FlightLauncherIntent } from '@/shared/state/nav-state'
+import { AgentSessionView } from '@/features/agent-sessions/components/AgentSessionView'
+import { ChevronRightIcon, Modal, Textarea, Toggle } from '@/features/config/components/atoms'
 import { STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 

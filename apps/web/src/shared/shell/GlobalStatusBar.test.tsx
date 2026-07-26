@@ -20,7 +20,7 @@ const mockActiveRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count
 const mockBootSessions = vi.hoisted(() => ({ value: { sessions: [] as unknown[], count: 0 } }))
 const mockVerifyRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count: 0 } }))
 
-vi.mock('../../features/runs/state/RunsContext', () => ({
+vi.mock('@/features/runs/state/RunsContext', () => ({
   useRuns: () => ({ connection: 'live', runs: [], abort: vi.fn() }),
   useActiveRuns: () => mockActiveRuns.value,
   useActiveBootSessions: () => mockBootSessions.value,
@@ -29,19 +29,19 @@ vi.mock('../../features/runs/state/RunsContext', () => ({
   useRunDetails: () => ({}),
 }))
 
-vi.mock('../../features/benchmark/state/BenchmarkContext', () => ({
+vi.mock('@/features/benchmark/state/BenchmarkContext', () => ({
   useBenchmarks: () => ({ benchmarks: [], connection: 'live', startBenchmark: vi.fn(), abortBenchmark: vi.fn(), loadBenchmark: vi.fn() }),
 }))
 
-vi.mock('../../features/benchmark/components/BenchmarkWindow', () => ({
+vi.mock('@/features/benchmark/components/BenchmarkWindow', () => ({
   BenchmarkWindow: () => null,
 }))
 
-vi.mock('../../features/wizard/components/WizardTaskStatus', () => ({
+vi.mock('@/features/wizard/components/WizardTaskStatus', () => ({
   WizardTaskStatus: () => null,
 }))
 
-vi.mock('../../features/evaluation/components/EvaluationExportTaskToast', () => ({
+vi.mock('@/features/evaluation/components/EvaluationExportTaskToast', () => ({
   EvaluationExportDialogHost: () => null,
 }))
 
