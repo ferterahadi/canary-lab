@@ -1,9 +1,36 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { writeHealIndex } from './heal-index'
-import { HEAL_INDEX_PATH as REAL_HEAL_INDEX, LOGS_DIR as REAL_LOGS } from './paths'
+
+// The stoppedEarly tests below drive writeHealIndex through its DEFAULT target
+// — the hard-coded HEAL_INDEX_PATH from './paths' — because that fallback is
+// the branch they cover. Against the real module that is one shared
+// `<ROOT>/logs/heal-index.md` plus a shared `.tmp` sidecar, so heal-index.test.ts
+// (which also exercises the fallback) races this file when vitest runs them in
+// parallel: whoever renames the sidecar first wins and the loser ENOENTs, and
+// read-backs see the other file's content. Point the hard-coded paths at a root
+// this file owns so "the default target" is per-file. Same pattern as
+// summary-locations.test.ts.
+const ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-hid-')))
+const LOGS_DIR = path.join(ROOT, 'logs')
+const HEAL_INDEX_PATH = path.join(LOGS_DIR, 'heal-index.md')
+
+vi.mock('./paths', () => ({
+  ROOT,
+  LOGS_DIR,
+  MANIFEST_PATH: path.join(LOGS_DIR, 'manifest.json'),
+  SUMMARY_PATH: path.join(LOGS_DIR, 'e2e-summary.json'),
+  DIAGNOSIS_JOURNAL_PATH: path.join(LOGS_DIR, 'diagnosis-journal.md'),
+  HEAL_INDEX_PATH,
+  FAILED_DIR: path.join(LOGS_DIR, 'failed'),
+  getSummaryPath: () =>
+    process.env.CANARY_LAB_SUMMARY_PATH ?? path.join(LOGS_DIR, 'e2e-summary.json'),
+}))
+
+// Dynamic so the consts above are initialized before the mock factory runs —
+// a static import is hoisted above them and would hit the TDZ.
+const { writeHealIndex } = await import('./heal-index')
 
 let tmpDir: string
 
@@ -260,38 +287,27 @@ describe('writeHealIndex partial-suite header (stoppedEarly)', () => {
   })
 
   it('writes the note text to disk and toggles plural forms', () => {
-    // Drive writeHealIndex against the real LOGS_DIR (the module hard-codes
-    // HEAL_INDEX_PATH). Snapshot + restore so the test is hermetic.
-    let createdLogs = false
-    if (!fs.existsSync(REAL_LOGS)) {
-      fs.mkdirSync(REAL_LOGS, { recursive: true })
-      createdLogs = true
-    }
-    const prior = fs.existsSync(REAL_HEAL_INDEX) ? fs.readFileSync(REAL_HEAL_INDEX, 'utf-8') : null
-    try {
-      writeHealIndex({
-        manifest: {
-          featureName: 'demo',
-          stoppedEarly: { reason: 'max-failures', failuresAtStop: 1, suiteTotal: 1 },
-        },
-        summary: { failed: [{ name: 'a' }] },
-      })
-      const oneOne = fs.readFileSync(REAL_HEAL_INDEX, 'utf-8')
-      expect(oneOne).toMatch(/Stopped early: max-failures after 1 failure \(suite has 1 test;/)
+    // No healIndexPath, so writeHealIndex renders to the hard-coded
+    // HEAL_INDEX_PATH — mocked above to this file's own LOGS_DIR, which is why
+    // the write needs no snapshot/restore dance to stay hermetic.
+    writeHealIndex({
+      manifest: {
+        featureName: 'demo',
+        stoppedEarly: { reason: 'max-failures', failuresAtStop: 1, suiteTotal: 1 },
+      },
+      summary: { failed: [{ name: 'a' }] },
+    })
+    const oneOne = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+    expect(oneOne).toMatch(/Stopped early: max-failures after 1 failure \(suite has 1 test;/)
 
-      writeHealIndex({
-        manifest: {
-          featureName: 'demo',
-          stoppedEarly: { reason: 'user-pause', failuresAtStop: 2, suiteTotal: 11 },
-        },
-        summary: { failed: [{ name: 'a' }, { name: 'b' }] },
-      })
-      const plural = fs.readFileSync(REAL_HEAL_INDEX, 'utf-8')
-      expect(plural).toMatch(/Stopped early: user-pause after 2 failures \(suite has 11 tests;/)
-    } finally {
-      if (prior !== null) fs.writeFileSync(REAL_HEAL_INDEX, prior)
-      else { try { fs.unlinkSync(REAL_HEAL_INDEX) } catch { /* ignore */ } }
-      if (createdLogs) { try { fs.rmdirSync(REAL_LOGS) } catch { /* ignore */ } }
-    }
+    writeHealIndex({
+      manifest: {
+        featureName: 'demo',
+        stoppedEarly: { reason: 'user-pause', failuresAtStop: 2, suiteTotal: 11 },
+      },
+      summary: { failed: [{ name: 'a' }, { name: 'b' }] },
+    })
+    const plural = fs.readFileSync(HEAL_INDEX_PATH, 'utf-8')
+    expect(plural).toMatch(/Stopped early: user-pause after 2 failures \(suite has 11 tests;/)
   })
 })

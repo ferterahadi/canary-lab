@@ -1,10 +1,37 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { writeFailureSlices } from './log-enrichment'
-import { writeHealIndex } from './heal-index'
-import { DIAGNOSIS_JOURNAL_PATH as REAL_JOURNAL, LOGS_DIR as REAL_LOGS, ROOT } from './paths'
+
+// Several tests below drive writeHealIndex through its DEFAULT target — the
+// hard-coded HEAL_INDEX_PATH / DIAGNOSIS_JOURNAL_PATH from './paths' — because
+// that fallback is the branch they exist to cover. Against the real module that
+// target is one shared `<ROOT>/logs/heal-index.md` plus a shared `.tmp` sidecar,
+// so heal-index.delta.test.ts (which also exercises the fallback) races this
+// file when vitest runs them in parallel: whoever renames the sidecar first wins
+// and the loser ENOENTs, and read-backs see the other file's content. Point the
+// hard-coded paths at a root this file owns so "the default target" is per-file.
+// Same pattern as summary-locations.test.ts.
+const ROOT = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-hi-')))
+const LOGS_DIR = path.join(ROOT, 'logs')
+const JOURNAL_PATH = path.join(LOGS_DIR, 'diagnosis-journal.md')
+
+vi.mock('./paths', () => ({
+  ROOT,
+  LOGS_DIR,
+  MANIFEST_PATH: path.join(LOGS_DIR, 'manifest.json'),
+  SUMMARY_PATH: path.join(LOGS_DIR, 'e2e-summary.json'),
+  DIAGNOSIS_JOURNAL_PATH: JOURNAL_PATH,
+  HEAL_INDEX_PATH: path.join(LOGS_DIR, 'heal-index.md'),
+  FAILED_DIR: path.join(LOGS_DIR, 'failed'),
+  getSummaryPath: () =>
+    process.env.CANARY_LAB_SUMMARY_PATH ?? path.join(LOGS_DIR, 'e2e-summary.json'),
+}))
+
+// Dynamic so the consts above are initialized before the mock factory runs —
+// a static import is hoisted above them and would hit the TDZ.
+const { writeFailureSlices } = await import('./log-enrichment')
+const { writeHealIndex } = await import('./heal-index')
 
 let tmpDir: string
 
@@ -23,23 +50,27 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
   let createdLogsDir = false
   let createdJournal = false
 
+  // Seeds the journal at the module's DEFAULT DIAGNOSIS_JOURNAL_PATH (this
+  // file's mocked one) so writeHealIndex picks it up through the fallback
+  // rather than an injected journalPath. Cleaned up after each seeded test so
+  // later tests in this file don't inherit the tail.
   function seedJournal(content: string): void {
-    if (!fs.existsSync(REAL_LOGS)) {
-      fs.mkdirSync(REAL_LOGS, { recursive: true })
+    if (!fs.existsSync(LOGS_DIR)) {
+      fs.mkdirSync(LOGS_DIR, { recursive: true })
       createdLogsDir = true
     }
-    if (!fs.existsSync(REAL_JOURNAL)) {
+    if (!fs.existsSync(JOURNAL_PATH)) {
       createdJournal = true
     }
-    fs.writeFileSync(REAL_JOURNAL, content)
+    fs.writeFileSync(JOURNAL_PATH, content)
   }
 
   function cleanupSeed(): void {
     if (createdJournal) {
-      try { fs.unlinkSync(REAL_JOURNAL) } catch { /* ignore */ }
+      try { fs.unlinkSync(JOURNAL_PATH) } catch { /* ignore */ }
     }
     if (createdLogsDir) {
-      try { fs.rmdirSync(REAL_LOGS) } catch { /* directory not empty — leave it */ }
+      try { fs.rmdirSync(LOGS_DIR) } catch { /* directory not empty — leave it */ }
     }
     createdJournal = false
     createdLogsDir = false
@@ -302,6 +333,55 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
     expect(body).toMatch(/- trace: logs\/runs\/X\/failed\/click-checkout\/trace-extract\/failure-summary\.md/)
   })
 
+  // Listed before the trace bullet on purpose: Playwright writes this one in
+  // onTestEnd with no subprocess, so it is the cheapest first stop for "what
+  // did the page look like when this failed".
+  it('emits a page-state bullet when errorContextFile is set on a failed entry', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: {
+        failed: [
+          {
+            name: 'click-checkout',
+            error: { message: 'TimeoutError' },
+            errorContextFile: 'failed/click-checkout/error-context.md',
+            traceSummaryFile: 'failed/click-checkout/trace-extract/failure-summary.md',
+          },
+        ],
+      },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    expect(body).toMatch(/- page state: failed\/click-checkout\/error-context\.md/)
+    // Both pointers coexist — the trace extract carries network/console detail
+    // the page snapshot does not.
+    expect(body).toMatch(/- trace: failed\/click-checkout\/trace-extract\/failure-summary\.md/)
+    expect(body.indexOf('- page state:')).toBeLessThan(body.indexOf('- trace:'))
+  })
+
+  it('emits a network bullet when harFile is set on a failed entry', () => {
+    const healIndexPath = path.join(tmpDir, 'heal-index.md')
+    writeHealIndex({
+      manifest: { featureName: 'demo' },
+      summary: {
+        failed: [
+          {
+            name: 'checkout-posts-the-order',
+            error: { message: 'expected 200' },
+            harFile: 'failed/checkout-posts-the-order/network.har',
+          },
+        ],
+      },
+      healIndexPath,
+    })
+    const body = fs.readFileSync(healIndexPath, 'utf-8')
+    // Pointed at as a grep target, not something to read whole — a HAR with
+    // embedded response bodies does not fit in an agent's context.
+    expect(body).toMatch(/- network: failed\/checkout-posts-the-order\/network\.har/)
+    expect(body).toContain('grep it')
+  })
+
   it('emits a `full error` pointer when errorFile is set on a failed entry', () => {
     const healIndexPath = path.join(tmpDir, 'heal-index.md')
     writeHealIndex({
@@ -371,17 +451,22 @@ describe('writeHealIndex with journal tail and various manifest shapes', () => {
 
 describe('writeFailureSlices + writeHealIndex (smoke)', () => {
   it('produces an index containing failure error + slice paths', () => {
-    // This relies on the module's hard-coded LOGS_DIR / paths — but writeHealIndex
-    // accepts a parsed object so we can drive it without touching real paths.
+    // No healIndexPath: this is the hard-coded-HEAL_INDEX_PATH branch, which
+    // './paths' mocking points at this file's own LOGS_DIR — so unlike before
+    // we can read the write back instead of only asserting it doesn't throw.
     const manifest = { featureName: 'demo', repoPaths: ['/repo'] }
     const summary = {
       failed: [
         { name: 'a-test', error: { message: 'boom' }, logFiles: ['logs/failed/a-test/svc.log'] },
       ],
     }
-    // We can't easily verify the disk write without mocking paths, but we can
-    // confirm the function executes without throwing.
-    expect(() => writeHealIndex({ manifest, summary })).not.toThrow()
+    writeHealIndex({ manifest, summary })
+    const body = fs.readFileSync(path.join(LOGS_DIR, 'heal-index.md'), 'utf-8')
+    expect(body).toContain('Feature: demo')
+    expect(body).toContain('Repos:   /repo')
+    expect(body).toContain('- **a-test**')
+    expect(body).toContain('- error: boom')
+    expect(body).toContain('- slice: logs/failed/a-test/svc.log')
   })
 
   it('handles empty failed list', () => {
