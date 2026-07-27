@@ -28,6 +28,14 @@ export interface TestEntry {
   /** Repo-relative path to the curated failure-summary.md produced from this
    *  test's Playwright trace.zip. Populated in onEnd after async extraction. */
   traceSummaryFile?: string
+  /** Repo-relative path to `failed/<slug>/error-context.md` — Playwright's own
+   *  page-state-at-failure capture, copied out of the `--output` dir before the
+   *  next invocation wipes it. Populated in onTestEnd. */
+  errorContextFile?: string
+  /** Repo-relative path to `failed/<slug>/network.har` — every request this
+   *  test made, recorded by the published log-marker fixture and kept only for
+   *  failures. Populated in onTestEnd. */
+  harFile?: string
 }
 
 export interface RunningStep {

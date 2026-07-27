@@ -8,6 +8,10 @@ import {
   Select,
   Toggle,
 } from '@/shared/ui/atoms'
+import {
+  PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
+  PLAYWRIGHT_SCREENSHOT_MODES,
+} from '@shared/configs/playwright-modes'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 
@@ -24,9 +28,9 @@ interface Slice {
   }
 }
 
-const VIDEO_OPTIONS = ['off', 'on', 'on-first-retry', 'retain-on-failure'] as const
-const TRACE_OPTIONS = ['off', 'on', 'on-first-retry', 'retain-on-failure'] as const
-const SCREENSHOT_OPTIONS = ['off', 'on', 'only-on-failure'] as const
+const VIDEO_OPTIONS = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
+const TRACE_OPTIONS = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
+const SCREENSHOT_OPTIONS = PLAYWRIGHT_SCREENSHOT_MODES
 
 function asMaybeNumberOrExpr(v: ConfigValue | undefined): number | { $expr: string } | undefined {
   if (typeof v === 'number') return v

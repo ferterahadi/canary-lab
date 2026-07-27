@@ -268,6 +268,14 @@ export interface FailedEntry {
   // after the test run completes; surfaced in `heal-index.md` so the agent
   // reads the curated trace summary as its first stop for "what went wrong".
   traceSummaryFile?: string
+  // Repo-relative path to `failed/<slug>/error-context.md` — Playwright's own
+  // page-state-at-failure capture. Cheaper and earlier than the trace extract
+  // (no subprocess, available in onTestEnd), so the heal-index lists it first.
+  errorContextFile?: string
+  // Repo-relative path to `failed/<slug>/network.har` — every request the test
+  // made. Large and machine-shaped, so the heal-index points at it as a grep
+  // target rather than something to read whole.
+  harFile?: string
   error?: { message?: string; snippet?: string }
   // Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
   // assertion message + code-frame snippet. The heal-index shows a one-line

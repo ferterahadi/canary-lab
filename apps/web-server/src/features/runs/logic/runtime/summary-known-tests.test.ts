@@ -28,6 +28,41 @@ vi.mock('./trace-enrichment', () => ({
 }))
 
 const { slugify, testIdFor, default: SummaryReporter } = await import('./summary-reporter')
+const { listLineFromTitlePath } = await import('./summary-known-tests')
+
+// Every expectation here was measured against Playwright 1.62 by feeding the
+// output back through `playwright test --list --test-list <file>`. A line that
+// does not match selects ZERO tests, and Playwright reports that as an ordinary
+// empty run rather than an error — so these are the shapes standing between a
+// targeted rerun and a verdict computed from nothing.
+describe('listLineFromTitlePath', () => {
+  it('drops the empty project slot when the config declares no named projects', () => {
+    expect(listLineFromTitlePath(['', '', 'a.spec.ts', 'checkout flow', 'applies a discount (10% off)']))
+      .toBe('a.spec.ts › checkout flow › applies a discount (10% off)')
+  })
+
+  it('wraps a named project in brackets, matching how Playwright renders it', () => {
+    // The bare form `chromium › a.spec.ts › …` matches nothing at all.
+    expect(listLineFromTitlePath(['', 'chromium', 'a.spec.ts', 'checkout flow', 'a title']))
+      .toBe('[chromium] › a.spec.ts › checkout flow › a title')
+  })
+
+  it('keeps every nested suite title in order', () => {
+    expect(listLineFromTitlePath(['', '', 'nested/c.spec.ts', 'outer', 'inner', 'deep test']))
+      .toBe('nested/c.spec.ts › outer › inner › deep test')
+  })
+
+  it('returns undefined when there is no file plus title to identify a test', () => {
+    expect(listLineFromTitlePath(['', '', 'a.spec.ts'])).toBeUndefined()
+    expect(listLineFromTitlePath([])).toBeUndefined()
+    expect(listLineFromTitlePath(['', 'chromium'])).toBeUndefined()
+  })
+
+  it('ignores non-string parts rather than rendering them', () => {
+    expect(listLineFromTitlePath(['', '', 'a.spec.ts', undefined, 'a title']))
+      .toBe('a.spec.ts › a title')
+  })
+})
 
 afterEach(() => {
   fs.rmSync(LOGS_DIR, { recursive: true, force: true })

@@ -2,6 +2,10 @@ import { Fragment, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '@/features/config'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
+import {
+  PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
+  PLAYWRIGHT_SCREENSHOT_MODES,
+} from '@shared/configs/playwright-modes'
 import { STAGE_COLUMN } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
 
@@ -15,9 +19,9 @@ export function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }
 
-export const PW_MODES = ['on', 'off', 'retain-on-failure', 'on-first-retry'] as const
+export const PW_MODES = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
 
-export const PW_SCREENSHOT_MODES = ['off', 'on', 'only-on-failure'] as const
+export const PW_SCREENSHOT_MODES = PLAYWRIGHT_SCREENSHOT_MODES
 
 // A block IS a config repo — the same unit the Advanced setup Service tab
 // renders, so every field here maps 1:1 onto a field there (Name ↔ NAME,

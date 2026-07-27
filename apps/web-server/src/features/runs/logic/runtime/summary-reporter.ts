@@ -12,7 +12,7 @@ import { classifyJournalOutcome, enrichSummaryWithLogs, stripAnsi, updateLatestP
 import { getSummaryPath } from './paths'
 import { extractTraceSummary } from './trace-enrichment'
 import { ExistingSummary, KnownTestEntry, idForExistingResult, knownTestFromTest, knownTestsFromExistingSummary, mergeKnownTest, readExistingSummary, stringAt } from './summary-known-tests'
-import { failureLocations, findLastStepIndex, findTraceAttachmentPath, isErrorShape, isFailureResult, journalPathForSummary, runIdForSummary, stepToRunningStep } from './summary-locations'
+import { failureLocations, findErrorContextAttachmentPath, findHarAttachmentPath, findLastStepIndex, findTraceAttachmentPath, isErrorShape, isFailureResult, journalPathForSummary, runIdForSummary, stepToRunningStep } from './summary-locations'
 import type { PlaybackEvent, RunningStep, RunningTest, TestEntry } from './summary-types'
 
 export { slugify } from './summary-types'
@@ -150,6 +150,12 @@ class SummaryReporter implements Reporter {
     const locations = failed
       ? failureLocations(result, this.failedStepLocationsByTest.get(known.id))
       : []
+    const errorContextFile = failed
+      ? this.persistFailureArtifact(name, findErrorContextAttachmentPath(result.attachments), 'error-context.md')
+      : undefined
+    const harFile = failed
+      ? this.persistFailureArtifact(name, findHarAttachmentPath(result.attachments), 'network.har')
+      : undefined
     const entry: TestEntry = {
       id: known.id,
       name,
@@ -159,6 +165,8 @@ class SummaryReporter implements Reporter {
       durationMs: result.duration,
       location: known.location ?? `${test.location.file}:${test.location.line}`,
       ...(locations.length > 0 ? { locations } : {}),
+      ...(errorContextFile ? { errorContextFile } : {}),
+      ...(harFile ? { harFile } : {}),
       retry: result.retry,
     }
     this.results.push(entry)
@@ -215,6 +223,33 @@ class SummaryReporter implements Reporter {
       process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline'
     ) {
       await this.runTraceEnrichment()
+    }
+  }
+
+  /**
+   * Copy one attachment next to the other per-failure artifacts and return its
+   * repo-relative path.
+   *
+   * Attachments land in the test's output dir, which the next Playwright
+   * invocation wipes via `--output` — so a heal cycle that reruns the test
+   * would leave the heal-index pointing at a deleted file. Copying into
+   * `failed/<slug>/` puts them beside `error.txt` and the trace extract, where
+   * artifact persistence already expects per-failure evidence to live.
+   *
+   * Best-effort: on any failure the heal-index simply omits that bullet, and
+   * the remaining artifacts stay as failure signal.
+   */
+  private persistFailureArtifact(name: string, src: string | null, destFileName: string): string | undefined {
+    if (!src) return undefined
+    const runDir = path.dirname(getSummaryPath())
+    const destDir = path.join(runDir, 'failed', name)
+    try {
+      fs.mkdirSync(destDir, { recursive: true })
+      const dest = path.join(destDir, destFileName)
+      fs.copyFileSync(src, dest)
+      return path.relative(runDir, dest)
+    } catch {
+      return undefined
     }
   }
 
@@ -320,6 +355,8 @@ class SummaryReporter implements Reporter {
           ...(r.logFiles ? { logFiles: r.logFiles } : {}),
           ...(r.errorFile ? { errorFile: r.errorFile } : {}),
           ...(r.traceSummaryFile ? { traceSummaryFile: r.traceSummaryFile } : {}),
+          ...(r.errorContextFile ? { errorContextFile: r.errorContextFile } : {}),
+          ...(r.harFile ? { harFile: r.harFile } : {}),
         })),
     }
 

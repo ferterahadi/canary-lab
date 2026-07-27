@@ -11,6 +11,10 @@ export interface RunPaths {
   summaryPath: string
   playwrightStdoutPath: string
   playwrightEventsPath: string
+  // Newline-delimited `--test-list` entries for a targeted rerun, rewritten
+  // before each Playwright invocation that uses one. Kept in the run dir rather
+  // than a temp file so a rerun's exact selection stays inspectable afterwards.
+  rerunListPath: string
   lifecycleEventsPath: string
   playwrightArtifactsDir: string
   // Durable copy of each Playwright per-test artifact directory. Playwright's
@@ -66,6 +70,7 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     summaryPath: path.join(runDir, 'e2e-summary.json'),
     playwrightStdoutPath: path.join(runDir, 'playwright.log'),
     playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
+    rerunListPath: path.join(runDir, 'rerun-test-list.txt'),
     lifecycleEventsPath: path.join(runDir, 'lifecycle-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
     playwrightArtifactsKeepDir: path.join(runDir, 'playwright-artifacts-keep'),

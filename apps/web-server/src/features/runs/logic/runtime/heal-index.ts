@@ -169,8 +169,14 @@ export function writeHealIndex(parsed?: {
       for (const sliceLine of renderSliceLines(entry)) {
         lines.push(sliceLine)
       }
+      if (entry.errorContextFile) {
+        lines.push(`  - page state: ${entry.errorContextFile} — Playwright's own capture of what the page looked like when the assertion failed`)
+      }
       if (entry.traceSummaryFile) {
         lines.push(`  - trace: ${entry.traceSummaryFile} — read this for the failing action, page state, failed requests, console errors`)
+      }
+      if (entry.harFile) {
+        lines.push(`  - network: ${entry.harFile} — full HAR of every request this test made; grep it for the failing call's response body rather than reading it whole`)
       }
     }
     lines.push('')

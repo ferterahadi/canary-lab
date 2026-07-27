@@ -16,13 +16,42 @@ export function isFailureResult(entry: Pick<TestEntry, 'status'>): boolean {
 export function findTraceAttachmentPath(
   attachments: ReadonlyArray<{ name?: string; path?: string }> | undefined,
 ): string | null {
+  return findAttachmentPath(attachments, 'trace')
+}
+
+// One finder for every attachment the run leaves behind. Attachments are how
+// per-test evidence reaches the reporter: some are Playwright's own
+// (`trace`, `error-context`), some are ours (`canary-lab-network-har`, written
+// by the published log-marker fixture).
+export function findAttachmentPath(
+  attachments: ReadonlyArray<{ name?: string; path?: string }> | undefined,
+  attachmentName: string,
+): string | null {
   if (!attachments) return null
   for (const a of attachments) {
-    if (a?.name === 'trace' && typeof a.path === 'string' && a.path.length > 0) {
+    if (a?.name === attachmentName && typeof a.path === 'string' && a.path.length > 0) {
       return a.path
     }
   }
   return null
+}
+
+// Playwright attaches a Markdown `error-context` file to a failed test — the
+// page state at the moment of failure, built from the same data its
+// `TestInfoError.errorContext` carries. That property is only visible inside
+// the test process, but the attachment reaches the reporter, so this is how we
+// read it without asking features to change their specs.
+export function findErrorContextAttachmentPath(
+  attachments: ReadonlyArray<{ name?: string; path?: string }> | undefined,
+): string | null {
+  return findAttachmentPath(attachments, 'error-context')
+}
+
+// The per-test HAR our published fixture records and keeps only on failure.
+export function findHarAttachmentPath(
+  attachments: ReadonlyArray<{ name?: string; path?: string }> | undefined,
+): string | null {
+  return findAttachmentPath(attachments, 'canary-lab-network-har')
 }
 
 export function journalPathForSummary(): string {

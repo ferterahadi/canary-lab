@@ -9,7 +9,37 @@ export interface KnownTestEntry {
   name: string
   title: string
   titlePath?: string[]
+  /** The test as Playwright's own `--list` renders it, e.g.
+   *  `a.spec.ts › checkout flow › applies a discount`. This is the only form a
+   *  `--test-list` entry can take, and it must be captured here rather than
+   *  rebuilt from `titlePath` — see `listLineFromTitlePath`. */
+  listLine?: string
   location?: string
+}
+
+/**
+ * Render a `--test-list` entry from the RAW (unfiltered) `TestCase.titlePath()`.
+ *
+ * The raw array is `['', <project>, <file>, ...suites, <title>]` — index 1 is
+ * the project slot, empty unless the config declares named projects. Playwright
+ * renders a project as `[name]`, and a `--test-list` entry has to match that
+ * rendering exactly: a bare `chromium › a.spec.ts › …` matches ZERO tests and
+ * Playwright reports that as a normal empty run, not an error.
+ *
+ * This is why the line is built here and stored, rather than derived later from
+ * `KnownTestEntry.titlePath`: that field is already `filter(Boolean)`-ed, which
+ * discards the positions, leaving no way to tell a project name from a file path.
+ *
+ * The path component is Playwright's own rendering (relative to the common base
+ * dir of the discovered spec files), so nothing here computes a path prefix — a
+ * wrong prefix is the other way to silently select nothing.
+ */
+export function listLineFromTitlePath(raw: readonly unknown[]): string | undefined {
+  const project = typeof raw[1] === 'string' && raw[1].length > 0 ? `[${raw[1]}]` : undefined
+  const rest = raw.slice(2).filter((part): part is string => typeof part === 'string' && part.length > 0)
+  // Needs at least the file and the test title to identify anything.
+  if (rest.length < 2) return undefined
+  return [...(project ? [project] : []), ...rest].join(' › ')
 }
 
 export interface ExistingSummary {
@@ -22,9 +52,10 @@ export interface ExistingSummary {
 }
 
 export function knownTestFromTest(test: TestCase): KnownTestEntry {
-  const titlePath = typeof test.titlePath === 'function'
-    ? test.titlePath().filter((part): part is string => typeof part === 'string' && part.length > 0)
-    : undefined
+  const rawTitlePath = typeof test.titlePath === 'function' ? test.titlePath() : undefined
+  const titlePath = rawTitlePath
+    ?.filter((part): part is string => typeof part === 'string' && part.length > 0)
+  const listLine = rawTitlePath ? listLineFromTitlePath(rawTitlePath) : undefined
   const location = test.location?.file && typeof test.location.line === 'number'
     ? `${test.location.file}:${test.location.line}`
     : undefined
@@ -37,6 +68,7 @@ export function knownTestFromTest(test: TestCase): KnownTestEntry {
     name: `test-case-${slugify(test.title)}`,
     title: test.title,
     ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
+    ...(listLine ? { listLine } : {}),
     ...(location ? { location } : {}),
   }
 }
@@ -51,6 +83,7 @@ export function knownTestsFromExistingSummary(summary: ExistingSummary | null): 
       name?: unknown
       title?: unknown
       titlePath?: unknown
+      listLine?: unknown
       location?: unknown
     }
     if (typeof value.name !== 'string' || value.name.length === 0) continue
@@ -60,12 +93,14 @@ export function knownTestsFromExistingSummary(summary: ExistingSummary | null): 
     const titlePath = Array.isArray(value.titlePath)
       ? value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0)
       : undefined
+    const listLine = typeof value.listLine === 'string' && value.listLine.length > 0 ? value.listLine : undefined
     const location = typeof value.location === 'string' && value.location.length > 0 ? value.location : undefined
     mergeKnownTest(out, {
       id,
       name: value.name,
       title: value.title,
       ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
+      ...(listLine ? { listLine } : {}),
       ...(location ? { location } : {}),
     })
   }

@@ -134,6 +134,60 @@ describe('nonPassedSignatureFromPlan', () => {
   })
 })
 
+describe('computeVerificationPlan test-list selection', () => {
+  const withLine = (name: string, title: string, listLine: string) => ({ name, title, listLine })
+
+  it('selects by test-list when every not-yet-passed test carries a listLine', () => {
+    const plan = computeVerificationPlan(mkFeatureDir(), {
+      knownTests: [
+        withLine('test-case-a', 'a title', 'a.spec.ts › suite › a title'),
+        withLine('test-case-b', 'b title', 'b.spec.ts › b title'),
+      ],
+      passedNames: ['test-case-b'],
+      failed: [{ name: 'test-case-a' }],
+    })
+
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    expect(plan.selection.kind).toBe('test-list')
+    if (plan.selection.kind !== 'test-list') return
+    // Only the not-yet-passed test, named exactly — not the passing one that
+    // a title-based grep could also have matched.
+    expect(plan.selection.testList).toEqual(['a.spec.ts › suite › a title'])
+  })
+
+  it('falls back to grep when even one selected test has no listLine', () => {
+    // All-or-nothing: a partial list would silently run a subset of the plan,
+    // and the verdict would rest on a rerun that skipped tests nobody skipped.
+    const plan = computeVerificationPlan(mkFeatureDir(), {
+      knownTests: [
+        withLine('test-case-a', 'a title', 'a.spec.ts › a title'),
+        known('test-case-b', 'b title'),
+      ],
+      failed: [{ name: 'test-case-a' }, { name: 'test-case-b' }],
+    })
+
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    expect(plan.selection.kind).toBe('grep')
+  })
+
+  it('deduplicates identical listLines rather than repeating an entry', () => {
+    const plan = computeVerificationPlan(mkFeatureDir(), {
+      knownTests: [
+        withLine('test-case-a', 'a title', 'a.spec.ts › a title'),
+        withLine('test-case-a-dup', 'a title', 'a.spec.ts › a title'),
+      ],
+      failed: [{ name: 'test-case-a' }, { name: 'test-case-a-dup' }],
+    })
+
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    if (plan.selection.kind !== 'test-list') return
+    expect(plan.selection.testList).toEqual(['a.spec.ts › a title'])
+  })
+})
+
 describe('computeVerificationPlan', () => {
   it('falls back to the full suite when a failed test is missing from the inventory', () => {
     const plan = computeVerificationPlan(mkFeatureDir(), {

@@ -111,6 +111,61 @@ describe('SummaryReporter', () => {
     ])
   })
 
+  it("copies Playwright's error-context attachment into failed/<slug>/ and records the path", () => {
+    process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
+    const reporter = new SummaryReporter()
+    // Stands in for the file Playwright writes into the test's output dir —
+    // the dir the next `--output` invocation wipes, which is the whole reason
+    // the reporter copies it out instead of pointing at it.
+    const pwOutputDir = fs.mkdtempSync(path.join(tmpRoot, 'pw-output-'))
+    const attachmentPath = path.join(pwOutputDir, 'error-context.md')
+    fs.writeFileSync(attachmentPath, '# Page state\n- button "Checkout" [disabled]\n')
+
+    reporter.onTestEnd(mkTest('checkout is enabled', '/specs/checkout.spec.ts', 12), mkResult({
+      status: 'failed',
+      error: { message: 'expected enabled' },
+      attachments: [{ name: 'error-context', contentType: 'text/markdown', path: attachmentPath }],
+    }))
+
+    // Keyed off the entry's own slug so this stays pinned to the same
+    // `failed/<slug>/` convention the trace extract and error.txt already use.
+    const entry = readSummary().failed[0]
+    const rel = path.join('failed', entry.name, 'error-context.md')
+    expect(entry.errorContextFile).toBe(rel)
+    expect(fs.readFileSync(path.join(LOGS_DIR, rel), 'utf-8')).toContain('button "Checkout" [disabled]')
+    fs.rmSync(pwOutputDir, { recursive: true, force: true })
+  })
+
+  it('copies the fixture-recorded HAR into failed/<slug>/network.har', () => {
+    process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
+    const reporter = new SummaryReporter()
+    const pwOutputDir = fs.mkdtempSync(path.join(tmpRoot, 'pw-output-'))
+    const attachmentPath = path.join(pwOutputDir, 'canary-lab-network-my-case.har')
+    fs.writeFileSync(attachmentPath, '{"log":{"entries":[{"request":{"url":"/api/checkout"}}]}}')
+
+    reporter.onTestEnd(mkTest('checkout posts the order', '/specs/checkout.spec.ts', 20), mkResult({
+      status: 'failed',
+      error: { message: 'expected 200' },
+      attachments: [{ name: 'canary-lab-network-har', contentType: 'application/json', path: attachmentPath }],
+    }))
+
+    const entry = readSummary().failed[0]
+    expect(entry.harFile).toBe(path.join('failed', entry.name, 'network.har'))
+    expect(fs.readFileSync(path.join(LOGS_DIR, entry.harFile), 'utf-8')).toContain('/api/checkout')
+    fs.rmSync(pwOutputDir, { recursive: true, force: true })
+  })
+
+  it('omits errorContextFile when the failure carried no error-context attachment', () => {
+    process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('no context fail'), mkResult({
+      status: 'failed',
+      error: { message: 'boom' },
+      attachments: [{ name: 'trace', path: '/tmp/trace.zip' }],
+    }))
+    expect(readSummary().failed[0].errorContextFile).toBeUndefined()
+  })
+
   it('records a step end with no locations and no error', () => {
     const reporter = new SummaryReporter()
     const test = mkTest('Step end no loc', '/specs/no-loc.spec.ts', 3)

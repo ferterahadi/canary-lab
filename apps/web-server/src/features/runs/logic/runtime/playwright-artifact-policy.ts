@@ -1,6 +1,10 @@
 import fs from 'fs'
 import path from 'path'
 import { readPlaywrightConfig, type ConfigValue } from '../../../../shared/config-ast'
+import {
+  PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
+  PLAYWRIGHT_SCREENSHOT_MODES,
+} from '../../../../../../../shared/configs/playwright-modes'
 import type { PlaywrightArtifactPolicy } from './manifest'
 
 const PLAYWRIGHT_CONFIG_NAMES = ['playwright.config.ts', 'playwright.config.js', 'playwright.config.cjs']
@@ -11,8 +15,8 @@ export const DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY: PlaywrightArtifactPolicy = {
   trace: 'retain-on-failure',
 }
 
-const SCREENSHOT_MODES = ['off', 'on', 'only-on-failure'] as const
-const RETAINABLE_MODES = ['off', 'on', 'on-first-retry', 'retain-on-failure'] as const
+const SCREENSHOT_MODES = PLAYWRIGHT_SCREENSHOT_MODES
+const RETAINABLE_MODES = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
 
 export function readPlaywrightArtifactPolicy(featureDir: string): PlaywrightArtifactPolicy {
   const cfgPath = findPlaywrightConfig(featureDir)

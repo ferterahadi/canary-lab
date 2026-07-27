@@ -66,14 +66,16 @@ export interface RepoBranchSnapshot {
   dirty: boolean
 }
 
-export type PlaywrightScreenshotMode = 'off' | 'on' | 'only-on-failure'
-export type PlaywrightRetainedArtifactMode = 'off' | 'on' | 'on-first-retry' | 'retain-on-failure'
+// Imported for local use below and re-exported so existing `from './manifest'`
+// imports keep working; the modes themselves live in one shared place because
+// six copies had drifted.
+import type {
+  PlaywrightArtifactPolicy,
+  PlaywrightRetainedArtifactMode,
+  PlaywrightScreenshotMode,
+} from '../../../../../../../shared/configs/playwright-modes'
 
-export interface PlaywrightArtifactPolicy {
-  screenshot: PlaywrightScreenshotMode
-  video: PlaywrightRetainedArtifactMode
-  trace: PlaywrightRetainedArtifactMode
-}
+export type { PlaywrightArtifactPolicy, PlaywrightRetainedArtifactMode, PlaywrightScreenshotMode }
 
 // Mid-Run Heal: populated when Playwright was halted before completing the
 // suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit

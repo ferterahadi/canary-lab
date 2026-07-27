@@ -5,6 +5,7 @@ import path from 'path'
 import { fileURLToPath } from 'node:url'
 import {
   captureFinalPageScreenshot,
+  harTracingFor,
   logMarkerFixture,
   logMarkerFixtureEntry,
   pageFixture,
@@ -12,6 +13,9 @@ import {
   playwrightStep,
   shouldCaptureFinalPageScreenshot,
   slugify,
+  startHarRecording,
+  stopHarRecording,
+  supportsHar,
   withLogMarkers,
   wrapWithCallSite,
   type CallSiteStep,
@@ -273,6 +277,98 @@ describe('pageFixture', () => {
   })
 })
 
+function fakeHarPage(tracing: unknown, extra: Record<string, unknown> = {}) {
+  return { context: () => ({ tracing }), ...extra }
+}
+
+function fakeTracing(order?: string[]) {
+  return {
+    startHar: vi.fn(async () => { order?.push('startHar') }),
+    stopHar: vi.fn(async () => { order?.push('stopHar') }),
+  }
+}
+
+describe('per-test HAR recording', () => {
+  // The load-bearing guard: this file is published to feature repos, which
+  // resolve their own @playwright/test. A feature pinned below 1.60 has no
+  // startHar, and must keep running rather than fail every test.
+  it('is skipped when the resolved Playwright has no startHar/stopHar', async () => {
+    expect(supportsHar(undefined)).toBe(false)
+    expect(supportsHar({ startHar: () => undefined })).toBe(false)
+    expect(harTracingFor(fakeHarPage({ startHar: () => undefined }) as never)).toBeNull()
+    expect(await startHarRecording(fakeHarPage({}) as never, fakeTestInfo() as never)).toBeNull()
+  })
+
+  it('is skipped when the page exposes no context', async () => {
+    expect(harTracingFor({} as never)).toBeNull()
+    expect(harTracingFor({ context: () => { throw new Error('closed') } } as never)).toBeNull()
+    expect(await startHarRecording({} as never, fakeTestInfo() as never)).toBeNull()
+  })
+
+  it('keeps and attaches the HAR when the test did not end as expected', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({
+      outputPath: (name: string) => path.join(dir, name),
+      status: 'failed',
+      expectedStatus: 'passed',
+    })
+
+    const harPath = await startHarRecording(page as never, testInfo as never)
+    expect(harPath).toBe(path.join(dir, 'canary-lab-network-my-case.har'))
+    expect(tracing.startHar).toHaveBeenCalledWith(harPath)
+    fs.writeFileSync(harPath!, '{"log":{}}')
+
+    await stopHarRecording(page as never, testInfo as never, harPath)
+
+    expect(tracing.stopHar).toHaveBeenCalledOnce()
+    expect(fs.existsSync(harPath!)).toBe(true)
+    expect(testInfo.attach).toHaveBeenCalledWith('canary-lab-network-har', {
+      path: harPath,
+      contentType: 'application/json',
+    })
+  })
+
+  it('deletes the HAR and attaches nothing when the test passed', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+
+    const harPath = await startHarRecording(page as never, testInfo as never)
+    fs.writeFileSync(harPath!, '{"log":{}}')
+    await stopHarRecording(page as never, testInfo as never, harPath)
+
+    expect(fs.existsSync(harPath!)).toBe(false)
+    expect(testInfo.attach).not.toHaveBeenCalled()
+  })
+
+  it('stopHarRecording is a no-op when recording never started', async () => {
+    const tracing = fakeTracing()
+    await stopHarRecording(fakeHarPage(tracing) as never, fakeTestInfo() as never, null)
+    expect(tracing.stopHar).not.toHaveBeenCalled()
+  })
+
+  it('brackets the test body: starts before it, stops after the screenshot', async () => {
+    const dir = mkTmp()
+    const order: string[] = []
+    const tracing = fakeTracing(order)
+    const page = fakeHarPage(tracing, {
+      goto: async () => { order.push('goto'); return 'ok' },
+      screenshot: vi.fn(async () => { order.push('screenshot') }),
+    })
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+    const noopStep: CallSiteStep = (_title, body) => body()
+
+    await pageFixture(page as never, async (wrapped) => {
+      await (wrapped as unknown as { goto: () => Promise<string> }).goto()
+    }, testInfo as never, noopStep)
+
+    expect(order).toEqual(['startHar', 'goto', 'screenshot', 'stopHar'])
+  })
+})
+
 describe('logMarkerFixture', () => {
   it('brackets the test body with markers in each service log', async () => {
     const dir = mkTmp()
@@ -322,6 +418,19 @@ describe('base.extend wiring', () => {
     let used = false
     await logMarkerFixtureEntry({}, async () => { used = true }, { title: 'x' } as never)
     expect(used).toBe(true)
+  })
+
+  it('declares every fixture entry with a destructuring first parameter', () => {
+    // Playwright parses fixture functions and rejects a plain identifier first
+    // argument ("First argument must use the object destructuring pattern").
+    // That failure happens at module load, so it takes down every spec that
+    // imports this published fixture. Vitest never invokes Playwright's parser,
+    // so the shape is pinned here — this is the only guard against a signature
+    // edit that looks harmless and breaks every feature's suite.
+    for (const fn of [pageFixtureEntry, logMarkerFixtureEntry]) {
+      const src = fn.toString()
+      expect(src.slice(src.indexOf('('))).toMatch(/^\(\s*\{/)
+    }
   })
 
   it('playwrightStep delegates to Playwright test.step', async () => {

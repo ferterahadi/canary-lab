@@ -6,6 +6,7 @@
 // SUMMARY_REPORTER_PATH resolves a sibling file via __dirname, so moving this
 // module to another directory would silently point the reporter at nothing.
 
+import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { PtyHandle } from './pty-spawner'
@@ -39,7 +40,7 @@ export const BRACKETED_PASTE_END = '\x1b[201~'
 
 // Production Playwright invocation. Uses `npx playwright test` with our custom
 // summary reporter, rooted at the feature dir. Tests inject their own.
-export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets, rerunGrep }) => {
+export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, rerunTargets, rerunGrep, rerunSelection }) => {
   const reporter = SUMMARY_REPORTER_PATH
   const threshold = feature.healOnFailureThreshold
   const maxFailures = typeof threshold === 'number' && threshold > 0
@@ -49,10 +50,34 @@ export const defaultPlaywrightSpawner: PlaywrightSpawner = ({ feature, paths, re
     ? ` ${rerunTargets.map((target) => JSON.stringify(target)).join(' ')}`
     : ''
   const grep = rerunGrep ? ` --grep=${JSON.stringify(rerunGrep)}` : ''
+  const testList = writeRerunTestList(paths.rerunListPath, rerunSelection)
+    ? ` --test-list=${JSON.stringify(paths.rerunListPath)}`
+    : ''
   return {
-    command: `npx playwright test${targets}${grep} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
+    command: `npx playwright test${targets}${grep}${testList} --output=${JSON.stringify(paths.playwrightArtifactsDir)} --reporter=${JSON.stringify(reporter)},list${maxFailures}`,
     cwd: feature.featureDir,
   }
+}
+
+/**
+ * Write the `--test-list` file for a targeted rerun. Returns false when the
+ * selection is not a test list, so the caller omits the flag.
+ *
+ * Each line is the test as Playwright's own `--list` renders it, captured by the
+ * summary reporter at inventory time. Nothing here derives or rewrites a path:
+ * a wrong path prefix, or a project name written without its `[brackets]`,
+ * matches zero tests and Playwright reports that as an ordinary empty run rather
+ * than an error — which would leave the run's verdict resting on a rerun that
+ * executed nothing.
+ */
+export function writeRerunTestList(
+  listPath: string,
+  selection?: PlaywrightRerunSelection,
+): boolean {
+  if (selection?.kind !== 'test-list' || selection.testList.length === 0) return false
+  fs.mkdirSync(path.dirname(listPath), { recursive: true })
+  fs.writeFileSync(listPath, selection.testList.join('\n') + '\n')
+  return true
 }
 
 // Send `signal` to the entire process group of `pty`. node-pty spawns its

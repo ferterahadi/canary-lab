@@ -31,11 +31,28 @@ export type PlaywrightRerunSelection =
       mode: RunLifecycleTargetedRerun['mode']
       reason: string
     }
+  // Preferred over `grep` whenever every selected test carries a `listLine`.
+  // `--grep` matches on TITLE only, so two tests sharing a title in different
+  // spec files both run even when the plan selected one — measured against
+  // Playwright 1.62: an escaped grep for a duplicated title selects 2 tests in
+  // 2 files, while the equivalent test list selects exactly 1.
+  | {
+      kind: 'test-list'
+      testList: readonly string[]
+      selected: number
+      total: number
+      mode: RunLifecycleTargetedRerun['mode']
+      reason: string
+    }
 
 export interface KnownSummaryTest {
   name: string
   title: string
   titlePath?: string[]
+  /** The test as Playwright's `--list` renders it, captured by the summary
+   *  reporter. Present only for summaries written after `--test-list` support
+   *  landed; absent on older ones, which fall back to `--grep`. */
+  listLine?: string
   location?: string
 }
 
@@ -207,6 +224,7 @@ export function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[]
       name?: unknown
       title?: unknown
       titlePath?: unknown
+      listLine?: unknown
       location?: unknown
     }
     if (typeof value.name !== 'string' || value.name.length === 0) continue
@@ -218,6 +236,7 @@ export function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[]
       ...(Array.isArray(value.titlePath)
         ? { titlePath: value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0) }
         : {}),
+      ...(typeof value.listLine === 'string' && value.listLine.length > 0 ? { listLine: value.listLine } : {}),
       ...(typeof value.location === 'string' && value.location.length > 0 ? { location: value.location } : {}),
     })
   }
@@ -256,6 +275,25 @@ export function uniqueByName(tests: KnownSummaryTest[]): KnownSummaryTest[] {
 // the sole caller has already returned early on an empty selection. The return
 // type says `string` so a future edit that breaks either invariant is a compile
 // error rather than a silently-widened full-suite rerun.
+/**
+ * The `--test-list` lines for a selection, or `null` when even one selected test
+ * lacks a `listLine`.
+ *
+ * All-or-nothing on purpose. A partial list would quietly run a subset of what
+ * the plan selected, and the run's verdict would then be computed from a rerun
+ * that skipped tests nobody chose to skip. Returning null hands the caller back
+ * to `--grep`, which over-selects rather than under-selects — the safe direction
+ * when we cannot be exact.
+ */
+export function testListForKnownTests(tests: KnownSummaryTest[]): string[] | null {
+  const lines: string[] = []
+  for (const test of tests) {
+    if (!test.listLine) return null
+    if (!lines.includes(test.listLine)) lines.push(test.listLine)
+  }
+  return lines.length > 0 ? lines : null
+}
+
 export function grepForKnownTests(tests: KnownSummaryTest[]): string {
   const titles = Array.from(new Set(tests.map((test) => test.title)))
   const escaped = titles.map(escapeRegExp)

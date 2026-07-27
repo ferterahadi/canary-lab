@@ -12,7 +12,7 @@ import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { type RunLifecyclePhase, type RunManifest, type StoppedEarlyReason } from './manifest'
 import { loadFeatures } from '../../../../shared/feature-loader'
-import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, skippedNameSet, uniqueByName } from './rerun-targets'
+import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
 
 export { computeNonPassedTargets, computeRerunTargetsOrdered, nonPassedSignatureFromPlan, normalizeRerunSelection, selectionForPlan, summaryHasPassingEvidence } from './rerun-targets'
 export type { NonPassedTargetsResult, PlaywrightRerunSelection, RerunTargetsOrderedResult } from './rerun-targets'
@@ -120,20 +120,32 @@ export function computeVerificationPlan(
         reason: `Post-heal rerun could not match ${missingFailed.length} failed test${missingFailed.length === 1 ? '' : 's'} in the known Playwright inventory; running the full suite with the configured failure threshold.`,
       }
     }
-    const grep = grepForKnownTests(selected)
     const passedCount = countPassed(summary)
     const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
     const reason = `Rerunning ${selected.length} not-yet-passed tests (${failedFirst.length} failed first, then ${skipped.length} skipped, then ${pending.length} pending/not-run) because ${passedCount} passed and ${failedCount} failed before healing.`
+    // A test list names each test exactly; `--grep` matches on title alone and
+    // would also run same-titled tests in other spec files. Older summaries
+    // predate `listLine`, so grep stays as the fallback.
+    const testList = testListForKnownTests(selected)
     return {
       kind: 'targeted',
-      selection: {
-        kind: 'grep',
-        grep,
-        selected: selected.length,
-        total: knownTests.length,
-        mode: 'failed-and-pending',
-        reason,
-      },
+      selection: testList
+        ? {
+            kind: 'test-list',
+            testList,
+            selected: selected.length,
+            total: knownTests.length,
+            mode: 'failed-and-pending',
+            reason,
+          }
+        : {
+            kind: 'grep',
+            grep: grepForKnownTests(selected),
+            selected: selected.length,
+            total: knownTests.length,
+            mode: 'failed-and-pending',
+            reason,
+          },
       failedFirst,
       skipped,
       pending,
