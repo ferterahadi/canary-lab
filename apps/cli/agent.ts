@@ -5,6 +5,7 @@ import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
 import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../web-server/src/mcp/tools'
+import { copyDirRecursive } from '../../shared/lib/copy-dir'
 
 type Target = 'codex' | 'claude' | 'all'
 export type AgentInstallTarget = Target
@@ -67,7 +68,7 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
       if (!force) throw new Error(`${op.label} already exists at ${op.to}; rerun with --force to replace it`)
       fs.rmSync(op.to, { recursive: true, force: true })
     }
-    copyDir(op.from, op.to)
+    copyDirRecursive(op.from, op.to)
     log(`Installed ${op.label}: ${op.to}`)
   }
 
@@ -113,12 +114,12 @@ export function installOrRefresh(target: Target, opts: AgentInstallOptions = {})
         continue
       }
       fs.rmSync(op.to, { recursive: true, force: true })
-      copyDir(op.from, op.to)
+      copyDirRecursive(op.from, op.to)
       log(`Updated ${op.label}: ${op.to}`)
       changed += 1
       continue
     }
-    copyDir(op.from, op.to)
+    copyDirRecursive(op.from, op.to)
     log(`Installed ${op.label}: ${op.to}`)
     changed += 1
   }
@@ -137,7 +138,7 @@ export function refreshInstalled(target: Target, opts: AgentInstallOptions = {})
     if (!fs.existsSync(op.to)) continue
     if (dirsEqual(op.from, op.to)) continue
     fs.rmSync(op.to, { recursive: true, force: true })
-    copyDir(op.from, op.to)
+    copyDirRecursive(op.from, op.to)
     log(`Updated ${op.label}: ${op.to}`)
     updated += 1
   }
@@ -249,19 +250,6 @@ function resolveAgentAssetsDir(): string {
   const found = candidates.find((dir) => fs.existsSync(dir))
   if (!found) throw new Error('could not locate packaged agent integrations')
   return found
-}
-
-function copyDir(sourceDir: string, targetDir: string): void {
-  fs.mkdirSync(targetDir, { recursive: true })
-  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
-    const source = path.join(sourceDir, entry.name)
-    const target = path.join(targetDir, entry.name)
-    if (entry.isDirectory()) {
-      copyDir(source, target)
-    } else if (entry.isFile()) {
-      fs.copyFileSync(source, target)
-    }
-  }
 }
 
 function dirsEqual(leftDir: string, rightDir: string): boolean {

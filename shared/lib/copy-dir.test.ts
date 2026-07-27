@@ -58,6 +58,27 @@ describe('copyDirRecursive', () => {
     expect(fs.readFileSync(path.join(dst, 'real.txt'), 'utf8')).toBe('real')
   })
 
+  it('maps entry names through renameEntry', () => {
+    fs.writeFileSync(path.join(src, 'gitignore'), 'node_modules\n')
+    fs.writeFileSync(path.join(src, 'keep.txt'), 'keep')
+    copyDirRecursive(src, dst, (name) => (name === 'gitignore' ? '.gitignore' : name))
+    expect(fs.readFileSync(path.join(dst, '.gitignore'), 'utf8')).toBe('node_modules\n')
+    expect(fs.existsSync(path.join(dst, 'gitignore'))).toBe(false)
+    // The identity arm of the same callback must still copy untouched names.
+    expect(fs.readFileSync(path.join(dst, 'keep.txt'), 'utf8')).toBe('keep')
+  })
+
+  // Renaming a directory has to carry its subtree, which only holds if the
+  // callback is threaded through the recursive call rather than applied at the
+  // top level. Asserting on the nested file is what pins that.
+  it('renames directories and carries their subtree to the new name', () => {
+    fs.mkdirSync(path.join(src, 'dot-github', 'workflows'), { recursive: true })
+    fs.writeFileSync(path.join(src, 'dot-github', 'workflows', 'ci.yml'), 'on: push')
+    copyDirRecursive(src, dst, (name) => (name === 'dot-github' ? '.github' : name))
+    expect(fs.readFileSync(path.join(dst, '.github', 'workflows', 'ci.yml'), 'utf8')).toBe('on: push')
+    expect(fs.existsSync(path.join(dst, 'dot-github'))).toBe(false)
+  })
+
   // The reason this helper exists instead of fs.cpSync: on Node 22 cpSync
   // aborts the whole process on an unreadable directory, so a best-effort
   // caller's try/catch never runs. Here it must be an ordinary JS throw.
