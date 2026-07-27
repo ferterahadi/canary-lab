@@ -3,6 +3,7 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import { ok, section, step, line, path as ansiPath } from '../../shared/cli-ui/ui'
 import { fail } from '../../shared/cli-ui/ui'
+import { copyDirRecursive } from '../../shared/lib/copy-dir'
 import { runAsScript } from './run-as-script'
 import { setup as setupCanaryLab } from './setup'
 import { isValidPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
@@ -39,20 +40,7 @@ const TEMPLATE_RENAMES: Record<string, string> = {
 }
 
 export function copyDir(sourceDir: string, targetDir: string): void {
-  fs.mkdirSync(targetDir, { recursive: true })
-
-  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
-    const sourcePath = path.join(sourceDir, entry.name)
-    const targetName = TEMPLATE_RENAMES[entry.name] ?? entry.name
-    const targetPath = path.join(targetDir, targetName)
-
-    if (entry.isDirectory()) {
-      copyDir(sourcePath, targetPath)
-      continue
-    }
-
-    fs.copyFileSync(sourcePath, targetPath)
-  }
+  copyDirRecursive(sourceDir, targetDir, (name) => TEMPLATE_RENAMES[name] ?? name)
 }
 
 function readPackageVersion(): string {

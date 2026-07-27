@@ -14,12 +14,22 @@ import path from 'path'
 //
 // Symlinks and other non-regular entries are skipped: callers copy artifact and
 // template trees, where following a link out of the tree is never wanted.
-export function copyDirRecursive(sourceDir: string, targetDir: string): void {
+//
+// `renameEntry` maps each entry's on-disk name to the name it takes in the
+// target. It exists because a source tree cannot always store the name it wants
+// to produce — `canary-lab init` ships `gitignore` and writes `.gitignore`, since
+// npm pack strips a real dotfile from the tarball. It applies to directories as
+// well as files, so a renamed directory carries its subtree with it.
+export function copyDirRecursive(
+  sourceDir: string,
+  targetDir: string,
+  renameEntry?: (name: string) => string,
+): void {
   fs.mkdirSync(targetDir, { recursive: true })
   for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
     const source = path.join(sourceDir, entry.name)
-    const target = path.join(targetDir, entry.name)
-    if (entry.isDirectory()) copyDirRecursive(source, target)
+    const target = path.join(targetDir, renameEntry?.(entry.name) ?? entry.name)
+    if (entry.isDirectory()) copyDirRecursive(source, target, renameEntry)
     else if (entry.isFile()) fs.copyFileSync(source, target)
   }
 }
