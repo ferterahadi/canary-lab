@@ -6,6 +6,7 @@ import { type RunContext } from './run-context'
 import fs from 'fs'
 import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { copyDirRecursive } from '../../../../../../../shared/lib/copy-dir'
 import { type RunLifecycleTargetedRerun, type RunManifest } from './manifest'
 import { SummaryShape, VerificationPlan, computeVerificationPlan, decideRunStatus, normalizeRerunSelection, readLatestHealOnFailureThreshold, type PlaywrightRerunSelection } from './run-verdict'
 import { testPortEnv } from './run-service-boot'
@@ -112,7 +113,9 @@ export function persistPlaywrightArtifacts(ctx: RunContext): void {
     const dstPath = path.join(dst, entry.name)
     try {
       fs.rmSync(dstPath, { recursive: true, force: true })
-      fs.cpSync(srcPath, dstPath, { recursive: true })
+      // Not fs.cpSync: its native tree walk aborts the process on a directory
+      // it cannot read, which would take the run down instead of warning.
+      copyDirRecursive(srcPath, dstPath)
     } catch (err) {
       ctx.runnerLog?.warn(`persist playwright artifact ${entry.name} failed: ${err instanceof Error ? err.message : String(err)}`)
     }
