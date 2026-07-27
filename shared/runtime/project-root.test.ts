@@ -106,6 +106,17 @@ describe('getProjectRoot', () => {
     vi.spyOn(process, 'cwd').mockReturnValue(checkout)
     expect(getProjectRoot()).toBe(checkout)
   })
+
+  it('walks past a directory whose package.json is unparseable', () => {
+    // A malformed package.json must not abort the upward walk — it is simply
+    // not a Canary Lab package. Without `features/` anywhere above it, the
+    // walk runs to the filesystem root and falls back to cwd.
+    const dir = mkTmp()
+    fs.writeFileSync(path.join(dir, 'package.json'), '{ not json')
+    vi.stubEnv('CANARY_LAB_PROJECT_ROOT', '')
+    vi.spyOn(process, 'cwd').mockReturnValue(dir)
+    expect(getProjectRoot()).toBe(dir)
+  })
 })
 
 describe('getFeaturesDir', () => {

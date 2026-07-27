@@ -1,605 +1,52 @@
+import { createRunContext, type RunContext } from './run-context'
+import { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-loop'
+import { recordFullSuiteTerminalRestartFallback, runPlaywright, runVerification, verificationPlanForSummary } from './run-playwright'
+import { interjectHealAgent, runHealAgent, waitForHealSignal } from './run-heal-agent'
+import type { StoppedEarlyReason } from './manifest'
+import { applyPortifyOverlay, captureFixBaseline, captureFixes, hydrateWorktreeEnvsets, reversePortifyOverlay } from './run-fix-capture'
 import fs from 'fs'
 import path from 'path'
-import { randomUUID } from 'crypto'
 import { EventEmitter } from 'events'
-import type { FeatureConfig, HealthProbe, HttpProbe, PortSlot, TcpProbe } from '../../../../../../../shared/launcher/types'
-import type { ExecutionType, VerificationRunMetadata } from '../../../../../../../shared/verification'
-import {
-  HealSignalGate,
-  createRunLifecycleEvent,
-  type HealEnd,
-  type HealSignal,
-  type HealSignalKind,
-  type RunFixCapture,
-} from '../../../../../../../shared/run-state'
-import { classifyHealFailure } from './heal-failure-classifier'
-import {
-  coerceTcpPort,
-  enabledForEnv,
-  isHealthy,
-  isTcpListening,
-  normalizeStartCommand,
-  resolveHealthProbe,
-  resolvePath,
-} from '../../../../shared/launcher-startup'
-import {
-  buildRunPaths,
-  type RunPaths,
-} from './run-paths'
-import {
-  type ExternalHealSession,
-  type RunBootFailure,
-  type RunLifecycleAbortReason,
-  type RunLifecycleEvent,
-  type RunLifecyclePhase,
-  type RunLifecycleRestartPlan,
-  type RunLifecycleSeverity,
-  type RunLifecycleTargetedRerun,
-  type RepoBranchSnapshot,
-  type RunManifest,
-  type ServiceManifestEntry,
-  type StoppedEarlyReason,
-} from './manifest'
-import { FileRunStateSink, type RunStateSink } from './run-state-sink'
-import type { PtyFactory, PtyHandle } from './pty-spawner'
-import { HealCycleState, AUTO_HEAL_MAX_CYCLES } from './heal-cycle'
-import { ESCALATION_THRESHOLD } from './heal-escalation'
-import type { BuildHealCyclePrompt } from './auto-heal'
-import { appendJournalIteration as appendJournalIterationToFile, type JournalAppendInput } from './log-enrichment'
-import { AgentSessionRefStore } from './agent-session-refs'
+import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import { type RunPaths } from './run-paths'
+import { type RunManifest } from './manifest'
 import type { RunnerLog } from './runner-log'
-import {
-  resolveMcpOutputDir,
-  ensureMcpOutputDir,
-  capArtifacts,
-} from './playwright-mcp-artifacts'
 import { planRestart } from './restart-planner'
-import { interpolateConfigTokens, makeTokenCache, resolvePortTokens } from './launcher/interpolate'
 import { releasePorts } from './port-allocator'
-import { removeWorktree, type WorktreeHandle } from './repo-worktree'
-import { hydrateEnvsetIntoWorktrees } from './env-switcher/worktree-hydrate'
-import { overlayExists, readOverlay, checkStaleness, overlayDir } from '../../../portify/logic/runtime/overlay'
-import { applyOverlay, reverseOverlay } from '../../../portify/logic/runtime/git-ops'
-import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
-import {
-  diffContentForFeatureRepos,
-  diffFeatureRepos,
-  snapshotFeatureRepos,
-} from './feature-repo-diff'
-import {
-  diffContentSinceSnapshot,
-  diffNamesSinceSnapshot,
-  runGit,
-  snapshotWorkingTree,
-} from '../../../../shared/git-repo'
-
+import { removeWorktree } from './repo-worktree'
 // Headless event-emitting orchestrator for a single feature run. Wraps the
 // existing health-check / signal-file semantics behind a clean API the future
 // Fastify server can drive without inheriting any readline / iTerm cruft.
 
-import {
-  SummaryShape,
-  VerificationPlan,
-  computeVerificationPlan,
-  decideRunStatus,
-  extractFailedSlugs,
-  finalLifecyclePhase,
-  nonPassedSignatureFromPlan,
-  normalizeRerunSelection,
-  readLatestHealOnFailureThreshold,
-  readSummary,
-  restartPlanDetail,
-  selectionForPlan,
-  signalLabel,
-  startingServicesDetail,
-  summarizeFailures,
-  summaryHasPassingEvidence,
-  type PlaywrightRerunSelection,
-} from './run-verdict'
-import {
-  BRACKETED_PASTE_BEGIN,
-  BRACKETED_PASTE_END,
-  defaultPlaywrightSpawner,
-  defaultSpawnCommand,
-  killTree,
-  scheduleSigkillFallback,
-} from './run-spawn'
-import {
-  HEAL_AGENT_TAIL_BYTES,
-  defaultHealPrompt,
-  formatUserInterjectBlock,
-  healAgentCauseSuffix,
-} from './heal-agent-text'
-import { listUntracked, sanitizeRepoFileName } from './repo-worktree'
+import { decideRunStatus, finalLifecyclePhase, readSummary, restartPlanDetail, selectionForPlan, summaryHasPassingEvidence } from './run-verdict'
+import { killTree, scheduleSigkillFallback } from './run-spawn'
 import type { PlaywrightSpawner } from './run-spawn'
+import { ensureServicesRunning, spawnService, waitForHealth } from './run-service-boot'
+import { captureDirtySpecBaseline, markStoppedEarly, noteHealCycle, prepareRun, recordLifecycle, setStatus, stopHeartbeat } from './run-manifest-writer'
+import type { InterjectResult, OrchestratorEventMap, OrchestratorOptions, ServiceSpec } from './run-orchestrator-types'
+
+export type { AutoHealAgent, AutoHealConfig, BuildServiceSpecsOptions, CancelHealResult, DirtySpecHooks, InterjectResult, LifecycleRecordOptions, OrchestratorEventMap, OrchestratorOptions, PauseResult, ServiceSpec } from './run-orchestrator-types'
+export { buildQueuedServiceEntries, buildServiceSpecs, collectPortSlots } from './service-specs'
+
 export type { PlaywrightInvocation, PlaywrightSpawner } from './run-spawn'
-export interface ServiceSpec {
-  repoName: string
-  name: string
-  safeName: string
-  command: string
-  cwd: string
-  /** Resolved per-env readiness probe (single transport). */
-  healthProbe?: HealthProbe
-  /** Extra env injected at spawn — e.g. the allocated `PORT` for each declared
-   *  port slot whose `env` is set. */
-  env?: Record<string, string>
-  /** Per-run allocated ports keyed by declared slot name (for the manifest). */
-  allocatedPorts?: Record<string, number>
-}
-
-// Test-file integrity side-channel. The orchestrator captures the pre-heal spec
-// baseline at run start and asks for promotion when a run passes; the store does
-// the hashing/diffing. Structural so `DirtySpecStore` satisfies it and tests can
-// omit it. Absent in unit tests; wired to the singleton store in server.ts.
-export interface DirtySpecHooks {
-  captureRunStart(featureId: string, featureDir: string): Promise<unknown>
-  finalizeRun(featureId: string, featureDir: string, passed: boolean): Promise<unknown>
-}
-
-export interface OrchestratorOptions {
-  feature: FeatureConfig
-  runId: string
-  runDir: string
-  // Repo root where the diagnosis journal lives (independent of the run dir).
-  projectRoot?: string
-  // Injected pty factory — production code passes the real one; tests pass a
-  // fake. Required so unit tests can run without a TTY or node-pty native.
-  ptyFactory: PtyFactory
-  // Health-check function — defaulted to the real HTTP poller, but injectable
-  // for tests.
-  healthCheck?: (url: string, timeoutMs?: number) => Promise<boolean>
-  // Default polling cadence; overridable for tests to keep them fast.
-  healthPollIntervalMs?: number
-  // Default deadline for an entire health-check phase (per service).
-  healthDeadlineMs?: number
-  // Override for `setTimeout`-based delays in tests.
-  delay?: (ms: number) => Promise<void>
-  // Builds the Playwright invocation. The orchestrator spawns it via
-  // ptyFactory so tests can inject a fake. Defaults to the standard
-  // `npx playwright test` command rooted at the feature dir.
-  playwrightSpawner?: PlaywrightSpawner
-  // Auto-heal configuration. Omit to disable the heal loop.
-  autoHeal?: AutoHealConfig
-  // Manual heal mode: when true and `autoHeal` is omitted, a failing run
-  // transitions to 'healing' and waits for the user to write the signal
-  // file by hand (no agent process spawned). When false (default), failing
-  // tests with no autoHeal short-circuit to 'failed' immediately.
-  manualHeal?: boolean
-  // External heal mode: identical operational behavior to `manualHeal` (no
-  // agent CLI is spawned, the orchestrator parks at waiting-for-signal until
-  // a signal file appears in `<runDir>/signals/`). The only difference is
-  // that the manifest's `healMode` is written as `'external'` so the UI can
-  // render the dedicated `ExternalHealPanel` instead of the manual-heal
-  // banner, and so external clients (Claude/Codex via MCP) can recognise
-  // ownership. Mutually exclusive with `autoHeal`; takes precedence over
-  // `manualHeal` for the manifest tag when both are true.
-  externalHeal?: boolean
-  /** When `externalHeal` is true, the route layer auto-claims the broker for
-   *  the request's session. Passing the resulting `ExternalHealSession` here
-   *  lets the orchestrator include it in the initial manifest write so the UI
-   *  sees the "Healing via Claude Desktop" badge from the very first frame
-   *  instead of after a follow-up patch round-trip. */
-  externalHealSession?: ExternalHealSession
-  // Polling interval for the heal-cycle signal-wait loop. Defaults to
-  // healthPollIntervalMs.
-  healSignalPollMs?: number
-  // Hard ceiling on a single heal cycle (signal-wait). Defaults to 60 min.
-  // When the agent is actively producing output, this is the absolute upper
-  // bound on how long one cycle can run; quieter checks live in
-  // `healAgentIdleTimeoutMs` below.
-  healAgentTimeoutMs?: number
-  // Idle window — max time the agent can go without emitting any output
-  // before the cycle is given up on. Resets every time a chunk arrives on
-  // the agent pty. Defaults to 3 min, which is generous for normal claude
-  // pacing but catches a wedged REPL.
-  healAgentIdleTimeoutMs?: number
-  // Optional runner-log sink. When present, the orchestrator subscribes to its
-  // own lifecycle events on construction and tees a human-readable line for
-  // each into `runner.log`. Both CLI and web entrypoints provide one.
-  runnerLog?: RunnerLog
-  // Selected env (e.g. 'local', 'production'). Used to filter
-  // repos/startCommands whose `envs` whitelist excludes it — letting a feature
-  // skip booting local services when running tests against a remote URL.
-  env?: string
-  // Single mutator for manifest.json + runs-index.json. Defaults to a
-  // file-only sink that writes the same files directly; production wires
-  // the web-server's `RunStore` here so mutations also emit events that
-  // drive the WS push channel.
-  runStateSink?: RunStateSink
-  repoBranchSnapshots?: RepoBranchSnapshot[]
-  initialHealCycles?: number
-  executionType?: ExecutionType
-  verification?: VerificationRunMetadata
-  playwrightEnv?: Record<string, string>
-  /** Per-run allocated ports keyed by slot name (allocated by the start flow
-   *  before construction). Resolves `${port.<slot>}` tokens and is injected as
-   *  each service's declared `env`. Released on stop. */
-  portMap?: Map<string, number>
-  /** Per-run git worktrees created (opt-in) after a same-repo collision. The
-   *  orchestrator redirects affected services' cwd into the worktree, records
-   *  them in the manifest, and removes them on stop. */
-  worktrees?: WorktreeHandle[]
-  /** Relocate the heal-signal directory away from `<runDir>/signals`. The
-   *  benchmark baseline arm points this at the agent's own worktree so the
-   *  agent can signal completion without being handed a path into the run dir
-   *  (where harness-only artifacts live). Omit for the default location. */
-  signalsDir?: string
-  /** Test-file integrity hooks (run-start capture + green promotion). Absent in
-   *  tests; wired to the singleton DirtySpecStore in server.ts. */
-  dirtySpecHooks?: DirtySpecHooks
-}
-
-export type PauseResult =
-  | { ok: true; failureCount: number }
-  | { ok: false; reason: 'already-healing' | 'no-playwright-running' | 'no-failures-yet' }
-
-export type CancelHealResult =
-  | { ok: true }
-  | { ok: false; reason: 'not-healing' | 'no-agent-running' }
-
-export type InterjectResult =
-  | { ok: true }
-  | { ok: false; reason: 'no-agent-running' }
-
-export type OrchestratorEventMap = {
-  'service-started': { service: ServiceSpec; pid: number }
-  'service-output': { service: ServiceSpec; chunk: string }
-  'service-exit': { service: ServiceSpec; exitCode: number; signal?: number }
-  'service-restart-skipped': { service: ServiceSpec; reason: 'no-files-changed-here' }
-  'restart-planned': { toRestart: string[]; toKeep: string[]; noMatch: boolean }
-  'health-check': { service: ServiceSpec; healthy: boolean; transport?: 'http' | 'tcp' }
-  'playwright-output': { chunk: string }
-  'playwright-started': { command: string }
-  'playwright-exit': { exitCode: number }
-  'agent-started': { cycle: number; command: string; redirect?: boolean }
-  'agent-output': { chunk: string }
-  'agent-exit': { exitCode: number }
-  'heal-cycle-started': { cycle: number; failureSignature: string }
-  'signal-detected': {
-    kind: 'restart' | 'rerun' | 'heal'
-    body: Record<string, unknown>
-  }
-  'signal-accepted': {
-    kind: 'restart' | 'rerun' | 'heal'
-    body: Record<string, unknown>
-  }
-  'signal-ignored': {
-    kind: 'restart' | 'rerun' | 'heal'
-    reason: string
-  }
-  'run-status': { status: RunManifest['status'] }
-  'run-complete': { status: RunManifest['status'] }
-  'paused-by-user': { failureCount: number }
-}
-
-interface LifecycleRecordOptions {
-  detail?: string
-  severity?: RunLifecycleSeverity
-  activeCycle?: number
-  lastSignal?: RunLifecycleEvent['lastSignal']
-  restartPlan?: RunLifecycleRestartPlan
-  targetedRerun?: RunLifecycleTargetedRerun
-  abortReason?: RunLifecycleAbortReason
-}
-
-// One snapshot entry per edit surface tracked across a heal cycle. Service
-// repos populate this with `gitRoot === resolveRepoPath(localPath)` and no
-// pathspecs. The feature dir populates it with `gitRoot` = the workspace
-// repo root (resolved via `git rev-parse --show-toplevel`) and pathspecs
-// that scope the diff to the feature subtree while excluding any service
-// repo nested inside.
-
-// True when `child` is a descendant of `parent` (or identical). Used by the
-// snapshot helper to decide whether a service repo lives inside the feature
-// dir and therefore needs to be excluded from the feature-dir diff scope.
-
-export type AutoHealAgent = 'claude' | 'codex'
-
-export interface AutoHealConfig {
-  agent: AutoHealAgent
-  // Optional 1-based cap on heal cycles. Omit for the production default
-  // (AUTO_HEAL_MAX_CYCLES = 10). The loop also gives up earlier when the
-  // exact failing set stays identical past the no-progress limit
-  // (heal-cycle.ts DEFAULT_NO_PROGRESS_LIMIT).
-  maxCycles?: number
-  // Returns the spawn command for the long-lived REPL — just the binary +
-  // flags. Production wires `buildAgentSpawnCommand` from auto-heal.ts; tests
-  // pass a no-op script that stays alive (e.g. `cat`). The orchestrator
-  // either reuses the prior session id from `<runDir>/agent-session-id.txt`
-  // (setting `resume: true`) or, for claude, generates a fresh UUID, computes
-  // `mcpOutputDir`, and passes the path to the cycle-1 prompt file
-  // (`<runDir>/heal-prompt.md`); the production builder appends
-  // `"@<promptFile>"` as a positional arg so claude reads the file at
-  // startup and processes its content as the first user message —
-  // bypassing the REPL's input editor.
-  buildSpawnCommand?: (args: {
-    sessionId?: string
-    resume?: boolean
-    mcpOutputDir?: string
-    promptFile?: string
-  }) => string
-  // Returns the prompt text to write to the REPL's stdin for cycle N.
-  // Production wires `buildOrchestratorHealPrompt`; tests pass a stub that
-  // returns a deterministic string. The orchestrator pty.write()s the result
-  // followed by a newline.
-  buildCyclePrompt?: BuildHealCyclePrompt
-}
-
-
-export interface BuildServiceSpecsOptions {
-  /** Per-run allocated ports keyed by slot name. Resolves `${port.<slot>}`
-   *  tokens and is injected as each declared slot's `env` var. */
-  portMap?: Map<string, number>
-  /** Per-run repo localPath overrides keyed by repo name. Set when a repo is
-   *  isolated in a worktree so the service `cwd` points at the worktree. */
-  repoPathOverrides?: Record<string, string>
-}
-
-function resolvePortEnv(
-  ports: PortSlot[] | undefined,
-  portMap: Map<string, number> | undefined,
-): { env: Record<string, string>; allocatedPorts: Record<string, number> } {
-  const env: Record<string, string> = {}
-  const allocatedPorts: Record<string, number> = {}
-  for (const slot of ports ?? []) {
-    const port = portMap?.get(slot.name)
-    if (port == null) continue
-    allocatedPorts[slot.name] = port
-    if (slot.env) env[slot.env] = String(port)
-  }
-  return { env, allocatedPorts }
-}
-
-/** Gather the unique port slots a feature declares for the given env. The
- *  start flow allocates one free port per slot before constructing the
- *  orchestrator (buildServiceSpecs runs synchronously in the constructor). */
-export function collectPortSlots(feature: FeatureConfig, env?: string): PortSlot[] {
-  const slots = new Map<string, PortSlot>()
-  for (const repo of feature.repos ?? []) {
-    if (!enabledForEnv(repo.envs, env)) continue
-    const commands = repo.startCommands ?? []
-    for (let i = 0; i < commands.length; i++) {
-      const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
-      if (!enabledForEnv(normalized.envs, env)) continue
-      for (const slot of normalized.ports ?? []) {
-        if (!slots.has(slot.name)) slots.set(slot.name, slot)
-      }
-    }
-  }
-  return [...slots.values()]
-}
-
-export function buildServiceSpecs(
-  feature: FeatureConfig,
-  runDir: string,
-  env?: string,
-  opts: BuildServiceSpecsOptions = {},
-): ServiceSpec[] {
-  const out: ServiceSpec[] = []
-  // ${slot.key} tokens in feature.config values resolve from the chosen env's
-  // envset slot files at boot time, and the reserved ${port.<slot>} namespace
-  // from the per-run port map. The cache shares parsed slot files across every
-  // value in this build pass.
-  const tokenCtx = {
-    envName: env,
-    envsetsDir: path.join(feature.featureDir, 'envsets'),
-    ports: opts.portMap,
-  }
-  const tokenCache = makeTokenCache()
-  const interp = <T,>(node: T): T => interpolateConfigTokens(node, tokenCtx, tokenCache)
-  for (const repo of feature.repos ?? []) {
-    if (!enabledForEnv(repo.envs, env)) continue
-    const dir = opts.repoPathOverrides?.[repo.name] ?? resolvePath(repo.localPath)
-    const commands = repo.startCommands ?? []
-    for (let i = 0; i < commands.length; i++) {
-      const normalized = normalizeStartCommand(commands[i], `${repo.name}-cmd-${i + 1}`)
-      if (!enabledForEnv(normalized.envs, env)) continue
-      const safeName = normalized.name!.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
-      const probe = resolveHealthProbe(normalized.healthCheck, env)
-      const { env: portEnv, allocatedPorts } = resolvePortEnv(normalized.ports, opts.portMap)
-      out.push({
-        repoName: repo.name,
-        name: normalized.name!,
-        safeName,
-        command: interp(normalized.command),
-        cwd: dir,
-        healthProbe: probe ? interp(probe) : undefined,
-        ...(Object.keys(portEnv).length > 0 ? { env: portEnv } : {}),
-        ...(Object.keys(allocatedPorts).length > 0 ? { allocatedPorts } : {}),
-        // Service log path is implied by runDir; consumers can derive via buildRunPaths.
-      })
-    }
-  }
-  return out
-}
-
-/**
- * Manifest service entries for a *queued* run — built from the feature config
- * before any process spawns, so the queued run's Overview lists the services
- * that will boot once it leaves the queue (instead of "No services configured").
- * Ports aren't allocated until promotion, so `allocatedPorts` and the
- * port-templated `healthUrl` are intentionally omitted; status is 'queued'.
- * Promotion later overwrites this with the real running manifest.
- */
-export function buildQueuedServiceEntries(
-  feature: FeatureConfig,
-  runDir: string,
-  env?: string,
-): ServiceManifestEntry[] {
-  const paths = buildRunPaths(runDir)
-  return buildServiceSpecs(feature, runDir, env).map((s) => ({
-    repoName: s.repoName,
-    name: s.name,
-    safeName: s.safeName,
-    command: s.command,
-    cwd: s.cwd,
-    logPath: paths.serviceLog(s.safeName),
-    status: 'queued',
-  }))
-}
 
 export class RunOrchestrator extends EventEmitter {
-  readonly runId: string
-  readonly runDir: string
-  readonly feature: FeatureConfig
-  readonly env?: string
-  readonly paths: RunPaths
-  readonly services: ServiceSpec[]
+  /** Every field this class used to declare. Shared by reference with the
+   *  run-domain modules in ./run-* so each concern lives in its own file
+   *  without widening the class's surface — see run-context.ts. */
+  private readonly ctx: RunContext
 
-  private readonly ptyFactory: PtyFactory
-  private readonly healthCheck: (url: string, timeoutMs?: number) => Promise<boolean>
-  private readonly healthPollIntervalMs: number
-  private readonly healthDeadlineMs: number
-  private readonly delay: (ms: number) => Promise<void>
-  private readonly logsRoot: string
-  private readonly playwrightSpawner: PlaywrightSpawner
-  private readonly autoHeal?: AutoHealConfig
-  private readonly manualHeal: boolean
-  private readonly externalHeal: boolean
-  private readonly externalHealSession: ExternalHealSession | undefined
-  private readonly healSignalPollMs: number
-  private readonly healAgentTimeoutMs: number
-  private readonly healAgentIdleTimeoutMs: number
-  // Wall-clock of the most recent chunk emitted by the live heal-agent pty.
-  // Reset at the start of each `waitForHealSignal` call. Used to detect a
-  // wedged REPL (no output for `healAgentIdleTimeoutMs`) while still
-  // allowing legitimate long-running cycles to keep going as long as the
-  // agent is producing text.
-  private lastAgentDataAt = 0
-  private readonly runnerLog?: RunnerLog
-  private readonly stateSink: RunStateSink
-  private readonly dirtySpecHooks?: DirtySpecHooks
-  private readonly repoBranchSnapshots?: RepoBranchSnapshot[]
-  private readonly executionType: ExecutionType
-  private readonly verification?: VerificationRunMetadata
-  private readonly playwrightEnv: Record<string, string>
-  private readonly portMap?: Map<string, number>
-  private readonly worktreeHandles: WorktreeHandle[]
-  private readonly repoPathOverrides: Record<string, string>
-  // Ephemeral port overlay: when the feature has a saved overlay, its captured
-  // patch is `git apply`-ed into each per-run worktree before boot and
-  // reverse-applied at teardown — the target repo is never permanently changed.
-  private readonly portified: boolean
-  // Overlays applied this run, recorded so stop() can reverse exactly what it
-  // applied (and so a failed partial apply reverses only what landed).
-  private appliedOverlays: { repoName: string; worktreeRoot: string; patchPath: string }[] = []
-  // Fix-capture baseline: a stash-create ref of each worktree taken AFTER
-  // overlay + envset + WIP hydration and BEFORE boot, so the diff at teardown
-  // is exactly the heal agent's edits. `untracked` is the set of non-ignored
-  // untracked files present AT baseline (hydrated WIP + generated docs) — the
-  // stash ref doesn't include them, so teardown must exclude them explicitly or
-  // they'd masquerade as agent-created files. Keyed by repo name. Empty for
-  // in-place runs (no worktree to capture from).
-  private fixBaselines = new Map<string, { ref: string; worktreeRoot: string; sourceRoot: string; baseSha: string; untracked: Set<string> }>()
-  private readonly signalGate = new HealSignalGate()
-  private healCycleHistory: Array<{ cycle: number; restarted: string[]; kept: string[] }> = []
-
-  private status: RunManifest['status'] = 'running'
-  private healCycles = 0
-  private startedAt = ''
-  private servicePtys = new Map<string, PtyHandle>()
-  private logFiles = new Set<string>()
-  private signalWatcher: NodeJS.Timeout | null = null
-  private heartbeatTimer: NodeJS.Timeout | null = null
-  private stopped = false
-  // Mid-Run Heal: tracked while a Playwright pty is in flight so
-  // pauseAndHeal() can SIGTERM it. Cleared on exit.
-  private playwrightPty: PtyHandle | null = null
-  private playwrightExitWaiter: ((value: { exitCode: number; signal?: number }) => void) | null = null
-  // Tracked while a heal-agent pty is in flight so cancelHeal() can SIGTERM it.
-  // The REPL is spawned ONCE per heal session and persists across cycles —
-  // the orchestrator drives cycle handoffs by writing to its stdin instead
-  // of respawning. Cleared on cleanup.
-  private healAgentPty: PtyHandle | null = null
-  // MCP artifact dir for the live REPL. Pinned at spawn time from cycle-1's
-  // failed slugs and held until the heal loop exits, since claude's
-  // `--mcp-config` is set once at process boot. Read by the bidirectional
-  // pane handler when it needs to associate input with a heal session.
-  private healAgentMcpOutputDir: string | undefined
-  // Pinned at spawn time via `--session-id <uuid>` for claude (codex has no
-  // equivalent flag and leaves this null). Persisted to
-  // `paths.agentSessionIdPath` so external tools can correlate the run with
-  // the conversation log under `~/.claude/projects/`.
-  private healAgentSessionId: string | null = null
-  // ISO timestamp captured at heal-agent spawn so the codex session-log
-  // locator can find this run's `~/.codex/sessions/.../<rollout>.jsonl`
-  // (codex has no `--session-id` flag, so we discover the session by
-  // matching `cwd === runDir` and `session_meta.timestamp >= here`).
-  private healAgentStartedAt: string | null = null
-  // Last dimensions reported by the browser's agent pane. The pane can mount
-  // before auto-heal spawns the REPL, so keep the size and apply it at spawn.
-  private healAgentTerminalSize: { cols: number; rows: number } | null = null
-  // Rolling tail of the heal agent's raw terminal output (kept to the last
-  // ~HEAL_AGENT_TAIL_BYTES). When the loop gives up on a no-signal cycle this
-  // is the only evidence of WHY the agent went quiet, so it's written to
-  // `paths.healAgentTailPath` and classified into `HealEnd.agentCause`.
-  private healAgentOutputTail = ''
-  private readonly agentSessionRefs: AgentSessionRefStore
-  // Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
-  // racing toward another Playwright rerun.
-  private healCancelled = false
-  private stoppedEarlyReason: StoppedEarlyReason | undefined
-  private pendingAbortReason: RunLifecycleAbortReason | undefined
-  // Set by waitForHealth (via pollUntilReady) when a service fails to come up on
-  // a normal run: the suite can't run, so runFullCycle / the heal loops treat
-  // the run as `failed` and route it into heal instead of aborting. Cleared at
-  // the top of every ensureServicesRunning so a stale failure from a prior
-  // cycle doesn't survive a successful reboot.
-  private bootFailure: RunBootFailure | undefined
-  private lastLifecycleEvent: { phase: RunLifecyclePhase; headline: string } | null = null
+  get runId(): string { return this.ctx.runId }
+  get runDir(): string { return this.ctx.runDir }
+  get feature(): FeatureConfig { return this.ctx.feature }
+  get env(): string | undefined { return this.ctx.env }
+  get paths(): RunPaths { return this.ctx.paths }
+  get services(): ServiceSpec[] { return this.ctx.services }
 
   constructor(opts: OrchestratorOptions) {
     super()
-    this.feature = opts.feature
-    this.env = opts.env
-    this.runId = opts.runId
-    this.runDir = opts.runDir
-    this.paths = buildRunPaths(opts.runDir, opts.signalsDir ? { signalsDir: opts.signalsDir } : undefined)
-    this.agentSessionRefs = new AgentSessionRefStore({
-      runDir: this.runDir,
-      agentSessionRefPath: this.paths.agentSessionRefPath,
-      agentSessionIdPath: this.paths.agentSessionIdPath,
-    })
-    this.portMap = opts.portMap
-    this.worktreeHandles = opts.worktrees ?? []
-    this.repoPathOverrides = {}
-    for (const handle of this.worktreeHandles) {
-      this.repoPathOverrides[handle.repoName] = handle.localPath
-    }
-    this.portified = overlayExists(opts.feature.featureDir)
-    this.services = buildServiceSpecs(opts.feature, opts.runDir, opts.env, {
-      portMap: this.portMap,
-      repoPathOverrides: this.repoPathOverrides,
-    })
-    this.ptyFactory = opts.ptyFactory
-    this.healthCheck = opts.healthCheck ?? isHealthy
-    this.healthPollIntervalMs = opts.healthPollIntervalMs ?? 1000
-    this.healthDeadlineMs = opts.healthDeadlineMs ?? 60_000
-    this.delay = opts.delay ?? ((ms) => new Promise((r) => setTimeout(r, ms)))
-    this.logsRoot = path.dirname(path.dirname(opts.runDir))
-    this.playwrightSpawner = opts.playwrightSpawner ?? defaultPlaywrightSpawner
-    this.autoHeal = opts.autoHeal
-    this.manualHeal = opts.manualHeal ?? false
-    this.externalHeal = opts.externalHeal ?? false
-    this.externalHealSession = opts.externalHealSession
-    this.healSignalPollMs = opts.healSignalPollMs ?? this.healthPollIntervalMs
-    // Hard ceiling per cycle. Generous (2h) so a single heal cycle isn't cut
-    // off mid-work for a hard, agent-blind reason — the idle timeout below
-    // is the primary safety net.
-    this.healAgentTimeoutMs = opts.healAgentTimeoutMs ?? 120 * 60 * 1000
-    this.healAgentIdleTimeoutMs = opts.healAgentIdleTimeoutMs ?? 5 * 60 * 1000
-    this.runnerLog = opts.runnerLog
-    // Default to a file-only sink so unit tests + the CLI shim don't have
-    // to know about `RunStore`. Production wires RunStore in via opts.
-    this.stateSink = opts.runStateSink ?? new FileRunStateSink(this.logsRoot)
-    this.repoBranchSnapshots = opts.repoBranchSnapshots
-    this.healCycles = opts.initialHealCycles ?? 0
-    this.executionType = opts.executionType ?? 'run'
-    this.verification = opts.verification
-    this.playwrightEnv = opts.playwrightEnv ?? {}
-    this.dirtySpecHooks = opts.dirtySpecHooks
-    if (this.runnerLog) this.attachRunnerLog(this.runnerLog)
+    this.ctx = createRunContext(opts, (event, payload) => this.emit(event, payload))
+    if (this.ctx.runnerLog) this.attachRunnerLog(this.ctx.runnerLog)
   }
 
   // Subscribe the runner-log to every lifecycle event it cares about. Done
@@ -626,6 +73,59 @@ export class RunOrchestrator extends EventEmitter {
     }
   }
 
+  // ── delegations ──────────────────────────────────────────────────────────
+  // These moved into the run-* modules beside this file; they stay on the class
+  // because they are its public surface — routes, the MCP tools and the tests
+  // drive the orchestrator, not the modules.
+
+  markStoppedEarly(reason: StoppedEarlyReason, failuresAtStop: number, suiteTotal: number): void {
+    markStoppedEarly(this.ctx, reason, failuresAtStop, suiteTotal)
+  }
+
+  setStatus(status: RunManifest['status']): void {
+    setStatus(this.ctx, status)
+  }
+
+  noteHealCycle(): void {
+    noteHealCycle(this.ctx)
+  }
+
+  async pauseAndHeal(): ReturnType<typeof pauseAndHeal> {
+    return pauseAndHeal(this.ctx, this)
+  }
+
+  async cancelHeal(): ReturnType<typeof cancelHeal> {
+    return cancelHeal(this.ctx, this)
+  }
+
+  async restartHealFromFailure(guidance = ''): ReturnType<typeof restartHealFromFailure> {
+    return restartHealFromFailure(this.ctx, this, guidance)
+  }
+
+  async runPlaywright(args?: Parameters<typeof runPlaywright>[1]): ReturnType<typeof runPlaywright> {
+    return runPlaywright(this.ctx, args)
+  }
+
+  async runVerification(): ReturnType<typeof runVerification> {
+    return runVerification(this.ctx)
+  }
+
+  async interjectHealAgent(text: string): Promise<InterjectResult> {
+    return interjectHealAgent(this.ctx, text)
+  }
+
+  async waitForHealSignal(
+    hardTimeoutMs?: number,
+    idleTimeoutMs?: number,
+    requiresAgent?: boolean,
+  ): ReturnType<typeof waitForHealSignal> {
+    return waitForHealSignal(this.ctx, hardTimeoutMs, idleTimeoutMs, requiresAgent)
+  }
+
+  async runHealAgent(args: Parameters<typeof runHealAgent>[1]): ReturnType<typeof runHealAgent> {
+    return runHealAgent(this.ctx, args)
+  }
+
   emit<K extends keyof OrchestratorEventMap>(
     event: K,
     payload: OrchestratorEventMap[K],
@@ -645,17 +145,17 @@ export class RunOrchestrator extends EventEmitter {
   // caller drives Playwright via runPlaywright(), which lets the future
   // server show "services up" before tests start.
   async start(): Promise<void> {
-    this.prepareRun('starting')
+    prepareRun(this.ctx, 'starting')
     // Capture the pre-heal spec baseline before any service (and therefore any
     // heal agent) can touch a test file. This is the run-start fallback baseline
     // and the reference the green promotion compares against. Best-effort —
     // integrity tracking must never block a run from booting.
-    await this.captureDirtySpecBaseline()
+    await captureDirtySpecBaseline(this.ctx)
     // Apply the ephemeral port overlay BEFORE any service spawns. A failure
     // here throws out of start() so the caller's `.catch` runs stop('aborted')
     // — we must never boot a portified feature un-portified (the second
     // concurrent boot would EADDRINUSE on the un-injected port).
-    await this.applyPortifyOverlay()
+    await applyPortifyOverlay(this.ctx)
     // Then the envset: worktrees are cut from committed HEAD, so the real-path
     // envset apply (uncommitted) never reaches them — a worktree-isolated
     // service would boot the CHECKED-IN config (e.g. a docker `db` datasource
@@ -663,494 +163,12 @@ export class RunOrchestrator extends EventEmitter {
     // Overlay-first mirrors real-run semantics: the envset overwrites the
     // checked-in file either way. Throws like the overlay — booting
     // un-hydrated just fails later with a far less actionable error.
-    this.hydrateWorktreeEnvsets()
+    hydrateWorktreeEnvsets(this.ctx)
     // Snapshot each worktree NOW — after overlay + envset + WIP hydration, before
     // any service (and therefore any heal agent) can touch it. The diff against
     // this baseline at teardown is exactly the heal agent's fix (R80).
-    await this.captureFixBaseline()
-    await this.ensureServicesRunning()
-  }
-
-  /** Stash-create a baseline ref for every per-run worktree so teardown can diff
-   *  the agent's edits out. Best-effort: a repo we can't snapshot simply won't
-   *  have its fix captured — never blocks the boot. */
-  private async captureFixBaseline(): Promise<void> {
-    for (const handle of this.worktreeHandles) {
-      const ref = await snapshotWorkingTree(handle.worktreeRoot)
-      if (ref === null) continue
-      const head = await runGit(handle.worktreeRoot, ['rev-parse', 'HEAD'])
-      const baseSha = head.code === 0 ? head.stdout.trim() : ''
-      this.fixBaselines.set(handle.repoName, {
-        ref,
-        worktreeRoot: handle.worktreeRoot,
-        sourceRoot: handle.sourceRoot,
-        baseSha,
-        untracked: await listUntracked(handle.worktreeRoot),
-      })
-    }
-  }
-
-  /** Diff each worktree against its capture baseline and persist the heal fix as
-   *  `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture`. Called
-   *  at teardown BEFORE the worktrees are removed. A run whose agent changed
-   *  nothing writes no capture. Intent-to-add stages agent-created files so new
-   *  source files ride the patch too; gitignored/untracked-at-baseline state
-   *  (envset .env, hydrated WIP) never leaks in — the baseline already had it or
-   *  git ignores it. */
-  private async captureFixes(): Promise<void> {
-    if (this.fixBaselines.size === 0) return
-    const repos: RunFixCapture['repos'] = []
-    for (const [repoName, base] of this.fixBaselines) {
-      // Stage ONLY agent-created files (untracked now, but not at baseline) so
-      // `git diff <ref>` includes their content — the hydrated WIP / generated
-      // docs that were already untracked at baseline stay untracked and never
-      // leak into the fix patch.
-      const nowUntracked = await listUntracked(base.worktreeRoot)
-      const agentNew = [...nowUntracked].filter((f) => !base.untracked.has(f))
-      if (agentNew.length > 0) await runGit(base.worktreeRoot, ['add', '-N', '--', ...agentNew])
-      const patch = await diffContentSinceSnapshot(base.worktreeRoot, base.ref)
-      if (!patch.trim()) continue
-      const names = await diffNamesSinceSnapshot(base.worktreeRoot, base.ref)
-      const patchFile = `${sanitizeRepoFileName(repoName)}.patch`
-      const patchPath = path.join(this.paths.fixesDir, patchFile)
-      try {
-        fs.mkdirSync(this.paths.fixesDir, { recursive: true })
-        fs.writeFileSync(patchPath, patch)
-      } catch (err) {
-        this.runnerLog?.warn(`Fix capture write failed for "${repoName}": ${(err as Error).message}`)
-        continue
-      }
-      repos.push({ repoName, patchPath, patchFile, repoRoot: base.sourceRoot, baseSha: base.baseSha, files: names.length })
-    }
-    if (repos.length === 0) return
-    const fixCapture: RunFixCapture = { repos, capturedAt: new Date().toISOString() }
-    try {
-      fs.writeFileSync(path.join(this.paths.fixesDir, 'fixes.json'), JSON.stringify(fixCapture, null, 2) + '\n')
-    } catch { /* the manifest carries the same data — index file is a convenience */ }
-    this.stateSink.patchManifest(this.runId, { fixCapture })
-    this.runnerLog?.info(`Captured heal fix diff for ${repos.map((r) => r.repoName).join(', ')} → ${this.paths.fixesDir}`)
-  }
-
-  /** Hydrate the feature's envset into every per-run worktree (portified or
-   *  collision-isolated). `${port.*}` tokens follow the run's allocation,
-   *  byte-identical to the real-path apply. No restore — per-run worktrees are
-   *  disposable. No-op without an env, worktrees, or an envsets config. */
-  private hydrateWorktreeEnvsets(): void {
-    if (!this.env || this.worktreeHandles.length === 0) return
-    const { written } = hydrateEnvsetIntoWorktrees({
-      featureDir: this.feature.featureDir,
-      setName: this.env,
-      roots: this.worktreeHandles.map((h) => ({ sourceRoot: h.sourceRoot, worktreeRoot: h.worktreeRoot })),
-      resolve: this.portMap && this.portMap.size > 0
-        ? (content) => resolvePortTokens(content, this.portMap!)
-        : undefined,
-    })
-    for (const f of written) {
-      this.runnerLog?.info(`Hydrated envset "${this.env}" into worktree: ${f}`)
-    }
-  }
-
-  /**
-   * Apply the feature's saved port overlay into each per-run worktree. No-op
-   * unless the feature is portified. Checks staleness first (the user's repo
-   * may have moved since the overlay was captured) and fails loud — with an
-   * actionable "re-run Portify" message — on staleness, a missing worktree, or
-   * a patch that won't apply. Records what it applied for reverse at teardown.
-   */
-  private async applyPortifyOverlay(): Promise<void> {
-    if (!this.portified) return
-    const featureDir = this.feature.featureDir
-    const overlay = readOverlay(featureDir)
-    if (!overlay) {
-      // overlayExists was true at construction but the overlay is now
-      // unreadable (e.g. a patch file vanished) — refuse rather than boot bare.
-      throw new Error(
-        `saved port overlay for "${this.feature.name}" is missing or corrupt — re-run Portify to refresh it`,
-      )
-    }
-    // Worktree must cover every overlay repo; otherwise a service would boot
-    // from un-patched source. Map repo name → its per-run worktree root.
-    const worktreeByRepo: Record<string, string> = {}
-    for (const handle of this.worktreeHandles) worktreeByRepo[handle.repoName] = handle.worktreeRoot
-    const sourceByRepo: Record<string, string> = {}
-    for (const repo of overlay.meta.repos) {
-      const handle = this.worktreeHandles.find((h) => h.repoName === repo.name)
-      if (!handle) {
-        throw new Error(
-          `portified run requires a per-run worktree for repo "${repo.name}" but none was created — this run cannot apply its port overlay safely`,
-        )
-      }
-      sourceByRepo[repo.name] = handle.sourceRoot
-    }
-
-    // Staleness: did the user's repo move under the captured patch?
-    const staleness = await checkStaleness(featureDir, sourceByRepo)
-    if (staleness.stale) {
-      const files = staleness.changedFiles.map((c) => `${c.repo}:${c.path}`).join(', ')
-      throw new Error(
-        `saved port overlay no longer applies (${files} changed since capture) — re-run Portify to refresh it`,
-      )
-    }
-
-    const dir = overlayDir(featureDir)
-    for (const repo of overlay.meta.repos) {
-      const worktreeRoot = worktreeByRepo[repo.name]
-      const patchPath = path.join(dir, repo.patch)
-      const outcome = await applyOverlay(worktreeRoot, patchPath)
-      if (outcome.kind === 'ok') {
-        this.appliedOverlays.push({ repoName: repo.name, worktreeRoot, patchPath })
-        this.runnerLog?.info(`Applied port overlay for "${repo.name}".`)
-        continue
-      }
-      // Apply failed — reverse whatever already landed, then abort loud.
-      await this.reversePortifyOverlay()
-      const detail = outcome.kind === 'conflict' ? `conflicts in ${outcome.files.join(', ')}` : outcome.detail
-      throw new Error(
-        `failed to apply the saved port overlay for "${repo.name}" (${detail}) — re-run Portify to refresh it`,
-      )
-    }
-  }
-
-  /**
-   * Reverse every overlay this run applied (`git apply -R`), keeping the
-   * worktree intact — it holds the heal agent's repair edits. Reverse is atomic
-   * per repo: a conflict (a heal edit on the same lines) leaves that file
-   * untouched and is surfaced as a warning, not a throw.
-   */
-  private async reversePortifyOverlay(): Promise<void> {
-    for (const applied of this.appliedOverlays.splice(0)) {
-      const outcome = await reverseOverlay(applied.worktreeRoot, applied.patchPath)
-      if (outcome.kind === 'ok') {
-        this.runnerLog?.info(`Reverted port overlay for "${applied.repoName}".`)
-      } else {
-        const detail = outcome.kind === 'conflict' ? outcome.files.join(', ') : outcome.detail
-        this.runnerLog?.warn(
-          `port overlay for "${applied.repoName}" could not be reverted (${detail}) — heal edits preserved; the worktree keeps the injected ports`,
-        )
-      }
-    }
-  }
-
-  private prepareRun(serviceStatus: ServiceManifestEntry['status']): void {
-    this.startedAt = new Date().toISOString()
-    fs.mkdirSync(this.runDir, { recursive: true })
-    fs.mkdirSync(this.paths.signalsDir, { recursive: true })
-
-    this.writeInitialManifest(serviceStatus)
-    this.recordLifecycle('starting-services', 'Starting services', {
-      detail: startingServicesDetail(this.services.length),
-    })
-    this.startSignalWatcher()
-    this.startHeartbeat()
-  }
-
-  private recordLifecycle(
-    phase: RunLifecyclePhase,
-    headline: string,
-    opts: LifecycleRecordOptions = {},
-  ): void {
-    this.stateSink.recordLifecycleEvent(this.runId, createRunLifecycleEvent(phase, headline, {
-      id: randomUUID(),
-      ...opts,
-    }))
-    this.lastLifecycleEvent = { phase, headline }
-  }
-
-  private appendJournalIteration(input: JournalAppendInput): void {
-    appendJournalIterationToFile(input)
-    this.stateSink.recordJournalChange(this.runId)
-  }
-
-  private async ensureServicesRunning(): Promise<string[]> {
-    // Fresh boot attempt — drop any health failure recorded by a prior cycle so
-    // a service that comes up cleanly this time clears the failed state.
-    this.bootFailure = undefined
-    const toStart = this.services.filter((svc) => !this.servicePtys.has(svc.name))
-    for (const svc of toStart) {
-      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
-      this.spawnService(svc)
-    }
-    if (this.services.length > 0) await this.waitForHealth()
-    return toStart.map((svc) => svc.safeName)
-  }
-
-  private writeInitialManifest(serviceStatus: ServiceManifestEntry['status'] = 'starting'): void {
-    const services: ServiceManifestEntry[] = this.services.map((s) => ({
-      repoName: s.repoName,
-      name: s.name,
-      safeName: s.safeName,
-      command: s.command,
-      cwd: s.cwd,
-      logPath: this.paths.serviceLog(s.safeName),
-      // Manifest carries the http URL only when the probe is http. tcp
-      // probes don't have a URL; left undefined so older manifest readers
-      // still work for the http case.
-      healthUrl: s.healthProbe && 'http' in s.healthProbe ? s.healthProbe.http.url : undefined,
-      status: serviceStatus,
-      ...(s.allocatedPorts && Object.keys(s.allocatedPorts).length > 0 ? { allocatedPorts: s.allocatedPorts } : {}),
-    }))
-    const worktreeMap: Record<string, string> = {}
-    for (const handle of this.worktreeHandles) worktreeMap[handle.repoName] = handle.worktreeRoot
-    const manifest: RunManifest = {
-      runId: this.runId,
-      executionType: this.executionType,
-      feature: this.feature.name,
-      featureDir: this.feature.featureDir,
-      env: this.env,
-      startedAt: this.startedAt,
-      status: this.status,
-      healCycles: this.healCycles,
-      services,
-      // Reflect the actual paths this run occupies: worktree-isolated repos
-      // point at their worktree so a later run can take the freed source in
-      // place without a false collision.
-      repoPaths: (this.feature.repos ?? [])
-        .map((r) => this.repoPathOverrides[r.name] ?? resolvePath(r.localPath))
-        .filter((p) => {
-          try { return fs.existsSync(p) } catch { return false }
-        }),
-      ...(Object.keys(worktreeMap).length > 0 ? { worktrees: worktreeMap } : {}),
-      repoBranches: this.repoBranchSnapshots,
-      playwrightArtifacts: readPlaywrightArtifactPolicy(this.feature.featureDir),
-      signalPaths: {
-        rerun: this.paths.rerunSignal,
-        restart: this.paths.restartSignal,
-      },
-      healMode: this.externalHeal
-        ? 'external'
-        : this.autoHeal
-          ? 'auto'
-          : this.manualHeal
-            ? 'manual'
-            : undefined,
-      ...(this.autoHeal ? { healAgent: this.autoHeal.agent } : {}),
-      ...(this.externalHealSession ? { externalHealSession: this.externalHealSession } : {}),
-      lifecycle: {
-        phase: 'starting-services',
-        headline: 'Starting services',
-        detail: startingServicesDetail(services.length),
-        updatedAt: new Date().toISOString(),
-      },
-      heartbeatAt: new Date().toISOString(),
-      ...(this.verification ? { verification: this.verification } : {}),
-    }
-    this.stateSink.bootstrap(manifest)
-  }
-
-  // Per-run allocated ports exposed to the Playwright process as
-  // CANARY_PORT_<slot> so tests can resolve the dynamic target. Empty when the
-  // feature declares no port slots (remote runs keep their static envset URL).
-  private testPortEnv(): Record<string, string> {
-    const out: Record<string, string> = {}
-    if (this.portMap) {
-      for (const [slot, port] of this.portMap) out[`CANARY_PORT_${slot}`] = String(port)
-    }
-    return out
-  }
-
-  private ensureLogFile(target: string): void {
-    if (this.logFiles.has(target)) return
-    fs.mkdirSync(path.dirname(target), { recursive: true })
-    if (!fs.existsSync(target)) fs.writeFileSync(target, '')
-    this.logFiles.add(target)
-  }
-
-  private spawnService(svc: ServiceSpec): void {
-    const logPath = this.paths.serviceLog(svc.safeName)
-    this.ensureLogFile(logPath)
-    const pty = this.ptyFactory({
-      command: `LOG_MODE=plain ${svc.command}`,
-      cwd: svc.cwd,
-      env: { LOG_MODE: 'plain', ...(svc.env ?? {}) },
-    })
-    this.servicePtys.set(svc.name, pty)
-    this.emit('service-started', { service: svc, pid: pty.pid })
-
-    pty.onData((chunk) => {
-      try { fs.appendFileSync(logPath, chunk) } catch { /* ignore */ }
-      this.emit('service-output', { service: svc, chunk })
-    })
-    pty.onExit(({ exitCode, signal }) => {
-      if (this.servicePtys.get(svc.name) !== pty) return
-      this.servicePtys.delete(svc.name)
-      this.emit('service-exit', { service: svc, exitCode, signal })
-    })
-  }
-
-  // Readiness probe — block until every spawned service is ready. Each
-  // service has *one* probe with one transport (`http` or `tcp`); we
-  // dispatch by transport. Services with no probe emit a loud warning and
-  // are skipped (Playwright still races the boot, but the user knows why).
-  private async waitForHealth(): Promise<void> {
-    if (this.services.length === 0) return
-    await Promise.all(this.services.map((svc) => this.waitForServiceReady(svc)))
-  }
-
-  private async waitForServiceReady(svc: ServiceSpec): Promise<void> {
-    const probe = svc.healthProbe
-    if (!probe) {
-      const envHint = this.env ? ` for env "${this.env}"` : ''
-      const msg = `Service "${svc.name}" has no readiness probe${envHint}; Playwright may race the boot. Add healthCheck.http or healthCheck.tcp.`
-      this.runnerLog?.warn(msg)
-      this.emit('agent-output', { chunk: `\n[warning] ${msg}\n` })
-      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
-      this.emit('health-check', { service: svc, healthy: true })
-      return
-    }
-
-    if ('http' in probe) {
-      await this.pollUntilReady(svc, 'http', () => this.attemptHttp(probe.http))
-      return
-    }
-    if ('tcp' in probe) {
-      await this.pollUntilReady(svc, 'tcp', () => isTcpListening(
-        coerceTcpPort(probe.tcp.port),
-        probe.tcp.host ?? '127.0.0.1',
-        probe.tcp.timeoutMs,
-      ))
-      return
-    }
-    // Exhaustiveness: TS proves this is unreachable; the validator already
-    // rejects malformed shapes at config-load time.
-    throw new Error(`Unknown probe shape for ${svc.name}: ${JSON.stringify(probe)}`)
-  }
-
-  /** One HTTP attempt — wraps the existing `isHealthy` so tests can stub it. */
-  private async attemptHttp(p: HttpProbe): Promise<boolean> {
-    return this.healthCheck(p.url, p.timeoutMs)
-  }
-
-  /**
-   * Poll a single async attempter until it returns true, or until the
-   * probe-specific deadline elapses. The transport label is folded into
-   * every emitted event and the timeout error so logs stay specific.
-   */
-  private async pollUntilReady(
-    svc: ServiceSpec,
-    transport: 'http' | 'tcp',
-    attempt: () => Promise<boolean>,
-  ): Promise<void> {
-    const probe = svc.healthProbe!
-    const deadlineMs = (transport === 'http'
-      ? (probe as { http: HttpProbe }).http.deadlineMs
-      : (probe as { tcp: TcpProbe }).tcp.deadlineMs) ?? this.healthDeadlineMs
-    const deadline = Date.now() + deadlineMs
-
-    // `health-timeout` unless we observe the process die first (below), in
-    // which case there's no point polling a dead port until the deadline.
-    let failureReason: RunBootFailure['reason'] = 'health-timeout'
-    while (Date.now() < deadline) {
-      if (this.stopped) return
-      const ready = await attempt()
-      if (this.stopped) return
-      if (ready) {
-        this.stateSink.setServiceStatus(this.runId, svc.safeName, 'ready')
-        this.emit('health-check', { service: svc, healthy: true, transport })
-        this.recordLifecycle(this.status === 'healing' ? 'agent-healing' : 'starting-services', `Health passed: ${svc.name}`, {
-          detail: `${transport.toUpperCase()} readiness probe passed.`,
-          severity: 'success',
-        })
-        return
-      }
-      // Fast-fail: the service process exited before it became healthy (e.g. a
-      // crash or compile error). spawnService's onExit removed it from the pty
-      // map, so a missing entry means the process is gone — fail now instead of
-      // polling a dead port for the rest of the deadline.
-      if (!this.servicePtys.has(svc.name)) {
-        failureReason = 'process-exited'
-        break
-      }
-      await this.delay(this.healthPollIntervalMs)
-    }
-    this.stateSink.setServiceStatus(this.runId, svc.safeName, 'timeout')
-    this.emit('health-check', { service: svc, healthy: false, transport })
-    const probeTarget = transport === 'http'
-      ? `url=${(probe as { http: HttpProbe }).http.url}`
-      : `port=${(probe as { tcp: TcpProbe }).tcp.port}`
-    const detail = failureReason === 'process-exited'
-      ? `Service process exited before ${transport.toUpperCase()} readiness (${probeTarget}).`
-      : `Timed out waiting for ${transport.toUpperCase()} readiness (${probeTarget}).`
-    // The failure record (reason + service log path) is written for EVERY
-    // execution type — readers like the flight's boot-verify need the real
-    // cause (crashed vs never-healthy) and the log to surface, not just a
-    // `timeout` status. What differs below is only whether the run dies.
-    this.bootFailure ??= {
-      service: svc.name,
-      safeName: svc.safeName,
-      reason: failureReason,
-      detail,
-      logPath: this.paths.serviceLog(svc.safeName),
-    }
-    this.stateSink.patchManifest(this.runId, { bootFailure: this.bootFailure })
-    // Boot-only sessions hold whatever came up. A service that fails its
-    // readiness probe is marked `timeout` (red) and surfaced as a non-fatal
-    // warning, but the session is NOT aborted — the user keeps the healthy
-    // services up to exercise while they debug the failed one, and only
-    // abort_run / Stop tears the session down.
-    if (this.executionType === 'boot') {
-      this.recordLifecycle('starting-services', `Health failed: ${svc.name} — kept up`, {
-        detail: `${detail} Marked failed; boot session held — other services stay up. Stop with abort_run to tear down.`,
-        severity: 'warning',
-      })
-      return
-    }
-    // Normal run: a missing service makes the Playwright suite meaningless, but
-    // a broken service IS app code the heal agent can fix. The recorded failure
-    // (first one wins) makes runFullCycle / the heal loops declare the run
-    // `failed` and route it into heal with this service's log as context,
-    // instead of throwing and aborting with no chance to repair.
-    this.recordLifecycle('starting-services', `Service failed to start: ${svc.name}`, {
-      detail: `${detail} The run will be marked failed; the heal agent should read the service log to fix why it won't serve.`,
-      severity: 'error',
-    })
-  }
-
-  // Polls the per-run signals dir. The future server (and externally-spawned
-  // heal agents) write here; the orchestrator translates them into events the
-  // consumer can react to (re-run Playwright, restart services, etc.).
-  private startSignalWatcher(): void {
-    if (this.signalWatcher) return
-    this.signalWatcher = setInterval(() => {
-      const tries: Array<{ kind: HealSignalKind; file: string }> = [
-        { kind: 'restart', file: this.paths.restartSignal },
-        { kind: 'rerun', file: this.paths.rerunSignal },
-        { kind: 'heal', file: this.paths.healSignal },
-      ]
-      for (const t of tries) {
-        if (!fs.existsSync(t.file)) continue
-        let body: Record<string, unknown> = {}
-        try {
-          const raw = fs.readFileSync(t.file, 'utf-8').trim()
-          if (raw) body = JSON.parse(raw) as Record<string, unknown>
-        } catch {
-          // Tolerate empty/non-JSON — the signal still applies — but say so:
-          // a silent parse failure means hypothesis/fixDescription silently
-          // vanish from the audit journal.
-          this.emitAgentSystemMessage(
-            `.${t.kind} signal body was not valid JSON — hypothesis/fixDescription will be missing from the journal.`,
-          )
-        }
-        try { fs.unlinkSync(t.file) } catch { /* race with caller is fine */ }
-        const result = this.signalGate.observe(t.kind, body)
-        if (!result.accepted) {
-          this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal ignored`, {
-            detail: result.reason === 'signal-already-pending' && result.pendingKind
-              ? `A .${result.pendingKind} signal is already pending.`
-              : 'The runner was not waiting for a heal signal.',
-            severity: 'warning',
-            lastSignal: { kind: t.kind, status: 'ignored', reason: result.reason },
-          })
-          this.emit('signal-ignored', { kind: t.kind, reason: result.reason })
-          continue
-        }
-        this.recordLifecycle('applying-signal', `${signalLabel(t.kind)} signal accepted`, {
-          detail: `The runner accepted .${t.kind} and will apply it before verification.`,
-          lastSignal: { kind: t.kind, status: 'accepted' },
-        })
-        this.emit('signal-detected', result.signal)
-        this.emit('signal-accepted', result.signal)
-      }
-    }, this.healthPollIntervalMs)
+    await captureFixBaseline(this.ctx)
+    await ensureServicesRunning(this.ctx)
   }
 
   // Manually fire a restart. When `filesChanged` is supplied and non-empty,
@@ -1161,17 +179,17 @@ export class RunOrchestrator extends EventEmitter {
   // heal-agent's claim is wrong but losing warm services to that mistake is
   // costlier than the rerun seeing the same failure.
   async restart(filesChanged?: readonly string[]): Promise<{ restarted: string[]; kept: string[]; startedBecauseMissing: string[] }> {
-    const plan = planRestart(filesChanged ?? [], this.services)
+    const plan = planRestart(filesChanged ?? [], this.ctx.services)
     const startedBecauseMissing = plan.toKeep.filter((safeName) => {
-      const svc = this.services.find((candidate) => candidate.safeName === safeName)
-      return Boolean(svc && !this.servicePtys.has(svc.name))
+      const svc = this.ctx.services.find((candidate) => candidate.safeName === safeName)
+      return Boolean(svc && !this.ctx.servicePtys.has(svc.name))
     })
     this.emit('restart-planned', {
       toRestart: plan.toRestart,
       toKeep: plan.toKeep,
       noMatch: plan.noMatch,
     })
-    this.recordLifecycle('restarting-services', 'Restart plan ready', {
+    recordLifecycle(this.ctx, 'restarting-services', 'Restart plan ready', {
       detail: restartPlanDetail(plan.toRestart, plan.toKeep, startedBecauseMissing),
       restartPlan: {
         restarted: plan.toRestart,
@@ -1183,7 +201,7 @@ export class RunOrchestrator extends EventEmitter {
 
     if (plan.noMatch) {
       // Non-empty filesChanged but nothing matched: keep all services warm.
-      for (const svc of this.services) {
+      for (const svc of this.ctx.services) {
         this.emit('service-restart-skipped', { service: svc, reason: 'no-files-changed-here' })
       }
       return { restarted: [], kept: plan.toKeep, startedBecauseMissing }
@@ -1192,7 +210,7 @@ export class RunOrchestrator extends EventEmitter {
     const filesProvided = (filesChanged ?? []).length > 0
     const restartSet = new Set(plan.toRestart)
     const targets: ServiceSpec[] = []
-    for (const svc of this.services) {
+    for (const svc of this.ctx.services) {
       if (!filesProvided || restartSet.has(svc.safeName)) {
         targets.push(svc)
       } else {
@@ -1201,328 +219,30 @@ export class RunOrchestrator extends EventEmitter {
     }
 
     for (const svc of targets) {
-      const pty = this.servicePtys.get(svc.name)
+      const pty = this.ctx.servicePtys.get(svc.name)
       if (pty) {
         try { pty.kill('SIGTERM') } catch { /* already dead */ }
-        this.servicePtys.delete(svc.name)
+        this.ctx.servicePtys.delete(svc.name)
       }
-      this.logFiles.delete(this.paths.serviceLog(svc.safeName))
-      const p = this.paths.serviceLog(svc.safeName)
+      this.ctx.logFiles.delete(this.ctx.paths.serviceLog(svc.safeName))
+      const p = this.ctx.paths.serviceLog(svc.safeName)
       try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
     }
     for (const svc of targets) {
-      this.stateSink.setServiceStatus(this.runId, svc.safeName, 'starting')
-      this.spawnService(svc)
+      this.ctx.stateSink.setServiceStatus(this.ctx.runId, svc.safeName, 'starting')
+      spawnService(this.ctx, svc)
     }
-    if (targets.length > 0) await this.waitForHealth()
+    if (targets.length > 0) await waitForHealth(this.ctx)
     return { restarted: plan.toRestart, kept: plan.toKeep, startedBecauseMissing }
   }
 
   // Re-run is a no-op at the orchestrator level beyond truncating logs — the
   // consumer reruns Playwright on top.
   async rerun(): Promise<void> {
-    for (const svc of this.services) {
-      const p = this.paths.serviceLog(svc.safeName)
+    for (const svc of this.ctx.services) {
+      const p = this.ctx.paths.serviceLog(svc.safeName)
       try { fs.writeFileSync(p, '') } catch { /* may not exist yet */ }
     }
-  }
-
-  // ─── Playwright + heal loop ────────────────────────────────────────────────
-  //
-  // Spawns Playwright through the same ptyFactory used for services so tests
-  // inject a fake. Returns the exit code after the pty exits.
-  async runPlaywright(rerun?: readonly string[] | PlaywrightRerunSelection): Promise<number> {
-    const rerunSelection = normalizeRerunSelection(rerun)
-    const rerunTargets = rerunSelection?.kind === 'targets' ? rerunSelection.targets : undefined
-    const rerunGrep = rerunSelection?.kind === 'grep' ? rerunSelection.grep : undefined
-    const feature = this.featureWithLatestHealThreshold()
-    const inv = this.playwrightSpawner({
-      feature,
-      paths: this.paths,
-      rerunTargets,
-      rerunGrep,
-      rerunSelection,
-    })
-    const targetCount = rerunSelection?.selected ?? 0
-    const targetedRerun = rerunSelection
-      ? {
-          selected: rerunSelection.selected,
-          total: rerunSelection.total,
-          mode: rerunSelection.mode,
-          reason: rerunSelection.reason,
-        } satisfies RunLifecycleTargetedRerun
-      : undefined
-    this.emit('playwright-started', { command: inv.command })
-    this.recordLifecycle(targetedRerun ? 'rerunning-tests' : 'running-tests', targetedRerun ? 'Rerunning Playwright tests' : 'Running Playwright tests', {
-      detail: targetedRerun
-        ? `Running ${targetCount} selected test target${targetCount === 1 ? '' : 's'}.`
-        : 'Running the configured Playwright suite.',
-      ...(targetedRerun ? { targetedRerun } : {}),
-    })
-    const pty = this.ptyFactory({
-      command: inv.command,
-      cwd: inv.cwd,
-      env: {
-        ...this.playwrightEnv,
-        // Per-run allocated ports, so tests can target the same dynamic port
-        // the local service bound (CANARY_PORT_<slot>). Empty when no ports
-        // were allocated, preserving the static envset target for remote runs.
-        ...this.testPortEnv(),
-        CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
-        CANARY_LAB_MANIFEST_PATH: this.paths.manifestPath,
-        CANARY_LAB_SUMMARY_PATH: this.paths.summaryPath,
-        ...(rerunSelection ? { CANARY_LAB_TARGETED_RERUN: '1' } : {}),
-      },
-    })
-    this.playwrightPty = pty
-    fs.mkdirSync(path.dirname(this.paths.playwrightStdoutPath), { recursive: true })
-    fs.writeFileSync(this.paths.playwrightStdoutPath, '')
-    pty.onData((chunk) => {
-      try { fs.appendFileSync(this.paths.playwrightStdoutPath, chunk) } catch { /* ignore */ }
-      this.emit('playwright-output', { chunk })
-    })
-    return new Promise<number>((resolve) => {
-      pty.onExit(({ exitCode, signal }) => {
-        this.playwrightPty = null
-        this.persistPlaywrightArtifacts()
-        this.emit('playwright-exit', { exitCode })
-        this.recordLifecycle(exitCode === 0 ? 'completed' : 'failed', `Playwright exited with code ${exitCode}`, {
-          detail: signal ? `Process signal: ${signal}` : undefined,
-          severity: exitCode === 0 ? 'success' : 'warning',
-        })
-        const waiter = this.playwrightExitWaiter
-        this.playwrightExitWaiter = null
-        if (waiter) waiter({ exitCode, signal })
-        resolve(exitCode)
-      })
-    })
-  }
-
-  private featureWithLatestHealThreshold(): FeatureConfig {
-    const latestThreshold = readLatestHealOnFailureThreshold(this.feature)
-    return latestThreshold === this.feature.healOnFailureThreshold
-      ? this.feature
-      : { ...this.feature, healOnFailureThreshold: latestThreshold }
-  }
-
-  // Copy each per-test subdir from `playwright-artifacts/` into the keep dir
-  // so it survives the next Playwright invocation's `--output` wipe. New
-  // artifacts for the same pw-slug overwrite the previous copy — heal-cycle
-  // reruns of a single test thus replace that test's previous video/trace
-  // while leaving the other tests' artifacts intact. Best-effort: failures
-  // here are logged but do not fail the run.
-  private persistPlaywrightArtifacts(): void {
-    const src = this.paths.playwrightArtifactsDir
-    const dst = this.paths.playwrightArtifactsKeepDir
-    if (!fs.existsSync(src)) return
-    try { fs.mkdirSync(dst, { recursive: true }) } catch { return }
-    let entries: fs.Dirent[]
-    try {
-      entries = fs.readdirSync(src, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const srcPath = path.join(src, entry.name)
-      const dstPath = path.join(dst, entry.name)
-      try {
-        fs.rmSync(dstPath, { recursive: true, force: true })
-        fs.cpSync(srcPath, dstPath, { recursive: true })
-      } catch (err) {
-        this.runnerLog?.warn(`persist playwright artifact ${entry.name} failed: ${err instanceof Error ? err.message : String(err)}`)
-      }
-    }
-  }
-
-  private verificationPlanForSummary(summary: SummaryShape): VerificationPlan {
-    const plan = computeVerificationPlan(this.feature.featureDir, summary)
-    if (plan.kind === 'targeted') {
-      this.runnerLog?.info(`Targeted re-run: ${plan.failedFirst.length} failed + ${plan.skipped.length} skipped + ${plan.pending.length} pending of ${plan.total} total tests`)
-      this.recordLifecycle('rerunning-tests', 'Targeted rerun selected', {
-        detail: plan.selection.reason,
-        targetedRerun: {
-          selected: plan.selection.selected,
-          total: plan.selection.total,
-          mode: plan.selection.mode,
-          reason: plan.selection.reason,
-        },
-      })
-      return plan
-    }
-    if (plan.kind === 'full-suite') {
-      this.runnerLog?.warn(plan.reason)
-      this.recordLifecycle('rerunning-tests', 'Full rerun selected', {
-        detail: plan.reason,
-        severity: 'warning',
-        targetedRerun: {
-          selected: plan.total,
-          total: plan.total,
-          mode: 'full-suite',
-          reason: plan.reason,
-        },
-      })
-      this.emit('playwright-output', { chunk: `\n[warning] ${plan.reason}\n` })
-      return plan
-    }
-    return plan
-  }
-
-  private recordFullSuiteTerminalRestartFallback(reason: string, total: number): void {
-    this.runnerLog?.warn(reason)
-    this.recordLifecycle('rerunning-tests', 'Full restart rerun selected', {
-      detail: reason,
-      severity: 'warning',
-      targetedRerun: {
-        selected: total,
-        total,
-        mode: 'full-suite',
-        reason,
-      },
-    })
-    this.emit('playwright-output', { chunk: `\n[warning] ${reason}\n` })
-  }
-
-  // Wait for the in-flight Playwright pty to exit. Resolves immediately when
-  // there is no Playwright running. Used by pauseAndHeal() after issuing
-  // SIGTERM so we can fall back to SIGKILL on timeout.
-  private waitForPlaywrightExit(timeoutMs: number): Promise<{ exitCode: number; signal?: number } | null> {
-    if (!this.playwrightPty) return Promise.resolve(null)
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        if (this.playwrightExitWaiter) this.playwrightExitWaiter = null
-        resolve(null)
-      }, timeoutMs)
-      this.playwrightExitWaiter = (info) => {
-        clearTimeout(timer)
-        resolve(info)
-      }
-    })
-  }
-
-  // Persist a `stoppedEarly` reason on the manifest. Surfaced to the heal-index
-  // so the agent knows it's looking at a partial suite.
-  markStoppedEarly(reason: StoppedEarlyReason, failuresAtStop: number, suiteTotal: number): void {
-    this.stoppedEarlyReason = reason
-    this.stateSink.patchManifest(this.runId, {
-      stoppedEarly: { reason, failuresAtStop, suiteTotal },
-    })
-  }
-
-  // Manual interruption: check the failure summary FIRST, and only kill the
-  // in-flight Playwright pty when we're actually committing to a heal cycle.
-  // This avoids the previous footgun where pressing Pause before any test had
-  // failed would still SIGTERM Playwright, let it exit cleanly with code 0,
-  // and then `runFullCycle` would mark the whole run "passed".
-  //
-  // Returns a discriminated result the route handler maps to 202 (committed)
-  // or 409 (no-op — try again later). On success, the kill is graceful first
-  // (SIGTERM, 5 s wait) then forced (SIGKILL).
-  async pauseAndHeal(): Promise<PauseResult> {
-    if (this.status === 'healing') {
-      return { ok: false, reason: 'already-healing' }
-    }
-    if (!this.playwrightPty) {
-      return { ok: false, reason: 'no-playwright-running' }
-    }
-
-    // Check failures BEFORE killing — no failures yet → no-op, Playwright
-    // keeps running and the user can retry later when something has failed.
-    const { failed, total } = summarizeFailures(this.paths.summaryPath)
-    if (failed.length === 0) {
-      return { ok: false, reason: 'no-failures-yet' }
-    }
-
-    // Commit: stamp the reason BEFORE killing so `runFullCycle` can treat
-    // the impending Playwright exit as a heal trigger regardless of whether
-    // Playwright exits cleanly (code 0) or via signal.
-    this.markStoppedEarly('user-pause', failed.length, total)
-    this.recordLifecycle('pausing-for-heal', 'Pause accepted', {
-      detail: `Stopping Playwright after ${failed.length} failure${failed.length === 1 ? '' : 's'} so healing can start.`,
-      severity: 'warning',
-    })
-    this.emit('paused-by-user', { failureCount: failed.length })
-
-    const pty = this.playwrightPty
-    try { pty.kill('SIGTERM') } catch { /* already dead */ }
-    const exited = await this.waitForPlaywrightExit(5000)
-    if (!exited && this.playwrightPty) {
-      try { this.playwrightPty.kill('SIGKILL') } catch { /* already dead */ }
-      await this.waitForPlaywrightExit(1000)
-    }
-
-    return { ok: true, failureCount: failed.length }
-  }
-
-  /**
-   * Manually abort an in-flight heal session. Sets a cancellation flag so
-   * `runAutoHealLoop` bails out (instead of spawning another Playwright
-   * rerun or feeding another prompt to the REPL), appends a journal entry,
-   * and SIGTERMs whichever pty is currently active (heal agent OR the
-   * post-heal Playwright rerun).
-   *
-   * Accepted in two states:
-   *   - `status === 'healing'`: the heal agent is processing.
-   *   - `status === 'running' && healCycles > 0`: a post-heal Playwright
-   *     rerun is in flight between cycles. Without this branch the user's
-   *     click is silently 409'd until the cycle wraps back to 'healing'.
-   *
-   * Cancel succeeds even when no pty is attached — claude's REPL can exit
-   * on its own (user typed `/exit`, crash) and leave the orchestrator
-   * polling for a signal file that will never come. In that case the
-   * cancel flag is what unwedges the loop.
-   *
-   * Returns `409 not-healing` only when the run isn't inside the heal loop
-   * at all (initial Playwright phase, terminal status). Use Abort there.
-   */
-  async cancelHeal(): Promise<CancelHealResult> {
-    const inHealLoop = this.status === 'healing'
-      || (this.status === 'running' && this.healCycles > 0)
-    if (!inHealLoop) return { ok: false, reason: 'not-healing' }
-
-    this.healCancelled = true
-    this.markStoppedEarly('user-cancel-heal', 0, 0)
-    // Record the give-up reason at its source — every healCancelled break in
-    // the loop funnels through this one flag, so the manifest carries a typed
-    // "stopped by user" instead of a bare failed status.
-    this.recordHealEnd({
-      reason: 'cancelled',
-      cycle: this.healCycles,
-      message: 'Auto-repair was stopped by you before the suite passed.',
-      at: new Date().toISOString(),
-    })
-
-    // Best-effort journal note BEFORE we tear down the pty so the entry
-    // lands even if the user-cancel races a fast agent exit.
-    try {
-      this.appendJournalIteration({
-        // Logged as a `.rerun`-shaped entry for journal-parser compatibility,
-        // even though no rerun actually happens. Hypothesis text makes the
-        // intent explicit for downstream readers (heal-index, future agent
-        // contexts).
-        signal: '.rerun',
-        hypothesis: 'User cancelled the heal cycle mid-run. No fix applied.',
-        fixDescription: 'Cancelled by user — no changes were made.',
-        runId: this.runId,
-        manifestPath: this.paths.manifestPath,
-        summaryPath: this.paths.summaryPath,
-        journalPath: this.paths.diagnosisJournalPath,
-      })
-    } catch { /* journal append is best-effort */ }
-
-    // Kill whichever pty is currently in flight. The loop is awaiting either
-    // `waitForHealSignal` (REPL alive, healCancelled check unwedges) or
-    // `runPlaywright` (kills the pw pty so the await resolves, then the
-    // post-Playwright healCancelled check breaks the loop).
-    if (this.healAgentPty) {
-      killTree(this.healAgentPty, 'SIGTERM')
-      scheduleSigkillFallback(this.healAgentPty)
-    }
-    if (this.playwrightPty) {
-      killTree(this.playwrightPty, 'SIGTERM')
-      scheduleSigkillFallback(this.playwrightPty)
-    }
-    return { ok: true }
   }
 
   /**
@@ -1536,7 +256,7 @@ export class RunOrchestrator extends EventEmitter {
    */
   writeToHealAgent(chunk: string): void {
     if (!chunk) return
-    const pty = this.healAgentPty
+    const pty = this.ctx.healAgentPty
     if (!pty) return
     try { pty.write(chunk) } catch { /* pty closed mid-frame */ }
   }
@@ -1558,439 +278,15 @@ export class RunOrchestrator extends EventEmitter {
     // renderers can chew CPU on absurd sizes (e.g., 100k cols).
     const c = Math.min(Math.floor(cols), 1000)
     const r = Math.min(Math.floor(rows), 1000)
-    this.healAgentTerminalSize = { cols: c, rows: r }
-    const pty = this.healAgentPty
+    this.ctx.healAgentTerminalSize = { cols: c, rows: r }
+    const pty = this.ctx.healAgentPty
     if (!pty) return
     try { pty.resize(c, r) } catch { /* pty closed mid-frame */ }
-  }
-
-  /**
-   * Interrupt & Redirect — drop the user's correction into the live REPL's
-   * stdin. The agent absorbs it like any other typed message: Esc interrupts
-   * any in-flight generation, then the text is sent followed by Enter. The
-   * run stays in `healing` throughout; verification does not begin until the
-   * agent writes a `.rerun` / `.restart` / `.heal` signal.
-   *
-   * No respawn, no session-id race — the REPL is alive across cycles, and
-   * everything we'd previously rebuild from `--resume <sid>` is just the
-   * existing conversation.
-   *
-   *   - `no-agent-running`: REPL hasn't spawned (cycle 0) or has exited
-   *     (cancel, crash, manual mode).
-   */
-  async interjectHealAgent(text: string): Promise<InterjectResult> {
-    const pty = this.healAgentPty
-    if (!pty) return { ok: false, reason: 'no-agent-running' }
-
-    this.echoUserInterject(text)
-
-    // Best-effort journal note so the interject is part of run history.
-    try {
-      const truncated = text.length > 200 ? text.slice(0, 200) + '…' : text
-      this.appendJournalIteration({
-        signal: '.rerun',
-        hypothesis: `User interjected mid-heal: ${truncated}`,
-        fixDescription: `Sent text to live REPL stdin.`,
-        runId: this.runId,
-        manifestPath: this.paths.manifestPath,
-        summaryPath: this.paths.summaryPath,
-        journalPath: this.paths.diagnosisJournalPath,
-      })
-    } catch { /* journal append is best-effort */ }
-
-    // Esc first to interrupt any in-flight generation, then the text as a
-    // bracketed paste followed by Enter. Bracketed paste keeps the REPL's
-    // input editor from re-rendering the text word-by-word — same reason
-    // `runHealAgent` uses it for cycle prompts. Esc is harmless when idle;
-    // claude/codex treat it as "cancel current generation".
-    try {
-      pty.write('')
-      pty.write(BRACKETED_PASTE_BEGIN + text + BRACKETED_PASTE_END + '\r')
-    } catch {
-      return { ok: false, reason: 'no-agent-running' }
-    }
-    this.emit('agent-started', { cycle: this.healCycles, command: '<repl-redirect>', redirect: true })
-    return { ok: true }
-  }
-
-  // Forward raw REPL output (ANSI from xterm.js's perspective) into the
-  // `agent-output` event — the pane broker pushes those chunks to live
-  // xterm subscribers. Historical replay no longer reads from a raw
-  // transcript file; the structured-view route reads the agent CLI's own
-  // JSONL session log instead.
-  //
-  // Each chunk bumps `lastAgentDataAt` so `waitForHealSignal` can detect
-  // an idle REPL (no output for `healAgentIdleTimeoutMs`) while not
-  // killing an actively-thinking one.
-  private attachAgentDataHandlers(pty: PtyHandle): void {
-    pty.onData((chunk) => {
-      this.lastAgentDataAt = Date.now()
-      this.appendAgentOutputTail(chunk)
-      this.emit('agent-output', { chunk })
-    })
-  }
-
-  // Keep only the last HEAL_AGENT_TAIL_BYTES of agent output. A usage-limit /
-  // auth banner is always near the end (the agent prints it and stops), so the
-  // tail is where the classifier finds its evidence.
-  private appendAgentOutputTail(chunk: string): void {
-    const combined = this.healAgentOutputTail + chunk
-    this.healAgentOutputTail =
-      combined.length > HEAL_AGENT_TAIL_BYTES
-        ? combined.slice(combined.length - HEAL_AGENT_TAIL_BYTES)
-        : combined
-  }
-
-  // Persist the captured tail and classify why the agent went quiet. Called
-  // only from the no-signal give-up path. Best-effort: a failed write still
-  // lets the loop end cleanly, it just leaves `agentCause` unclassified.
-  private captureHealAgentCause(): HealEnd['agentCause'] {
-    const tail = this.healAgentOutputTail
-    if (tail.trim() !== '') {
-      try {
-        fs.writeFileSync(this.paths.healAgentTailPath, tail)
-      } catch { /* tail persistence is best-effort */ }
-    }
-    return classifyHealFailure(tail, this.autoHeal?.agent)
-  }
-
-  // Write the typed give-up reason to the manifest so the Test Run surface can
-  // state it plainly. One writer, called at each give-up site in the loop.
-  private recordHealEnd(healEnd: HealEnd): void {
-    this.stateSink.patchManifest(this.runId, { healEnd })
-  }
-
-  private echoUserInterject(text: string): void {
-    const block = formatUserInterjectBlock(text, this.startedAt)
-    this.emit('agent-output', { chunk: block })
-  }
-
-  private emitAgentSystemMessage(message: string): void {
-    this.emit('agent-output', { chunk: `\n[orchestrator] ${message}\n` })
-  }
-
-  private agentPtyEnv(): Record<string, string> {
-    return {
-      CANARY_LAB_PROJECT_ROOT: this.feature.featureDir,
-      // Kept as a hint for tools or shell rc files that want to surface the
-      // session id — the orchestrator writes the UUID to this path itself
-      // (no formatter sidecar in REPL mode).
-      CANARY_LAB_AGENT_SESSION_ID_FILE: this.paths.agentSessionIdPath,
-    }
-  }
-
-  // Block until a signal lands or we give up. Returns a tagged result so the
-  // caller can react to *why* the wait ended:
-  //   - signal:       agent wrote `.restart` / `.rerun` / `.heal`
-  //   - pty-died:     REPL exited (clean /exit, crash, or external kill),
-  //                   plus a short grace window so a write-then-exit signal
-  //                   isn't lost to the watcher race
-  //   - idle-timeout: REPL is alive but hasn't emitted any output for
-  //                   `healAgentIdleTimeoutMs` — usually a wedged REPL
-  //   - hard-timeout: REPL is alive and producing output but has been
-  //                   running for `healAgentTimeoutMs` (the absolute upper
-  //                   bound on a single cycle)
-  //   - stopped:      orchestrator aborted (full stop)
-  //   - cancelled:    user clicked Stop Heal mid-cycle
-  // The signal watcher feeds `signalGate`; this wait consumes one accepted
-  // signal and lets the gate audit duplicates or late files.
-  async waitForHealSignal(
-    hardTimeoutMs: number = this.healAgentTimeoutMs,
-    idleTimeoutMs: number = this.healAgentIdleTimeoutMs,
-    requiresAgent: boolean = true,
-  ): Promise<{
-    signal: HealSignal | null
-    reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
-  }> {
-    const startedAt = Date.now()
-    // Seed the idle clock at the start of the wait so the first chunk-less
-    // poll doesn't insta-trip the idle timeout.
-    this.lastAgentDataAt = startedAt
-    this.signalGate.beginWaiting()
-    this.recordLifecycle('waiting-for-signal', 'Waiting for heal signal', {
-      detail: 'The runner is waiting for .restart, .rerun, or .heal.',
-      activeCycle: this.healCycles,
-    })
-    const hardDeadline = startedAt + hardTimeoutMs
-    // Always yield to the macrotask queue here — this loop runs concurrently
-    // with the signal-watcher setInterval, and a microtask-only delay would
-    // starve the timer queue.
-    const yieldOnce = (ms: number) =>
-      new Promise<void>((resolve) => setTimeout(resolve, ms))
-    // When the pty dies before we've seen a signal, give the signal-watcher
-    // a short grace window to surface any `.heal`/`.rerun`/`.restart` file
-    // the agent wrote just before exiting. Without this, the wait races the
-    // watcher's polling and bails immediately, losing signals from agents
-    // that write-then-exit. 1s is plenty — the watcher polls at
-    // `healSignalPollMs` (≤1s in production).
-    let postExitDeadline: number | null = null
-    try {
-      while (true) {
-        if (this.stopped) return { signal: null, reason: 'stopped' }
-        if (this.healCancelled) return { signal: null, reason: 'cancelled' }
-        const sig = this.signalGate.consume()
-        if (sig) {
-          return { signal: sig, reason: 'signal' }
-        }
-        if (requiresAgent && !this.healAgentPty) {
-          // Pty is dead: the `pty-died` grace owns the exit. Don't let the
-          // hard/idle timeouts steal it — they describe a still-alive REPL,
-          // which we no longer have.
-          if (postExitDeadline === null) {
-            postExitDeadline = Date.now() + 1000
-          } else if (Date.now() >= postExitDeadline) {
-            return { signal: null, reason: 'pty-died' }
-          }
-          await yieldOnce(Math.max(1, this.healSignalPollMs))
-          continue
-        }
-        const now = Date.now()
-        if (now >= hardDeadline) return { signal: null, reason: 'hard-timeout' }
-        if (now - this.lastAgentDataAt >= idleTimeoutMs) {
-          return { signal: null, reason: 'idle-timeout' }
-        }
-        await yieldOnce(Math.max(1, this.healSignalPollMs))
-      }
-    } finally {
-      this.signalGate.endWaiting()
-    }
-  }
-
-  /**
-   * Run one heal cycle inside the persistent REPL.
-   *
-   * - On the first call (or after a cancel/crash), spawns the long-lived
-   *   `claude` / `codex` REPL with `--session-id <uuid>` (claude) and the
-   *   playwright MCP wired up.
-   * - Renders the cycle prompt and writes it to the REPL's stdin —
-   *   subsequent cycles all flow through the same conversation, so the
-   *   agent retains context from prior cycles.
-   * - Awaits a `.heal` / `.rerun` / `.restart` signal file (or cancel /
-   *   timeout / full abort). Returns the signal the caller will interpret.
-   *
-   * `exitCode` in the return is 0 when the REPL is still alive when we
-   * resolve, 1 when it died during the cycle (crash or kill). The auto-heal
-   * loop uses it only to surface unexpected exits in the transcript.
-   */
-  async runHealAgent(args: {
-    cycle: number
-    failedSlugs: readonly string[]
-    userGuidance?: string
-    /**
-     * Streak counter from `HealCycleState.snapshot().consecutiveSameFailures`,
-     * captured by the caller right after `observeFailures`. Threaded through
-     * to the cycle prompt builder so the stuck-cycle escalation block can
-     * fire when the agent has had two failed attempts on the same set.
-     */
-    consecutiveSameFailures?: number
-    /** Flake-tolerant stuck set from `HealCycleState.stuckSlugs(ESCALATION_THRESHOLD)`. */
-    stuckSlugs?: string[]
-    /** Longest per-test failure streak, from `HealCycleState.snapshot().maxSlugStreak`. */
-    maxSlugStreak?: number
-  }): Promise<{
-    exitCode: number
-    signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
-    reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled' | 'spawn-failed'
-  }> {
-    const cfg = this.autoHeal
-    if (!cfg) throw new Error('autoHeal not configured')
-
-    // Write the cycle prompt to `<runDir>/heal-prompt.md` BEFORE we spawn
-    // (or before we ask the live REPL to re-read). The wired
-    // `buildOrchestratorHealPrompt` writes the file as a side effect and
-    // returns the rendered text; we keep the text only for transcript
-    // echo bookkeeping — claude reads the file directly via `@<path>`.
-    void (cfg.buildCyclePrompt ?? defaultHealPrompt)({
-      cycle: args.cycle,
-      outputDir: this.healAgentMcpOutputDir ?? this.runDir,
-      userGuidance: args.userGuidance,
-      consecutiveSameFailures: args.consecutiveSameFailures,
-      stuckSlugs: args.stuckSlugs,
-      maxSlugStreak: args.maxSlugStreak,
-      priorAgentSessionContext: !this.healAgentPty
-        ? this.agentSessionRefs.crossAgentContext(cfg.agent)
-        : undefined,
-    })
-
-    const isFirstSpawn = !this.healAgentPty
-    if (isFirstSpawn) {
-      this.spawnHealAgentRepl()
-    }
-    const pty = this.healAgentPty
-    if (!pty) {
-      // spawn failed; spawnHealAgentRepl already surfaced the error.
-      return { exitCode: 1, signal: null, reason: 'spawn-failed' }
-    }
-
-    if (args.userGuidance) this.echoUserInterject(args.userGuidance)
-
-    // `redirect: true` tells the server-side broker not to reset the pane.
-    // Cycle 2+ continues in the *same* long-lived REPL, so wiping the
-    // transcript at the cycle boundary would clear the running conversation
-    // (visible as a blink). Only the first spawn is a fresh REPL that
-    // warrants a clean canvas.
-    this.emit('agent-started', {
-      cycle: args.cycle,
-      command: `<repl ${cfg.agent} cycle=${args.cycle}>`,
-      redirect: !isFirstSpawn,
-    })
-
-    // Cycle 1 has the prompt already wired into the spawn command's argv
-    // (`claude … "@<promptFile>"`), so the agent reads it at startup with no
-    // stdin write. Cycle 2+ needs to re-prompt the alive REPL. Avoid `@<path>`
-    // here: in Claude's input editor it can attach/read the file without
-    // submitting the composer, leaving the run stuck until a human presses
-    // Enter. Send a plain instruction with the prompt path instead.
-    if (!isFirstSpawn) {
-      try {
-        const promptMessage = `Read ${this.healPromptFile} and continue the auto-heal cycle now.`
-        pty.write(BRACKETED_PASTE_BEGIN + promptMessage + BRACKETED_PASTE_END + '\r')
-      } catch {
-        return { exitCode: 1, signal: null, reason: 'pty-died' }
-      }
-    }
-
-    const { signal, reason } = await this.waitForHealSignal(
-      this.healAgentTimeoutMs,
-      this.healAgentIdleTimeoutMs,
-    )
-    const exitCode = this.healAgentPty ? 0 : 1
-    return { exitCode, signal, reason }
   }
 
   /** Absolute path to the heal-prompt file written by `buildCyclePrompt`.
    *  Stable across cycles — each cycle overwrites it with that cycle's
    *  prompt body, then references it via claude's `@<path>` syntax. */
-  private get healPromptFile(): string {
-    return path.join(this.runDir, 'heal-prompt.md')
-  }
-
-  /**
-   * Spawn the long-lived heal-agent REPL. Idempotent-ish — if a pty is
-   * already attached, no-ops. The MCP output dir is the run-level
-   * `<runDir>/playwright-mcp` — claude reads `--mcp-config` once at boot and
-   * the failing set changes across cycles, so a per-failure dir would
-   * misattribute cycle 2+ captures.
-   */
-  private spawnHealAgentRepl(): void {
-    if (this.healAgentPty) return
-    const cfg = this.autoHeal
-    if (!cfg) throw new Error('autoHeal not configured')
-
-    const target = resolveMcpOutputDir({ runDir: this.runDir })
-    ensureMcpOutputDir(target.dir)
-    this.healAgentMcpOutputDir = target.dir
-
-    // claude can pin via `--session-id <uuid>` on first launch. codex has no
-    // equivalent on first launch. For both agents, older/interrupted runs can
-    // lack Canary's sidecar files; in that case we recover the latest native
-    // CLI session log for this run directory and resume it.
-    //
-    // On Restart Heal the run dir already has a session id from the previous
-    // (failed) heal session — reuse it so the agent continues the prior
-    // conversation with full history. Without this, every restart would
-    // orphan the previous turns and start the agent's investigation from
-    // scratch.
-    let sessionId: string | undefined = this.agentSessionRefs.priorSessionId(cfg.agent) ?? undefined
-    let resume = sessionId !== undefined
-    if (!sessionId && cfg.agent === 'claude') sessionId = randomUUID()
-    this.healAgentSessionId = sessionId ?? null
-    try {
-      fs.mkdirSync(path.dirname(this.paths.agentSessionIdPath), { recursive: true })
-      if (sessionId) fs.writeFileSync(this.paths.agentSessionIdPath, sessionId)
-      else fs.rmSync(this.paths.agentSessionIdPath, { force: true })
-    } catch { /* sidecar write is informational */ }
-
-    let command: string
-    try {
-      command = (cfg.buildSpawnCommand ?? defaultSpawnCommand)({
-        sessionId,
-        resume,
-        mcpOutputDir: target.dir,
-        // The cycle-1 prompt was already written to this file by the
-        // caller (`runHealAgent`); the wired spawn-command builder
-        // appends `"@<promptFile>"` so claude reads it on startup.
-        promptFile: this.healPromptFile,
-      })
-    } catch (err) {
-      this.emitAgentSystemMessage(`Failed to build heal-agent spawn command: ${(err as Error).message}`)
-      throw err
-    }
-
-    let pty: PtyHandle
-    try {
-      pty = this.ptyFactory({
-        command,
-        cwd: this.runDir,
-        env: this.agentPtyEnv(),
-        cols: this.healAgentTerminalSize?.cols,
-        rows: this.healAgentTerminalSize?.rows,
-      })
-    } catch (err) {
-      this.emitAgentSystemMessage(`Failed to spawn heal agent: ${(err as Error).message}`)
-      throw err
-    }
-    this.healAgentPty = pty
-    this.healAgentStartedAt = new Date().toISOString()
-    this.attachAgentDataHandlers(pty)
-
-    // When the REPL exits — either intentionally (cleanup writes /exit then
-    // SIGTERM) or unexpectedly (crash) — drop the pty handle so the next
-    // cycle's runHealAgent sees no PTY and can decide to bail. Skip if
-    // cleanupHealAgentPty already cleared the field — it'll emit agent-exit
-    // itself in that path.
-    pty.onExit(({ exitCode }) => {
-      if (this.healAgentPty !== pty) return
-      this.healAgentPty = null
-      this.persistAgentSessionRef()
-      this.emit('agent-exit', { exitCode })
-    })
-
-    // Note: `agent-started` is emitted by runHealAgent per-cycle (with the
-    // cycle number). The spawn itself is recorded via the manifest +
-    // transcript; we don't fire a second agent-started here so consumers see
-    // one event per cycle, matching the headless flow.
-    void command
-  }
-
-  /**
-   * Tear down the persistent REPL. Sends Esc + `/exit\r` first to give the
-   * agent a chance to flush, then SIGTERMs the pty (with SIGKILL fallback).
-   * Idempotent — no-op when no pty is attached.
-   */
-  private cleanupHealAgentPty(): void {
-    const pty = this.healAgentPty
-    // Persist the agent's CLI-native session-log pointer before clearing
-    // bookkeeping. This runs once per heal session (the auto-heal loop's
-    // finally), so the JSON reflects the final session, not per-cycle.
-    this.persistAgentSessionRef()
-    if (!pty) return
-    // Clear the field first so the onExit handler in spawnHealAgentRepl
-    // sees `this.healAgentPty !== pty` and skips re-emitting agent-exit.
-    this.healAgentPty = null
-    try {
-      pty.write('')
-      pty.write('/exit\r')
-    } catch { /* already gone */ }
-    killTree(pty, 'SIGTERM')
-    scheduleSigkillFallback(pty)
-    this.emit('agent-exit', { exitCode: 0 })
-    if (this.healAgentMcpOutputDir) {
-      try { capArtifacts(this.healAgentMcpOutputDir) } catch { /* best-effort */ }
-    }
-    this.healAgentMcpOutputDir = undefined
-    this.healAgentSessionId = null
-    this.healAgentStartedAt = null
-  }
-
-  private persistAgentSessionRef(): void {
-    if (!this.autoHeal) return
-    this.agentSessionRefs.persistActive({
-      agent: this.autoHeal.agent,
-      ...(this.healAgentSessionId ? { sessionId: this.healAgentSessionId } : {}),
-      ...(this.healAgentStartedAt ? { startedAt: this.healAgentStartedAt } : {}),
-    })
-  }
 
   // Top-level "do the whole thing" entry. Boots services, runs Playwright,
   // and—if autoHeal is enabled—loops through heal cycles until one of:
@@ -1998,18 +294,18 @@ export class RunOrchestrator extends EventEmitter {
   // failure set stops changing. Updates manifest status throughout.
   async runFullCycle(): Promise<RunManifest['status']> {
     await this.start()
-    if (this.stopped) return this.status
+    if (this.ctx.stopped) return this.ctx.status
     // A service never came up — the Playwright suite would be meaningless.
     // Declare the run failed and route it into heal (the agent fixes the
     // service) instead of running tests against a dead service.
-    if (this.bootFailure) return await this.failRunForBootFailure()
-    let exitCode = await this.runPlaywright()
+    if (this.ctx.bootFailure) return await this.failRunForBootFailure()
+    let exitCode = await runPlaywright(this.ctx)
     // If the user clicked Abort while Playwright was running, bail out
     // immediately — don't compute a finalStatus from the killed pty's
     // exit code, and don't fall through into the heal loop where a fresh
     // heal agent would otherwise be spawned. `stop()` has already written
     // 'aborted' to the manifest; honor it.
-    if (this.stopped) return this.status
+    if (this.ctx.stopped) return this.ctx.status
     // Status comes from decideRunStatus, not Playwright's exit byte alone.
     // The summary file is the authoritative record: PASSED requires every
     // AST-visible test to be in `passedNames`, so failed/skipped/pending all
@@ -2021,33 +317,20 @@ export class RunOrchestrator extends EventEmitter {
     //   - Targeted re-runs that complete cleanly while earlier failures or
     //     pending tests are still recorded in the summary.
     let finalStatus: RunManifest['status'] = decideRunStatus(
-      this.feature.featureDir,
-      this.paths.summaryPath,
+      this.ctx.feature.featureDir,
+      this.ctx.paths.summaryPath,
       exitCode,
     )
     // If the user clicked Pause & Heal, Playwright was killed on purpose —
     // even a clean summary mustn't mark the run "passed". The
     // `markStoppedEarly('user-pause')` call inside `pauseAndHeal` is what
     // we key off here. Override so the heal-loop entry condition below fires.
-    if (this.stoppedEarlyReason === 'user-pause') {
+    if (this.ctx.stoppedEarlyReason === 'user-pause') {
       finalStatus = 'failed'
     }
-    this.setStatus(finalStatus)
+    setStatus(this.ctx, finalStatus)
 
-    return await this.continueAfterTestRun(finalStatus)
-  }
-
-  async runVerification(): Promise<RunManifest['status']> {
-    this.prepareRun('stopped')
-    if (this.stopped) return this.status
-    this.recordLifecycle('running-tests', 'Running verification tests', {
-      detail: 'Verify is observational only: Canary Lab will not start services or heal code.',
-    })
-    const exitCode = await this.runPlaywright()
-    if (this.stopped) return this.status
-    const finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
-    this.setStatus(finalStatus)
-    return finalStatus
+    return await continueAfterTestRun(this.ctx, this, finalStatus)
   }
 
   // Boot-only entry. The envset was applied before construction (by the server's
@@ -2059,11 +342,11 @@ export class RunOrchestrator extends EventEmitter {
   // Unlike `runFullCycle`, the caller must NOT chain `.then(stop)` on this
   // promise: resolving here means "services are up and held", not "run done".
   // A health-check timeout still `throw`s out of `start()` so the caller's
-  // `.catch` can stop()+revert; an abort mid-boot sets `this.stopped`.
+  // `.catch` can stop()+revert; an abort mid-boot sets `this.ctx.stopped`.
   async bootOnly(): Promise<void> {
     await this.start()
-    if (this.stopped) return
-    this.recordLifecycle('services-ready', 'Services ready — boot-only session (tests skipped)', {
+    if (this.ctx.stopped) return
+    recordLifecycle(this.ctx, 'services-ready', 'Services ready — boot-only session (tests skipped)', {
       detail: 'Services are up and held. Stop the run to tear them down and revert the envset.',
       severity: 'success',
     })
@@ -2071,31 +354,31 @@ export class RunOrchestrator extends EventEmitter {
 
   async restartTerminalRun(userGuidance?: string): Promise<RunManifest['status']> {
     await this.start()
-    if (this.stopped) return this.status
-    if (this.bootFailure) return await this.failRunForBootFailure()
+    if (this.ctx.stopped) return this.ctx.status
+    if (this.ctx.bootFailure) return await this.failRunForBootFailure()
     if (userGuidance) {
-      this.runnerLog?.info(`Terminal run restart guidance: ${userGuidance}`)
+      this.ctx.runnerLog?.info(`Terminal run restart guidance: ${userGuidance}`)
     }
-    const summary = readSummary(this.paths.summaryPath)
-    const verificationPlan = this.verificationPlanForSummary(summary)
+    const summary = readSummary(this.ctx.paths.summaryPath)
+    const verificationPlan = verificationPlanForSummary(this.ctx, summary)
     let selection = selectionForPlan(verificationPlan)
     if (verificationPlan.kind === 'all-passed') {
       if (summaryHasPassingEvidence(summary)) {
-        this.setStatus('passed')
+        setStatus(this.ctx, 'passed')
         return 'passed'
       }
-      this.recordFullSuiteTerminalRestartFallback(
+      recordFullSuiteTerminalRestartFallback(this.ctx, 
         'Terminal restart could not find prior passing evidence or a safe remaining-test selector; running the full Playwright suite.',
         verificationPlan.total,
       )
       selection = undefined
     }
-    this.setStatus('running')
-    const exitCode = await this.runPlaywright(selection)
-    if (this.stopped) return this.status
-    const finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
-    this.setStatus(finalStatus)
-    return await this.continueAfterTestRun(finalStatus)
+    setStatus(this.ctx, 'running')
+    const exitCode = await runPlaywright(this.ctx, selection)
+    if (this.ctx.stopped) return this.ctx.status
+    const finalStatus = decideRunStatus(this.ctx.feature.featureDir, this.ctx.paths.summaryPath, exitCode)
+    setStatus(this.ctx, finalStatus)
+    return await continueAfterTestRun(this.ctx, this, finalStatus)
   }
 
   // A service failed to come up, so the suite can't run. Declare the run
@@ -2105,545 +388,59 @@ export class RunOrchestrator extends EventEmitter {
   // ends terminal 'failed' — not 'aborted', because the app is broken, the user
   // didn't stop it.
   private async failRunForBootFailure(): Promise<RunManifest['status']> {
-    this.setStatus('failed')
-    return await this.continueAfterTestRun('failed')
+    setStatus(this.ctx, 'failed')
+    return await continueAfterTestRun(this.ctx, this, 'failed')
   }
 
   // A heal rerun restarted the services but one still failed to come up.
   // Running Playwright against a dead service would only reproduce the same
   // failure, so the heal loops skip the rerun and re-wait for the next fix —
   // this records why, pointing the agent back at the service log.
-  private recordBootFailureHealWait(): void {
-    const bf = this.bootFailure
+  /** Part of the RunLoopHost contract the heal loop is handed. */
+  recordBootFailureHealWait(): void {
+    const bf = this.ctx.bootFailure
     if (!bf) return
-    this.recordLifecycle('agent-healing', `Service still down: ${bf.service}`, {
+    recordLifecycle(this.ctx, 'agent-healing', `Service still down: ${bf.service}`, {
       detail: `${bf.detail} Skipped the test run — fix the service (log: ${bf.logPath}) and signal again.`,
       severity: 'error',
-      activeCycle: this.healCycles,
+      activeCycle: this.ctx.healCycles,
     })
-  }
-
-  private async continueAfterTestRun(finalStatus: RunManifest['status']): Promise<RunManifest['status']> {
-    if (finalStatus === 'passed') return finalStatus
-
-    // Manual / external heal mode: no agent CLI configured but the user
-    // explicitly asked for hand- or external-driven mode. Transition to
-    // 'healing' and wait for either the user (manual) or the external client
-    // (external, via POST /api/runs/:runId/signal) to write the signal file.
-    // Loops until tests pass, the user cancels, or the signal-poll timeout
-    // (24h) is hit. Signal watcher (already running) feeds `signalGate` for
-    // `waitForHealSignal` to consume.
-    if (!this.autoHeal && (this.manualHeal || this.externalHeal)) {
-      return await this.runManualExternalHealLoop(finalStatus)
-    }
-
-    if (!this.autoHeal) return finalStatus
-
-    // Same abort guard as above: if the user aborted between Playwright
-    // exiting and the heal-loop entry, never spawn a heal agent. Without
-    // this, auto-heal would race past stop() and start a fresh heal pty
-    // the user has no way to interrupt (the row is already 'aborted').
-    if (this.stopped) return this.status
-
-    return await this.runAutoHealLoop()
-  }
-
-  private async runManualExternalHealLoop(initialStatus: RunManifest['status']): Promise<RunManifest['status']> {
-    const MANUAL_TIMEOUT_MS = 24 * 60 * 60 * 1000
-    const modeLabel = this.externalHeal ? 'External' : 'Manual'
-    const modeCommand = this.externalHeal ? '<external>' : '<manual>'
-    const modeDetail = this.externalHeal
-      ? 'Waiting for an external AI client (Claude/Codex via MCP) to write a per-run signal file.'
-      : 'Waiting for a manual agent or user to write a per-run signal file.'
-    let finalStatus = initialStatus
-    while (true) {
-      this.setStatus('healing')
-      this.noteHealCycle()
-      this.emit('agent-started', { cycle: this.healCycles, command: modeCommand })
-      this.recordLifecycle('agent-healing', `${modeLabel} heal cycle ${this.healCycles} started`, {
-        detail: modeDetail,
-        activeCycle: this.healCycles,
-      })
-      // Same snapshot/diff pattern as auto-heal: capture working-tree state
-      // before the user starts editing, then diff after the signal arrives
-      // so the journal records only what the user changed during this turn.
-      const snapshots = await snapshotFeatureRepos(this.feature)
-      // Manual heal: no live REPL emits output, so the idle timeout would
-      // otherwise fire after 3 min. Set the idle window equal to the hard
-      // ceiling so it can't dominate the manual flow.
-      const { signal } = await this.waitForHealSignal(MANUAL_TIMEOUT_MS, MANUAL_TIMEOUT_MS, false)
-      this.emit('agent-exit', { exitCode: 0 })
-      if (this.healCancelled || this.stopped) {
-        finalStatus = 'failed'
-        this.setStatus(finalStatus)
-        break
-      }
-      if (!signal) {
-        finalStatus = 'failed'
-        this.setStatus(finalStatus)
-        break
-      }
-      const filesChanged = await diffFeatureRepos(snapshots)
-      const diffContent = await diffContentForFeatureRepos(snapshots)
-      try {
-        if (signal.kind === 'restart' || signal.kind === 'rerun') {
-          this.appendJournalIteration({
-            signal: signal.kind === 'restart' ? '.restart' : '.rerun',
-            hypothesis: typeof signal.body.hypothesis === 'string' ? signal.body.hypothesis : undefined,
-            filesChanged,
-            fixDescription: typeof signal.body.fixDescription === 'string' ? signal.body.fixDescription : undefined,
-            diffContent,
-            runId: this.runId,
-            manifestPath: this.paths.manifestPath,
-            summaryPath: this.paths.summaryPath,
-            journalPath: this.paths.diagnosisJournalPath,
-          })
-        }
-      } catch { /* journal is best-effort */ }
-      const verificationPlan = this.verificationPlanForSummary(readSummary(this.paths.summaryPath))
-      this.setStatus('running')
-      if (signal.kind === 'restart') {
-        await this.restart(filesChanged)
-      } else {
-        await this.rerun()
-      }
-      if (this.stopped) return this.status
-      const startedBecauseMissing = await this.ensureServicesRunning()
-      if (startedBecauseMissing.length > 0) {
-        this.recordLifecycle('restarting-services', 'Started missing services', {
-          detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
-          restartPlan: { restarted: [], kept: [], startedBecauseMissing },
-        })
-      }
-      if (this.bootFailure) {
-        this.recordBootFailureHealWait()
-        continue
-      }
-      const exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
-      // Manual-heal mirror of the auto-heal abort guard: the top of the
-      // loop already checks `stopped`, but the killed Playwright pty's
-      // exit code arrives after the abort flips the flag — don't
-      // compute a finalStatus from it.
-      if (this.stopped) return this.status
-      finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
-      this.setStatus(finalStatus)
-      if (finalStatus === 'passed') break
-    }
-    return finalStatus
-  }
-
-  async restartHealFromFailure(userGuidance: string): Promise<RunManifest['status']> {
-    if (!this.autoHeal) return 'failed'
-    this.prepareRun('stopped')
-    if (this.stopped) return this.status
-    // The pane broker's in-memory ring buffer is cleared separately (see
-    // `restartHeal` in server.ts) so reconnecting subscribers don't see the
-    // previous session's bytes. There's no on-disk transcript to truncate.
-    return await this.runAutoHealLoop(userGuidance)
-  }
-
-  private async runAutoHealLoop(initialUserGuidance?: string): Promise<RunManifest['status']> {
-    if (!this.autoHeal) return 'failed'
-    // Clear any give-up reason from a prior heal session — a restart-heal
-    // re-enters this loop and may now pass, so a stale `healEnd` must not
-    // linger on the manifest.
-    this.stateSink.patchManifest(this.runId, { healEnd: undefined })
-    let finalStatus: RunManifest['status'] = 'failed'
-    const heal = new HealCycleState({
-      maxCycles: this.autoHeal.maxCycles ?? AUTO_HEAL_MAX_CYCLES,
-    })
-
-    const threshold = this.feature.healOnFailureThreshold
-    if (typeof threshold === 'number' && threshold > 0 && !this.stoppedEarlyReason) {
-      const { failed: failed0, total: total0 } = summarizeFailures(this.paths.summaryPath)
-      if (failed0.length >= threshold) {
-        this.markStoppedEarly('max-failures', failed0.length, total0)
-      }
-    }
-
-    let userGuidance = initialUserGuidance
-    try {
-      while (true) {
-        if (this.stopped) return this.status
-        // Cancel observed at the loop top means the user clicked Stop Heal
-        // between cycles (or just before the next cycle starts). Bail out
-        // before incrementing the cycle counter.
-        if (this.healCancelled) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-        const summary = readSummary(this.paths.summaryPath)
-        const failedSlugs = extractFailedSlugs(summary)
-        if (failedSlugs.length === 0) {
-          const pendingPlan = this.verificationPlanForSummary(summary)
-          if (pendingPlan.kind === 'all-passed') {
-            if (summaryHasPassingEvidence(summary)) {
-              finalStatus = 'passed'
-              this.setStatus(finalStatus)
-            }
-            break
-          }
-          // This rerun spawns NO heal agent — it just re-executes the
-          // not-yet-passed tests. That can only make progress on genuinely
-          // not-run (pending) tests; a deterministically skipped test
-          // (`test.skip(cond)`) re-runs to the same skipped result every time.
-          // Capture the not-passed set before the rerun so a no-progress cycle
-          // terminates the run instead of re-running the identical summary
-          // forever (the skipped-test infinite-rerun bug).
-          const beforeSignature = nonPassedSignatureFromPlan(pendingPlan)
-          this.setStatus('running')
-          const exitCode = await this.runPlaywright(selectionForPlan(pendingPlan))
-          if (this.stopped) return this.status
-          if (this.healCancelled) {
-            finalStatus = 'failed'
-            this.setStatus(finalStatus)
-            break
-          }
-          finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
-          this.setStatus(finalStatus)
-          if (finalStatus === 'passed') break
-          const afterSummary = readSummary(this.paths.summaryPath)
-          if (
-            extractFailedSlugs(afterSummary).length === 0 &&
-            nonPassedSignatureFromPlan(computeVerificationPlan(this.feature.featureDir, afterSummary)) === beforeSignature
-          ) {
-            const skippedCount = pendingPlan.kind === 'targeted' ? pendingPlan.skipped.length : 0
-            this.recordLifecycle('rerunning-tests', 'Stopped: not-yet-passed tests stayed unchanged after rerun', {
-              detail: skippedCount > 0
-                ? `${skippedCount} test${skippedCount === 1 ? '' : 's'} remained skipped; a rerun without a code fix cannot turn skipped tests green. Stopping instead of re-running indefinitely.`
-                : 'A rerun made no progress on the not-yet-passed tests; stopping instead of re-running indefinitely.',
-              severity: 'warning',
-            })
-            this.recordHealEnd({
-              reason: 'no-progress',
-              cycle: heal.snapshot().cycle,
-              message:
-                skippedCount > 0
-                  ? `Auto-repair stopped: ${skippedCount} test${skippedCount === 1 ? '' : 's'} stayed skipped and a rerun without a code fix can't turn them green.`
-                  : 'Auto-repair stopped: a rerun made no progress on the not-yet-passed tests.',
-              at: new Date().toISOString(),
-            })
-            break
-          }
-          continue
-        }
-        const signature = failedSlugs.slice().sort().join('|')
-        // `observeFailures` now takes the raw slug array so it can remember it
-        // on `snapshot().lastFailingSlugs` — that's what the heal-index uses
-        // to compute the "delta vs previous cycle" section. The signature
-        // string stays as the human-readable lifecycle-event detail.
-        const decision = heal.observeFailures(failedSlugs)
-        if (!decision.shouldHeal) {
-          // `decision.reason` is always defined here (failedSlugs is non-empty,
-          // so the empty-signature `shouldHeal:false` branch can't fire). Record
-          // WHY the loop stops so the Test Run surface can state it plainly.
-          const reason = decision.reason ?? 'no-progress'
-          const cyclesDone = heal.snapshot().cycle
-          this.recordHealEnd({
-            reason,
-            cycle: cyclesDone,
-            message:
-              reason === 'max-cycles'
-                ? `Auto-repair stopped after the ${cyclesDone}-cycle limit without turning the suite green.`
-                : `Auto-repair stopped: the same tests kept failing across ${cyclesDone} cycles with no progress.`,
-            at: new Date().toISOString(),
-          })
-          break
-        }
-
-        // Capture the failure streaks AFTER `observeFailures` has updated
-        // them for this cycle. The escalation block in the cycle prompt keys
-        // off the flake-tolerant per-test streaks (`stuckSlugs`) — a test that
-        // failed ESCALATION_THRESHOLD observations in a row is stuck even when
-        // a flaky sibling churned the exact-set signature.
-        const healSnapshot = heal.snapshot()
-        const consecutiveSameFailures = healSnapshot.consecutiveSameFailures
-        const maxSlugStreak = healSnapshot.maxSlugStreak
-        const stuckSlugs = heal.stuckSlugs(ESCALATION_THRESHOLD)
-
-        const cycleNum = heal.beginCycle() + 1
-        this.emit('heal-cycle-started', { cycle: cycleNum, failureSignature: signature })
-        this.setStatus('healing')
-        this.noteHealCycle()
-        this.recordLifecycle('agent-healing', `Heal cycle ${cycleNum} started`, {
-          detail: signature ? `Failures: ${signature}` : 'No failure signature was available.',
-          activeCycle: cycleNum,
-        })
-
-        // Snapshot every git-tracked feature repo just before the agent runs.
-        // After the signal arrives, the diff against this snapshot is the
-        // ground-truth list of files the agent edited during its turn —
-        // pre-existing dirty state in the workspace doesn't leak in.
-        const snapshots = await snapshotFeatureRepos(this.feature)
-
-        const { signal, reason } = await this.runHealAgent({ cycle: cycleNum, failedSlugs, userGuidance, consecutiveSameFailures, stuckSlugs, maxSlugStreak })
-        userGuidance = undefined
-
-        // Pin the agent's CLI-native session-log pointer as soon as this cycle's
-        // wait ends — codex has no `--session-id` flag, so its rollout log is
-        // discovered by cwd + start time, and that discovery must happen while
-        // the log still exists. Waiting until cleanup lost the ref when a
-        // silent cycle-1 agent gave up (the agent-session-null gap).
-        this.persistAgentSessionRef()
-
-        if (this.stopped) return this.status
-
-        if (this.healCancelled) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-
-        const filesChanged = await diffFeatureRepos(snapshots)
-        const diffContent = await diffContentForFeatureRepos(snapshots)
-
-        // No signal: agent exited / went idle / hit the hard ceiling. The
-        // `reason` distinguishes which so the transcript can say what
-        // actually happened (was it our timeout, or did the agent give up?).
-        // Either way, if it edited any feature-repo file, treat as an
-        // implicit `.rerun` so we don't discard the work; otherwise log the
-        // no-op and end the loop. Journal is always written.
-        let effectiveSignal = signal
-        if (!effectiveSignal) {
-          const idleSec = Math.round(this.healAgentIdleTimeoutMs / 1000)
-          const hardMin = Math.round(this.healAgentTimeoutMs / 60_000)
-          const reasonMessage =
-            reason === 'idle-timeout' ? `Heal agent went silent for ${idleSec}s without writing a signal.`
-              : reason === 'hard-timeout' ? `Heal cycle hit the ${hardMin}-minute ceiling without a signal.`
-                : reason === 'pty-died' ? 'Heal agent exited without writing a signal.'
-                  : reason === 'spawn-failed' ? 'Heal agent failed to spawn.'
-                    : `Heal cycle ended without a signal (reason: ${reason}).`
-          this.emitAgentSystemMessage(reasonMessage)
-
-          if (filesChanged.length === 0) {
-            try {
-              this.appendJournalIteration({
-                signal: 'none',
-                hypothesis: `${reasonMessage} No code changes detected.`,
-                fixDescription: 'No fix applied.',
-                runId: this.runId,
-                manifestPath: this.paths.manifestPath,
-                summaryPath: this.paths.summaryPath,
-                journalPath: this.paths.diagnosisJournalPath,
-              })
-            } catch { /* journal write is best-effort */ }
-            this.emitAgentSystemMessage('No code changes detected — ending the heal loop.')
-            // The agent produced no signal and changed nothing. Its own output
-            // tail is the only evidence of why — capture + classify it so the
-            // Test Run surface can say "usage limit" vs "tried and couldn't".
-            if (reason === 'spawn-failed') {
-              this.recordHealEnd({
-                reason: 'spawn-failed',
-                cycle: cycleNum,
-                message: 'Auto-repair stopped: the heal agent failed to spawn.',
-                at: new Date().toISOString(),
-              })
-            } else {
-              const agentCause = this.captureHealAgentCause()
-              this.recordHealEnd({
-                reason: 'no-signal',
-                agentWait: reason as HealEnd['agentWait'],
-                agentCause,
-                cycle: cycleNum,
-                message: `${reasonMessage}${healAgentCauseSuffix(agentCause)} No code changes were made, so auto-repair stopped after cycle ${cycleNum}.`,
-                at: new Date().toISOString(),
-              })
-            }
-            finalStatus = 'failed'
-            this.setStatus(finalStatus)
-            break
-          }
-          this.emitAgentSystemMessage('Code changes detected — inferring a rerun from git diff.')
-          effectiveSignal = {
-            kind: 'rerun',
-            body: {
-              hypothesis: `${reasonMessage} Runner inferred a rerun from git diff.`,
-              fixDescription: 'Inferred from git diff — agent did not write a signal body.',
-            },
-          }
-        }
-
-        // A present-but-non-string field means the agent wrote a malformed
-        // body (e.g. `{"hypothesis": 123}`); it would otherwise be dropped
-        // without a trace. Warn so the transcript explains the journal gap.
-        for (const field of ['hypothesis', 'fixDescription'] as const) {
-          const value = effectiveSignal.body[field]
-          if (value !== undefined && typeof value !== 'string') {
-            this.emitAgentSystemMessage(
-              `Signal body field \`${field}\` was not a string — dropping it from the journal entry.`,
-            )
-          }
-        }
-        try {
-          if (effectiveSignal.kind === 'restart' || effectiveSignal.kind === 'rerun') {
-            this.appendJournalIteration({
-              signal: effectiveSignal.kind === 'restart' ? '.restart' : '.rerun',
-              hypothesis: typeof effectiveSignal.body.hypothesis === 'string' ? effectiveSignal.body.hypothesis : undefined,
-              filesChanged,
-              fixDescription: typeof effectiveSignal.body.fixDescription === 'string' ? effectiveSignal.body.fixDescription : undefined,
-              diffContent,
-              runId: this.runId,
-              manifestPath: this.paths.manifestPath,
-              summaryPath: this.paths.summaryPath,
-              journalPath: this.paths.diagnosisJournalPath,
-            })
-          }
-        } catch { /* journal write is best-effort */ }
-
-        const verificationPlan = this.verificationPlanForSummary(summary)
-        this.setStatus('running')
-
-        const action = heal.actionForSignal(effectiveSignal.kind === 'heal' ? 'rerun' : effectiveSignal.kind)
-        if (action.kind === 'restart-and-rerun') {
-          const { restarted, kept, startedBecauseMissing } = await this.restart(filesChanged)
-          if (this.stopped) return this.status
-          this.healCycleHistory.push({ cycle: cycleNum, restarted, kept })
-          this.stateSink.patchManifest(this.runId, {
-            healCycleHistory: this.healCycleHistory,
-          })
-          if (startedBecauseMissing.length > 0) {
-            this.recordLifecycle('restarting-services', 'Starting missing kept services', {
-              detail: `Starting ${startedBecauseMissing.join(', ')} because this heal restart is running in a fresh orchestrator process.`,
-              restartPlan: { restarted, kept, startedBecauseMissing },
-            })
-          }
-        } else {
-          await this.rerun()
-        }
-        if (this.stopped) return this.status
-        const startedBecauseMissing = await this.ensureServicesRunning()
-        if (startedBecauseMissing.length > 0) {
-          this.recordLifecycle('restarting-services', 'Started missing services', {
-            detail: `Started ${startedBecauseMissing.join(', ')} before rerun.`,
-            restartPlan: { restarted: [], kept: [], startedBecauseMissing },
-          })
-        }
-
-        if (this.bootFailure) {
-          this.recordBootFailureHealWait()
-          continue
-        }
-        const exitCode = await this.runPlaywright(selectionForPlan(verificationPlan))
-        if (this.stopped) return this.status
-        // User cancelled mid-Playwright (cancelHeal SIGTERM'd the pw pty).
-        // Don't read into the killed pty's exit code — finalize as failed.
-        if (this.healCancelled) {
-          finalStatus = 'failed'
-          this.setStatus(finalStatus)
-          break
-        }
-        finalStatus = decideRunStatus(this.feature.featureDir, this.paths.summaryPath, exitCode)
-        this.setStatus(finalStatus)
-        if (finalStatus === 'passed') break
-      }
-
-      return finalStatus
-    } finally {
-      // Drop the persistent REPL however the loop terminated — clean break,
-      // failure, cancel, threshold, or thrown error. `stop()` also nukes the
-      // pty during a full abort, so the second cleanup here is a no-op.
-      this.cleanupHealAgentPty()
-    }
-  }
-
-  /** Write a heartbeat timestamp to the manifest every 5 seconds so consumers
-   *  can detect orphaned runs whose orchestrator crashed without cleaning up. */
-  private startHeartbeat(): void {
-    const tick = (): void => {
-      if (this.stopped) return
-      this.stateSink.recordHeartbeat(this.runId)
-    }
-    this.heartbeatTimer = setInterval(tick, 5_000)
-    // Don't keep the process alive just for heartbeats.
-    this.heartbeatTimer.unref()
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer)
-      this.heartbeatTimer = null
-    }
-  }
-
-  setStatus(status: RunManifest['status']): void {
-    // Once the run has been stopped (e.g. user clicked Abort), drop any
-    // further status writes coming from the in-flight runFullCycle /
-    // heal-loop. Without this guard the killed Playwright pty's exit code
-    // would race the abort and overwrite `aborted` with `passed`/`failed`.
-    // `stop()` is the single authority for the terminal manifest write.
-    if (this.stopped) return
-    this.status = status
-    this.emit('run-status', { status })
-    this.stateSink.setStatus(this.runId, status, this.healCycles)
-    if (status === 'passed' || status === 'failed') {
-      this.recordLifecycle(status, status === 'passed' ? 'Run passed' : 'Run failed', {
-        severity: status === 'passed' ? 'success' : 'error',
-      })
-    }
-    // On a pass, promote the run-start baseline to "last green" for specs that
-    // weren't modified during the run — binding the green verdict to the
-    // pre-heal test bytes. Specs the agent touched are left dirty (the live cue
-    // is already set by the spec watcher at edit time). Best-effort, fire-and-
-    // forget: a recompute must never gate the status write. Failed/aborted runs
-    // intentionally don't touch the baseline.
-    if (status === 'passed' && this.feature.featureDir) {
-      void this.dirtySpecHooks
-        ?.finalizeRun(this.feature.name, this.feature.featureDir, true)
-        .catch(() => {})
-    }
-  }
-
-  // Record the pre-heal spec hashes for this run. Guards a missing featureDir and
-  // swallows errors so integrity capture never blocks boot.
-  private async captureDirtySpecBaseline(): Promise<void> {
-    if (!this.dirtySpecHooks || !this.feature.featureDir) return
-    try {
-      await this.dirtySpecHooks.captureRunStart(this.feature.name, this.feature.featureDir)
-    } catch {
-      /* integrity capture is best-effort */
-    }
-  }
-
-  noteHealCycle(): void {
-    this.healCycles += 1
-    this.stateSink.patchManifest(this.runId, { healCycles: this.healCycles })
   }
 
   async stop(finalStatus: RunManifest['status'] = 'aborted'): Promise<void> {
-    if (this.stopped) return
-    this.stopped = true
-    if (this.signalWatcher) {
-      clearInterval(this.signalWatcher)
-      this.signalWatcher = null
+    if (this.ctx.stopped) return
+    this.ctx.stopped = true
+    if (this.ctx.signalWatcher) {
+      clearInterval(this.ctx.signalWatcher)
+      this.ctx.signalWatcher = null
     }
-    this.stopHeartbeat()
+    stopHeartbeat(this.ctx)
     // Kill any in-flight Playwright + heal-agent ptys before services so the
     // user's abort actually stops the visible processes — not just the
     // services they happen to depend on. `killTree` targets the process group
     // (negative pid) so children of the shell pipeline (claude, formatter)
     // also receive the signal; bare `pty.kill` only signals the shell.
-    if (this.playwrightPty) {
-      killTree(this.playwrightPty, 'SIGTERM')
-      scheduleSigkillFallback(this.playwrightPty)
-      this.playwrightPty = null
+    if (this.ctx.playwrightPty) {
+      killTree(this.ctx.playwrightPty, 'SIGTERM')
+      scheduleSigkillFallback(this.ctx.playwrightPty)
+      this.ctx.playwrightPty = null
     }
-    if (this.healAgentPty) {
-      killTree(this.healAgentPty, 'SIGTERM')
-      scheduleSigkillFallback(this.healAgentPty)
-      this.healAgentPty = null
+    if (this.ctx.healAgentPty) {
+      killTree(this.ctx.healAgentPty, 'SIGTERM')
+      scheduleSigkillFallback(this.ctx.healAgentPty)
+      this.ctx.healAgentPty = null
     }
-    for (const [name, pty] of this.servicePtys) {
+    for (const [name, pty] of this.ctx.servicePtys) {
       killTree(pty, 'SIGTERM')
-      this.servicePtys.delete(name)
+      this.ctx.servicePtys.delete(name)
     }
-    this.logFiles.clear()
+    this.ctx.logFiles.clear()
     // Capture the heal agent's fix diff from each worktree BEFORE the overlay is
     // reversed or the worktree is removed — the baseline was taken after overlay
     // + envset + WIP, so this diff is exactly the repair (R80). Best-effort:
     // never blocks finalization.
-    await this.captureFixes().catch((err) => {
-      this.runnerLog?.warn(`Fix capture failed: ${(err as Error).message}`)
+    await captureFixes(this.ctx).catch((err) => {
+      this.ctx.runnerLog?.warn(`Fix capture failed: ${(err as Error).message}`)
     })
     // Release per-run isolation resources. Ports go back to the pool. For a
     // PORTIFIED run we reverse the overlay but KEEP the worktree — it holds the
@@ -2651,33 +448,33 @@ export class RunOrchestrator extends EventEmitter {
     // lifecycle (the Cleanup page lists/opens/removes it). For a non-portified
     // worktree run, tear the worktree down so the source repo doesn't
     // accumulate stale checkouts. Failures here must not block finalization.
-    if (this.portMap) releasePorts(this.portMap.values())
-    if (this.portified) {
-      await this.reversePortifyOverlay().catch(() => {})
+    if (this.ctx.portMap) releasePorts(this.ctx.portMap.values())
+    if (this.ctx.portified) {
+      await reversePortifyOverlay(this.ctx).catch(() => {})
     } else {
-      for (const handle of this.worktreeHandles) {
+      for (const handle of this.ctx.worktreeHandles) {
         await removeWorktree(handle).catch(() => {})
       }
     }
     const endedAt = new Date().toISOString()
-    this.status = finalStatus
+    this.ctx.status = finalStatus
     // Single terminal write — services flipped to 'stopped', status +
     // endedAt + healCycles persisted, runs-index mirrored. The sink is the
     // only writer at this point; no other path can race because
-    // `this.stopped = true` already gates `setStatus`.
-    this.stateSink.finalize(this.runId, finalStatus, endedAt, this.healCycles)
+    // `this.ctx.stopped = true` already gates `setStatus`.
+    this.ctx.stateSink.finalize(this.ctx.runId, finalStatus, endedAt, this.ctx.healCycles)
     // A boot-only session ending is a normal teardown, not a failure: give it a
     // calm "services stopped" headline (info, no abortReason) instead of the
     // warning-tinted "Run aborted" a test run gets.
-    const isBoot = this.executionType === 'boot'
+    const isBoot = this.ctx.executionType === 'boot'
     const finalPhase = finalLifecyclePhase(finalStatus)
     const finalHeadline = finalStatus === 'aborted'
       ? (isBoot ? 'Services stopped — envset reverted' : 'Run aborted')
       : finalStatus === 'passed' ? 'Run passed' : 'Run failed'
-    if (this.lastLifecycleEvent?.phase !== finalPhase || this.lastLifecycleEvent.headline !== finalHeadline) {
-      this.recordLifecycle(finalPhase, finalHeadline, {
+    if (this.ctx.lastLifecycleEvent?.phase !== finalPhase || this.ctx.lastLifecycleEvent.headline !== finalHeadline) {
+      recordLifecycle(this.ctx, finalPhase, finalHeadline, {
         severity: finalStatus === 'passed' ? 'success' : finalStatus === 'aborted' ? (isBoot ? 'info' : 'warning') : 'error',
-        ...(finalStatus === 'aborted' && !isBoot ? { abortReason: this.pendingAbortReason ?? { reason: 'run-stopped' } } : {}),
+        ...(finalStatus === 'aborted' && !isBoot ? { abortReason: this.ctx.pendingAbortReason ?? { reason: 'run-stopped' } } : {}),
       })
     }
     this.emit('run-complete', { status: finalStatus })

@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 import type { DraftRecord } from '@/shared/api/types'
 import { WizardDraftProvider, useWizardDrafts } from './WizardDraftContext'
+import { Probe, draft, workspaceSocket } from './__fixtures__/wizard-draft-context-fixtures'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 vi.mock('@/shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
@@ -24,7 +25,7 @@ vi.mock('@/shared/api/client', async () => {
   }
 })
 
-class FakeWebSocket {
+export class FakeWebSocket {
   static instances: FakeWebSocket[] = []
   onmessage: ((event: MessageEvent) => void) | null = null
   closeCalls = 0
@@ -43,6 +44,7 @@ class FakeWebSocket {
 }
 
 let container: HTMLDivElement
+
 let root: Root
 
 beforeEach(() => {
@@ -493,29 +495,4 @@ function renderProbe() {
     )
   })
   return captured
-}
-
-function workspaceSocket(): FakeWebSocket {
-  const socket = FakeWebSocket.instances.find((item) => item.url === 'ws://test/ws/workspace')
-  if (!socket) throw new Error('workspace socket not opened')
-  return socket
-}
-
-function Probe({ captured }: { captured: { value: ReturnType<typeof useWizardDrafts> | null } }) {
-  captured.value = useWizardDrafts()
-  return null
-}
-
-function draft(overrides: Partial<DraftRecord> = {}): DraftRecord {
-  return {
-    draftId: 'draft-1',
-    prdText: 'Checkout flow',
-    prdDocuments: [],
-    repos: [{ name: 'app', localPath: '/app' }],
-    featureName: 'checkout-flow',
-    status: 'planning',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    ...overrides,
-  }
 }

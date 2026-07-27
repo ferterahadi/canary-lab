@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { runsIndexPath, runsRoot } from './run-paths'
+import { runsIndexPath } from './run-paths'
 import type {
   HealEnd,
   QueueReason,
@@ -16,7 +16,7 @@ import type {
   VerificationRunMetadata,
 } from '../../../../../../../shared/verification'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
-import type { ClientKind, ExternalSessionMeta } from '../../../../../../../shared/run-mode'
+import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 export type {
   HealEnd,
   QueueReason,

@@ -43,7 +43,6 @@ export function registerCanaryLabTools(
     }
   }) as McpServer['registerTool']
 
-
   const ctx = { registerTool, deps, clientKindInput }
   registerReadTools(ctx)
   registerAuthoringTools(ctx)

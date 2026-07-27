@@ -285,6 +285,13 @@ describe('deriveRunViewModel', () => {
     expect(vm.headline).toBe('Stopping services')
   })
 
+  it('labels a queued test run with the capacity wording', () => {
+    // Distinct from the boot wording: a queued test run starts tests when
+    // capacity frees, whereas a queued boot session only brings services up.
+    const vm = deriveRunViewModel(detail({ status: 'queued' }))
+    expect(vm.headline).toBe('Queued — will start when capacity frees')
+  })
+
   it('labels a queued boot run and shows no alert', () => {
     const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'queued' }))
     expect(vm.headline).toBe('Queued — services will boot when capacity frees')

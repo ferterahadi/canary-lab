@@ -1,34 +1,22 @@
 import fs from 'fs'
 import path from 'path'
-import { randomUUID } from 'crypto'
-import { type ChildProcess } from 'child_process'
-import type { FeatureConfig, RepoPrerequisite } from '../../../../../../../shared/launcher/types'
-import { runGit, resolveRepoPath, snapshotWorkingTree, getGitRoot } from '../../../../shared/git-repo'
+import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { PtyFactory } from '../../../runs/logic/runtime/pty-spawner'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
-import { generateRunId } from '../../../runs/logic/runtime/run-id'
-import { type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
-import { computeSlotBudget, readSystemResources, resolveAdmissionConfig } from '../../../runs/logic/runtime/admission'
-import { hydrateEnvsetIntoWorktrees } from '../../../runs/logic/runtime/env-switcher/worktree-hydrate'
+import { prepareWorkflow as prepare } from './prepare-workflow'
 import { PortifyRunStore } from './store'
 import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
-import { createBranchAndWorktree, captureDiff, changedFiles, discardWorktree, portifyBranchName, applyOverlay, resetWorktree } from './git-ops'
-import { writeOverlay, readOverlay, captureTouchedFiles, type OverlayRepoInput } from './overlay'
-import { runPortifyAgent, writePortifyClaudeRef } from './agent'
-import { buildPortifyPrompt, buildPortifyRetryPrompt, buildPortifyFeedbackPrompt, type RepoEditTarget } from './prompt'
-import { verifyDoubleBoot } from './verify'
-import type {
-  PortifyManifest,
-  PortifyRepoState,
-  PortifyProducer,
-  PortifyExternalSession,
-  StartPortifyInput,
-  StartPortifyResult,
-  StartExternalPortifyInput,
-  StartExternalPortifyResult,
-  ExternalPortifyEditTarget,
-} from './types'
+import { discardWorktree } from './git-ops'
+import { writeOverlay } from './overlay'
+import { buildPortifyPrompt } from './prompt'
+import type { PortifyManifest, PortifyProducer, PortifyExternalSession, StartPortifyInput, StartPortifyResult, StartExternalPortifyInput, StartExternalPortifyResult, ExternalPortifyEditTarget } from './types'
+import { captureOverlayRepos, readPendingOverlay, restoreConfig } from './portify-overlay-capture'
+import { RepoGroup, buildSeededNote, portifyConcurrencyCap } from './portify-worktree-borrow'
+
+export { canonicalConfigDiff, captureOverlayRepos, readFileOrNull, realpathOrSelf, restoreConfig } from './portify-overlay-capture'
+export { buildSeededNote, buildSiblingOverlayIndex, pickBorrowable, portifyConcurrencyCap, safeKey } from './portify-worktree-borrow'
+export type { GroupMember, RepoGroup } from './portify-worktree-borrow'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
 // worktree per GIT ROOT, the port-ification agent, the double-boot verifier,
@@ -56,26 +44,7 @@ export interface PortifyRunnerDeps {
   healthPollIntervalMs?: number
 }
 
-interface GroupMember {
-  name: string
-  /** Canonical localPath of this logical repo. */
-  path: string
-  /** Where to edit this repo's source inside the group's worktree. */
-  editPath?: string
-}
-
-interface RepoGroup {
-  /** Stable worktree-dir key. */
-  key: string
-  /** Git toplevel shared by every member. */
-  sourceRoot: string
-  handle?: WorktreeHandle
-  /** Worktree diff baseline captured before the agent edits. */
-  snapshotRef: string
-  members: GroupMember[]
-}
-
-interface ActiveWorkflow {
+export interface ActiveWorkflow {
   groups: RepoGroup[]
   branch: string
   feature: string
@@ -92,93 +61,6 @@ interface ActiveWorkflow {
   seededFrom: { feature: string; repos: string[] }[]
   /** Set once the orchestrator is constructed; drives user-feedback revise passes. */
   orchestrator?: PortifyOrchestrator
-}
-
-export function safeKey(s: string): string {
-  return s.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'root'
-}
-
-/** A reusable port patch another feature already saved for the same git root. */
-interface BorrowCandidate {
-  /** The sibling feature whose overlay this came from. */
-  feature: string
-  /** Unified diff content to pre-apply into the scratch worktree. */
-  patch: string
-  /** HEAD the sibling captured the patch against (prefer an exact match). */
-  baseSha: string
-  /** ISO capture time — newest wins when several siblings match. */
-  capturedAt: string
-}
-
-/**
- * Index every OTHER feature's saved overlay by the git root its patch targets,
- * so a new port-ification can borrow an existing rewrite for the same app
- * instead of redoing it. Skips empty (source-native) overlays — there's nothing
- * to apply. Resolving a sibling repo's git root requires the same path dance as
- * setup (resolveRepoPath → getGitRoot).
- */
-async function buildSiblingOverlayIndex(
-  features: FeatureConfig[],
-  currentFeature: string,
-): Promise<Map<string, BorrowCandidate[]>> {
-  const index = new Map<string, BorrowCandidate[]>()
-  for (const f of features) {
-    if (f.name === currentFeature) continue
-    const overlay = readOverlay(f.featureDir)
-    if (!overlay) continue
-    for (const repo of overlay.meta.repos) {
-      const patch = overlay.patches[repo.name]
-      if (!patch || !patch.trim()) continue // source-native overlay — nothing to borrow
-      const decl = (f.repos ?? []).find((r) => r.name === repo.name)
-      if (!decl) continue
-      let root: string | null = null
-      try { root = await getGitRoot(resolveRepoPath(decl.localPath)) } catch { /* unresolved repo — skip */ }
-      if (!root) continue
-      const list = index.get(root) ?? []
-      list.push({ feature: f.name, patch, baseSha: repo.baseSha, capturedAt: overlay.meta.capturedAt })
-      index.set(root, list)
-    }
-  }
-  return index
-}
-
-/**
- * Note for the agent/client when sibling overlays were pre-applied to the
- * worktree — so it reviews the existing edits + declares config slots instead
- * of rewriting from scratch (and isn't surprised by a populated tree).
- */
-export function buildSeededNote(seededFrom: { feature: string; repos: string[] }[]): string | undefined {
-  if (seededFrom.length === 0) return undefined
-  const from = seededFrom.map((s) => `"${s.feature}" (${s.repos.join(', ')})`).join('; ')
-  return `NOTE: the same app was already port-ified for another feature, so its port-injection patch from ${from} has been PRE-APPLIED to the worktree source — the listeners likely already read injected ports. Review the existing edits; you may only need to declare the matching \`ports\` slots in the feature config. A no-op source change is fine — the concurrent double-boot is what proves it.`
-}
-
-/** Pick the best sibling patch for a root: exact base-SHA match first, then newest. */
-function pickBorrowable(candidates: BorrowCandidate[] | undefined, baseSha: string): BorrowCandidate | null {
-  if (!candidates || candidates.length === 0) return null
-  return [...candidates].sort(
-    (a, b) =>
-      Number(b.baseSha === baseSha) - Number(a.baseSha === baseSha) ||
-      b.capturedAt.localeCompare(a.capturedAt),
-  )[0]
-}
-
-/**
- * Max port-ification workflows allowed to run CONCURRENTLY (across all
- * features). The per-feature lock already prevents two workflows on one feature;
- * this caps the global load because each `submit_external_portify` boots the
- * whole stack TWICE concurrently to verify, so unbounded fan-out across features
- * would exhaust the machine. Reuses the run loop's resource heuristic
- * (`computeSlotBudget`) rather than a bespoke number; `CANARY_MAX_CONCURRENT_PORTIFY`
- * is the optional manual ceiling (mirrors `CANARY_MAX_CONCURRENT_RUNS`).
- */
-export function portifyConcurrencyCap(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.CANARY_MAX_CONCURRENT_PORTIFY
-  if (raw != null && raw.trim() !== '') {
-    const n = Number.parseInt(raw.trim(), 10)
-    if (Number.isFinite(n) && n > 0) return n
-  }
-  return computeSlotBudget(readSystemResources(), resolveAdmissionConfig(env))
 }
 
 export function createPortifyRunner(deps: PortifyRunnerDeps) {
@@ -217,291 +99,12 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     }
   }
 
-  // Validate + set up a workflow (git checks, scratch worktrees, manifest, the
-  // orchestrator + its injected I/O) and register it in `active`. Shared by the
-  // local path (which then run()s the agent) and the external path (which parks
-  // at `editing` for the user's own client to edit the worktree in place). The
-  // caller resolves the feature + agent; this returns the live orchestrator so
-  // the caller decides run() vs startExternal().
-  async function prepareWorkflow(
+  // Setup lives in ./prepare-workflow — it was a 280-line closure here.
+  const prepareWorkflow = (
     feature: FeatureConfig,
     agent: HealAgent,
     opts: { maxAttempts?: number; producer: PortifyProducer; external?: PortifyExternalSession },
-  ): Promise<{ workflowId: string; state: ActiveWorkflow; orchestrator: PortifyOrchestrator }> {
-    const repos: RepoPrerequisite[] = feature.repos ?? []
-    if (repos.length === 0) throw Object.assign(new Error(`feature "${feature.name}" declares no repos`), { statusCode: 409 })
-
-    // Validate each repo is a clean git working tree and resolve its git root.
-    // Worktrees only see committed files, so a dirty tree would benchmark a
-    // stale snapshot — refuse with a clear error (mirrors the benchmark guard).
-    // Dirty repos are COLLECTED across the whole set before throwing: naming
-    // only the first would send the user through a fix→retry→fail-on-the-next
-    // loop when several repos are dirty at once.
-    const byRoot = new Map<string, GroupMember[]>()
-    const dirty: string[] = []
-    for (const repo of repos) {
-      const repoPath = resolveRepoPath(repo.localPath)
-      const status = await runGit(repoPath, ['status', '--porcelain', '--', '.'])
-      if (status.code !== 0) {
-        throw Object.assign(new Error(`repo "${repo.name}" at ${repo.localPath} is not a git repository`), { statusCode: 409 })
-      }
-      if (status.stdout.trim()) {
-        dirty.push(repo.name)
-        continue
-      }
-      // `git status` above returned 0, so this path IS inside a work tree —
-      // rev-parse --show-toplevel resolves the root.
-      const sourceRoot = (await getGitRoot(repoPath))!
-      const members = byRoot.get(sourceRoot) ?? []
-      members.push({ name: repo.name, path: repo.localPath })
-      byRoot.set(sourceRoot, members)
-    }
-    if (dirty.length > 0) {
-      const label = dirty.length === 1 ? 'repo' : 'repos'
-      throw Object.assign(
-        new Error(`${label} ${dirty.map((n) => `"${n}"`).join(', ')} ${dirty.length === 1 ? 'has' : 'have'} uncommitted changes — commit or stash them first (worktrees only see committed files)`),
-        { statusCode: 409 },
-      )
-    }
-    // Group repos that share a git root into ONE worktree (git can't check out
-    // the same branch in two worktrees of one repo).
-    const groups: RepoGroup[] = [...byRoot.entries()].map(([sourceRoot, members], i) => ({
-      key: `g${i}-${safeKey(path.basename(sourceRoot))}`,
-      sourceRoot,
-      snapshotRef: 'HEAD',
-      members,
-    }))
-
-    const workflowId = `portify-${generateRunId()}`
-    const dir = portifyDir(deps.logsDir, workflowId)
-    const paths = buildPortifyPaths(dir)
-    fs.mkdirSync(paths.verifyLogDir, { recursive: true })
-    const branch = portifyBranchName(feature.name)
-    const env = feature.envs?.[0]
-    const configPath = path.join(feature.featureDir, 'feature.config.cjs')
-    const originalConfig = readFileOrNull(configPath)
-    // Persist the pre-edit config to disk so a startup reclaim can restore it
-    // after a crash (the in-memory copy dies with the process).
-    if (originalConfig != null) {
-      try { fs.writeFileSync(paths.originalConfigPath, originalConfig) } catch { /* best-effort */ }
-    }
-
-    const manifest: PortifyManifest = {
-      workflowId,
-      feature: feature.name,
-      featureDir: feature.featureDir,
-      repos: repos.map((r) => ({ name: r.name, path: r.localPath })),
-      env,
-      agent,
-      producer: opts.producer,
-      ...(opts.external ? { external: opts.external } : {}),
-      branch,
-      status: 'planning',
-      attempt: 0,
-      maxAttempts: opts.maxAttempts && opts.maxAttempts > 0 ? opts.maxAttempts : 3,
-      feedbackRounds: 0,
-      startedAt: deps.now(),
-    }
-    deps.store.save(manifest)
-
-    let aborted = false
-    const children = new Set<ChildProcess>()
-    // External edits happen in the user's own client — no local session to pin.
-    const sessionId = opts.producer === 'internal' && agent === 'claude' ? randomUUID() : undefined
-    const state: ActiveWorkflow = {
-      groups,
-      branch,
-      feature: feature.name,
-      configPath,
-      originalConfig,
-      configSnapshotRef: 'HEAD',
-      seededFrom: [],
-      abort: () => {
-        aborted = true
-        for (const c of children) { try { c.kill('SIGTERM') } catch { /* gone */ } }
-      },
-    }
-    active.set(workflowId, state)
-
-    const allMembers = (): GroupMember[] => state.groups.flatMap((g) => g.members)
-
-    // Run the agent in the first group's worktree with a given prompt. `resume`
-    // continues the pinned claude session (no-op for codex, which re-execs).
-    const runAgentWithPrompt = async (prompt: string, resume: boolean): Promise<void> => {
-      const cwd = state.groups[0].handle!.worktreeRoot
-      if (sessionId) writePortifyClaudeRef(dir, cwd, sessionId)
-      await runPortifyAgent({ agent, prompt, cwd, logPath: paths.agentLogPath, children, sessionId, resume })
-    }
-
-    const orchestrator = new PortifyOrchestrator({
-      manifest,
-      persist: (m) => deps.store.save(m),
-      now: deps.now,
-      isAborted: () => aborted,
-
-      setup: async () => {
-        const states: PortifyRepoState[] = []
-        // Borrow: if another feature already saved a port overlay for the same
-        // app (git root), pre-apply it so this workflow starts from the existing
-        // rewrite instead of redoing it. Built once; matched per group below.
-        const siblingOverlays = await buildSiblingOverlayIndex(deps.loadFeatures(), feature.name)
-        for (const group of state.groups) {
-          const wt = await createBranchAndWorktree({
-            repoName: group.key,
-            localPath: group.sourceRoot,
-            worktreesDir: path.join(dir, 'worktrees'),
-            branch,
-          })
-          group.handle = wt.handle
-          group.snapshotRef = wt.snapshotRef
-          for (const member of group.members) {
-            // `group.sourceRoot` is symlink-resolved (git rev-parse --show-toplevel),
-            // so resolve the member path the same way before diffing — otherwise a
-            // symlinked ancestor (e.g. macOS /var → /private/var) makes path.relative
-            // emit a bogus `../..` traversal and editPath points outside the worktree.
-            const rel = path.relative(group.sourceRoot, realpathOrSelf(resolveRepoPath(member.path)))
-            member.editPath = rel ? path.join(wt.handle.worktreeRoot, rel) : wt.handle.worktreeRoot
-            states.push({ name: member.name, path: member.path, worktreePath: wt.handle.worktreeRoot, baseSha: wt.baseSha })
-          }
-          // Apply the borrowed patch AFTER snapshotRef is captured, so the
-          // borrowed lines land in this feature's own captured diff/overlay
-          // (self-contained). Borrowing is an optimization — never fatal.
-          const borrowed = pickBorrowable(siblingOverlays.get(group.sourceRoot), wt.baseSha)
-          if (borrowed) {
-            const seedPatch = path.join(dir, `seed-${group.key}.patch`)
-            try {
-              fs.writeFileSync(seedPatch, borrowed.patch)
-              const outcome = await applyOverlay(wt.handle.worktreeRoot, seedPatch)
-              if (outcome.kind === 'ok') {
-                state.seededFrom.push({ feature: borrowed.feature, repos: group.members.map((m) => m.name) })
-              } else {
-                // A conflict/error means we couldn't cleanly seed (base drift,
-                // overlapping edits). `--3way` leaves conflict markers in the
-                // files even on failure, so scrub the worktree back to a clean
-                // HEAD before the agent edits from scratch — otherwise the
-                // markers poison its edits and the captured diff.
-                await resetWorktree(wt.handle.worktreeRoot)
-              }
-            } catch { /* best-effort seed */ }
-            finally { try { fs.rmSync(seedPatch, { force: true }) } catch { /* gone */ } }
-          }
-        }
-        // Baseline the canonical config (edited in place) before the agent runs.
-        state.configSnapshotRef = (await snapshotWorkingTree(feature.featureDir)) ?? 'HEAD'
-        return states
-      },
-
-      // Attempt-0 gate: a borrowed sibling overlay may already complete the
-      // rewrite — the orchestrator verifies it before spending an agent run.
-      seeded: () => state.seededFrom.length > 0,
-
-      runAgent: async (attempt, failureDetail) => {
-        // setup() ran (and fully succeeded) before any runAgent, so every
-        // member has an editPath and every group a handle.
-        const targets: RepoEditTarget[] = allMembers().map((m) => ({ name: m.name, editPath: m.editPath! }))
-        const prompt = attempt === 1 || !failureDetail
-          ? buildPortifyPrompt(feature, targets, buildSeededNote(state.seededFrom))
-          : buildPortifyRetryPrompt(feature, failureDetail)
-        await runAgentWithPrompt(prompt, attempt > 1)
-      },
-
-      // Revise pass: resume the session (claude) with the human's feedback.
-      // Codex has no --resume, so it re-execs against the already-edited
-      // worktree — context-light but it still sees and adjusts its prior work.
-      runFeedbackAgent: async (feedback) => {
-        await runAgentWithPrompt(buildPortifyFeedbackPrompt(feature, feedback), true)
-      },
-
-      captureDiff: async () => {
-        const blocks: string[] = []
-        for (const group of state.groups) {
-          const d = await captureDiff(group.handle!.worktreeRoot, group.snapshotRef)
-          if (d) blocks.push(`# repo: ${group.members.map((m) => m.name).join(', ')}\n${d}`)
-        }
-        const configDiff = await canonicalConfigDiff(feature.featureDir, state.configSnapshotRef)
-        if (configDiff) blocks.push(`# feature config: ${feature.featureDir}\n${configDiff}`)
-        return blocks.join('\n\n')
-      },
-
-      verify: async () => {
-        // Reload the config so the agent's edits (declared slots, tokenized
-        // health checks) are reflected. Source comes from each worktree.
-        const fresh = deps.loadFeatures().find((f) => f.name === feature.name) ?? feature
-        const overrides: Record<string, string> = {}
-        for (const member of allMembers()) overrides[member.name] = member.editPath!
-        // Hydrate the captured envset into the worktrees for the boot window:
-        // worktrees are cut from committed HEAD, so without this the boots run
-        // the CHECKED-IN config (e.g. a docker `db` datasource host) that the
-        // real-path envset apply normally overwrites — an unfixable-by-the-
-        // agent crash. `${port.*}` tokens stay verbatim (one shared file can't
-        // carry two instances' port maps); restore() in `finally` keeps the
-        // overlay diff `save()` captures afterwards ports-only.
-        const hydrated = env
-          ? hydrateEnvsetIntoWorktrees({
-              featureDir: feature.featureDir,
-              setName: env,
-              roots: state.groups.map((g) => ({ sourceRoot: g.sourceRoot, worktreeRoot: g.handle!.worktreeRoot })),
-            })
-          : null
-        try {
-          const result = await verifyDoubleBoot(fresh, env, overrides, {
-            ptyFactory: deps.ptyFactory,
-            healthCheck: deps.healthCheck,
-            healthPollIntervalMs: deps.healthPollIntervalMs,
-            healthDeadlineMs,
-            verifyLogDir: paths.verifyLogDir,
-          })
-          if (!result.ok && hydrated && hydrated.portTokenSlots.length > 0) {
-            const hint =
-              `NOTE: envset file(s) ${hydrated.portTokenSlots.join(', ')} carry \`\${port.*}\` tokens that stay ` +
-              `UNRESOLVED during the double-boot (one shared file cannot serve two port maps). If a service reads ` +
-              `that wiring from the file, move it to per-process injection (CLI arg / env var) — that is what ` +
-              `port-ification verifies.`
-            // A not-ok verify always carries a failure detail (see verifyDoubleBoot).
-            result.failureDetail = `${result.failureDetail}\n\n${hint}`
-          }
-          return result
-        } finally {
-          hydrated?.restore()
-        }
-      },
-
-      checkTestsUntouched: async () => {
-        const offending: string[] = []
-        for (const group of state.groups) {
-          const changed = await changedFiles(group.handle!.worktreeRoot, group.snapshotRef)
-          offending.push(...changed.filter((f) => /(^|\/)e2e\//.test(f) || /\.spec\.[tj]s$/.test(f)).map((f) => `${group.key}:${f}`))
-        }
-        return { ok: offending.length === 0, offending }
-      },
-
-      // Restart survival for the parked review: snapshot the verified diff in
-      // save()'s exact overlay shape so a post-restart save can still write the
-      // overlay after the worktrees are gone (see paths.pendingOverlayPath).
-      persistReviewCapture: async () => {
-        try {
-          const repos = await captureOverlayRepos(state)
-          fs.writeFileSync(
-            paths.pendingOverlayPath,
-            JSON.stringify({ version: 1, capturedAt: deps.now(), repos, originalConfig: state.originalConfig }, null, 2),
-          )
-        } catch { /* best-effort — the live save path never needs the capture */ }
-      },
-
-      cleanup: async () => {
-        // Reached only on failed/aborted: discard every worktree + branch and
-        // restore the canonical config we edited in place.
-        for (const group of state.groups) {
-          if (group.handle) await discardWorktree(group.handle, branch)
-        }
-        restoreConfig(state)
-        active.delete(workflowId)
-      },
-    })
-
-    state.orchestrator = orchestrator
-    return { workflowId, state, orchestrator }
-  }
+  ) => prepare({ deps, active, healthDeadlineMs }, feature, agent, opts)
 
   async function startPortify(input: StartPortifyInput): Promise<StartPortifyResult> {
     admitNewWorkflow(input.feature)
@@ -740,57 +343,4 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
   }
 
   return { startPortify, startExternalPortify, submitExternalPortify, save, cancel, revise, remove, abort: cancel }
-}
-
-function readFileOrNull(p: string): string | null {
-  try { return fs.readFileSync(p, 'utf-8') } catch { return null }
-}
-
-// One captured diff per git-root group; every member repo in the group shares
-// that group's worktree (so the same patch + base SHA). Run time forces one
-// worktree per repo NAME and applies the repo's patch into it.
-async function captureOverlayRepos(state: ActiveWorkflow): Promise<OverlayRepoInput[]> {
-  const overlayRepos: OverlayRepoInput[] = []
-  for (const group of state.groups) {
-    const wt = group.handle! // reaching a capture means setup fully succeeded
-    const patch = await captureDiff(wt.worktreeRoot, group.snapshotRef)
-    const baseSha = (await runGit(wt.worktreeRoot, ['rev-parse', 'HEAD'])).stdout.trim()
-    const changed = await changedFiles(wt.worktreeRoot, group.snapshotRef)
-    const touchedFiles = await captureTouchedFiles(wt.worktreeRoot, baseSha, changed)
-    for (const member of group.members) {
-      overlayRepos.push({ name: member.name, baseSha, patch, touchedFiles })
-    }
-  }
-  return overlayRepos
-}
-
-/** The restart-survival capture persisted at every verified ready-to-save park. */
-interface PendingOverlayCapture {
-  version: 1
-  capturedAt: string
-  repos: OverlayRepoInput[]
-  originalConfig: string | null
-}
-
-function readPendingOverlay(p: string): PendingOverlayCapture | null {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as PendingOverlayCapture
-    return Array.isArray(parsed.repos) ? parsed : null
-  } catch { return null }
-}
-
-function realpathOrSelf(p: string): string {
-  try { return fs.realpathSync(p) } catch { return p }
-}
-
-function restoreConfig(state: ActiveWorkflow): void {
-  if (state.originalConfig == null) return
-  try { fs.writeFileSync(state.configPath, state.originalConfig) } catch { /* best-effort */ }
-}
-
-// Diff of the canonical feature config edited in place (a different git root
-// than the product repo for external features). Empty when not a git repo.
-async function canonicalConfigDiff(featureDir: string, ref: string): Promise<string> {
-  const res = await runGit(featureDir, ['diff', ref, '--', 'feature.config.cjs'])
-  return res.code === 0 ? res.stdout : ''
 }

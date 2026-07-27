@@ -20,12 +20,18 @@ import type {
   VerificationRunMetadata,
   VerificationTarget,
 } from '@shared/verification'
-import type { ClientKind, RunProducer } from '@shared/run-mode'
+import type { RunProducer } from '@shared/run-mode'
 import type {
   FlightPauseReason,
   FlightStageKey,
   FlightStatus,
 } from '@shared/flights/types'
+import type { ExternalHealClientKind } from './types-runs'
+
+export type { CleanupListing, CleanupOrphan, CleanupRunEntry, CleanupWorktree, PortifyCleanupEntry, PortifyCleanupListing } from './types-cleanup'
+export type { ExternalHealClientKind, ExternalHealSession, ExternalHealSessionStatus, JournalEntry, PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightArtifactKind, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, PlaywrightRetainedArtifactMode, PlaywrightScreenshotMode, RepoBranchSnapshot, RunDetail, RunIndexEntry, RunManifest, RunSummary, RunSummaryFailedEntry, RunSummaryRunningStep, ServiceManifestEntry } from './types-runs'
+export type { AuditEntry, AuditList, CreateDraftPayload, CreateDraftResponse, DraftPrdDocument, DraftRecord, DraftRepo, DraftSource, DraftStatus, ExternalDraftStage, PlanStep } from './types-wizard'
+
 export type {
   DisplayStatus,
   HealEnd,
@@ -46,6 +52,7 @@ export type {
   ServiceStatus,
   TransientAction,
 } from '@shared/run-state'
+
 export type {
   ExecutionType,
   VerificationConfig,
@@ -149,81 +156,10 @@ export interface FeatureSpecFile {
 
 export type FeatureTests = FeatureSpecFile[]
 
-export interface RunIndexEntry {
-  runId: string
-  executionType?: ExecutionType
-  feature: string
-  startedAt: string
-  status: RunStatus
-  endedAt?: string
-  verificationConfigName?: string
-  verificationPlaywrightEnvsetId?: string
-  verificationTargetUrls?: Record<string, string>
-}
-
-// ─── Log cleanup ─────────────────────────────────────────────────────────
-
-export interface CleanupRunEntry {
-  runId: string
-  feature: string
-  executionType: ExecutionType
-  status: RunStatus
-  startedAt: string
-  endedAt?: string
-  folderBytes: number
-  artifactBytes: number
-  active: boolean
-}
-
-export interface CleanupOrphan {
-  runId: string
-  folderBytes: number
-}
-
-export interface CleanupListing {
-  runs: CleanupRunEntry[]
-  orphans: CleanupOrphan[]
-  totals: {
-    totalBytes: number
-    reclaimableTrimBytes: number
-    reclaimableDeleteBytes: number
-  }
-}
-
-// A git worktree canary-lab created under the logs dir (mirrors the server
-// WorktreeEntry, plus `active`). Surfaced in the Log Cleanup worktree list.
-export interface CleanupWorktree {
-  path: string
-  sourceRoot: string
-  ref: string
-  ownerKind: 'run' | 'benchmark' | 'portify' | 'unknown'
-  ownerId: string | null
-  slot: string | null
-  bytes: number
-  ageMs: number | null
-  exists: boolean
-  /** Owner run/benchmark is still running — removal is refused. */
-  active: boolean
-}
-
-// A port-ification workflow record on disk, for the Log Cleanup "Portify" tab.
-// Mirrors the server PortifyCleanupEntry; status reuses the portify lifecycle.
-export interface PortifyCleanupEntry {
-  workflowId: string
-  feature: string
-  status: 'planning' | 'editing' | 'verifying' | 'ready-to-save' | 'saved' | 'failed' | 'aborted'
-  startedAt: string
-  endedAt?: string
-  folderBytes: number
-}
-
-export interface PortifyCleanupListing {
-  workflows: PortifyCleanupEntry[]
-  totalBytes: number
-}
-
 export type EvaluationExportMode = 'raw' | 'localized'
+
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
+
 export type EvaluationExportProducer = RunProducer
 
 export interface EvaluationExportTask {
@@ -246,292 +182,6 @@ export interface EvaluationExportTask {
    *  renders its live AgentSessionView instead of the text progress panel.
    *  Absent for raw/external/cached runs (no live agent). */
   sessionRef?: { agent: 'claude' | 'codex'; sessionId: string }
-}
-
-export interface ServiceManifestEntry {
-  repoName?: string
-  name: string
-  safeName: string
-  command: string
-  cwd: string
-  logPath: string
-  healthUrl?: string
-  status?: ServiceStatus
-  /** Per-run allocated ports keyed by declared slot name. */
-  allocatedPorts?: Record<string, number>
-}
-
-export interface RepoBranchSnapshot {
-  name: string
-  path: string
-  branch: string | null
-  expectedBranch?: string
-  detached: boolean
-  dirty: boolean
-}
-
-export type PlaywrightScreenshotMode = 'off' | 'on' | 'only-on-failure'
-export type PlaywrightRetainedArtifactMode = 'off' | 'on' | 'on-first-retry' | 'retain-on-failure'
-
-export interface PlaywrightArtifactPolicy {
-  screenshot: PlaywrightScreenshotMode
-  video: PlaywrightRetainedArtifactMode
-  trace: PlaywrightRetainedArtifactMode
-}
-
-export type ExternalHealClientKind = ClientKind
-
-export type ExternalHealSessionStatus =
-  | 'connected'
-  | 'waiting'
-  | 'healing'
-  | 'running-tests'
-  | 'paused'
-  | 'disconnected'
-
-export interface ExternalHealSession {
-  sessionId: string
-  clientKind: ExternalHealClientKind
-  clientVersion?: string
-  conversationName?: string
-  claimedAt: string
-  lastHeartbeatAt: string
-  status: ExternalHealSessionStatus
-  cycleCount: number
-}
-
-export interface RunManifest {
-  runId: string
-  executionType?: ExecutionType
-  feature: string
-  featureDir?: string
-  env?: string
-  startedAt: string
-  endedAt?: string
-  status: RunStatus
-  healCycles: number
-  services: ServiceManifestEntry[]
-  repoPaths?: string[]
-  repoBranches?: RepoBranchSnapshot[]
-  /** Per-run git worktrees (repo name → worktree path) when isolated. */
-  worktrees?: Record<string, string>
-  /** Why a queued run is waiting. Present only while status === 'queued'. */
-  queueReason?: 'resources' | 'repo-collision'
-  playwrightArtifacts?: PlaywrightArtifactPolicy
-  signalPaths?: { rerun: string; restart: string }
-  healMode?: 'auto' | 'manual' | 'external'
-  healAgent?: 'claude' | 'codex'
-  externalHealSession?: ExternalHealSession
-  lifecycle?: RunLifecycleSnapshot
-  /** Set when a service failed to come up, so the run was declared failed and
-   *  (if heal is configured) routed into heal with the service log as context. */
-  bootFailure?: RunBootFailure
-  /** Why the auto-heal loop stopped without passing. Drives the Test Run
-   *  hero's "why heal stopped" line. Absent unless the run entered heal. */
-  healEnd?: HealEnd
-  /** The heal agent's edits captured from the per-run worktree at teardown —
-   *  what the FixesCapturedPanel surfaces (patch path, apply-locally, PR). */
-  fixCapture?: RunFixCapture
-  /** PRs opened from this run's captured fix, per repo (on-demand). */
-  proposedPrs?: RunProposedPr[]
-  verification?: VerificationRunMetadata
-}
-
-export interface RunSummaryFailedEntry {
-  id?: string
-  name: string
-  error?: { message: string; snippet?: string }
-  durationMs?: number
-  location?: string
-  locations?: string[]
-  retry?: number
-  logFiles?: string[]
-  traceSummaryFile?: string
-}
-
-export interface RunSummaryRunningStep {
-  title: string
-  category: string
-  location?: string
-  locations?: string[]
-}
-
-export interface RunSummary {
-  complete: boolean
-  total: number
-  passed: number
-  passedNames?: string[]
-  passedIds?: string[]
-  skipped?: number
-  skippedNames?: string[]
-  skippedIds?: string[]
-  knownTests?: Array<{
-    id?: string
-    name: string
-    title?: string
-    titlePath?: string[]
-    location?: string
-  }>
-  running?: { id?: string; name: string; location: string; step?: RunSummaryRunningStep }
-  runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
-  failed: RunSummaryFailedEntry[]
-}
-
-export type PlaywrightPlaybackEvent =
-  | {
-      type: 'test-begin'
-      time: string
-      test: { name: string; title: string; location: string }
-    }
-  | {
-      type: 'step-begin' | 'step-end'
-      time: string
-      test: { name: string; title: string }
-      step: RunSummaryRunningStep
-    }
-  | {
-      type: 'test-end'
-      time: string
-      test: { name: string; title: string; location: string }
-      status: string
-      passed: boolean
-      durationMs: number
-      retry: number
-      error?: { message: string; snippet?: string }
-      attachments?: Array<{ name: string; contentType?: string; path?: string }>
-    }
-
-export type PlaywrightArtifactKind = 'screenshot' | 'trace' | 'video' | 'other'
-
-export interface PlaywrightArtifact {
-  name: string
-  kind: PlaywrightArtifactKind
-  path: string
-  url: string
-  contentType?: string
-  sizeBytes: number
-  mtimeMs: number
-}
-
-export interface PlaywrightArtifactGroup {
-  testName: string
-  testTitle?: string
-  artifacts: PlaywrightArtifact[]
-}
-
-export interface RunDetail {
-  runId: string
-  manifest: RunManifest
-  summary?: RunSummary
-  playbackEvents?: PlaywrightPlaybackEvent[]
-  playwrightArtifacts?: PlaywrightArtifactGroup[]
-  lifecycleEvents?: RunLifecycleEvent[]
-}
-
-export type DraftStatus =
-  | 'created'
-  | 'planning'
-  | 'plan-ready'
-  | 'generating'
-  | 'spec-ready'
-  | 'accepted'
-  | 'rejected'
-  | 'cancelled'
-  | 'error'
-
-export type DraftSource = RunProducer
-export type ExternalDraftStage =
-  | 'scaffolding'
-  | 'authoring-tests'
-  | 'validating'
-  | 'ready'
-  | 'applied'
-  | 'error'
-
-export interface PlanStep {
-  coverageType?: string
-  step: string
-  actions: string[]
-  expectedOutcome: string
-}
-
-export interface DraftRepo {
-  name: string
-  localPath: string
-  branch?: string
-}
-
-export interface DraftRecord {
-  draftId: string
-  prdText: string
-  additionalNotes?: string
-  prdDocuments: DraftPrdDocument[]
-  repos: DraftRepo[]
-  featureName?: string
-  producer?: DraftSource
-  externalStage?: ExternalDraftStage
-  externalClientKind?: ExternalHealClientKind
-  externalSessionId?: string
-  externalConversationName?: string
-  externalSessionUrl?: string
-  intentSummary?: string
-  wizardAgent?: 'claude' | 'codex'
-  activeAgentStage?: 'planning' | 'generating'
-  planAgentSessionId?: string
-  planAgentSessionKind?: 'claude' | 'codex'
-  status: DraftStatus
-  createdAt: string
-  updatedAt: string
-  plan?: PlanStep[]
-  generatedFiles?: string[]
-  devDependencies?: string[]
-  errorMessage?: string
-  planAgentLogTail?: string
-  specAgentLogTail?: string
-}
-
-export interface DraftPrdDocument {
-  filename: string
-  contentType: string
-  characters: number
-  text?: string
-  contentBase64?: string
-}
-
-export interface CreateDraftPayload {
-  prdText: string
-  additionalNotes?: string
-  prdDocuments?: DraftPrdDocument[]
-  repos: DraftRepo[]
-  featureName?: string
-}
-
-export interface CreateDraftResponse {
-  draftId: string
-  status: DraftStatus
-}
-
-export interface AuditEntry {
-  ts: string
-  sessionId: string | null
-  clientKind: ExternalHealClientKind | null
-  action: string
-  args?: Record<string, unknown>
-  result?: Record<string, unknown>
-}
-
-export interface AuditList {
-  entries: AuditEntry[]
-}
-
-export interface JournalEntry {
-  iteration: number | null
-  timestamp: string | null
-  feature: string | null
-  run: string | null
-  outcome: string | null
-  hypothesis: string | null
-  body: string
 }
 
 // Requirement Coverage Ledger — the computed shapes are shared with the server.

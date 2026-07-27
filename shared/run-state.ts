@@ -327,6 +327,8 @@ function disabledReason(
   if (action === 'stop') return (status === 'running' || status === 'queued') ? undefined : 'Stop is available only while a run is queued or its tests are running.'
   if (action === 'cancelHeal') return status === 'healing' ? undefined : 'Cancel Heal is available only while an agent is healing.'
   if (action === 'delete') return isTerminalRunStatus(status) ? undefined : 'Delete is available after the run finishes.'
-  if (action === 'restartHeal') return isRestartableRunStatus(status) ? undefined : 'Restart Heal is available after a failed or aborted run.'
-  return undefined
+  // `restartHeal` is the last remaining member of RunActionAvailabilitySet, so
+  // it is the unconditional tail rather than one more guarded case — there is
+  // no unreachable default left behind for the coverage gate to carry.
+  return isRestartableRunStatus(status) ? undefined : 'Restart Heal is available after a failed or aborted run.'
 }

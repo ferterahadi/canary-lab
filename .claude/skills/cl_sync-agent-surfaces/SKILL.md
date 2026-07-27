@@ -37,7 +37,7 @@ families (`canary-lab`, `-run`, `-verify`, `-author`, `-coverage`, `-portify`,
 | # | Surface | Where | Owns |
 | --- | --- | --- | --- |
 | 1 | Profile instructions (`INSTRUCTIONS_BY_PROFILE`) | `apps/web-server/src/mcp/server.ts` | What a skill-less client reads at `initialize` |
-| 2 | Tool-result steering (`healWaitNext`, `bootSessionValue`, collision/queued shapes) | `apps/web-server/src/mcp/tool-support.ts` (helpers) + `tool-groups/` (call sites) | What a result-driven agent follows next |
+| 2 | Tool-result steering (`healWaitNext`, `bootSessionValue`, collision/queued shapes) | `apps/web-server/src/mcp/heal-task-wait.ts` (helpers) + `tool-groups/` (call sites) | What a result-driven agent follows next |
 | 3 | Shipped run-loop skills | `canary-lab-run/SKILL.md` in all three channels (locate them with the grep) | The full external loop: claim → wait → fix → signal |
 | 4 | Other shipped skill families | `canary-lab{,-verify,-author,-coverage,-portify,-export}/SKILL.md` | Touch only when the changed semantic is theirs — grep decides |
 

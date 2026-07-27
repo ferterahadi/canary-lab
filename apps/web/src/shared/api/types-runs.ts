@@ -1,0 +1,210 @@
+// Type definitions for the canary-lab web UI. Mirrors the server-side return
+// shapes in apps/web-server/lib/{run-store,feature-loader,journal-store}.ts.
+// Run-state primitives are shared with the server so recovery behavior has one
+// semantic model; feature/journal/wizard shapes remain web-local API mirrors.
+import type { HealEnd, RunBootFailure, RunFixCapture, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
+import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
+import type { ClientKind } from '@shared/run-mode'
+
+export interface RunIndexEntry {
+  runId: string
+  executionType?: ExecutionType
+  feature: string
+  startedAt: string
+  status: RunStatus
+  endedAt?: string
+  verificationConfigName?: string
+  verificationPlaywrightEnvsetId?: string
+  verificationTargetUrls?: Record<string, string>
+}
+
+export interface ServiceManifestEntry {
+  repoName?: string
+  name: string
+  safeName: string
+  command: string
+  cwd: string
+  logPath: string
+  healthUrl?: string
+  status?: ServiceStatus
+  /** Per-run allocated ports keyed by declared slot name. */
+  allocatedPorts?: Record<string, number>
+}
+
+export interface RepoBranchSnapshot {
+  name: string
+  path: string
+  branch: string | null
+  expectedBranch?: string
+  detached: boolean
+  dirty: boolean
+}
+
+export type PlaywrightScreenshotMode = 'off' | 'on' | 'only-on-failure'
+
+export type PlaywrightRetainedArtifactMode = 'off' | 'on' | 'on-first-retry' | 'retain-on-failure'
+
+export interface PlaywrightArtifactPolicy {
+  screenshot: PlaywrightScreenshotMode
+  video: PlaywrightRetainedArtifactMode
+  trace: PlaywrightRetainedArtifactMode
+}
+
+export type ExternalHealClientKind = ClientKind
+
+export type ExternalHealSessionStatus =
+  | 'connected'
+  | 'waiting'
+  | 'healing'
+  | 'running-tests'
+  | 'paused'
+  | 'disconnected'
+
+export interface ExternalHealSession {
+  sessionId: string
+  clientKind: ExternalHealClientKind
+  clientVersion?: string
+  conversationName?: string
+  claimedAt: string
+  lastHeartbeatAt: string
+  status: ExternalHealSessionStatus
+  cycleCount: number
+}
+
+export interface RunManifest {
+  runId: string
+  executionType?: ExecutionType
+  feature: string
+  featureDir?: string
+  env?: string
+  startedAt: string
+  endedAt?: string
+  status: RunStatus
+  healCycles: number
+  services: ServiceManifestEntry[]
+  repoPaths?: string[]
+  repoBranches?: RepoBranchSnapshot[]
+  /** Per-run git worktrees (repo name → worktree path) when isolated. */
+  worktrees?: Record<string, string>
+  /** Why a queued run is waiting. Present only while status === 'queued'. */
+  queueReason?: 'resources' | 'repo-collision'
+  playwrightArtifacts?: PlaywrightArtifactPolicy
+  signalPaths?: { rerun: string; restart: string }
+  healMode?: 'auto' | 'manual' | 'external'
+  healAgent?: 'claude' | 'codex'
+  externalHealSession?: ExternalHealSession
+  lifecycle?: RunLifecycleSnapshot
+  /** Set when a service failed to come up, so the run was declared failed and
+   *  (if heal is configured) routed into heal with the service log as context. */
+  bootFailure?: RunBootFailure
+  /** Why the auto-heal loop stopped without passing. Drives the Test Run
+   *  hero's "why heal stopped" line. Absent unless the run entered heal. */
+  healEnd?: HealEnd
+  /** The heal agent's edits captured from the per-run worktree at teardown —
+   *  what the FixesCapturedPanel surfaces (patch path, apply-locally, PR). */
+  fixCapture?: RunFixCapture
+  /** PRs opened from this run's captured fix, per repo (on-demand). */
+  proposedPrs?: RunProposedPr[]
+  verification?: VerificationRunMetadata
+}
+
+export interface RunSummaryFailedEntry {
+  id?: string
+  name: string
+  error?: { message: string; snippet?: string }
+  durationMs?: number
+  location?: string
+  locations?: string[]
+  retry?: number
+  logFiles?: string[]
+  traceSummaryFile?: string
+}
+
+export interface RunSummaryRunningStep {
+  title: string
+  category: string
+  location?: string
+  locations?: string[]
+}
+
+export interface RunSummary {
+  complete: boolean
+  total: number
+  passed: number
+  passedNames?: string[]
+  passedIds?: string[]
+  skipped?: number
+  skippedNames?: string[]
+  skippedIds?: string[]
+  knownTests?: Array<{
+    id?: string
+    name: string
+    title?: string
+    titlePath?: string[]
+    location?: string
+  }>
+  running?: { id?: string; name: string; location: string; step?: RunSummaryRunningStep }
+  runningTests?: Array<{ id?: string; name: string; location: string; step?: RunSummaryRunningStep }>
+  failed: RunSummaryFailedEntry[]
+}
+
+export type PlaywrightPlaybackEvent =
+  | {
+      type: 'test-begin'
+      time: string
+      test: { name: string; title: string; location: string }
+    }
+  | {
+      type: 'step-begin' | 'step-end'
+      time: string
+      test: { name: string; title: string }
+      step: RunSummaryRunningStep
+    }
+  | {
+      type: 'test-end'
+      time: string
+      test: { name: string; title: string; location: string }
+      status: string
+      passed: boolean
+      durationMs: number
+      retry: number
+      error?: { message: string; snippet?: string }
+      attachments?: Array<{ name: string; contentType?: string; path?: string }>
+    }
+
+export type PlaywrightArtifactKind = 'screenshot' | 'trace' | 'video' | 'other'
+
+export interface PlaywrightArtifact {
+  name: string
+  kind: PlaywrightArtifactKind
+  path: string
+  url: string
+  contentType?: string
+  sizeBytes: number
+  mtimeMs: number
+}
+
+export interface PlaywrightArtifactGroup {
+  testName: string
+  testTitle?: string
+  artifacts: PlaywrightArtifact[]
+}
+
+export interface RunDetail {
+  runId: string
+  manifest: RunManifest
+  summary?: RunSummary
+  playbackEvents?: PlaywrightPlaybackEvent[]
+  playwrightArtifacts?: PlaywrightArtifactGroup[]
+  lifecycleEvents?: RunLifecycleEvent[]
+}
+
+export interface JournalEntry {
+  iteration: number | null
+  timestamp: string | null
+  feature: string | null
+  run: string | null
+  outcome: string | null
+  hypothesis: string | null
+  body: string
+}

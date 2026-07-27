@@ -408,7 +408,11 @@ export interface PlanFeaturesTask {
  *  surfaces derive identical names (basename → lowercase → non-alphanumerics
  *  collapsed to '-'). */
 export function deriveFeatureSlug(repoPath: string): string {
-  const base = repoPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? 'feature'
+  // `split` always yields at least one element (`''.split(/x/)` is `['']`), so
+  // the last segment is a string even for an empty or all-separator path — the
+  // `|| 'feature'` on the way out is the only fallback this needs.
+  const segments = repoPath.replace(/[\\/]+$/, '').split(/[\\/]/)
+  const base = segments[segments.length - 1]
   const slug = base.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
   return slug || 'feature'
 }

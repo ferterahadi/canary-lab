@@ -14,6 +14,18 @@ describe('formatCodeForDisplay', () => {
     expect(formatCodeForDisplay("import { test } from '@playwright/test'\n\ntest('x', async ({ page }) => { await page.goto('/') })")).toBe(`import { test } from '@playwright/test';
 test('x', async ({ page }) => { await page.goto('/'); });`)
   })
+
+  it('returns an empty string for blank source', () => {
+    expect(formatCodeForDisplay('   \n\t\n  ')).toBe('')
+  })
+
+  it('falls back to the raw source when the printer emits nothing', () => {
+    // A comment-only snippet parses to zero statements, so `printList` has
+    // nothing to print and returns ''. Handing back the empty string would
+    // silently blank the snippet in the report, so the raw source wins.
+    const commentOnly = '// only a comment, no statements'
+    expect(formatCodeForDisplay(commentOnly)).toBe(commentOnly)
+  })
 })
 
 describe('formatSourceSnippetForDisplay', () => {
@@ -32,4 +44,5 @@ describe('formatSourceSnippetForDisplay', () => {
   it('leaves a single-line body untouched', () => {
     expect(formatSourceSnippetForDisplay('{ const x = 1; expect(x).toBe(1) }')).toBe('{ const x = 1; expect(x).toBe(1) }')
   })
+
 })

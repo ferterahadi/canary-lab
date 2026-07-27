@@ -151,6 +151,45 @@ describe('FileBackedTaskStore', () => {
     expect(() => store.transition('a', 'created')).toThrow(IllegalTaskTransitionError)
   })
 
+  it('allows any transition when the store declares no state machine', () => {
+    // `allowedTransitions` is optional; a store without one is a plain status
+    // setter, so an otherwise-illegal-looking move must go through.
+    const store = new FileBackedTaskStore<Rec>({
+      logsDir: dir,
+      dirName: 'freeform',
+      recordFile: 'record.json',
+      idOf: (r) => r.id,
+      indexEntryOf: (r) => ({ id: r.id, status: r.status, feature: r.feature, createdAt: r.createdAt }),
+    })
+    store.save({ id: 'a', status: 'done', feature: 'f', createdAt: '2026-01-01' })
+    expect(store.transition('a', 'created').status).toBe('created')
+    expect(store.get('a')!.status).toBe('created')
+  })
+
+  it('transition throws a locating error when the record is gone', () => {
+    // Distinct from IllegalTaskTransitionError on purpose: the caller can retry
+    // an illegal move, but a missing record means the id itself is wrong.
+    const store = makeStore(dir)
+    expect(() => store.transition('nope', 'running')).toThrow('record not found: nope')
+    expect(() => store.transition('nope', 'running')).not.toThrow(IllegalTaskTransitionError)
+  })
+
+  it('rejects every transition when transitions are declared without statusOf', () => {
+    // Without `statusOf` the current state reads as '', which no transition map
+    // lists — so the guard closes rather than silently allowing anything. A
+    // store that declares a state machine must also say how to read the state.
+    const store = new FileBackedTaskStore<Rec>({
+      logsDir: dir,
+      dirName: 'guarded',
+      recordFile: 'record.json',
+      idOf: (r) => r.id,
+      indexEntryOf: (r) => ({ id: r.id, status: r.status, feature: r.feature, createdAt: r.createdAt }),
+      allowedTransitions: { created: ['running'] },
+    })
+    store.save({ id: 'a', status: 'created', feature: 'f', createdAt: '2026-01-01' })
+    expect(() => store.transition('a', 'running')).toThrow(IllegalTaskTransitionError)
+  })
+
   it('patch merges fields and persists', () => {
     const store = makeStore(dir)
     store.save({ id: 'a', status: 'created', feature: 'f', createdAt: '2026-01-01' })
@@ -193,6 +232,80 @@ describe('FileBackedTaskStore', () => {
     expect(() => store.list()).not.toThrow()
   })
 
+  it('sinks undated legacy rows below dated ones, whichever side of the compare they land on', () => {
+    // Two undated rows bracketing the dated ones so the comparator sees a
+    // missing `createdAt` as both operands; the dated rows must still come
+    // back newest-first rather than being reordered by the fallback.
+    const store = makeStore(dir)
+    store.save({ id: 'a', status: 'done', feature: 'f', createdAt: '2026-01-02' })
+    store.save({ id: 'b', status: 'done', feature: 'f', createdAt: '2026-01-03' })
+    const indexPath = path.join(dir, 'widgets', 'index.json')
+    const rows = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+    rows.unshift({ jobId: 'legacy-first', status: 'done', feature: 'f' })
+    rows.push({ jobId: 'legacy-last', status: 'done', feature: 'f' })
+    fs.writeFileSync(indexPath, JSON.stringify(rows))
+
+    const listed = store.list()
+    expect(listed).toHaveLength(4)
+    expect(listed.slice(0, 2).map((e) => e.id)).toEqual(['b', 'a'])
+  })
+
+  it('reconcileInterrupted is a no-op for a store with no reconcile config', () => {
+    const store = new FileBackedTaskStore<Rec>({
+      logsDir: dir,
+      dirName: 'plain',
+      recordFile: 'record.json',
+      idOf: (r) => r.id,
+      indexEntryOf: (r) => ({ id: r.id, status: r.status, feature: r.feature, createdAt: r.createdAt }),
+    })
+    store.save({ id: 'a', status: 'running', feature: 'f', createdAt: '2026-01-01' })
+    store.reconcileInterrupted(() => '2026-02-02')
+    expect(store.get('a')!.status).toBe('running')
+  })
+
+  it('runs an untrusted record through the configured validator', () => {
+    // `validate` is the seam that keeps a hand-edited or half-written record
+    // from reaching callers as a typed value; returning null must read as "no
+    // record" rather than surfacing the raw JSON.
+    const store = new FileBackedTaskStore<Rec>({
+      logsDir: dir,
+      dirName: 'validated',
+      recordFile: 'record.json',
+      idOf: (r) => r.id,
+      indexEntryOf: (r) => ({ id: r.id, status: r.status, feature: r.feature, createdAt: r.createdAt }),
+      validate: (raw) => {
+        const rec = raw as Partial<Rec>
+        return typeof rec.status === 'string' ? (raw as Rec) : null
+      },
+    })
+    store.save({ id: 'good', status: 'done', feature: 'f', createdAt: '2026-01-01' })
+    expect(store.get('good')).toMatchObject({ status: 'done' })
+
+    fs.writeFileSync(
+      path.join(dir, 'validated', 'good', 'record.json'),
+      JSON.stringify({ id: 'good', feature: 'f', createdAt: '2026-01-01' }),
+    )
+    expect(store.get('good')).toBeNull()
+  })
+
+  it('treats an index file holding a non-array as empty', () => {
+    const store = makeStore(dir)
+    store.save({ id: 'a', status: 'done', feature: 'f', createdAt: '2026-01-01' })
+    fs.writeFileSync(path.join(dir, 'widgets', 'index.json'), JSON.stringify({ rows: [] }))
+    expect(store.list()).toEqual([])
+  })
+
+  it('offEvent stops a listener from receiving further events', () => {
+    const store = makeStore(dir)
+    const seen: string[] = []
+    const listener = (event: { kind: string }): void => { seen.push(event.kind) }
+    store.onEvent(listener)
+    store.save({ id: 'a', status: 'created', feature: 'f', createdAt: '2026-01-01' })
+    store.offEvent(listener)
+    store.save({ id: 'b', status: 'created', feature: 'f', createdAt: '2026-01-02' })
+    expect(seen).toEqual(['changed'])
+  })
+
   describe('renameFeature', () => {
     it('rewrites the feature on every matching record and index row, leaving others alone', () => {
       const store = makeStore(dir)
@@ -206,6 +319,21 @@ describe('FileBackedTaskStore', () => {
       expect(store.get('c')).toMatchObject({ feature: 'new' })
       expect(store.get('b')).toMatchObject({ feature: 'other' })
       expect(store.list().map((e) => e.feature).sort()).toEqual(['new', 'new', 'other'])
+    })
+
+    it('skips legacy index rows that carry no resolvable id', () => {
+      // Same legacy shape reconcileInterrupted guards against: an unkeyed row
+      // has no record to load, so renaming must step over it rather than
+      // path.join(undefined,…) and take the whole rename down with it.
+      const store = makeStore(dir)
+      store.save({ id: 'a', status: 'done', feature: 'old', createdAt: '2026-01-01' })
+      const indexPath = path.join(dir, 'widgets', 'index.json')
+      const rows = JSON.parse(fs.readFileSync(indexPath, 'utf8'))
+      rows.push({ jobId: 'legacy', status: 'done', feature: 'old' })
+      fs.writeFileSync(indexPath, JSON.stringify(rows))
+
+      expect(store.renameFeature('old', 'new')).toBe(1)
+      expect(store.get('a')).toMatchObject({ feature: 'new' })
     })
 
     it('is a no-op when the store carries no feature, or from === to', () => {

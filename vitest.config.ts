@@ -60,6 +60,8 @@ export default defineConfig({
           ],
           exclude: [
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
+            // Needs real localStorage, not a stub — see the dom project below.
+            'apps/web/src/features/flights/lib/group-open-state.test.ts',
           ],
           environment: 'node',
         },
@@ -72,6 +74,7 @@ export default defineConfig({
           include: [
             'apps/web/**/*.test.tsx',
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
+            'apps/web/src/features/flights/lib/group-open-state.test.ts',
           ],
           environment: 'happy-dom',
         },
@@ -92,6 +95,28 @@ export default defineConfig({
         'apps/web-server/src/features/**/logic/**/*.ts',
         'apps/web-server/src/features/**/routes/**/*.ts',
         'apps/web-server/src/shared/**/*.ts',
+        // Cross-cutting root `shared/` tree: consumed by the CLI, the server and
+        // the web app alike, and published as `canary-lab/feature-support/*`.
+        //
+        // Enumerated per subtree rather than written as `shared/**/*.ts`, because
+        // these patterns are matched UNANCHORED against every file a test loads —
+        // and `*.ts` also matches `.tsx`. A bare `shared/**/*.ts` therefore also
+        // swallows `apps/web/src/shared/**`, dragging ~25 React components into
+        // the gate. None of the names below collide with a component directory.
+        'shared/cli-ui/**/*.ts',
+        'shared/configs/**/*.ts',
+        'shared/coverage/**/*.ts',
+        'shared/e2e-runner/**/*.ts',
+        'shared/flights/**/*.ts',
+        'shared/launcher/**/*.ts',
+        'shared/lib/**/*.ts',
+        'shared/runtime/**/*.ts',
+        'shared/code-display-format.ts',
+        'shared/feature-scaffold.ts',
+        'shared/portify-overlay.ts',
+        'shared/run-mode.ts',
+        'shared/run-state.ts',
+        'shared/verification.ts',
         // Frontend pure modules. React components are excluded — only the
         // API client, pure utilities, and benchmark state are gated.
         'apps/web/src/shared/api/**/*.ts',
@@ -121,7 +146,32 @@ export default defineConfig({
         // runs orchestrator: killTree numeric-signal arm, `'completed'` lifecycle
         //   fallthrough, non-finite-startedAt tag, spawn-failed null-pty return,
         //   plus mid-heal-loop cancel paths only reachable via racy timing.
+        //   The 2,684-line file became a 487-line class over ./run-context plus
+        //   ten run-* modules, so this entry follows the arms into the modules
+        //   that actually hold them instead of hiding the whole run loop:
         'apps/web-server/src/features/runs/logic/runtime/orchestrator.ts',
+        //   the cancel/abort races — the loop checks `healCancelled` and
+        //   `stopped` between every await, and a test cannot land inside those
+        //   windows deterministically
+        'apps/web-server/src/features/runs/logic/runtime/run-heal-loop.ts',
+        'apps/web-server/src/features/runs/logic/runtime/run-heal-controls.ts',
+        //   spawn-failed null-pty return + the idle/hard-timeout arms of the
+        //   signal wait, which are wall-clock races against a live REPL
+        'apps/web-server/src/features/runs/logic/runtime/run-heal-agent.ts',
+        //   non-finite-startedAt tag + the `'completed'` lifecycle fallthrough
+        'apps/web-server/src/features/runs/logic/runtime/run-manifest-writer.ts',
+        //   partial-apply reversal of an overlay whose `git apply` failed
+        //   mid-repo, and the worktree-less in-place shapes
+        'apps/web-server/src/features/runs/logic/runtime/run-fix-capture.ts',
+        //   artifact-policy arms that need a real Playwright artifact tree
+        'apps/web-server/src/features/runs/logic/runtime/run-playwright.ts',
+        //   health-probe shapes that need a service that half-boots
+        'apps/web-server/src/features/runs/logic/runtime/run-service-boot.ts',
+        // NOTE: run-context.ts and service-specs.ts came out of the same split
+        //   and are NOT excluded — the defaults and the port-slot builders were
+        //   unreachable only because the class hid them, and both got real
+        //   tests (run-context.test.ts, service-specs.test.ts) once they were
+        //   modules. ~360 lines of the old orchestrator joined the gate.
         // NOTE: benchmark/logic/runtime/runner.ts and
         //   evaluation/logic/test-review-export.ts used to be listed here. Both
         //   are now fully gated: the unreachable arms were removed at the source
@@ -129,11 +179,23 @@ export default defineConfig({
         //   rewrite passed in rather than re-derived) and the rest turned out to
         //   be reachable and got real tests. Deleting the arm beats excluding
         //   the file.
-        // feature-config route: value-type guards against a non-object config
-        //   (readFeatureConfig always yields a plain object) + the `isWithin`
-        //   path-traversal guards the slot-name regex already makes unreachable
-        //   (defence-in-depth kept on purpose).
-        'apps/web-server/src/features/config/routes/feature-config.ts',
+        // NOTE: config/routes/feature-config.ts used to be listed here for
+        //   value-type guards against a non-object config plus the `isWithin`
+        //   path-traversal guards. Splitting the 863-line route function into
+        //   feature-config-doc / playwright-config-routes / envset-routes /
+        //   workspace-fs-routes put all four in the gate at 100% — the arms the
+        //   exclusion was protecting turned out to be reachable once each route
+        //   group was measured on its own. ~880 lines joined the gate.
+        //   Those same two arm kinds now also live in the modules that
+        //   `feature-config.ts` was split into, so the entry follows them —
+        //   `feature-config-doc.ts` (non-object config guard on the
+        //   pin-branches route), `feature-config-support.ts` (the same guard in
+        //   `syncEnvsInConfig`), and `envset-routes.ts` (two `isWithin` slot-path
+        //   guards). Everything reachable in those files IS tested, including the
+        //   flight-handoff arms added alongside this entry.
+        'apps/web-server/src/features/config/routes/feature-config-doc.ts',
+        'apps/web-server/src/features/config/routes/feature-config-support.ts',
+        'apps/web-server/src/features/config/routes/envset-routes.ts',
         // env-switcher CLI: only the `require.main === module` boot shim is
         //   uncovered (never true under import); the exports are fully tested.
         'apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts',

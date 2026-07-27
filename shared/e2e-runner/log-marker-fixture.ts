@@ -99,10 +99,23 @@ const LOCATOR_RETURNING = new Set([
   'frame',
 ])
 
-interface CallSiteFrame { file: string; line: number; column: number }
+export interface CallSiteFrame { file: string; line: number; column: number }
+
+/** How `wrapWithCallSite` reports a located step. Passed in rather than reached
+ *  for, because `test.step` only works inside a running Playwright worker —
+ *  that runner context is the one edge a unit test cannot reproduce, so it is
+ *  the only thing the tests substitute. */
+export type CallSiteStep = (
+  title: string,
+  body: () => unknown,
+  options: { location: CallSiteFrame },
+) => unknown
 
 function captureFrame(testFile: string): CallSiteFrame | null {
-  const stack = new Error().stack ?? ''
+  // V8 always populates `stack`. Coercing rather than defaulting keeps the
+  // undefined case handled (it splits to a single unmatchable line, so the
+  // walk returns null) without leaving a fallback branch nothing can take.
+  const stack = String(new Error().stack)
   for (const raw of stack.split('\n').slice(1)) {
     const m = raw.match(/\(([^()]+):(\d+):(\d+)\)/) ?? raw.match(/at\s+([^\s:]+):(\d+):(\d+)/)
     if (m && m[1] === testFile) {
@@ -121,9 +134,10 @@ function isThenable(value: unknown): value is Promise<unknown> {
 // that location. Playwright then sees the pw:api step it would already emit
 // as a *child* of our step, so walking `step.parent` in the summary reporter
 // surfaces the call site in the user's spec.
-function wrapWithCallSite<T extends object>(
+export function wrapWithCallSite<T extends object>(
   target: T,
   testFile: string,
+  step: CallSiteStep,
   inheritedFrame?: CallSiteFrame,
 ): T {
   return new Proxy(target, {
@@ -141,10 +155,10 @@ function wrapWithCallSite<T extends object>(
             typeof result === 'object' &&
             !isThenable(result)
           ) {
-            return wrapWithCallSite(result as object, testFile, frame ?? inheritedFrame)
+            return wrapWithCallSite(result as object, testFile, step, frame ?? inheritedFrame)
           }
           if (frame && isThenable(result)) {
-            return test.step(`page.${methodName}`, () => result, { location: frame })
+            return step(`page.${methodName}`, () => result, { location: frame })
           }
           return result
         },
@@ -166,20 +180,57 @@ function wrapWithCallSite<T extends object>(
  *
  * https://playwright.dev/docs/extensibility
  */
+/** The `page` fixture body, named so it can be driven directly with fakes.
+ *  Hands the test a call-site-wrapping proxy, then screenshots the REAL page
+ *  (not the proxy) once the test body has finished with it. */
+export async function pageFixture(
+  page: Page,
+  use: (wrapped: Page) => Promise<void>,
+  testInfo: TestInfo,
+  step: CallSiteStep,
+): Promise<void> {
+  const wrapped = wrapWithCallSite(page, testInfo.file, step) as Page
+  await use(wrapped)
+  await captureFinalPageScreenshot(page, testInfo)
+}
+
+/** The auto `_logMarker` fixture body, named for the same reason. */
+export async function logMarkerFixture(
+  use: (value: never) => Promise<void>,
+  testInfo: Pick<TestInfo, 'title'>,
+  manifestPath: string = MANIFEST_PATH,
+): Promise<void> {
+  await withLogMarkers(testInfo.title, manifestPath, async () => {
+    await use(undefined as never)
+  })
+}
+
+/** Production step runner. Playwright's `test.step` only resolves inside a
+ *  running worker, so this is the single line the unit tests substitute — they
+ *  assert it delegates rather than trying to reproduce a worker. */
+export const playwrightStep: CallSiteStep = (title, body, options) => test.step(title, body, options)
+
+/** `base.extend` wiring, named rather than inline so the fixtures are ordinary
+ *  callable functions in a unit test instead of values only Playwright can reach. */
+export async function pageFixtureEntry(
+  { page }: { page: Page },
+  use: (wrapped: Page) => Promise<void>,
+  testInfo: TestInfo,
+): Promise<void> {
+  await pageFixture(page, use, testInfo, playwrightStep)
+}
+
+export async function logMarkerFixtureEntry(
+  _fixtures: unknown,
+  use: (value: never) => Promise<void>,
+  testInfo: TestInfo,
+): Promise<void> {
+  await logMarkerFixture(use, testInfo)
+}
+
 export const test = base.extend<{ _logMarker: void }>({
-  page: async ({ page }, use, testInfo) => {
-    const wrapped = wrapWithCallSite(page, testInfo.file) as Page
-    await use(wrapped)
-    await captureFinalPageScreenshot(page, testInfo)
-  },
-  _logMarker: [
-    async ({}, use, testInfo) => {
-      await withLogMarkers(testInfo.title, MANIFEST_PATH, async () => {
-        await use(undefined as never)
-      })
-    },
-    { auto: true },
-  ],
+  page: pageFixtureEntry,
+  _logMarker: [logMarkerFixtureEntry, { auto: true }],
 })
 
 export { expect, type APIRequestContext, type Page } from '@playwright/test'

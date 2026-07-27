@@ -33,7 +33,8 @@ const ROOTS = ['apps', 'shared', 'tools']
 
 // Coverage-gate floor. Percentage alone does not prove scope: a file lifted out
 // of the gate keeps it at 100% while covering less. Raise this when it grows.
-const MIN_GATED_FILES = 187
+// 187 → 210 when the root `shared/` tree (23 files) joined the gate.
+const MIN_GATED_FILES = 210
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']
@@ -60,7 +61,7 @@ const BASELINE = {
   // a 530-line file out of the gate to excuse four lines.
   'no-v8-ignore': new Map([
     ['apps/web-server/src/features/config/logic/feature-authoring.ts', '4 pragmas — 3 isWithin path-traversal guards behind sanitizeSlotName/validateGeneratedSpecFiles, 1 non-object-config guard the AST locator cannot produce'],
-    ['apps/web-server/src/features/runs/logic/runtime/trace-enrichment.ts', '1 pragma — corrupt-install branch; reachable with a mocked fs, so this one is real debt'],
+    ['apps/web-server/src/features/runs/logic/runtime/trace-cli.ts', '1 pragma — corrupt-install branch; reachable with a mocked fs, so this one is real debt. Moved here from trace-enrichment.ts when the CLI shell was split out; the debt did not change, only its file'],
   ]),
   'no-console': new Map([
     ['apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts', 'is itself a CLI entry point'],

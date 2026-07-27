@@ -15,6 +15,14 @@ describe('parseSemver', () => {
     expect(parseSemver(null)).toBeNull()
     expect(parseSemver(undefined)).toBeNull()
   })
+  it('returns null when a triple has the right shape but non-integer parts', () => {
+    // Shape and value are separate rejections: '1.x.0' survives the
+    // three-segment check and is only caught by the integer test, so a
+    // regression there would let NaN through into the comparison.
+    expect(parseSemver('1.x.0')).toBeNull()
+    expect(parseSemver('1.-2.0')).toBeNull()
+    expect(parseSemver('1.4.0.5')).toEqual({ major: 1, minor: 4, patch: 0 })
+  })
 })
 
 describe('compareSemver', () => {
@@ -29,6 +37,10 @@ describe('compareSemver', () => {
   })
   it('treats unparseable versions as equal', () => {
     expect(compareSemver('latest', '1.0.0')).toBe(0)
+  })
+  it('orders greater-than in each position, not just less-than', () => {
+    expect(compareSemver('2.0.0', '1.0.0')).toBe(1)
+    expect(compareSemver('1.4.2', '1.4.1')).toBe(1)
   })
 })
 
@@ -67,5 +79,37 @@ describe('fetchLatestVersion', () => {
   it('returns null when the body has no version string', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: 42 }) }) as unknown as typeof fetch
     expect(await fetchLatestVersion('canary-lab', { fetchImpl })).toBeNull()
+  })
+  it('falls back to the global fetch when no impl is injected', async () => {
+    const globalFetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: '9.0.1' }) })
+    vi.stubGlobal('fetch', globalFetch)
+    try {
+      expect(await fetchLatestVersion('canary-lab')).toBe('9.0.1')
+      expect(globalFetch).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('returns null on a runtime with no fetch at all', async () => {
+    vi.stubGlobal('fetch', undefined)
+    try {
+      expect(await fetchLatestVersion('canary-lab')).toBeNull()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('aborts and reports null once the timeout elapses', async () => {
+    // Drives the real timer rather than asserting the callback exists: the
+    // request must be abandoned and the result must stay fail-silent, so a
+    // registry hang can never block startup.
+    let aborted = false
+    const fetchImpl = vi.fn((_url: string, init?: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        aborted = true
+        reject(new Error('aborted'))
+      })
+    })) as unknown as typeof fetch
+    expect(await fetchLatestVersion('canary-lab', { fetchImpl, timeoutMs: 1 })).toBeNull()
+    expect(aborted).toBe(true)
   })
 })

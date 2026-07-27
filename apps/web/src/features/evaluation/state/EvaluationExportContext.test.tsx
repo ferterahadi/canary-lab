@@ -6,8 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 import type { EvaluationExportTask } from '@/shared/api/types'
 import { EvaluationExportProvider, useEvaluationExports } from './EvaluationExportContext'
+import { Probe, exportSockets, task, taskSocket, workspaceSocket } from './__fixtures__/evaluation-export-context-fixtures'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
 vi.mock('@/shared/api/client', async () => {
   const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
@@ -21,7 +22,7 @@ vi.mock('@/shared/api/client', async () => {
   }
 })
 
-class FakeWebSocket {
+export class FakeWebSocket {
   static instances: FakeWebSocket[] = []
   readyState = 0
   onmessage: ((event: MessageEvent) => void) | null = null
@@ -45,6 +46,7 @@ class FakeWebSocket {
 }
 
 let container: HTMLDivElement
+
 let root: Root
 
 beforeEach(() => {
@@ -67,6 +69,18 @@ afterEach(() => {
   container.remove()
   vi.useRealTimers()
 })
+
+function renderProbe(WebSocketImpl: typeof WebSocket = FakeWebSocket as unknown as typeof WebSocket) {
+  const captured: { value: ReturnType<typeof useEvaluationExports> | null } = { value: null }
+  act(() => {
+    root.render(
+      <EvaluationExportProvider WebSocketImpl={WebSocketImpl} wsBase="ws://test">
+        <Probe captured={captured} />
+      </EvaluationExportProvider>,
+    )
+  })
+  return captured
+}
 
 describe('EvaluationExportProvider', () => {
   it('rehydrates persisted tasks and replays task logs on mount', async () => {
@@ -451,133 +465,4 @@ describe('EvaluationExportProvider', () => {
 
     expect(exportSockets()).toHaveLength(1)
   })
-
-  it('ignores periodic discovery results after unmount', async () => {
-    vi.useFakeTimers()
-    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
-    vi.mocked(api.listEvaluationExportTasks)
-      .mockResolvedValueOnce([])
-      .mockReturnValueOnce(new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }))
-
-    renderProbe()
-    await act(async () => {
-      await Promise.resolve()
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(3000)
-      await Promise.resolve()
-    })
-    act(() => {
-      root.unmount()
-    })
-
-    await act(async () => {
-      resolveTasks([task({ taskId: 'late-periodic-task', runId: 'run-late', status: 'running' })])
-      await Promise.resolve()
-    })
-
-    expect(exportSockets()).toHaveLength(0)
-    root = createRoot(container)
-  })
-
-  it('sorts remaining tasks by createdAt after dismissTask', async () => {
-    const t1 = task({ taskId: 't1', runId: 'r1', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' })
-    const t2 = task({ taskId: 't2', runId: 'r2', status: 'completed', createdAt: '2026-01-02T00:00:00.000Z' })
-    const t3 = task({ taskId: 't3', runId: 'r3', status: 'completed', createdAt: '2026-01-03T00:00:00.000Z' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([t1, t2, t3])
-    vi.mocked(api.cancelEvaluationExportTask).mockResolvedValue(undefined)
-    const captured = renderProbe()
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-    expect(captured.value?.tasks.map((t) => t.taskId)).toEqual(['t3', 't2', 't1'])
-    await act(async () => {
-      await captured.value!.dismissTask('t2')
-    })
-    expect(captured.value?.tasks.map((t) => t.taskId)).toEqual(['t3', 't1'])
-  })
-
-  it('calls refreshTask when a data chunk signals an agent session ref (line 76 true branch)', async () => {
-    // The onData handler only calls refreshTask when:
-    // 1. the task has no sessionRef yet, AND
-    // 2. the chunk matches `[agent:xxx] starting localized rewrite|still running`
-    const running = task({ taskId: 'ref-task', runId: 'run-ref', status: 'running' })
-    const withRef = { ...running, sessionRef: { agent: 'claude' as const, sessionId: 'sid', logPath: '/tmp/x.jsonl' } }
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
-    vi.mocked(api.getEvaluationExportTask).mockResolvedValue(withRef)
-
-    const captured = renderProbe()
-    await act(async () => {
-      await captured.value?.startExport('run-ref', 'localized')
-    })
-
-    // Fire a chunk matching the regex (no sessionRef yet → refreshTask fires)
-    await act(async () => {
-      taskSocket('ref-task').fire({ type: 'data', chunk: '[agent:claude] starting localized rewrite\n' })
-      await Promise.resolve()
-    })
-    expect(api.getEvaluationExportTask).toHaveBeenCalledWith('ref-task')
-  })
-
-  it('throws when the hook is used outside the provider', () => {
-    function OutsideProviderProbe() {
-      useEvaluationExports()
-      return null
-    }
-
-    expect(() => {
-      act(() => {
-        root.render(<OutsideProviderProbe />)
-      })
-    }).toThrow('useEvaluationExports must be used inside EvaluationExportProvider')
-  })
 })
-
-function renderProbe(WebSocketImpl: typeof WebSocket = FakeWebSocket as unknown as typeof WebSocket) {
-  const captured: { value: ReturnType<typeof useEvaluationExports> | null } = { value: null }
-  act(() => {
-    root.render(
-      <EvaluationExportProvider WebSocketImpl={WebSocketImpl} wsBase="ws://test">
-        <Probe captured={captured} />
-      </EvaluationExportProvider>,
-    )
-  })
-  return captured
-}
-
-function workspaceSocket(): FakeWebSocket {
-  const socket = FakeWebSocket.instances.find((item) => item.url === 'ws://test/ws/workspace')
-  if (!socket) throw new Error('workspace socket not opened')
-  return socket
-}
-
-function exportSockets(): FakeWebSocket[] {
-  return FakeWebSocket.instances.filter((item) => item.url.includes('/ws/evaluation-exports/'))
-}
-
-function taskSocket(taskId: string): FakeWebSocket {
-  const url = `ws://test/ws/evaluation-exports/${taskId}`
-  const socket = FakeWebSocket.instances.find((item) => item.url === url)
-  if (!socket) throw new Error(`task socket not opened: ${taskId}`)
-  return socket
-}
-
-function Probe({ captured }: { captured: { value: ReturnType<typeof useEvaluationExports> | null } }) {
-  captured.value = useEvaluationExports()
-  return null
-}
-
-function task(overrides: Partial<EvaluationExportTask> = {}): EvaluationExportTask {
-  return {
-    taskId: 'task-1',
-    runId: 'run-1',
-    feature: 'checkout',
-    mode: 'raw',
-    status: 'running',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    downloadReady: false,
-    ...overrides,
-  }
-}

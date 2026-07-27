@@ -85,15 +85,16 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
   // different files stay as separate entries — the export HTML disambiguates
   // them via positional anchor IDs. Map preserves first-seen identity order,
   // last write wins so the latest attempt is kept.
-  const latestKeyByIdentity = new Map<string, string>()
+  // Carries the test alongside its key: every entry here comes straight out of
+  // `tests`, so re-looking it up afterwards only added a `has`/`get` pair whose
+  // miss arm nothing could reach.
+  const latestByIdentity = new Map<string, { key: string; test: PlaybackTest }>()
   for (const [key, test] of tests.entries()) {
     const file = parseLocation(locationByKey.get(key))?.file ?? ''
     const identity = `${test.name}@${file}`
-    latestKeyByIdentity.set(identity, key)
+    latestByIdentity.set(identity, { key, test })
   }
-  return [...latestKeyByIdentity.values()]
-    .map((key) => (tests.has(key) ? { key, test: tests.get(key)! } : null))
-    .filter((entry): entry is { key: string; test: PlaybackTest } => entry !== null)
+  return [...latestByIdentity.values()]
     .map(({ key, test }) => ({
       ...test,
       location: test.location ?? locationByKey.get(key),

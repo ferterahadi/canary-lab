@@ -61,6 +61,35 @@ describe('deriveFeatureActivity', () => {
     expect(map.get('c')).toEqual({ kind: 'authoring', draftId: 'd-c' })
   })
 
+  it('marks a feature with a running evaluation export as exporting', () => {
+    const map = deriveFeatureActivity({
+      activeRuns: [],
+      portifyWorkflows: [],
+      drafts: [],
+      exportTasks: [
+        { taskId: 't-a', runId: 'r-a', feature: ' checkout ', status: 'running' },
+        // A settled export is not activity — the pill would otherwise never
+        // stop spinning after the first successful export.
+        { taskId: 't-b', runId: 'r-b', feature: 'billing', status: 'completed' },
+        // No feature to pin it to.
+        { taskId: 't-c', runId: 'r-c', feature: '   ', status: 'running' },
+      ] as never,
+    })
+    expect(map.get('checkout')).toEqual({ kind: 'exporting', taskId: 't-a', runId: 'r-a' })
+    expect(map.get('billing')).toBeUndefined()
+    expect(map.size).toBe(1)
+  })
+
+  it('a live run outranks an export on the same feature', () => {
+    const map = deriveFeatureActivity({
+      activeRuns: [run({ feature: 'checkout', runId: 'r-live' })],
+      portifyWorkflows: [],
+      drafts: [],
+      exportTasks: [{ taskId: 't-a', runId: 'r-a', feature: 'checkout', status: 'running' }] as never,
+    })
+    expect(map.get('checkout')).toEqual({ kind: 'running', runId: 'r-live' })
+  })
+
   it('one verb per feature, loudest wins: running > portifying > authoring', () => {
     const map = deriveFeatureActivity({
       activeRuns: [run({})],

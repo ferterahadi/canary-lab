@@ -1,0 +1,321 @@
+import type { FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import { AgentSessionView, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
+import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
+import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
+import type { FlightLauncherIntent } from '@/shared/state/nav-state'
+import type { ConfigTab } from '@/shared/lib/workspace-view-state'
+import { FactsGrid, STAGE_BLURB, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageLabel, stageStateLine, type StageRailRow } from './stage-meta'
+import { CheckpointControls, DownloadEvaluationAction } from './CheckpointControls'
+import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
+import type { FlightDrillThroughs } from './FlightPage'
+import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
+import { SpecsPassTimeline, StageActivity, truncate } from './StageActivity'
+
+export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate } from './StageActivity'
+
+// One uniform stage template (R20). Every stage renders the SAME skeleton —
+// nothing stage-shaped leaks into the layout:
+//   1. label + status chip + the one primary affordance (drill-through)
+//   2. state line — one plain sentence
+//   3. facts — the 2–4 things the user cares about at this stage (FactsGrid)
+//   4. checkpoint / error, when the stage needs the user
+//   5. the activity band (R66): ONE chronological story — the conductor's
+//      tagged lines, the agent timeline (AgentSessionView) embedded where the
+//      agent worked, the wrap-up lines after. Expanded while the stage works;
+//      one "▸ View activity" disclosure once it settles.
+export function StageDetail({
+  flightId,
+  flight,
+  row,
+  stage,
+  companion,
+  runLive,
+  onResponded,
+  onActionError,
+  onStartFlight,
+  onOpenConfig,
+  configRefreshKey,
+  docsRefreshKey,
+  drill,
+}: {
+  flightId: string
+  flight: FlightManifest
+  row: StageRailRow
+  stage: FlightStage
+  /** The folded half of a pair-merged row (heal / env-capture / prd-summary). */
+  companion: FlightStage | null
+  /** A run for this feature is live right now (R64) — the run row polls. */
+  runLive?: boolean
+  onResponded: () => void
+  /** R71/W1: run-control failures surface on the header's inline error line. */
+  onActionError?: (msg: string) => void
+  /** R75: the Repo scan panel's "Change…" → launcher handoff. */
+  onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
+  onOpenConfig?: (feature: string, tab?: ConfigTab) => void
+  configRefreshKey?: number
+  docsRefreshKey?: number
+  drill: FlightDrillThroughs
+}) {
+  // R27: the specs↔coverage loop runs TWO agents per pass — the authoring
+  // agent (sidecar `specs-coverage`) and the mapping agent (`coverage-map`).
+  // The live view follows whichever half of the loop is working now.
+  const loopProgress = specsCoverageProgress(stage)
+  const agentDir =
+    loopProgress && stage.status === 'running' && loopProgress.phase === 'mapping'
+      ? 'coverage-map'
+      // The merged Requirements row has TWO possible agents: the docs
+      // collector (R74) while its own half is open, then the folded
+      // prd-summary's distiller once docs settle.
+      : stage.key === 'docs' && (stage.status === 'running' || stage.status === 'waiting-for-approval')
+        ? 'docs'
+        : AGENT_STAGE_DIRS[stage.key] ?? (companion ? AGENT_STAGE_DIRS[companion.key] : undefined)
+  const runMerged = stage.key === 'run'
+  const live = row.status === 'running'
+  const settled = row.status === 'done' || row.status === 'failed'
+  const facts = stageFacts(stage, flight, companion ?? undefined)
+  const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)
+  const runId = runMerged
+    ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
+    : undefined
+  // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
+  // the run detail poll, so StageDetail no longer fetches it here (R80). The
+  // hero renders from this evidence immediately (before its first poll) and
+  // enriches from the live run detail; healEnd rides the run stage's evidence.
+  const runEv = (stage.evidence ?? {}) as Record<string, unknown>
+  const runCev = (companion?.evidence ?? {}) as Record<string, unknown>
+  const runEvidence: RunStageEvidence = {
+    runId,
+    status: typeof runEv.status === 'string' ? runEv.status : undefined,
+    healCycles: typeof runEv.healCycles === 'number'
+      ? runEv.healCycles
+      : typeof runCev.healCycles === 'number' ? runCev.healCycles : undefined,
+    healEnd: runEv.healEnd as RunStageEvidence['healEnd'],
+  }
+  // A pair row surfaces whichever half is parked on a checkpoint (the
+  // missing-env checkpoint lives on the folded env-capture, run-failed on run).
+  const checkpointStage =
+    stage.status === 'waiting-for-approval' ? stage
+    : companion?.status === 'waiting-for-approval' ? companion
+    : null
+  const error = stage.error ?? companion?.error
+  // Detail travels with whichever half's error is showing.
+  const errorDetail = stage.error != null ? stage.errorDetail : companion?.errorDetail
+  const combinedLog = [stage.log, companion?.log].filter(Boolean).join('')
+
+  // R66: every stage's activity is the same rail. Resolve its one agent source
+  // (if any): agent stages tail their flight session; the Evaluation Report
+  // tails its export task (kind:'evaluation' — a localized rewrite streams a
+  // timeline, a raw export has none and shows only its system rows). Agentless
+  // stages pass no source and render system rows alone.
+  const evalTaskId = stage.key === 'evaluation-export'
+    ? (((stage.evidence as Record<string, unknown> | undefined)?.taskId as string | undefined) ?? flight.links?.evaluationTaskId)
+    : undefined
+  // Portify's agent lives under the WORKFLOW dir (logs/portify/<wf>), not a
+  // flight sidecar — tail it through the portify source the wizard already
+  // uses, keyed by the id the adapter pins as live progress. Without this the
+  // stage's longest phase (the agent editing) shows an empty rail.
+  const portifyId = portifyWorkflowId(stage)
+  const activitySource: AgentSessionSource | undefined =
+    evalTaskId ? { kind: 'evaluation', taskId: evalTaskId, live }
+    : portifyId ? { kind: 'portify', workflowId: portifyId, live }
+    : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
+    : undefined
+  const activityKey = evalTaskId ? `evaluation:${evalTaskId}` : portifyId ? `portify:${portifyId}` : (agentDir ?? 'system-only')
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* R66: header, facts and stage panels scroll here; the activity band
+          below fills the rest of the pane so a long transcript scrolls in
+          place instead of the whole stage view running off the bottom. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      {/* Stable header row: title truncates on the left, the chip + actions
+          anchor to the RIGHT edge — switching stages must not shift anything
+          horizontally (only the title text itself changes). min-h-6 (=the
+          .cl-button height) locks the row height too, so the vertically-centered
+          title does NOT drop on stages that carry an action button (Advanced
+          setup, drill-through, download) versus the plain chip-only stages. */}
+      <div className="flex min-h-6 items-center gap-2">
+        <h2 className="min-w-0 truncate text-[13px] font-semibold" title={STAGE_BLURB[stage.key]}>{row.label}</h2>
+        <div className="flex-1" />
+        <StageStatusChip status={row.status} />
+        {/* Advanced setup appears once the config EXISTS on disk — approved
+            (done) or pre-existing (skipped, the scaffold had nothing to do).
+            Not while generating, and not at the approval checkpoint: there the
+            in-place editor (per-service ✎) is the one editing surface, so the
+            fork stays a two-button decision. */}
+        {stage.key === 'scaffold' && (stage.status === 'done' || stage.status === 'skipped') && onOpenConfig && (
+          <button
+            type="button"
+            data-testid="feature-setup-advanced"
+            /* Locked while the flight is running (the run/authoring stages own
+               the config) — matches the inline FeatureSetupPanel's `editable`
+               gate below; only editable once the flight is idle. */
+            disabled={flight.status === 'running'}
+            onClick={() => onOpenConfig(flight.feature)}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+            title={flight.status === 'running'
+              ? 'Advanced setup is locked while the flight is running'
+              : undefined}
+          >
+            ⚙ Advanced setup
+          </button>
+        )}
+        {stage.key === 'evaluation-export' && <DownloadEvaluationAction flight={flight} stage={stage} />}
+        {drillThrough && (
+          <button
+            type="button"
+            data-testid={`stage-drill-${stage.key}`}
+            onClick={drillThrough.onClick}
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px] text-accent"
+          >
+            {drillThrough.label}
+          </button>
+        )}
+      </div>
+
+      {/* Where are we — one plain sentence, always present. */}
+      <div data-testid="stage-state-line" className="max-w-[76ch] text-[12px] text-secondary">
+        {stageStateLine(stage, flight, companion ?? undefined)}
+      </div>
+
+      <FactsGrid facts={facts} />
+
+      {/* Paused with nothing else to act on (no checkpoint, no error): the
+          "how to pick it back up" card fills the void the state sentence alone
+          left, and points up to the header's one Continue. Only renders on the
+          single stage Continue resumes (pausedResumeKind mirrors stageStateLine),
+          and never alongside the checkpoint/error cards below (those states are
+          not `paused` + `pending`). */}
+      {(() => {
+        const kind = pausedResumeKind(stage, flight)
+        if (!kind) return null
+        // R82: the run stage keeps its hero mounted through a pause, so the
+        // resume note is a line above real evidence, not a card filling a void.
+        return <StagePausedPanel kind={kind} compact={runMerged && Boolean(runId)} />
+      })()}
+
+      {/* Repo scan (R72c): one intent card, then one repo card per inspected
+          repo carrying its own location + env files. */}
+      {stage.key === 'scout' && (
+        <RepoScanPanel
+          flight={flight}
+          envFiles={(() => {
+            const ev = (stage.evidence ?? {}) as Record<string, unknown>
+            return Array.isArray(ev.envFiles) ? (ev.envFiles as unknown[]).filter((f): f is string => typeof f === 'string') : []
+          })()}
+          onChangeInputs={onStartFlight ? () => onStartFlight(flight.feature, 'fresh') : undefined}
+        />
+      )}
+
+      {/* Suite setup (R43): the editable digest over the REAL on-disk config
+          — same doc Advanced setup (FeatureConfigEditor) edits, live both
+          ways. The Advanced setup button rides the stage header above. */}
+      {stage.key === 'scaffold' && stage.status !== 'pending' && (
+        <FeatureSetupPanel
+          feature={flight.feature}
+          editable={flight.status !== 'running'}
+          refreshKey={configRefreshKey}
+          /* Same gate as the header action: only once the config exists on
+             disk, so the checkpoint fork stays a two-button decision. */
+          onOpenAdvanced={onOpenConfig && (stage.status === 'done' || stage.status === 'skipped')
+            ? () => onOpenConfig(flight.feature)
+            : undefined}
+        />
+      )}
+
+      {/* Requirements (R74): while parked on prd-source the FORK owns the
+          surface (manual drop zone vs the two agent hints); otherwise the
+          read-only docs panel — locked once approved. The folded
+          prd-summary's status chips the panel header (R59). The fork is
+          gated on the FLIGHT being parked too: a stale checkpoint on a
+          paused/aborted record must never render an answerable ask that can
+          only 409 (respond requires waiting-for-approval). */}
+      {stage.key === 'docs' && stage.status !== 'pending' && (
+        flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint?.kind === 'prd-source' ? (
+          <RequirementsFork
+            flightId={flightId}
+            flight={flight}
+            refreshKey={docsRefreshKey}
+            onResponded={onResponded}
+          />
+        ) : (
+          <FlightDocsPanel
+            feature={flight.feature}
+            approved={stage.status === 'done'}
+            refreshKey={docsRefreshKey}
+            summaryStatus={companion?.status}
+            requirementCount={
+              typeof (companion?.evidence as Record<string, unknown> | undefined)?.requirementCount === 'number'
+                ? ((companion!.evidence as Record<string, unknown>).requirementCount as number)
+                : undefined
+            }
+          />
+        )
+      )}
+
+      {/* Test Run (R80): the run rendered ONCE as the Latest-run hero —
+          identity, metric tiles, failing tests, live controls, and the previous
+          runs. Owns its own run-detail/runs poll; the run detail page holds the
+          failure evidence and the full agent transcript.
+
+          R82 — mounted whenever the stage HAS a run, not only while the row is
+          non-pending. A flight pause flips the open row back to `pending` (it
+          keeps its startedAt), and the old gate unmounted the whole hero with
+          it: the pane went blank and read as "I lost my progress". Nothing was
+          lost — pause deliberately does NOT abort the run (see the run stage
+          adapter's `interrupt`), so the run is often still going. Keeping it
+          mounted keeps its verdict, its score and its failing tests on screen,
+          and the poll alive, while the flight waits for Continue. */}
+      {runMerged && runId && (
+        <TestRunPanel
+          feature={flight.feature}
+          runId={runId}
+          live={Boolean(runLive) || live}
+          evidence={runEvidence}
+          onOpenRun={drill.onOpenRun}
+          onError={onActionError}
+        />
+      )}
+
+      {/* Test authoring & coverage (R27): the author↔map loop as a pass
+          timeline — coverage % after each mapping feeds the next authoring. */}
+      {loopProgress && <SpecsPassTimeline progress={loopProgress} live={live} />}
+
+      {(row.status === 'failed' && error) && (
+        <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} />
+      )}
+
+      {/* prd-source renders as the RequirementsFork above; EVERY other kind —
+          run-failed included, as of R82 — keeps the generic card. The run-failed
+          fork used to be a bespoke amber slab fused inside the Test Run hero
+          (R80); it now sits here, in the one place a flight asks its questions,
+          so a run's decision looks and lands like a config approval or a portify
+          save. Gated on the flight being parked: responding to a paused/aborted
+          record's stale checkpoint can only 409. */}
+      {flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint
+        && checkpointStage.checkpoint.kind !== 'prd-source' && (
+        <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
+      )}
+
+      </div>
+      {/* R66: one activity rail per stage — the conductor's tagged system lines
+          and the stage's agent timeline (if any) on a single block. The run
+          stage is agentless at the flight level (its repair agent's timeline is
+          on the run detail drill-through), so R80 cut its near-empty band; the
+          hero carries a collapsed "Repairs" disclosure instead. */}
+      {!runMerged && (
+        <StageActivity
+          source={activitySource}
+          sourceKey={activityKey}
+          live={live}
+          settled={settled}
+          log={combinedLog}
+        />
+      )}
+    </div>
+  )
+}
+
+export function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+}

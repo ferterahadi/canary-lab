@@ -120,6 +120,20 @@ describe('diffFlightToasts (R68)', () => {
     expect(body).toMatch(/open to resume/)
   })
 
+  it('a restart pause with no known stage still says interrupted, not failed', () => {
+    // `stageLabelFor` returns null for a flight paused before any stage is
+    // current; the toast must still distinguish a restart from a failure,
+    // because the two lead the user to different next actions.
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    const out = diffFlightToasts(
+      prev,
+      [fl({ flightId: 'a', status: 'paused', pauseReason: 'restart', currentStage: undefined })],
+      noView,
+      stageLabel,
+    )
+    expect(out[0].kind === 'flight' && out[0].body).toBe('Interrupted by a server restart — open to resume')
+  })
+
   it('a user→stage-failed pause transition toasts (pauseReason folded into the key)', () => {
     const prev = attentionKeyMap([fl({ flightId: 'a', status: 'paused', pauseReason: 'user' })])
     const out = diffFlightToasts(prev, [fl({ flightId: 'a', status: 'paused', pauseReason: 'stage-failed' })], noView, stageLabel)
