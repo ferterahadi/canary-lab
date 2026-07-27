@@ -38,7 +38,7 @@
   },
   "homepage": "https://github.com/ferterahadi/canary-lab#readme",
   "engines": {
-    "node": ">=20.19.0",
+    "node": ">=22.12.0",
     "npm": ">=9.0.0"
   },
   "bin": {
@@ -70,6 +70,7 @@
     "gen:skills": "node tools/gen-codex-skills.mjs",
     "check:boundaries": "node tools/check-feature-boundaries.mjs",
     "check:conventions": "node tools/check-conventions.mjs",
+    "check:docs": "node tools/check-docs.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",

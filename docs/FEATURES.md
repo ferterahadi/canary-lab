@@ -10,7 +10,7 @@ Create one from the UI or with:
 npx canary-lab new feature checkout-discounts --description "Validate checkout discounts"
 ```
 
-The UI's Add Test flow can also turn a PRD or uploaded document into a generated plan and Playwright files for review. Generated tests still run through Playwright.
+A flight's **Test authoring & coverage** stage can also turn a PRD or uploaded document into tagged Playwright specs, looping until the coverage ledger hits its target. External MCP clients author specs through the draft flow instead (`start_external_draft` → `apply_external_draft`). Generated tests still run through Playwright.
 
 ## Requirement Coverage
 
@@ -27,7 +27,7 @@ test('DELETE /todos/:id removes a todo', { tag: ['@req-R3', '@path-happy'] }, as
 - `@variant-<value>` — optional; for a requirement that must hold across a domain axis (channel, tenant, region…).
 - Legacy `// @requirement <id>` / `// @path happy` comments above the test still parse as a fallback.
 
-Open the **Coverage** view (the 🎯 pill in the top bar, per feature) for the ledger: requirements on the left, tests on the right, synced colour highlighting. Coverage is **semantic, not run-gated** — it asks "does a mapped test claim every path (and variant) this requirement implies?", and canary computes the % straight from the tags, so the headline number is math, not an agent's opinion. Gaps:
+Open the **Coverage** view (the target icon on a feature's row in the features column) for the ledger: requirements on the left, tests on the right, synced colour highlighting. Coverage is **semantic, not run-gated** — it asks "does a mapped test claim every path (and variant) this requirement implies?", and canary computes the % straight from the tags, so the headline number is math, not an agent's opinion. Gaps:
 
 - **Untested** — no test mapped to the requirement.
 - **Path-incomplete** — some paths are claimed, but a sad/edge path has no test.

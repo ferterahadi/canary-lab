@@ -12,7 +12,7 @@ exists**; the skill says **how to decide**. Neither replaces the other.
 | Tokens + CSS primitives | [`apps/web/src/styles.css`](../apps/web/src/styles.css) (single stylesheet, no per-component CSS) |
 | React primitives | [`apps/web/src/shared/ui/`](../apps/web/src/shared/ui/) |
 | Status atoms (`StatusDot`, form atoms, icons) | [`apps/web/src/shared/ui/atoms.tsx`](../apps/web/src/shared/ui/atoms.tsx) |
-| Agent output | `AgentSessionView` (`features/agent-sessions/`) — the only agent renderer |
+| Agent output | [`AgentSessionView`](../apps/web/src/shared/ui/AgentSessionView.tsx) — the only agent renderer; it lives in `apps/web/src/shared/ui/` because six features render agent output |
 
 Styling stack: **Tailwind v4** (CSS-first, `@import "tailwindcss"`) + hand-written
 `.cl-*` component classes. No UI kit, no CSS-in-JS runtime, no `tailwind.config.js`.
@@ -119,12 +119,12 @@ ids, tags, file paths, ports, branch names, counts.
 
 ### Size scale (as built)
 
-The app runs a 9–13px operator-console scale. There is no `--font-size-*` token
-yet, so sizes appear as Tailwind arbitrary values.
+The app runs a 9–13px operator-console scale, with one deliberate outlier. There is
+no `--font-size-*` token yet, so sizes appear as Tailwind arbitrary values.
 
 | px | Class | Role |
 | --- | --- | --- |
-| 9–10 | `text-[9px]` / `text-[10px]` | Micro-labels, badges, `cl-rubric` caps |
+| 9–10 | `text-[9px]` / `text-[9.5px]` / `text-[10px]` | Micro-labels, badges, numbered beads, `cl-rubric` caps |
 | 10.5 | `text-[10.5px]` | Chip label default, id badges, count chips |
 | 11 | `text-[11px]` | **Workhorse** — the most common size in the app |
 | 11.5 | `text-[11.5px]` | Step rows, denser body |
@@ -132,6 +132,7 @@ yet, so sizes appear as Tailwind arbitrary values.
 | 12.5 | `text-[12.5px]` | Tabs, frame headings |
 | 13 | `text-[13px]` | `cl-kicker` section headings |
 | 13.5 | — | Wordmark only |
+| 22 | `text-[22px]` | The one outlier — `StageFact`'s `big` metric value |
 
 ### Named voices
 
@@ -313,22 +314,28 @@ count. Different interaction models — don't merge them.
 
 ## 7. Audit — current state
 
-Measured across 83 components in `apps/web/src`.
+Measured across `apps/web/src`. The counts below are a snapshot, so each row carries the
+command that produced it — re-run before trusting a number.
 
 | Category | Tokenized | Notes |
 | --- | --- | --- |
 | Surfaces / borders / text | ✅ | Token vars + utilities |
 | Radius / fonts | ✅ | Token names match Tailwind's theme vars, so the utilities resolve to them automatically |
 | Shadow / overlay | ✅ | Two shadow levels, one backdrop |
-| **Status hues** | ✅ | **Was 210 raw palette classes; all rewritten to token utilities.** Zero raw palette classes remain outside the xterm theme. |
-| Typography size | 🔥 None | **413** arbitrary `text-[Npx]` across 11 distinct sizes; no `--text-*` step defined |
-| Spacing | ➖ Tailwind only | 51 arbitrary `p-[…]` / `gap-[…]` values |
-| Hardcoded hex | ✅ Contained | 20 total — 9 are the xterm terminal theme (legitimate, xterm takes hex), 8 are `#fff` on accent/danger fills, 2 are external-client brand colours |
+| **Status hues** | ✅ | **Was 210 raw palette classes; all rewritten to token utilities.** Zero remain outside the xterm theme |
+| Typography size | 🔥 None | **414** arbitrary `text-[Npx]` across 11 distinct sizes; no `--text-*` step defined |
+| Spacing | ➖ Tailwind only | A handful of arbitrary `p-[…]` / `gap-[…]` escapes; everything else is on Tailwind's 4px scale |
+| Hardcoded hex | ✅ Contained | **19** total — 9 are the xterm terminal theme (legitimate, xterm takes hex), 8 are `#fff` on accent/danger fills, 2 are external-client brand colours |
+
+```bash
+grep -roh "text-\[[0-9.]*px\]" apps/web/src --include="*.tsx" | sort | uniq -c | sort -rn
+grep -roE "(bg|text|border)-(rose|amber|emerald|sky|violet|blue|red|green|slate|zinc|neutral)-[0-9]{3}" apps/web/src --include="*.tsx"
+```
 
 ### Remaining work
 
-**Fold the type scale into named steps.** Eleven distinct sizes between 9 and
-13.5px is more resolution than the design needs. The fix mirrors what the colour
+**Fold the type scale into named steps.** Eleven distinct sizes — ten of them packed
+between 9 and 13.5px — is more resolution than the design needs. The fix mirrors what the colour
 bridge did: pick ~5 steps, add them to `@theme` under **`--text-*`** — but note
 that namespace currently holds three colour tokens in `:root`
 (`--text-primary/-secondary/-muted`), so the type steps need names that can't

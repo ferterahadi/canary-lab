@@ -82,18 +82,36 @@ repair rule, artifact retention) live in `cl_run-evidence-invariants`.
 
 `CLAUDE.md` (commands + rules), `docs/ARCHITECTURE.md` (mechanisms), and
 `docs/PRD.md` (intent) are single-source per topic, and `.claude/skills/` must match
-what's actually on disk. Nothing enforces it automatically — run this when you add,
-rename, or delete a skill, or when a doc names a file list:
+what's actually on disk.
+
+**The mechanical half is now a gate.** `npm run check:docs` fails on any backticked
+repo path, relative link, or `#anchor` in `README.md` / `docs/**` that doesn't
+resolve. It runs in CI. Don't hand-check what it checks.
+
+**The judgement half is still yours**, because the gate can't tell TRUE from
+merely well-spelled — a doc naming only live files can still describe last
+release's behaviour. Run it when your change alters something a doc *describes*.
+The four drift classes that have actually bitten, each with its probe:
+
+| Class | Smells like | Probe |
+| --- | --- | --- |
+| **Enumeration** — a doc lists what the code lists | profiles, CLI subcommands, feature dirs, tool arrays, sample features | diff the prose against the source of truth: `mcp/tool-profiles.ts`, `apps/cli/cli.ts`'s switch, `ls apps/*/src/features` |
+| **Quoted constant** — a doc states a number | timeouts, staleness windows, thresholds, ports, file counts | grep the constant, don't trust the prose: `grep -rn 'HEARTBEAT_STALE_MS\|DEFAULT_.*=' shared/ apps/` |
+| **Deleted or moved surface** — a doc names UI that no longer exists | "the X wizard", "the Y pill", a route, a tab label | grep the label in `apps/web/src`; zero hits on a doc's UI noun is a finding |
+| **Flipped default** — a doc says the user is asked, and they aren't | autopilot, default profile, opt-in that became opt-out | find the default in code AND confirm with a test, not just the constant |
+
+A hardcoded path list in a doc is a finding even when every path resolves — the
+shipped skill set moves (the run loop already migrated from `canary-lab/` to
+`canary-lab-run/`). Prefer a discovery command in the prose over an enumeration:
 
 ```bash
 diff <(ls .claude/skills) <(grep -o 'cl_[a-z-]*' CLAUDE.md | sort -u)   # index vs disk
-grep -rn 'agent-integrations/[a-z]*/skills/[a-z-]*/SKILL.md' docs/ .claude/skills/  # hardcoded file lists
-find agent-integrations -name SKILL.md | wc -l                          # what the list should be
+find agent-integrations -name SKILL.md | wc -l                          # what a list would have to say
 ```
 
-A hardcoded path list in a doc is a finding — the shipped skill set moves (the run
-loop already migrated from `canary-lab/` to `canary-lab-run/`). Prefer a discovery
-command in the prose over an enumeration.
+> The 1.6.0 audit found 26 findings against these docs, and the discipline-only
+> version of this section caught none of them. If your change makes a doc
+> sentence false, fixing the doc is part of the change — not a follow-up.
 
 ## Common mistakes
 

@@ -16,7 +16,7 @@ Canary Lab doesn't replace Playwright or your agent — it gives both of them st
 **One command, from your workspace:**
 
 ```text
-/canary-lab run checkout locally, fix it if it fails, and run it again until it passes
+/canary-lab-run checkout locally, fix it if it fails, and run it again until it passes
 ```
 
 Boots your services → runs the tests → agent reads the failure, fixes the code, signals a rerun → Canary Lab reruns until green. The agent only reads results and asks for a retry — it never writes the verdict.
@@ -34,7 +34,7 @@ A good agent can already start a dev server and run Playwright. The gap is trust
 Three things a bare terminal agent can't do alone:
 
 - **Results it doesn't own** — the harness runs the tests and holds the pass/fail.
-- **Concurrency without conflicts** — per-run ports (injected as `${port.api}`) + a git worktree per shared repo; extras queue. Several agents share one laptop safely.
+- **Concurrency without conflicts** — per-run ports (injected as `${port.api}`) + a git worktree per repo on every run, so repairs never touch your working copy; extras queue. Several agents share one laptop safely.
 - **Safe env switching** — env files are backed up before changes and restored when the run ends.
 
 ## What You Write
@@ -108,9 +108,9 @@ Canary Lab earns its place when a failure depends on more than a browser asserti
 
 Compose runs services as images, so a one-line fix waits on a rebuild. Canary Lab runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`): hot reload picks up the fix in seconds, no Dockerfile. Use both — `docker compose up postgres redis` in a Canary Lab `startCommand` for infra, Canary Lab for your app services in dev mode.
 
-## Quick Start — one command: `flight`
+## Quick Start
 
-Point Canary Lab at a bare product repo and say what to test:
+One command: `flight`. Point Canary Lab at a bare product repo and say what to test:
 
 ```bash
 npx canary-lab flight ../your-app "checkout flow"
@@ -167,7 +167,7 @@ No test language, assertion model, or browser runner — Playwright runs the tes
 
 ## Requirements
 
-- Node.js >= 20 and npm >= 9.
+- Node.js >= 22.12 and npm >= 9. (Node 20 reached end-of-life in April 2026.)
 - A modern browser: Chrome, Firefox, or Safari.
 - Local UI server on `http://localhost:7421` (set per project via `--port` or Project Settings), with orchestration through `node-pty`.
 - Optional repair agents: supported AI agent CLIs (`claude`, `codex`) on `PATH`.
@@ -190,6 +190,8 @@ No test language, assertion model, or browser runner — Playwright runs the tes
 | [Commands](docs/COMMANDS.md) | Full CLI reference. |
 | [Feature Folders](docs/FEATURES.md) | Feature structure, scaffold conventions, creating a feature. |
 | [Architecture](docs/ARCHITECTURE.md) | Module map, run lifecycle, concurrency, heal system, MCP layer. |
+| [Product Requirements](docs/PRD.md) | Product intent, non-goals, and the quality bars behind review decisions. |
+| [Design System](docs/DESIGN-SYSTEM.md) | The web UI's token catalog, primitives, and layout patterns. |
 | [Contributing](docs/CONTRIBUTING.md) | Code orientation and build/test workflow. |
 
 ## License

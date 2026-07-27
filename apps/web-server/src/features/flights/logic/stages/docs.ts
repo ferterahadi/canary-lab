@@ -22,9 +22,12 @@ import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps }
 // before parking, so the user's original stays the live source. Yolo flights
 // skip the fork and use the deterministic gather chain (repo-doc sweep → diff
 // → description) — no human moment to fork on.
-// Non-yolo flights ALWAYS park — even when docs exist — so the human gets one
-// deliberate moment before the PRD summary runs; `continue` is the
-// zero-friction release.
+// Non-yolo flights ALWAYS EMIT the checkpoint — even when docs exist — so the
+// fork is never silently skipped. Whether a HUMAN sees it is autopilot's call,
+// not this stage's: `continue` is only offered once docs exist, and autopilot
+// (on by default) auto-answers it there. So the park reaches a person when
+// there are no docs yet, when autopilot is off, or on a re-park. See
+// AUTOPILOT_CHOICE in ../flight-drive.ts.
 
 const MAX_REPO_DOCS = 10
 const MAX_DOC_BYTES = 200 * 1024

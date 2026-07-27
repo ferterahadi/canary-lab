@@ -28,13 +28,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20.19.x
+          node-version: 22.12.x
           cache: npm
       - run: npm ci
       - name: Conventions
         run: npm run check:conventions
       - name: Feature boundaries
         run: npm run check:boundaries
+      - name: Contributor docs
+        run: npm run check:docs
       - name: Lint
         run: npm run lint
       # Both generators must be checked BEFORE any build: `npm run build`
@@ -88,7 +90,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20.19.x
+          node-version: 22.12.x
           cache: npm
       - run: npm ci
       - name: Give git an identity

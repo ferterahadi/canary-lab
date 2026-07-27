@@ -5,7 +5,7 @@ All notable changes to Canary Lab are listed here. We try to keep the language p
 Each entry is tagged with the area it touches:
 
 - **[Test Runner]** — running tests, run history, auto-heal, services, logs
-- **[Test Generation]** — Add Test wizard, PRD/plan/spec drafting
+- **[Test Generation]** — spec authoring and PRD/plan drafting (the flight's authoring stage; the standalone Add Test wizard before it)
 - **[Coverage]** — verified coverage ledger, requirement-to-test traceability
 - **[Export evaluation]** — exported evaluation reports
 - **[Portify]** — port-ification wizard, converting features to dynamic port allocation
@@ -17,10 +17,12 @@ Each entry is tagged with the area it touches:
 
 ## Unreleased
 
-- **[General]** **Flight is now the front door — the whole experience rethought around 7 user-facing steps** (Repo Scan → Feature Setup → Requirements → Test Authoring & Coverage → Parallel Readiness → Test Run → Evaluation Report).
+> **Node 22.12+ is now required** — see Breaking changes at the end of this section.
+
+- **[General]** **Flight is now the front door — the whole experience rethought around 7 user-facing steps** (Repo scan → Suite setup → Requirements → Test authoring & coverage → Parallel readiness → Test Run → Evaluation Report).
   - **Start a flight from the UI with two inputs.** The "+ New" button opens the flight launcher: describe what to test (documents you reference by path are linked in automatically) and pick one or more repos (known workspace repos plus any path). The feature name derives from the first repo. For a feature that never flew, every "Start from" step renders locked — step entry unlocks after the first flight.
-  - **Feature Setup approves the real config.** The config-approval checkpoint now parks AFTER the feature is scaffolded, against the on-disk `feature.config.cjs`: edit the start command and Playwright settings (workers / retries / video / trace) right on the stage, or open **Advanced setup** (the full config editor) — both write the same document and stay live-synced. Approve proceeds to the boot proof; Redraft re-runs the repo scan. (The old raw-textarea approval and its Reject option are gone.)
-  - **Requirements always pauses.** The flight stops once for your docs — add files, or link a local PRD by path (symlinked, so your original stays the live source; broken links are surfaced, never crash the list). Answer `continue` to release. Paths mentioned in your intent (e.g. `~/Documents/prd.md`) are linked in automatically.
+  - **Suite setup approves the real config.** The config-approval checkpoint now parks AFTER the feature is scaffolded, against the on-disk `feature.config.cjs`: edit the start command and Playwright settings (workers / retries / video / trace) right on the stage, or open **Advanced setup** (the full config editor) — both write the same document and stay live-synced. Approve proceeds to the boot proof; Redraft re-runs the repo scan. (The old raw-textarea approval and its Reject option are gone.)
+  - **Requirements gets its own stop.** The flight parks for your docs whenever it has none yet — add files, or link a local PRD by path (symlinked, so your original stays the live source; broken links are surfaced, never crash the list). Answer `continue` to release. Paths mentioned in your intent (e.g. `~/Documents/prd.md`) are linked in automatically. With docs already present, autopilot releases the stop for you; turn autopilot off to be asked every time.
   - **Pick the evaluation flavor.** Before the terminal export, a checkpoint asks `raw` (fast report) vs `localized` (an agent rewrites per-test reasoning). `--yolo` exports raw.
   - **Pause, stop, start over — always in reach.** A new user pause parks the flight resumably (in-flight agent work stops safely; the run keeps its own lifecycle and controls); Stop aborts (and aborts the flight's run); Start over redoes the same record from step 1. Intent and repos are editable on the Repo Scan stage while the flight is paused/stopped — a repo change restarts from Repo Scan by design.
   - **One row per feature.** The Flights pill and landing list now show every workspace feature 1:1 — never-flown features appear with a greyed rail and open the launcher. A toast pops when any flight parks on a checkpoint (or pauses on a failure), clicking straight through to it. Coverage's "Redo from the start" now reopens the matching flight's Requirements/Authoring steps live.
@@ -37,7 +39,16 @@ Each entry is tagged with the area it touches:
   - Re-entry safe: a repo that already has a feature parks on a rerun / enhance / new choice — never a silent duplicate. `flight` also creates the workspace and boots the server when needed.
   - The command was briefly named `fly` during development; `fly` still works as a hidden deprecated alias that forwards to `flight` with a one-line notice.
   - New **Flights** pill in the top bar (live active count) and a routed flight view (`?view=flights&flight=<id>`) with a per-stage rail, harness evidence, checkpoint controls, and the stage agent's live timeline.
-  - MCP parity: `start_flight` / `get_flight` / `respond_flight_checkpoint` (author/lifecycle/full profiles) drive the same flight store; external clients can feed conversation-distilled docs via `write_feature_doc` before the PRD stage.
+  - MCP parity: `start_flight` / `get_flight` / `respond_flight_checkpoint` (flight/lifecycle/full profiles) drive the same flight store; external clients can feed conversation-distilled docs via `write_feature_doc` before the PRD stage.
+
+- **[Test Runner]** **Repairs no longer touch your checkout.** Every test run now boots in its own throwaway `git worktree` per repo — cut from your last commit, with your uncommitted work copied in, so the run still tests what you're actually working on. The healing agent edits that copy. When the run ends, Canary Lab saves exactly what the agent changed as a patch under `logs/runs/<runId>/fixes/` and throws the copy away, leaving your repo untouched. Apply the patch if you want to keep the fix.
+  - Previously only a colliding second run was isolated, and the agent edited your files in place.
+  - Port-ified features keep their worktree at the end (it holds the repair) — the Cleanup page's **Worktrees** tab lists and removes them.
+  - Boot-only and verification sessions are unchanged: they never heal, so there is nothing to capture.
+
+### Breaking changes
+
+- **[General]** **Minimum Node version raised to 22.12.** Node 20 reached end-of-life in April 2026. The old `>=20.19.0` floor was also quietly wrong: semver-wise it accepted Node 22.0–22.11, which lack the unflagged `require(esm)` support Canary Lab depends on — those versions installed cleanly and then failed at runtime. One honest floor now. Upgrade to Node 22.12 or newer before running `npx canary-lab`.
 
 ---
 

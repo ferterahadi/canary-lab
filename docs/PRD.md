@@ -1,7 +1,7 @@
 # Canary Lab — Product Requirements (reverse-engineered)
 
-> **Status**: reverse-engineered from the README, CHANGELOG, GUIDE, and code as of
-> v1.4.0; positioning refreshed for 1.6.0. This captures the product intent implied
+> **Status**: reverse-engineered from the README, CHANGELOG, GUIDE, and code; last
+> reconciled against the 1.6.0 tree. This captures the product intent implied
 > by what's shipped so agents and new contributors share the same picture. Correct
 > anything that misreads the intent — this document is the tie-breaker when a change
 > is technically possible but product-questionable.
@@ -47,13 +47,31 @@ run**. Built for teams that use tests as the spec.
    The agent is a first-class user: tool results and `initialize` instructions are
    designed to steer agents that never read documentation.
 3. **Eval author** — exports a terminal run (passed or failed) as a structured
-   evaluation report; the external client writes the wording, Canary Lab renders and
-   stores the archive.
+   evaluation report. Canary Lab always renders and stores the archive; the wording is
+   either taken straight from the evidence (`raw`), rewritten by a local agent
+   (`localized`), or authored by the external client on the MCP path.
 
 ## Capabilities by area
 
-These broadly mirror the CHANGELOG area tags; requirement coverage and verification are
-cross-cutting and not separately tagged in the CHANGELOG.
+These broadly mirror the CHANGELOG area tags; flight, requirement coverage and
+verification are cross-cutting and not separately tagged in the CHANGELOG (flight lands
+under `[General]` there).
+
+### [Flight]
+
+- The product's front door: one command (`canary-lab flight <repo…> "<what to test>"`)
+  or one tool (`start_flight`) conducts a bare product repo through every stage to a
+  green, covered, healed run ending in an evaluation archive. The archive is the
+  deliverable, not the green check.
+- **The server conducts and the harness computes every verdict; the agent only proposes.**
+  A stage never succeeds on an agent's say-so — the config must parse and boot, the ledger
+  must be met, the run must be green, the zip must be on disk.
+- Resumable background job with typed checkpoints. Autopilot answers the ones with a safe
+  default so an unattended flight only stops where a machine genuinely can't decide
+  (the similarity choice, missing secrets, a docs-less PRD source, any re-park).
+- **One flight record per feature**, with repos and intent frozen at first start — a
+  re-entry resumes or redoes; it never silently duplicates or quietly swaps inputs.
+- Drivable identically from the CLI, the web UI, and MCP, all against one store.
 
 ### [Test Runner]
 
@@ -64,6 +82,9 @@ cross-cutting and not separately tagged in the CHANGELOG.
   passes or fails terminally.
 - Concurrent runs with per-run port allocation, same-repo collision handling
   (worktree or queue), and resource-aware admission queueing.
+- **The repair never lands in the user's checkout.** Every test run boots in a per-run
+  git worktree (WIP hydrated in), and the heal agent's edits are diffed out to
+  `logs/runs/<runId>/fixes/` at teardown. Applying the patch is the user's call.
 - Boot-only sessions: start a feature's services without running tests, for manual
   exploration.
 - Envset switching: run one feature against `local`/`staging`/`production` env files
@@ -71,7 +92,7 @@ cross-cutting and not separately tagged in the CHANGELOG.
 
 ### [Test Generation]
 
-- Feature scaffolding (`create_feature`, the Add Test wizard) with conventions:
+- Feature scaffolding (`create_feature`, a flight's Suite setup stage) with conventions:
   `feature.config.cjs`, envsets, specs importing
   `canary-lab/feature-support/log-marker-fixture`.
 - External draft flow: an MCP client authors specs while Canary Lab tracks the draft
@@ -92,7 +113,7 @@ cross-cutting and not separately tagged in the CHANGELOG.
 - Gap typing — `covered` / `path-incomplete` / `variant-incomplete` / `untested` — plus a
   per-test strictness grade for *depth*: which layer each test really checks (app log →
   internal state → app API → browser) and the stronger assertion to write.
-- One computation layer behind both the UI (the 🎯 Coverage view) and MCP
+- One computation layer behind both the UI (the Coverage view) and MCP
   (`get_feature_coverage`), so the two can never diverge.
 
 ### [Verification]
@@ -104,16 +125,22 @@ cross-cutting and not separately tagged in the CHANGELOG.
 
 ### [Export evaluation]
 
-- Export any terminal run as an evaluation archive (`evaluation.html`); the external
-  client writes the report wording, Canary Lab stores and renders it. A failed or
+- Export any terminal run as an evaluation archive (`evaluation.html`). A failed or
   aborted run exports as-is — the status is preserved, not healed away.
+- Two flavors, same tests and same verdicts, differing only in wording: **raw** renders
+  straight from the run evidence with no LLM involved, **localized** spawns a local agent
+  to rewrite the per-test reasoning for readability. Exports driven by an external MCP
+  client are a third path — there the client writes the wording and Canary Lab only stores
+  and renders it.
 
 ### [General]
 
-- One published CLI (`init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `upgrade`),
-  a local web UI, and an MCP server sharing one port.
-- Profile-scoped MCP surface (`repair`/`verify`/`author`/`portify`/`lifecycle`/`full`) so
-  each client kind sees only the tools its workflow needs.
+- One published CLI (`flight`, `init`, `setup`, `ui`, `mcp`, `new feature`, `env`,
+  `boot`, `upgrade`), a local web UI, and an MCP server sharing one port.
+- Profile-scoped MCP surface — six workflow profiles (`repair`/`verify`/`author`/
+  `coverage`/`export`/`flight`), `portify` for the specialized case, and two composed
+  unions (`lifecycle`, the default, and `full`) — so each client kind sees only the
+  tools its workflow needs.
 
 ## Non-goals
 
@@ -161,7 +188,7 @@ invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 | **Envset** | A named set of env files per environment (`local`/`production`/…) applied before a run and reverted after |
 | **Heal claim** | The single-owner lock an external client takes to drive a run's repair loop |
 | **Boot session** | A run with `executionType: 'boot'` — services up, no tests, no heal task |
-| **Worktree isolation** | Running a colliding same-repo run in a per-run `git worktree` so heal edits can't corrupt the other run |
+| **Worktree isolation** | Running every test run in a per-run `git worktree` per repo, so heal edits are captured as a diff instead of mutating the product repo (and a colliding same-repo run can't corrupt the other one) |
 | **Portify** | The workflow that rewrites a feature's services to read injected ports, unlocking concurrent boots |
 | **Draft** | An externally authored set of spec files tracked through staged validation before apply |
 | **Requirement coverage** | Whether a mapped test claims every path (and variant) a requirement implies; the ledger maps requirements ↔ tests with a coverage % canary computes from the tags — semantic, decoupled from run history |

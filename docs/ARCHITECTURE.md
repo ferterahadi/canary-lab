@@ -19,11 +19,14 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 
 ## Package Model
 
-- One published CLI: `canary-lab`. Main subcommands: `init`, `setup`, `ui`, `mcp`,
-  `new feature`, `env`, `upgrade`.
+- One published CLI: `canary-lab`. Main subcommands: `flight` (the front door),
+  `init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `boot`, `upgrade`. `fly` is a
+  hidden deprecated alias forwarding to `flight`; `agent` is internal.
 - Package internals ship as compiled code in `dist/` (built by `npm run build`:
-  `tools/clean-dist.mjs` → `tsc -p tsconfig.build.json` → `tools/prepare-assets.mjs`
-  → Vite build for the web UI).
+  `tools/gen-agents-md.mjs` → `tools/gen-codex-skills.mjs` → `tools/clean-dist.mjs`
+  → `tsc -p tsconfig.build.json` → `tools/prepare-assets.mjs` → Vite build for the
+  web UI). The two `gen-*` steps are generators: `AGENTS.md` and the Codex copies of
+  the shipped skills are build outputs, not hand-edited files.
 - Scaffold templates live in `templates/project/` and are **copied into
   `dist/templates/` during build** by `tools/prepare-assets.mjs`. Editing a template
   without rebuilding does nothing for consumers — `npm run smoke:pack` is the
@@ -58,31 +61,32 @@ entry. The three places that must agree for the web aliases are
 | `apps/cli/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`apps/cli/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/src/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
 | `apps/web-server/src/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions); `tools.ts` builds the profile gate and delegates to `tool-groups/{reads,authoring,run-lifecycle,heal-flow}.ts` (`authoring.ts` composes seven domain siblings); `tool-schemas.ts` holds the input schemas and deps interface, `tool-profiles.ts` the tool-name union and profile arrays, `heal-task-wait.ts` the wait/boot-session steering, `tool-support.ts` the run-resolution and result helpers |
-| `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `wizard` (draft + wizard-agent pipeline, tests-draft route), `evaluation` (export archive/store, test-review export), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark` |
-| `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `ring-buffer`, `simple-zip`, `workspace-events`, `editor-launch`, `open-browser`, and `ws/workspace-stream` |
+| `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `flights` (flight store, conductor/drive loop, per-stage adapters), `wizard` (draft pipeline, tests-draft route), `evaluation` (export archive/store, test-review export, localized-rewrite agent), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark`, `version` (npm-registry update check) |
+| `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `gh-cli`, `ring-buffer`, `simple-zip`, `toon`, `workspace-events`, `editor-launch`, `open-browser`, `prompts` (the `.md` template loader), `feature-loader`, `launcher-startup` (service startup + health probes), `config-ast`, `ast-extractor` (the Playwright tag/assertion parser the coverage ledger reads), and `ws/workspace-stream` |
 | `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
 | `templates/project/` | Scaffolded workspace files, incl. four sample features: `example_todo_api` (happy path), `broken_todo_api` (heal target), `flaky_orders_api`, `tricky_checkout_api` |
-| `tools/` | Build/publish utilities: `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions` |
+| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions` |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
 the data being deleted — `/api/cleanup/runs` and `/api/cleanup/worktrees` in
-`features/runs/routes/runs.ts`, `/api/cleanup/portify` in
+`features/runs/routes/runs-cleanup-routes.ts`, `/api/cleanup/portify` in
 `features/portify/routes/portify.ts`. Do not go looking for a `cleanup` server
 feature, and do not create one: it would pull run and portify deletion away from the
 stores that back them, for nothing but symmetry. The web side is named after the API
-surface it consumes so the two are greppable together.
+surface it consumes so the two are greppable together. (In the UI this is the
+**Cleanup** pill, with three tabs — Runs, Worktrees, Portify.)
 
 Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 
 | Module | Role |
 | --- | --- |
 | `orchestrator.ts` | Single-run lifecycle: env apply, service boot, Playwright run, heal cycles, manifest/journal writes |
-| `launcher/startup.ts`, `pty-spawner.ts` | Service startup, health probes (HTTP/TCP), PTY capture |
+| `pty-spawner.ts` (+ `apps/web-server/src/shared/launcher-startup.ts`) | Service startup, health probes (HTTP/TCP), PTY capture |
 | `launcher/interpolate.ts` | Token resolution — the reserved `${port.<slot>}` namespace |
 | `port-allocator.ts` | Per-run free-TCP-port allocation per declared port slot |
 | `admission.ts`, `run-scheduler.ts` | Resource-aware admission + FIFO queue promotion |
@@ -97,8 +101,13 @@ Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 
 ### Feature boundaries and per-feature layout
 
-Both apps use the same 8-feature taxonomy, but the two sides enforce it
-differently.
+The two apps share an **eight-feature spine** — `runs`, `coverage`, `flights`,
+`wizard`, `evaluation`, `config`, `portify`, `benchmark` — with three deliberate
+asymmetries: the server also has `agent-sessions` and `version`, and the web also
+has `cleanup` (see above). Ten server features, nine web ones. Note that
+`agent-sessions` is server-only *now*: its web half (`AgentSessionView` and the
+session socket) moved to `apps/web/src/shared/` in Phase 9, since six features
+render agent output. The two sides enforce the taxonomy differently.
 
 **Server features are registrars, not re-export barrels.** Each
 `apps/web-server/src/features/<name>/index.ts` exports `register(app, ctx)` and
@@ -155,7 +164,7 @@ flowchart TD
     user(["Run button in canary-lab ui"])
     web["Web server + run store<br/>server.ts + run-store.ts"]
     runtime["Run orchestrator<br/>orchestrator.ts + run-paths.ts"]
-    setup["Env + service startup<br/>env-switcher/switch.ts + pty-spawner.ts + launcher/startup.ts"]
+    setup["Env + service startup<br/>env-switcher/switch.ts + pty-spawner.ts + shared/launcher-startup.ts"]
     playwright(["Playwright"])
     capture["Run capture<br/>log-marker-fixture.ts + summary-reporter.ts"]
     autoheal["Auto-heal command builder<br/>auto-heal.ts"]
@@ -201,23 +210,25 @@ flowchart TD
 ```
 
 In prose: the `startRun` factory in `apps/web-server/src/server.ts` admits/queues the run
-(see [Concurrency](#concurrency)), then `orchestrator.ts` applies the selected envset,
-boots services through the launcher/PTY layer (each service's PTY output is captured
-programmatically into `svc-<name>.log` — never echoed to the server's stdout), runs
-Playwright, and captures evidence. On failure, the run either spawns a local heal agent
+(see [Concurrency](#concurrency)), isolates every repo in a per-run worktree (see
+[Always-worktree runs](#always-worktree-runs-r80)), then `orchestrator.ts` applies the
+selected envset, boots services through the launcher/PTY layer (each service's PTY output
+is captured programmatically into `svc-<name>.log` — never echoed to the server's stdout),
+runs Playwright, and captures evidence. On failure, the run either spawns a local heal agent
 (`auto-heal.ts`) or parks for an external client (see [Heal System](#heal-system)).
 The agent fixes code and drops a `rerun`/`restart` signal; the orchestrator continues
-the same run until pass or terminal failure.
+the same run until pass or terminal failure. At teardown the agent's edits are diffed out
+of each worktree into `<runDir>/fixes/` before the worktree is released.
 
 ### Logging and retention
 
 Logs live under `<workspace>/logs/`. Per-run artifacts are in `logs/runs/<runId>/`:
 `runner.log` (orchestrator narration), `svc-<name>.log`, `playwright.log`,
-`external-commands.jsonl` (per-command audit for external heal), failure slices, and
-the manifest. There is no automatic retention/pruning — runs persist on disk until
-removed manually via the Log Cleanup page (`GET /api/cleanup/runs`, backed by
-`RunStore.delete` / `trimArtifacts`), which deletes whole runs or trims Playwright
-artifacts while keeping the manifest and `runner.log`.
+`external-commands.jsonl` (per-command audit for external heal), `fixes/` (the captured
+heal diff), failure slices, and the manifest. There is no automatic retention/pruning —
+runs persist on disk until removed manually via the Cleanup page's **Runs** tab
+(`GET /api/cleanup/runs`, backed by `RunStore.delete` / `trimArtifacts`), which deletes
+whole runs or trims Playwright artifacts while keeping the manifest and `runner.log`.
 
 ## Concurrency
 
@@ -247,15 +258,38 @@ run's allocation. Test helpers resolve the target as
 `e2e/helpers/api.ts`). The CLI `env` switching path passes no resolver, so it stays a
 verbatim copy.
 
+### Always-worktree runs (R80)
+
+**Every `executionType: 'run'` isolates every one of the feature's repos in a per-run
+`git worktree`** under `<runDir>/worktrees/` — not just colliding ones, and not only
+when the user asks. Set in `runs-route-deps.ts` (`alwaysWorktree = executionType === 'run'`).
+Each worktree is cut from `HEAD`, gets the source repo's `node_modules` symlinked in
+(`linkNodeModules` — a bare worktree skips gitignored deps and the boot command dies at
+exit 127, which then reads as a health-check timeout), and has the user's uncommitted
+changes replayed into it (`hydrateWorkingTreeDiff`), so the run tests their WIP rather
+than committed state. A repo that can't be worktree'd falls back to running in place with
+a warning; a **portified** repo that can't be worktree'd fails the run loudly, because its
+overlay could not apply and it would boot un-portified.
+
+The point is fix capture. `captureFixBaseline` stashes a baseline ref after
+overlay + envset + WIP hydration, so the teardown diff is exactly the repair; `captureFixes`
+writes it to `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture` before the
+worktree goes away. **The heal agent never mutates the product repo** — the user applies the
+patch or doesn't. Non-portified worktrees are removed at teardown; a portified run reverses
+its overlay but *keeps* the worktree (it holds the repair, and the Cleanup page's Worktrees
+tab owns its lifecycle). Boot, verify and benchmark sessions keep the older
+portified/collision-only behaviour — they don't heal, so there is nothing to capture.
+
 ### Same-repo collision
 
-The heal loop edits repo code in place, so two runs on the *same* repo would corrupt
-each other. Starting a second run on an active repo returns
-`repo_collision_requires_choice` (REST 409 / MCP result). The user chooses
-**worktree** (isolate the run in a per-run `git worktree` under `<runDir>/worktrees/`
-and run now) or **queue** (wait until the conflicting run finishes). Different-repo
-runs never collide. See `apps/web-server/src/features/runs/logic/runtime/repo-collision.ts` +
-`repo-worktree.ts`.
+Worktrees isolate the *working tree*, not the feature's **fixed ports** — so two runs of the
+same feature still can't boot side by side unless it has been port-ified. Starting a second
+run on an active repo therefore returns `repo_collision_requires_choice` (REST 409 / MCP
+result) and the user chooses **worktree** (run now) or **queue** (wait for the conflicting
+run to finish). Different-repo runs never collide, and a portified feature auto-isolates with
+no prompt at all — its overlay gives each boot disjoint injected ports, which makes it
+inherently collision-free. See
+`apps/web-server/src/features/runs/logic/runtime/repo-collision.ts` + `repo-worktree.ts`.
 
 ### Admission and queue
 
@@ -300,8 +334,10 @@ prompt.
 When `manifest.healMode === 'external'` the orchestrator parks at
 `waiting-for-signal` and an MCP client drives `claim_heal` → `get_heal_context` →
 edit code → `signal_run`. `ExternalHealBroker`
-(`apps/web-server/src/features/runs/logic/heal/external-heal-broker.ts`) owns the single-claim lock + 15s
-heartbeat staleness. Every external command is audited at
+(`apps/web-server/src/features/runs/logic/heal/external-heal-broker.ts`) owns the single-claim
+lock and reclaims a claim whose heartbeat has gone stale — `HEARTBEAT_STALE_MS` in
+`shared/run-state.ts`, currently **10 minutes**, long enough that a client thinking between
+tool calls is never evicted. Every external command is audited at
 `<runDir>/external-commands.jsonl`.
 
 ### Heal-claim policy (block runner PTYs)
@@ -350,10 +386,14 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   `canary-lab ui`. Health: `GET /mcp/health?profile=<p>`. The port is configured in
   `canary-lab.config.json` (`port` field) in the workspace directory — read it
   dynamically rather than assuming a fixed value (default 7421 if unset).
-- **Profiles** pick the tool subset via `?profile=`: `repair` (heal loop, default),
-  `verify` (verification configs), `author` (feature/envset/draft/eval authoring),
-  `portify` (port-injection workflow), `lifecycle` (everyday end-to-end loop —
-  repair + author + verify, no portify), `full` (lifecycle + portify). Optional
+- **Profiles** pick the tool subset via `?profile=`. Nine of them, six workflow-scoped
+  plus three composed: `repair` (heal loop), `verify` (verification configs), `author`
+  (feature/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
+  (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
+  workflow) — then `lifecycle` (**the default**: repair + verify + author + coverage +
+  export + flight, no portify) and `full` (lifecycle + portify). `coverage`, `export`
+  and `flight` were carved out of what used to be one oversized `author` array; the
+  composed unions absorbed the split, so nothing had to move twice. Optional
   `?client_kind=claude|codex|other|...` (the `*-pty` kinds are set by the runner, not passed by clients).
 - Tools live in `apps/web-server/src/mcp/tool-groups/` — one module per domain
   section (`reads`, `authoring`, `run-lifecycle`, `heal-flow`), each a thin wrapper
@@ -364,11 +404,15 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   The grouping is **by domain, not by profile** — seven tools (`list_features` in
   six) belong to several profiles at once, so profile membership is data in
   `tool-profiles.ts`, never file layout.
-- Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`
-  arrays (`tools.ts`). `LIFECYCLE_TOOLS` auto-dedupes repair+verify+author union +
-  `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`); `FULL_TOOLS`
-  is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`. Adding/moving a tool also
-  requires updating the mirror arrays in `mcp/server.smoke.test.ts` — see the
+- Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`COVERAGE_TOOLS`/
+  `EXPORT_TOOLS`/`FLIGHT_TOOLS`/`PORTIFY_TOOLS` arrays, which live in
+  **`mcp/tool-profiles.ts`** and reach the rest of the layer re-exported through
+  `tool-support.ts`. `LIFECYCLE_TOOLS` auto-dedupes the union of all six non-portify
+  arrays + `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`);
+  `FULL_TOOLS` is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`. Because both are computed
+  unions, adding a tool to any workflow array surfaces it in the composed profiles
+  with no second edit. Adding/moving a tool does still require updating the mirror
+  arrays in `mcp/server.smoke.test.ts` — see the
   [invariants table](#keep-in-sync-invariants) and the `cl_add-mcp-tool` skill.
 - Each MCP session gets its own transport (`mcp/server.ts`) — a singleton would
   reject the 2nd client with `-32600 Server already initialized`.
@@ -387,13 +431,14 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   `wait_for_heal_task` returns immediately rather than dead-waiting until timeout.
 - **Feature docs convention**: feature-scoped prose (distilled sessions, plans,
   notes) lives at `features/<name>/docs/<slug>.md`. The `write_feature_doc` MCP tool
-  (author/full profiles) is the only sanctioned writer — create-or-replace, markdown
-  only, path-traversal hardened. The draft-apply path rejects non-spec files, so docs
-  do NOT go through it.
+  (`coverage` / `flight` / `lifecycle` / `full` profiles — **not** `author`) is the only
+  sanctioned writer — create-or-replace, markdown only, path-traversal hardened, with
+  `link_path` to symlink a local file in place instead of copying it. The draft-apply
+  path rejects non-spec files, so docs do NOT go through it.
 
 ## Portify and Benchmark
 
-**Portify** (`apps/web-server/src/features/portify/logic/runtime/`, ~11 files) is an agent-driven
+**Portify** (`apps/web-server/src/features/portify/logic/runtime/`, ~16 files) is an agent-driven
 workflow that rewrites a feature's services so every network listener reads an
 injected port, proven by a concurrent double-boot — making the feature eligible for
 concurrent runs and benchmark arms. Two execution models, split by who initiates
@@ -414,8 +459,10 @@ the caller waits/retries). `list_portify_status` shows which features have a sav
 agent edits source in a throwaway scratch worktree and the verified diff is captured
 as a per-repo patch under `features/<feature>/portify/` (`overlay.ts`: `writeOverlay`/
 `readOverlay`/`overlayExists`/`checkStaleness`). `save_portify` writes the overlay and
-discards the scratch worktree — nothing is committed or merged. At RUN time the
-`RunOrchestrator` force-isolates every repo in a per-run worktree, `applyOverlay`s the
+discards the scratch worktree — nothing is committed or merged. At RUN time every repo is
+already worktree-isolated (see [Always-worktree runs](#always-worktree-runs-r80); for a
+portified feature this is non-negotiable rather than best-effort — a repo that can't be
+worktree'd fails the run). The orchestrator `applyOverlay`s the
 patch (plain `git apply`, `--3way` fallback) before boot after a staleness check, and
 `reverseOverlay`s it (atomic `git apply -R`) at teardown while KEEPING the worktree
 (it holds heal edits). Apply/staleness failure aborts the run loudly ("re-run Portify")
@@ -440,7 +487,7 @@ facts about a feature's tests as math over the tags — never an agent's opinion
   `Requirement`s (`prd-summary.ts`; agent-proposed, deterministic heading-extraction
   fallback). Tests link to requirements via `@req-<id>` / `@path-*` / `@variant-*` tags on
   the `test()` (legacy `@requirement` / `@path` comments parse too), extracted by
-  `ast-extractor.ts`. `ledger.ts` joins these into per-requirement gap types
+  `apps/web-server/src/shared/ast-extractor.ts`. `ledger.ts` joins these into per-requirement gap types
   (`covered` / `path-incomplete` / `variant-incomplete` / `untested`) and the coverage %.
   Coverage is **decoupled from runs**: it asks "does a mapped test claim every path (and
   variant) this requirement implies?", never "did a run pass?".
