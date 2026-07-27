@@ -82,7 +82,9 @@ export function ShikiCode({
           const line = (e.target as HTMLElement).closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
           if (line) void openAt(Number(line))
         }}
-        // eslint-disable-next-line react/no-danger
+        // Shiki has already escaped the source it highlighted; decorateShikiLines
+        // only wraps those tokens in spans.
+        // eslint-disable-next-line no-restricted-syntax
         dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines) }}
       />
     </CodeShell>

@@ -1,6 +1,5 @@
 import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
-import react from 'eslint-plugin-react'
 
 // Narrow on purpose. ESLint was added because 46 `eslint-disable` directives sat
 // in this repo with no ESLint installed — 46 statements that were not true. The
@@ -25,7 +24,7 @@ import react from 'eslint-plugin-react'
 // The mechanical conventions this repo does care about — filename case, explained
 // catches, alias scope, coverage pragmas, test placement, coverage scope — live in
 // tools/check-conventions.mjs: no type information, 0.09s, and it runs in the edit
-// hook. ESLint here covers only what needs a type checker or the React plugin.
+// hook. ESLint here covers only what needs a type checker or the Hooks plugin.
 //
 // Widening this is a deliberate act: add a rule, run it, and fix or baseline what
 // it finds in the same commit.
@@ -35,6 +34,12 @@ export default tseslint.config(
     ignores: [
       'dist/**',
       'apps/web/dist/**',
+      // A git worktree checkout is a whole second copy of the repo living inside
+      // this one — its own `dist/`, `node_modules/`, and source. The patterns above
+      // are anchored at the root, so they miss all of it and ESLint lints compiled
+      // JS (375 files, and the surviving `eslint-disable` comments in it report
+      // "rule not found"). Each worktree lints itself from its own root.
+      '.claude/worktrees/**',
       'coverage/**',
       // Scaffold templates ship to users verbatim; not this repo's source, and
       // covered by no tsconfig.
@@ -79,12 +84,22 @@ export default tseslint.config(
   {
     files: ['apps/web/**/*.{ts,tsx}'],
     ignores: ['**/*.test.{ts,tsx}'],
-    plugins: { react, 'react-hooks': reactHooks },
+    plugins: { 'react-hooks': reactHooks },
     rules: {
       // Warn, not error: the 6 current findings are real but each needs a
       // behaviour judgement, not a mechanical fix.
       'react-hooks/exhaustive-deps': 'warn',
-      'react/no-danger': 'error',
+      // Was `react/no-danger`. eslint-plugin-react was here for that one rule and
+      // nothing else, and its newest release (7.37.5) still peers `eslint ^9.7` —
+      // so one rule pinned the whole toolchain to ESLint 9, whose minimatch@3 →
+      // brace-expansion@1 chain was every remaining `npm audit` high. A core
+      // selector says the same thing with no plugin, and is strictly wider: the
+      // plugin rule only fires on DOM elements, this also catches the prop
+      // forwarded through a custom component.
+      'no-restricted-syntax': ['error', {
+        selector: "JSXAttribute[name.name='dangerouslySetInnerHTML']",
+        message: 'dangerouslySetInnerHTML renders unescaped HTML. Justify each use with an explained inline disable.',
+      }],
     },
   },
   // A directive that suppresses nothing is the same rot as a stale allowlist
