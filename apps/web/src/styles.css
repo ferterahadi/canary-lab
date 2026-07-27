@@ -431,13 +431,43 @@ body {
   background: var(--bg-hover);
 }
 
-.feature-row__cog {
+/* Features-column row actions (flight / coverage / config): a cluster that
+   FLOATS over the row's right edge rather than sitting in flow, revealed on
+   hover or keyboard focus.
+
+   Why float: the icons used to hold their width at rest, so every added action
+   permanently shortened the suite name — the column's actual content, and
+   already truncating for the long `cns_*` names. Off-flow, the name owns the
+   full row until the pointer arrives, then yields exactly the cluster's width
+   (`--feature-row-actions`, set per row from the visible count). Nothing moves;
+   only the ellipsis lands earlier, so hovering down a long list can't shuffle
+   the layout.
+
+   pointer-events is off at rest: the invisible cluster now overlaps the name, so
+   leaving it clickable would swallow clicks meant for the row. */
+.feature-row__actions {
+  position: absolute;
+  right: 6px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
   opacity: 0;
+  pointer-events: none;
   transition: opacity 150ms ease;
 }
-.feature-row:hover .feature-row__cog,
-.feature-row__cog:focus-visible {
+.feature-row:hover .feature-row__actions,
+.feature-row:focus-within .feature-row__actions {
   opacity: 1;
+  pointer-events: auto;
+}
+.feature-row__name {
+  transition: padding-right 150ms ease;
+}
+.feature-row:hover .feature-row__name,
+.feature-row:focus-within .feature-row__name {
+  padding-right: var(--feature-row-actions, 100px);
 }
 
 /* Active-run state is shown by highlighting the whole feature row, not a

@@ -78,6 +78,8 @@ export interface McpCommandOptions {
   // live-server record so a switched port is followed automatically).
   reResolveUrl?: () => string
   reconnectAttempts?: number
+  // Ceiling for the exponential backoff between reconnect attempts.
+  maxReconnectDelayMs?: number
   reconnectDelayMs?: number
 }
 

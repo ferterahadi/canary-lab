@@ -314,6 +314,44 @@ describe('runUi port resolution', () => {
     expect(refreshAgents).toHaveBeenCalledOnce()
   })
 
+  // Claude Desktop rewrites its own MCP config from a copy loaded at launch, so
+  // it can restore a pre-upgrade cli.js path after `upgrade` healed it. Boot is
+  // the touchpoint later than that revert — and a repair is inert until the user
+  // restarts Desktop, so the hint is the part that makes it useful.
+  it('tells the user to restart Claude Desktop when boot repaired its MCP entry', async () => {
+    const projectRoot = mkProject()
+    mockServer()
+    const messages: string[] = []
+
+    await runUi(['--no-open'], {
+      projectRoot,
+      log: (m) => messages.push(m),
+      exit: vi.fn(),
+      refreshAgents: vi.fn(),
+      refreshDesktopMcp: () => 'configured',
+      ...noopActiveServer,
+    })
+
+    expect(messages.join('\n')).toContain('Restart Claude Desktop')
+  })
+
+  it.each(['unchanged', 'skipped'] as const)('stays silent about Claude Desktop when boot returned %s', async (result) => {
+    const projectRoot = mkProject()
+    mockServer()
+    const messages: string[] = []
+
+    await runUi(['--no-open'], {
+      projectRoot,
+      log: (m) => messages.push(m),
+      exit: vi.fn(),
+      refreshAgents: vi.fn(),
+      refreshDesktopMcp: () => result,
+      ...noopActiveServer,
+    })
+
+    expect(messages.join('\n')).not.toContain('Claude Desktop')
+  })
+
   it('relaunches the UI and shuts down when a port change is requested', async () => {
     const projectRoot = mkProject({ port: 8000 })
     let captured: ((port: number) => void) | undefined

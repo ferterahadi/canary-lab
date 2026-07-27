@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { type FlightStore } from '../logic/store'
 import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDeps } from '../logic/conductor'
-import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
+import { STAGE_DEPENDS_ON, type FlightOptions, type FlightStageKey } from '../logic/types'
 import { type PlannedFeature } from '../../../../../../shared/flights/types'
 import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import { hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
@@ -43,26 +43,51 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
   }): string | null => {
     const { feature, fromStage, env } = args
     const featureDir = path.join(featuresDir, feature)
-    const after = (stage: FlightStageKey) =>
-      FLIGHT_STAGE_KEYS.indexOf(fromStage) > FLIGHT_STAGE_KEYS.indexOf(stage)
 
     if (fromStage === 'heal') {
       return 'cannot start at "heal" — heal is driven by the run stage; use --from-stage run'
     }
-    if (after('scaffold') && !fs.existsSync(path.join(featureDir, 'feature.config.cjs'))) {
-      return `cannot start at "${fromStage}": feature "${feature}" has no feature.config.cjs (scaffold prerequisite) — start from scout/scaffold instead`
+
+    /** The on-disk artifact each producing stage leaves behind, with the message
+     *  naming what is missing and where to start instead. Keyed by the stage that
+     *  PRODUCES the artifact, so the reason always points at a real entry point. */
+    const PRODUCED: Partial<Record<FlightStageKey, { present: () => boolean; missing: string; startFrom: string }>> = {
+      'scaffold': {
+        present: () => fs.existsSync(path.join(featureDir, 'feature.config.cjs')),
+        missing: `feature "${feature}" has no feature.config.cjs (scaffold prerequisite)`,
+        startFrom: 'scout/scaffold',
+      },
+      'env-capture': {
+        present: () => hasCapturedEnvset(featureDir, env),
+        missing: `no captured envset at envsets/${env}/ (env-capture prerequisite)`,
+        startFrom: 'env-capture',
+      },
+      'prd-summary': {
+        present: () => hasPrdSummary(featureDir),
+        missing: 'no PRD summary at docs/_prd-summary.json (prd-summary prerequisite)',
+        startFrom: 'docs',
+      },
+      'specs-coverage': {
+        present: () => hasAuthoredSpecs(featureDir),
+        missing: 'no specs under e2e/ (specs-coverage prerequisite)',
+        startFrom: 'specs-coverage',
+      },
+      'run': {
+        present: () => Boolean(args.existing?.links?.runId) || hasStandalonePassedRun(feature),
+        missing: 'no passed run for this feature yet (run prerequisite)',
+        startFrom: 'run',
+      },
     }
-    if (after('env-capture') && !hasCapturedEnvset(featureDir, env)) {
-      return `cannot start at "${fromStage}": no captured envset at envsets/${env}/ (env-capture prerequisite) — start from env-capture instead`
-    }
-    if (after('prd-summary') && !hasPrdSummary(featureDir)) {
-      return `cannot start at "${fromStage}": no PRD summary at docs/_prd-summary.json (prd-summary prerequisite) — start from docs instead`
-    }
-    if (after('specs-coverage') && !hasAuthoredSpecs(featureDir)) {
-      return `cannot start at "${fromStage}": no specs under e2e/ (specs-coverage prerequisite) — start from specs-coverage instead`
-    }
-    if (fromStage === 'evaluation-export' && !args.existing?.links?.runId && !hasStandalonePassedRun(feature)) {
-      return 'cannot start at "evaluation-export": no passed run for this feature yet (run prerequisite) — start from run instead'
+
+    // Only what this stage READS — see STAGE_DEPENDS_ON. The old rule tested
+    // every stage to the LEFT of the entry point, which made an early artifact a
+    // hard gate for later stages that never open it (a PRD summary blocking
+    // portify, run and the evaluation export).
+    for (const producer of STAGE_DEPENDS_ON[fromStage]) {
+      const artifact = PRODUCED[producer]
+      if (artifact && !artifact.present()) {
+        return `cannot start at "${fromStage}": ${artifact.missing} — start from ${artifact.startFrom} instead`
+      }
     }
     return null
   }

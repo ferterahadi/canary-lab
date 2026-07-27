@@ -1,4 +1,6 @@
-import type { FlightManifest, FlightStage } from '@/shared/api/client'
+import type { ReactNode } from 'react'
+import type { EvaluationExportTask, FlightManifest, FlightStage } from '@/shared/api/client'
+import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { PORTIFY_PHASE_LABEL, STAGE_COLUMN, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
 
@@ -62,14 +64,31 @@ export function bootCheckFacts(envEv: Record<string, unknown>): StageFact[] {
 
 export const MAX_LIST_FACTS = 5
 
+/** The export task behind an Evaluation Report stage. Recorded evidence and the
+ *  read-time probe both carry the id; `links` is the resume path's only carrier
+ *  (its evidence records the reused archive, not the task). Resolving the TASK is
+ *  what makes the card and the download work on a derived flight, which has no
+ *  record at all. */
+export function evaluationTaskId(stage: FlightStage, flight: FlightManifest): string | undefined {
+  if (stage.key !== 'evaluation-export') return undefined
+  return str(evidenceOf(stage), 'taskId') ?? flight.links?.evaluationTaskId
+}
+
 export function stageFacts(
   stage: FlightStage,
   flight: FlightManifest,
   companion?: FlightStage,
+  /** The resolved export task (Evaluation Report only) — the archive's name, run
+   *  and mode come from it rather than from the flight record. */
+  evalTask?: EvaluationExportTask | null,
 ): StageFact[] {
   const ev = evidenceOf(stage)
   const cev = evidenceOf(companion)
-  if (stage.status === 'pending') return []
+  // A pending step normally has nothing to show — EXCEPT when its artifacts were
+  // probed from the workspace, which means they exist on disk even though the step
+  // never completed (specs authored, no requirements to map them onto). Hiding
+  // those facts would misreport a part-done step as untouched.
+  if (stage.status === 'pending' && stage.evidenceSource !== 'workspace') return []
   switch (stage.key) {
     case 'similarity': {
       const match = ev.match as Record<string, unknown> | null | undefined
@@ -136,6 +155,12 @@ export function stageFacts(
       }
       const breakdown = [...byKind].map(([kind, n]) => `${n} ${kind}`).join(' · ')
       const target = flight.opts.coverageTarget
+      // A probed suite with no requirements has UNDEFINED coverage, not 0%. The
+      // percentage tile (amber, empty bar) would read as a failing suite when the
+      // truth is there is no PRD to measure its specs against.
+      if (stage.evidenceSource === 'workspace' && num(ev, 'total') === 0) {
+        return [{ label: 'Requirements', value: 'None mapped yet' }]
+      }
       return [
         // Pass N of M — the big number carries the stepper so "3 passes still to
         // go" reads at a glance instead of being inferred from "2 of 5".
@@ -200,8 +225,27 @@ export function stageFacts(
       // exactly the duplication the hero replaced. So: no stage-level facts.
       return []
     case 'evaluation-export': {
-      const zip = str(ev, 'evaluationZip') ?? flight.links?.evaluationZip
-      return zip ? [{ label: 'Archive', value: zip.split('/').pop() ?? zip, mono: true, title: zip }] : []
+      // One card whichever path produced the evidence — a conducted flight (the
+      // stage recorded its own) and a derived one (probed at read time) had
+      // COMPLEMENTARY halves before: the first named only the archive, the second
+      // only the run. Both now read the export TASK, which is what the download
+      // actually fetches and the only source both paths share.
+      //
+      // The archive is named as the user will receive it
+      // (`canary-lab-evaluation-<feature>-<runId>.zip`, from the same helper that
+      // sets `link.download`) — never `export.zip`, which is only the internal
+      // filename inside the logs dir and a file nobody has ever been handed.
+      const runId = evalTask?.runId ?? str(ev, 'runId')
+      const mode = evalTask?.mode ?? str(ev, 'mode')
+      const recordedBase = str(ev, 'archiveBase')
+      const archive = evalTask
+        ? evaluationArchiveFilename(evalTask.feature, evalTask.runId)
+        : recordedBase ? `${recordedBase}.zip` : null
+      return [
+        ...(runId ? [{ label: 'From run', value: runId, mono: true }] : []),
+        ...(mode ? [{ label: 'Report', value: mode === 'localized' ? 'agent-rewritten' : 'built from evidence' }] : []),
+        ...(archive ? [{ label: 'Archive', value: archive, mono: true, title: archive }] : []),
+      ]
     }
     default:
       return []
@@ -282,13 +326,21 @@ export function FactTile({ fact: f }: { fact: StageFact }) {
  *  Facts render as a responsive tile grid (R77): numeric facts get a large
  *  metric treatment (coverage %, pass N of M), text/path facts stay quiet — one
  *  layout that fits every stage's mix of scalar and sentence values. */
-export function FactsGrid({ facts }: { facts: StageFact[] }) {
+export function FactsGrid({ facts, aside }: {
+  facts: StageFact[]
+  /** The stage's one card-level action, on the kicker line (PanelCard's `aside`)
+   *  — the Evaluation Report's download sits with the archive it downloads
+   *  instead of in the stage header. Only ever passed alongside the facts it acts
+   *  on (the download and the Archive tile come from the same export task), so
+   *  the no-facts return below can't strand it. */
+  aside?: ReactNode
+}) {
   if (facts.length === 0) return null
   return (
     // Same column as every stage panel — the tile grid wraps inside it and
     // long values truncate within a tile, never sprawling the whole pane.
     <div className={STAGE_COLUMN}>
-      <PanelCard kicker="At a glance" testId="stage-facts-card">
+      <PanelCard kicker="At a glance" aside={aside} testId="stage-facts-card">
         <div
           data-testid="stage-facts"
           className="grid gap-2"

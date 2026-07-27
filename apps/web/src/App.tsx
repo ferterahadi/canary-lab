@@ -18,6 +18,7 @@ import { FlightStartDialog } from './features/flights/components/FlightStartDial
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
+import { resolveFeatureFlightAction } from './features/flights'
 import { useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
@@ -89,6 +90,15 @@ export function App() {
   // Evidence-derived stage rails for flightless picker rows — one instance,
   // same ownership rule as featureActivity (the pill stays presentational).
   const derivedStages = useDerivedFeatureStages(features)
+  // The Features column's per-row flight shortcut — one jump from a suite to its
+  // flight instead of the pill → picker → find-the-row detour. Same inputs the
+  // picker rows resolve from, so the two agree on where a suite's flight lives
+  // (a recorded id, or the `feature:` derived token for progress made outside
+  // the conductor) and on the state the icon reports.
+  const flightAction = useCallback(
+    (feature: string) => resolveFeatureFlightAction(feature, flights, featureActivity.get(feature), derivedStages.get(feature)),
+    [flights, featureActivity, derivedStages],
+  )
   // Clicking a live activity row opens the activity's REAL surface. The routing
   // decision is the pure `resolveActivityTarget`; App maps the target to nav.
   const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
@@ -248,6 +258,7 @@ export function App() {
           onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
           onStartNewFlight={() => setFlightStartNew(true)}
           onOpenFlight={openFlight}
+          flightAction={flightAction}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
         />

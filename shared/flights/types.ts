@@ -29,6 +29,41 @@ export const FLIGHT_STAGE_KEYS = [
 
 export type FlightStageKey = (typeof FLIGHT_STAGE_KEYS)[number]
 
+/** Which stages produce the artifacts a stage actually READS — the real
+ *  dependency graph, not the list order.
+ *
+ *  Execution order and dependency are different things, and conflating them was
+ *  a bug: a positional "everything to my left must exist" rule blocked
+ *  `portify`, `run` and `evaluation-export` on a PRD summary that none of them
+ *  ever opens, so a suite with a green run but no requirements could not be
+ *  re-entered at any of them. Declared here, in shared, because both the
+ *  server's stage-entry validator and the client's "what is this step waiting
+ *  on" copy must answer from the same graph.
+ *
+ *  Read as: to enter at KEY, the listed stages' artifacts must be on disk.
+ *  - `docs` / `prd-summary` need only the suite to exist; neither boots anything,
+ *    and `prd-summary`'s own checkpoint handles the no-docs case by collecting or
+ *    inferring, so a source doc is not an entry prerequisite.
+ *  - `specs-coverage` genuinely needs the PRD summary — it maps specs onto
+ *    requirements — and the envset, because its validate pass compiles the specs.
+ *  - `portify` double-boots services: config + envset, nothing else.
+ *  - `run` executes specs: config + envset + specs.
+ *  - `evaluation-export` builds its archive from the run record alone.
+ *  - `heal` is driven by `run` and is refused as an entry point outright. */
+export const STAGE_DEPENDS_ON: Record<FlightStageKey, readonly FlightStageKey[]> = {
+  'similarity': [],
+  'scout': [],
+  'scaffold': [],
+  'env-capture': ['scaffold'],
+  'docs': ['scaffold'],
+  'prd-summary': ['scaffold'],
+  'specs-coverage': ['scaffold', 'env-capture', 'prd-summary'],
+  'portify': ['scaffold', 'env-capture'],
+  'run': ['scaffold', 'env-capture', 'specs-coverage'],
+  'heal': ['run'],
+  'evaluation-export': ['run'],
+}
+
 export type FlightStageStatus =
   | 'pending'
   | 'running'
@@ -133,6 +168,12 @@ export interface FlightStage {
   /** Harness-computed proof the stage settled on (boot summary, coverage
    *  ledger snapshot, archive path…) — never agent-asserted. */
   evidence?: unknown
+  /** Where `evidence` came from. Absent (the default) = recorded by the stage
+   *  adapter when it settled. `workspace` = probed from the workspace at READ
+   *  time because the stage never recorded any, so it describes the artifacts as
+   *  they are NOW rather than a point-in-time measurement. Never persisted —
+   *  the fill happens on the read path (see workspace-evidence.ts). */
+  evidenceSource?: 'workspace'
   /** Structured LIVE progress while the stage runs (kept after it settles as
    *  the audit trail). Shape is stage-specific — specs-coverage publishes
    *  `SpecsCoverageProgress` so the UI can render the authoring↔mapping loop
@@ -338,6 +379,12 @@ export interface FlightEntryOptions {
   canContinue: boolean
   prefill: { repoPaths: string[]; description: string; env: string; coverageTarget: number }
   stages: FlightStageEntryOption[]
+  /** Stage evidence probed from the workspace at read time, keyed by stage.
+   *  A DERIVED flight (no record — see derived-stages.ts) has no manifest to
+   *  read, so this is where its panels get their facts; the client attaches each
+   *  block to the matching stage of its client-only pseudo-manifest. Absent keys
+   *  simply have no artifact to report. Never persisted. */
+  evidence?: Partial<Record<FlightStageKey, Record<string, unknown>>>
 }
 
 /** Flight statuses that hold the single-flight lock for their repo set. */

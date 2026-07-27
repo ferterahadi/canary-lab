@@ -48,7 +48,14 @@ export function deriveFeatureStages(
     // summaries where docs/ holds no source docs).
     'docs': ev.prdSummary ? 'done' : 'pending',
     'prd-summary': ev.prdSummary ? 'done' : 'pending',
-    'specs-coverage': ev.specs ? 'done' : 'pending',
+    // "Test authoring & coverage" is TWO things, and a spec file only proves the
+    // first. Coverage is a mapping onto requirements, so with no PRD summary it
+    // was never computed and never could be — marking the step done off an
+    // authored spec alone put a green tick on a suite with zero coverage. The
+    // percentage itself is reported, not gated: a conducted flight may settle
+    // this stage below target via accept-partial, so "done" means mapped, not
+    // fully covered.
+    'specs-coverage': ev.specs && ev.prdSummary ? 'done' : 'pending',
     'portify': feature.portified ? 'done' : 'pending',
     'run': runStatus,
     'heal': runStatus,
@@ -91,7 +98,7 @@ export function derivedFlightFeature(flightId: string): string | null {
 export function buildDerivedManifest(
   feature: string,
   stages: DerivedStage[],
-  prefill?: { repoPaths?: string[]; env?: string },
+  prefill?: { repoPaths?: string[]; env?: string; evidence?: Partial<Record<FlightStageKey, Record<string, unknown>>> },
 ): FlightManifest {
   const allDone = stages.every((s) => s.status === 'done')
   return {
@@ -102,7 +109,21 @@ export function buildDerivedManifest(
     opts: { env: prefill?.env ?? 'local', coverageTarget: 100, yolo: false },
     status: allDone ? 'done' : 'paused',
     currentStage: null,
-    stages: stages.map((s) => ({ key: s.key, status: s.status })),
+    // Evidence probed from the workspace rides along so every panel renders facts
+    // through its normal `stage.evidence` path.
+    //
+    // Attached regardless of the stage's status, because a probe returning a block
+    // IS proof the artifact is on disk — and a step can be part-done: specs
+    // authored with no requirements to map them against leaves this stage open
+    // while its spec files genuinely exist. Gating on `done` would hide that real
+    // work behind a bare "not started". A stage with no artifact to report still
+    // carries nothing, so nothing is invented for a step that never happened.
+    stages: stages.map((s) => {
+      const evidence = prefill?.evidence?.[s.key]
+      return evidence
+        ? { key: s.key, status: s.status, evidence, evidenceSource: 'workspace' as const }
+        : { key: s.key, status: s.status }
+    }),
     createdAt: '',
     updatedAt: '',
   }

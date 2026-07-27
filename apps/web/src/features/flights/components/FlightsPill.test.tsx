@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightIndexEntry, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
-import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows } from './FlightsPill'
+import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction } from './FlightsPill'
 
 const preFlight = (over: Partial<PlanFeaturesTask>): PlanFeaturesTask => ({
   taskId: 'fp_1',
@@ -411,5 +411,56 @@ describe('groupPickerRows group fallback (R69)', () => {
     )
     const { groups } = groupPickerRows(rows, [{ name: 'checkout', group: 'Shop' }])
     expect(groups.map((g) => g.group)).toEqual(['Shop'])
+  })
+})
+
+describe('resolveFeatureFlightAction — the Features column row shortcut', () => {
+  const allPending = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const }))
+  const worked = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'scout' ? 'done' as const : 'pending' as const }))
+
+  it('points at the recorded flight and reports its state', () => {
+    const action = resolveFeatureFlightAction(
+      'checkout',
+      [flight({ flightId: 'fl_9', feature: 'checkout', status: 'waiting-for-approval' })],
+    )
+    expect(action).toEqual({
+      flightId: 'fl_9',
+      tone: 'var(--warning)',
+      label: 'to approve',
+      title: 'needs approval',
+    })
+  })
+
+  it('keeps the first record when a feature has several flights (same rule as the picker rows)', () => {
+    const action = resolveFeatureFlightAction('checkout', [
+      flight({ flightId: 'fl_new', feature: 'checkout', status: 'running' }),
+      flight({ flightId: 'fl_old', feature: 'checkout', status: 'done' }),
+    ])
+    expect(action?.flightId).toBe('fl_new')
+  })
+
+  it('points a flightless-but-worked suite at its derived flight token', () => {
+    const action = resolveFeatureFlightAction('checkout', [], undefined, worked)
+    expect(action?.flightId).toBe('feature:checkout')
+    expect(action?.label).toBe('idle')
+  })
+
+  it('lets live activity carry the tone even without a flight record', () => {
+    const action = resolveFeatureFlightAction(
+      'checkout',
+      [],
+      { kind: 'running', runId: 'r1' },
+      worked,
+    )
+    expect(action?.flightId).toBe('feature:checkout')
+    expect(action?.tone).toBe('var(--running)')
+  })
+
+  it('offers nothing for a suite with no flight and no evidence — starting stays with "+ New" (R40)', () => {
+    expect(resolveFeatureFlightAction('fresh', [], undefined, allPending)).toBeNull()
+    // Older server: no evidence block at all → no derived rail, no shortcut.
+    expect(resolveFeatureFlightAction('fresh', [])).toBeNull()
+    // Another feature's flight must not resolve for this one.
+    expect(resolveFeatureFlightAction('fresh', [flight({ feature: 'checkout' })])).toBeNull()
   })
 })

@@ -136,18 +136,24 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(body.canContinue).toBe(false)
     expect(body.prefill.repoPaths).toEqual([repoDir])
     expect(body.prefill.description).toBe('')
-    // Config on disk → everything up to and including env-capture is enterable
-    // with no flight record at all.
-    for (const key of ['similarity', 'scout', 'scaffold', 'env-capture'] as const) {
+    // Config on disk → every stage whose only dependency is the suite existing is
+    // enterable with no flight record at all. `docs` and `prd-summary` belong here:
+    // they gather and distil requirement files and boot nothing, so an envset is
+    // not their prerequisite (the old positional rule wrongly demanded one).
+    for (const key of ['similarity', 'scout', 'scaffold', 'env-capture', 'docs', 'prd-summary'] as const) {
       expect(stageOf(body, key)).toMatchObject({ allowed: true })
     }
-    // Past that the artifacts don't exist yet, so the validator — not a record
-    // check — is what blocks, and it names the missing prerequisite.
-    for (const key of ['docs', 'specs-coverage', 'run'] as const) {
+    // Stages that DO read the envset stay blocked, named by the missing artifact —
+    // the validator, not a record check.
+    for (const key of ['specs-coverage', 'portify', 'run'] as const) {
       expect(stageOf(body, key)).toMatchObject({ allowed: false })
       expect(stageOf(body, key).reason).toMatch(/env-capture prerequisite/)
       expect(stageOf(body, key).reason).not.toMatch(/first flight/)
     }
+    // The export builds its archive from the run record, so its blocker is the
+    // absent run — never someone else's missing artifact.
+    expect(stageOf(body, 'evaluation-export')).toMatchObject({ allowed: false })
+    expect(stageOf(body, 'evaluation-export').reason).toMatch(/run prerequisite/)
   })
 
   it('unlocks a stage for a never-flown feature once its evidence is on disk — R81', async () => {

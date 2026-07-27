@@ -104,6 +104,45 @@ describe('derived flight tokens (R81)', () => {
     expect(m.opts.env).toBe('staging')
   })
 
+  it('attaches workspace-probed evidence whatever the stage status, flagging the source', () => {
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: (key === 'specs-coverage' ? 'pending' : 'done') as 'done' | 'pending',
+    }))
+    const m = buildDerivedManifest('go-smoke', stages, {
+      evidence: {
+        'run': { counts: { passed: 3, total: 3, failed: 0 } },
+        // A PENDING stage still gets its block: the probe returning one is proof
+        // the artifact is on disk, and this step is part-done (specs authored,
+        // nothing to map them onto). Withholding it would report real work as
+        // untouched.
+        'specs-coverage': { coveragePct: 0, total: 0 },
+      },
+    })
+    const run = m.stages.find((s) => s.key === 'run')
+    expect(run?.evidence).toEqual({ counts: { passed: 3, total: 3, failed: 0 } })
+    expect(run?.evidenceSource).toBe('workspace')
+    const specs = m.stages.find((s) => s.key === 'specs-coverage')
+    expect(specs?.status).toBe('pending')
+    expect(specs?.evidence).toEqual({ coveragePct: 0, total: 0 })
+    expect(specs?.evidenceSource).toBe('workspace')
+    // A stage with no probed block stays status-only — nothing is invented.
+    expect(m.stages.find((s) => s.key === 'scout')?.evidence).toBeUndefined()
+    expect(m.stages.find((s) => s.key === 'scout')?.evidenceSource).toBeUndefined()
+  })
+
+  it('leaves the coverage step OPEN when there is no PRD to map specs onto', () => {
+    const specsOnly = deriveFeatureStages(
+      { evidence: { envCapture: true, prdSummary: false, specs: true }, portified: false },
+    )
+    expect(specsOnly?.find((s) => s.key === 'specs-coverage')?.status).toBe('pending')
+    // With requirements distilled, the step can actually complete.
+    const withPrd = deriveFeatureStages(
+      { evidence: { envCapture: true, prdSummary: true, specs: true }, portified: false },
+    )
+    expect(withPrd?.find((s) => s.key === 'specs-coverage')?.status).toBe('done')
+  })
+
   it('entry stage is the first step with nothing to show for it', () => {
     const stages = FLIGHT_STAGE_KEYS.map((key) => ({
       key,

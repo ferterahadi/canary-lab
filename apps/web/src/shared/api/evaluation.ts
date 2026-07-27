@@ -3,6 +3,7 @@
 
 import type { EvaluationExportMode, EvaluationExportTask } from './types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
+import { evaluationArchiveFilename } from '@/shared/lib/format'
 
 export function startEvaluationExport(
   runId: string,
@@ -77,7 +78,7 @@ export async function downloadEvaluationExportTask(
   const link = documentRef.createElement('a')
   try {
     link.href = href
-    link.download = evaluationExportFilename(task.feature, task.runId)
+    link.download = evaluationArchiveFilename(task.feature, task.runId)
     link.style.display = 'none'
     documentRef.body.appendChild(link)
     link.click()
@@ -85,14 +86,6 @@ export async function downloadEvaluationExportTask(
     link.remove()
     urlApi.revokeObjectURL(href)
   }
-}
-
-function evaluationExportFilename(feature: string, runId: string): string {
-  return `canary-lab-evaluation-${safeFilename(feature)}-${safeFilename(runId)}.zip`
-}
-
-function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }
 
 async function readResponseBody(res: Response): Promise<unknown> {

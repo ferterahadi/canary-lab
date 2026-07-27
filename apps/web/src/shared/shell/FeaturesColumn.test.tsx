@@ -153,6 +153,9 @@ describe('FeaturesColumn coverage action (R8)', () => {
   })
 })
 
+// R40 removed the per-row flight LAUNCHER; the hover shortcut below is the
+// opposite direction (open the flight this suite already has), so both hold:
+// nothing on a row starts a flight, and a row can still jump to one.
 describe('FeaturesColumn flight action (R40: per-row action removed)', () => {
   const feature = (name: string) => ({ name, repos: [], envs: [] })
 
@@ -326,3 +329,98 @@ function clickButton(label: string): void {
   expect(button).toBeTruthy()
   button?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 }
+
+describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', () => {
+  const feature = (name: string) => ({ name, repos: [], envs: [] })
+  const action = { flightId: 'fl_7', tone: 'var(--success)', label: 'done', title: 'flight done' }
+
+  it('opens the resolved flight and aligns the workspace selection with it', () => {
+    const onOpenFlight = vi.fn()
+    const onSelectFeature = vi.fn()
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          onSelectFeature={onSelectFeature}
+          onOpenFlight={onOpenFlight}
+          flightAction={() => action}
+        />,
+      )
+    })
+    const button = container.querySelector<HTMLButtonElement>('[data-testid="flight-shortcut-alpha"]')
+    expect(button?.getAttribute('data-flight-id')).toBe('fl_7')
+    // The status hue rides on the icon — the state is the point of the jump.
+    expect(button?.style.color).toBe('var(--success)')
+    act(() => { button?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(onSelectFeature).toHaveBeenCalledWith('alpha')
+    expect(onOpenFlight).toHaveBeenCalledWith('fl_7')
+  })
+
+  it('omits the shortcut when the suite has no flight to open', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          onOpenFlight={() => {}}
+          flightAction={() => null}
+        />,
+      )
+    })
+    expect(container.querySelector('[data-testid="flight-shortcut-alpha"]')).toBeNull()
+  })
+
+  it('omits the shortcut when no resolver or no destination handler is wired', () => {
+    act(() => {
+      root.render(
+        <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
+      )
+    })
+    expect(container.querySelector('[data-testid="flight-shortcut-alpha"]')).toBeNull()
+    // Resolver present, nowhere to send the click → still nothing to click.
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          flightAction={() => action}
+        />,
+      )
+    })
+    expect(container.querySelector('[data-testid="flight-shortcut-alpha"]')).toBeNull()
+  })
+
+  it('reserves only the visible actions\' width, so the suite name yields no more than it must', () => {
+    // The floating cluster is off-flow; the name makes room on hover via this
+    // per-row width. One action (config) → 40px; all three → 100px.
+    const render = (props: Record<string, unknown>) => {
+      act(() => {
+        root.render(
+          <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} {...props} />,
+        )
+      })
+      return container.querySelector<HTMLElement>('li.feature-row')?.style.getPropertyValue('--feature-row-actions')
+    }
+    expect(render({})).toBe('40px')
+    expect(render({ onOpenFlight: () => {}, flightAction: () => action, onOpenCoverage: () => {} })).toBe('100px')
+  })
+
+  it('keeps the shortcut on grouped rows too', () => {
+    localStorage.clear()
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[{ name: 'beta', repos: [], envs: [], group: 'CNS' }]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          onOpenFlight={() => {}}
+          flightAction={() => action}
+        />,
+      )
+    })
+    expect(container.querySelector('[data-testid="flight-shortcut-beta"]')).toBeTruthy()
+  })
+})

@@ -7,7 +7,9 @@
 export {
   FlightStatusChip,
   FlightsPill,
+  resolveFeatureFlightAction,
 } from './components/FlightsPill'
+export type { FeatureFlightAction } from './components/FlightsPill'
 export {
   StageStatusChip,
   stageLabel,

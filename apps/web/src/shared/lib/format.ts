@@ -1,5 +1,19 @@
 // Pure formatting helpers used by the read-only views.
 
+/** The evaluation archive's filename — the `<feature>-<runId>` shape the server
+ *  mints as the task's `archiveBase`. One home so the name the browser saves, the
+ *  name a UI shows and the name the download header carries cannot drift; the
+ *  internal `export.zip` inside the logs dir is never a user-facing name. */
+export function evaluationArchiveFilename(feature: string, runId: string): string {
+  return `canary-lab-evaluation-${safeFilename(feature)}-${safeFilename(runId)}.zip`
+}
+
+/** Filesystem-safe segment for a download name — anything outside
+ *  `[A-Za-z0-9._-]` collapses to a single dash. */
+export function safeFilename(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
+}
+
 // Format a duration (in milliseconds) as a short human string. Examples:
 //   500   -> "0.5s"
 //   12_500 -> "12.5s"

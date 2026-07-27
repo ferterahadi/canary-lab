@@ -42,7 +42,31 @@ export function claudeDesktopInstalled(configPath: string = claudeDesktopConfigP
   return fs.existsSync(path.dirname(configPath))
 }
 
-export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}): void {
+/** What the write actually did. A caller that re-asserts the entry routinely
+ *  (the `ui` boot re-point) needs to tell a silent no-op from a real repair:
+ *  Desktop only reads this file at launch, so a repair is worthless unless the
+ *  user is told to restart it. */
+export type DesktopRegistrationResult = 'configured' | 'unchanged' | 'skipped'
+
+// The absolute cli.js path Desktop currently has registered, or null when it has
+// no Canary Lab entry. Desktop has no `mcp get` to query — unlike codex/claude
+// (registeredCliPath in mcp-registration.ts) — so the config file is the only
+// source, and a stale-path check that forgets this is blind to Desktop entirely.
+// Returns null for the portable `npx canary-lab@latest` form: it pins no path,
+// so it cannot rot.
+export function registeredDesktopCliPath(
+  configPath: string = claudeDesktopConfigPath(),
+): string | null {
+  const servers = readConfig(configPath).mcpServers
+  if (!servers || typeof servers !== 'object') return null
+  const entry = (servers as Record<string, unknown>)[SERVER_NAME]
+  if (!entry || typeof entry !== 'object') return null
+  const args = (entry as { args?: unknown }).args
+  if (!Array.isArray(args)) return null
+  return args.find((arg): arg is string => typeof arg === 'string' && /[/\\]cli\.js$/.test(arg)) ?? null
+}
+
+export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}): DesktopRegistrationResult {
   const log = opts.log ?? console.log
   const configPath = opts.configPath ?? claudeDesktopConfigPath()
   const invocation = resolveMcpInvocation({
@@ -54,7 +78,7 @@ export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}):
 
   if (opts.dryRun) {
     log(`[dry-run] configure Claude Desktop MCP: ${configPath} -> ${invocation.command} ${invocation.args.join(' ')}`)
-    return
+    return 'skipped'
   }
 
   const config = readConfig(configPath)
@@ -79,25 +103,26 @@ export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}):
       config.mcpServers = servers
       writeConfig(configPath, config)
       log(migrateLog)
-    } else {
-      log('Claude Desktop MCP already configured')
+      return 'configured'
     }
-    return
+    log('Claude Desktop MCP already configured')
+    return 'unchanged'
   }
 
   if (existing !== undefined && !opts.force && !opts.refreshOnly) {
     log('Claude Desktop MCP is already configured differently. Rerun `npx canary-lab setup --force` to replace it.')
-    return
+    return 'skipped'
   }
 
   if (existing === undefined && opts.refreshOnly && !migratedLegacy) {
-    return
+    return 'skipped'
   }
 
   servers[SERVER_NAME] = invocationEntry(invocation)
   config.mcpServers = servers
   writeConfig(configPath, config)
   log(migratedLegacy ? migrateLog : 'Claude Desktop MCP configured')
+  return 'configured'
 }
 
 function invocationEntry(invocation: ResolvedMcpInvocation): Record<string, unknown> {

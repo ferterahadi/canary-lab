@@ -1,4 +1,5 @@
 import { isTerminalRunStatus } from '../../../../../../../shared/run-state'
+import { runCounts } from '../../../runs/logic/run-detail'
 import type { RunSummary } from '../../../runs/logic/run-store'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
@@ -29,16 +30,6 @@ async function readManifest(deps: FlightStageDeps, runId: string): Promise<RunMa
   return (await readRun(deps, runId)).manifest
 }
 
-/** The run's score, straight off the summary artifact — `passed` and `total` are
- *  read, never derived (a test absent from every result list is NOT RUN, so
- *  `total - failed` would silently count it as passed). `failed` is the length of
- *  the failed list, which is what the stage sentence and the flight's evidence
- *  report. Absent summary (older run, never listed) → no count keys at all
- *  rather than zeros that would read as "nothing failed". */
-function runCounts(summary: RunSummary | undefined): { passed: number; total: number; failed: number } | undefined {
-  if (!summary || typeof summary.total !== 'number' || typeof summary.passed !== 'number') return undefined
-  return { passed: summary.passed, total: summary.total, failed: summary.failed?.length ?? 0 }
-}
 
 export function runStage(deps: FlightStageDeps): StageAdapter {
   const waitForVerdict = async (ctx: StageContext, runId: string): Promise<StageOutcome> => {

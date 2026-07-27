@@ -6,7 +6,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ execFileSync: vi.fn() }))
 vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
-const { refreshCanaryLabMcp, findStaleCanaryLabMcp } = await import('./mcp-refresh')
+const { refreshCanaryLabMcp, findStaleCanaryLabMcp, refreshClaudeDesktopMcpQuietly } = await import('./mcp-refresh')
+const { claudeDesktopConfigPath } = await import('./desktop-registration')
+
+// A throwaway home with a Desktop config already in place, so the per-OS layout
+// comes from the resolver rather than a hardcoded macOS path.
+function tmpHomeWithDesktopConfig(contents: unknown): { homeDir: string; configPath: string } {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-refresh-home-'))
+  tmpDirs.push(homeDir)
+  const configPath = claudeDesktopConfigPath(homeDir)
+  fs.mkdirSync(path.dirname(configPath), { recursive: true })
+  fs.writeFileSync(configPath, JSON.stringify(contents))
+  return { homeDir, configPath }
+}
 
 const tmpDirs: string[] = []
 function tmpConfig(): string {
@@ -135,15 +147,17 @@ describe('findStaleCanaryLabMcp', () => {
     const stale = findStaleCanaryLabMcp({
       readRegisteredCliPath: (target) =>
         target === 'claude' ? '/old/dist/scripts/cli.js' : null,
+      readDesktopCliPath: () => null,
       exists: () => false,
     })
 
     expect(stale).toEqual([{ client: 'Claude', cliPath: '/old/dist/scripts/cli.js' }])
   })
 
-  it('reports both clients independently', () => {
+  it('reports both CLI clients independently', () => {
     const stale = findStaleCanaryLabMcp({
       readRegisteredCliPath: () => '/gone/cli.js',
+      readDesktopCliPath: () => null,
       exists: () => false,
     })
 
@@ -153,6 +167,7 @@ describe('findStaleCanaryLabMcp', () => {
   it('stays quiet when the registered path still resolves', () => {
     expect(findStaleCanaryLabMcp({
       readRegisteredCliPath: () => '/live/dist/apps/cli/cli.js',
+      readDesktopCliPath: () => null,
       exists: () => true,
     })).toEqual([])
   })
@@ -160,7 +175,146 @@ describe('findStaleCanaryLabMcp', () => {
   it('stays quiet when a client has no Canary Lab entry at all', () => {
     const exists = vi.fn(() => false)
 
-    expect(findStaleCanaryLabMcp({ readRegisteredCliPath: () => null, exists })).toEqual([])
+    expect(findStaleCanaryLabMcp({
+      readRegisteredCliPath: () => null,
+      readDesktopCliPath: () => null,
+      exists,
+    })).toEqual([])
     expect(exists).not.toHaveBeenCalled()
+  })
+
+  // Desktop is the client most likely to go stale — it rewrites its own config
+  // from a pre-upgrade copy — and the one the check used to be blind to.
+  it('reports Claude Desktop, which has no client CLI to query', () => {
+    const stale = findStaleCanaryLabMcp({
+      readRegisteredCliPath: () => null,
+      readDesktopCliPath: () => '/old/dist/scripts/cli.js',
+      exists: () => false,
+    })
+
+    expect(stale).toEqual([{ client: 'Claude Desktop', cliPath: '/old/dist/scripts/cli.js' }])
+  })
+
+  it('reports Desktop alongside the CLI clients rather than instead of them', () => {
+    const stale = findStaleCanaryLabMcp({
+      readRegisteredCliPath: () => '/gone/cli.js',
+      readDesktopCliPath: () => '/gone/desktop/cli.js',
+      exists: () => false,
+    })
+
+    expect(stale.map((s) => s.client)).toEqual(['Codex', 'Claude', 'Claude Desktop'])
+  })
+
+  // The refresh writes Desktop under this home, so the check has to read the
+  // same one — otherwise a smoke-test upgrade warns about the real install.
+  it('reads the Desktop config under homeDir, through the real reader', () => {
+    const { homeDir } = tmpHomeWithDesktopConfig({
+      mcpServers: { 'Canary_Lab': { command: EXEC, args: ['/gone/dist/scripts/cli.js', 'mcp'] } },
+    })
+
+    const stale = findStaleCanaryLabMcp({ readRegisteredCliPath: () => null, homeDir })
+
+    expect(stale).toEqual([{ client: 'Claude Desktop', cliPath: '/gone/dist/scripts/cli.js' }])
+  })
+
+  it('stays quiet when Desktop points at a path that still resolves', () => {
+    expect(findStaleCanaryLabMcp({
+      readRegisteredCliPath: () => null,
+      readDesktopCliPath: () => '/live/dist/apps/cli/cli.js',
+      exists: () => true,
+    })).toEqual([])
+  })
+})
+
+// Why this exists at all: `upgrade` already heals Desktop, but Desktop owns its
+// config file and rewrites it wholesale from a copy loaded at launch — so an
+// instance running across the upgrade puts the dead path back afterwards.
+// Re-asserting at `ui` boot is the only touchpoint later than the revert.
+describe('refreshClaudeDesktopMcpQuietly', () => {
+  it('re-points an entry Desktop reverted to a pre-upgrade path, and says it repaired it', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify({
+      mcpServers: { 'Canary_Lab': { command: EXEC, args: ['/old/dist/scripts/cli.js', 'mcp', '--profile', 'lifecycle'] } },
+    }))
+
+    const result = refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })
+
+    expect(result).toBe('configured')
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers['Canary_Lab'].args[0]).toBe(CLI)
+  })
+
+  it('reports unchanged on the next boot, so the caller stays silent', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify({
+      mcpServers: { 'Canary_Lab': { command: EXEC, args: ['/old/dist/scripts/cli.js', 'mcp'] } },
+    }))
+    // First boot heals it; the entry it wrote is the one a healthy boot re-reads.
+    expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('configured')
+
+    expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('unchanged')
+  })
+
+  it('never adds an entry to a Desktop that was never configured', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify({ preferences: { a: 1 } }))
+
+    expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('skipped')
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers).toBeUndefined()
+  })
+
+  it('does nothing when Claude Desktop is not installed', () => {
+    const configPath = tmpConfig()
+
+    expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('skipped')
+    expect(fs.existsSync(configPath)).toBe(false)
+  })
+
+  it('honours CANARY_LAB_SKIP_CLIENT_MCP so a smoke-test install cannot hijack the real config', () => {
+    process.env.CANARY_LAB_SKIP_CLIENT_MCP = '1'
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify({
+      mcpServers: { 'Canary_Lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } },
+    }))
+
+    expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('skipped')
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers['Canary_Lab'].command).toBe('npx')
+  })
+
+  it('resolves the config under CANARY_LAB_AGENT_HOME, keeping tests off the real Desktop config', () => {
+    const { homeDir, configPath } = tmpHomeWithDesktopConfig({
+      mcpServers: { 'Canary_Lab': { command: EXEC, args: ['/old/dist/scripts/cli.js', 'mcp'] } },
+    })
+    const priorHome = process.env.CANARY_LAB_AGENT_HOME
+    process.env.CANARY_LAB_AGENT_HOME = homeDir
+
+    try {
+      expect(refreshClaudeDesktopMcpQuietly({ execPath: EXEC, cliPath: CLI })).toBe('configured')
+    } finally {
+      if (priorHome === undefined) delete process.env.CANARY_LAB_AGENT_HOME
+      else process.env.CANARY_LAB_AGENT_HOME = priorHome
+    }
+
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers['Canary_Lab'].args[0]).toBe(CLI)
+  })
+
+  // Running as root defeats the read-only bit, so this asserts the guarantee
+  // only where the OS can actually enforce it.
+  const cannotChmod = process.platform === 'win32' || process.getuid?.() === 0
+  it.skipIf(cannotChmod)('swallows a write failure rather than blocking the ui boot', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify({
+      mcpServers: { 'Canary_Lab': { command: EXEC, args: ['/old/dist/scripts/cli.js', 'mcp'] } },
+    }))
+    // Stale entry, so the refresh definitely tries to write — and cannot.
+    fs.chmodSync(configPath, 0o444)
+
+    expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('skipped')
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers['Canary_Lab'].args[0])
+      .toBe('/old/dist/scripts/cli.js')
   })
 })

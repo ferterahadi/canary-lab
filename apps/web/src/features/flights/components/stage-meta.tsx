@@ -2,7 +2,7 @@ import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgr
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 
-export { FactTile, FactsGrid, stageFacts } from './StageFacts'
+export { evaluationTaskId, FactTile, FactsGrid, stageFacts } from './StageFacts'
 export type { StageFact } from './StageFacts'
 export { STAGE_COMPANION, stageRailRows, stageRowKey } from './StageRail'
 export type { StageRailRow } from './StageRail'

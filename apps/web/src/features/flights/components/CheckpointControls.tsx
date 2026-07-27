@@ -1,38 +1,66 @@
 import { useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
+import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { DiffView } from '@/shared/ui/DiffView'
 import { useEvaluationExports } from '@/features/evaluation'
-import { checkpointOptionLabel, checkpointTitle, STAGE_COLUMN } from './stage-meta'
+import { checkpointOptionLabel, checkpointTitle, evaluationTaskId, STAGE_COLUMN } from './stage-meta'
 
-/** Evaluation Report's primary action (R15): the explicit download — in the
- *  stage's action slot, and (R71/W1, `primary`) as the done-state header
- *  primary. Header and stage instances carry distinct testIds. */
+/** Evaluation Report's explicit download (R15): as an `icon` on the at-a-glance
+ *  card's kicker line — beside the archive it fetches — and (R71/W1, `primary`)
+ *  as the done-state header primary. Instances carry distinct testIds. */
 export function DownloadEvaluationAction({
   flight,
   stage,
   testId = 'flight-download-evaluation',
   primary = false,
+  icon = false,
 }: {
   flight: FlightManifest
   stage: FlightStage
   testId?: string
   primary?: boolean
+  /** Icon-only, for the card's kicker line. */
+  icon?: boolean
 }) {
-  const { downloadTask } = useEvaluationExports()
+  const { downloadTask, taskById } = useEvaluationExports()
   const [failed, setFailed] = useState(false)
-  const ev = (stage.evidence ?? {}) as Record<string, unknown>
-  const taskId = (typeof ev.taskId === 'string' ? ev.taskId : undefined) ?? flight.links?.evaluationTaskId
-  const zip = (typeof ev.evaluationZip === 'string' ? ev.evaluationZip : undefined) ?? flight.links?.evaluationZip
-  if (!taskId || !zip) return null
+  const taskId = evaluationTaskId(stage, flight)
+  // Gated on the TASK, not on a recorded zip PATH: the download fetches
+  // `/api/evaluation-exports/<taskId>/download`, and a flight whose evidence came
+  // from a read-time probe carries no path — the old path gate hid the download on
+  // every derived flight that had a finished archive sitting on disk. A task the
+  // client doesn't hold (a deleted export) has nothing to fetch, so the action
+  // stays absent rather than clicking into a silent no-op.
+  const task = taskId ? taskById(taskId) : null
+  if (!taskId || !task?.downloadReady) return null
+  const filename = evaluationArchiveFilename(task.feature, task.runId)
+  const title = failed ? 'Download failed — click to retry' : `Download ${filename}`
+  const download = () => {
+    setFailed(false)
+    downloadTask(taskId).catch(() => setFailed(true))
+  }
+  if (icon) {
+    return (
+      <button
+        type="button"
+        data-testid={testId}
+        onClick={download}
+        aria-label={title}
+        title={title}
+        className="cl-icon-button h-6 w-6 shrink-0 text-[12px]"
+        style={failed ? { color: 'var(--danger)' } : undefined}
+      >
+        ⬇
+      </button>
+    )
+  }
   return (
     <button
       type="button"
       data-testid={testId}
-      onClick={() => {
-        setFailed(false)
-        downloadTask(taskId).catch(() => setFailed(true))
-      }}
+      onClick={download}
+      title={title}
       className={`${primary ? 'cl-button-primary' : 'cl-button'} shrink-0 px-2.5 py-1 text-xs`}
       style={primary ? undefined : { color: failed ? 'var(--danger)' : 'var(--success)' }}
     >

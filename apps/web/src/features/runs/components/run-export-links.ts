@@ -1,4 +1,5 @@
 import type { PlaywrightArtifactGroup } from '@/shared/api/types'
+import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { isTerminalRunStatus as isSharedTerminalRunStatus } from '@shared/run-state'
 
 // Run has reached a terminal state — the agent pty is gone, so the live
@@ -25,7 +26,7 @@ export function assertionHref(runId: string): string {
 }
 
 export function evaluationFilename(feature: string, runId: string): string {
-  return `canary-lab-evaluation-${safeFilename(feature)}-${safeFilename(runId)}.zip`
+  return evaluationArchiveFilename(feature, runId)
 }
 
 export function evaluationHref(runId: string): string {
@@ -64,6 +65,4 @@ export function hasAssertionVideos(groups: PlaywrightArtifactGroup[] | undefined
   return groups?.some((group) => group.artifacts.some((artifact) => artifact.kind === 'video')) ?? false
 }
 
-export function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
-}
+export { safeFilename } from '@/shared/lib/format'

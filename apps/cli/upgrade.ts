@@ -340,7 +340,9 @@ export async function main(
   // Deliberately console.warn, not log(): `--silent` is the postinstall's normal
   // mode, and a registration pointing at a deleted cli.js is exactly the thing a
   // quiet upgrade must still surface.
-  for (const stale of findStaleCanaryLabMcp()) {
+  for (const stale of findStaleCanaryLabMcp({
+    homeDir: extras.agentHomeDir ?? process.env.CANARY_LAB_AGENT_HOME,
+  })) {
     console.warn(`  Canary Lab: ${stale.client} MCP points at ${stale.cliPath}, which no longer exists.`)
     console.warn('  Canary Lab: run `npx canary-lab setup` to re-point it at this install.')
   }

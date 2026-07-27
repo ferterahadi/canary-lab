@@ -4,6 +4,7 @@ import type { FeatureActivity, FeatureActivityKind } from '../state/feature-acti
 import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { stageLabel } from './stage-meta'
+import { derivedFlightToken } from '../lib/derived-stages'
 
 // Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress, and (since the pill consolidation) the one live indicator for
@@ -186,6 +187,50 @@ export function featureChipState(
   }
   const rank = flight.status === 'paused' ? 2 : flight.status === 'failed' ? 3 : flight.status === 'aborted' ? 4 : 5
   return { label: flight.status, tone: FLIGHT_STATUS_TONE[flight.status], live: false, rank, title: flightStatusLabel(flight.status) }
+}
+
+/** What a per-suite "open its flight" shortcut should do — the Features column's
+ *  hover action (and any other surface that wants one jump from a suite to its
+ *  flight). `flightId` is a recorded id when the conductor kept a journal, else
+ *  the `feature:` derived token, so the shortcut lands on the SAME flight view
+ *  the picker opens. `tone`/`label` are the flight chip's own vocabulary, so the
+ *  icon means green-done / sky-running / amber-needs-you without inventing a
+ *  second colour language. */
+export interface FeatureFlightAction {
+  flightId: string
+  tone: string
+  /** Short state word, e.g. `done` / `idle` / `to approve` — for the tooltip. */
+  label: string
+  /** The fuller story behind the label (chip tooltip copy). */
+  title: string
+}
+
+/** Resolve the shortcut for one suite, or null when there is no flight to open.
+ *
+ *  Null means "nothing has happened to this suite yet" — no flight record and
+ *  no workspace evidence (an older server that sends no evidence block lands
+ *  here too). Starting a flight stays with `+ New` and the picker (R40), so the
+ *  shortcut simply isn't offered rather than turning into a second launcher.
+ *  Every suite that HAS done something gets the jump, because those completed
+ *  stages are flight progress (R81) — the same reason the picker routes a
+ *  flightless-but-worked feature to the flight detail. */
+export function resolveFeatureFlightAction(
+  feature: string,
+  flights: FlightIndexEntry[],
+  activity?: FeatureActivity,
+  derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
+): FeatureFlightAction | null {
+  // First match wins — the same dedupe-by-feature rule the picker rows use, so
+  // a suite with several flights opens the one the picker would.
+  const flight = flights.find((f) => f.feature === feature) ?? null
+  if (!flight && !derived?.some((s) => s.status !== 'pending')) return null
+  const chip = featureChipState(flight, activity, derived)
+  return {
+    flightId: flight?.flightId ?? derivedFlightToken(feature),
+    tone: chip.tone,
+    label: chip.label,
+    title: chip.title,
+  }
 }
 
 /** Fixed-width status chip for a feature row (landing list + picker): pinned

@@ -6,8 +6,10 @@ import {
 } from './mcp-registration'
 import {
   registerClaudeDesktopMcp,
+  registeredDesktopCliPath,
   claudeDesktopConfigPath,
   claudeDesktopInstalled,
+  type DesktopRegistrationResult,
 } from './desktop-registration'
 
 export interface RefreshOptions {
@@ -49,6 +51,53 @@ export function refreshCanaryLabMcp(opts: RefreshOptions = {}): void {
   }
 }
 
+export interface QuietDesktopRefreshOptions {
+  /** Home the Desktop config is resolved under. Defaults to CANARY_LAB_AGENT_HOME
+   *  (the same seam `upgrade` uses), which keeps tests off the real config. */
+  homeDir?: string
+  configPath?: string
+  execPath?: string
+  cliPath?: string
+}
+
+// Re-assert ONLY the Claude Desktop entry, for the `canary-lab ui` boot.
+//
+// Upgrade-time cannot be the last word for Desktop. Desktop owns
+// claude_desktop_config.json and rewrites the whole file from a copy it loaded
+// at launch, so an instance running across an upgrade puts the pre-upgrade entry
+// back minutes after `upgrade` healed it — pointing at a cli.js the upgrade
+// deleted. The user sees "Server disconnected" and nothing else. `ui` is the
+// command they run every session, so it is where that revert gets caught.
+//
+// Desktop-only on purpose: codex/claude are re-pointed by `upgrade` and cannot
+// revert themselves, and shelling out to two client CLIs on every boot is not free.
+export function refreshClaudeDesktopMcpQuietly(
+  opts: QuietDesktopRefreshOptions = {},
+): DesktopRegistrationResult {
+  // Same guard as refreshCanaryLabMcp: the tarball smoke test boots a throwaway
+  // install and must never re-point the developer's live Desktop config at it.
+  if (process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1') return 'skipped'
+  try {
+    const configPath = opts.configPath
+      ?? claudeDesktopConfigPath(opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME)
+    if (!claudeDesktopInstalled(configPath)) return 'skipped'
+    return registerClaudeDesktopMcp({
+      refreshOnly: true,
+      force: true,
+      configPath,
+      execPath: opts.execPath,
+      cliPath: opts.cliPath,
+      // The caller reports the outcome from the return value; the writer's own
+      // "already configured" line would be noise on every single boot.
+      log: () => {},
+    })
+  } catch {
+    // Best-effort: an unreadable or read-only Desktop config must never block
+    // `canary-lab ui` from starting.
+    return 'skipped'
+  }
+}
+
 export interface StaleMcpRegistration {
   client: string
   cliPath: string
@@ -64,9 +113,17 @@ export interface StaleMcpRegistration {
 // whatever caused it, instead of trying to enumerate the causes.
 export function findStaleCanaryLabMcp(deps: {
   readRegisteredCliPath?: (target: McpRegistrationTarget) => string | null
+  readDesktopCliPath?: () => string | null
+  /** Home the Desktop config is read from. Must match the home the refresh
+   *  wrote to, or this reports a stale entry against a config nothing touched —
+   *  the tarball smoke test runs under its own home and would otherwise warn
+   *  about the developer's real Desktop install. */
+  homeDir?: string
   exists?: (candidate: string) => boolean
 } = {}): StaleMcpRegistration[] {
   const read = deps.readRegisteredCliPath ?? registeredCliPath
+  const readDesktop = deps.readDesktopCliPath
+    ?? (() => registeredDesktopCliPath(claudeDesktopConfigPath(deps.homeDir)))
   const exists = deps.exists ?? ((candidate: string) => fs.existsSync(candidate))
   const stale: StaleMcpRegistration[] = []
   for (const target of ['codex', 'claude'] as const) {
@@ -74,6 +131,14 @@ export function findStaleCanaryLabMcp(deps: {
     if (cliPath && !exists(cliPath)) {
       stale.push({ client: target === 'codex' ? 'Codex' : 'Claude', cliPath })
     }
+  }
+  // Desktop is read from its config file, not a client CLI, so it needs its own
+  // arm rather than another loop entry. Leaving it out made this check blind to
+  // the one client that can revert a healed entry on its own — the likeliest way
+  // a registration ends up stale, and the hardest for a user to diagnose.
+  const desktopCliPath = readDesktop()
+  if (desktopCliPath && !exists(desktopCliPath)) {
+    stale.push({ client: 'Claude Desktop', cliPath: desktopCliPath })
   }
   return stale
 }

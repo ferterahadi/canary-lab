@@ -455,26 +455,80 @@ describe('trailer model (R14–R18)', () => {
     expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'rerun' })
   })
 
-  it('R15/R20: the export stage carries the explicit download action; the agent timeline stays behind details', async () => {
-    mocks.getFlight.mockResolvedValue(manifest({
-      status: 'done',
-      currentStage: null,
-      links: { runId: 'run-9', evaluationTaskId: 'task-7', evaluationZip: '/logs/evaluation-exports/task-7/export.zip' },
-      stages: FLIGHT_STAGE_KEYS.map((key) => ({
-        key,
-        status: 'done' as const,
-        ...(key === 'evaluation-export' ? { evidence: { taskId: 'task-7', evaluationZip: '/logs/evaluation-exports/task-7/export.zip' } } : {}),
-      })),
-    }))
+  const exportFlight = (evidence: Record<string, unknown>): FlightManifest => manifest({
+    status: 'done',
+    currentStage: null,
+    links: { runId: 'run-9', evaluationTaskId: 'task-7', evaluationZip: '/logs/evaluation-exports/task-7/export.zip' },
+    stages: FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: 'done' as const,
+      ...(key === 'evaluation-export' ? { evidence } : {}),
+    })),
+  })
+
+  const openExportStage = async (evidence: Record<string, unknown>): Promise<void> => {
+    mocks.getFlight.mockResolvedValue(exportFlight(evidence))
     await render('fl_1')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-evaluation-export"]')?.click()
     })
-    const download = container.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')
-    expect(download?.textContent).toContain('Download evaluation (.zip)')
+  }
+
+  const readyTask = {
+    taskId: 'task-7',
+    runId: '2026-07-23T1603-z6kc',
+    feature: 'merchant-pass-fnb',
+    mode: 'localized',
+    status: 'completed',
+    downloadReady: true,
+    createdAt: '2026-07-23T16:03:00Z',
+    updatedAt: '2026-07-23T16:10:00Z',
+  }
+
+  it('R15/R20: the download is an icon INSIDE the facts card, naming the archive the user receives', async () => {
+    mocks.taskById.mockReturnValue(readyTask)
+    await openExportStage({ taskId: 'task-7', evaluationZip: '/logs/evaluation-exports/task-7/export.zip' })
+    // Not in the stage header any more — it sits with the archive it fetches.
+    const header = container.querySelector('[data-testid="stage-state-line"]')?.previousElementSibling
+    expect(header?.querySelector('[data-testid="flight-download-evaluation"]')).toBeNull()
+    const card = container.querySelector('[data-testid="stage-facts-card"]')
+    const download = card?.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')
+    expect(download?.getAttribute('title')).toBe('Download canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
     await act(async () => { download?.click() })
     expect(mocks.downloadTask).toHaveBeenCalledWith('task-7')
-    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('export.zip')
+    // The card names the run, the report mode and the real archive — never the
+    // internal export.zip inside the logs dir.
+    const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
+    expect(facts).toContain('2026-07-23T1603-z6kc')
+    expect(facts).toContain('agent-rewritten')
+    expect(facts).toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
+    expect(facts).not.toContain('export.zip')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Evaluation ready.')
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
+  })
+
+  it('a read-time-probed export (a derived flight has no zip path) still offers the download', async () => {
+    mocks.taskById.mockReturnValue(readyTask)
+    await openExportStage({ taskId: 'task-7', runId: '2026-07-23T1603-z6kc', mode: 'localized' })
+    expect(container.querySelector('[data-testid="stage-facts-card"] [data-testid="flight-download-evaluation"]')).toBeTruthy()
+  })
+
+  it('an export the client no longer holds shows no download rather than a dead button', async () => {
+    mocks.taskById.mockReturnValue(null)
+    await openExportStage({ taskId: 'task-7', archiveBase: 'canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc' })
+    expect(container.querySelector('[data-testid="flight-download-evaluation"]')).toBeNull()
+    // The recorded name still reads — the flight's own record of what it built.
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent)
+      .toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
+  })
+
+  it('surfaces a failed download on the icon instead of failing silently', async () => {
+    mocks.taskById.mockReturnValue(readyTask)
+    mocks.downloadTask.mockRejectedValue(new Error('nope'))
+    await openExportStage({ taskId: 'task-7' })
+    const download = container.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')
+    await act(async () => { download?.click() })
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')?.getAttribute('title'))
+      .toBe('Download failed — click to retry')
   })
 })

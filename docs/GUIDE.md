@@ -100,7 +100,7 @@ Two overrides on top of that. A checkpoint that **re-parks** (a config parse err
 
 Turn autopilot off to be asked at every checkpoint: the flight header's facts strip carries an **Autopilot on/off** toggle you can flip at any time (it takes effect at the next checkpoint), and MCP clients pass `autopilot: false` to `start_flight` — worth doing when you plan to distill the conversation into requirement docs at the `prd-source` stop.
 
-Answer checkpoints in the terminal, in the web UI (Flights pill → routed flight view with per-stage evidence and the agent's live timeline), or over MCP (`start_flight` / `get_flight` / `respond_flight_checkpoint`; on that path, distill the conversation's requirements with `write_feature_doc` — content or `link_path` for a local file — before answering `prd-source`; dropped docs win the source hierarchy).
+Answer checkpoints in the terminal, in the web UI (Flights pill → routed flight view with per-stage evidence and the agent's live timeline — or hover a suite in the Suites column and click its paper-plane icon, which jumps straight to that suite's flight and is tinted by its state), or over MCP (`start_flight` / `get_flight` / `respond_flight_checkpoint`; on that path, distill the conversation's requirements with `write_feature_doc` — content or `link_path` for a local file — before answering `prd-source`; dropped docs win the source hierarchy).
 
 ### Resuming, redoing, and queueing
 

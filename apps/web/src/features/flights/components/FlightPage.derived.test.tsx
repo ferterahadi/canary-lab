@@ -251,6 +251,46 @@ describe('derived flights (R81)', () => {
     // The token can never point at a stale derived view.
     expect(onSelectFlight).toHaveBeenCalledWith('fl_real')
   })
+
+  // The download is task-scoped, NOT record-scoped: it fetches the export task,
+  // which a derived flight's read-time evidence carries. Gating it on the
+  // recorded zip PATH hid a finished, downloadable archive on every derived
+  // flight — so the header keeps its one primary while the archive's own card
+  // carries the download.
+  it('offers the archive download on the export card, with the run it was built from', async () => {
+    mocks.taskById.mockReturnValue({
+      taskId: 'eval-derived',
+      runId: '2026-07-01T0245-o456',
+      feature: 'go-smoke',
+      mode: 'localized',
+      status: 'completed',
+      downloadReady: true,
+      createdAt: '2026-07-01T02:45:00Z',
+      updatedAt: '2026-07-01T02:50:00Z',
+    })
+    mocks.getFlightEntryOptions.mockResolvedValue({
+      feature: 'go-smoke',
+      flight: null,
+      active: false,
+      canContinue: false,
+      prefill: { repoPaths: ['/repo/shop'], description: '', env: 'local', coverageTarget: 100 },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, allowed: true })),
+      evidence: { 'evaluation-export': { taskId: 'eval-derived', runId: '2026-07-01T0245-o456', mode: 'localized' } },
+    })
+    await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]) })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-evaluation-export"]')?.click()
+    })
+    const card = container.querySelector('[data-testid="stage-facts-card"]')
+    expect(card?.textContent).toContain('2026-07-01T0245-o456')
+    expect(card?.textContent).toContain('canary-lab-evaluation-go-smoke-2026-07-01T0245-o456.zip')
+    const download = card?.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')
+    await act(async () => { download?.click() })
+    expect(mocks.downloadTask).toHaveBeenCalledWith('eval-derived')
+    // Still exactly one header primary — the record-scoped one stays absent.
+    expect(container.querySelector('[data-testid="flight-primary-download"]')).toBeNull()
+    expect(container.querySelector('[data-testid="derived-conduct"]')).toBeTruthy()
+  })
 })
 
 // A pseudo-manifest must not answer questions only a real record can answer.

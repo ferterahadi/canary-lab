@@ -151,17 +151,22 @@ describe('flight entry modes (continue / redo / jump)', () => {
     expect((jump.json() as { error: string }).error).toMatch(/use --from-stage run/)
   })
 
-  it('rejects a jump to run when no PRD summary exists (prd-summary prerequisite)', async () => {
+  // A stage is gated on what it READS, never on list position. The run stage
+  // executes specs — it never opens the PRD summary — so a suite with config,
+  // envset and specs is enterable at `run` with no requirements on disk at all.
+  // The old positional rule rejected this, which left a suite holding a green run
+  // unable to re-enter the very stage that produced it.
+  it('allows a jump to run with no PRD summary — the run stage never reads one', async () => {
     const featureDir = path.join(tmpDir, 'features', 'checkout')
     fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
     fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'api.env'), 'PORT=0\n')
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'e2e', 'checkout.spec.ts'), '')
+    expect(fs.existsSync(path.join(featureDir, 'docs', '_prd-summary.json'))).toBe(false)
     app = await buildApp(allDone())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'run' }) })
-    expect(jump.statusCode).toBe(400)
-    const body = jump.json() as { type: string; error: string }
-    expect(body.type).toBe('stage_entry_rejected')
-    expect(body.error).toMatch(/_prd-summary\.json/)
+    expect(jump.statusCode).toBe(201)
   })
 
   it('rejects a jump to run when no specs exist under e2e/ (specs-coverage prerequisite)', async () => {
@@ -177,6 +182,38 @@ describe('flight entry modes (continue / redo / jump)', () => {
     const body = jump.json() as { type: string; error: string }
     expect(body.type).toBe('stage_entry_rejected')
     expect(body.error).toMatch(/no specs under e2e\//)
+  })
+
+  // The archive is built from the run record, so a settled run is the ONLY thing
+  // the export reads. Under the old positional rule it inherited the whole
+  // requirements-and-specs chain, which meant a suite holding a passing run could
+  // not export the report it had already earned.
+  it('allows a jump to the evaluation export on a passed run alone — no PRD, no specs', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'checkout')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
+    fs.mkdirSync(path.join(tmpDir, 'runs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(tmpDir, 'runs', 'index.json'),
+      JSON.stringify([{ runId: '2026-07-01T0245-o456', feature: 'checkout', startedAt: '2026-07-01T02:45:00.000Z', status: 'passed' }]),
+    )
+    expect(fs.existsSync(path.join(featureDir, 'docs', '_prd-summary.json'))).toBe(false)
+    expect(fs.existsSync(path.join(featureDir, 'e2e'))).toBe(false)
+    app = await buildApp(allDone())
+    const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'evaluation-export' }) })
+    expect(jump.statusCode).toBe(201)
+  })
+
+  it('still refuses the evaluation export when the feature has no settled run', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'checkout')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'feature.config.cjs'), 'module.exports = {}\n')
+    app = await buildApp(allDone())
+    const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'evaluation-export' }) })
+    expect(jump.statusCode).toBe(400)
+    const body = jump.json() as { type: string; error: string }
+    expect(body.type).toBe('stage_entry_rejected')
+    expect(body.error).toMatch(/run prerequisite/)
   })
 
   it('accepts a jump to env-capture with only the scaffold prerequisite met', async () => {

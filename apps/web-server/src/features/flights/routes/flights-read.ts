@@ -10,6 +10,7 @@ import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightEntryOptions, type 
 import { flightStageRemedy } from '../logic/stage-remedy'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { buildStageEntryValidator } from './flight-route-support'
+import { withWorkspaceEvidence, workspaceStageEvidence } from '../logic/workspace-evidence'
 
 export async function registerFlightReadRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -90,6 +91,15 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
           coverageTarget: manifest?.opts.coverageTarget ?? 100,
         },
         stages,
+        // A derived flight has no manifest, so its panels have nowhere else to
+        // get facts from. Probed here because this is the one call the derived
+        // view already makes — no extra round trip, nothing persisted.
+        evidence: workspaceStageEvidence(
+          { featuresDir: deps.featuresDir, logsDir: deps.logsDir },
+          feature,
+          [...FLIGHT_STAGE_KEYS],
+          env,
+        ),
       }
       return options
     },
@@ -101,7 +111,19 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
       reply.code(404)
       return { error: `flight not found: ${req.params.id}` }
     }
-    return manifest
+    // A settled stage that recorded no evidence reads its artifacts from the
+    // workspace instead of rendering blank — same read-time derivation the
+    // /remedy route uses, and nothing is written back. Recorded evidence always
+    // wins; a stage with none costs the probes and no more.
+    return {
+      ...manifest,
+      stages: withWorkspaceEvidence(
+        { featuresDir: deps.featuresDir, logsDir: deps.logsDir },
+        manifest.feature,
+        manifest.stages,
+        manifest.opts.env,
+      ),
+    }
   })
 
   // Machine-actionable fix for a failed stage — derived at read time (live

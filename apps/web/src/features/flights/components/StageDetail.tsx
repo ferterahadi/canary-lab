@@ -4,7 +4,8 @@ import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { FactsGrid, STAGE_BLURB, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageLabel, stageStateLine, type StageRailRow } from './stage-meta'
+import { evaluationTaskId, FactsGrid, STAGE_BLURB, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageLabel, stageStateLine, type StageRailRow } from './stage-meta'
+import { useEvaluationExports } from '@/features/evaluation'
 import { CheckpointControls, DownloadEvaluationAction } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
@@ -72,7 +73,12 @@ export function StageDetail({
   const runMerged = stage.key === 'run'
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
-  const facts = stageFacts(stage, flight, companion ?? undefined)
+  // The Evaluation Report's deliverable: one resolved export task feeds both the
+  // facts (run · report mode · archive name) and the activity rail below, so the
+  // card reads the same on a conducted flight and a derived one.
+  const evalTaskId = evaluationTaskId(stage, flight)
+  const { taskById } = useEvaluationExports()
+  const facts = stageFacts(stage, flight, companion ?? undefined, evalTaskId ? taskById(evalTaskId) : null)
   const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
     ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
@@ -107,9 +113,6 @@ export function StageDetail({
   // tails its export task (kind:'evaluation' — a localized rewrite streams a
   // timeline, a raw export has none and shows only its system rows). Agentless
   // stages pass no source and render system rows alone.
-  const evalTaskId = stage.key === 'evaluation-export'
-    ? (((stage.evidence as Record<string, unknown> | undefined)?.taskId as string | undefined) ?? flight.links?.evaluationTaskId)
-    : undefined
   // Portify's agent lives under the WORKFLOW dir (logs/portify/<wf>), not a
   // flight sidecar — tail it through the portify source the wizard already
   // uses, keyed by the id the adapter pins as live progress. Without this the
@@ -160,7 +163,6 @@ export function StageDetail({
             ⚙ Advanced setup
           </button>
         )}
-        {stage.key === 'evaluation-export' && <DownloadEvaluationAction flight={flight} stage={stage} />}
         {drillThrough && (
           <button
             type="button"
@@ -178,7 +180,12 @@ export function StageDetail({
         {stageStateLine(stage, flight, companion ?? undefined)}
       </div>
 
-      <FactsGrid facts={facts} />
+      <FactsGrid
+        facts={facts}
+        aside={stage.key === 'evaluation-export'
+          ? <DownloadEvaluationAction flight={flight} stage={stage} icon />
+          : undefined}
+      />
 
       {/* Paused with nothing else to act on (no checkpoint, no error): the
           "how to pick it back up" card fills the void the state sentence alone

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import type { FlightEntryOptions, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
@@ -75,7 +75,7 @@ export function FlightDetail({
   // below renders from a client-only pseudo-manifest, unchanged.
   const derivedFeature = derivedFlightFeature(flightId)
   const derivedRail = derivedFeature ? derivedStages?.get(derivedFeature) : undefined
-  const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; env: string } | null>(null)
+  const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; env: string; evidence?: FlightEntryOptions['evidence'] } | null>(null)
   const [fetched, setFlight] = useState<FlightManifest | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedStage, setSelectedStage] = useState<FlightStageKey | null>(null)
@@ -93,7 +93,7 @@ export function FlightDetail({
       api.getFlightEntryOptions(derivedFeature)
         .then((o) => {
           setError(null)
-          setDerivedPrefill({ repoPaths: o.prefill.repoPaths, env: o.prefill.env })
+          setDerivedPrefill({ repoPaths: o.prefill.repoPaths, env: o.prefill.env, evidence: o.evidence })
           if (o.flight) onNavigateFlight?.(o.flight.flightId)
         })
         .catch(() => { /* prefill is best-effort — the rail stands on its own */ })

@@ -12,6 +12,8 @@ import { loadProjectConfig, resolveProjectPort } from '../web-server/src/feature
 import { registerActiveServer, unregisterActiveServer } from '../../shared/runtime/active-servers'
 import { hydrateAgentConfigEnvFromShell } from '../web-server/src/features/agent-sessions/logic/agent-config-env'
 import { refreshAgentIntegrationsQuietly } from './agent'
+import { refreshClaudeDesktopMcpQuietly } from './mcp-refresh'
+import type { DesktopRegistrationResult } from './desktop-registration'
 
 // Graceful-teardown ceiling. Long enough for an honest run abort + app.close,
 // short enough that a wedged shutdown doesn't feel hung before the watchdog
@@ -35,6 +37,10 @@ export interface UiCommandOptions {
   // Brings the installed agent skill up to date with this package version.
   // Injected as a no-op / spy in tests so they never touch the real home dir.
   refreshAgents?: () => void
+  // Re-points a Claude Desktop MCP entry that Desktop reverted to a pre-upgrade
+  // path. Injected as a spy in tests; the default resolves its config path under
+  // CANARY_LAB_AGENT_HOME, which the suite already points at a throwaway home.
+  refreshDesktopMcp?: () => DesktopRegistrationResult
   // Spawns a fresh detached UI for this project (on the new port from config).
   relaunch?: (projectRoot: string) => void
   // Defers the relaunch+shutdown so the HTTP response can flush first.
@@ -88,6 +94,16 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   const refreshAgents = opts.refreshAgents
     ?? (() => { refreshAgentIntegrationsQuietly({ log }) })
   refreshAgents()
+  // Same reasoning one step further: Claude Desktop reverts its own MCP entry.
+  // It rewrites claude_desktop_config.json wholesale from a copy loaded at
+  // launch, so a Desktop open across an upgrade restores the pre-upgrade path —
+  // a cli.js the upgrade deleted — and the user gets "Server disconnected" with
+  // no hint. Re-assert it here. Silent unless it actually repaired something,
+  // and a repair only takes effect once Desktop is restarted, so say so.
+  const refreshDesktopMcp = opts.refreshDesktopMcp ?? (() => refreshClaudeDesktopMcpQuietly())
+  if (refreshDesktopMcp() === 'configured') {
+    log('Repaired the Claude Desktop MCP entry — it pointed at a path from a previous install. Restart Claude Desktop to pick it up.')
+  }
   // Forward reference: the port-change hook needs `shutdown`, which is defined
   // after the server exists. createServer captures this stable delegate.
   let triggerPortChange: (port: number) => void = () => { /* assigned below */ }

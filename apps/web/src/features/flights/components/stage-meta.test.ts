@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
-import type { FlightManifest, FlightStage } from '@/shared/api/client'
+import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
+import type { EvaluationExportTask, FlightManifest, FlightStage } from '@/shared/api/client'
 import type { HealEnd } from '@/shared/api/types'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
@@ -20,13 +20,44 @@ function flight(over: Partial<FlightManifest> = {}): FlightManifest {
 }
 
 describe('stageStateLine — pending copy (R78 pause mid-step)', () => {
-  it('a NEVER-STARTED pending stage with an earlier stage still ahead waits for it', () => {
+  it('a pending stage waits on a step it DEPENDS on, named as the rail names it', () => {
     const stage = { key: 'specs-coverage', status: 'pending' } as FlightStage
     const stages = [
-      { key: 'scout', status: 'running' },
+      { key: 'scaffold', status: 'done' },
+      { key: 'env-capture', status: 'done' },
+      { key: 'prd-summary', status: 'pending' },
       stage,
     ] as FlightStage[]
-    expect(stageStateLine(stage, flight({ stages }))).toBe('Waiting for earlier stages.')
+    // "Requirements" is the merged rail row for docs+prd-summary — the raw
+    // `prd-summary` key is a row the rail never shows.
+    expect(stageStateLine(stage, flight({ stages }))).toBe('Waiting for Requirements.')
+  })
+
+  it('a pending stage does NOT wait on an unfinished step it never reads', () => {
+    // Parallel readiness double-boots services; it never opens the PRD summary.
+    // The old positional rule told it otherwise just because Requirements sits
+    // above it in the rail.
+    const stage = { key: 'portify', status: 'pending' } as FlightStage
+    const stages = [
+      { key: 'scaffold', status: 'done' },
+      { key: 'env-capture', status: 'done' },
+      { key: 'prd-summary', status: 'pending' },
+      stage,
+    ] as FlightStage[]
+    expect(stageStateLine(stage, flight({ stages, status: 'running' }))).toBe('Not started yet.')
+  })
+
+  it('the export waits only on the run — not on requirements or specs', () => {
+    const stage = { key: 'evaluation-export', status: 'pending' } as FlightStage
+    const withRun = [
+      { key: 'prd-summary', status: 'pending' },
+      { key: 'specs-coverage', status: 'pending' },
+      { key: 'run', status: 'done' },
+      stage,
+    ] as FlightStage[]
+    expect(stageStateLine(stage, flight({ stages: withRun, status: 'running' }))).toBe('Not started yet.')
+    const noRun = withRun.map((s) => (s.key === 'run' ? { ...s, status: 'pending' as const } : s))
+    expect(stageStateLine(stage, flight({ stages: noRun }))).toBe('Waiting for Test Run.')
   })
 
   it('an INTERRUPTED pending stage (startedAt set) says the step was interrupted, not waiting', () => {
@@ -180,5 +211,171 @@ describe('portify live progress (workflow id + phase mirror)', () => {
     expect(line({ workflowId: 'wf1', status: 'verifying' })).toBe('Double-boot verifying the edits (two instances side by side)…')
     expect(line({ workflowId: 'wf1', status: 'weird-new-phase' })).toBe('Verifying the services boot concurrently (port injection)…')
     expect(line()).toBe('Verifying the services boot concurrently (port injection)…')
+  })
+})
+
+describe('stageStateLine — read-time (workspace-probed) evidence never asserts a gate', () => {
+  it('scout drops the env-file clause when the scan never recorded one, instead of reporting zero', () => {
+    const stage = { key: 'scout', status: 'done' } as FlightStage
+    const line = stageStateLine(stage, flight({ stages: [stage] }))
+    expect(line).toBe('Scanned 1 repo — suite configuration drafted.')
+    expect(line).not.toMatch(/0 environment files/)
+  })
+
+  it('scout still reports what a real scan measured', () => {
+    const stage = { key: 'scout', status: 'done', evidence: { envFiles: ['.env', '.env.local'] } } as FlightStage
+    expect(stageStateLine(stage, flight({ stages: [stage] })))
+      .toBe('Scanned 1 repo — suite configuration drafted, 2 environment files detected.')
+  })
+
+  it('probed coverage reports the ledger instead of claiming the target was met', () => {
+    const stage = {
+      key: 'specs-coverage',
+      status: 'done',
+      evidence: { coveragePct: 36, covered: 5, total: 14 },
+      evidenceSource: 'workspace',
+    } as FlightStage
+    const line = stageStateLine(stage, flight({ stages: [stage] }))
+    expect(line).toBe('Specs authored, coverage at 36% — 5 of 14 requirements covered.')
+    expect(line).not.toMatch(/target met/)
+  })
+
+  it('a conducted coverage stage keeps its target-met sentence', () => {
+    const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100 } } as FlightStage
+    expect(stageStateLine(stage, flight({ stages: [stage] }))).toBe('Coverage target met — 100%.')
+  })
+
+  it('a probed suite-setup pair states the captured envset without claiming a dry-run boot', () => {
+    const scaffold = { key: 'scaffold', status: 'done' } as FlightStage
+    const envCapture = {
+      key: 'env-capture',
+      status: 'done',
+      evidence: { captured: 1 },
+      evidenceSource: 'workspace',
+    } as FlightStage
+    const line = stageStateLine(scaffold, flight({ stages: [scaffold, envCapture] }), envCapture)
+    expect(line).toBe('Suite "checkout" created — env captured (1 file).')
+    expect(line).not.toMatch(/dry-run boot/)
+  })
+
+  it('a conducted suite-setup pair keeps the dry-run boot proof', () => {
+    const scaffold = { key: 'scaffold', status: 'done' } as FlightStage
+    const envCapture = { key: 'env-capture', status: 'done', evidence: { captured: 2 } } as FlightStage
+    expect(stageStateLine(scaffold, flight({ stages: [scaffold, envCapture] }), envCapture))
+      .toBe('Suite "checkout" created — env captured (2 files), dry-run boot passed.')
+  })
+})
+
+describe('stageFacts — evaluation report reads the export task, not the flight record', () => {
+  const task = {
+    taskId: 'eval-x',
+    runId: '2026-07-01T0245-o456',
+    feature: 'cns_better_auth',
+    mode: 'localized',
+    status: 'completed',
+    downloadReady: true,
+    createdAt: '2026-07-01T02:45:00Z',
+    updatedAt: '2026-07-01T02:50:00Z',
+  } as EvaluationExportTask
+  const archive = { label: 'Archive', value: 'canary-lab-evaluation-cns_better_auth-2026-07-01T0245-o456.zip', mono: true, title: 'canary-lab-evaluation-cns_better_auth-2026-07-01T0245-o456.zip' }
+
+  it('a conducted export and a probed one produce the SAME card', () => {
+    // The two halves that used to differ: conducted evidence carries the archive
+    // path, a read-time probe carries the task fields. Same task → same card.
+    const conducted = {
+      key: 'evaluation-export',
+      status: 'done',
+      evidence: { taskId: 'eval-x', evaluationZip: '/logs/e/eval-x/export.zip', archiveBase: 'canary-lab-evaluation-cns_better_auth-2026-07-01T0245-o456', mode: 'localized' },
+    } as FlightStage
+    const probed = {
+      key: 'evaluation-export',
+      status: 'done',
+      evidence: { taskId: 'eval-x', runId: '2026-07-01T0245-o456', mode: 'localized' },
+      evidenceSource: 'workspace',
+    } as FlightStage
+    const expected = [
+      { label: 'From run', value: '2026-07-01T0245-o456', mono: true },
+      { label: 'Report', value: 'agent-rewritten' },
+      archive,
+    ]
+    expect(stageFacts(conducted, flight(), undefined, task)).toEqual(expected)
+    expect(stageFacts(probed, flight(), undefined, task)).toEqual(expected)
+  })
+
+  it('never shows export.zip — the internal filename nobody is handed', () => {
+    const stage = {
+      key: 'evaluation-export',
+      status: 'done',
+      evidence: { taskId: 'eval-x', evaluationZip: '/logs/e/eval-x/export.zip' },
+    } as FlightStage
+    const values = stageFacts(stage, flight(), undefined, task).map((f) => f.value)
+    expect(values).toContain(archive.value)
+    expect(values).not.toContain('export.zip')
+  })
+
+  it('falls back to the recorded archive name when the export task is gone', () => {
+    const stage = {
+      key: 'evaluation-export',
+      status: 'done',
+      evidence: { taskId: 'eval-x', archiveBase: 'canary-lab-evaluation-checkout-2026-07-01T0245-o456', mode: 'raw' },
+    } as FlightStage
+    expect(stageFacts(stage, flight(), undefined, null)).toEqual([
+      { label: 'Report', value: 'built from evidence' },
+      {
+        label: 'Archive',
+        value: 'canary-lab-evaluation-checkout-2026-07-01T0245-o456.zip',
+        mono: true,
+        title: 'canary-lab-evaluation-checkout-2026-07-01T0245-o456.zip',
+      },
+    ])
+  })
+
+  it('no task and no recorded name means no facts', () => {
+    const none = { key: 'evaluation-export', status: 'done', evidence: {} } as FlightStage
+    expect(stageFacts(none, flight())).toEqual([])
+  })
+})
+
+describe('evaluationTaskId — the export task behind the stage', () => {
+  it('prefers the stage evidence, falls back to the record for the resume path', () => {
+    const withEvidence = { key: 'evaluation-export', status: 'done', evidence: { taskId: 'eval-from-evidence' } } as FlightStage
+    const reused = { key: 'evaluation-export', status: 'done', evidence: { evaluationZip: '/logs/e/eval-x/export.zip', reused: true } } as FlightStage
+    const linked = flight({ links: { evaluationTaskId: 'eval-from-links' } })
+    expect(evaluationTaskId(withEvidence, linked)).toBe('eval-from-evidence')
+    expect(evaluationTaskId(reused, linked)).toBe('eval-from-links')
+    expect(evaluationTaskId(reused, flight())).toBeUndefined()
+    expect(evaluationTaskId({ key: 'run', status: 'done' } as FlightStage, linked)).toBeUndefined()
+  })
+})
+
+describe('probed coverage with no requirements is undefined, not zero', () => {
+  const noReqs = {
+    key: 'specs-coverage',
+    status: 'done',
+    evidence: { coveragePct: 0, requirementCount: 0, covered: 0, total: 0 },
+    evidenceSource: 'workspace',
+  } as FlightStage
+
+  it('says there is nothing to map against instead of reporting 0%', () => {
+    const line = stageStateLine(noReqs, flight({ stages: [noReqs] }))
+    expect(line).toBe('Specs authored — no requirements to map them against yet.')
+    expect(line).not.toMatch(/0%/)
+    expect(line).not.toMatch(/0 of 0/)
+  })
+
+  it('shows no percentage tile — an amber 0% would read as a failing suite', () => {
+    expect(stageFacts(noReqs, flight())).toEqual([{ label: 'Requirements', value: 'None mapped yet' }])
+  })
+
+  it('a probed suite WITH requirements still reports its real coverage', () => {
+    const withReqs = {
+      key: 'specs-coverage',
+      status: 'done',
+      evidence: { coveragePct: 35.7, covered: 5, total: 14 },
+      evidenceSource: 'workspace',
+    } as FlightStage
+    expect(stageStateLine(withReqs, flight({ stages: [withReqs] })))
+      .toBe('Specs authored, coverage at 35.7% — 5 of 14 requirements covered.')
+    expect(stageFacts(withReqs, flight())[0]).toMatchObject({ label: 'Requirements covered', value: '35.7%' })
   })
 })

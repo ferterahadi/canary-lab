@@ -1,6 +1,10 @@
+import { STAGE_DEPENDS_ON } from '@shared/flights/types'
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { HealEnd } from '@/shared/api/types'
+import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from './StageFacts'
+import { stageLabel } from './stage-meta'
+import { MERGED_LABEL, stageRowKey } from './StageRail'
 import { PORTIFY_PHASE_LINE, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
 
 // ─── Auto-repair give-up reason (R80) ───────────────────────────────────────
@@ -112,6 +116,17 @@ export function runOutcomeLine(stage: FlightStage, flight: FlightManifest, compa
   return `Run ${runId ?? ''}${runStatus ? ` ${runStatus}` : ''}`.trim() + '.'
 }
 
+/** Sentence for a step whose artifacts were probed from the workspace but which
+ *  is NOT finished — the part-done case a status alone cannot express. Only
+ *  `specs-coverage` can reach it today: spec files exist (so the authoring half
+ *  happened) while no requirements exist to map them onto, which is what leaves
+ *  the step open. Null when the stage is not in that state. */
+export function partialProbedLine(stage: FlightStage): string | null {
+  if (stage.evidenceSource !== 'workspace' || stage.key !== 'specs-coverage') return null
+  const ev = evidenceOf(stage)
+  return num(ev, 'total') === 0 ? 'Specs authored — no requirements to map them against yet.' : null
+}
+
 export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
   const { key, status } = stage
@@ -128,20 +143,36 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
   // shown right below it.
   if (status === 'pending') {
     if (stage.startedAt) return 'Interrupted mid-step — Continue resumes it from here.'
-    // "Waiting for earlier stages" only makes sense when an earlier stage is
-    // still ahead of this one. For the first stage to run (nothing earlier,
-    // or every earlier stage already done/skipped) there is nothing to wait
-    // on — a flight parked here was stopped before this step began.
-    const idx = flight.stages.findIndex((s) => s.key === key)
-    const waitingOnEarlier = flight.stages
-      .slice(0, idx < 0 ? 0 : idx)
-      .some((s) => s.status !== 'done' && s.status !== 'skipped')
-    if (!waitingOnEarlier) {
-      return flight.status === 'paused'
-        ? 'Paused before it started — Continue begins this step.'
-        : 'Not started yet.'
+    // A part-done step: the artifacts are on disk but the step never completed,
+    // so say what exists. "Not started" would hide real work — a suite with
+    // authored specs and no requirements to map them against is the live case.
+    const partial = partialProbedLine(stage)
+    if (partial) return partial
+    // What a step waits on is what it READS, not what sits above it in the rail.
+    // The old rule was positional — "is any earlier row unfinished" — which told a
+    // portified suite it was waiting on requirements it never opens, and told an
+    // exportable run the same. STAGE_DEPENDS_ON is the shared dependency graph.
+    // A dependency is satisfied when its ARTIFACT exists, not when its step is
+    // ticked. Workspace-probed evidence is exactly that proof: a part-done step
+    // (specs authored, nothing mapping them) has still produced the specs the run
+    // stage needs. Without this the rail would claim the run is blocked while the
+    // server's entry validator — which checks artifacts — allows it.
+    const satisfied = (s: FlightStage): boolean =>
+      s.status === 'done' || s.status === 'skipped' || s.evidenceSource === 'workspace'
+    const blockers = STAGE_DEPENDS_ON[key]
+      .map((dep) => flight.stages.find((s) => s.key === dep))
+      .filter((s): s is FlightStage => Boolean(s) && !satisfied(s!))
+    if (blockers.length > 0) {
+      // Name it exactly as the rail row does — a merged pair reads "Requirements",
+      // never the raw `prd-summary` key the rail never shows.
+      const row = stageRowKey(blockers[0].key)
+      return `Waiting for ${MERGED_LABEL[row] ?? stageLabel(row)}.`
     }
-    return 'Waiting for earlier stages.'
+    // Nothing it depends on is outstanding — this step simply hasn't run. A
+    // derived flight is never "paused by you": there is no record to have paused.
+    return flight.status === 'paused' && derivedFlightFeature(flight.flightId) === null
+      ? 'Paused before it started — Continue begins this step.'
+      : 'Not started yet.'
   }
   if (status === 'waiting-for-approval') {
     // `prd-source` renders as the RequirementsFork, which owns the whole
@@ -171,7 +202,12 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     const cev = (companion?.evidence ?? {}) as Record<string, unknown>
     const captured = num(cev, 'captured')
     const verb = ev.reused ? 'reused' : 'created'
-    return `Suite "${flight.feature}" ${verb} — env captured${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''}, dry-run boot passed.`
+    const files = captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''
+    // The dry-run boot is a GATE the env-capture stage runs. Read-time evidence
+    // only proves the envset is on disk — it could have been written by hand or
+    // by write_envset — so a probed pair states the artifact and stops there.
+    if (companion?.evidenceSource === 'workspace') return `Suite "${flight.feature}" ${verb} — env captured${files}.`
+    return `Suite "${flight.feature}" ${verb} — env captured${files}, dry-run boot passed.`
   }
   if (companionDone && key === 'docs') {
     const cev = (companion?.evidence ?? {}) as Record<string, unknown>
@@ -195,10 +231,15 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     }
     case 'scout': {
       const repos = flight.repoPaths.length
-      const envFiles = Array.isArray(ev.envFiles) ? ev.envFiles.length : 0
+      // What the scan SAW is only knowable from its own evidence — no artifact on
+      // disk records it, so a stage without that key has to drop the clause. The
+      // old `: 0` fallback turned "never measured" into "detected none", which on
+      // a feature whose envset is captured contradicted the very next row.
+      const envFiles = Array.isArray(ev.envFiles) ? ev.envFiles.length : null
+      const detected = envFiles != null ? `, ${plural(envFiles, 'environment file')} detected` : ''
       return running
         ? `Inspecting ${plural(repos, 'repo')} to learn how it boots and which environment files it uses…`
-        : `Scanned ${plural(repos, 'repo')} — suite configuration drafted, ${plural(envFiles, 'environment file')} detected.`
+        : `Scanned ${plural(repos, 'repo')} — suite configuration drafted${detected}.`
     }
     case 'scaffold':
       return running
@@ -241,6 +282,20 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         return 'Agent is authoring specs to close coverage gaps…'
       }
       if (ev.acceptedPartial) return `Coverage accepted at ${pct ?? '?'}% (partial, per your call).`
+      // Read-time evidence proves the specs EXIST; it cannot prove a target was
+      // met, because no coverage loop ran to accept one. Report what the ledger
+      // says right now instead — the number the old "target met" sentence was
+      // asserting over (a suite at 36% with open variant gaps read as met).
+      if (stage.evidenceSource === 'workspace') {
+        const covered = num(ev, 'covered')
+        const total = num(ev, 'total')
+        // No requirements means coverage is UNDEFINED, not zero. A suite with real
+        // specs and no PRD to map them against would otherwise read "0% — 0 of 0
+        // covered", which sounds like a failure instead of nothing to measure.
+        if (total === 0) return 'Specs authored — no requirements to map them against yet.'
+        const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} covered` : ''
+        return `Specs authored, coverage at ${pct ?? '?'}%${of}.`
+      }
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
     }
     case 'portify': {
@@ -269,8 +324,10 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     }
     case 'evaluation-export': {
       if (running) return 'Building the evaluation archive…'
-      const zip = str(ev, 'evaluationZip') ?? flight.links?.evaluationZip
-      return `Evaluation ready${zip ? ` — ${zip.split('/').pop() ?? ''}` : ''}.`
+      // Deliberately unnamed here: the sentence used to end in `export.zip`, the
+      // archive's internal filename inside the logs dir and NOT the name the
+      // download hands over. The card's Archive tile carries the real one.
+      return 'Evaluation ready.'
     }
     default:
       return running ? 'Working…' : 'Done.'

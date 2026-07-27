@@ -4,6 +4,7 @@ import path from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   registerClaudeDesktopMcp,
+  registeredDesktopCliPath,
   claudeDesktopConfigPath,
   claudeDesktopInstalled,
 } from './desktop-registration'
@@ -148,6 +149,99 @@ describe('registerClaudeDesktopMcp refresh', () => {
     expect(cfg.mcpServers['canary-lab']).toBeUndefined()
     expect(cfg.mcpServers['Canary_Lab'].command).toBe(EXEC)
     expect(lines.join('\n')).toContain('migrated legacy entry')
+  })
+})
+
+// Desktop is the only client with no `mcp get` CLI, so the stale-path check can
+// reach it only through this reader — see findStaleCanaryLabMcp in mcp-refresh.
+describe('registeredDesktopCliPath', () => {
+  it('reads back the cli.js path Desktop is configured to launch', () => {
+    const configPath = tmpConfig()
+    registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, log: () => {} })
+
+    expect(registeredDesktopCliPath(configPath)).toBe(CLI)
+  })
+
+  it('is null when the config file does not exist', () => {
+    expect(registeredDesktopCliPath(tmpConfig())).toBeNull()
+  })
+
+  it.each([
+    ['no mcpServers key', { preferences: { a: 1 } }],
+    ['mcpServers not an object', { mcpServers: 'nope' }],
+    ['no Canary Lab entry', { mcpServers: { Other: { command: 'x', args: ['/o/cli.js'] } } }],
+    ['entry is not an object', { mcpServers: { 'Canary_Lab': 'nope' } }],
+    ['entry has no args array', { mcpServers: { 'Canary_Lab': { command: 'node' } } }],
+    ['args carry no cli.js', { mcpServers: { 'Canary_Lab': { command: 'node', args: ['--version'] } } }],
+  ])('is null when %s', (_label, contents) => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify(contents))
+
+    expect(registeredDesktopCliPath(configPath)).toBeNull()
+  })
+
+  it('is null for the npx@latest form, which pins no path that can rot', () => {
+    const configPath = tmpConfig()
+    registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: EPHEMERAL_CLI, log: () => {} })
+
+    expect(registeredDesktopCliPath(configPath)).toBeNull()
+  })
+})
+
+// The `ui` boot re-point reports a repair to the user and stays silent
+// otherwise, so these three outcomes have to be distinguishable by return value
+// — the log lines alone cannot drive that decision.
+describe('registerClaudeDesktopMcp result', () => {
+  const write = (configPath: string, contents: unknown): void => {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify(contents))
+  }
+
+  it('reports configured on a real write, then unchanged on a repeat', () => {
+    const configPath = tmpConfig()
+
+    expect(registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, log: () => {} })).toBe('configured')
+    expect(registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, log: () => {} })).toBe('unchanged')
+  })
+
+  it('reports configured when a stale entry is healed under refreshOnly', () => {
+    const configPath = tmpConfig()
+    write(configPath, { mcpServers: { 'Canary_Lab': { command: EXEC, args: ['/old/dist/scripts/cli.js', 'mcp'] } } })
+
+    expect(registerClaudeDesktopMcp({ configPath, refreshOnly: true, execPath: EXEC, cliPath: CLI, log: () => {} }))
+      .toBe('configured')
+  })
+
+  it('reports configured when only a legacy key had to be migrated', () => {
+    const configPath = tmpConfig()
+    const entry = { command: EXEC, args: [CLI, 'mcp', '--profile', 'lifecycle'], env: { PATH: '/usr/bin:/bin' } }
+    // New key already correct; the legacy duplicate is the only thing to remove.
+    write(configPath, { mcpServers: { 'canary-lab': { command: 'npx', args: [] }, 'Canary_Lab': entry } })
+
+    expect(registerClaudeDesktopMcp({
+      configPath, refreshOnly: true, execPath: EXEC, cliPath: CLI, pathEnv: '/usr/bin:/bin', log: () => {},
+    })).toBe('configured')
+  })
+
+  it('reports skipped for a dry run', () => {
+    expect(registerClaudeDesktopMcp({ configPath: tmpConfig(), dryRun: true, execPath: EXEC, cliPath: CLI, log: () => {} }))
+      .toBe('skipped')
+  })
+
+  it('reports skipped when refreshOnly finds nothing to re-point', () => {
+    const configPath = tmpConfig()
+    write(configPath, { preferences: { a: 1 } })
+
+    expect(registerClaudeDesktopMcp({ configPath, refreshOnly: true, execPath: EXEC, cliPath: CLI, log: () => {} }))
+      .toBe('skipped')
+  })
+
+  it('reports skipped on a conflict with neither force nor refreshOnly', () => {
+    const configPath = tmpConfig()
+    write(configPath, { mcpServers: { 'Canary_Lab': { command: 'npx', args: ['-y', 'canary-lab', 'mcp'] } } })
+
+    expect(registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, log: () => {} })).toBe('skipped')
   })
 })
 

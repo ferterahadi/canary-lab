@@ -5,6 +5,7 @@
 
 export {
   FLIGHT_STAGE_KEYS,
+  STAGE_DEPENDS_ON,
   ACTIVE_FLIGHT_STATUSES,
   isActiveFlightStatus,
   isTerminalFlightStatus,

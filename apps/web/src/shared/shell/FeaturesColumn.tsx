@@ -3,7 +3,7 @@ import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor, SettingsModal } from '@/features/config'
-import { FlightStatusChip, readGroupOpen, writeGroupOpen } from '@/features/flights'
+import { FlightStatusChip, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
@@ -28,8 +28,13 @@ interface Props {
    *  Flight is the only GUI path to a new feature (R40/R50). */
   onStartNewFlight?: () => void
   /** Opens the routed flight view — a pending (pre-scaffold) placeholder row
-   *  has no feature dir to select, so clicking it resumes its flight instead. */
+   *  has no feature dir to select, so clicking it resumes its flight instead.
+   *  Also the destination of the per-row flight shortcut below. */
   onOpenFlight?: (flightId: string) => void
+  /** The row's hover flight shortcut: where this suite's flight lives and what
+   *  state it's in, or null when there's nothing to open yet (see
+   *  `resolveFeatureFlightAction`). Omitting the prop drops the action. */
+  flightAction?: (feature: string) => FeatureFlightAction | null
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
@@ -116,6 +121,7 @@ export function FeaturesColumn({
   onOpenCoverage,
   onStartNewFlight,
   onOpenFlight,
+  flightAction,
   versionStatus,
   onStartPortify,
   onOpenPortify,
@@ -185,6 +191,7 @@ export function FeaturesColumn({
                     onSelectFeature={onSelectFeature}
                     onOpenCoverage={onOpenCoverage}
                     onOpenFlight={onOpenFlight}
+                    flightAction={flightAction}
                     onConfigure={setConfigFor}
                   />
                 ))}
@@ -202,6 +209,7 @@ export function FeaturesColumn({
                 onSelectFeature={onSelectFeature}
                 onOpenCoverage={onOpenCoverage}
                 onOpenFlight={onOpenFlight}
+                flightAction={flightAction}
                 onConfigure={setConfigFor}
               />
             ))}
@@ -262,6 +270,7 @@ function FeatureRow({
   onSelectFeature,
   onOpenCoverage,
   onOpenFlight,
+  flightAction,
   onConfigure,
 }: {
   feature: Feature
@@ -273,6 +282,7 @@ function FeatureRow({
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
   onOpenFlight?: (flightId: string) => void
+  flightAction?: (feature: string) => FeatureFlightAction | null
   onConfigure: (feature: string) => void
 }) {
   // A pending placeholder (First-Flight batch, pre-scaffold) has no feature dir
@@ -287,12 +297,25 @@ function FeatureRow({
         ? 'booted'
         : activeRunStatus === 'healing' ? 'healing' : 'running')
     : null
+  // The hover shortcut to this suite's flight — absent for a suite nothing has
+  // touched yet (starting stays with "+ New" / the picker, per R40), and absent
+  // without a destination handler. Resolved once so the reserved width below
+  // can't disagree with what actually renders.
+  const flight = onOpenFlight ? flightAction?.(f.name) ?? null : null
+  // The action cluster FLOATS over the row's right edge instead of sitting in
+  // flow, so three icons cost the suite name zero width at rest — in a column
+  // of long `cns_*` names that width is the column's actual content. The name
+  // only makes room (padding-right) while the row is hovered/focused, so
+  // nothing ever moves: the ellipsis just lands earlier. Width is computed from
+  // the visible count so a 1-action row doesn't reserve space for three.
+  const actionCount = 1 + (onOpenCoverage ? 1 : 0) + (flight ? 1 : 0)
   return (
     <li
       className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
       style={{
         color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontWeight: isSelected ? 500 : 400,
+        ['--feature-row-actions' as string]: `${actionCount * 28 + (actionCount - 1) * 2 + 12}px`,
       }}
       title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
     >
@@ -332,7 +355,7 @@ function FeatureRow({
         type="button"
         onClick={() => onSelectFeature(f.name)}
         title={f.name}
-        className="min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
+        className="feature-row__name min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
         style={{ color: 'inherit', fontWeight: 'inherit' }}
       >
         {f.name}
@@ -340,38 +363,64 @@ function FeatureRow({
       {runState && (
         <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
       )}
-      {onOpenCoverage && (
-        <Tooltip label="Coverage">
+      <span className="feature-row__actions">
+        {flight && (
+          /* Reads state, not just destination: "Flight · to approve" beats a bare
+             "Flight" when the point of coming here is to find out. */
+          <Tooltip label={`Flight · ${flight.label}`}>
+            <button
+              type="button"
+              onClick={() => { onSelectFeature(f.name); onOpenFlight?.(flight.flightId) }}
+              aria-label={`Open flight for ${f.name} — ${flight.title}`}
+              data-testid={`flight-shortcut-${f.name}`}
+              data-flight-id={flight.flightId}
+              className="cl-icon-button h-7 w-7 shrink-0"
+              /* The flight chip's own hue — green done, sky running, amber
+                 needs-you — so the icon carries the state it jumps to. A
+                 resting `idle` tone is the neutral secondary text colour, which
+                 is exactly the calm the column wants. */
+              style={{ color: flight.tone }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M22 2 11 13" />
+                <path d="M22 2 15 22l-4-9-9-4Z" />
+              </svg>
+            </button>
+          </Tooltip>
+        )}
+        {onOpenCoverage && (
+          <Tooltip label="Coverage">
+            <button
+              type="button"
+              onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
+              aria-label={`Open coverage for ${f.name}`}
+              data-testid={`coverage-action-${f.name}`}
+              data-headline={coverageHeadline ?? ''}
+              className="cl-icon-button h-7 w-7 shrink-0"
+              style={{ color: coverageHeadlineColor(coverageHeadline) }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="4.5" />
+                <circle cx="12" cy="12" r="0.6" fill="currentColor" />
+              </svg>
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip label="Config">
           <button
             type="button"
-            onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
-            aria-label={`Open coverage for ${f.name}`}
-            data-testid={`coverage-action-${f.name}`}
-            data-headline={coverageHeadline ?? ''}
-            className="feature-row__cog cl-icon-button mr-0.5 h-7 w-7 shrink-0 self-center"
-            style={{ color: coverageHeadlineColor(coverageHeadline) }}
+            onClick={() => onConfigure(f.name)}
+            aria-label={`Configure ${f.name}`}
+            className="cl-icon-button h-7 w-7 shrink-0"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <circle cx="12" cy="12" r="4.5" />
-              <circle cx="12" cy="12" r="0.6" fill="currentColor" />
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
         </Tooltip>
-      )}
-      <Tooltip label="Config">
-        <button
-          type="button"
-          onClick={() => onConfigure(f.name)}
-          aria-label={`Configure ${f.name}`}
-          className="feature-row__cog cl-icon-button mr-1.5 h-7 w-7 shrink-0 self-center"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
-      </Tooltip>
+      </span>
     </li>
   )
 }
@@ -390,6 +439,7 @@ function FeatureGroupAccordion({
   onSelectFeature,
   onOpenCoverage,
   onOpenFlight,
+  flightAction,
   onConfigure,
 }: {
   section: FeatureGroupSection
@@ -401,6 +451,7 @@ function FeatureGroupAccordion({
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
   onOpenFlight?: (flightId: string) => void
+  flightAction?: (feature: string) => FeatureFlightAction | null
   onConfigure: (feature: string) => void
 }) {
   const { group } = section
@@ -441,6 +492,7 @@ function FeatureGroupAccordion({
               onSelectFeature={onSelectFeature}
               onOpenCoverage={onOpenCoverage}
               onOpenFlight={onOpenFlight}
+              flightAction={flightAction}
               onConfigure={onConfigure}
             />
           ))}

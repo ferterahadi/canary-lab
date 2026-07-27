@@ -5,6 +5,8 @@ import {
   shortTime,
   formatBytes,
   timeAgo,
+  evaluationArchiveFilename,
+  safeFilename,
 } from './format'
 
 describe('formatDuration', () => {
@@ -69,5 +71,19 @@ describe('timeAgo', () => {
     expect(timeAgo('2026-06-04T09:00:00Z', now)).toBe('3h ago')
     expect(timeAgo('2026-05-30T12:00:00Z', now)).toBe('5d ago')
     expect(timeAgo('garbage', now)).toBe('garbage')
+  })
+})
+
+describe('evaluationArchiveFilename', () => {
+  it('names the archive by feature and run — the runId already carries the date', () => {
+    expect(evaluationArchiveFilename('merchant-pass-fnb', '2026-07-23T1603-z6kc'))
+      .toBe('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
+  })
+
+  it('collapses anything a filesystem would choke on', () => {
+    expect(evaluationArchiveFilename('shop redeeming', '2026:05:06 run'))
+      .toBe('canary-lab-evaluation-shop-redeeming-2026-05-06-run.zip')
+    expect(safeFilename('///')).toBe('run')
+    expect(safeFilename('--keep.me--')).toBe('keep.me')
   })
 })
