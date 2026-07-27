@@ -18,6 +18,7 @@ import {
   resolveUiProjectRootForMcpAutostart,
   type BridgeTransport,
 } from './mcp'
+import { isUsableUiProjectRoot } from './mcp-reachability'
 
 const inertPtyFactory: PtyFactory = () => ({
   pid: 0,
@@ -244,6 +245,45 @@ describe('canary-lab mcp', () => {
     expect(started).toBe(false)
     expect(stderr.text()).toContain('projectRoot "/"')
     expect(stderr.text()).toContain('Stop that server')
+  })
+
+  it('never picks the canary-lab source checkout as a boot target', async () => {
+    // The checkout's package.json is named `canary-lab`, which used to be enough
+    // to qualify it as a UI root — but it has no features/, so the UI booted
+    // there served an empty workspace and `list_features` answered `[]`.
+    const checkout = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-checkout-')))
+    fs.writeFileSync(path.join(checkout, 'package.json'), JSON.stringify({ name: 'canary-lab' }))
+    const stderr = new BufferWritable()
+    let started = false
+    const servingCheckout: typeof fetch = async () =>
+      new Response(JSON.stringify({ ok: true, projectRoot: checkout }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+
+    try {
+      expect(isUsableUiProjectRoot(checkout)).toBe(false)
+      // Not chosen to boot…
+      expect(resolveUiProjectRootForMcpAutostart({
+        cwd: checkout,
+        registry: {
+          version: 1,
+          workspaces: [{ name: 'repo', path: checkout, createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z' }],
+        },
+      })).toBeNull()
+      // …and not attached to if one is already serving it.
+      await expect(ensureMcpServerReachable('http://127.0.0.1:7421/mcp', {
+        stderr,
+        fetch: servingCheckout,
+        startUi: async () => { started = true },
+      })).resolves.toBe(false)
+      expect(started).toBe(false)
+      expect(stderr.text()).toContain('Stop that server')
+      // The real checkout this session runs in is the case it protects.
+      expect(isUsableUiProjectRoot(path.resolve(__dirname, '..', '..'))).toBe(false)
+    } finally {
+      fs.rmSync(checkout, { recursive: true, force: true })
+    }
   })
 
   it('does not auto-start the UI when the URL was explicitly provided (autoStartEligible: false)', async () => {

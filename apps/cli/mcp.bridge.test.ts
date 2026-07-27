@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 import { Writable } from 'stream'
 import {
   bridge,
@@ -266,6 +269,47 @@ describe('bridge cold start', () => {
     })
     expect(ok).toBe(false)
     expect(stderr.text()).toContain('Start the UI first')
+  })
+
+  it('will not attach to a server serving an unusable project root', async () => {
+    // Making startup non-fatal opened this: the startup guard refused a bogus
+    // server, then the reconnect loop attached to the very same one 500ms later.
+    // The loop has to hold the same line, and warn once rather than every poll.
+    const created: FakeTransport[] = []
+    const stdio = new FakeTransport('stdio')
+    const stderr = new BufferWritable()
+    const usable = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-usable-')))
+    fs.mkdirSync(path.join(usable, 'features'))
+    const root = { path: '/' }
+    const servingRoot = (async () => new Response(JSON.stringify({ ok: true, projectRoot: root.path }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch
+
+    try {
+      const ok = await bridge('http://127.0.0.1:7420/mcp', {
+        ...coldStartOpts({ healthy: false }),
+        stderr,
+        fetch: servingRoot,
+        createHttpTransport: (url) => { const t = new FakeTransport(url); created.push(t); return t },
+        createStdioTransport: () => stdio,
+      })
+      expect(ok).toBe(true)
+
+      await waitFor(() => stderr.text().includes('unusable projectRoot "/"'))
+      // Reachable the whole time, and still never attached to.
+      expect(created).toHaveLength(1)
+      expect(created[0].started).toBe(false)
+      // Warned once, not once per poll.
+      expect(stderr.text().match(/unusable projectRoot/g)).toHaveLength(1)
+
+      // The same server moves to a real workspace root; now it is attachable.
+      root.path = usable
+      await waitFor(() => created.length === 2)
+      expect(created[1].started).toBe(true)
+    } finally {
+      fs.rmSync(usable, { recursive: true, force: true })
+    }
   })
 
   it('clears the reconnect guard when re-resolving the target throws', async () => {

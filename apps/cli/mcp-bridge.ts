@@ -4,7 +4,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import { type CanaryLabMcpProfile } from '../web-server/src/mcp/tools'
 import { DEFAULT_MCP_PROFILE, McpCommandOptions, resolveDefaultMcpUrl, stripProfile } from './mcp'
 import { inferMcpClientKind } from './mcp-client-kind'
-import { checkHealth, ensureMcpServerReachable, sleep, urlWithContext } from './mcp-reachability'
+import { checkHealth, ensureMcpServerReachable, isAttachableServer, sleep, urlWithContext } from './mcp-reachability'
 
 // Structural transport shape shared by the SDK's stdio + streamable-HTTP
 // transports — just enough for the bridge to forward and reconnect.
@@ -35,7 +35,12 @@ export async function bridge(url: string, opts: McpCommandOptions = {}): Promise
   // pipe: it sees `write EPIPE` / "could not attach" and has no tools for its
   // whole session, even once the server returns. Serve stdio anyway and let the
   // reconnect loop (which already handles a mid-session drop) find the server.
-  const waitForServer = opts.autoStartEligible !== false && (opts.autoStartUi ?? true)
+  // False only for an explicit --url, which pins one named instance: that server
+  // is the caller's choice, so neither re-resolution nor the usable-root guard
+  // applies to it. Shared by `waitForServer`, `reResolveUrl` and the loop guard
+  // so all three agree on what "a server we may go looking for" means.
+  const attachEligible = opts.autoStartEligible !== false
+  const waitForServer = attachEligible && (opts.autoStartUi ?? true)
   const reachable = await ensureMcpServerReachable(initialUrl, opts)
   if (!reachable && !waitForServer) return false
 
@@ -50,7 +55,7 @@ export async function bridge(url: string, opts: McpCommandOptions = {}): Promise
   // server; otherwise re-read the live-server record so a switched port (or
   // relaunched UI) is followed without restarting the client.
   const reResolveUrl = opts.reResolveUrl
-    ?? (opts.autoStartEligible === false
+    ?? (!attachEligible
       ? () => initialUrl
       : () => urlWithContext(
           resolveDefaultMcpUrl({ cwd: opts.cwd, homeDir: opts.homeDir, registry: opts.registry }),
@@ -108,9 +113,20 @@ export async function bridge(url: string, opts: McpCommandOptions = {}): Promise
     // later client message can ever retrigger the hunt.
     try {
       let delay = reconnectDelayMs
+      let warnedUnusable = false
       for (let attempt = 0; attempt < reconnectAttempts && !stdioClosing; attempt += 1) {
         const target = reResolveUrl()
-        if ((await checkHealth(target, fetchFn)).ok) {
+        const health = await checkHealth(target, fetchFn)
+        // Refusing an unusable root at startup only to attach to it on the next
+        // poll would make that guard decorative — now that startup is non-fatal,
+        // the loop has to hold the same line. Warned once so a server that stays
+        // wrong does not spam a line every attempt.
+        if (health.ok && !isAttachableServer(health, attachEligible)) {
+          if (!warnedUnusable) {
+            warnedUnusable = true
+            stderr.write(`Canary Lab MCP is ignoring the server at ${stripProfile(target)}: it serves unusable projectRoot "${health.projectRoot ?? ''}". Run \`canary-lab ui\` from a Canary Lab workspace.\n`)
+          }
+        } else if (health.ok) {
           const next = createHttp(target)
           wireHttp(next)
           try {

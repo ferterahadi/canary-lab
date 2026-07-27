@@ -6,7 +6,7 @@ import path from 'path'
 import readline from 'readline'
 import { spawn } from 'child_process'
 import { createServer } from '../web-server/src/server'
-import { getProjectRoot, isCanaryLabWorkspace } from '../../shared/runtime/project-root'
+import { getProjectRoot, isCanaryLabWorkspace, looksLikeProjectRoot } from '../../shared/runtime/project-root'
 import { openBrowser } from '../web-server/src/shared/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { registerActiveServer, unregisterActiveServer } from '../../shared/runtime/active-servers'
@@ -60,14 +60,18 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   if (portFromArgs !== undefined) return
   const noOpen = argv.includes('--no-open')
   const projectRoot = opts.projectRoot ?? getProjectRoot()
-  // Refuse to boot outside a Canary Lab workspace. `getProjectRoot` walks up
-  // and matches any dir with a `features/` folder, so a stray `features/` (e.g.
-  // one accidentally scaffolded into the home dir) would otherwise let
-  // `canary-lab ui` root a server at `~`. Require the init-only dependency
-  // marker instead. The workspace registry is owned solely by `canary-lab init`;
-  // `ui` never writes it — it only advertises the running server via the
-  // active-server record below.
-  if (!isCanaryLabWorkspace(projectRoot)) {
+  // Refuse to boot outside a Canary Lab workspace, and both halves are needed.
+  // `getProjectRoot` walks up and matches any dir with a `features/` folder, so
+  // a stray `features/` (e.g. one accidentally scaffolded into the home dir)
+  // would otherwise let `canary-lab ui` root a server at `~` — hence the
+  // init-only dependency marker. But `isCanaryLabWorkspace` is also true for
+  // this package's own source checkout (`name: "canary-lab"`), which has no
+  // `features/`; booting there serves an empty workspace, and an MCP client
+  // asking for features gets `[]` with no hint that it reached the wrong root.
+  // The workspace registry is owned solely by `canary-lab init`; `ui` never
+  // writes it — it only advertises the running server via the active-server
+  // record below.
+  if (!isCanaryLabWorkspace(projectRoot) || !looksLikeProjectRoot(projectRoot)) {
     log(`Canary Lab is not set up in ${projectRoot}. Run \`npx canary-lab init\` here first.`)
     requestExit(1)
     return

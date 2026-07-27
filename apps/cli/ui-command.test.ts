@@ -294,6 +294,25 @@ describe('runUi port resolution', () => {
     vi.unstubAllEnvs()
   })
 
+  it('refuses to boot in the canary-lab source checkout, which has the marker but no features/', async () => {
+    // The mirror image of the stray-features case above, and the one that
+    // actually bit: `isCanaryLabWorkspace` is true for a package.json named
+    // `canary-lab`, so the source tree passed the marker check while having no
+    // features/ at all. A UI booted there answers `list_features` with `[]`.
+    const checkout = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-ui-checkout-')))
+    tmpDirs.push(checkout)
+    fs.writeFileSync(path.join(checkout, 'package.json'), JSON.stringify({ name: 'canary-lab' }))
+    const app = mockServer()
+    const exit = vi.fn()
+    const messages: string[] = []
+
+    await runUi(['--no-open'], { projectRoot: checkout, log: (m) => messages.push(m), exit, ...noopActiveServer })
+
+    expect(app.listen).not.toHaveBeenCalled()
+    expect(exit).toHaveBeenCalledExactlyOnceWith(1)
+    expect(messages.some((m) => m.includes('canary-lab init'))).toBe(true)
+  })
+
   it('records the live server with its bound port once it is listening', async () => {
     const projectRoot = mkProject({ port: 8300 })
     mockServer()

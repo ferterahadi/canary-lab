@@ -27,12 +27,8 @@ export async function ensureMcpServerReachable(
   const eligible = opts.autoStartEligible ?? isDefaultLocalMcpUrl(url)
   const firstCheck = await checkHealth(url, fetchFn)
   if (firstCheck.ok) {
-    if (
-      eligible &&
-      firstCheck.projectRoot &&
-      !isUsableUiProjectRoot(firstCheck.projectRoot)
-    ) {
-      stderr.write(`Canary Lab MCP is reachable at ${stripProfile(url)} but is serving unusable projectRoot "${firstCheck.projectRoot}". Stop that server, then run \`canary-lab ui\` from a Canary Lab workspace.\n`)
+    if (!isAttachableServer(firstCheck, eligible)) {
+      stderr.write(`Canary Lab MCP is reachable at ${stripProfile(url)} but is serving unusable projectRoot "${firstCheck.projectRoot ?? ''}". Stop that server, then run \`canary-lab ui\` from a Canary Lab workspace.\n`)
       return false
     }
     return true
@@ -139,20 +135,29 @@ export function findUsableUiProjectRootUpward(start: string): string | null {
   }
 }
 
+// A boot target has to be *servable*, and `features/` is exactly that property.
+// This used to also accept any directory whose package.json is named
+// `canary-lab` — which matches this package's own source checkout, a tree with
+// no `features/` at all. Auto-start picked it whenever a bridge ran with the
+// checkout as cwd, and the resulting UI served an empty workspace: an agent
+// asking for features got `[]`, indistinguishable from a workspace with none.
+// `canary-lab ui` applies the stricter workspace-marker check on top of this.
 export function isUsableUiProjectRoot(candidate: string): boolean {
-  const resolved = path.resolve(candidate)
-  return looksLikeProjectRoot(resolved) || looksLikeCanaryLabPackage(resolved)
+  return looksLikeProjectRoot(path.resolve(candidate))
 }
 
-export function looksLikeCanaryLabPackage(candidate: string): boolean {
-  const packageJson = path.join(candidate, 'package.json')
-  if (!fs.existsSync(packageJson)) return false
-  try {
-    const parsed = JSON.parse(fs.readFileSync(packageJson, 'utf-8')) as { name?: string }
-    return parsed.name === 'canary-lab'
-  } catch {
-    return false
-  }
+// A reachable server is only worth attaching to when it serves a root the CLI
+// would itself boot. Checked on every reconnect, not just at startup: refusing
+// a bogus server at attach time and then connecting to it 500ms later would
+// make the guard decorative. An explicit --url is exempt — the caller named
+// that server, so what it serves is their business.
+export function isAttachableServer(
+  health: { ok: true; projectRoot?: string } | { ok: false; error: string },
+  eligible: boolean,
+): boolean {
+  if (!health.ok) return false
+  if (!eligible || !health.projectRoot) return true
+  return isUsableUiProjectRoot(health.projectRoot)
 }
 
 export function resolveCliPath(): string {

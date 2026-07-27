@@ -379,3 +379,39 @@ describe('probed coverage with no requirements is undefined, not zero', () => {
     expect(stageFacts(withReqs, flight())[0]).toMatchObject({ label: 'Requirements covered', value: '35.7%' })
   })
 })
+
+describe('a dependency is satisfied by its ARTIFACT, not by its step being ticked', () => {
+  // The rail must not claim a step is blocked while the server's entry validator
+  // — which checks artifacts on disk — allows entering it. A part-done coverage
+  // step (specs authored, no requirements to map them onto) has still produced
+  // the specs the run stage reads.
+  const partDoneCoverage = {
+    key: 'specs-coverage',
+    status: 'pending',
+    evidence: { coveragePct: 0, total: 0 },
+    evidenceSource: 'workspace',
+  } as FlightStage
+
+  it('the run stage is not blocked by a part-done coverage step whose specs exist', () => {
+    const stage = { key: 'run', status: 'pending' } as FlightStage
+    const stages = [
+      { key: 'scaffold', status: 'done' },
+      { key: 'env-capture', status: 'done' },
+      partDoneCoverage,
+      stage,
+    ] as FlightStage[]
+    expect(stageStateLine(stage, flight({ stages, status: 'running' }))).toBe('Not started yet.')
+  })
+
+  it('but a dependency with NO artifact at all still blocks, and is named', () => {
+    const stage = { key: 'run', status: 'pending' } as FlightStage
+    const stages = [
+      { key: 'scaffold', status: 'done' },
+      { key: 'env-capture', status: 'done' },
+      { key: 'specs-coverage', status: 'pending' },
+      stage,
+    ] as FlightStage[]
+    expect(stageStateLine(stage, flight({ stages, status: 'running' })))
+      .toBe('Waiting for Test authoring & coverage.')
+  })
+})
