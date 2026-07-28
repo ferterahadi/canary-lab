@@ -5,7 +5,7 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { FixesCapturedPanel, RunRow } from '@/features/runs'
 import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
-import { FactTile, FactsGrid, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
+import { FactsGrid, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
 import { runHistoryStats } from './stage-metrics'
 import { formatDuration } from '@/shared/lib/format'
 
@@ -14,9 +14,11 @@ import { formatDuration } from '@/shared/lib/format'
 // second facts card, the runs-list row, and the checkpoint message. The panel
 // was organized by DATA SOURCE, so one run's verdict + pass count repeated.
 //
-// This renders the run as ONE object: an identity row (RunRow chrome), a metric
-// row (Tests · Repairs · Services tiles), the failing tests worst-first, and the
-// live run controls. Below the hero: the previous runs for this feature.
+// This renders the run as ONE object: an identity row (RunRow chrome), a quiet
+// stats line under it (Tests · Repairs · Services), the failing tests
+// worst-first, and the live run controls. The big-number tile treatment belongs
+// to the "At a glance" band above — see RunStatsLine. Below the hero: the
+// previous runs for this feature.
 //
 // R82 — the stage is the run's SUMMARY, and everything that was really run-detail
 // content is gone from it: the per-failure assertion error / snippet / open-spec
@@ -30,7 +32,7 @@ import { formatDuration } from '@/shared/lib/format'
 // It is the SINGLE poller for the run stage (one 5s interval: run detail + the
 // feature's runs list).
 
-/** Display cap for the repair-cycle stepper — mirrors the server's
+/** The cap the repair count is reported against — mirrors the server's
  *  AUTO_HEAL_MAX_CYCLES (heal-cycle.ts). Presentation only. */
 const REPAIR_CYCLE_CAP = 10
 
@@ -112,7 +114,7 @@ export function TestRunPanel({
     executionType: manifest?.executionType ?? 'run',
   }
 
-  const tiles = runTiles({ summary, healCycles, healEnd, services: manifest?.services })
+  const stats = runStats({ summary, healCycles, healEnd, services: manifest?.services })
   const failing = summary?.failed ?? []
   const active = live && (status === 'running' || status === 'healing')
   const runRef = shortRunRef(runId)
@@ -136,24 +138,16 @@ export function TestRunPanel({
             primaryLabel={`Run ${runRef}`}
             marker={ordinal != null ? `run ${ordinal} of ${featureRuns.length}` : undefined}
             showPorts={false}
-            /* R82: the score is HIDDEN on the identity row — the Tests-passed
-               tile right below states it big, with its bar. Showing it here too
-               (promoted beside the chip, or in the meta line) printed the same
-               fraction twice, a hand's width apart. */
+            /* R82: the score is HIDDEN on the identity row — the stats line
+               right below states it. Showing it here too (promoted beside the
+               chip, or in the meta line) printed the same fraction twice, a
+               hand's width apart. */
             passCount="hidden"
             onSelect={() => onOpenRun?.(feature, runId)}
           />
         </ul>
 
-        {tiles.length > 0 && (
-          <div
-            data-testid="run-hero-tiles"
-            className="mt-1 grid gap-2"
-            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
-          >
-            {tiles.map((f, i) => <FactTile key={`${f.label}-${i}`} fact={f} />)}
-          </div>
-        )}
+        <RunStatsLine stats={stats} />
 
         {/* WHICH tests failed — identity only. Each row opens that failure on the
             run detail, where the assertion error, the snippet and the spec live
@@ -292,10 +286,64 @@ function outcomeBreakdown(failed: number, aborted: number): string | undefined {
   return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
-/** The metric tiles: Tests (passed/total + bar), Repairs (cycles + stepper +
- *  give-up short form), Services ("N/M booted", per-service tooltip). Boot
- *  health is a different axis than the test verdict, so it keeps its own tile. */
-function runTiles({
+/** One entry on the latest run's stats line. */
+interface RunStat {
+  label: string
+  value: string
+  /** Trailing qualifier in the label's own quiet weight — why the repair loop
+   *  stopped, which the number alone can't say. */
+  note?: string
+  /** Hover detail when the value is a roll-up (the per-service list). */
+  title?: string
+  /** Danger hue. The only tone this line carries — see `RunStatsLine`. */
+  bad?: boolean
+}
+
+/** The latest run's numbers, in the identity row's own register: 11px, muted
+ *  label + neutral value, `·` separated — the same vocabulary RunRow's meta line
+ *  uses, one line under it and aligned to the same text column.
+ *
+ *  These three facts used to render as `FactTile`s — boxed on `bg-elevated`,
+ *  22px figures, with a progress bar and a ten-segment stepper. That is the
+ *  exact treatment the "At a glance" band directly above uses, so the stage
+ *  opened with two adjacent cards of big boxed numbers and nothing said which
+ *  one was the headline. The band is the metric moment (it reports the whole run
+ *  HISTORY); this card is ONE run object, and these are that object's
+ *  attributes, so they read as attributes.
+ *
+ *  Tone all but disappears with the boxes. The verdict chip on the row above
+ *  already carries the run's colour, and green "2/2 booted" next to an amber
+ *  "2/23" next to a red FAILED chip was three accents competing for one glance —
+ *  these numbers are reference data, not the alarm. The single exception is a
+ *  service that never came up, which stays danger-hued because it is the one
+ *  fact here that the verdict chip does NOT say: a red run whose services all
+ *  booted is failing tests, a red run missing a service never got off the
+ *  ground. So the line is neutral whenever nothing is wrong with it. */
+function RunStatsLine({ stats }: { stats: RunStat[] }) {
+  return (
+    <div
+      data-testid="run-hero-stats"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-3 text-[11px] leading-tight"
+      /* Hangs under RunRow's text column, not its dot — derived from that row's
+         own gutter + dot + gap so this line reads as its second meta line. */
+      style={{ paddingLeft: 'calc(0.75rem + 0.55rem + 0.5rem)' }}
+    >
+      {stats.map((s, i) => (
+        <span key={s.label} className="flex items-center gap-1.5" {...(s.title ? { title: s.title } : {})}>
+          {i > 0 && <span aria-hidden="true" className="select-none text-muted opacity-50">·</span>}
+          <span className="text-muted">{s.label}</span>
+          <span className={`tabular-nums ${s.bad ? 'text-danger' : 'text-secondary'}`}>{s.value}</span>
+          {s.note ? <span className="text-muted">({s.note})</span> : null}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+/** What the stats line reports: Tests (passed/total), Repairs (cycle of the cap
+ *  + the give-up short form), Services ("N/M booted", per-service tooltip). Boot
+ *  health is a different axis than the test verdict, so it stays its own fact. */
+function runStats({
   summary,
   healCycles,
   healEnd,
@@ -305,28 +353,18 @@ function runTiles({
   healCycles: number
   healEnd: HealEnd | undefined
   services: RunDetail['manifest']['services'] | undefined
-}): StageFact[] {
-  const tiles: StageFact[] = []
+}): RunStat[] {
+  const stats: RunStat[] = []
   if (summary && summary.total > 0) {
-    const allGreen = summary.passed === summary.total
-    tiles.push({
-      label: 'Tests passed',
-      value: `${summary.passed}/${summary.total}`,
-      big: true,
-      bar: summary.total > 0 ? summary.passed / summary.total : 0,
-      tone: allGreen ? 'good' : 'warn',
-    })
+    stats.push({ label: 'Tests passed', value: `${summary.passed}/${summary.total}` })
   }
-  // Repairs: 0 cycles on a clean run reads "0" with no stepper; any cycle shows
-  // the stepper toward the cap and, if the loop gave up, the reason short form.
+  // Repairs: a clean run reads a bare "0"; any cycle names the cap it is
+  // counting toward, and a loop that gave up carries the reason as the note.
   const short = healEndShort(healEnd)
-  tiles.push({
+  stats.push({
     label: 'Repair cycles',
-    value: String(healCycles),
-    big: true,
-    ...(healCycles > 0 ? { stepper: [Math.min(healCycles, REPAIR_CYCLE_CAP), REPAIR_CYCLE_CAP] as [number, number] } : {}),
-    ...(short ? { sub: short } : {}),
-    ...(healCycles === 0 && !short ? { tone: 'good' as const } : {}),
+    value: healCycles > 0 ? `${Math.min(healCycles, REPAIR_CYCLE_CAP)} of ${REPAIR_CYCLE_CAP}` : '0',
+    ...(short ? { note: short } : {}),
   })
   const svc = services ?? []
   if (svc.length > 0) {
@@ -339,14 +377,14 @@ function runTiles({
         return `${s.name} · ${s.status ?? 'unknown'}${port ? ` · :${port}` : ''}`
       })
       .join('\n')
-    tiles.push({
+    stats.push({
       label: 'Services',
       value: `${booted}/${svc.length} booted`,
       title: tooltip,
-      tone: booted === svc.length ? 'good' : 'bad',
+      ...(booted < svc.length ? { bad: true } : {}),
     })
   }
-  return tiles
+  return stats
 }
 
 /** The run's LIVE controls, on the stage: Stop, and Cancel repair while healing.

@@ -1,27 +1,15 @@
 import * as api from '@/shared/api/client'
 import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
+import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, healDisplayValue, healEnabled } from '@/shared/lib/heal-threshold'
 import { FieldRow, NumberInput, Section, TextInput, Textarea, Toggle } from '@/shared/ui/atoms'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
-
-// Mirror of DEFAULT_HEAL_ON_FAILURE_THRESHOLD in shared/launcher/types.ts —
-// the server applies the same default at load time. Absent ⇒ enabled at this
-// value; `0` ⇒ disabled (full suite runs before healing).
-const DEFAULT_HEAL_THRESHOLD = 2
 
 interface Slice {
   name: string
   description: string
   group: string
   healOnFailureThreshold?: number
-}
-
-// A feature stops & heals by default; only an explicit `0` opts out.
-function healEnabled(v: number | undefined): boolean {
-  return v == null ? true : v > 0
-}
-function healDisplayValue(v: number | undefined): number {
-  return v != null && v > 0 ? v : DEFAULT_HEAL_THRESHOLD
 }
 
 function asString(v: ConfigValue | undefined, fallback = ''): string {
@@ -58,7 +46,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
       // Always persist a concrete number (including `0` = opt out). An absent
       // value materializes the default so the saved config is explicit and
       // matches the server-side default.
-      next.healOnFailureThreshold = slice.healOnFailureThreshold ?? DEFAULT_HEAL_THRESHOLD
+      next.healOnFailureThreshold = slice.healOnFailureThreshold ?? DEFAULT_HEAL_ON_FAILURE_THRESHOLD
       return next
     },
     save: async (payload) => {
@@ -106,7 +94,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
           <Section title="Heal behavior">
             <FieldRow
               label="Stop & heal after"
-              hint={`On by default (${DEFAULT_HEAL_THRESHOLD} failures). Each new Playwright spawn starts with --max-failures=N; turn off to run the whole suite before healing. Changes made while tests are already running apply to the next rerun or restart, not the current process.`}
+              hint={`On by default (${DEFAULT_HEAL_ON_FAILURE_THRESHOLD} failures). Each new Playwright spawn starts with --max-failures=N; turn off to run the whole suite before healing. Changes made while tests are already running apply to the next rerun or restart, not the current process.`}
               layout="inline"
             >
               <div className="flex items-center gap-3">

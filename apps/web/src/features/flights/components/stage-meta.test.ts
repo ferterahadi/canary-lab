@@ -181,7 +181,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     expect(facts.find((f) => f.label === 'Authoring passes')).toBeUndefined()
   })
 
-  it('with a ledger, the gap COUNT gives way to the requirement composition — total, split, and the gap kinds named', () => {
+  it('with a ledger, the gap COUNT gives way to the requirement TOTAL — the split moves to the composition card', () => {
     const stage = {
       key: 'specs-coverage',
       status: 'done',
@@ -193,15 +193,12 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       }),
     })
     const req = facts.find((f) => f.label === 'Requirements')
-    // The total is the denominator the percentage alone never gave.
-    expect(req).toMatchObject({ value: '12', big: true, sub: '9 covered · 1 path gap · 1 variant gap · 1 untested' })
-    // Path- and variant-incomplete share one amber segment; the sub-line above is
-    // where the two kinds are told apart.
-    expect(req?.segments).toEqual([
-      { value: 9, tone: 'good' },
-      { value: 2, tone: 'warn' },
-      { value: 1, tone: 'bad' },
-    ])
+    // The total is the denominator the percentage alone never gave. It stays a
+    // bare count: five buckets across two populations belong on a card, not
+    // squeezed through a 10.5px sub-line.
+    expect(req).toMatchObject({ value: '12', big: true })
+    expect(req?.segments).toBeUndefined()
+    expect(req?.sub).toBeUndefined()
     expect(facts.find((f) => f.label === 'Coverage gaps')).toBeUndefined()
   })
 
@@ -217,37 +214,38 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     expect(facts.find((f) => f.label === 'Coverage gaps')).toMatchObject({ value: '2', big: true })
   })
 
-  it('Specs authored carries the strength split, in the same buckets and tones as the Evaluation Report', () => {
+  it('the band is exactly three counts — coverage, requirements, specs — and no distribution', () => {
     const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
     const facts = stageFacts(stage, flight(), undefined, {
       ledger: ledger({
-        totals: { total: 2, covered: 2, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+        totals: { total: 2, covered: 2, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 3 },
         tests: [
           { name: 't1', requirements: ['R1'], pathTypes: ['happy'], strength: 'strong', file: 'a.spec.ts' },
           { name: 't2', requirements: ['R2'], pathTypes: ['happy'], strength: 'shallow', file: 'a.spec.ts' },
         ],
       }),
     })
+    expect(facts.map((f) => f.label)).toEqual(['Requirements covered', 'Requirements', 'Specs authored'])
     const specs = facts.find((f) => f.label === 'Specs authored')
-    // The strength split replaces the spec-FILE sub: how many files two tests live
-    // in changes nothing anyone would do; one of them being shallow does.
-    expect(specs).toMatchObject({ value: '2', big: true, sub: '1 strong · 1 shallow' })
-    expect(specs?.segments).toEqual([
-      { value: 1, tone: 'good' },
-      { value: 0, tone: 'accent' },
-      { value: 0, tone: 'warn' },
-      { value: 1, tone: 'bad' },
-      { value: 0, tone: 'muted' },
-    ])
+    expect(specs).toMatchObject({ value: '2', big: true })
+    // Depth and the orphan count both live on the composition card now, so the
+    // tile carries neither a bar nor a sub — and no Orphan specs tile is emitted
+    // even though this ledger has three.
+    expect(specs?.segments).toBeUndefined()
+    expect(specs?.sub).toBeUndefined()
   })
 
-  it('orphan specs surface only when there are some — a zero is the normal case, not a tile', () => {
+  it('a suite with specs but no requirements keeps the spec-FILE sub — it has no composition card to fall back to', () => {
     const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
-    const totals = { total: 2, covered: 2, pathIncomplete: 0, variantIncomplete: 0, untested: 0 }
-    const clean = stageFacts(stage, flight(), undefined, { ledger: ledger({ totals: { ...totals, orphanTests: 0 } }) })
-    expect(clean.find((f) => f.label === 'Orphan specs')).toBeUndefined()
-    const orphaned = stageFacts(stage, flight(), undefined, { ledger: ledger({ totals: { ...totals, orphanTests: 3 } }) })
-    expect(orphaned.find((f) => f.label === 'Orphan specs')).toMatchObject({ value: '3', tone: 'warn', sub: 'map to no requirement' })
+    const facts = stageFacts(stage, flight(), undefined, {
+      ledger: ledger({
+        tests: [
+          { name: 't1', requirements: [], pathTypes: ['happy'], file: 'a.spec.ts' },
+          { name: 't2', requirements: [], pathTypes: ['happy'], file: 'b.spec.ts' },
+        ],
+      }),
+    })
+    expect(facts.find((f) => f.label === 'Specs authored')).toMatchObject({ value: '2', sub: 'across 2 spec files' })
   })
 })
 
@@ -255,19 +253,21 @@ describe('stageFacts — Requirements source tile', () => {
   const docs = { key: 'docs', status: 'done', evidence: { docs: ['prd.md', 'okr.md'] } } as unknown as FlightStage
   const summary = { key: 'prd-summary', status: 'done', evidence: { requirementCount: 8 } } as unknown as FlightStage
 
-  it('names the SOURCE the requirements came from, never how much the agent read', () => {
+  it('reports BOTH ends of the distillation — input tokens and what came out', () => {
     const facts = stageFacts(docs, flight(), summary, { docBytes: 38_000, summaryBytes: 9_000 })
-    const tile = facts.find((f) => f.label === 'Distilled from')
-    expect(tile).toMatchObject({ value: '≈ 9.5k', big: true })
-    // The unit lives in the sub so the big value stays a bare figure, and the
-    // compression ratio is the reason the tile earns its place.
-    expect(tile?.sub).toBe('tokens · 37.1 KB · 4× smaller')
+    const tile = facts.find((f) => f.label === 'Distilled to')
+    expect(tile).toMatchObject({ value: '≈ 2.3k', big: true })
+    // The unit lives in the sub so the big value stays a bare figure; the input
+    // it shrank from rides there too, with both measured byte figures behind it.
+    expect(tile?.sub).toBe('tokens · from ≈ 9.5k · 37.1 KB → 8.8 KB')
     expect(facts.find((f) => f.label === 'Tokens read')).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Distilled from')).toBeUndefined()
   })
 
-  it('drops the ratio when the distillation barely shrank anything, keeping the size', () => {
-    const facts = stageFacts(docs, flight(), summary, { docBytes: 10_000, summaryBytes: 9_000 })
-    expect(facts.find((f) => f.label === 'Distilled from')?.sub).toBe('tokens · 9.8 KB')
+  it('claims no result before the summary exists — only the source it will read', () => {
+    const facts = stageFacts(docs, flight(), summary, { docBytes: 10_000 })
+    expect(facts.find((f) => f.label === 'Distilled to')).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Source text')).toMatchObject({ value: '≈ 2.5k', sub: 'tokens · 9.8 KB' })
   })
 })
 

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
-import type { EvaluationExportTask, RunDetail, ServiceManifestEntry } from '@/shared/api/types'
+import type { CoverageLedger, EvaluationExportTask, RunDetail, ServiceManifestEntry, TestCoverage, TestStrength } from '@/shared/api/types'
 import { useEvaluationExports } from '@/features/evaluation'
+import { GAP_META, SEG_ORDER, STRENGTH_META, STRENGTH_ORDER, countFor } from '@/features/coverage'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { StatusDot } from '@/shared/ui/atoms'
 import { evaluationArchiveFilename, formatBytes, formatDuration, timeAgo } from '@/shared/lib/format'
@@ -127,8 +128,8 @@ export function DoubleBootPanel({ portify }: { portify: PortifyManifest | null }
  *  Grouping is not decoration. Overlay paths are repo-relative, so a two-repo
  *  stack that gained a port-injection line in each `build.gradle` produced two
  *  rows reading `build.gradle +8` with nothing to tell them apart — the reader
- *  could not answer "which app was edited". The repo heading answers it, and the
- *  directory dims so a long source path scans as fast as a bare filename.
+ *  could not answer "which app was edited". The repo heading answers it, and each
+ *  row shows the filename alone so a deep source path scans as fast as a bare one.
  *
  *  The footer states what an overlay IS, because "7 files edited" otherwise reads
  *  as edits landing in the user's product repos. */
@@ -157,12 +158,23 @@ export function OverlayPanel({ portify }: { portify: PortifyManifest | null }) {
                 const { dir, base } = splitFilePath(file.path)
                 return (
                   <li key={file.path} className="flex min-w-0 items-center gap-2 py-0.5 text-[11px]">
-                    {/* The directory truncates and the filename never does: cutting
-                        the tail would hide the one part of a deep source path that
-                        identifies the file. */}
-                    <span className="flex min-w-0 flex-1 items-baseline" style={{ fontFamily: 'var(--font-mono)' }} title={file.path}>
-                      {dir && <span className="min-w-0 truncate text-muted">{dir}</span>}
-                      <span className="shrink-0 text-secondary">{base}</span>
+                    {/* Filename only — a deep source path spent the row's whole width
+                        on directories nobody reads, and the part that identifies the
+                        file sat at the far end. The full path stays one hover away, so
+                        the row needs to LOOK hoverable: the `…/` says a directory was
+                        elided and the dotted underline says there is more to see. Both
+                        drop out for a root-level file, which has nothing to reveal. */}
+                    <span
+                      className={`flex min-w-0 flex-1 items-baseline ${dir ? 'cursor-help' : ''}`}
+                      style={{ fontFamily: 'var(--font-mono)' }}
+                      title={file.path}
+                    >
+                      {dir && <span className="shrink-0 text-muted" data-testid="overlay-path-elision">…/</span>}
+                      <span
+                        className={`min-w-0 truncate text-secondary ${dir ? 'underline decoration-line-strong decoration-dotted underline-offset-2' : ''}`}
+                      >
+                        {base}
+                      </span>
                     </span>
                     {file.added > 0 && <span className="shrink-0" style={{ color: 'var(--success)' }}>+{file.added}</span>}
                     {file.removed > 0 && <span className="shrink-0" style={{ color: 'var(--danger)' }}>−{file.removed}</span>}
@@ -177,6 +189,109 @@ export function OverlayPanel({ portify }: { portify: PortifyManifest | null }) {
           Nothing lands in the product repos.
         </p>
       </PanelCard>
+    </div>
+  )
+}
+
+/** Test authoring & coverage: the two distributions behind the band's three
+ *  counts — which depth the specs reached, and which kind of gap the uncovered
+ *  requirements are.
+ *
+ *  These lived as segment bars + sub-lines on the tiles themselves, which forced
+ *  a five-bucket distribution through one 10.5px line and merged the two amber
+ *  gap kinds into a single bar segment. A card has the room to name every bucket
+ *  with its own count and hue.
+ *
+ *  Every label, colour, tooltip and order comes from the coverage feature's own
+ *  vocabulary (`GAP_META` / `STRENGTH_META` and their canonical orders), because
+ *  the stage header links straight to the ledger page that renders the same two
+ *  breakdowns as filters. A private copy here would drift on the first rename.
+ *
+ *  Zero buckets RENDER, dimmed, rather than dropping out: on a suite that is 7
+ *  shallow and nothing else, "0 strong" is the finding. A distribution that hides
+ *  its empty classes reads as a shorter distribution, not an emptier one. */
+export function CoverageCompositionPanel({ ledger }: { ledger: CoverageLedger | null }) {
+  if (!ledger || ledger.totals.total === 0) return null
+  const tests = ledger.tests
+  const strengthOf = (t: TestCoverage): TestStrength => t.strength ?? 'shallow'
+  return (
+    <div className={STAGE_COLUMN}>
+      <PanelCard kicker="Composition" testId="coverage-composition">
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+          {tests.length > 0 && (
+            <CompositionGroup
+              testId="composition-strength"
+              // "Depth", not "strength": the heading has to say what the buckets
+              // measure, and depth is what a tier ramp is.
+              heading={`Spec depth · ${plural(tests.length, 'spec')}`}
+              rows={STRENGTH_ORDER.map((s) => ({
+                key: s,
+                label: STRENGTH_META[s].label,
+                title: STRENGTH_META[s].title,
+                color: STRENGTH_META[s].color,
+                count: tests.filter((t) => strengthOf(t) === s).length,
+              }))}
+            />
+          )}
+          <CompositionGroup
+            testId="composition-gaps"
+            heading={`Requirement coverage · ${plural(ledger.totals.total, 'requirement')}`}
+            rows={SEG_ORDER.map((g) => ({
+              key: g,
+              label: GAP_META[g].label,
+              color: GAP_META[g].color,
+              count: countFor(ledger, g),
+            }))}
+          />
+        </div>
+        {ledger.totals.orphanTests > 0 && (
+          <p className="mt-2.5 mb-0 text-[11px] text-muted" data-testid="composition-orphans">
+            {plural(ledger.totals.orphanTests, 'spec')} map to no requirement — either a missing
+            tag or a test covering something nobody asked for.
+          </p>
+        )}
+      </PanelCard>
+    </div>
+  )
+}
+
+interface CompositionRow {
+  key: string
+  label: string
+  title?: string
+  color: string
+  count: number
+}
+
+/** One distribution: a proportional bar, then a row per bucket. The bar drops its
+ *  empty segments (a zero-width sliver is noise); the rows keep theirs, dimmed. */
+function CompositionGroup({ heading, rows, testId }: { heading: string; rows: CompositionRow[]; testId: string }) {
+  const total = rows.reduce((sum, r) => sum + r.count, 0)
+  return (
+    <div data-testid={testId}>
+      <div className="cl-rubric pb-1.5">{heading}</div>
+      <div className="mb-2 flex h-[3px] gap-[2px]" aria-hidden>
+        {total === 0
+          ? <span className="flex-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
+          : rows
+              .filter((r) => r.count > 0)
+              .map((r) => (
+                <span key={r.key} className="rounded-full" style={{ width: `${(r.count / total) * 100}%`, background: r.color }} />
+              ))}
+      </div>
+      <dl className="m-0 grid gap-x-2 gap-y-1 text-[11.5px]" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
+        {rows.map((r) => (
+          <div key={r.key} className="col-span-3 grid grid-cols-subgrid items-baseline" data-testid={`${testId}-${r.key}`}>
+            <span
+              className="h-[7px] w-[7px] translate-y-[-1px] rounded-full"
+              style={{ background: r.color, opacity: r.count === 0 ? 0.3 : 1 }}
+              aria-hidden
+            />
+            <dt className={r.count === 0 ? 'text-muted' : 'text-secondary'} {...(r.title ? { title: r.title } : {})}>{r.label}</dt>
+            <dd className={`m-0 tabular-nums ${r.count === 0 ? 'text-muted' : ''}`}>{r.count}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   )
 }

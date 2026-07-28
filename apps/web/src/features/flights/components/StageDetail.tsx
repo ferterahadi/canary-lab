@@ -14,6 +14,7 @@ import { useStageBandData } from './use-stage-band-data'
 import {
   AllReportsPanel,
   BootCheckPanel,
+  CoverageCompositionPanel,
   DoubleBootPanel,
   EvaluationDeliverablePanel,
   OverlayPanel,
@@ -316,6 +317,11 @@ export function StageDetail({
           onError={onActionError}
         />
       )}
+
+      {/* Test authoring & coverage: the two distributions behind the band's
+          counts — spec depth and requirement gap kinds. Above the pass timeline
+          because it describes the RESULT; the timeline is how it got there. */}
+      {stage.key === 'specs-coverage' && <CoverageCompositionPanel ledger={band.ledger ?? null} />}
 
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
           timeline — coverage % after each mapping feeds the next authoring. */}

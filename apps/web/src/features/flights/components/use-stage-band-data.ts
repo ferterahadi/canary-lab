@@ -7,10 +7,10 @@ import { evidenceOf, portifyWorkflowId, str } from './stage-meta'
 import type { StageBandData } from './StageFacts'
 
 // The band's data sources live outside the flight record: the coverage ledger,
-// the boot run, the portify workflow, the on-disk config, the envset slots and
-// the doc listing. Fetching all six on every stage switch would be six requests
-// for a band that shows three tiles, so this resolves ONLY what the visible
-// stage's band actually reads — keyed on the stage, refetched when it changes.
+// the boot run, the portify workflow, the on-disk config and the doc listing.
+// Fetching all five on every stage switch would be five requests for a band
+// that shows three tiles, so this resolves ONLY what the visible stage's band
+// actually reads — keyed on the stage, refetched when it changes.
 //
 // Every field stays optional: a source that hasn't resolved yet, or doesn't
 // exist for this flight, drops its tile rather than rendering a zero.
@@ -29,7 +29,6 @@ export function useStageBandData(
   const [boot, setBoot] = useState<RunDetail | null>(null)
   const [portify, setPortify] = useState<PortifyManifest | null>(null)
   const [config, setConfig] = useState<StageBandData['config']>(null)
-  const [envFiles, setEnvFiles] = useState<number | null>(null)
   const [docBytes, setDocBytes] = useState<number | null>(null)
   const [summaryBytes, setSummaryBytes] = useState<number | null>(null)
 
@@ -44,9 +43,6 @@ export function useStageBandData(
   const needsLedger = stageKey === 'specs-coverage' || stageKey === 'evaluation-export'
   const needsConfig = stageKey === 'scout'
   const needsBoot = stageKey === 'scaffold' || stageKey === 'env-capture'
-  // Only the scan's band reads the slot count; Suite setup compares the scan's
-  // declared list against its own captured count, both off the flight record.
-  const needsEnvFiles = stageKey === 'scout'
   const needsDocs = stageKey === 'docs'
 
   useEffect(() => {
@@ -101,25 +97,6 @@ export function useStageBandData(
     return () => { alive = false }
   }, [feature, needsConfig, configRefreshKey])
 
-  // The envset INDEX only — the slot count is the whole answer. This used to fan
-  // out one request per slot to sum every key in every file, for a tile that
-  // reported the size of the user's own config surface; that tile is gone, and
-  // with it three round-trips per Suite setup view.
-  useEffect(() => {
-    if (!needsEnvFiles) { setEnvFiles(null); return }
-    let alive = true
-    void (async () => {
-      try {
-        const index = await api.getEnvsetsIndex(feature)
-        const env = index.envs.find((e) => e.name === flight.opts.env) ?? index.envs[0]
-        if (alive) setEnvFiles(env && env.slots.length > 0 ? env.slots.length : null)
-      } catch {
-        if (alive) setEnvFiles(null)
-      }
-    })()
-    return () => { alive = false }
-  }, [feature, flight.opts.env, needsEnvFiles])
-
   useEffect(() => {
     if (!needsDocs) { setDocBytes(null); setSummaryBytes(null); return }
     let alive = true
@@ -142,7 +119,7 @@ export function useStageBandData(
     return () => { alive = false }
   }, [feature, needsDocs])
 
-  return { evalTask, ledger, boot, portify, config, envFiles, docBytes, summaryBytes }
+  return { evalTask, ledger, boot, portify, config, docBytes, summaryBytes }
 }
 
 /** The feature's most recent dry-run boot. `aborted` is the NORMAL terminal

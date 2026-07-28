@@ -385,6 +385,77 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
+  it("the latest run's numbers are a quiet stats line, not a second band of metric tiles", async () => {
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: {
+        runId: 'run-9',
+        status: 'failed',
+        healCycles: 1,
+        services: [{ name: 'api', status: 'healthy' }, { name: 'web', status: 'healthy' }],
+      },
+      summary: { complete: true, total: 23, passed: 2, failed: [] },
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      runVerdict: 'failed',
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'failed', healCycles: 1 } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    const stats = container.querySelector('[data-testid="run-hero-stats"]')
+    // All three facts survive the tone-down — only their treatment changed.
+    expect(stats?.textContent).toContain('Tests passed')
+    expect(stats?.textContent).toContain('2/23')
+    expect(stats?.textContent).toContain('1 of 10')
+    expect(stats?.textContent).toContain('2/2 booted')
+    // The "At a glance" band above owns the big-number tile treatment; the
+    // latest-run card must not put a second grid of them beside it.
+    expect(container.querySelector('[data-testid="run-hero-tiles"]')).toBeNull()
+    expect(stats?.querySelector('.text-\\[22px\\]')).toBeNull()
+    // Neutral while nothing here is wrong — the FAILED chip carries the colour.
+    expect(stats?.querySelector('.text-danger')).toBeNull()
+  })
+
+  it('a service that never came up keeps its danger hue — the verdict chip does not say that', async () => {
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: {
+        runId: 'run-9',
+        status: 'failed',
+        healCycles: 0,
+        services: [{ name: 'api', status: 'healthy' }, { name: 'web', status: 'timeout' }],
+      },
+      summary: { complete: true, total: 23, passed: 0, failed: [] },
+    })
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      runVerdict: 'failed',
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'failed' } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    const stats = container.querySelector('[data-testid="run-hero-stats"]')
+    expect(stats?.textContent).toContain('1/2 booted')
+    expect(stats?.querySelector('.text-danger')?.textContent).toBe('1/2 booted')
+  })
+
   it('R82: while the run is live the hero shows the repair state and the failures found so far — no repair journal', async () => {
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',

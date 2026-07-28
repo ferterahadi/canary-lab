@@ -417,10 +417,9 @@ describe('trailer model (R14–R18)', () => {
     // stay on the repo cards above, so neither repeats the other.
     const scoutFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
     expect(scoutFacts).toContain('Repos scanned')
-    // "required", not "found" — the count is the app's declared need, read out of
-    // its own code, not a sweep of the machine for secrets.
-    expect(scoutFacts).toContain('Env files required')
-    expect(scoutFacts).not.toContain('Env files found')
+    // No env-file tile: the declared list reads in the state line, and the
+    // number that matters (captured against declared) is Suite setup's.
+    expect(scoutFacts).not.toContain('Env files')
     expect(scoutFacts).not.toContain('/repo/shop')
     expect(container.querySelector('header')?.textContent).not.toContain('/repo/shop')
 
@@ -438,6 +437,9 @@ describe('trailer model (R14–R18)', () => {
     expect(docsFacts).toContain('Requirements distilled')
     expect(docsFacts).toContain('7')
     expect(docsFacts).toContain('Source docs')
+    // Input before output: the tiles read in the order the work happened, so
+    // "Source docs" sits left of "Requirements distilled".
+    expect(docsFacts.indexOf('Source docs')).toBeLessThan(docsFacts.indexOf('Requirements distilled'))
     expect(docsFacts).not.toContain('shop-readme.md')
     expect(docsFacts).not.toContain('api-spec.md')
   })

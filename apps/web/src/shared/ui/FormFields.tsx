@@ -130,6 +130,7 @@ export function NumberInput({
   step = 1,
   disabled,
   id,
+  testId,
 }: {
   value: number
   onChange: (v: number) => void
@@ -138,6 +139,7 @@ export function NumberInput({
   step?: number
   disabled?: boolean
   id?: string
+  testId?: string
 }) {
   const safe = Number.isFinite(value) ? value : 0
   const clamp = (n: number): number => {
@@ -172,6 +174,7 @@ export function NumberInput({
       </button>
       <input
         id={id}
+        data-testid={testId}
         type="number"
         value={safe}
         min={min}
