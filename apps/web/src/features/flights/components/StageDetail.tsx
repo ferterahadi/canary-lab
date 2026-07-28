@@ -6,10 +6,18 @@ import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { evaluationTaskId, FactsGrid, STAGE_BLURB, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageLabel, stageStateLine, type StageRailRow } from './stage-meta'
 import { useEvaluationExports } from '@/features/evaluation'
-import { CheckpointControls, DownloadEvaluationAction } from './CheckpointControls'
+import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
+import { useStageBandData } from './use-stage-band-data'
+import {
+  AllReportsPanel,
+  BootCheckPanel,
+  DoubleBootPanel,
+  EvaluationDeliverablePanel,
+  OverlayPanel,
+} from './StageEvidencePanels'
 import { SpecsPassTimeline, StageActivity, truncate } from './StageActivity'
 
 export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate } from './StageActivity'
@@ -78,7 +86,16 @@ export function StageDetail({
   // card reads the same on a conducted flight and a derived one.
   const evalTaskId = evaluationTaskId(stage, flight)
   const { taskById } = useEvaluationExports()
-  const facts = stageFacts(stage, flight, companion ?? undefined, evalTaskId ? taskById(evalTaskId) : null)
+  // Sources outside the flight record (ledger, boot run, portify workflow,
+  // config, envsets, docs) — resolved for the VISIBLE stage only.
+  const band = useStageBandData(
+    flight,
+    stage,
+    companion,
+    evalTaskId ? taskById(evalTaskId) : null,
+    configRefreshKey,
+  )
+  const facts = stageFacts(stage, flight, companion ?? undefined, band)
   const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
     ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
@@ -180,12 +197,11 @@ export function StageDetail({
         {stageStateLine(stage, flight, companion ?? undefined)}
       </div>
 
-      <FactsGrid
-        facts={facts}
-        aside={stage.key === 'evaluation-export'
-          ? <DownloadEvaluationAction flight={flight} stage={stage} icon />
-          : undefined}
-      />
+      {/* No download on the kicker line any more: the deliverable card below
+          offers it beside the filename it fetches, and every archive has its own
+          row in the reports list — a third button for the same file, a hand's
+          width above both, is the duplication R82 removed for Restart. */}
+      <FactsGrid facts={facts} />
 
       {/* Paused with nothing else to act on (no checkpoint, no error): the
           "how to pick it back up" card fills the void the state sentence alone
@@ -211,6 +227,23 @@ export function StageDetail({
             return Array.isArray(ev.envFiles) ? (ev.envFiles as unknown[]).filter((f): f is string => typeof f === 'string') : []
           })()}
           onChangeInputs={onStartFlight ? () => onStartFlight(flight.feature, 'fresh') : undefined}
+        />
+      )}
+
+      {/* Suite setup: the boot proof sits directly under the band, ABOVE the
+          config cards. The band's "Services booted 2/2" and "Boot time" are
+          summaries of exactly these rows, so they read as one block; the config
+          digest below is editable INPUT, a different kind of thing. Putting the
+          config first separated a number from the evidence behind it by a
+          screenful of start commands. */}
+      {(stage.key === 'scaffold' || stage.key === 'env-capture') && (
+        <BootCheckPanel
+          boot={band.boot ?? null}
+          recorded={(() => {
+            const ev = ((companion ?? stage).evidence ?? {}) as Record<string, unknown>
+            const boot = ev.boot as { services?: Array<{ name?: string; status?: string }> } | undefined
+            return boot?.services ?? []
+          })()}
         />
       )}
 
@@ -287,6 +320,25 @@ export function StageDetail({
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
           timeline — coverage % after each mapping feeds the next authoring. */}
       {loopProgress && <SpecsPassTimeline progress={loopProgress} live={live} />}
+
+      {/* Parallel readiness: the concurrent-boot evidence, then what was edited
+          to get there. */}
+      {stage.key === 'portify' && (
+        <>
+          <DoubleBootPanel portify={band.portify ?? null} />
+          <OverlayPanel portify={band.portify ?? null} />
+        </>
+      )}
+
+      {/* Evaluation Report: this flight's deliverable, then every archive ever
+          built for the suite — the stage is where reports are collected, not just
+          where the newest one is announced. */}
+      {stage.key === 'evaluation-export' && (
+        <>
+          <EvaluationDeliverablePanel task={band.evalTask ?? null} />
+          <AllReportsPanel feature={flight.feature} pinnedTaskId={evalTaskId} />
+        </>
+      )}
 
       {(row.status === 'failed' && error) && (
         <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} />

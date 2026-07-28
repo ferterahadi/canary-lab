@@ -298,8 +298,8 @@ describe('stageFacts — evaluation report reads the export task, not the flight
       { label: 'Report', value: 'agent-rewritten' },
       archive,
     ]
-    expect(stageFacts(conducted, flight(), undefined, task)).toEqual(expected)
-    expect(stageFacts(probed, flight(), undefined, task)).toEqual(expected)
+    expect(stageFacts(conducted, flight(), undefined, { evalTask: task })).toEqual(expected)
+    expect(stageFacts(probed, flight(), undefined, { evalTask: task })).toEqual(expected)
   })
 
   it('never shows export.zip — the internal filename nobody is handed', () => {
@@ -308,7 +308,7 @@ describe('stageFacts — evaluation report reads the export task, not the flight
       status: 'done',
       evidence: { taskId: 'eval-x', evaluationZip: '/logs/e/eval-x/export.zip' },
     } as FlightStage
-    const values = stageFacts(stage, flight(), undefined, task).map((f) => f.value)
+    const values = stageFacts(stage, flight(), undefined, { evalTask: task }).map((f) => f.value)
     expect(values).toContain(archive.value)
     expect(values).not.toContain('export.zip')
   })
@@ -319,7 +319,7 @@ describe('stageFacts — evaluation report reads the export task, not the flight
       status: 'done',
       evidence: { taskId: 'eval-x', archiveBase: 'canary-lab-evaluation-checkout-2026-07-01T0245-o456', mode: 'raw' },
     } as FlightStage
-    expect(stageFacts(stage, flight(), undefined, null)).toEqual([
+    expect(stageFacts(stage, flight(), undefined, {})).toEqual([
       { label: 'Report', value: 'built from evidence' },
       {
         label: 'Archive',

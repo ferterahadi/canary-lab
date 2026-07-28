@@ -37,6 +37,36 @@ describe('listRuns', () => {
     expect(listRuns(tmpDir, { feature: 'bar' }).map((e) => e.runId)).toEqual(['b'])
   })
 
+  it('backfills healCycles from the manifest for entries written before it was mirrored', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'healed', feature: 'foo', startedAt: '2026-01-03T00:00:00Z', status: 'failed' },
+      { runId: 'clean', feature: 'foo', startedAt: '2026-01-02T00:00:00Z', status: 'passed' },
+      { runId: 'gone', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    const manifest = (runId: string, healCycles: number) => {
+      const dir = runDirFor(tmpDir, runId)
+      fs.mkdirSync(dir, { recursive: true })
+      writeManifest(path.join(dir, 'manifest.json'), {
+        runId, feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed', healCycles, services: [],
+      })
+    }
+    manifest('healed', 4)
+    manifest('clean', 0)
+    const byId = Object.fromEntries(listRuns(tmpDir).map((e) => [e.runId, e.healCycles]))
+    expect(byId.healed).toBe(4)
+    // A run that never healed and one whose directory has been cleaned away both
+    // stay absent — nothing is invented to fill the column.
+    expect(byId.clean).toBeUndefined()
+    expect(byId.gone).toBeUndefined()
+  })
+
+  it('leaves an already-mirrored healCycles alone instead of re-reading the manifest', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed', healCycles: 2 },
+    ])
+    expect(listRuns(tmpDir)[0].healCycles).toBe(2)
+  })
+
   it('treats equal startedAt deterministically', () => {
     writeRunsIndex(tmpDir, [
       { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },

@@ -182,6 +182,16 @@ export interface EvaluationExportTask {
    *  renders its live AgentSessionView instead of the text progress panel.
    *  Absent for raw/external/cached runs (no live agent). */
   sessionRef?: { agent: 'claude' | 'codex'; sessionId: string }
+  /** What the built archive holds, recorded when the zip was written. Absent
+   *  while running, on a failed export, and on tasks exported before this was
+   *  recorded — so a row shows the size it knows and omits it otherwise. */
+  archive?: EvaluationArchiveContents
+}
+
+export interface EvaluationArchiveContents {
+  bytes: number
+  videos: number
+  assets: number
 }
 
 // Requirement Coverage Ledger — the computed shapes are shared with the server.

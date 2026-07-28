@@ -13,6 +13,9 @@ export interface RunIndexEntry {
   startedAt: string
   status: RunStatus
   endedAt?: string
+  /** Repair cycles this run consumed, mirrored from its manifest. Absent on
+   *  pre-existing entries and on runs that never healed. */
+  healCycles?: number
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>
@@ -29,6 +32,10 @@ export interface ServiceManifestEntry {
   status?: ServiceStatus
   /** Per-run allocated ports keyed by declared slot name. */
   allocatedPorts?: Record<string, number>
+  /** Spawn time (status → starting) and first-probe-pass time (status →
+   *  ready). Both absent on runs recorded before these were stamped. */
+  startingAt?: string
+  readyAt?: string
 }
 
 export interface RepoBranchSnapshot {

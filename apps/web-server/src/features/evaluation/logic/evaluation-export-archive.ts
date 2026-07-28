@@ -15,10 +15,23 @@ export interface EvaluationExportArchiveOptions {
   rewrite?: AssertionHtmlOptions['rewrite']
 }
 
+/** What the archive actually ended up holding. Counted from the entries that
+ *  went into the zip — never from what the run *had*, so a video that failed to
+ *  resolve is absent here too. The report page itself is not counted; it is
+ *  always present and says nothing. */
+export interface EvaluationArchiveContents {
+  /** Byte length of the built zip. */
+  bytes: number
+  /** Playwright videos bundled alongside the report. */
+  videos: number
+  /** The report's own assets (styles, inline media it references). */
+  assets: number
+}
+
 export async function buildEvaluationExportArchive(
   detail: RunDetail,
   options: EvaluationExportArchiveOptions,
-): Promise<{ archiveBase: string; zip: Buffer }> {
+): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> {
   const runPaths = buildRunPaths(runDirFor(options.logsDir, detail.runId))
   const videos = assertionVideos(
     detail.playwrightArtifacts,
@@ -42,13 +55,16 @@ export async function buildEvaluationExportArchive(
     videoLinksByTestName: videoLinksByTestName(videos),
     coverage,
   })
+  const videoEntries = videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) }))
+  const zip = createZip([
+    { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
+    ...exported.assets,
+    ...videoEntries,
+  ])
   return {
     archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
-    zip: createZip([
-      { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
-      ...exported.assets,
-      ...videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) })),
-    ]),
+    zip,
+    contents: { bytes: zip.length, videos: videoEntries.length, assets: exported.assets.length },
   }
 }
 

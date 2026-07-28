@@ -31,6 +31,10 @@ const mocks = vi.hoisted(() => ({
   redoFlight: vi.fn(),
   deleteFlight: vi.fn(),
   listRuns: vi.fn(),
+  getEnvsetSlot: vi.fn(),
+  getEnvsetsIndex: vi.fn(),
+  getPortify: vi.fn(),
+  getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
   getPlaywrightConfig: vi.fn(),
@@ -49,6 +53,7 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
+  evaluationTasks: vi.fn(() => []),
 }))
 
 vi.mock('@/shared/api/client', () => ({
@@ -66,6 +71,10 @@ vi.mock('@/shared/api/client', () => ({
   redoFlight: mocks.redoFlight,
   deleteFlight: mocks.deleteFlight,
   listRuns: mocks.listRuns,
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getPortify: mocks.getPortify,
+  getFeatureCoverage: mocks.getFeatureCoverage,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
   getRepoGitStatus: mocks.getRepoGitStatus,
@@ -103,6 +112,7 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 // context; the provider needs live sockets, so stub the hook.
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: () => ({
+    tasks: mocks.evaluationTasks(),
     downloadTask: mocks.downloadTask,
     taskById: mocks.taskById,
     taskForRun: mocks.taskForRun,
@@ -121,6 +131,10 @@ let root: Root
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getFeatureCoverage.mockResolvedValue(undefined)
+  mocks.getPortify.mockResolvedValue(undefined)
+  mocks.getEnvsetsIndex.mockResolvedValue(undefined)
+  mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
   mocks.getFlightRemedy.mockResolvedValue({ remedy: null })
   mocks.listRuns.mockResolvedValue([])

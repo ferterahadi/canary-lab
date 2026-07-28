@@ -22,6 +22,10 @@ const mocks = vi.hoisted(() => ({
   redoFlight: vi.fn(),
   deleteFlight: vi.fn(),
   listRuns: vi.fn(),
+  getEnvsetSlot: vi.fn(),
+  getEnvsetsIndex: vi.fn(),
+  getPortify: vi.fn(),
+  getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
   getPlaywrightConfig: vi.fn(),
@@ -40,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
+  evaluationTasks: vi.fn(() => []),
 }))
 
 vi.mock('@/shared/api/client', () => ({
@@ -57,6 +62,10 @@ vi.mock('@/shared/api/client', () => ({
   redoFlight: mocks.redoFlight,
   deleteFlight: mocks.deleteFlight,
   listRuns: mocks.listRuns,
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getPortify: mocks.getPortify,
+  getFeatureCoverage: mocks.getFeatureCoverage,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
   getRepoGitStatus: mocks.getRepoGitStatus,
@@ -94,6 +103,7 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 // context; the provider needs live sockets, so stub the hook.
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: () => ({
+    tasks: mocks.evaluationTasks(),
     downloadTask: mocks.downloadTask,
     taskById: mocks.taskById,
     taskForRun: mocks.taskForRun,
@@ -114,6 +124,10 @@ let root: Root
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getFeatureCoverage.mockResolvedValue(undefined)
+  mocks.getPortify.mockResolvedValue(undefined)
+  mocks.getEnvsetsIndex.mockResolvedValue(undefined)
+  mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
   mocks.getFlightRemedy.mockResolvedValue({ remedy: null })
   mocks.listRuns.mockResolvedValue([])
@@ -302,7 +316,12 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
-    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('None needed')
+    // The band counts the work instead of restating the verdict three ways: a
+    // flight that needed no edits reports zero files, not the sentence "None
+    // needed" beside two more sentences saying the same thing.
+    const portifyFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
+    expect(portifyFacts).toContain('Files edited')
+    expect(portifyFacts).toContain('already injectable')
     expect(container.textContent).not.toContain('"workflowId"')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
@@ -485,50 +504,87 @@ describe('trailer model (R14–R18)', () => {
     updatedAt: '2026-07-23T16:10:00Z',
   }
 
-  it('R15/R20: the download is an icon INSIDE the facts card, naming the archive the user receives', async () => {
+  it('the download sits on the deliverable card, beside the archive name it fetches', async () => {
     mocks.taskById.mockReturnValue(readyTask)
     await openExportStage({ taskId: 'task-7', evaluationZip: '/logs/evaluation-exports/task-7/export.zip' })
-    // Not in the stage header any more — it sits with the archive it fetches.
+    // Neither in the stage header nor on the band's kicker line: the band
+    // measures what the report says, the card hands the file over. Three buttons
+    // for one file is the duplication R82 removed for Restart.
     const header = container.querySelector('[data-testid="stage-state-line"]')?.previousElementSibling
-    expect(header?.querySelector('[data-testid="flight-download-evaluation"]')).toBeNull()
-    const card = container.querySelector('[data-testid="stage-facts-card"]')
-    const download = card?.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')
+    expect(header?.querySelector('[data-testid^="download-report-"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-facts-card"] [data-testid^="download-report-"]')).toBeNull()
+    const card = container.querySelector('[data-testid="evaluation-deliverable"]')
+    const download = card?.querySelector<HTMLButtonElement>('[data-testid="download-report-task-7"]')
     expect(download?.getAttribute('title')).toBe('Download canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
     await act(async () => { download?.click() })
     expect(mocks.downloadTask).toHaveBeenCalledWith('task-7')
-    // The card names the run, the report mode and the real archive — never the
-    // internal export.zip inside the logs dir.
-    const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(facts).toContain('2026-07-23T1603-z6kc')
-    expect(facts).toContain('agent-rewritten')
-    expect(facts).toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
-    expect(facts).not.toContain('export.zip')
+    // The card names the run and the real archive — never the internal
+    // export.zip inside the logs dir, a file nobody is ever handed.
+    const deliverable = card?.textContent ?? ''
+    expect(deliverable).toContain('2026-07-23T1603-z6kc')
+    expect(deliverable).toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
+    expect(deliverable).not.toContain('export.zip')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Evaluation ready.')
-    expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
   it('a read-time-probed export (a derived flight has no zip path) still offers the download', async () => {
     mocks.taskById.mockReturnValue(readyTask)
     await openExportStage({ taskId: 'task-7', runId: '2026-07-23T1603-z6kc', mode: 'localized' })
-    expect(container.querySelector('[data-testid="stage-facts-card"] [data-testid="flight-download-evaluation"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="evaluation-deliverable"] [data-testid="download-report-task-7"]')).toBeTruthy()
   })
 
   it('an export the client no longer holds shows no download rather than a dead button', async () => {
     mocks.taskById.mockReturnValue(null)
     await openExportStage({ taskId: 'task-7', archiveBase: 'canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc' })
-    expect(container.querySelector('[data-testid="flight-download-evaluation"]')).toBeNull()
-    // The recorded name still reads — the flight's own record of what it built.
+    expect(container.querySelector('[data-testid^="download-report-"]')).toBeNull()
+    // The recorded name still reads in the band — the flight's own record of
+    // what it built, even with the task gone.
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent)
       .toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
   })
 
-  it('surfaces a failed download on the icon instead of failing silently', async () => {
+  it('surfaces a failed download on the control instead of failing silently', async () => {
     mocks.taskById.mockReturnValue(readyTask)
     mocks.downloadTask.mockRejectedValue(new Error('nope'))
     await openExportStage({ taskId: 'task-7' })
-    const download = container.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')
+    const download = container.querySelector<HTMLButtonElement>('[data-testid="download-report-task-7"]')
     await act(async () => { download?.click() })
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')?.getAttribute('title'))
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="download-report-task-7"]')?.getAttribute('title'))
       .toBe('Download failed — click to retry')
+  })
+
+  it('lists every report for the suite, marks this flight\'s, and downloads any row', async () => {
+    // Both tasks belong to THIS flight's feature — the list is suite-scoped, so
+    // an export for another feature must not appear here.
+    const mine = { ...readyTask, feature: 'checkout' }
+    const older = { ...mine, taskId: 'task-3', runId: '2026-07-20T0900-m4tq', mode: 'raw' as const }
+    const otherFeature = { ...readyTask, taskId: 'task-5', feature: 'billing' }
+    // Newest-first, exactly as the export store hands them over.
+    mocks.evaluationTasks.mockReturnValue([mine, older, otherFeature])
+    mocks.taskById.mockReturnValue(mine)
+    await openExportStage({ taskId: 'task-7' })
+    const list = container.querySelector('[data-testid="all-reports-panel"]')
+    expect(list?.textContent).toContain('2026-07-23T1603-z6kc')
+    expect(list?.textContent).toContain('2026-07-20T0900-m4tq')
+    // The stage's own report is badged; the others are just history.
+    expect(list?.querySelector('[data-testid="report-row-task-7"]')?.textContent).toContain('this flight')
+    expect(list?.querySelector('[data-testid="report-row-task-3"]')?.textContent).not.toContain('this flight')
+    expect(list?.querySelector('[data-testid="report-row-task-5"]')).toBeNull()
+    await act(async () => {
+      list?.querySelector<HTMLButtonElement>('[data-testid="download-report-task-3"]')?.click()
+    })
+    expect(mocks.downloadTask).toHaveBeenCalledWith('task-3')
+  })
+
+  it('a failed export shows its reason, not a download that cannot work', async () => {
+    mocks.evaluationTasks.mockReturnValue([
+      { ...readyTask, feature: 'checkout', taskId: 'task-9', status: 'failed', downloadReady: false, error: 'rewrite agent exited' },
+    ])
+    mocks.taskById.mockReturnValue(null)
+    await openExportStage({ taskId: 'task-9' })
+    const row = container.querySelector('[data-testid="report-row-task-9"]')
+    expect(row?.textContent).toContain('rewrite agent exited')
+    expect(row?.textContent).toContain('no archive')
+    expect(row?.querySelector('[data-testid="download-report-task-9"]')).toBeNull()
   })
 })

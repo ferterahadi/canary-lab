@@ -9,7 +9,7 @@ import { isTerminalRunStatus } from '../../../../../../shared/run-state'
 import { buildAgentSessionResponse, resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../logic/test-review-export'
-import { buildEvaluationExportArchive } from '../logic/evaluation-export-archive'
+import { buildEvaluationExportArchive, type EvaluationArchiveContents } from '../logic/evaluation-export-archive'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
@@ -56,7 +56,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     log?: (chunk: string) => void,
     signal?: AbortSignal,
     onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void,
-  ): Promise<{ archiveBase: string; zip: Buffer }> => {
+  ): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
     // When the project default is the new `external` heal-agent, there is no
@@ -159,6 +159,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
         writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
         const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           archiveBase: built.archiveBase,
+          archive: built.contents,
           status: 'completed',
           downloadReady: true,
         })

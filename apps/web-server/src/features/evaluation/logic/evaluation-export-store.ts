@@ -3,6 +3,7 @@ import path from 'path'
 import { createZip } from '../../../shared/simple-zip'
 import { isClientKind, type ClientKind, type RunProducer } from '../../../../../../shared/run-mode'
 import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import type { EvaluationArchiveContents } from './evaluation-export-archive'
 
 export type EvaluationExportMode = 'raw' | 'localized'
 export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
@@ -30,6 +31,10 @@ export interface EvaluationExportTaskRecord {
    *  codex: '' — located by cwd + start). Absent for raw/external/cached runs,
    *  which have no live agent and keep the text progress panel. */
   sessionRef?: EvaluationExportSessionRef
+  /** What the built archive holds — recorded once, when the zip is written.
+   *  Absent on a running/failed task and on records written before this
+   *  existed, so every reader must treat it as optional rather than zero. */
+  archive?: EvaluationArchiveContents
 }
 
 export interface EvaluationExportSessionRef {
@@ -54,6 +59,7 @@ export interface EvaluationExportTaskView {
   externalSessionUrl?: string
   error?: string
   sessionRef?: EvaluationExportSessionRef
+  archive?: EvaluationArchiveContents
 }
 
 export interface EvaluationExportTaskPaths {
@@ -122,7 +128,26 @@ export function createEvaluationExportTask(
 
 export function readEvaluationExportTask(logsDir: string, taskId: string): EvaluationExportTaskRecord | null {
   if (!isSafeTaskId(taskId)) return null
-  return evalStore(logsDir).get(taskId)
+  const record = evalStore(logsDir).get(taskId)
+  return record ? withArchiveSize(logsDir, record) : null
+}
+
+/** Exports built before the contents were recorded still have their zip on disk
+ *  (cleanup never prunes these), so the SIZE is recoverable with a stat — and a
+ *  reports list whose older rows show no size at all is the first thing a reader
+ *  notices. The video count is not recoverable without unpacking the archive, so
+ *  it stays absent rather than being guessed at as zero. Backfilled on read, not
+ *  persisted: the record stays a description of what the export wrote. */
+function withArchiveSize(logsDir: string, record: EvaluationExportTaskRecord): EvaluationExportTaskRecord {
+  if (record.archive || !record.downloadReady) return record
+  const paths = evaluationExportTaskPaths(logsDir, record.taskId)
+  if (!paths) return record
+  try {
+    return { ...record, archive: { bytes: fs.statSync(paths.zipPath).size, videos: 0, assets: 0 } }
+  } catch {
+    // The archive is gone (hand-deleted logs dir) — say nothing rather than 0 B.
+    return record
+  }
 }
 
 export function writeEvaluationExportTask(logsDir: string, record: EvaluationExportTaskRecord): void {
@@ -228,6 +253,7 @@ export function evaluationExportTaskView(record: EvaluationExportTaskRecord): Ev
     ...(record.externalSessionUrl ? { externalSessionUrl: record.externalSessionUrl } : {}),
     ...(record.error ? { error: record.error } : {}),
     ...(record.sessionRef ? { sessionRef: record.sessionRef } : {}),
+    ...(record.archive ? { archive: record.archive } : {}),
   }
 }
 
@@ -249,6 +275,7 @@ function normalizeTaskRecord(value: EvaluationExportTaskRecord): EvaluationExpor
   if (value.externalSessionUrl !== undefined && typeof value.externalSessionUrl !== 'string') return null
   if (value.error !== undefined && typeof value.error !== 'string') return null
   if (value.sessionRef !== undefined && !isSessionRef(value.sessionRef)) return null
+  if (value.archive !== undefined && !isArchiveContents(value.archive)) return null
   return { ...value, producer: value.producer ?? 'internal' }
 }
 
@@ -260,6 +287,12 @@ function isSessionRef(value: unknown): value is EvaluationExportSessionRef {
   if (!value || typeof value !== 'object') return false
   const ref = value as Record<string, unknown>
   return (ref.agent === 'claude' || ref.agent === 'codex') && typeof ref.sessionId === 'string'
+}
+
+function isArchiveContents(value: unknown): value is EvaluationArchiveContents {
+  if (!value || typeof value !== 'object') return false
+  const c = value as Record<string, unknown>
+  return typeof c.bytes === 'number' && typeof c.videos === 'number' && typeof c.assets === 'number'
 }
 
 function validateArchivePath(filePath: string): string {

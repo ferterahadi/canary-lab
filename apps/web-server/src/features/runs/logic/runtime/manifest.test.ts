@@ -120,4 +120,35 @@ describe('service status updates', () => {
     expect(updateServiceStatus(path.join(tmpDir, 'nope.json'), 'api', 'ready')).toBeNull()
   })
 
+  it('stamps startingAt and readyAt so per-service time-to-ready is derivable', () => {
+    const manifestPath = path.join(tmpDir, 'manifest.json')
+    writeManifest(manifestPath, makeManifest({
+      services: [{ name: 'api', safeName: 'api', command: 'go run', cwd: '/x', logPath: '/x/api.log' }],
+    }))
+    updateServiceStatus(manifestPath, 'api', 'starting')
+    const started = readManifest(manifestPath)!.services[0]!
+    expect(started.startingAt).toEqual(expect.any(String))
+    expect(started.readyAt).toBeUndefined()
+
+    updateServiceStatus(manifestPath, 'api', 'ready')
+    const ready = readManifest(manifestPath)!.services[0]!
+    expect(ready.startingAt).toBe(started.startingAt)
+    expect(Date.parse(ready.readyAt!)).toBeGreaterThanOrEqual(Date.parse(started.startingAt!))
+  })
+
+  it('keeps the first boot timings when a heal restart re-readies a service', () => {
+    const manifestPath = path.join(tmpDir, 'manifest.json')
+    writeManifest(manifestPath, makeManifest({
+      services: [{ name: 'api', safeName: 'api', command: 'go run', cwd: '/x', logPath: '/x/api.log' }],
+    }))
+    updateServiceStatus(manifestPath, 'api', 'starting')
+    updateServiceStatus(manifestPath, 'api', 'ready')
+    const first = readManifest(manifestPath)!.services[0]!
+    updateServiceStatus(manifestPath, 'api', 'stopped')
+    updateServiceStatus(manifestPath, 'api', 'starting')
+    updateServiceStatus(manifestPath, 'api', 'ready')
+    const after = readManifest(manifestPath)!.services[0]!
+    expect(after.startingAt).toBe(first.startingAt)
+    expect(after.readyAt).toBe(first.readyAt)
+  })
 })

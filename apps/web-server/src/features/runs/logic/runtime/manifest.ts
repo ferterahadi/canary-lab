@@ -55,6 +55,13 @@ export interface ServiceManifestEntry {
    *  service declares no ports. The UI surfaces these so concurrent runs are
    *  distinguishable. */
   allocatedPorts?: Record<string, number>
+  /** When the service was spawned (status → `starting`). */
+  startingAt?: string
+  /** When its readiness probe first passed (status → `ready`). Together with
+   *  `startingAt` this gives per-service time-to-ready, which is what the
+   *  Suite setup boot rows report. Stamped here rather than derived from the
+   *  run's own start/end, which also spans queue wait and teardown. */
+  readyAt?: string
 }
 
 export interface RepoBranchSnapshot {
@@ -215,11 +222,23 @@ export function updateServiceStatus(
   const current = readManifest(manifestPath)
   if (!current) return null
   const services = current.services.map((s) =>
-    s.safeName === safeName ? { ...s, status } : s,
+    s.safeName === safeName ? { ...s, status, ...serviceStatusStamp(s, status) } : s,
   )
   const next = { ...current, services }
   writeManifest(manifestPath, next)
   return next
+}
+
+/** Timestamp for the two transitions worth measuring. Only ever stamps the
+ *  FIRST arrival: a service that goes ready → stopped → ready (a heal restart)
+ *  keeps its original boot timing rather than reporting the restart's. */
+function serviceStatusStamp(
+  service: ServiceManifestEntry,
+  status: ServiceStatus,
+): Partial<ServiceManifestEntry> {
+  if (status === 'starting' && !service.startingAt) return { startingAt: new Date().toISOString() }
+  if (status === 'ready' && !service.readyAt) return { readyAt: new Date().toISOString() }
+  return {}
 }
 
 export function updateAllServicesStatus(
@@ -244,6 +263,11 @@ export interface RunIndexEntry {
   startedAt: string
   status: RunStatus
   endedAt?: string
+  /** Repair cycles this run consumed. Mirrored from the manifest on every
+   *  index write so a feature's repair total reads off the index alone,
+   *  without opening one manifest per run. Absent on pre-existing entries and
+   *  on runs that never healed. */
+  healCycles?: number
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>

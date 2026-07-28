@@ -106,6 +106,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
       appendEvaluationExportLog(deps.store.logsDir, taskId, '[evaluation] external report submitted\n')
       const next = patchEvaluationExportTask(deps.store.logsDir, taskId, {
         archiveBase: built.archiveBase,
+        archive: built.contents,
         status: 'completed',
         downloadReady: true,
       })

@@ -22,6 +22,10 @@ const mocks = vi.hoisted(() => ({
   redoFlight: vi.fn(),
   deleteFlight: vi.fn(),
   listRuns: vi.fn(),
+  getEnvsetSlot: vi.fn(),
+  getEnvsetsIndex: vi.fn(),
+  getPortify: vi.fn(),
+  getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
   getPlaywrightConfig: vi.fn(),
@@ -40,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
+  evaluationTasks: vi.fn(() => []),
 }))
 
 vi.mock('@/shared/api/client', () => ({
@@ -57,6 +62,10 @@ vi.mock('@/shared/api/client', () => ({
   redoFlight: mocks.redoFlight,
   deleteFlight: mocks.deleteFlight,
   listRuns: mocks.listRuns,
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getPortify: mocks.getPortify,
+  getFeatureCoverage: mocks.getFeatureCoverage,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
   getRepoGitStatus: mocks.getRepoGitStatus,
@@ -94,6 +103,7 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 // context; the provider needs live sockets, so stub the hook.
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: () => ({
+    tasks: mocks.evaluationTasks(),
     downloadTask: mocks.downloadTask,
     taskById: mocks.taskById,
     taskForRun: mocks.taskForRun,
@@ -114,6 +124,10 @@ let root: Root
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getFeatureCoverage.mockResolvedValue(undefined)
+  mocks.getPortify.mockResolvedValue(undefined)
+  mocks.getEnvsetsIndex.mockResolvedValue(undefined)
+  mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
   mocks.getFlightRemedy.mockResolvedValue({ remedy: null })
   mocks.listRuns.mockResolvedValue([])
@@ -264,9 +278,20 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
       .toBe('Suite "checkout" created — env captured (2 files), dry-run boot passed.')
     const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(facts).toContain('checkout')
-    expect(facts).toContain('2 files')
-    expect(facts).toContain('api healthy')
+    // The band reports the boot PROOF, not the config it booted with: the suite
+    // name, the reuse verb and the env FILE count already read in the state line
+    // above, and the worker count / service list are editable inputs on the
+    // cards below. A tile restating either measures nothing.
+    expect(facts).toContain('Services booted')
+    expect(facts).toContain('1/1')
+    expect(facts).not.toContain('Location')
+    expect(facts).not.toContain('/ws/features/checkout')
+    // Boot proof directly under the band it summarizes, BEFORE the config
+    // digest: "Services booted 2/2" and these rows are one block, and the
+    // editable config in between separated a number from its own evidence.
+    const blocks = [...container.querySelectorAll('[data-testid="stage-facts-card"],[data-testid="boot-check-panel"],[data-testid="feature-setup-panel"]')]
+      .map((el) => el.getAttribute('data-testid'))
+    expect(blocks).toEqual(['stage-facts-card', 'boot-check-panel', 'feature-setup-panel'])
     // The facts sit on the SAME card surface as the panels below them (one
     // stack of like blocks) — not bare above the first card.
     const factsCard = container.querySelector('[data-testid="stage-facts-card"]')
@@ -388,7 +413,12 @@ describe('trailer model (R14–R18)', () => {
     const apiCard = container.querySelector('[data-testid="repo-card-api"]')?.textContent ?? ''
     expect(apiCard).toContain('/repo/api')
     expect(apiCard).not.toContain('.env')
-    expect(container.querySelector('[data-testid="stage-facts"]')).toBeNull()
+    // The scan's band counts what it FOUND; the identities behind each count
+    // stay on the repo cards above, so neither repeats the other.
+    const scoutFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
+    expect(scoutFacts).toContain('Repos scanned')
+    expect(scoutFacts).toContain('Env files found')
+    expect(scoutFacts).not.toContain('/repo/shop')
     expect(container.querySelector('header')?.textContent).not.toContain('/repo/shop')
 
     await act(async () => {
@@ -398,11 +428,15 @@ describe('trailer model (R14–R18)', () => {
       .toBe('7 requirements distilled from 2 docs (repo-docs).')
     // R59: the folded prd-summary's status chips the Requirements header.
     expect(container.querySelector('[data-testid="docs-summary-chip"]')?.textContent).toContain('done')
+    // Counts, not filenames. The band used to spend one tile per doc printing
+    // the same names the Requirement docs card lists below — with their sizes —
+    // so it was a worse copy of that card. It now reports the shape of the work.
     const docsFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(docsFacts).toContain('shop-readme.md')
-    expect(docsFacts).toContain('api-spec.md')
-    expect(docsFacts).toContain('repo-docs')
+    expect(docsFacts).toContain('Requirements distilled')
     expect(docsFacts).toContain('7')
+    expect(docsFacts).toContain('Source docs')
+    expect(docsFacts).not.toContain('shop-readme.md')
+    expect(docsFacts).not.toContain('api-spec.md')
   })
 
   it('R29/R66: the export stage rides the SAME rail — its export task as the agent source', async () => {

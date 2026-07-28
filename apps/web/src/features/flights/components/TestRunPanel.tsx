@@ -5,7 +5,9 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { FixesCapturedPanel, RunRow } from '@/features/runs'
 import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
-import { FactTile, STAGE_COLUMN, healEndShort, type StageFact } from './stage-meta'
+import { FactTile, FactsGrid, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
+import { runHistoryStats } from './stage-metrics'
+import { formatDuration } from '@/shared/lib/format'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
 // three-to-four times: the "At a glance" facts card, the RunRepairSummary's own
@@ -119,6 +121,13 @@ export function TestRunPanel({
 
   return (
     <div className={`flex flex-col gap-3 ${STAGE_COLUMN}`} data-testid="test-run">
+      {/* The band belongs HERE rather than in `stageFacts`, because this panel
+          already polls the feature's run list — resolving it a second time in the
+          band-data hook would be two requests for one answer. It reports the
+          HISTORY (how many runs, how they ended, how long they take); the hero
+          below reports the latest run. Different scopes, so no number repeats. */}
+      <FactsGrid facts={runHistoryFacts(featureRuns)} />
+
       <PanelCard kicker="Latest run" testId="test-run-hero">
         <ul className="m-0 list-none p-0">
           <RunRow
@@ -213,6 +222,74 @@ export function TestRunPanel({
       )}
     </div>
   )
+}
+
+/** The stage's "At a glance": what this feature's run history looks like. Every
+ *  count comes from `runHistoryStats`, which keeps unfinished runs out of the
+ *  outcome buckets — a run still going is not a failure, and a band that folded
+ *  it into one would report a worse verdict than the evidence supports. */
+function runHistoryFacts(runs: RunIndexEntry[]): StageFact[] {
+  const stats = runHistoryStats(runs)
+  if (!stats) return []
+  const settled = stats.passed + stats.failed + stats.aborted
+  return [
+    {
+      label: 'Runs performed',
+      value: String(stats.total),
+      big: true,
+      ...(stats.active > 0 ? { sub: `${stats.active} still going` } : {}),
+    },
+    {
+      label: 'Succeeded',
+      value: `${stats.passed}`,
+      big: true,
+      // All three outcomes in one bar. A single passed/settled fraction would
+      // render a failed run and an aborted one as the same empty space, and an
+      // abort is a run that never reached a verdict — not a failing one.
+      ...(settled > 0
+        ? {
+            segments: [
+              { value: stats.passed, tone: 'good' as const },
+              { value: stats.failed, tone: 'bad' as const },
+              { value: stats.aborted, tone: 'muted' as const },
+            ],
+          }
+        : {}),
+      tone: settled === 0 ? undefined : stats.passed === settled ? 'good' : 'warn',
+      ...(outcomeBreakdown(stats.failed, stats.aborted) ? { sub: outcomeBreakdown(stats.failed, stats.aborted)! } : {}),
+    },
+    ...(stats.avgDurationMs != null
+      ? [{
+          label: 'Avg duration',
+          value: formatDuration(stats.avgDurationMs),
+          big: true as const,
+          ...(stats.longestDurationMs != null && stats.longestDurationMs !== stats.avgDurationMs
+            ? { sub: `longest ${formatDuration(stats.longestDurationMs)}` }
+            : {}),
+        }]
+      : []),
+    ...(stats.healCycles > 0
+      ? [{
+          label: 'Repair cycles',
+          value: String(stats.healCycles),
+          big: true as const,
+          // Scoped explicitly: the hero's own Repair-cycles tile counts THIS
+          // run, and two unqualified "Repair cycles" tiles a hand's width apart
+          // would read as a contradiction rather than two scopes.
+          sub: `across ${plural(stats.runsWithRepairs, 'run')}`,
+        }]
+      : []),
+  ]
+}
+
+/** "2 failed · 1 aborted", omitting whichever is zero; undefined when neither
+ *  happened, so a clean history carries no sub-line at all. */
+function outcomeBreakdown(failed: number, aborted: number): string | undefined {
+  const parts = [
+    ...(failed > 0 ? [`${failed} failed`] : []),
+    ...(aborted > 0 ? [`${aborted} aborted`] : []),
+  ]
+  return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
 /** The metric tiles: Tests (passed/total + bar), Repairs (cycles + stepper +

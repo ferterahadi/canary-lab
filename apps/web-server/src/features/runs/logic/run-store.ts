@@ -1,7 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
-import { readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunLifecycleEvent, type RunIndexEntry, type RunManifest, type ServiceStatus } from './runtime/manifest'
+import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunLifecycleEvent, type RunIndexEntry, type RunManifest, type ServiceStatus } from './runtime/manifest'
 import { runDirFor } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
@@ -29,7 +29,22 @@ export interface ListRunsOptions {
 export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexEntry[] {
   const all = readRunsIndex(logsDir)
   const filtered = opts.feature ? all.filter((e) => e.feature === opts.feature) : all
-  return [...filtered].sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0))
+  return [...filtered]
+    .sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0))
+    .map((entry) => fillHealCycles(logsDir, entry))
+}
+
+/** The index mirrors `healCycles` from the manifest, but entries written before
+ *  it did have none — and a repair total that silently skipped them would report
+ *  a healed feature as never repaired. The index is a cache and the manifest is
+ *  truth, so read the manifest for the gap. One stat-and-parse per un-mirrored
+ *  run, on a list that holds dozens of entries at most; a run whose directory
+ *  has been cleaned away legitimately has no answer and stays absent. */
+function fillHealCycles(logsDir: string, entry: RunIndexEntry): RunIndexEntry {
+  if (entry.healCycles !== undefined) return entry
+  const manifest = readManifest(path.join(runDirFor(logsDir, entry.runId), 'manifest.json'))
+  if (!manifest?.healCycles) return entry
+  return { ...entry, healCycles: manifest.healCycles }
 }
 
 /**

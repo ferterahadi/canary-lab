@@ -22,6 +22,10 @@ const mocks = vi.hoisted(() => ({
   redoFlight: vi.fn(),
   deleteFlight: vi.fn(),
   listRuns: vi.fn(),
+  getEnvsetSlot: vi.fn(),
+  getEnvsetsIndex: vi.fn(),
+  getPortify: vi.fn(),
+  getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
   getPlaywrightConfig: vi.fn(),
@@ -40,6 +44,7 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
+  evaluationTasks: vi.fn(() => []),
 }))
 
 vi.mock('@/shared/api/client', () => ({
@@ -57,6 +62,10 @@ vi.mock('@/shared/api/client', () => ({
   redoFlight: mocks.redoFlight,
   deleteFlight: mocks.deleteFlight,
   listRuns: mocks.listRuns,
+  getEnvsetSlot: mocks.getEnvsetSlot,
+  getEnvsetsIndex: mocks.getEnvsetsIndex,
+  getPortify: mocks.getPortify,
+  getFeatureCoverage: mocks.getFeatureCoverage,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
   getRepoGitStatus: mocks.getRepoGitStatus,
@@ -94,6 +103,7 @@ vi.mock('@/shared/ui/AgentSessionView', () => ({
 // context; the provider needs live sockets, so stub the hook.
 vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   useEvaluationExports: () => ({
+    tasks: mocks.evaluationTasks(),
     downloadTask: mocks.downloadTask,
     taskById: mocks.taskById,
     taskForRun: mocks.taskForRun,
@@ -114,6 +124,10 @@ let root: Root
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.getFeatureCoverage.mockResolvedValue(undefined)
+  mocks.getPortify.mockResolvedValue(undefined)
+  mocks.getEnvsetsIndex.mockResolvedValue(undefined)
+  mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
   mocks.getFlightRemedy.mockResolvedValue({ remedy: null })
   mocks.listRuns.mockResolvedValue([])
@@ -281,10 +295,12 @@ describe('derived flights (R81)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-evaluation-export"]')?.click()
     })
-    const card = container.querySelector('[data-testid="stage-facts-card"]')
+    // A derived flight has no record at all, so the deliverable card is built
+    // entirely from the probed export TASK — and the download works from it.
+    const card = container.querySelector('[data-testid="evaluation-deliverable"]')
     expect(card?.textContent).toContain('2026-07-01T0245-o456')
     expect(card?.textContent).toContain('canary-lab-evaluation-go-smoke-2026-07-01T0245-o456.zip')
-    const download = card?.querySelector<HTMLButtonElement>('[data-testid="flight-download-evaluation"]')
+    const download = card?.querySelector<HTMLButtonElement>('[data-testid="download-report-eval-derived"]')
     await act(async () => { download?.click() })
     expect(mocks.downloadTask).toHaveBeenCalledWith('eval-derived')
     // Still exactly one header primary — the record-scoped one stays absent.
