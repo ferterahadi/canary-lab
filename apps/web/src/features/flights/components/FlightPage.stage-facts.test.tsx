@@ -270,7 +270,9 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
     })
-    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('Authoring passes')
+    // The pass COUNT tile is gone — the history rows below are the same fact with
+    // each pass's result attached, so the tile was a count of the rows under it.
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).not.toContain('Authoring passes')
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('specs failed to compile/list')
     expect(container.querySelector('[data-testid="specs-pass-2"]')?.textContent).toContain('100% covered')
     expect(container.querySelector('[data-testid="specs-pass-live"]')).toBeNull()

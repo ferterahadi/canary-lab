@@ -95,20 +95,48 @@ export interface OverlayDiffStat {
   files: number
   added: number
   removed: number
-  byFile: Array<{ path: string; added: number; removed: number }>
+  byFile: Array<{
+    path: string
+    /** Which repo (or the feature config) this file belongs to, from the block
+     *  header. Absent on a diff captured before the headers existed. */
+    group?: string
+    added: number
+    removed: number
+  }>
 }
+
+/** The `group` label for the feature-config block. One constant so the parser and
+ *  the panel that counts repos agree on the literal. */
+export const CONFIG_GROUP = 'feature config'
+
+/** Block header the portify capture writes ahead of each repo group's diff
+ *  (`# repo: a, b`) and ahead of the feature-config diff. */
+const OVERLAY_GROUP = /^# (repo|feature config): (.+)$/
 
 /** File and line counts from the portify overlay's unified diff. The `+++`/`---`
  *  header lines are skipped — counting them would add two phantom changed lines
- *  per file. */
+ *  per file.
+ *
+ *  Paths are repo-RELATIVE (each block is a `git diff` inside that group's
+ *  worktree), so two repos with a `build.gradle` yield two identical paths. The
+ *  block header is what tells them apart, which is why it is parsed rather than
+ *  skipped: without it the panel renders rows a reader cannot attribute. */
 export function overlayDiffStat(diff: string | undefined): OverlayDiffStat | null {
   if (!diff) return null
   const byFile: OverlayDiffStat['byFile'] = []
   let current: OverlayDiffStat['byFile'][number] | null = null
+  let group: string | undefined
   for (const line of diff.split('\n')) {
+    const header = OVERLAY_GROUP.exec(line)
+    if (header) {
+      // The repo block names its member repos; the config block's value is the
+      // feature directory — a path nobody needs, so the kind is the label.
+      group = header[1] === 'repo' ? header[2].trim() : CONFIG_GROUP
+      continue
+    }
     if (line.startsWith('+++ ')) {
       const path = line.slice(4).replace(/^b\//, '').trim()
-      current = { path, added: 0, removed: 0 }
+      current = { path, ...(group ? { group } : {}), added: 0, removed: 0 }
       byFile.push(current)
       continue
     }
@@ -124,6 +152,39 @@ export function overlayDiffStat(diff: string | undefined): OverlayDiffStat | nul
     removed: byFile.reduce((sum, f) => sum + f.removed, 0),
     byFile,
   }
+}
+
+export interface OverlayFileGroup {
+  /** The block label. Undefined for a diff captured before the headers existed,
+   *  where the files render as one unlabelled group rather than claiming a repo. */
+  group?: string
+  files: OverlayDiffStat['byFile']
+}
+
+/** Overlay rows grouped by owning repo — groups in diff order, files worst-first
+ *  WITHIN each group. The panel used to rank every file globally by size, which
+ *  interleaved the repos; combined with repo-relative paths that made two
+ *  different `build.gradle` files read as one duplicated row. Grouping is what
+ *  makes a row attributable, and the size ranking survives inside the group. */
+export function groupOverlayFiles(byFile: OverlayDiffStat['byFile']): OverlayFileGroup[] {
+  const groups: OverlayFileGroup[] = []
+  for (const file of byFile) {
+    const existing = groups.find((g) => g.group === file.group)
+    if (existing) existing.files.push(file)
+    else groups.push({ group: file.group, files: [file] })
+  }
+  for (const group of groups) {
+    group.files.sort((a, b) => (b.added + b.removed) - (a.added + a.removed))
+  }
+  return groups
+}
+
+/** Split a path so the panel can dim the directory and keep the filename. The
+ *  trailing slash rides the directory, so the two halves concatenate back to the
+ *  original with no separator of the renderer's own. */
+export function splitFilePath(p: string): { dir: string; base: string } {
+  const cut = p.lastIndexOf('/')
+  return cut < 0 ? { dir: '', base: p } : { dir: p.slice(0, cut + 1), base: p.slice(cut + 1) }
 }
 
 export interface StrengthCounts extends Record<TestStrength, number> {

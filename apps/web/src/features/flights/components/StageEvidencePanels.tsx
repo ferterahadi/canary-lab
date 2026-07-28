@@ -6,7 +6,8 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { StatusDot } from '@/shared/ui/atoms'
 import { evaluationArchiveFilename, formatBytes, formatDuration, timeAgo } from '@/shared/lib/format'
 import { STAGE_COLUMN } from './stage-meta'
-import { overlayDiffStat, serviceReadyMs } from './stage-metrics'
+import { plural } from './StageFacts'
+import { CONFIG_GROUP, groupOverlayFiles, overlayDiffStat, serviceReadyMs, splitFilePath } from './stage-metrics'
 
 // The evidence blocks that sit UNDER a stage's band: the per-service boot rows,
 // the portify double-boot proof and its overlay, and the Evaluation Report's
@@ -120,27 +121,57 @@ export function DoubleBootPanel({ portify }: { portify: PortifyManifest | null }
   )
 }
 
-/** Overlay (Parallel readiness): which files the edit touched, worst-first by
- *  size of change. The footer states what an overlay IS, because "7 files
- *  edited" otherwise reads as edits landing in the user's product repos. */
+/** Overlay (Parallel readiness): which files the edit touched, grouped by the repo
+ *  that owns them and worst-first by size of change within each group.
+ *
+ *  Grouping is not decoration. Overlay paths are repo-relative, so a two-repo
+ *  stack that gained a port-injection line in each `build.gradle` produced two
+ *  rows reading `build.gradle +8` with nothing to tell them apart — the reader
+ *  could not answer "which app was edited". The repo heading answers it, and the
+ *  directory dims so a long source path scans as fast as a bare filename.
+ *
+ *  The footer states what an overlay IS, because "7 files edited" otherwise reads
+ *  as edits landing in the user's product repos. */
 export function OverlayPanel({ portify }: { portify: PortifyManifest | null }) {
   const stat = overlayDiffStat(portify?.diff)
   if (!stat) return null
-  const rows = [...stat.byFile].sort((a, b) => (b.added + b.removed) - (a.added + a.removed))
+  const groups = groupOverlayFiles(stat.byFile)
+  // Only count repos when every group IS one — a feature-config block is not a
+  // repo, and an unlabelled group (pre-header capture) has nothing to count.
+  const repoGroups = groups.filter((g) => g.group && g.group !== CONFIG_GROUP)
+  const kicker = repoGroups.length > 1 && repoGroups.length === groups.length
+    ? `Overlay · ${plural(stat.files, 'file')} across ${plural(repoGroups.length, 'repo')}`
+    : `Overlay · ${plural(stat.files, 'file')}`
   return (
     <div className={STAGE_COLUMN}>
-      <PanelCard kicker={`Overlay · ${stat.files} ${stat.files === 1 ? 'file' : 'files'}`} testId="overlay-panel">
-        <ul className="m-0 flex list-none flex-col p-0">
-          {rows.map((file) => (
-            <li key={file.path} className="flex min-w-0 items-center gap-2 py-0.5 text-[11px]">
-              <span className="min-w-0 flex-1 truncate text-secondary" style={{ fontFamily: 'var(--font-mono)' }} title={file.path}>
-                {file.path}
-              </span>
-              {file.added > 0 && <span className="shrink-0" style={{ color: 'var(--success)' }}>+{file.added}</span>}
-              {file.removed > 0 && <span className="shrink-0" style={{ color: 'var(--danger)' }}>−{file.removed}</span>}
-            </li>
-          ))}
-        </ul>
+      <PanelCard kicker={kicker} testId="overlay-panel">
+        {groups.map((group) => (
+          <div key={group.group ?? '·'} className="mb-1.5 last:mb-0">
+            {group.group && (
+              <div className="pb-0.5 text-[11px] text-secondary" data-testid={`overlay-group-${group.group}`}>
+                {group.group}
+              </div>
+            )}
+            <ul className={`m-0 flex list-none flex-col p-0 ${group.group ? 'pl-3' : ''}`}>
+              {group.files.map((file) => {
+                const { dir, base } = splitFilePath(file.path)
+                return (
+                  <li key={file.path} className="flex min-w-0 items-center gap-2 py-0.5 text-[11px]">
+                    {/* The directory truncates and the filename never does: cutting
+                        the tail would hide the one part of a deep source path that
+                        identifies the file. */}
+                    <span className="flex min-w-0 flex-1 items-baseline" style={{ fontFamily: 'var(--font-mono)' }} title={file.path}>
+                      {dir && <span className="min-w-0 truncate text-muted">{dir}</span>}
+                      <span className="shrink-0 text-secondary">{base}</span>
+                    </span>
+                    {file.added > 0 && <span className="shrink-0" style={{ color: 'var(--success)' }}>+{file.added}</span>}
+                    {file.removed > 0 && <span className="shrink-0" style={{ color: 'var(--danger)' }}>−{file.removed}</span>}
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ))}
         <p className="mt-2 mb-0 text-[11px] text-muted">
           Kept as the feature's overlay — applied into each run's worktree at boot and reversed at teardown.
           Nothing lands in the product repos.

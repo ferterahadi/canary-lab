@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
 import type { EvaluationExportTask, FlightManifest, FlightStage } from '@/shared/api/client'
-import type { HealEnd } from '@/shared/api/types'
+import type { CoverageLedger, HealEnd } from '@/shared/api/types'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   return {
@@ -17,6 +17,22 @@ function flight(over: Partial<FlightManifest> = {}): FlightManifest {
     updatedAt: '2026-01-01T00:00:00Z',
     ...over,
   } as FlightManifest
+}
+
+/** A band-data coverage ledger. Only `totals` and `tests` drive the tiles under
+ *  test, so the rest is a valid empty shell. */
+function ledger(over: Partial<CoverageLedger> = {}): CoverageLedger {
+  return {
+    feature: 'checkout',
+    requirements: [],
+    tests: [],
+    totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+    coveragePct: 0,
+    mappedPct: 0,
+    orphanRequirementIds: [],
+    orphanTestNames: [],
+    ...over,
+  }
 }
 
 describe('stageStateLine — pending copy (R78 pause mid-step)', () => {
@@ -146,7 +162,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     expect(gaps).toMatchObject({ value: '3', big: true, tone: 'warn', sub: '2 untested · 1 path-incomplete' })
   })
 
-  it('full coverage with no gaps reads good — bar full, gaps 0 with no sub, Pass fact dropped once settled', () => {
+  it('full coverage with no gaps reads good — bar full, gaps 0 with no sub, both pass tiles dropped once settled', () => {
     const stage = {
       key: 'specs-coverage',
       status: 'done',
@@ -159,7 +175,138 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     expect(gaps).toMatchObject({ value: '0', big: true, tone: 'good' })
     expect(gaps?.sub).toBeUndefined()
     expect(facts.find((f) => f.label === 'Authoring pass')).toBeUndefined()
-    expect(facts.find((f) => f.label === 'Authoring passes')).toMatchObject({ value: '2', big: true })
+    // The settled pass COUNT is gone too: it reported how hard canary worked, not
+    // anything about the suite, and the pass history rows below the band already
+    // name every pass with its result.
+    expect(facts.find((f) => f.label === 'Authoring passes')).toBeUndefined()
+  })
+
+  it('with a ledger, the gap COUNT gives way to the requirement composition — total, split, and the gap kinds named', () => {
+    const stage = {
+      key: 'specs-coverage',
+      status: 'done',
+      evidence: { coveragePct: 75, gaps: [{ gap: 'untested' }] },
+    } as unknown as FlightStage
+    const facts = stageFacts(stage, flight(), undefined, {
+      ledger: ledger({
+        totals: { total: 12, covered: 9, pathIncomplete: 1, variantIncomplete: 1, untested: 1, orphanTests: 0 },
+      }),
+    })
+    const req = facts.find((f) => f.label === 'Requirements')
+    // The total is the denominator the percentage alone never gave.
+    expect(req).toMatchObject({ value: '12', big: true, sub: '9 covered · 1 path gap · 1 variant gap · 1 untested' })
+    // Path- and variant-incomplete share one amber segment; the sub-line above is
+    // where the two kinds are told apart.
+    expect(req?.segments).toEqual([
+      { value: 9, tone: 'good' },
+      { value: 2, tone: 'warn' },
+      { value: 1, tone: 'bad' },
+    ])
+    expect(facts.find((f) => f.label === 'Coverage gaps')).toBeUndefined()
+  })
+
+  it('without a ledger the older gap count still stands in — a running loop has no ledger to read', () => {
+    const stage = {
+      key: 'specs-coverage',
+      status: 'running',
+      progress: { pass: 1, maxPasses: 5, phase: 'authoring', coveragePct: 50, target: 100, gapsOpen: 2, passes: [] },
+      evidence: { gaps: [{ gap: 'untested' }, { gap: 'path-incomplete' }] },
+    } as unknown as FlightStage
+    const facts = stageFacts(stage, flight())
+    expect(facts.find((f) => f.label === 'Requirements')).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Coverage gaps')).toMatchObject({ value: '2', big: true })
+  })
+
+  it('Specs authored carries the strength split, in the same buckets and tones as the Evaluation Report', () => {
+    const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
+    const facts = stageFacts(stage, flight(), undefined, {
+      ledger: ledger({
+        totals: { total: 2, covered: 2, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+        tests: [
+          { name: 't1', requirements: ['R1'], pathTypes: ['happy'], strength: 'strong', file: 'a.spec.ts' },
+          { name: 't2', requirements: ['R2'], pathTypes: ['happy'], strength: 'shallow', file: 'a.spec.ts' },
+        ],
+      }),
+    })
+    const specs = facts.find((f) => f.label === 'Specs authored')
+    // The strength split replaces the spec-FILE sub: how many files two tests live
+    // in changes nothing anyone would do; one of them being shallow does.
+    expect(specs).toMatchObject({ value: '2', big: true, sub: '1 strong · 1 shallow' })
+    expect(specs?.segments).toEqual([
+      { value: 1, tone: 'good' },
+      { value: 0, tone: 'accent' },
+      { value: 0, tone: 'warn' },
+      { value: 1, tone: 'bad' },
+      { value: 0, tone: 'muted' },
+    ])
+  })
+
+  it('orphan specs surface only when there are some — a zero is the normal case, not a tile', () => {
+    const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
+    const totals = { total: 2, covered: 2, pathIncomplete: 0, variantIncomplete: 0, untested: 0 }
+    const clean = stageFacts(stage, flight(), undefined, { ledger: ledger({ totals: { ...totals, orphanTests: 0 } }) })
+    expect(clean.find((f) => f.label === 'Orphan specs')).toBeUndefined()
+    const orphaned = stageFacts(stage, flight(), undefined, { ledger: ledger({ totals: { ...totals, orphanTests: 3 } }) })
+    expect(orphaned.find((f) => f.label === 'Orphan specs')).toMatchObject({ value: '3', tone: 'warn', sub: 'map to no requirement' })
+  })
+})
+
+describe('stageFacts — Requirements source tile', () => {
+  const docs = { key: 'docs', status: 'done', evidence: { docs: ['prd.md', 'okr.md'] } } as unknown as FlightStage
+  const summary = { key: 'prd-summary', status: 'done', evidence: { requirementCount: 8 } } as unknown as FlightStage
+
+  it('names the SOURCE the requirements came from, never how much the agent read', () => {
+    const facts = stageFacts(docs, flight(), summary, { docBytes: 38_000, summaryBytes: 9_000 })
+    const tile = facts.find((f) => f.label === 'Distilled from')
+    expect(tile).toMatchObject({ value: '≈ 9.5k', big: true })
+    // The unit lives in the sub so the big value stays a bare figure, and the
+    // compression ratio is the reason the tile earns its place.
+    expect(tile?.sub).toBe('tokens · 37.1 KB · 4× smaller')
+    expect(facts.find((f) => f.label === 'Tokens read')).toBeUndefined()
+  })
+
+  it('drops the ratio when the distillation barely shrank anything, keeping the size', () => {
+    const facts = stageFacts(docs, flight(), summary, { docBytes: 10_000, summaryBytes: 9_000 })
+    expect(facts.find((f) => f.label === 'Distilled from')?.sub).toBe('tokens · 9.8 KB')
+  })
+})
+
+describe('stageFacts — Suite setup env tile', () => {
+  const scaffold = { key: 'scaffold', status: 'done', evidence: {} } as unknown as FlightStage
+
+  /** A flight whose scan declared `declared` env files. */
+  function withScout(declared: number) {
+    const f = flight()
+    return {
+      ...f,
+      stages: [
+        { key: 'scout', status: 'done', evidence: { envFiles: Array.from({ length: declared }, (_, i) => `/repo/.env${i}`) } },
+        ...f.stages.filter((s) => s.key !== 'scout'),
+      ],
+    } as typeof f
+  }
+
+  it('reports captured against declared, and never a count of env KEYS', () => {
+    const companion = { key: 'env-capture', status: 'done', evidence: { captured: 3 } } as unknown as FlightStage
+    const facts = stageFacts(scaffold, withScout(3), companion)
+    expect(facts.find((f) => f.label === 'Env files')).toMatchObject({
+      value: '3/3', big: true, tone: 'good', bar: 1, sub: 'all the app asked for',
+    })
+    expect(facts.find((f) => f.label === 'Env keys captured')).toBeUndefined()
+  })
+
+  it('a waived env file reads BAD with the shortfall named — that gap is what breaks a later boot', () => {
+    const companion = { key: 'env-capture', status: 'done', evidence: { captured: 2 } } as unknown as FlightStage
+    const facts = stageFacts(scaffold, withScout(3), companion)
+    expect(facts.find((f) => f.label === 'Env files')).toMatchObject({
+      value: '2/3', big: true, tone: 'bad', sub: '1 waived or missing',
+    })
+  })
+
+  it('a probed record with no scan evidence reports the captured count alone, inventing no denominator', () => {
+    const companion = { key: 'env-capture', status: 'done', evidence: { captured: 2 } } as unknown as FlightStage
+    const facts = stageFacts(scaffold, flight(), companion)
+    expect(facts.find((f) => f.label === 'Env files')).toMatchObject({ value: '2', sub: 'captured into the envset' })
   })
 })
 

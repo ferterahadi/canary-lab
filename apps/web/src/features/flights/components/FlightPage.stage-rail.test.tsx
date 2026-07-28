@@ -417,7 +417,10 @@ describe('trailer model (R14–R18)', () => {
     // stay on the repo cards above, so neither repeats the other.
     const scoutFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
     expect(scoutFacts).toContain('Repos scanned')
-    expect(scoutFacts).toContain('Env files found')
+    // "required", not "found" — the count is the app's declared need, read out of
+    // its own code, not a sweep of the machine for secrets.
+    expect(scoutFacts).toContain('Env files required')
+    expect(scoutFacts).not.toContain('Env files found')
     expect(scoutFacts).not.toContain('/repo/shop')
     expect(container.querySelector('header')?.textContent).not.toContain('/repo/shop')
 

@@ -29,7 +29,6 @@ export function useStageBandData(
   const [boot, setBoot] = useState<RunDetail | null>(null)
   const [portify, setPortify] = useState<PortifyManifest | null>(null)
   const [config, setConfig] = useState<StageBandData['config']>(null)
-  const [envKeys, setEnvKeys] = useState<number | null>(null)
   const [envFiles, setEnvFiles] = useState<number | null>(null)
   const [docBytes, setDocBytes] = useState<number | null>(null)
   const [summaryBytes, setSummaryBytes] = useState<number | null>(null)
@@ -44,7 +43,10 @@ export function useStageBandData(
   const portifyId = portifyWorkflowId(stage)
   const needsLedger = stageKey === 'specs-coverage' || stageKey === 'evaluation-export'
   const needsConfig = stageKey === 'scout'
-  const needsEnvKeys = stageKey === 'scaffold' || stageKey === 'env-capture'
+  const needsBoot = stageKey === 'scaffold' || stageKey === 'env-capture'
+  // Only the scan's band reads the slot count; Suite setup compares the scan's
+  // declared list against its own captured count, both off the flight record.
+  const needsEnvFiles = stageKey === 'scout'
   const needsDocs = stageKey === 'docs'
 
   useEffect(() => {
@@ -59,7 +61,7 @@ export function useStageBandData(
   }, [feature, needsLedger])
 
   useEffect(() => {
-    if (!needsEnvKeys) { setBoot(null); return }
+    if (!needsBoot) { setBoot(null); return }
     let alive = true
     void (async () => {
       try {
@@ -79,7 +81,7 @@ export function useStageBandData(
       }
     })()
     return () => { alive = false }
-  }, [bootRunId, feature, needsEnvKeys])
+  }, [bootRunId, feature, needsBoot])
 
   useEffect(() => {
     if (!portifyId) { setPortify(null); return }
@@ -99,39 +101,24 @@ export function useStageBandData(
     return () => { alive = false }
   }, [feature, needsConfig, configRefreshKey])
 
+  // The envset INDEX only — the slot count is the whole answer. This used to fan
+  // out one request per slot to sum every key in every file, for a tile that
+  // reported the size of the user's own config surface; that tile is gone, and
+  // with it three round-trips per Suite setup view.
   useEffect(() => {
-    if (!needsEnvKeys && !needsConfig) { setEnvKeys(null); setEnvFiles(null); return }
+    if (!needsEnvFiles) { setEnvFiles(null); return }
     let alive = true
     void (async () => {
       try {
         const index = await api.getEnvsetsIndex(feature)
         const env = index.envs.find((e) => e.name === flight.opts.env) ?? index.envs[0]
-        if (!env) { if (alive) { setEnvKeys(null); setEnvFiles(null) } return }
-        if (alive) setEnvFiles(env.slots.length > 0 ? env.slots.length : null)
-        // The scan only needs the file count; reading every slot's contents for
-        // it would be three requests to answer a question the index answered.
-        if (!needsEnvKeys) return
-        const slots = await Promise.all(
-          env.slots.map((slot) => api.getEnvsetSlot(feature, env.name, slot).catch(() => null)),
-        )
-        // Sum the parsed ENTRIES, not the file lines: a comment or a blank line
-        // is not a captured key.
-        //
-        // Every slot counts, deliberately — including the app's own large
-        // properties files. On a real Spring suite this reads in the hundreds
-        // while the canary-authored `<feature>.env` holds one key, which looks
-        // wrong at a glance and isn't: all of them were captured, and it's the
-        // big framework files that break a boot when a value is missing. Do not
-        // "fix" this by filtering to the feature's own slot; that hides the part
-        // of the env surface that actually fails.
-        const keys = slots.reduce((sum, slot) => sum + (slot?.entries.length ?? 0), 0)
-        if (alive) setEnvKeys(keys > 0 ? keys : null)
+        if (alive) setEnvFiles(env && env.slots.length > 0 ? env.slots.length : null)
       } catch {
-        if (alive) { setEnvKeys(null); setEnvFiles(null) }
+        if (alive) setEnvFiles(null)
       }
     })()
     return () => { alive = false }
-  }, [feature, flight.opts.env, needsEnvKeys, needsConfig])
+  }, [feature, flight.opts.env, needsEnvFiles])
 
   useEffect(() => {
     if (!needsDocs) { setDocBytes(null); setSummaryBytes(null); return }
@@ -155,7 +142,7 @@ export function useStageBandData(
     return () => { alive = false }
   }, [feature, needsDocs])
 
-  return { evalTask, ledger, boot, portify, config, envKeys, envFiles, docBytes, summaryBytes }
+  return { evalTask, ledger, boot, portify, config, envFiles, docBytes, summaryBytes }
 }
 
 /** The feature's most recent dry-run boot. `aborted` is the NORMAL terminal

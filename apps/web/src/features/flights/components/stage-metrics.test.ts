@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { CoverageLedger, RunIndexEntry, RunLifecycleEvent } from '@/shared/api/types'
 import {
+  CONFIG_GROUP,
   bootDurationMs,
   estimateTokens,
+  groupOverlayFiles,
   ledgerEvidence,
   overlayDiffStat,
   runHistoryStats,
   serviceReadyMs,
+  splitFilePath,
 } from './stage-metrics'
 
 // The stage bands report measurements, so every derivation here is pinned: a
@@ -176,6 +179,79 @@ describe('overlayDiffStat', () => {
   it('returns null for an absent or empty diff', () => {
     expect(overlayDiffStat(undefined)).toBeNull()
     expect(overlayDiffStat('')).toBeNull()
+  })
+
+  // Paths are repo-relative, so two repos each holding a `build.gradle` produce
+  // two identical paths. The block header the capture writes is the ONLY thing
+  // that tells them apart — dropping it left the panel rendering rows nobody
+  // could attribute to an app.
+  const twoRepos = [
+    '# repo: shop-api',
+    'diff --git a/build.gradle b/build.gradle',
+    '+++ b/build.gradle',
+    '+canaryPort = System.getenv("PORT")',
+    '',
+    '# repo: oms',
+    'diff --git a/build.gradle b/build.gradle',
+    '+++ b/build.gradle',
+    '+canaryPort = System.getenv("PORT")',
+    '+extra = 1',
+    '# feature config: /home/u/.canary-lab/features/checkout',
+    '+++ b/feature.config.cjs',
+    '+  ports: [{ name: "api" }],',
+  ].join('\n')
+
+  it('attributes each file to the repo block that owns it', () => {
+    expect(overlayDiffStat(twoRepos)!.byFile).toEqual([
+      { path: 'build.gradle', group: 'shop-api', added: 1, removed: 0 },
+      { path: 'build.gradle', group: 'oms', added: 2, removed: 0 },
+      { path: 'feature.config.cjs', group: CONFIG_GROUP, added: 1, removed: 0 },
+    ])
+  })
+
+  it('the group headers are not counted as changed lines', () => {
+    const stat = overlayDiffStat(twoRepos)!
+    expect(stat.files).toBe(3)
+    expect(stat.added).toBe(4)
+    expect(stat.removed).toBe(0)
+  })
+
+  it('leaves the group undefined on a capture written before the headers existed', () => {
+    expect(overlayDiffStat(diff)!.byFile.every((f) => f.group === undefined)).toBe(true)
+  })
+})
+
+describe('groupOverlayFiles', () => {
+  const rows = [
+    { path: 'a/small.gradle', group: 'shop-api', added: 1, removed: 0 },
+    { path: 'b/big.java', group: 'oms', added: 9, removed: 0 },
+    { path: 'a/big.gradle', group: 'shop-api', added: 8, removed: 2 },
+  ]
+
+  it('keeps groups in diff order and ranks files worst-first inside each one', () => {
+    expect(groupOverlayFiles(rows)).toEqual([
+      { group: 'shop-api', files: [rows[2], rows[0]] },
+      { group: 'oms', files: [rows[1]] },
+    ])
+  })
+
+  it('collects ungrouped rows into one unlabelled group rather than one group each', () => {
+    const groups = groupOverlayFiles([
+      { path: 'x', added: 1, removed: 0 },
+      { path: 'y', added: 2, removed: 0 },
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].group).toBeUndefined()
+  })
+})
+
+describe('splitFilePath', () => {
+  it('keeps the trailing slash on the directory so the halves rejoin exactly', () => {
+    expect(splitFilePath('oms/src/main/AppConfig.java')).toEqual({ dir: 'oms/src/main/', base: 'AppConfig.java' })
+  })
+
+  it('a bare filename has no directory to dim', () => {
+    expect(splitFilePath('.gitignore')).toEqual({ dir: '', base: '.gitignore' })
   })
 })
 

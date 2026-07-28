@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { FlightManifest, FlightStage, PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
+import type { CoverageLedger, CoverageTotals, EvaluationExportTask, RunDetail } from '@/shared/api/types'
 import { evaluationArchiveFilename, formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { PORTIFY_PHASE_LABEL, STAGE_COLUMN, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
@@ -91,8 +91,6 @@ export interface StageBandData {
   portify?: PortifyManifest | null
   /** Counts read off the on-disk feature config. */
   config?: { services: number; portSlots: number } | null
-  /** Env keys captured across the flight's envset slots. */
-  envKeys?: number | null
   /** Envset slot count — the read-time answer to "how many env files", for a
    *  scout stage whose record stored no evidence. */
   envFiles?: number | null
@@ -180,7 +178,11 @@ export function stageFacts(
       return [
         { label: 'Repos scanned', value: String(flight.repoPaths.length), big: true },
         ...(band.config ? [{ label: 'Services found', value: String(band.config.services), big: true as const }] : []),
-        ...(envFiles != null ? [{ label: 'Env files found', value: String(envFiles), big: true as const }] : []),
+        // "required", not "found": the scan read the repo's code to learn which
+        // env files the app needs to boot — it did not go hunting for secrets on
+        // the machine. The count is the app's declared need, and the capture that
+        // acts on it happens a stage later (Suite setup reports the ratio).
+        ...(envFiles != null ? [{ label: 'Env files required', value: String(envFiles), big: true as const }] : []),
         ...(band.config ? [{ label: 'Port slots drafted', value: String(band.config.portSlots), big: true as const }] : []),
       ]
     }
@@ -189,8 +191,8 @@ export function stageFacts(
       // count and the service list are inputs the user can edit six inches
       // below, and counting them here measures nothing. What it actually proved
       // is that the suite comes up — so the band reports the boot proof, how
-      // long that took, and what got snapshotted. The suite name, whether it was
-      // reused, and the env FILE count all already read in the state line above.
+      // long that took, and whether the env it booted with is complete. The
+      // suite name and whether it was reused already read in the state line.
       // The boot RUN is the better source than the cached evidence: it exists
       // for probed stages too (found by feature), and it carries per-service
       // ports and timings the evidence never held. Evidence is the fallback for
@@ -221,14 +223,7 @@ export function stageFacts(
               sub: 'every run pays this first',
             }]
           : []),
-        ...(band.envKeys != null
-          ? [{
-              label: 'Env keys captured',
-              value: String(band.envKeys),
-              big: true as const,
-              ...(capturedFiles != null ? { sub: `across ${plural(capturedFiles, 'file')}` } : {}),
-            }]
-          : []),
+        ...envFileFacts(flight, capturedFiles),
       ]
     }
     case 'env-capture':
@@ -252,13 +247,19 @@ export function stageFacts(
         ...(docs.length > 0 ? [{ label: 'Source docs', value: String(docs.length), big: true as const }] : []),
         ...(tokens != null && band.docBytes != null
           ? [{
-              label: 'Tokens read',
+              // "Distilled from", not "Tokens read": the same number, named as a
+              // property of the SOURCE the requirements came out of rather than as
+              // how much the agent had to read. It pairs with the requirement count
+              // on this row — input on one side, output on the other — and the
+              // compression is what makes it worth a tile at all: 38 KB of specs
+              // collapsing to 9 KB is the one hint on this screen that the
+              // distillation may have dropped something.
+              label: 'Distilled from',
               value: `≈ ${compactCount(tokens)}`,
               big: true as const,
-              // The compression is the interesting part: the distillation is what
-              // this stage produced, and "4× smaller" says how much reading the
-              // later stages were spared.
-              sub: [formatBytes(band.docBytes), distillRatio(band)].filter(Boolean).join(' · '),
+              // The unit rides the sub-line so the 22px value stays a bare figure
+              // and cannot overflow its tile at a narrow window.
+              sub: ['tokens', formatBytes(band.docBytes), distillRatio(band)].filter(Boolean).join(' · '),
             }]
           : []),
       ]
@@ -281,6 +282,8 @@ export function stageFacts(
       }
       const breakdown = [...byKind].map(([kind, n]) => `${n} ${kind}`).join(' · ')
       const target = flight.opts.coverageTarget
+      const totals = band.ledger?.totals
+      const led = ledgerEvidence(band.ledger)
       // A probed suite with no requirements has UNDEFINED coverage, not 0%. The
       // percentage tile (amber, empty bar) would read as a failing suite when the
       // truth is there is no PRD to measure its specs against.
@@ -307,27 +310,73 @@ export function stageFacts(
               tone: pct >= target ? 'good' as const : 'warn' as const,
             }]
           : []),
-        ...(gaps != null
+        // The COMPOSITION, when the ledger is loaded: how many requirements exist
+        // at all — a denominator the percentage alone never gave — split into what
+        // is covered and what kind of gap the rest are. While the loop is still
+        // running there is no ledger yet, so the older gap COUNT stands in; it
+        // answers less, but it is what the live progress shape can support.
+        ...(totals && totals.total > 0
           ? [{
-              label: 'Coverage gaps',
-              value: gaps === 0 ? '0' : String(gaps),
+              label: 'Requirements',
+              value: String(totals.total),
               big: true as const,
-              ...(breakdown && gaps > 0 ? { sub: breakdown } : {}),
-              tone: gaps === 0 ? 'good' as const : 'warn' as const,
+              // Path- and variant-incomplete share the amber segment: both mean
+              // "partially covered", and the bar answers how much. WHICH kind it
+              // is decides which test to write next, and that is the sub-line's
+              // job — where the two are named separately.
+              segments: [
+                { value: totals.covered, tone: 'good' as const },
+                { value: totals.pathIncomplete + totals.variantIncomplete, tone: 'warn' as const },
+                { value: totals.untested, tone: 'bad' as const },
+              ],
+              ...(gapBreakdown(totals) ? { sub: gapBreakdown(totals) } : {}),
             }]
-          : []),
-        ...(stage.status !== 'running' && p && p.passes.length > 0 ? [{ label: 'Authoring passes', value: String(p.passes.length), big: true as const }] : []),
-        // How many specs the authoring actually produced. Read off the ledger's
-        // mapped tests, which is the set the coverage percentage was computed
-        // over — so the two tiles describe the same population.
+          : gaps != null
+            ? [{
+                label: 'Coverage gaps',
+                value: gaps === 0 ? '0' : String(gaps),
+                big: true as const,
+                ...(breakdown && gaps > 0 ? { sub: breakdown } : {}),
+                tone: gaps === 0 ? 'good' as const : 'warn' as const,
+              }]
+            : []),
+        // How many specs the authoring actually produced, and how DEEP they are.
+        // Read off the ledger's mapped tests, which is the set the coverage
+        // percentage was computed over — so the two tiles describe the same
+        // population. The strength split replaces the old spec-FILE count: how
+        // many files 23 tests live in changes nothing anyone would do, whereas 16
+        // shallow ones is the reason to look. The file count stays as the fallback
+        // for a suite with specs but no requirements, which has no strength to
+        // grade against. Same buckets, tones and vocabulary as the Evaluation
+        // Report's Evidence strength tile, so the two stages cannot disagree.
         ...(band.ledger && band.ledger.tests.length > 0
           ? [{
               label: 'Specs authored',
               value: String(band.ledger.tests.length),
               big: true as const,
-              ...(specFileCount(band.ledger) != null
-                ? { sub: `across ${plural(specFileCount(band.ledger)!, 'spec file')}` }
-                : {}),
+              ...(led
+                ? {
+                    segments: strengthSegments(led.strength),
+                    ...(strengthBreakdown(led.strength, { includeStrong: true })
+                      ? { sub: strengthBreakdown(led.strength, { includeStrong: true }) }
+                      : {}),
+                  }
+                : specFileCount(band.ledger) != null
+                  ? { sub: `across ${plural(specFileCount(band.ledger)!, 'spec file')}` }
+                  : {}),
+            }]
+          : []),
+        // Specs that map to no requirement at all — the annotate pass's leftovers.
+        // Only when there ARE some: a zero here is the normal case and would just
+        // be a fourth tile reading 0. They mean either a missing tag or a test
+        // covering something nobody asked for, and both want a human.
+        ...(totals && totals.orphanTests > 0
+          ? [{
+              label: 'Orphan specs',
+              value: String(totals.orphanTests),
+              big: true as const,
+              tone: 'warn' as const,
+              sub: 'map to no requirement',
             }]
           : []),
       ]
@@ -387,14 +436,11 @@ export function stageFacts(
               sub: instancesOk === instances.length ? 'booted side by side' : 'a concurrent boot failed',
             }]
           : []),
-        ...(wf && wf.maxAttempts > 0
-          ? [{
-              label: 'Attempts',
-              value: String(wf.attempt),
-              big: true as const,
-              stepper: [wf.attempt, wf.maxAttempts] as [number, number],
-            }]
-          : []),
+        // Deliberately NOT here: the attempt count. While the stage runs it is the
+        // news, and the running branch above carries it — but once this settled,
+        // how many tries it took says how hard canary worked, not whether the
+        // suite is safe to run in parallel, which is what the three tiles above
+        // answer. The same reason the authoring-pass count left its band.
       ]
     }
     case 'run':
@@ -437,13 +483,7 @@ export function stageFacts(
               // The whole distribution, strongest to weakest: a suite that is
               // 2 strong and 16 shallow reads very differently from one that is
               // 2 strong and 2 shallow, and the headline number alone hides it.
-              segments: [
-                { value: led.strength.strong, tone: 'good' as const },
-                { value: led.strength.solid, tone: 'accent' as const },
-                { value: led.strength.basic, tone: 'warn' as const },
-                { value: led.strength.shallow, tone: 'bad' as const },
-                { value: led.strength.ungraded, tone: 'muted' as const },
-              ],
+              segments: strengthSegments(led.strength),
               sub: strengthBreakdown(led.strength),
             }]
           : []),
@@ -497,6 +537,53 @@ function evaluationIdentityFacts(
   ]
 }
 
+/** Suite setup's env tile: how many of the env files the app declared were
+ *  actually captured into the envset.
+ *
+ *  This replaced a count of env KEYS (which read in the hundreds on a Spring
+ *  stack). That number measured the size of the user's own config surface, not
+ *  anything this flight did, and nothing the user could act on changed with it —
+ *  while putting a four-figure tally next to the word "captured" made the tile
+ *  read as a secrets inventory. The ratio is the fact that matters: a missing-env
+ *  checkpoint can be WAIVED, letting a flight boot with fewer files than the app
+ *  asked for, and that shortfall resurfaces much later as a service that won't
+ *  come up or a test that can't reach one. `2/3` says so at a glance.
+ *
+ *  The scan's declared list is the denominator. A probed record has no scan
+ *  evidence to compare against, so it reports the captured count alone rather
+ *  than inventing a total. */
+function envFileFacts(flight: FlightManifest, captured: number | null): StageFact[] {
+  if (captured == null) return []
+  const scoutEv = evidenceOf(flight.stages.find((s) => s.key === 'scout'))
+  const declared = Array.isArray(scoutEv.envFiles) ? scoutEv.envFiles.length : null
+  if (declared == null || declared <= 0) {
+    return [{ label: 'Env files', value: String(captured), big: true, sub: 'captured into the envset' }]
+  }
+  const complete = captured >= declared
+  return [{
+    label: 'Env files',
+    value: `${captured}/${declared}`,
+    big: true,
+    bar: Math.min(1, captured / declared),
+    tone: complete ? 'good' : 'bad',
+    sub: complete ? 'all the app asked for' : `${declared - captured} waived or missing`,
+  }]
+}
+
+/** Names the requirement composition under the total: what is covered, then each
+ *  kind of gap. The gap KIND is the actionable part — untested wants a new test,
+ *  path-incomplete wants the missing path on an existing one — which is why the
+ *  two amber kinds that share a bar segment are told apart here. */
+function gapBreakdown(totals: CoverageTotals): string | undefined {
+  const parts = [
+    ...(totals.covered > 0 ? [`${totals.covered} covered`] : []),
+    ...(totals.pathIncomplete > 0 ? [`${totals.pathIncomplete} path gap`] : []),
+    ...(totals.variantIncomplete > 0 ? [`${totals.variantIncomplete} variant gap`] : []),
+    ...(totals.untested > 0 ? [`${totals.untested} untested`] : []),
+  ]
+  return parts.length > 0 ? parts.join(' · ') : undefined
+}
+
 /** How many distinct spec FILES the ledger's tests live in. Null when the ledger
  *  records no locations (older mappings), so the sub-line is omitted rather than
  *  claiming one file. */
@@ -506,11 +593,12 @@ function specFileCount(ledger: CoverageLedger): number | null {
 }
 
 /** "4× smaller" — source docs against the distilled summary. Omitted unless both
- *  sizes are known and the summary is genuinely smaller. */
+ *  sizes are known and the summary is genuinely smaller. The tile's own label
+ *  supplies the verb ("Distilled from"), so this carries only the ratio. */
 function distillRatio(band: StageBandData): string | null {
   if (band.docBytes == null || band.summaryBytes == null || band.summaryBytes <= 0) return null
   const ratio = band.docBytes / band.summaryBytes
-  return ratio >= 1.5 ? `distilled ${Math.round(ratio)}× smaller` : null
+  return ratio >= 1.5 ? `${Math.round(ratio)}× smaller` : null
 }
 
 /** `1234` → `1.2k`. Used for token estimates, where the exact digit is noise. */
@@ -525,11 +613,30 @@ function round(pct: number): number {
   return Math.round(pct)
 }
 
+/** The strength distribution bar, strongest to weakest. Shared by the two tiles
+ *  that report depth (Test authoring's specs, the Evaluation Report's evidence) so
+ *  a colour means the same thing in both. */
+function strengthSegments(strength: StrengthCounts): FactSegment[] {
+  return [
+    { value: strength.strong, tone: 'good' },
+    { value: strength.solid, tone: 'accent' },
+    { value: strength.basic, tone: 'warn' },
+    { value: strength.shallow, tone: 'bad' },
+    { value: strength.ungraded, tone: 'muted' },
+  ]
+}
+
 /** The strength buckets below the headline, strongest first, omitting empty
  *  ones. Ungraded tests are named as ungraded rather than folded into the
- *  weakest bucket — an unmeasured test is not a shallow one. */
-function strengthBreakdown(strength: StrengthCounts): string | undefined {
+ *  weakest bucket — an unmeasured test is not a shallow one.
+ *
+ *  `includeStrong` is for a tile whose headline is NOT the strong count: the
+ *  Evaluation Report leads with "4 strong" so repeating it below would be the
+ *  same figure twice, while Test authoring leads with the spec total and needs
+ *  every bucket named. */
+function strengthBreakdown(strength: StrengthCounts, opts?: { includeStrong?: boolean }): string | undefined {
   const parts = [
+    ...(opts?.includeStrong && strength.strong > 0 ? [`${strength.strong} strong`] : []),
     ...(strength.solid > 0 ? [`${strength.solid} solid`] : []),
     ...(strength.basic > 0 ? [`${strength.basic} basic`] : []),
     ...(strength.shallow > 0 ? [`${strength.shallow} shallow`] : []),
