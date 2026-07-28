@@ -50,6 +50,15 @@ interface Props {
   onStartFlight?: (feature: string) => void
   /** Open a run's detail (the Deploy-check pill's click-through) — App routes it. */
   onNavigateToRun?: (feature: string, runId: string) => void
+  /** R83: the flight a stage drill-through left, or null. A flight's drill-through
+   *  swaps the whole view (the run detail is a workspace column, with no close of
+   *  its own), so without a way back the trip is one-way. Lives outside the
+   *  collapsible action cluster deliberately — collapsing the actions must not
+   *  hide the only exit. */
+  returnFlight?: string | null
+  /** Label for that chip — the flight's feature name. */
+  returnFlightLabel?: string | null
+  onReturnToFlight?: (flightId: string) => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
@@ -69,7 +78,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -147,6 +156,26 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
       <ConnectionBadge state={connection} />
       <span className="cl-divider shrink-0">·</span>
       <McpHealthBadge />
+      {/* R83: the way back to the flight a stage drill-through left. Only the
+          run detail actually needs it (it's a workspace column, so it has no
+          close of its own — the coverage ledger fixes its own Close instead),
+          but it renders on any non-flight view for one consistent exit. Same
+          `cl-button` the flight header's "All flights" uses — a nav action, not
+          a status. */}
+      {returnFlight && onReturnToFlight && (
+        <>
+          <span className="cl-divider shrink-0">·</span>
+          <button
+            type="button"
+            data-testid="return-to-flight"
+            onClick={() => onReturnToFlight(returnFlight)}
+            className="cl-button shrink-0 max-w-[220px] truncate px-2.5 py-1 text-xs"
+            title={`Back to the ${returnFlightLabel ?? 'flight'} flight you came from`}
+          >
+            ← {returnFlightLabel ?? 'Flight'}
+          </button>
+        </>
+      )}
       {services.length > 0 && (
         <>
           <span className="cl-divider shrink-0">·</span>

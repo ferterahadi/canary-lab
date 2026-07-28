@@ -22,6 +22,8 @@ function asOptionalNumber(v: ConfigValue | undefined): number | undefined {
 
 export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onFeatureRenamed?: (nextFeature: string) => void }) {
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
+    // Shared with Service + Ports — one config doc, one fetch per dialog open.
+    cacheKey: `config-doc:${feature}`,
     load: () => api.getFeatureConfigDoc(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
@@ -57,7 +59,6 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
       if (nextName && nextName !== feature) onFeatureRenamed?.(nextName)
       return next
     },
-    deps: [feature],
   })
 
   if (ed.error && !ed.draft) {

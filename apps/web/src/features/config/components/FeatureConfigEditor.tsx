@@ -6,6 +6,7 @@ import { EnvsetsTab } from './EnvsetsTab'
 import { PlaywrightTab } from './PlaywrightTab'
 import { Modal, TrashIcon } from '@/shared/ui/atoms'
 import { DeleteSuiteConfirm } from './DeleteSuiteConfirm'
+import { ConfigDocCacheProvider } from './config-doc-cache'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 
 type Tab = ConfigTab
@@ -39,7 +40,9 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
   const [confirmDelete, setConfirmDelete] = useState(false)
 
   return (
-    <>
+    // The cache lives here, so it is born and dies with the dialog: every open
+    // re-reads from disk, and within one open a tab switch is a pure render.
+    <ConfigDocCacheProvider>
       <Modal
         open
         onClose={onClose}
@@ -84,7 +87,7 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
         onCancel={() => setConfirmDelete(false)}
         onDeleted={() => { onDeleted?.(feature); onClose() }}
       />
-    </>
+    </ConfigDocCacheProvider>
   )
 }
 

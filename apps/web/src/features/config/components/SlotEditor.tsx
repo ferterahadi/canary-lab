@@ -20,11 +20,11 @@ export function SlotEditor({
 }) {
   const [copyOpen, setCopyOpen] = useState(false)
   const ed = useEditableSlice<api.EnvsetSlotDoc, KvEntry[]>({
+    cacheKey: `envset-slot:${feature}:${env}:${slot}`,
     load: () => api.getEnvsetSlot(feature, env, slot),
     extract: (doc) => doc.entries,
     merge: (_doc, slice) => slice,
     save: (payload) => api.putEnvsetSlot(feature, env, slot, payload as KvEntry[]),
-    deps: [feature, env, slot],
   })
 
   if (ed.error && !ed.doc) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>

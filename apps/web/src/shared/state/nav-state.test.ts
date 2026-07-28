@@ -24,6 +24,7 @@ const base: NavState = {
   resumePlanTaskId: null,
   portifyTarget: null,
   focusTest: null,
+  returnFlight: null,
 }
 
 const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
@@ -35,6 +36,7 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   draft: null,
   configTab: null,
   focusTest: null,
+  returnFlight: null,
   ...over,
 })
 
@@ -42,6 +44,13 @@ describe('initialNavState', () => {
   it('carries view/feature/run/flight straight through', () => {
     const s = initialNavState(persisted({ view: 'coverage', feature: 'checkout', run: 'run-1', flight: 'fl_1' }))
     expect(s).toMatchObject({ view: 'coverage', feature: 'checkout', run: 'run-1', flight: 'fl_1' })
+  })
+
+  // R83: a refresh on a drilled-into view must keep the way back to the flight.
+  it('hydrates the origin flight so a refreshed destination keeps its way back', () => {
+    const s = initialNavState(persisted({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_1' }))
+    expect(s.returnFlight).toBe('fl_1')
+    expect(navToPersistedView(s).returnFlight).toBe('fl_1')
   })
 
   it('opens the config dialog on the persisted feature + tab', () => {
@@ -138,12 +147,12 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null, configTab: 'ports', focusTest: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null, configTab: 'ports', focusTest: null, returnFlight: null })
   })
 
   it('projects the open draft id + dialog=draft', () => {
     const s: NavState = { ...base, draftFor: 'dr_9' }
-    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9', configTab: null, focusTest: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9', configTab: null, focusTest: null, returnFlight: null })
   })
 })
 

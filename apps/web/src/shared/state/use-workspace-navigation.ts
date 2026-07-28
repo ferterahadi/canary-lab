@@ -74,8 +74,16 @@ export interface WorkspaceNavigation {
   openFlight: (flightId: string | null) => void
   /** Select a run in the workspace (clears any pending selection guard).
    *  `focusTest` (R82) is a run-summary failed-entry name: the run detail opens on
-   *  its Playwright tab, scrolled to that test. */
-  navigateToRun: (feature: string, runId: string, focusTest?: string) => void
+   *  its Playwright tab, scrolled to that test. `fromFlight` (R83) is the flight
+   *  that drilled here — omit it and any previous origin is cleared, so only a
+   *  real drill-through leaves a way back. */
+  navigateToRun: (feature: string, runId: string, focusTest?: string, fromFlight?: string | null) => void
+  /** Open a feature's coverage ledger. `fromFlight` (R83) follows the same rule
+   *  as navigateToRun's: set by the flight's drill-through, cleared otherwise. */
+  navigateToCoverage: (feature: string, fromFlight?: string | null) => void
+  /** R83: the flight a drill-through came from, or null. Drives the coverage
+   *  ledger's Close and the top bar's return chip. */
+  returnFlight: string | null
   /** R82: which failing test the open run detail should land on, or null. Paired
    *  with its run so a stale focus can never apply to a different one. */
   focusTest: { runId: string; test: string } | null
@@ -118,6 +126,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
   const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
+  const [returnFlight, setReturnFlight] = useState<string | null>(SEED.returnFlight)
 
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED.run)
   const selectedFeatureRef = useRef<string | null>(null)
@@ -140,6 +149,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     resumePlanTaskId,
     portifyTarget,
     focusTest,
+    returnFlight,
   }
   const dialog = routedDialog(state)
 
@@ -157,7 +167,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // focusTest is listed for the same reason as draftFor/configTab: the run
     // stays the same while the focused test changes, so keying on selectedRunId
     // alone would leave the URL's `test` param stale.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor, configTab, focusTest])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor, configTab, focusTest, returnFlight])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -168,16 +178,28 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const openFlight = useCallback((flightId: string | null) => {
     setSelectedFlightId(flightId)
     setView('flights')
+    // Arriving at a flight IS the return — drop the origin so the way back
+    // can't outlive the trip that set it.
+    setReturnFlight(null)
   }, [])
 
-  const navigateToRun = useCallback((feature: string, runId: string, focus?: string) => {
+  const navigateToRun = useCallback((feature: string, runId: string, focus?: string, fromFlight: string | null = null) => {
     pendingRunSelectionRef.current = null
     setSelectedFeature(feature)
     setSelectedRunId(runId)
     // Always written, so navigating to a run WITHOUT a focus clears a previous
     // one instead of inheriting it.
     setFocusTest(focus ? { runId, test: focus } : null)
+    // Same rule for the origin: an arrival that names no flight clears one a
+    // previous drill-through left behind.
+    setReturnFlight(fromFlight)
     setView('workspace')
+  }, [])
+
+  const navigateToCoverage = useCallback((feature: string, fromFlight: string | null = null) => {
+    setSelectedFeature(feature)
+    setReturnFlight(fromFlight)
+    setView('coverage')
   }, [])
 
   const selectStartedRun = useCallback((runId: string) => {
@@ -216,6 +238,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setPortifyTarget,
     openFlight,
     navigateToRun,
+    navigateToCoverage,
+    returnFlight,
     selectStartedRun,
     pendingRunSelectionRef,
     selectedFeatureRef,

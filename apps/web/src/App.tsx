@@ -19,7 +19,7 @@ import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsC
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
 import { resolveFeatureFlightAction } from './features/flights'
-import { useDerivedFeatureStages } from './features/flights/lib/derived-stages'
+import { derivedFlightFeature, useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
 import { ToastHost } from '@/shared/ui/atoms'
@@ -49,7 +49,7 @@ export function App() {
     resumePlanTaskId, setResumePlanTaskId,
     portifyTarget, setPortifyTarget,
     focusTest,
-    openFlight, navigateToRun, selectStartedRun,
+    openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
     pendingRunSelectionRef, selectedFeatureRef, selectedRunIdRef,
   } = nav
 
@@ -99,10 +99,21 @@ export function App() {
   // dep list, and a fresh arrow per render made it refetch every feature's
   // coverage on every render. The column guards against that too — this keeps
   // the prop honest at the source.
+  // No origin flight: this is the user opening the ledger on their own, so any
+  // way-back a previous drill-through left is cleared.
   const openCoverageFor = useCallback((feature: string): void => {
-    setSelectedFeature(feature)
-    setView('coverage')
-  }, [setSelectedFeature, setView])
+    navigateToCoverage(feature)
+  }, [navigateToCoverage])
+
+  // R83: what the return chip says. The origin is whatever `flight` held — a
+  // recorded id (name it from the index) or a `feature:<name>` derived token
+  // (the name IS the token). An id the index no longer carries still gets a
+  // chip: the way back matters more than the label.
+  const returnFlightLabel = useMemo(() => {
+    if (!returnFlight) return null
+    return flights.find((f) => f.flightId === returnFlight)?.feature
+      ?? derivedFlightFeature(returnFlight)
+  }, [returnFlight, flights])
 
   const flightAction = useCallback(
     (feature: string) => resolveFeatureFlightAction(feature, flights, featureActivity.get(feature), derivedStages.get(feature)),
@@ -349,23 +360,16 @@ export function App() {
         }}
         onOpenActivity={openActivity}
         onStartFlight={(feature) => { setSelectedFeature(feature); setFlightStartFor(feature) }}
-        onNavigateToRun={(feature, runId) => {
-          pendingRunSelectionRef.current = null
-          setSelectedFeature(feature)
-          setSelectedRunId(runId)
-          setView('workspace')
-        }}
+        onNavigateToRun={(feature, runId) => navigateToRun(feature, runId)}
+        returnFlight={returnFlight}
+        returnFlightLabel={returnFlightLabel}
+        onReturnToFlight={openFlight}
       />
       <div className="min-h-0 flex-1">
         {view === 'cleanup'
           ? <LogCleanupPage
               onClose={() => setView('workspace')}
-              onNavigateToRun={(feature, runId) => {
-                pendingRunSelectionRef.current = null
-                setSelectedFeature(feature)
-                setSelectedRunId(runId)
-                setView('workspace')
-              }}
+              onNavigateToRun={(feature, runId) => navigateToRun(feature, runId)}
               onNavigateToPortify={(workflowId) => {
                 setView('workspace')
                 setPortifyTarget({ kind: 'revisit', workflowId })
@@ -374,7 +378,11 @@ export function App() {
           : view === 'coverage' && selectedFeature
           ? <CoverageLedgerPage
               feature={selectedFeature}
-              onClose={() => setView('workspace')}
+              /* R83: the ledger is a top-level VIEW, so a flight's drill-through
+                 replaces the flight rather than stacking on it. Close returns to
+                 the flight that opened it; opened on its own, it still exits to
+                 the workspace. */
+              onClose={() => returnFlight ? openFlight(returnFlight) : setView('workspace')}
               generatingFlight={coverageGeneratingFlight}
               onOpenFlight={openFlight}
             />
@@ -393,9 +401,12 @@ export function App() {
               /* R82: `focusTest` is a run-summary failed-entry name — the flight's
                  Test Run stage passes the failure the user clicked, and the run
                  detail lands on it. navigateToRun does exactly what this handler
-                 used to inline, plus the focus pairing. */
-              onOpenRun={(feature, runId, focusTest) => navigateToRun(feature, runId, focusTest)}
-              onOpenCoverage={(feature) => { setSelectedFeature(feature); setView('coverage') }}
+                 used to inline, plus the focus pairing. R83: both drill-throughs
+                 pin THIS flight as the origin, so the destination knows where
+                 back is — the run detail has no close of its own, so it gets a
+                 return chip in the top bar instead. */
+              onOpenRun={(feature, runId, focusTest) => navigateToRun(feature, runId, focusTest, selectedFlightId)}
+              onOpenCoverage={(feature) => navigateToCoverage(feature, selectedFlightId)}
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
             />
           : <ResizablePanels panels={panels} />}

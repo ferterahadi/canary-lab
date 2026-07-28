@@ -70,6 +70,15 @@ export interface PersistedView {
    *  playback tests on. An unknown name simply doesn't match — the tab opens
    *  unscrolled rather than blank. */
   focusTest: string | null
+  /** R83: the flight a drill-through came FROM (URL only; dropped on the flights
+   *  view, where it would point at the screen you're already on). A flight's
+   *  stage drill-throughs switch the top-level view outright — the coverage
+   *  ledger and the run detail are views, not children of the flight — so
+   *  without this the destination has no idea it was opened from a flight and
+   *  its exit dumps you in the workspace. Carried in the URL rather than React
+   *  state so a refresh on the destination keeps the way back. Value is whatever
+   *  `flight` held: a real flight id or a `feature:<name>` derived token. */
+  returnFlight: string | null
 }
 
 /** The cross-tab/localStorage-mirrored subset — the durable nav tier only. */
@@ -97,7 +106,7 @@ function setOrDelete(params: URLSearchParams, key: string, value: string | null)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null, returnFlight: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog are never mirrored there). */
@@ -118,10 +127,13 @@ export function readPersistedView(): PersistedView {
     const configTab = dialog === 'config' ? parseConfigTab(params.get('tab')) : null
     // `test` only qualifies a selected run — dropped elsewhere.
     const focusTest = run ? params.get('test') || null : null
+    // `from` names the flight a drill-through left — meaningless on the flights
+    // view itself, dropped there.
+    const returnFlight = v === 'flights' ? null : params.get('from') || null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight, draft, configTab, focusTest }
-    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null, draft, configTab, focusTest }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, draft, configTab, focusTest, returnFlight }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, draft, configTab, focusTest, returnFlight }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -158,6 +170,9 @@ export function persistView(state: PersistedView): void {
     // `test` only qualifies a selected run — drop it otherwise, so switching runs
     // can't leave a previous run's failure pinned in the URL.
     setOrDelete(params, 'test', state.run ? state.focusTest : null)
+    // `from` is dropped on the flights view — arriving at a flight IS the return,
+    // so keeping it would leave a back-link to the screen you're already on.
+    setOrDelete(params, 'from', state.view === 'flights' ? null : state.returnFlight)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)

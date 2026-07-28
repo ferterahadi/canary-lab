@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null, returnFlight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -50,6 +50,45 @@ describe('workspace-view-state (R12)', () => {
   it('ignores a stray test param on a URL with no run', () => {
     window.history.replaceState(null, '', '/?feature=checkout&test=test-case-orphan')
     expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  // R83: `from` names the flight a stage drill-through left, so the destination
+  // (coverage ledger / run detail) can offer a way back that survives a refresh.
+  it('round-trips the origin flight on a drilled-into view', () => {
+    persistView(view({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_abc' }))
+    expect(window.location.search).toContain('from=fl_abc')
+    expect(readPersistedView()).toEqual(view({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_abc' }))
+  })
+
+  it('round-trips a derived-flight origin token', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', returnFlight: 'feature:checkout' }))
+    expect(readPersistedView().returnFlight).toBe('feature:checkout')
+  })
+
+  it('drops the origin flight on the flights view — you are already there', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc', returnFlight: 'fl_abc' }))
+    expect(window.location.search).not.toContain('from=')
+    expect(readPersistedView().returnFlight).toBeNull()
+  })
+
+  it('ignores a stray from param on the flights view', () => {
+    window.history.replaceState(null, '', '/?view=flights&flight=fl_abc&from=fl_old')
+    expect(readPersistedView().returnFlight).toBeNull()
+  })
+
+  it('treats a lone from param as an authoritative URL (workspace + origin)', () => {
+    window.history.replaceState(null, '', '/?from=fl_abc')
+    expect(readPersistedView()).toEqual(view({ returnFlight: 'fl_abc' }))
+  })
+
+  it('reads an empty from param as no origin', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&from=')
+    expect(readPersistedView().returnFlight).toBeNull()
+  })
+
+  it('keeps the origin flight OUT of localStorage (URL-only tier)', () => {
+    persistView(view({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_abc' }))
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'coverage', feature: 'checkout' })
   })
 
   it('keeps the focused test OUT of localStorage (URL-only tier)', () => {

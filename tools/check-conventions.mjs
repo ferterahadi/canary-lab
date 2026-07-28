@@ -45,6 +45,7 @@ const LOWERCASE_TSX_OK = new Map([
   ['atoms.tsx', 'a set of shared primitives, not one component'],
   ['main.tsx', 'the app entry point'],
   ['invalidation.tsx', 'query-invalidation helpers'],
+  ['config-doc-cache.tsx', 'the config dialog document cache: a provider plus its reader hook'],
   ['stage-meta.tsx', 'stage metadata tables'],
   ['external-client-branding.tsx', 'per-client branding lookups'],
 ])

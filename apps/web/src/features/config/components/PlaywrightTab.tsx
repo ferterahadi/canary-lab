@@ -49,6 +49,7 @@ function asMaybeString(v: ConfigValue | undefined): string | undefined {
 
 export function PlaywrightTab({ feature }: { feature: string }) {
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
+    cacheKey: `playwright:${feature}`,
     load: () => api.getPlaywrightConfig(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
@@ -92,7 +93,6 @@ export function PlaywrightTab({ feature }: { feature: string }) {
       return next
     },
     save: (payload) => api.putPlaywrightConfig(feature, payload as ConfigValue),
-    deps: [feature],
   })
 
   if (ed.error) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>

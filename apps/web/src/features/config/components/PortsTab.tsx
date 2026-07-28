@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { ConfigValue, PortifyManifest } from '@/shared/api/client'
 import { ConfirmModal, Section, TrashIcon } from '@/shared/ui/atoms'
@@ -10,6 +10,7 @@ import {
   usePortify,
 } from '@/features/portify'
 import { useInvalidationKey } from '@/shared/state/invalidation'
+import { useCachedDoc } from './config-doc-cache'
 import { patchFileName } from '@shared/portify-overlay'
 import {
   deriveRepoName,
@@ -67,27 +68,25 @@ export function PortsTab({
   // rewritten config doc in place — without it the tab kept the pre-portify
   // slots until a remount (tab switch / refresh).
   const portsRefreshKey = useInvalidationKey('ports')
-  // Read-only: this tab no longer writes config, so a plain fetch replaces the
-  // editable-slice + SaveBar. Refetches when portsRefreshKey is bumped (a portify
-  // save / removal rewrote the slots) so the table reflects it without a remount.
-  const [repos, setRepos] = useState<RepoSlice[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
-  // Bumped after un-portify reverts the config, so the slot table refetches the
-  // reverted file in place (features-changed only refreshes the feature list).
-  const [reloadKey, setReloadKey] = useState(0)
+  // Read-only: this tab no longer writes config, so a plain read replaces the
+  // editable-slice + SaveBar. The doc is the SAME one General + Service read, so
+  // it comes from the dialog-scoped cache — switching tabs no longer refetches it.
+  const cached = useCachedDoc(`config-doc:${feature}`, () => api.getFeatureConfigDoc(feature))
+  const v = (cached.doc?.parsed.value ?? null) as { [k: string]: ConfigValue } | null
+  const repos: RepoSlice[] | null = v == null
+    ? null
+    : Array.isArray(v.repos) ? v.repos.map(parseRepo).filter((r): r is RepoSlice => r != null) : []
+  const loadError = cached.error
+  // A portify save/removal rewrote the config file — evict the SHARED entry so
+  // General and Service re-read it too, not just the tab that noticed. Held in a
+  // ref because `cached` is a fresh object each render; the mount-time key is
+  // the baseline, so this fires on every bump but never on first render.
+  const refreshRef = useRef(cached.refresh)
+  refreshRef.current = cached.refresh
+  const mountedRefreshKey = useRef(portsRefreshKey)
   useEffect(() => {
-    let cancelled = false
-    setRepos(null)
-    setLoadError(null)
-    api.getFeatureConfigDoc(feature)
-      .then((doc) => {
-        if (cancelled) return
-        const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
-        setRepos(Array.isArray(v.repos) ? v.repos.map(parseRepo).filter((r): r is RepoSlice => r != null) : [])
-      })
-      .catch((err) => { if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Load failed') })
-    return () => { cancelled = true }
-  }, [feature, portsRefreshKey, reloadKey])
+    if (portsRefreshKey !== mountedRefreshKey.current) refreshRef.current()
+  }, [portsRefreshKey])
   const [confirmRemove, setConfirmRemove] = useState(false)
   const [removing, setRemoving] = useState(false)
   const [removeError, setRemoveError] = useState<string | null>(null)
@@ -159,9 +158,9 @@ export function PortsTab({
     try {
       await api.removePortifyOverlay(feature)
       // features-changed → App refetches /api/features → `portified` flips false
-      // (status band updates live). Bump reloadKey too: the config was reverted,
-      // so the slot table must refetch to drop the now-removed slots.
-      setReloadKey((k) => k + 1)
+      // (status band updates live). Drop the cached config doc too: the file was
+      // reverted, so every tab reading it must re-read to lose the removed slots.
+      cached.refresh()
       setConfirmRemove(false)
     } catch (err) {
       setRemoveError(err instanceof Error ? err.message : 'Remove failed')

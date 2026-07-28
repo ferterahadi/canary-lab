@@ -59,6 +59,11 @@ export interface NavState {
    *  inert automatically — no clearing effect to keep in sync, and the run detail
    *  only honours a focus whose `runId` is the run it is showing. */
   focusTest: { runId: string; test: string } | null
+  /** R83: the flight this view was drilled into FROM, or null when the user got
+   *  here on their own. Set only by the flight's stage drill-throughs (coverage
+   *  ledger, run detail), which switch the top-level view and would otherwise
+   *  strand the user in the workspace. Routed as `from` — see PersistedView. */
+  returnFlight: string | null
 }
 
 /** Build the initial nav state from a hydrated PersistedView (URL/localStorage). */
@@ -82,6 +87,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     focusTest: persisted.run && persisted.focusTest
       ? { runId: persisted.run, test: persisted.focusTest }
       : null,
+    returnFlight: persisted.returnFlight,
   }
 }
 
@@ -110,6 +116,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     // Only the CURRENT run's focus reaches the URL — a stale pair from a
     // previously-selected run is dropped rather than pinned.
     focusTest: state.focusTest?.runId === state.run ? state.focusTest.test : null,
+    returnFlight: state.returnFlight,
   }
 }
 

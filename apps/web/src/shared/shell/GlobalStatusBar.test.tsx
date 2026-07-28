@@ -184,6 +184,42 @@ describe('GlobalStatusBar', () => {
     expect(container.textContent).not.toContain('Deploy check')
   })
 
+  // R83: a flight's Latest-run drill-through lands in the workspace run detail,
+  // which has no close of its own — this chip is the only way back.
+  it('R83: offers a way back to the flight a drill-through came from', async () => {
+    const onReturnToFlight = vi.fn()
+    await act(async () => {
+      root.render(
+        <GlobalStatusBar
+          activeRunDetail={null}
+          returnFlight="fl_abc"
+          returnFlightLabel="merchant-pass-fnb"
+          onReturnToFlight={onReturnToFlight}
+        />,
+      )
+    })
+    const chip = container.querySelector('[data-testid="return-to-flight"]')
+    expect(chip?.textContent).toContain('merchant-pass-fnb')
+    await act(async () => { chip?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(onReturnToFlight).toHaveBeenCalledWith('fl_abc')
+  })
+
+  it('R83: still offers the way back when the flight index no longer names it', async () => {
+    await act(async () => {
+      root.render(
+        <GlobalStatusBar activeRunDetail={null} returnFlight="fl_abc" onReturnToFlight={vi.fn()} />,
+      )
+    })
+    expect(container.querySelector('[data-testid="return-to-flight"]')?.textContent).toContain('Flight')
+  })
+
+  it('R83: no return chip when the user got here on their own', async () => {
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    expect(container.querySelector('[data-testid="return-to-flight"]')).toBeNull()
+  })
+
   it('R6 consolidation: no Coverage/Portify/Services pills — the Flights pill is the per-feature entry point', async () => {
     await act(async () => {
       root.render(<GlobalStatusBar activeRunDetail={null} />)

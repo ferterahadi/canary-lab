@@ -5,10 +5,17 @@ import { AddSlotModal, inlineSelectStyle } from './AddSlotModal'
 import { NewEnvControl } from './NewEnvControl'
 import { SlotEditor } from './SlotEditor'
 import { NEW_ENV_SENTINEL, NEW_SLOT_SENTINEL, stripFeaturePrefix } from './envset-diff'
+import { useCachedDoc } from './config-doc-cache'
 
 export function EnvsetsTab({ feature }: { feature: string }) {
-  const [index, setIndex] = useState<api.EnvsetIndex | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  // Cached for the dialog's lifetime, so returning to this tab paints the env
+  // list from memory instead of blanking to "Loading…" while it re-reads.
+  const cached = useCachedDoc(`envsets:${feature}`, () => api.getEnvsetsIndex(feature))
+  const index = cached.doc
+  const setIndex = cached.setDoc
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  const error = mutationError ?? cached.error
+  const setError = setMutationError
   const [env, setEnv] = useState<string | null>(null)
   const [slot, setSlot] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -23,24 +30,13 @@ export function EnvsetsTab({ feature }: { feature: string }) {
       .then((idx) => { setIndex(idx); setError(null) })
       .catch((e: unknown) => { setError(e instanceof Error ? e.message : 'Failed to load envsets') })
 
+  // Default the selection to the first env/slot once the index is known —
+  // whether it arrived from the network or straight out of the cache.
   useEffect(() => {
-    let cancelled = false
-    api.getEnvsetsIndex(feature)
-      .then((idx) => {
-        if (cancelled) return
-        setIndex(idx)
-        setError(null)
-        if (!env && idx.envs.length > 0) {
-          setEnv(idx.envs[0].name)
-          setSlot(idx.envs[0].slots[0] ?? null)
-        }
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setError(e instanceof Error ? e.message : 'Failed to load envsets')
-      })
-    return () => { cancelled = true }
-  }, [feature])
+    if (env || !index || index.envs.length === 0) return
+    setEnv(index.envs[0].name)
+    setSlot(index.envs[0].slots[0] ?? null)
+  }, [env, index])
 
   const onAddEnv = async (): Promise<void> => {
     const name = newEnvName.trim()

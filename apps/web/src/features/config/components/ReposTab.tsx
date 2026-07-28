@@ -22,6 +22,8 @@ export function ReposTab({ feature }: { feature: string }) {
   const activeRun = runs.some((run) =>
     run.feature === feature && isActiveRunStatus(run.status))
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
+    // Shared with General + Ports — one config doc, one fetch per dialog open.
+    cacheKey: `config-doc:${feature}`,
     load: () => api.getFeatureConfigDoc(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
@@ -39,7 +41,6 @@ export function ReposTab({ feature }: { feature: string }) {
       return { ...current, repos }
     },
     save: (payload) => api.putFeatureConfigDoc(feature, payload as ConfigValue),
-    deps: [feature],
   })
 
   if (ed.error && !ed.draft) {
