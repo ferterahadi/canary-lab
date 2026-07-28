@@ -1,7 +1,8 @@
 import * as api from '@/shared/api/client'
 import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
-import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD, healDisplayValue, healEnabled } from '@/shared/lib/heal-threshold'
-import { FieldRow, NumberInput, Section, TextInput, Textarea, Toggle } from '@/shared/ui/atoms'
+import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD } from '@/shared/lib/heal-threshold'
+import { FieldRow, HintIcon, Section, TextInput, Textarea } from '@/shared/ui/atoms'
+import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 
@@ -91,29 +92,22 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
             </FieldRow>
           </Section>
 
-          <Section title="Heal behavior">
-            <FieldRow
-              label="Stop & heal after"
-              hint={`On by default (${DEFAULT_HEAL_ON_FAILURE_THRESHOLD} failures). Each new Playwright spawn starts with --max-failures=N; turn off to run the whole suite before healing. Changes made while tests are already running apply to the next rerun or restart, not the current process.`}
-              layout="inline"
-            >
-              <div className="flex items-center gap-3">
-                <Toggle
-                  value={healEnabled(ed.draft.healOnFailureThreshold)}
-                  onChange={(enabled) => ed.setDraft((d) => ({
-                    ...d,
-                    healOnFailureThreshold: enabled ? healDisplayValue(d.healOnFailureThreshold) : 0,
-                  }))}
-                />
-                <NumberInput
-                  min={1}
-                  value={healDisplayValue(ed.draft.healOnFailureThreshold)}
-                  disabled={!healEnabled(ed.draft.healOnFailureThreshold)}
-                  onChange={(n) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold: n }))}
-                />
-                <span className="text-xs" style={{ color: 'var(--text-muted)' }}>failure(s)</span>
-              </div>
-            </FieldRow>
+          {/* The same two-shape choice the flight Suite setup digest shows —
+              one component, so the two lenses on `healOnFailureThreshold` can't
+              drift into a switch here and a pick-a-run-shape there. The body
+              padding drops to px-0.5 because the rows carry their own px-3:
+              the selected band then spans the section edge-to-edge, with the
+              labels still under the section title. */}
+          <Section
+            title={<span className="inline-flex items-center gap-1.5">Heal behavior<HintIcon hint={HEAL_BEHAVIOR_INFO} /></span>}
+            bodyClassName="px-0.5 py-1.5"
+          >
+            <HealBehaviorChoice
+              threshold={ed.draft.healOnFailureThreshold}
+              editable
+              testIdPrefix="general-heal"
+              onChange={(healOnFailureThreshold) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold }))}
+            />
           </Section>
         </div>
       </div>

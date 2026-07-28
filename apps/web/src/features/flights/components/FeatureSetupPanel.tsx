@@ -1,8 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { BranchSuggestInput, branchSuggestions, useRepoGitStatus } from '@/features/config'
-import { healDisplayValue, healEnabled } from '@/shared/lib/heal-threshold'
-import { NumberInput, Toggle } from '@/shared/ui/atoms'
+import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
 import {
   PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
@@ -24,13 +23,6 @@ export function asRecord(v: unknown): Record<string, unknown> | null {
 export const PW_MODES = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
 
 export const PW_SCREENSHOT_MODES = PLAYWRIGHT_SCREENSHOT_MODES
-
-// The mechanism behind the heal threshold, on hover — the always-visible line
-// under the row says what it MEANS for a run; this says how it is implemented
-// and when a change lands. Same field, same wording, as Advanced setup's
-// General tab (`healOnFailureThreshold`).
-const HEAL_INFO =
-  'Each new Playwright spawn starts with --max-failures=N. A change made while tests are already running applies to the next rerun or restart, not the current process.'
 
 // A block IS a config repo — the same unit the Advanced setup Service tab
 // renders, so every field here maps 1:1 onto a field there (Name ↔ NAME,
@@ -152,7 +144,6 @@ export function FeatureSetupPanel({
   // Heal threshold lives on the feature config (not playwright.config), so it
   // writes through the same PUT the service blocks use.
   const healThreshold = typeof cfg?.healOnFailureThreshold === 'number' ? cfg.healOnFailureThreshold : undefined
-  const healOn = healEnabled(healThreshold)
   const setHeal = (threshold: number): void => {
     if (!cfg) return
     const next = structuredClone(cfg) as Record<string, unknown>
@@ -229,46 +220,23 @@ export function FeatureSetupPanel({
       {/* Heal behavior — its own card, not a Playwright row: the field lives in
           feature.config.cjs and governs the repair loop, and Advanced setup
           groups it under this same title, so the two lenses keep matching. The
-          label column is the Playwright card's 110px so both read as one
-          ruled stack; "after" rides in the value so the label still fits. */}
+          choice itself is the shared HealBehaviorChoice, rendered identically
+          in both places. -mx-3 cancels the card's px-3 so the selected band and
+          the hover tint span the card edge-to-edge; the rows' own px-3 then
+          puts their text back under the kicker. */}
       {cfg && (
         <div data-testid="setup-heal-card" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
-          <div className={PANEL_KICKER_CLASS}>Heal behavior</div>
-          <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
-            {editable ? (
-              <>
-                <RowLabel label="Stop & heal" info={HEAL_INFO} />
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <Toggle
-                    value={healOn}
-                    testId="setup-heal-toggle"
-                    onChange={(on) => setHeal(on ? healDisplayValue(healThreshold) : 0)}
-                  />
-                  <span className="text-muted">after</span>
-                  <NumberInput
-                    min={1}
-                    value={healDisplayValue(healThreshold)}
-                    disabled={!healOn}
-                    testId="setup-heal-threshold"
-                    onChange={setHeal}
-                  />
-                  <span className="text-muted">failure(s)</span>
-                </div>
-              </>
-            ) : (
-              <ReadRow
-                label="Stop & heal"
-                info={HEAL_INFO}
-                value={healOn ? `after ${healDisplayValue(healThreshold)} failure(s)` : 'off'}
-              />
-            )}
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <span className={PANEL_KICKER_CLASS}>Heal behavior</span>
+            <InfoMark label="Heal behavior" info={HEAL_BEHAVIOR_INFO} />
           </div>
-          {/* What the setting COSTS, which the number alone doesn't say. */}
-          <div className="mt-1.5 text-[10.5px] text-muted">
-            {healOn
-              ? 'Playwright stops there and the repair agent takes the failures — the rest of the suite doesn’t have to finish.'
-              : 'Playwright runs every test before the repair agent starts.'}
-          </div>
+          <HealBehaviorChoice
+            threshold={healThreshold}
+            editable={editable}
+            onChange={setHeal}
+            className="-mx-3"
+            lockedTitle="Locked while the flight is running"
+          />
         </div>
       )}
 
@@ -295,19 +263,25 @@ export function FeatureSetupPanel({
   )
 }
 
+/** The hoverable `i` that carries a field's mechanism. One home so the info
+ *  affordance reads the same on a row label and on a card kicker. */
+export function InfoMark({ label, info }: { label: string; info: string }) {
+  return (
+    <span
+      aria-label={`${label} explained`}
+      title={info}
+      className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-accent/40 text-[9px] font-semibold text-accent"
+    >
+      i
+    </span>
+  )
+}
+
 export function RowLabel({ label, info }: { label: string; info?: string }) {
   return (
     <span className="cl-rubric flex items-center gap-1">
       {label}
-      {info && (
-        <span
-          aria-label={`${label} explained`}
-          title={info}
-          className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-accent/40 text-[9px] font-semibold text-accent"
-        >
-          i
-        </span>
-      )}
+      {info && <InfoMark label={label} info={info} />}
     </span>
   )
 }

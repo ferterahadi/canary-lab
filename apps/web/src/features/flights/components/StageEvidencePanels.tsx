@@ -312,10 +312,18 @@ export function EvaluationDeliverablePanel({ task }: { task: EvaluationExportTas
           <dd className="m-0 min-w-0 truncate text-secondary">{builtBy(task)}</dd>
           {task.archive && (
             <>
-              <dt className="cl-rubric self-center">Contains</dt>
-              <dd className="m-0 min-w-0 truncate text-secondary">
-                {archiveContents(task)}
-              </dd>
+              {/* "Size", not "Contains": this row states the download's weight, so
+                  it names the one thing every archive knows. The video count is
+                  its own row rather than a "· 11 videos" tail, which would have
+                  put a count under a label that says size. */}
+              <dt className="cl-rubric self-center">Size</dt>
+              <dd className="m-0 min-w-0 truncate text-secondary">{formatBytes(task.archive.bytes)}</dd>
+              {task.archive.videos > 0 && (
+                <>
+                  <dt className="cl-rubric self-center">Videos</dt>
+                  <dd className="m-0 min-w-0 truncate text-secondary">{plural(task.archive.videos, 'video')}</dd>
+                </>
+              )}
             </>
           )}
         </dl>

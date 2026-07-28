@@ -4,7 +4,7 @@ import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/a
 import { evaluationArchiveFilename, formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { PORTIFY_PHASE_LABEL, STAGE_COLUMN, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
-import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, type StrengthCounts } from './stage-metrics'
+import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
 // One uniform template for every stage: the 2–4 things the user cares about at
@@ -236,37 +236,55 @@ export function stageFacts(
       // never claims to be the measured figure the byte count is.
       const tokens = band.docBytes != null ? estimateTokens(band.docBytes) : null
       const summaryTokens = band.summaryBytes != null && band.summaryBytes > 0 ? estimateTokens(band.summaryBytes) : null
+      // EVERY TILE CARRIES ITS OWN WEIGHT. The band used to hold all four size
+      // figures on one tile's sub-line (`tokens · from ≈ 3.3k · 12.9 KB → 3.2 KB`),
+      // which put the input's weight two tiles away from the input and left the
+      // reader matching each figure to an end of an arrow. Now the source tile
+      // states what the source weighs and the output tile states what the output
+      // weighs, each as `≈ tokens · KB` in that one order, so the three tiles read
+      // left to right as: this much text went in → this many requirements came out
+      // → and they weigh this much.
       return [
-        ...(docs.length > 0 ? [{ label: 'Source docs', value: String(docs.length), big: true as const }] : []),
+        ...(docs.length > 0
+          ? [{
+              label: 'Source docs',
+              value: String(docs.length),
+              big: true as const,
+              // The weight of what went in, on the tile that counts what went in.
+              ...(tokens != null && band.docBytes != null
+                ? { sub: `≈ ${compactCount(tokens)} tokens · ${formatBytes(band.docBytes)}` }
+                : {}),
+            }]
+          : []),
         ...(count != null ? [{ label: 'Requirements distilled', value: String(count), big: true as const }] : []),
-        ...(tokens != null && band.docBytes != null
-          ? [
-              // BOTH ends of the distillation, because one end alone is unreadable:
-              // "Distilled from ≈ 3.3k" named neither its unit nor its direction, so
-              // it could equally have been what went in, what came out, or what was
-              // saved. Naming the output as the headline and the input as its source
-              // makes the compression the fact — 3.3k of specs collapsing to 800 is
-              // the one hint on this screen that the distillation may have dropped
-              // something. Until the summary exists there is only an input, and the
-              // tile says exactly that instead of implying a result.
-              summaryTokens != null && band.summaryBytes != null
-                ? {
-                    label: 'Distilled to',
-                    value: `≈ ${compactCount(summaryTokens)}`,
-                    big: true as const,
-                    // Unit, then where it came from, then the two MEASURED byte
-                    // figures the token estimates approximate. All of it on the
-                    // sub-line so the 22px value stays a bare figure and cannot
-                    // overflow its tile at a narrow window.
-                    sub: `tokens · from ≈ ${compactCount(tokens)} · ${formatBytes(band.docBytes)} → ${formatBytes(band.summaryBytes)}`,
-                  }
-                : {
-                    label: 'Source text',
-                    value: `≈ ${compactCount(tokens)}`,
-                    big: true as const,
-                    sub: `tokens · ${formatBytes(band.docBytes)}`,
-                  },
-            ]
+        ...(summaryTokens != null && band.summaryBytes != null
+          ? [{
+              label: 'Distilled to',
+              value: `≈ ${compactCount(summaryTokens)}`,
+              big: true as const,
+              // Unit first so the 22px value stays a bare figure, then the measured
+              // byte count the estimate approximates, then the compression — the one
+              // hint on this screen that the distillation may have dropped
+              // something. The ratio is computed from the MEASURED bytes, not the
+              // token estimates, and is omitted rather than printed as a negative
+              // when a summary somehow came out bigger than its source.
+              sub: [
+                `tokens · ${formatBytes(band.summaryBytes)}`,
+                ...(band.docBytes != null && band.summaryBytes < band.docBytes
+                  ? [`${round((1 - band.summaryBytes / band.docBytes) * 100)}% smaller`]
+                  : []),
+              ].join(' · '),
+            }]
+          : []),
+        // No docs listed but bytes measured: nothing above carries the source
+        // weight, so it gets its own tile rather than going unreported.
+        ...(docs.length === 0 && tokens != null && band.docBytes != null
+          ? [{
+              label: 'Source text',
+              value: `≈ ${compactCount(tokens)}`,
+              big: true as const,
+              sub: `tokens · ${formatBytes(band.docBytes)}`,
+            }]
           : []),
       ]
     }
@@ -423,33 +441,55 @@ export function stageFacts(
       // exactly the duplication the hero replaced. So: no stage-level facts.
       return []
     case 'evaluation-export': {
-      // The band answers "what did we actually verify", which is the one
-      // question no earlier stage answers. Test authoring reports coverage
-      // CLAIMED by annotation — it never looks at a run result, so a suite whose
-      // every test fails still reads 100%. `proven` is the run-grounded sibling:
-      // covered AND confirmed by a test that passed. Naming both, side by side,
-      // is the point of the tile; the gap between them is the evaluation.
+      // The band answers "what did we actually verify" — the one question no
+      // earlier stage answers. It is deliberately a DERIVATION, and it reads left
+      // to right as one sentence with its arithmetic shown:
       //
-      // Deliberately NOT here: the pass/fail counts. Those are the Test Run's,
-      // one stage up, and reprinting them made this band a second run summary.
+      //   every requirement has a spec claiming it  (what we set out to prove)
+      //   → the specs are mostly shallow            (how strong that proof can be)
+      //   → 2 of them passed in the run             (what actually held)
+      //   → so 0 requirements come out proven       (the conclusion)
+      //
+      // WHY THE INPUTS ARE RESTATED HERE. Coverage is bookkeeping over
+      // annotations: a requirement is `covered` the moment some spec's `@req-*` /
+      // `@path-*` tags claim its every path, and no run is consulted — so a suite
+      // whose every spec fails still reports 100%. `proven` re-judges the same
+      // requirement through a second gate: every path backed by a spec that
+      // PASSED. The conclusion is therefore unreadable without both gates on
+      // screen; showing only `0/6` made a reader ask why, which is what this
+      // ordering fixes. The old band led with that conclusion and buried the
+      // first gate in a `100% claimed, 0% proven` sub-line — two terms of art in
+      // a 10.5px line, on the one surface a non-author reads first.
+      //
+      // Still deliberately NOT here: the RUN's own pass/fail totals (R80 — those
+      // are the Test Run's, and reprinting them made this band a second run
+      // summary). The specs tile is not that number: it counts only the specs
+      // annotated to a requirement, the population that can move the proven axis
+      // at all, on the same join the proven tile reads. Nor the archive's SIZE,
+      // which measured the download rather than the verification — that sits on
+      // the deliverable card beside the filename and the button it describes.
       const led = ledgerEvidence(band.ledger)
-      const contents = evalTask?.archive
+      const reportRunId = evalTask?.runId ?? str(ev, 'runId')
       const bandFacts: StageFact[] = [
-        ...(led && led.proven != null
+        // GATE ONE, run-blind, so it renders even with no run joined: the claim
+        // the coverage stage made. This is `claimedPct` as a count over the same
+        // denominator the proven tile uses, which is what lets the two ends of
+        // the band be compared at a glance instead of across a unit change.
+        ...(led
           ? [{
-              label: 'Requirements proven',
-              value: `${led.proven}/${led.total}`,
+              label: 'Requirements with specs',
+              value: `${led.covered}/${led.total}`,
               big: true as const,
-              bar: led.total > 0 ? led.proven / led.total : 0,
-              tone: led.proven === led.total ? 'good' as const : 'warn' as const,
-              sub: led.provenPct != null
-                ? `${round(led.claimedPct)}% claimed, ${round(led.provenPct)}% proven`
-                : undefined,
+              // No divide-by-zero guard: `ledgerEvidence` returns null for a
+              // feature with no requirements, so `total` is at least 1 here.
+              bar: led.covered / led.total,
+              tone: led.covered === led.total ? 'good' as const : 'warn' as const,
+              sub: claimedSub(led),
             }]
           : []),
         ...(led && led.strength.strong + led.strength.solid + led.strength.basic + led.strength.shallow > 0
           ? [{
-              label: 'Evidence strength',
+              label: 'Spec depth',
               value: `${led.strength.strong} strong`,
               big: true as const,
               // The whole distribution, strongest to weakest: a suite that is
@@ -459,17 +499,34 @@ export function stageFacts(
               sub: strengthBreakdown(led.strength),
             }]
           : []),
-        ...(contents
+        // What the run did with the specs that can carry proof. Gated on the
+        // proven axis existing: with no run joined, every mapped spec would
+        // report as "never ran", which reads as a finding about the suite when it
+        // is only the absence of a run.
+        //
+        // The foreign-run caveat is stated once, on the conclusion tile: both
+        // tiles read the same join, and saying it twice in two 10.5px sub-lines
+        // buries the numbers it qualifies.
+        ...(led && led.proven != null && led.specs.mapped > 0
           ? [{
-              label: 'Evidence bundled',
-              // Leads with the SIZE, not the video count. Size is always known —
-              // it can be stat'd off the zip even for an export written before
-              // the contents were recorded — whereas that older export's video
-              // count is unrecoverable without unpacking it. Leading with the
-              // count made every such archive announce a big "0".
-              value: formatBytes(contents.bytes),
+              label: 'Specs that passed',
+              value: `${led.specs.passed}/${led.specs.mapped}`,
               big: true as const,
-              ...(contents.videos > 0 ? { sub: plural(contents.videos, 'video') } : {}),
+              bar: led.specs.passed / led.specs.mapped,
+              tone: led.specs.passed === led.specs.mapped ? 'good' as const : 'warn' as const,
+              sub: passedSub(led),
+            }]
+          : []),
+        // GATE TWO — the conclusion, last, because it is what the three tiles to
+        // its left add up to.
+        ...(led && led.proven != null
+          ? [{
+              label: 'Requirements proven',
+              value: `${led.proven}/${led.total}`,
+              big: true as const,
+              bar: led.proven / led.total,
+              tone: led.proven === led.total ? 'good' as const : 'warn' as const,
+              sub: provenSub(led, reportRunId),
             }]
           : []),
       ]
@@ -481,6 +538,54 @@ export function stageFacts(
     default:
       return []
   }
+}
+
+/** The claim tile's sub-line: what "has specs" actually required. A requirement
+ *  is covered only when EVERY path it declares is claimed by some spec's tags, so
+ *  the clean case names that bar rather than restating the fraction above it —
+ *  and the incomplete case says how many fell short of it. */
+function claimedSub(led: LedgerEvidence): string {
+  const gaps = led.total - led.covered
+  if (gaps <= 0) return 'every path has a spec claiming it'
+  return `${gaps} still ${gaps === 1 ? 'has a gap' : 'have gaps'}`
+}
+
+/** What became of the specs that can carry proof. Empty buckets drop out, and a
+ *  clean sweep says so rather than leaving the tile bare — "18/18" with no
+ *  sub-line reads as a truncated tile.
+ *
+ *  The unmapped count is named whenever there is one: this tile's denominator
+ *  counts only specs annotated to a requirement, so a suite with unannotated
+ *  specs would otherwise read as a smaller suite than it is. It is the one place
+ *  the band can say so without a fifth tile. */
+function passedSub(led: LedgerEvidence): string {
+  const { specs } = led
+  const parts = [
+    ...(specs.failed > 0 ? [`${specs.failed} failed`] : []),
+    ...(specs.neverRan > 0 ? [`${specs.neverRan} never ran`] : []),
+    ...(led.testCount > specs.mapped ? [`${led.testCount - specs.mapped} unmapped`] : []),
+  ]
+  return parts.length > 0 ? parts.join(' · ') : 'every spec passed'
+}
+
+/** The conclusion tile's sub-line — the RULE that turns the three tiles to its
+ *  left into this number, which is the one thing they cannot show. A suite can
+ *  have every requirement claimed and two specs passing and still prove nothing,
+ *  because a requirement counts only when every path it declares is backed by a
+ *  spec that passed. Without that sentence the arithmetic looks broken.
+ *
+ *  The engine joins the proven axis against the feature's LATEST recorded run,
+ *  which is this report's run right after an export and stops being it the moment
+ *  the suite runs again. When the ledger's run and the report's run differ, that
+ *  caveat displaces the rule: a number attributed to the wrong run is a worse
+ *  problem than an unexplained one, and the deliverable card underneath names the
+ *  report's own run a few inches below. */
+function provenSub(led: LedgerEvidence, reportRunId: string | undefined): string {
+  if (led.provenRunId != null && reportRunId != null && led.provenRunId !== reportRunId) {
+    return `proven on run ${led.provenRunId}, not this one`
+  }
+  if (led.proven != null && led.proven === led.total) return 'every requirement had a passing spec'
+  return 'needs every path backed by a passing spec'
 }
 
 /** The Evaluation Report's pre-band fallback: name the deliverable when there

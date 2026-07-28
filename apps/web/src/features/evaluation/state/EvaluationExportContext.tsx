@@ -31,6 +31,8 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   const connectionsRef = useRef<Record<string, EvaluationExportConnection>>({})
   const workspaceConnectionRef = useRef<WorkspaceEventsConnection | null>(null)
   const tasksByIdRef = useRef<Record<string, EvaluationExportTask>>({})
+  /** Task ids ever attached to a log stream — see `subscribeTask`. */
+  const subscribedRef = useRef<Set<string>>(new Set())
 
   const rememberTask = useCallback((task: EvaluationExportTask): void => {
     setTasksById((current) => {
@@ -56,7 +58,12 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   }, [appendLog, rememberTask])
 
   const subscribeTask = useCallback((taskId: string): void => {
-    if (connectionsRef.current[taskId]) return
+    // At most one attach per task for the provider's lifetime. `connectionsRef`
+    // alone can't carry this: `onExit` clears it, so a finished task could be
+    // re-attached forever by any caller that retries. A task id belongs to one
+    // export, so one attach is all it ever needs.
+    if (subscribedRef.current.has(taskId)) return
+    subscribedRef.current.add(taskId)
     try {
       connectionsRef.current[taskId] = connectEvaluationExport({
         taskId,
@@ -89,8 +96,13 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     const next = Object.fromEntries(tasks.map((task) => [task.taskId, task]))
     tasksByIdRef.current = next
     setTasksById(next)
+    // Only live tasks get a stream here. A finished task's log is historical and
+    // cannot change, so pulling all of them on mount cost one socket, one full
+    // log transfer and one task refetch per past export (16 of each in a real
+    // workspace) before anything had asked to see them. `watchTask` fetches on
+    // demand when a panel actually surfaces one.
     for (const task of tasks) {
-      if (task.status === 'running' || !previous[task.taskId]) subscribeTask(task.taskId)
+      if (task.status === 'running') subscribeTask(task.taskId)
     }
   }, [subscribeTask])
 
@@ -185,9 +197,13 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     tasksById[taskId] ?? null
   ), [tasksById])
 
+  // The on-demand path for a task this provider didn't start: panels call it
+  // when they surface a past export, which is what pulls its historical log now
+  // that mount no longer attaches every finished task. `subscribeTask` owns the
+  // once-only guard, so this is safe to call from an effect on every render.
   const watchTask = useCallback((taskId: string): void => {
-    if (!logsByTaskId[taskId]) subscribeTask(taskId)
-  }, [logsByTaskId, subscribeTask])
+    subscribeTask(taskId)
+  }, [subscribeTask])
 
   const downloadTask = useCallback(async (taskId: string): Promise<void> => {
     const task = tasksById[taskId]

@@ -36,6 +36,9 @@ export const CSS_BASE = `
   --size-label: 11px;
   --track-label: 0.04em;
   --radius: 2px;
+  /* One height for every control in the topbar, so pills sitting side by side
+     line up on both edges instead of each sizing itself from its own contents. */
+  --tool-height: 30px;
 
   --paper: #f6f4ef;
   --surface: #fffefb;

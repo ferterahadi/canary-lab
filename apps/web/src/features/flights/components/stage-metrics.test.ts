@@ -271,17 +271,28 @@ describe('ledgerEvidence', () => {
     }
   }
 
-  it('reads proven straight off the ledger totals instead of recomputing it', () => {
+  it('reads both gates straight off the ledger totals as COUNTS, never as percentages', () => {
     const evidence = ledgerEvidence(ledger())
-    expect(evidence).toMatchObject({ proven: 3, total: 6, provenPct: 50, claimedPct: 100 })
+    // `covered` and `proven` are the band's two gates, and they share the `total`
+    // denominator so the band can put `6/6` beside `3/6`. The ledger's own
+    // coveragePct/provenPct are deliberately not carried through.
+    expect(evidence).toMatchObject({ covered: 6, proven: 3, total: 6 })
   })
 
-  it('reports no proven axis when the feature has no recorded run', () => {
+  it('reports no proven axis when the feature has no recorded run — but still reports the claim', () => {
     const evidence = ledgerEvidence(ledger({ totals: {
       total: 6, covered: 6, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0,
     }, provenPct: undefined }))
     expect(evidence?.proven).toBeNull()
-    expect(evidence?.provenPct).toBeNull()
+    // Coverage is run-blind, so the absence of a run cannot erase it.
+    expect(evidence?.covered).toBe(6)
+  })
+
+  it('carries a partial claim as its own count, so the band can say how many fell short', () => {
+    const evidence = ledgerEvidence(ledger({ totals: {
+      total: 6, covered: 4, pathIncomplete: 1, variantIncomplete: 0, untested: 1, orphanTests: 0, proven: 3,
+    } }))
+    expect(evidence).toMatchObject({ covered: 4, total: 6 })
   })
 
   it('buckets test strength and counts ungraded tests separately', () => {
@@ -296,6 +307,30 @@ describe('ledgerEvidence', () => {
       ],
     }))
     expect(evidence?.strength).toEqual({ strong: 2, solid: 1, basic: 0, shallow: 1, ungraded: 1 })
+    expect(evidence?.testCount).toBe(5)
+  })
+
+  it('carries the run the proven axis was joined against, so a caller can tell it is the run it means', () => {
+    expect(ledgerEvidence(ledger({ provenRunId: 'run-9' }))?.provenRunId).toBe('run-9')
+    // No run joined → nothing to compare against, not a run id of ''.
+    expect(ledgerEvidence(ledger())?.provenRunId).toBeNull()
+  })
+
+  it('splits the MAPPED specs by what the joined run did with them, and ignores the unmapped ones', () => {
+    const evidence = ledgerEvidence(ledger({
+      tests: [
+        { name: 't1', requirements: ['R1'], pathTypes: [], lastRun: { runId: 'run-9', passed: true } },
+        { name: 't2', requirements: ['R1'], pathTypes: [], lastRun: { runId: 'run-9', passed: true } },
+        { name: 't3', requirements: ['R2'], pathTypes: [], lastRun: { runId: 'run-9', passed: false } },
+        // Ran nowhere: new, renamed or never reached. Not a failure.
+        { name: 't4', requirements: ['R2'], pathTypes: [] },
+        // Mapped to nothing — it may pass, but it proves no requirement, so it
+        // must not pad the denominator the proven axis is read against.
+        { name: 't5', requirements: [], pathTypes: [], lastRun: { runId: 'run-9', passed: true } },
+      ],
+    }))
+    expect(evidence?.specs).toEqual({ mapped: 4, passed: 2, failed: 1, neverRan: 1 })
+    // The strength buckets still see every spec — depth is not a proof question.
     expect(evidence?.testCount).toBe(5)
   })
 

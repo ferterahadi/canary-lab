@@ -250,7 +250,16 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     const out: Array<{ feature: string; headline: string | null; summary: string | null; coverage: string | null; coveragePct: number | null }> = []
     for (const f of loadFeatures(deps.featuresDir)) {
       try {
-        const ledger = computeFeatureCoverage({ featuresDir: deps.featuresDir, logsDir: deps.logsDir, feature: f.name })
+        // Hand over the directory we already have — otherwise each iteration
+        // re-loads (and re-compiles) every feature config in the workspace.
+        // A feature without a `featureDir` falls through to the resolver, which
+        // throws FeatureNotFoundError and degrades to nulls below, as before.
+        const ledger = computeFeatureCoverage({
+          featuresDir: deps.featuresDir,
+          logsDir: deps.logsDir,
+          feature: f.name,
+          ...(f.featureDir ? { featureDir: f.featureDir } : {}),
+        })
         out.push({
           feature: f.name,
           headline: ledger.state?.headline ?? null,

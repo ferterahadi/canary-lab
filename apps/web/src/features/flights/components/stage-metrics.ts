@@ -193,35 +193,73 @@ export interface StrengthCounts extends Record<TestStrength, number> {
   ungraded: number
 }
 
+/** The specs that can carry proof at all — the ones annotated to a requirement —
+ *  split by what the joined run did with them. An unmapped spec is excluded
+ *  entirely: it may well pass, but it proves nothing about any requirement, so
+ *  counting it would inflate the denominator with tests that cannot move the
+ *  proven axis.
+ *
+ *  This is NOT the run's pass/fail count (that is the Test Run stage's, and
+ *  reprinting it here is the duplication R80 removed). It is the same population
+ *  the coverage stage reports as "Specs authored", re-read through the run — so
+ *  the two stages describe one set of specs, once claimed and once proven. */
+export interface ProofSpecs {
+  mapped: number
+  passed: number
+  failed: number
+  /** Mapped specs the joined run recorded no outcome for — new, renamed, or
+   *  never reached. Its own bucket: a spec that never ran did not fail. */
+  neverRan: number
+}
+
 export interface LedgerEvidence {
   /** Requirements whose coverage a passing test actually confirmed. Null when
    *  the feature has no recorded run, so there is no proven axis to report. */
   proven: number | null
   total: number
-  provenPct: number | null
-  /** What the coverage stage reports — claimed by annotation, run-blind. */
-  claimedPct: number
+  /** The run `proven` (and every `lastRun` behind `specs`) was joined against.
+   *  Carried through so a caller can check it is the run it is talking about —
+   *  the engine joins the feature's LATEST run, which stops being this report's
+   *  run the moment the suite runs again. Null when no run was joined. */
+  provenRunId: string | null
+  /** Requirements every declared path of which some annotated spec claims — what
+   *  the coverage stage reports, by annotation and run-blind. The COUNT, not the
+   *  percentage: the band renders it as `6/6` against the same denominator
+   *  `proven` uses, so its two gates read as one fraction each and can be
+   *  compared without a unit change in between. */
+  covered: number
   testCount: number
   strength: StrengthCounts
+  specs: ProofSpecs
 }
 
 /** Reshape the coverage ledger into what the Evaluation Report band shows.
- *  Every figure is read off the ledger the engine computed — the percentages
- *  are never recalculated here, so the band, the ledger page and
- *  `get_feature_coverage` cannot disagree. */
+ *  Every figure is read off the ledger the engine computed — nothing here is
+ *  recalculated, so the band, the ledger page and `get_feature_coverage` cannot
+ *  disagree. The band reports COUNTS on one denominator rather than the ledger's
+ *  `coveragePct`/`provenPct` pair, which is why neither percentage is carried:
+ *  two gates over the same requirements compare at a glance as `6/6` and `0/6`,
+ *  where `100%` beside `0/6` made the reader convert one to see the other. */
 export function ledgerEvidence(ledger: CoverageLedger | null | undefined): LedgerEvidence | null {
   if (!ledger || ledger.totals.total === 0) return null
   const strength: StrengthCounts = { strong: 0, solid: 0, basic: 0, shallow: 0, ungraded: 0 }
+  const specs: ProofSpecs = { mapped: 0, passed: 0, failed: 0, neverRan: 0 }
   for (const test of ledger.tests) {
     if (test.strength) strength[test.strength] += 1
     else strength.ungraded += 1
+    if (test.requirements.length === 0) continue
+    specs.mapped += 1
+    if (!test.lastRun) specs.neverRan += 1
+    else if (test.lastRun.passed) specs.passed += 1
+    else specs.failed += 1
   }
   return {
     proven: ledger.totals.proven ?? null,
     total: ledger.totals.total,
-    provenPct: ledger.provenPct ?? null,
-    claimedPct: ledger.coveragePct,
+    provenRunId: ledger.provenRunId ?? null,
+    covered: ledger.totals.covered,
     testCount: ledger.tests.length,
     strength,
+    specs,
   }
 }

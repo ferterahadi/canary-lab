@@ -253,20 +253,42 @@ describe('stageFacts — Requirements source tile', () => {
   const docs = { key: 'docs', status: 'done', evidence: { docs: ['prd.md', 'okr.md'] } } as unknown as FlightStage
   const summary = { key: 'prd-summary', status: 'done', evidence: { requirementCount: 8 } } as unknown as FlightStage
 
-  it('reports BOTH ends of the distillation — input tokens and what came out', () => {
+  it('gives each end of the distillation its OWN weight — source on the source tile, output on the output tile', () => {
     const facts = stageFacts(docs, flight(), summary, { docBytes: 38_000, summaryBytes: 9_000 })
-    const tile = facts.find((f) => f.label === 'Distilled to')
-    expect(tile).toMatchObject({ value: '≈ 2.3k', big: true })
-    // The unit lives in the sub so the big value stays a bare figure; the input
-    // it shrank from rides there too, with both measured byte figures behind it.
-    expect(tile?.sub).toBe('tokens · from ≈ 9.5k · 37.1 KB → 8.8 KB')
-    expect(facts.find((f) => f.label === 'Tokens read')).toBeUndefined()
+    // What went in weighs this much, said on the tile that counts what went in.
+    expect(facts.find((f) => f.label === 'Source docs')).toMatchObject({
+      value: '2',
+      big: true,
+      sub: '≈ 9.5k tokens · 37.1 KB',
+    })
+    // What came out weighs this much, in the same `≈ tokens · KB` order, plus the
+    // compression — computed from the measured bytes, not the token estimates.
+    expect(facts.find((f) => f.label === 'Distilled to')).toMatchObject({
+      value: '≈ 2.3k',
+      big: true,
+      sub: 'tokens · 8.8 KB · 76% smaller',
+    })
+    // The source figures no longer ride the output tile's sub-line, and the
+    // fallback source tile stays away when the docs tile carries the weight.
+    expect(facts.find((f) => f.label === 'Source text')).toBeUndefined()
     expect(facts.find((f) => f.label === 'Distilled from')).toBeUndefined()
   })
 
   it('claims no result before the summary exists — only the source it will read', () => {
     const facts = stageFacts(docs, flight(), summary, { docBytes: 10_000 })
     expect(facts.find((f) => f.label === 'Distilled to')).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Source docs')).toMatchObject({ value: '2', sub: '≈ 2.5k tokens · 9.8 KB' })
+  })
+
+  it('a summary bigger than its source omits the ratio rather than printing a negative one', () => {
+    const facts = stageFacts(docs, flight(), summary, { docBytes: 4_000, summaryBytes: 9_000 })
+    expect(facts.find((f) => f.label === 'Distilled to')?.sub).toBe('tokens · 8.8 KB')
+  })
+
+  it('measured bytes with no docs listed keep their own source tile — nothing else would report them', () => {
+    const noDocs = { key: 'docs', status: 'done', evidence: {} } as unknown as FlightStage
+    const facts = stageFacts(noDocs, flight(), summary, { docBytes: 10_000 })
+    expect(facts.find((f) => f.label === 'Source docs')).toBeUndefined()
     expect(facts.find((f) => f.label === 'Source text')).toMatchObject({ value: '≈ 2.5k', sub: 'tokens · 9.8 KB' })
   })
 })
@@ -480,6 +502,145 @@ describe('stageFacts — evaluation report reads the export task, not the flight
   it('no task and no recorded name means no facts', () => {
     const none = { key: 'evaluation-export', status: 'done', evidence: {} } as FlightStage
     expect(stageFacts(none, flight())).toEqual([])
+  })
+})
+
+describe('stageFacts — the Evaluation Report band reconciles the coverage stage', () => {
+  const task = {
+    taskId: 'eval-x',
+    runId: '2026-07-01T0245-o456',
+    feature: 'checkout',
+    mode: 'localized',
+    status: 'completed',
+    downloadReady: true,
+    createdAt: '2026-07-01T02:45:00Z',
+    updatedAt: '2026-07-01T02:50:00Z',
+    // An archive IS recorded on every test here: the band must still not report
+    // its weight, which now lives on the deliverable card as "Size".
+    archive: { bytes: 105_472, videos: 2, assets: 3 },
+  } as EvaluationExportTask
+  const stage = { key: 'evaluation-export', status: 'done', evidence: { taskId: 'eval-x' } } as FlightStage
+  /** 6 requirements all CLAIMED covered, none proven — the split the band exists
+   *  to expose. Three mapped specs behind them: one passed, one failed, one the
+   *  run never reached. */
+  const joined = (over: Partial<CoverageLedger> = {}): CoverageLedger => ledger({
+    totals: { total: 6, covered: 6, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0, proven: 0 },
+    coveragePct: 100,
+    mappedPct: 100,
+    provenPct: 0,
+    provenRunId: '2026-07-01T0245-o456',
+    tests: [
+      { name: 't1', requirements: ['R1'], pathTypes: [], strength: 'solid', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
+      { name: 't2', requirements: ['R2'], pathTypes: [], strength: 'shallow', lastRun: { runId: '2026-07-01T0245-o456', passed: false } },
+      { name: 't3', requirements: ['R3'], pathTypes: [], strength: 'shallow' },
+    ],
+    ...over,
+  })
+
+  it('reads left to right as the derivation: claim → depth → run → conclusion', () => {
+    const facts = stageFacts(stage, flight(), undefined, { evalTask: task, ledger: joined() })
+    // ORDER IS THE POINT. The conclusion is last because it is what the three
+    // tiles to its left add up to; leading with it (the old band) made `0/6`
+    // arrive before anything that explained it.
+    expect(facts.map((f) => f.label))
+      .toEqual(['Requirements with specs', 'Spec depth', 'Specs that passed', 'Requirements proven'])
+    // Gate one, run-blind: what the coverage stage claimed, as a count on the
+    // same denominator the conclusion uses — not the `100% claimed` jargon this
+    // replaced, which asked the reader to convert a percentage to compare it.
+    expect(facts.find((f) => f.label === 'Requirements with specs'))
+      .toMatchObject({ value: '6/6', tone: 'good', sub: 'every path has a spec claiming it' })
+    // "Spec depth", not "Evidence strength" — the composition card one stage up
+    // puts that exact word on this exact distribution.
+    expect(facts.find((f) => f.label === 'Spec depth'))
+      .toMatchObject({ value: '0 strong', sub: '1 solid · 2 shallow' })
+    expect(facts.find((f) => f.label === 'Specs that passed'))
+      .toMatchObject({ value: '1/3', tone: 'warn', sub: '1 failed · 1 never ran' })
+    // Gate two. Its sub carries the RULE, which is the only thing the three tiles
+    // to the left cannot show: one spec passed, yet nothing is proven, because a
+    // requirement needs every path of it backed by a pass.
+    expect(facts.find((f) => f.label === 'Requirements proven'))
+      .toMatchObject({ value: '0/6', tone: 'warn', sub: 'needs every path backed by a passing spec' })
+    expect(facts.some((f) => f.value.includes('KB'))).toBe(false)
+  })
+
+  it('a partial claim says how many fell short instead of claiming every path', () => {
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({
+        totals: { total: 6, covered: 4, pathIncomplete: 1, variantIncomplete: 0, untested: 1, orphanTests: 0, proven: 0 },
+      }),
+    })
+    expect(facts.find((f) => f.label === 'Requirements with specs'))
+      .toMatchObject({ value: '4/6', tone: 'warn', sub: '2 still have gaps' })
+    // One short reads "has", not "have" — a band that says "1 still have gaps"
+    // reads as a bug in the number rather than a fact about the suite.
+    const one = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({
+        totals: { total: 6, covered: 5, pathIncomplete: 1, variantIncomplete: 0, untested: 0, orphanTests: 0, proven: 0 },
+      }),
+    })
+    expect(one.find((f) => f.label === 'Requirements with specs')?.sub).toBe('1 still has a gap')
+  })
+
+  it('names the unmapped specs, so the run tile is not read as the whole suite', () => {
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({
+        tests: [
+          { name: 't1', requirements: ['R1'], pathTypes: [], strength: 'solid', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
+          // Annotated to nothing: it cannot move the proven axis, so it stays out
+          // of the denominator — but the sub says it exists.
+          { name: 't2', requirements: [], pathTypes: [], strength: 'shallow', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
+        ],
+      }),
+    })
+    expect(facts.find((f) => f.label === 'Specs that passed'))
+      .toMatchObject({ value: '1/1', sub: '1 unmapped' })
+  })
+
+  it('a proven axis joined to a DIFFERENT run names that run instead of speaking for this report', () => {
+    // The engine joins the feature's latest run; after a re-run that is no longer
+    // the run the deliverable card underneath names. That caveat DISPLACES the
+    // rule: a number attributed to the wrong run is worse than an unexplained one.
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({ provenRunId: '2026-07-04T1130-q881' }),
+    })
+    expect(facts.find((f) => f.label === 'Requirements proven')?.sub)
+      .toBe('proven on run 2026-07-04T1130-q881, not this one')
+    // Said once. The specs tile reads the same join and does not repeat the caveat.
+    expect(facts.find((f) => f.label === 'Specs that passed')?.sub).toBe('1 failed · 1 never ran')
+  })
+
+  it('with no run joined, the claim and the depth still render — only the run-grounded halves drop', () => {
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({
+        totals: { total: 6, covered: 6, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+        provenPct: undefined,
+        provenRunId: undefined,
+      }),
+    })
+    // Not "0/3 passed · 3 never ran": with no run to run them, that would read as
+    // a finding about the suite instead of the absence of a run. Coverage is
+    // run-blind though, so the claim tile is honest without one.
+    expect(facts.map((f) => f.label)).toEqual(['Requirements with specs', 'Spec depth'])
+  })
+
+  it('a clean sweep says so rather than leaving the tile bare', () => {
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({
+        totals: { total: 6, covered: 6, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0, proven: 6 },
+        provenPct: 100,
+        tests: [{ name: 't1', requirements: ['R1'], pathTypes: [], strength: 'strong', lastRun: { runId: '2026-07-01T0245-o456', passed: true } }],
+      }),
+    })
+    expect(facts.find((f) => f.label === 'Requirements proven'))
+      .toMatchObject({ value: '6/6', tone: 'good', sub: 'every requirement had a passing spec' })
+    expect(facts.find((f) => f.label === 'Specs that passed'))
+      .toMatchObject({ value: '1/1', tone: 'good', sub: 'every spec passed' })
   })
 })
 

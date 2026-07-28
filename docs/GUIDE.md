@@ -40,7 +40,7 @@ Each run writes to `logs/runs/<runId>/`:
 
 ## Evaluation Report
 
-Completed runs can export an Evaluation Report from the run detail Overview tab — a `.zip` containing `evaluation.html` and captured videos. It summarizes what was tested, the result, and the evidence; each test case expands to show its flowchart, test code, helper code, videos, and checks.
+Completed runs can export an Evaluation Report from the run detail Overview tab — a `.zip` containing `evaluation.html` and captured videos. It summarizes what was tested, the result, and the evidence; each test case expands to show its flowchart, test code, helper code, videos, and checks. When the feature has a PRD summary, the report also opens with a semantic-coverage banner — what the tags claim is covered, beside how much of that this run actually **proved** (a requirement whose covering test passed). The proven figure appears only when the coverage ledger was joined against the very run the report is headed by, so it never attributes another run's outcome to this one.
 
 The Export menu offers two flavors. **Raw output** renders straight from the run evidence — fast, no LLM involved. **Localized output** spawns a local agent to rewrite the per-test reasoning for readability, so it takes longer; you can watch it run in the agent view. Both cover the same tests with the same verdicts — only the wording differs. Exports driven by an external MCP client are always client-authored (Canary Lab never rewrites those).
 

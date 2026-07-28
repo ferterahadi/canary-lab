@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightManifest, FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import { Modal, useEscapeToClose } from '@/shared/ui/atoms'
+import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 import { DeleteSuiteConfirm } from '@/features/config'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
@@ -244,9 +245,10 @@ export function RedoFlightDialog({
             const selected = fromStage === s.key
             const lastStatus = flight.stages.find((st) => st.key === s.key)?.status
             const settled = lastStatus && lastStatus !== 'pending'
-            const badgeTone = selected
-              ? 'var(--accent)'
-              : settled ? stageStatusTone(lastStatus) : 'var(--text-muted)'
+            // The badge is never recoloured for selection — the row's grey says
+            // which one is picked, so the badge is free to keep saying what the
+            // stage's last run did.
+            const badgeTone = settled ? stageStatusTone(lastStatus) : 'var(--text-muted)'
             return (
               <button
                 key={s.key}
@@ -256,14 +258,27 @@ export function RedoFlightDialog({
                 data-testid={`flight-redo-${s.key}`}
                 disabled={!allowed}
                 onClick={() => setFromStage(selected ? null : s.key)}
-                /* Neutral surfaces only — rows sit on the modal's own grey;
-                   selection = the app's selected-grey + one accent bar. */
+                /* Look, selection language and hairline all come from the shared
+                   option row (neutral surface, selected-grey, no accent) — the
+                   same one the start proposal's StageRow and the heal-behavior
+                   modes use, so the three pickers can't drift apart. It owns the
+                   cursor in both directions — a pickable row's pointer comes from
+                   `interactive`, not a utility here — and deliberately does NOT
+                   dim a locked row:
+                   this row's sub-line becomes the server's missing-prerequisite
+                   reason, which is the one thing a blocked row exists to say, and
+                   a blanket opacity multiplies that already-muted 10.5px line
+                   down past readable. Blocked-ness rides on the cursor, the
+                   muted label and the reason text instead.
+                   Hover is gated on `allowed` because `.cl-hover-row:hover` has
+                   no :disabled guard — an unpickable row would otherwise light up
+                   under the pointer while showing `not-allowed`. */
                 className={[
-                  'cl-hover-row flex items-start gap-3 px-3.5 py-2.5 text-left transition-colors border-line',
+                  OPTION_ROW_CLASS,
+                  allowed ? 'cl-hover-row' : '',
                   index > 0 ? 'border-t' : '',
-                  selected ? 'bg-selected shadow-[inset_2px_0_0_var(--accent)]' : 'bg-transparent',
-                  allowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-55',
                 ].filter(Boolean).join(' ')}
+                style={optionRowStyle({ selected, disabled: !allowed, interactive: true })}
               >
                 <span
                   aria-hidden="true"

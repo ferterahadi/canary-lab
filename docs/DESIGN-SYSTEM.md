@@ -272,6 +272,7 @@ set `scrollbar-gutter: stable` so the appearing bar doesn't jump the layout.
 | **`Chip`** (`StatusChip.tsx`) | The one read-only status badge. `chrome: none \| fill \| border`, `tone`, `labelColor`, `background`, `icon`, `label`, `detail`, `uppercase`, `fontSize` (10.5), `width`. Backs `ConnectionBadge`, `RunStatusChip`, `StageStatusChip`, `FlightStatusChip`. |
 | **`StatusPill`** | The one *clickable* status-bar pill. Anatomy: `[dot] [name] [· detail — xl+ only] [count]`. `countTone: neutral \| accent \| boot \| danger`, `emphasis` (accent/danger border+text), `freshPulseKey`, `overlayDot`. |
 | **`PanelCard`** | The one stage-panel slab: `PANEL_CARD_CLASS` + `PANEL_CARD_STYLE` + `cl-rubric` kicker + optional right-aligned `aside`. |
+| **`OptionRow`** | The one pickable-row look: `OPTION_ROW_CLASS` + `optionRowStyle({ selected, disabled })` — neutral surface, selection = `--bg-selected` and nothing else (no accent: every row in a picker is clickable, so accent-tinting the picked one inverts what accent means), locked rows carry a cursor not an opacity. Class + style rather than a component so the caller picks the element: a `<button>` for a plain pick (`StageRow`), a `role="radio"` `<div>` when the row owns a control (the heal modes carry a stepper). |
 | **`StepList` / `StepRow`** | Vertical rail + beads. States `done · active · pending · warn · failed`; 15px indicator cell masks the rail. |
 | **`TestIdBadge`** | `#N` mono badge on `--bg-selected` — source-order identity, rendered identically in every view. |
 | **`Tooltip`**, **`DiffView`**, **`TestCodeBlock`** (Shiki), **`ResizablePanels`** / **`VerticalSplit`**, **`ThemeToggle`** | |
@@ -304,7 +305,8 @@ count. Different interaction models — don't merge them.
 4. **Meaning carries the style.** A status dot or coloured border-inset beats a
    decorative accent. Don't stack accents (border + badge + toggle).
 5. **Neutral surfaces, one accent.** Rows inside modals stay transparent with
-   dividers — never `--bg-base` slabs.
+   dividers — never `--bg-base` slabs. A picked row is `--bg-selected`, not an
+   accent: accent means "you can click this", and in a picker every row can be.
 6. **Worst-first ordering.** Items needing attention sort to the top.
 7. **Never dead-end, never blank.** Every state renders, with a next action.
 8. **Distinct view per lifecycle state** — empty / generating / final each get

@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import ts from 'typescript'
 import { buildTestReviewPacket, createAssertionExport, createAssertionHtml, createEvaluationHtml } from './test-review-export'
+import { THEME_SWITCH_HTML } from './test-review/report-theme'
 import { coverageLedgerFor, detail, lineOf, testEndEvent } from './__fixtures__/test-review-fixtures'
 
 let tmpDir: string
@@ -27,6 +28,50 @@ describe('test review export', () => {
     expect(html).toContain('@req-R1')
     // Specificity is demoted, not removed, and relabeled so it doesn't compete.
     expect(html).toContain('Assertion specificity')
+  })
+
+  it('carries the PROVEN axis when the ledger was joined to THIS run — the panel and the zip stop disagreeing', async () => {
+    // The workspace's Evaluation Report stage leads with "N/M proven". Before
+    // this, the zip it hands over opened with "100% covered" and never mentioned
+    // proof, so a recipient who only ever sees the file got the claim alone.
+    const ledger = coverageLedgerFor('passes checkout')
+    const html = await createEvaluationHtml(detail({ featureDir: tmpDir, title: 'passes checkout' }), {
+      coverage: { ...ledger, provenRunId: 'run-1', provenPct: 100, totals: { ...ledger.totals, proven: 1 } },
+    })
+    expect(html).toContain('proven · this run passed it')
+    expect(html).toContain('100% claimed → 100% proven')
+    // The section can no longer call itself run-free once a run-grounded stat is in it.
+    expect(html).toContain('claimed vs proven')
+    expect(html).not.toContain('run-free')
+  })
+
+  it('omits proven when the ledger was joined to a DIFFERENT run than the report is headed by', async () => {
+    const ledger = coverageLedgerFor('passes checkout')
+    const html = await createEvaluationHtml(detail({ featureDir: tmpDir, title: 'passes checkout' }), {
+      coverage: { ...ledger, provenRunId: 'run-7', provenPct: 100, totals: { ...ledger.totals, proven: 1 } },
+    })
+    // A percentage attributed to the wrong run is worse than no percentage — the
+    // engine joins the feature's LATEST run, which a re-run moves off this one.
+    expect(html).not.toContain('proven · this run passed it')
+    expect(html).toContain('run-free')
+  })
+
+  it('prints no proven stat for a ledger that names a joined run but carries no proven figures', async () => {
+    // The engine sets provenRunId, totals.proven and provenPct together off one
+    // flag, so this state should never reach here — but the type allows each
+    // independently, and a ledger from an older cache or an MCP client can.
+    // Silently rendering "undefined%" under a real run id is the failure mode.
+    const ledger = coverageLedgerFor('passes checkout')
+    const noCount = await createEvaluationHtml(detail({ featureDir: tmpDir, title: 'passes checkout' }), {
+      coverage: { ...ledger, provenRunId: 'run-1', provenPct: 100 },
+    })
+    const noPct = await createEvaluationHtml(detail({ featureDir: tmpDir, title: 'passes checkout' }), {
+      coverage: { ...ledger, provenRunId: 'run-1', totals: { ...ledger.totals, proven: 1 } },
+    })
+    for (const html of [noCount, noPct]) {
+      expect(html).not.toContain('proven · this run passed it')
+      expect(html).toContain('run-free')
+    }
   })
 
   it('falls back to Playwright assertion-specificity when no coverage ledger is provided', async () => {
@@ -68,6 +113,28 @@ describe('test review export', () => {
 
     expect(body).toContain('<h1>Shop Redeeming Eats Voucher</h1>')
     expect(body).toContain('<title>Evaluation Report: Shop Redeeming Eats Voucher</title>')
+  })
+
+  // A `<span>` written inside an `<svg>` is on the HTML parser's foreign-content
+  // breakout list: it closes the svg early and re-parents itself into the button,
+  // adding a second in-flow item to the button's centring grid and lifting that one
+  // icon off the baseline its neighbours share. A stray one in the sun cost 2.25px.
+  // Source review cannot see it — only a rendered measurement can — so the rule is
+  // pinned here instead. See the comment on THEME_SWITCH_HTML.
+  it('keeps the theme-switch icons on one baseline by admitting no HTML element inside their SVGs', () => {
+    const SVG_ELEMENTS = new Set([
+      'svg', 'g', 'defs', 'use', 'title', 'desc',
+      'path', 'circle', 'ellipse', 'line', 'polygon', 'polyline', 'rect',
+    ])
+    const svgs = THEME_SWITCH_HTML.match(/<svg[\s\S]*?<\/svg>/g) ?? []
+
+    expect(svgs).toHaveLength(3)
+    for (const svg of svgs) {
+      const tags = [...svg.matchAll(/<([a-zA-Z][\w-]*)/g)].map((m) => m[1])
+      expect(tags.filter((tag) => !SVG_ELEMENTS.has(tag))).toEqual([])
+    }
+    // The fix removed markup — prove it removed only the stray span, not a label.
+    expect(THEME_SWITCH_HTML.match(/<span class="sr-only">/g)).toHaveLength(3)
   })
 
   it('renders per-test video links after assertions', async () => {

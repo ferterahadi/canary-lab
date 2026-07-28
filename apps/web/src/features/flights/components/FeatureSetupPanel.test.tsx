@@ -39,27 +39,25 @@ afterEach(() => {
 })
 
 describe('FeatureSetupPanel — heal behavior card', () => {
-  it('reads an absent threshold as on at the default, and says what that costs', async () => {
+  it('reads an absent threshold as on at the default, with both run shapes named', async () => {
     await mount()
 
     const card = container.querySelector('[data-testid="setup-heal-card"]')
     expect(card).toBeTruthy()
     expect(card?.textContent).toContain('Heal behavior')
-    expect(card?.querySelector('[data-testid="setup-heal-toggle"]')?.getAttribute('aria-checked')).toBe('true')
+    expect(mode('stop')?.getAttribute('aria-checked')).toBe('true')
+    expect(mode('full')?.getAttribute('aria-checked')).toBe('false')
     expect(threshold()?.value).toBe('2')
     expect(threshold()?.disabled).toBe(false)
-    // The consequence line, not a restatement of the number above it.
-    expect(card?.textContent).toContain('the rest of the suite doesn’t have to finish')
   })
 
-  it('reads an explicit 0 as off — stepper parked at the default so the toggle can come back on', async () => {
+  it('reads an explicit 0 as the run-everything mode — stepper parked at the default so switching back lands on a usable count', async () => {
     await mount({ healOnFailureThreshold: 0 })
 
-    const card = container.querySelector('[data-testid="setup-heal-card"]')
-    expect(card?.querySelector('[data-testid="setup-heal-toggle"]')?.getAttribute('aria-checked')).toBe('false')
+    expect(mode('full')?.getAttribute('aria-checked')).toBe('true')
+    expect(mode('stop')?.getAttribute('aria-checked')).toBe('false')
     expect(threshold()?.disabled).toBe(true)
     expect(threshold()?.value).toBe('2')
-    expect(card?.textContent).toContain('Playwright runs every test before the repair agent starts.')
   })
 
   it('shows an explicit threshold and writes an edit to the same config doc', async () => {
@@ -77,38 +75,67 @@ describe('FeatureSetupPanel — heal behavior card', () => {
     expect(value.name).toBe('checkout')
   })
 
-  it('turning the toggle off persists an explicit 0 rather than dropping the key', async () => {
+  it('picking the run-everything mode persists an explicit 0 rather than dropping the key', async () => {
+    await mount({ healOnFailureThreshold: 3 })
+
+    await act(async () => { mode('full')?.click() })
+    const off = vi.mocked(putFeatureConfigDoc).mock.calls[0][1] as Record<string, unknown>
+    expect(off.healOnFailureThreshold).toBe(0)
+  })
+
+  it('picking stop & heal back restores the default count', async () => {
+    await mount({ healOnFailureThreshold: 0 })
+
+    await act(async () => { mode('stop')?.click() })
+    const on = vi.mocked(putFeatureConfigDoc).mock.calls[0][1] as Record<string, unknown>
+    expect(on.healOnFailureThreshold).toBe(2)
+  })
+
+  it('is keyboard-pickable — Space on a mode selects it, same as a click', async () => {
     await mount({ healOnFailureThreshold: 3 })
 
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="setup-heal-toggle"]')?.click()
+      mode('full')?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }))
     })
     const off = vi.mocked(putFeatureConfigDoc).mock.calls[0][1] as Record<string, unknown>
     expect(off.healOnFailureThreshold).toBe(0)
   })
 
-  it('turning it back on restores the default count', async () => {
-    await mount({ healOnFailureThreshold: 0 })
+  it('clicking the already-picked mode writes nothing — no PUT for a no-op', async () => {
+    await mount({ healOnFailureThreshold: 3 })
 
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="setup-heal-toggle"]')?.click()
-    })
-    const on = vi.mocked(putFeatureConfigDoc).mock.calls[0][1] as Record<string, unknown>
-    expect(on.healOnFailureThreshold).toBe(2)
+    await act(async () => { mode('stop')?.click() })
+    expect(putFeatureConfigDoc).not.toHaveBeenCalled()
   })
 
-  it('mid-run (not editable) reads as text — no toggle to race the conductor with', async () => {
+  it('the unpicked row’s stepper is out of hit-testing, so a click there selects the row', async () => {
+    await mount({ healOnFailureThreshold: 0 })
+
+    // A disabled control swallows the click rather than bubbling it — the
+    // wrapper drops out of hit-testing so the row still gets it.
+    const stepper = threshold()?.closest('div')?.parentElement
+    expect(stepper?.style.pointerEvents).toBe('none')
+
+    // …and once the row IS picked the stepper takes clicks again.
+    await act(async () => { mode('stop')?.click() })
+    await mount({ healOnFailureThreshold: 3 })
+    expect(threshold()?.closest('div')?.parentElement?.style.pointerEvents).toBe('')
+  })
+
+  it('mid-run (not editable) reads as text — no radio to race the conductor with', async () => {
     await mount({ healOnFailureThreshold: 3 }, { editable: false })
 
     const card = container.querySelector('[data-testid="setup-heal-card"]')
-    expect(card?.textContent).toContain('after 3 failure(s)')
-    expect(card?.querySelector('[data-testid="setup-heal-toggle"]')).toBeNull()
+    expect(card?.textContent).toContain('Stop & heal after 3 failure(s)')
+    expect(card?.querySelector('[role="radio"]')).toBeNull()
     expect(threshold()).toBeNull()
   })
 
-  it('mid-run with healing off reads "off"', async () => {
+  it('mid-run with healing off still names the mode that IS in force', async () => {
     await mount({ healOnFailureThreshold: 0 }, { editable: false })
-    expect(container.querySelector('[data-testid="setup-heal-card"]')?.textContent).toContain('off')
+    const card = container.querySelector('[data-testid="setup-heal-card"]')
+    expect(card?.textContent).toContain('Run the whole suite, then heal')
+    expect(card?.querySelector('[role="radio"]')).toBeNull()
   })
 
   it('is absent when the feature config could not be read (a playwright-only digest)', async () => {
@@ -131,6 +158,10 @@ describe('FeatureSetupPanel — heal behavior card', () => {
 
 function threshold(): HTMLInputElement | null {
   return container.querySelector<HTMLInputElement>('[data-testid="setup-heal-threshold"]')
+}
+
+function mode(which: 'stop' | 'full'): HTMLElement | null {
+  return container.querySelector<HTMLElement>(`[data-testid="setup-heal-mode-${which}"]`)
 }
 
 async function mount(

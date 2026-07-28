@@ -122,11 +122,17 @@ export interface ComputeFeatureCoverageArgs {
   featuresDir: string
   logsDir: string
   feature: string
+  /** Pre-resolved feature directory. Callers already holding the loaded feature
+   *  list pass it so this doesn't re-`loadFeatures()` — which busts the require
+   *  cache and re-compiles every `feature.config.cjs`. Looping the whole
+   *  workspace without it cost 34 full loads per request (1122 requires for 33
+   *  features). Omit it and the directory is resolved as before. */
+  featureDir?: string
 }
 
 /** Assemble the full ledger (breadth + depth + drift) for one feature. */
 export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): CoverageLedger {
-  const featureDir = resolveFeatureDir(args.featuresDir, args.feature)
+  const featureDir = args.featureDir ?? resolveFeatureDir(args.featuresDir, args.feature)
   const summary = readPrdSummary(featureDir)
   const requirements = summary?.requirements ?? []
 

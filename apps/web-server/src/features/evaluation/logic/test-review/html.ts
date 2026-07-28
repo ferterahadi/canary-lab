@@ -176,7 +176,7 @@ export async function renderHtml(
           ${packet.endedAt ? `<div><dt>Ended</dt><dd>${escapeHtml(packet.endedAt)}</dd></div>` : ''}
         </dl>
       </header>
-      ${options.coverage ? renderCoverageOverview(options.coverage) : ''}
+      ${options.coverage ? renderCoverageOverview(options.coverage, packet.runId) : ''}
       ${renderMatrix(groups, packet.tests)}
       <section id="test-cases" aria-label="Test cases">
         <h2 class="rule-heading">Test cases<span>${packet.tests.length}</span></h2>
@@ -342,17 +342,35 @@ export function renderCoverageStrength(tc: TestCoverage): string {
 }
 
 // Feature-level Semantic Coverage banner: breadth (mapped) vs depth-by-paths
-// (covered), independent of whether the run passed.
-export function renderCoverageOverview(coverage: CoverageLedger): string {
+// (covered), independent of whether the run passed — plus `proven`, the one axis
+// that is not.
+//
+// Proven is what the workspace's Evaluation Report stage leads with, and this
+// report used to omit it entirely: the panel said "0/6 proven" while the zip it
+// handed over opened with "100% covered" and never mentioned proof. A recipient
+// who only ever sees the file got the claim without the correction.
+//
+// It renders ONLY when the ledger's joined run is this report's run. The coverage
+// engine joins the feature's LATEST recorded run, so on a suite that has run
+// again since the export, `proven` describes a different run than the masthead
+// names — and a percentage under the wrong run id is worse than no percentage.
+export function renderCoverageOverview(coverage: CoverageLedger, runId: string): string {
   const t = coverage.totals
+  const proven = coverage.provenRunId === runId && t.proven != null && coverage.provenPct != null
+    ? { count: t.proven, pct: coverage.provenPct }
+    : null
   return `<section class="coverage" aria-label="Semantic coverage">
-    <h2 class="rule-heading">Semantic coverage<span>run-free</span></h2>
+    <h2 class="rule-heading">Semantic coverage<span>${proven ? 'claimed vs proven' : 'run-free'}</span></h2>
     <div class="stat-row">
       <div class="stat"><span class="stat-value">${coverage.coveragePct}<span class="stat-unit">%</span></span><span class="stat-label">covered · every path</span></div>
       <div class="stat"><span class="stat-value">${coverage.mappedPct}<span class="stat-unit">%</span></span><span class="stat-label">mapped · has a test</span></div>
+      ${proven ? `<div class="stat"><span class="stat-value">${proven.pct}<span class="stat-unit">%</span></span><span class="stat-label">proven · this run passed it</span></div>` : ''}
       <div class="stat"><span class="stat-value">${t.covered}<span class="stat-unit">/${t.total}</span></span><span class="stat-label">requirements covered</span></div>
     </div>
     <p class="muted">Coverage measures whether a test maps to each requirement's declared paths. It is independent of this run — a requirement can be fully covered by a test that never executed (${t.untested} untested, ${t.pathIncomplete} path-incomplete).</p>
+    ${proven
+      ? `<p class="muted"><strong>${proven.count} of ${t.total}</strong> requirements are <em>proven</em>: covered <em>and</em> confirmed by a test that passed in this run. ${coverage.coveragePct}% claimed → ${proven.pct}% proven is the distance between what this suite says it covers and what this run actually demonstrated.</p>`
+      : ''}
   </section>`
 }
 

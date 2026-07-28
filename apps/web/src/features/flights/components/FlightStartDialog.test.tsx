@@ -279,9 +279,12 @@ describe('FlightStartDialog — fresh intent (R76)', () => {
     expect(first.tagName).toBe('DIV')
     expect(later.tagName).toBe('DIV')
     expect(first.getAttribute('role')).toBeNull()
-    // The restart is what happens, so the lead row carries the selected mark.
-    expect(first.getAttribute('style')).toContain('var(--accent)')
-    expect(later.getAttribute('style')).not.toContain('var(--accent)')
+    // The restart is what happens, so the lead row carries the selected mark —
+    // the app's selected-grey, and no accent: every row in a picker is
+    // clickable, so accent-tinting the picked one would invert what blue means.
+    expect(first.getAttribute('style')).toContain('var(--bg-selected)')
+    expect(first.getAttribute('style')).not.toContain('var(--accent)')
+    expect(later.getAttribute('style')).not.toContain('var(--bg-selected)')
   })
 
   it('shows bare step numbers, never the wiped flight\'s status glyphs', async () => {

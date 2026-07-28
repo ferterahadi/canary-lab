@@ -94,6 +94,31 @@ describe('GeneralTab', () => {
     expect('group' in savedValue).toBe(false)
   })
 
+  it('offers the same two run shapes as the flight digest, and persists an explicit 0 for the run-everything one', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(doc('feat'))
+    vi.mocked(putFeatureConfigDoc).mockResolvedValue(doc('feat'))
+
+    await act(async () => {
+      root.render(<GeneralTab feature="feat" />)
+    })
+
+    // An absent threshold reads as on at the default — not as "off" — and both
+    // shapes are named, so the cost of the other one isn't hidden behind a
+    // switch the user has to flip to discover.
+    const stop = container.querySelector('[data-testid="general-heal-mode-stop"]')
+    const full = container.querySelector('[data-testid="general-heal-mode-full"]')
+    expect(stop?.getAttribute('aria-checked')).toBe('true')
+    expect(full?.getAttribute('aria-checked')).toBe('false')
+    expect(container.querySelector<HTMLInputElement>('[data-testid="general-heal-threshold"]')?.value).toBe('2')
+
+    await act(async () => {
+      full!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await clickSave()
+    expect(putFeatureConfigDoc).toHaveBeenCalledWith('feat', expect.objectContaining({ healOnFailureThreshold: 0 }))
+  })
+
   async function clickSave(): Promise<void> {
     const save = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Save')
     expect(save).toBeTruthy()

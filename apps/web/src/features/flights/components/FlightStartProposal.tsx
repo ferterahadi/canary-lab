@@ -3,6 +3,7 @@ import * as api from '@/shared/api/client'
 import type { PlanFeaturesTask, PlannedFeature } from '@/shared/api/client'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { Textarea } from '@/shared/ui/atoms'
+import { OPTION_ROW_CLASS, optionRowStyle } from '@/shared/ui/OptionRow'
 
 /** R54: the breakdown agent owns the dialog while it thinks — its timeline is
  *  the content. Closing (the modal's ✕) doesn't stop the agent: the plan runs
@@ -304,8 +305,8 @@ export function StageRow({
   const badge = icon !== '·' ? icon : step != null ? String(step) : icon
   // Status glyphs (and caller icons like ▸) keep their meaningful hue; a bare
   // pipeline number reads in secondary so the sequence stays legible. Selection
-  // is carried by the row's accent inset bar alone — the badge is never
-  // recoloured for it, so the accent never stacks.
+  // is carried by the row's selected-grey alone — the badge is never recoloured
+  // for it, so nothing in the row competes with the status hues.
   const badgeTone = icon !== '·' ? iconTone : 'var(--text-secondary)'
   const body = (
     <>
@@ -332,16 +333,15 @@ export function StageRow({
       </span>
     </>
   )
+  // Look and selection language come from the shared option row (neutral
+  // surface, selected-grey, no accent) — the same one the heal-behavior modes
+  // use, so the two pickers can't drift apart.
   if (readOnly) {
     return (
       <div
         data-testid={testId}
-        className={`flex items-start gap-3 px-3.5 py-2.5 text-left ${divider ? 'border-t' : ''}`}
-        style={{
-          borderColor: 'var(--border-default)',
-          background: selected ? 'var(--bg-selected)' : 'transparent',
-          boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
-        }}
+        className={`${OPTION_ROW_CLASS} ${divider ? 'border-t' : ''}`}
+        style={optionRowStyle({ selected })}
       >
         {body}
       </div>
@@ -355,19 +355,8 @@ export function StageRow({
       data-testid={testId}
       disabled={disabled}
       onClick={onPick}
-      className={`flex items-start gap-3 px-3.5 py-2.5 text-left ${disabled ? '' : 'cl-hover-row'} ${divider ? 'border-t' : ''}`}
-      style={{
-        // Neutral surfaces only — the rows sit on the modal's own grey, never
-        // a tinted slab. Selection = the app's selected-grey + one accent bar.
-        borderColor: 'var(--border-default)',
-        background: selected ? 'var(--bg-selected)' : 'transparent',
-        // Locked rows are NOT dimmed: a blanket opacity multiplied every child
-        // (label, reason, badge) down past readable — and the reason line is
-        // exactly what a locked row exists to say. Locked-ness is carried by the
-        // label dropping to secondary + the not-allowed cursor instead.
-        cursor: disabled ? 'not-allowed' : undefined,
-        boxShadow: selected ? 'inset 2px 0 0 var(--accent)' : undefined,
-      }}
+      className={`${OPTION_ROW_CLASS} ${disabled ? '' : 'cl-hover-row'} ${divider ? 'border-t' : ''}`}
+      style={optionRowStyle({ selected, disabled, interactive: true })}
     >
       {body}
     </button>

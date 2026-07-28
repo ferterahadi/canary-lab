@@ -95,6 +95,15 @@ export function App() {
   // picker rows resolve from, so the two agree on where a suite's flight lives
   // (a recorded id, or the `feature:` derived token for progress made outside
   // the conductor) and on the state the icon reports.
+  // Stable identity on purpose: FeaturesColumn holds this in a fetch effect's
+  // dep list, and a fresh arrow per render made it refetch every feature's
+  // coverage on every render. The column guards against that too — this keeps
+  // the prop honest at the source.
+  const openCoverageFor = useCallback((feature: string): void => {
+    setSelectedFeature(feature)
+    setView('coverage')
+  }, [setSelectedFeature, setView])
+
   const flightAction = useCallback(
     (feature: string) => resolveFeatureFlightAction(feature, flights, featureActivity.get(feature), derivedStages.get(feature)),
     [flights, featureActivity, derivedStages],
@@ -255,7 +264,7 @@ export function App() {
           }}
           onFeaturesChanged={refreshFeatures}
           versionStatus={versionStatus}
-          onOpenCoverage={(f) => { setSelectedFeature(f); setView('coverage') }}
+          onOpenCoverage={openCoverageFor}
           onStartNewFlight={() => setFlightStartNew(true)}
           onOpenFlight={openFlight}
           flightAction={flightAction}

@@ -137,8 +137,13 @@ export function FeaturesColumn({
   // every feature's coverage on a tight loop).
   const [coverageHeadlines, setCoverageHeadlines] = useState<Record<string, string | null>>({})
   const featureKey = features.map((f) => f.name).join(',')
+  // The effect only asks *whether* coverage is reachable, never calls the handler.
+  // Depending on the callback itself made every App re-render refetch all the
+  // features' coverage — App passes a fresh arrow each render, and one ledger
+  // recompute per feature is the most expensive route in the app.
+  const canOpenCoverage = Boolean(onOpenCoverage)
   useEffect(() => {
-    if (!onOpenCoverage || features.length === 0) return
+    if (!canOpenCoverage || features.length === 0) return
     let alive = true
     api.listCoverageStates()
       .then((states) => {
@@ -149,7 +154,7 @@ export function FeaturesColumn({
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [featureKey, onOpenCoverage, features.length, coverageRefreshKey])
+  }, [featureKey, canOpenCoverage, features.length, coverageRefreshKey])
 
   // R55: features declaring a `group` collapse under an accordion; the rest
   // stay flat. Sections order worst-first (a group with a running/dirty

@@ -37,14 +37,22 @@ export const CSS_CHROME = `
 .topbar-now:not(:empty) { opacity: 1; }
 
 .topbar-tools { display: flex; align-items: center; gap: 10px; flex: none; }
+
+/* The run chip and the theme switch are two pills side by side, so they share one
+ * explicit height — otherwise the chip is sized by its line box and the switch by
+ * its buttons, and the two never agree. Worse, the chip's line box comes from
+ * whichever mono font resolves on the READER's machine, so the mismatch was not
+ * even a fixed 2.4px: it drifted per recipient. Height first, padding second. */
+.run-chip, .theme-switch { height: var(--tool-height); }
 .run-chip {
-  padding: 4px 9px; border-radius: 999px;
+  display: inline-flex; align-items: center;
+  padding: 0 10px; border-radius: 999px;
   background: var(--surface-2); border: 1px solid var(--rule);
   color: var(--ink-2); font-size: 11px; letter-spacing: 0.02em;
 }
 
 .theme-switch {
-  display: inline-flex; padding: 2px; gap: 1px;
+  display: inline-flex; align-items: center; padding: 2px; gap: 1px;
   background: var(--surface-2); border: 1px solid var(--rule);
   border-radius: 999px;
 }

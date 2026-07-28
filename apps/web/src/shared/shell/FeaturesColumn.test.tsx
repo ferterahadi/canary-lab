@@ -9,6 +9,15 @@ import { FeaturesColumn } from './FeaturesColumn'
 
 const gatePromo = vi.fn((_action: string, continueAction: () => void) => continueAction())
 
+// Hoisted so the factory below can close over it without re-importing the mocked
+// module (that shape deadlocks vitest collection).
+const { listCoverageStates } = vi.hoisted(() => ({ listCoverageStates: vi.fn() }))
+
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
+  listCoverageStates,
+}))
+
 vi.mock('./McpPromoContext', () => ({
   useMcpPromo: () => ({ gatePromo }),
 }))
@@ -34,6 +43,8 @@ beforeEach(() => {
   root = createRoot(container)
   gatePromo.mockReset()
   gatePromo.mockImplementation((_action: string, continueAction: () => void) => continueAction())
+  listCoverageStates.mockReset()
+  listCoverageStates.mockResolvedValue([])
 })
 
 afterEach(() => {
@@ -422,5 +433,53 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
       )
     })
     expect(container.querySelector('[data-testid="flight-shortcut-beta"]')).toBeTruthy()
+  })
+})
+
+describe('FeaturesColumn coverage-headline fetching', () => {
+  const feature = (name: string) => ({ name, repos: [], envs: [] })
+
+  // `/api/coverage/states` recomputes every feature's ledger server-side, so the
+  // column must ask once per feature set — not once per render. App passes
+  // `onOpenCoverage` as a fresh arrow every render; depending on it turned each
+  // re-render into a full workspace-wide recompute (38 requests on one page load).
+  const renderWith = async (features: ReturnType<typeof feature>[]) => {
+    await act(async () => {
+      root.render(
+        <FeaturesColumn
+          features={features}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          onOpenCoverage={(f) => void f}
+        />,
+      )
+    })
+  }
+
+  it('does not refetch when only the onOpenCoverage identity changes', async () => {
+    await renderWith([feature('alpha')])
+    expect(listCoverageStates).toHaveBeenCalledTimes(1)
+
+    // Same feature set, brand-new callback instance — what every App render does.
+    await renderWith([feature('alpha')])
+    await renderWith([feature('alpha')])
+    expect(listCoverageStates).toHaveBeenCalledTimes(1)
+  })
+
+  it('still refetches when the feature set changes', async () => {
+    await renderWith([feature('alpha')])
+    expect(listCoverageStates).toHaveBeenCalledTimes(1)
+
+    await renderWith([feature('alpha'), feature('beta')])
+    expect(listCoverageStates).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not fetch at all when coverage is not reachable', async () => {
+    await act(async () => {
+      root.render(
+        <FeaturesColumn features={[feature('alpha')]} selectedFeature={null} onSelectFeature={() => {}} />,
+      )
+    })
+    expect(listCoverageStates).not.toHaveBeenCalled()
   })
 })

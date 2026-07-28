@@ -43,6 +43,14 @@ export interface DirtySpecStoreEvent {
   featureId?: string
 }
 
+/** Whole-record equality, used to skip a no-op write+emit. Deliberately a
+ *  stringify compare rather than a field-by-field one: it fails OPEN (any key
+ *  reordering, added field, or legacy record missing a hash map reads as
+ *  different and therefore saves), so it can never swallow a real transition. */
+function sameRecord(a: DirtySpecRecord, b: DirtySpecRecord): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
 function emptyRecord(featureId: string, now: string): DirtySpecRecord {
   return {
     id: featureId,
@@ -108,6 +116,17 @@ export class DirtySpecStore {
       message: DIRTY_MESSAGE,
       since: changed ? this.now() : rec.since,
     }
+    // A recompute that found nothing new must not write or emit. Every emit
+    // becomes a `tests-dirty-changed` push and a full `/api/features` refetch,
+    // so one `.git` write used to cost the client one refetch per feature
+    // sharing that git root (measured: 33).
+    //
+    // Compare against what is on DISK, not against `rec` — callers pass an
+    // already-augmented record (`captureRunStart` rewrites the baselines and
+    // leaves status/dirtySpecs alone), so comparing to `rec` would silently
+    // drop a legitimate baseline write.
+    const stored = this.get(next.featureId)
+    if (stored && sameRecord(stored, next)) return next
     this.store.save(next)
     return next
   }

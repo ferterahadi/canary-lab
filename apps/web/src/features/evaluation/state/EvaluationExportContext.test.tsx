@@ -102,17 +102,24 @@ describe('EvaluationExportProvider', () => {
     expect(api.listEvaluationExportTasks).toHaveBeenCalledWith()
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['persisted-completed', 'persisted-running'])
     expect(captured.value?.taskForRun('run-persisted')?.taskId).toBe('persisted-running')
+    // Only the live task gets a stream on mount. A finished export's log is
+    // historical and is pulled by `watchTask` when a panel surfaces it.
     expect(exportSockets().map((socket) => socket.url)).toEqual([
-      'ws://test/ws/evaluation-exports/persisted-completed',
       'ws://test/ws/evaluation-exports/persisted-running',
     ])
 
     act(() => {
-      taskSocket('persisted-completed').fire({ type: 'data', chunk: 'completed restored log\n' })
       taskSocket('persisted-running').fire({ type: 'data', chunk: 'running restored log\n' })
     })
-    expect(captured.value?.logsByTaskId['persisted-completed']).toContain('completed restored log')
     expect(captured.value?.logsByTaskId['persisted-running']).toContain('running restored log')
+
+    act(() => {
+      captured.value?.watchTask('persisted-completed')
+    })
+    act(() => {
+      taskSocket('persisted-completed').fire({ type: 'data', chunk: 'completed restored log\n' })
+    })
+    expect(captured.value?.logsByTaskId['persisted-completed']).toContain('completed restored log')
   })
 
   it('starts an export, streams logs, refreshes on exit, and exposes lookup helpers', async () => {
@@ -223,12 +230,36 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    // Startup reconciliation already subscribed it once; watchTask stays a no-op.
-    expect(exportSockets()).toHaveLength(1)
+    // Mount leaves finished tasks alone, so this is the only path that attaches.
+    expect(exportSockets()).toHaveLength(0)
     act(() => {
       captured.value?.watchTask('cold-task')
     })
     expect(exportSockets()).toHaveLength(1)
+
+    // Panels call watchTask from an effect, so repeat calls must not re-attach.
+    act(() => {
+      captured.value?.watchTask('cold-task')
+      captured.value?.watchTask('cold-task')
+    })
+    expect(exportSockets()).toHaveLength(1)
+  })
+
+  it('replays a finished export log once a panel watches it', async () => {
+    const done = task({ taskId: 'cold-task', runId: 'run-cold', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([done])
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    act(() => {
+      captured.value?.watchTask('cold-task')
+    })
+    act(() => {
+      taskSocket('cold-task').fire({ type: 'data', chunk: 'completed restored log\n' })
+    })
+    expect(captured.value?.logsByTaskId['cold-task']).toContain('completed restored log')
   })
 
   it('handles duplicate task subscriptions and string failures', async () => {
@@ -456,13 +487,15 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(exportSockets()).toHaveLength(1)
+    // A completed task is never attached on discovery — not on the first pass…
+    expect(exportSockets()).toHaveLength(0)
 
     await act(async () => {
       vi.advanceTimersByTime(3000)
       await Promise.resolve()
     })
 
-    expect(exportSockets()).toHaveLength(1)
+    // …and not on a later one either.
+    expect(exportSockets()).toHaveLength(0)
   })
 })
