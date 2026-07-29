@@ -10,6 +10,7 @@ import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
+import { SkeletonRows, awaitingFor } from '@/shared/ui/Skeleton'
 import { useStageBandData } from './use-stage-band-data'
 import {
   AllReportsPanel,
@@ -82,6 +83,11 @@ export function StageDetail({
   const runMerged = stage.key === 'run'
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
+  // R83: the pane keeps its SETTLED layout in every state — each card a finished
+  // stage shows renders as its own skeleton until it has content. Undefined once
+  // the stage settles, so a card with genuinely nothing to show still renders
+  // nothing rather than promising more.
+  const awaiting = awaitingFor(row.status, live)
   // The Evaluation Report's deliverable: one resolved export task feeds both the
   // facts (run · report mode · archive name) and the activity rail below, so the
   // card reads the same on a conducted flight and a derived one.
@@ -202,7 +208,11 @@ export function StageDetail({
           offers it beside the filename it fetches, and every archive has its own
           row in the reports list — a third button for the same file, a hand's
           width above both, is the duplication R82 removed for Restart. */}
-      <FactsGrid facts={facts} />
+      {/* R83: the band renders in EVERY state — measured tiles where the stage
+          has evidence, placeholders where it doesn't yet, sweeping while it
+          works. A stage pane no longer collapses to a bare sentence, and a value
+          lands in the slot its placeholder held. */}
+      <FactsGrid facts={facts} live={live} />
 
       {/* Paused with nothing else to act on (no checkpoint, no error): the
           "how to pick it back up" card fills the void the state sentence alone
@@ -223,6 +233,7 @@ export function StageDetail({
       {stage.key === 'scout' && (
         <RepoScanPanel
           flight={flight}
+          status={stage.status}
           envFiles={(() => {
             const ev = (stage.evidence ?? {}) as Record<string, unknown>
             return Array.isArray(ev.envFiles) ? (ev.envFiles as unknown[]).filter((f): f is string => typeof f === 'string') : []
@@ -239,6 +250,7 @@ export function StageDetail({
           screenful of start commands. */}
       {(stage.key === 'scaffold' || stage.key === 'env-capture') && (
         <BootCheckPanel
+          awaiting={awaiting}
           boot={band.boot ?? null}
           recorded={(() => {
             const ev = ((companion ?? stage).evidence ?? {}) as Record<string, unknown>
@@ -251,9 +263,10 @@ export function StageDetail({
       {/* Suite setup (R43): the editable digest over the REAL on-disk config
           — same doc Advanced setup (FeatureConfigEditor) edits, live both
           ways. The Advanced setup button rides the stage header above. */}
-      {stage.key === 'scaffold' && stage.status !== 'pending' && (
+      {stage.key === 'scaffold' && (
         <FeatureSetupPanel
           feature={flight.feature}
+          awaiting={awaiting}
           editable={flight.status !== 'running'}
           refreshKey={configRefreshKey}
           /* Same gate as the header action: only once the config exists on
@@ -271,7 +284,7 @@ export function StageDetail({
           gated on the FLIGHT being parked too: a stale checkpoint on a
           paused/aborted record must never render an answerable ask that can
           only 409 (respond requires waiting-for-approval). */}
-      {stage.key === 'docs' && stage.status !== 'pending' && (
+      {stage.key === 'docs' && (
         flight.status === 'waiting-for-approval' && checkpointStage?.checkpoint?.kind === 'prd-source' ? (
           <RequirementsFork
             flightId={flightId}
@@ -282,6 +295,7 @@ export function StageDetail({
         ) : (
           <FlightDocsPanel
             feature={flight.feature}
+            awaiting={awaiting}
             approved={stage.status === 'done'}
             refreshKey={docsRefreshKey}
             summaryStatus={companion?.status}
@@ -307,10 +321,11 @@ export function StageDetail({
           adapter's `interrupt`), so the run is often still going. Keeping it
           mounted keeps its verdict, its score and its failing tests on screen,
           and the poll alive, while the flight waits for Continue. */}
-      {runMerged && runId && (
+      {runMerged && (runId || awaiting) && (
         <TestRunPanel
           feature={flight.feature}
           runId={runId}
+          awaiting={awaiting}
           live={Boolean(runLive) || live}
           evidence={runEvidence}
           onOpenRun={drill.onOpenRun}
@@ -321,18 +336,30 @@ export function StageDetail({
       {/* Test authoring & coverage: the two distributions behind the band's
           counts — spec depth and requirement gap kinds. Above the pass timeline
           because it describes the RESULT; the timeline is how it got there. */}
-      {stage.key === 'specs-coverage' && <CoverageCompositionPanel ledger={band.ledger ?? null} />}
+      {stage.key === 'specs-coverage' && <CoverageCompositionPanel ledger={band.ledger ?? null} awaiting={awaiting} />}
 
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
           timeline — coverage % after each mapping feeds the next authoring. */}
-      {loopProgress && <SpecsPassTimeline progress={loopProgress} live={live} />}
+      {loopProgress
+        ? <SpecsPassTimeline progress={loopProgress} live={live} />
+        : stage.key === 'specs-coverage' && awaiting
+          ? (
+            // The loop's own shape before it starts: the same rubric heading and
+            // row list the timeline becomes, so the card doesn't appear from
+            // nowhere on the first pass.
+            <div data-testid="specs-pass-skeleton">
+              <h3 className="cl-rubric mb-2">Passes</h3>
+              <SkeletonRows awaiting={awaiting} rows={2} />
+            </div>
+          )
+          : null}
 
       {/* Parallel readiness: the concurrent-boot evidence, then what was edited
           to get there. */}
       {stage.key === 'portify' && (
         <>
-          <DoubleBootPanel portify={band.portify ?? null} />
-          <OverlayPanel portify={band.portify ?? null} />
+          <DoubleBootPanel portify={band.portify ?? null} awaiting={awaiting} />
+          <OverlayPanel portify={band.portify ?? null} awaiting={awaiting} />
         </>
       )}
 
@@ -341,8 +368,8 @@ export function StageDetail({
           where the newest one is announced. */}
       {stage.key === 'evaluation-export' && (
         <>
-          <EvaluationDeliverablePanel task={band.evalTask ?? null} />
-          <AllReportsPanel feature={flight.feature} pinnedTaskId={evalTaskId} />
+          <EvaluationDeliverablePanel task={band.evalTask ?? null} awaiting={awaiting} />
+          <AllReportsPanel feature={flight.feature} pinnedTaskId={evalTaskId} awaiting={awaiting} />
         </>
       )}
 

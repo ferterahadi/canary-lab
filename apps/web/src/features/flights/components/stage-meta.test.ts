@@ -210,7 +210,11 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       evidence: { gaps: [{ gap: 'untested' }, { gap: 'path-incomplete' }] },
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
-    expect(facts.find((f) => f.label === 'Requirements')).toBeUndefined()
+    // The requirement TOTAL is still never invented from the gap count — but as
+    // of R83 the tile holds its slot as a placeholder instead of being absent,
+    // so the total lands where the reader was already looking once the ledger
+    // exists. What it must NOT do is carry a figure.
+    expect(facts.find((f) => f.label === 'Requirements')).toEqual({ label: 'Requirements', value: '', awaiting: true })
     expect(facts.find((f) => f.label === 'Coverage gaps')).toMatchObject({ value: '2', big: true })
   })
 
@@ -369,9 +373,15 @@ describe('portify live progress (workflow id + phase mirror)', () => {
     expect(facts.find((f) => f.label === 'Phase')?.value).toBe('Agent editing services')
   })
 
-  it('running facts: older flights without the mirror render no half-empty tiles', () => {
-    expect(stageFacts(running({ workflowId: 'wf1' }), flight())).toEqual([])
-    expect(stageFacts(running(), flight())).toEqual([])
+  it('running facts: older flights without the mirror render placeholders, never a half-empty tile', () => {
+    // The rule this test has always protected is that a missing live mirror must
+    // not produce a tile carrying a made-up figure. R83 keeps that and fills the
+    // settled shape with placeholders, so the band shows what is coming.
+    for (const stage of [running({ workflowId: 'wf1' }), running()]) {
+      const facts = stageFacts(stage, flight())
+      expect(facts.map((f) => f.label)).toEqual(['Services injectable', 'Files edited', 'Instances proven'])
+      expect(facts.every((f) => f.awaiting === true && f.value === '')).toBe(true)
+    }
   })
 
   it('running state line follows the phase; unknown/missing phase falls back to the generic line', () => {

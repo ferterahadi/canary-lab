@@ -6,6 +6,7 @@ import { DocPill, readAsBase64 } from '@/features/coverage/components/CoverageDo
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
+import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 
 // ─── Requirements (R74): the two-path fork + the resting docs panel ──────────
 // While the flight is parked on the prd-source checkpoint the FORK owns the
@@ -83,6 +84,7 @@ export function FlightDocsPanel({
   refreshKey,
   summaryStatus,
   requirementCount,
+  awaiting,
 }: {
   feature: string
   /** Stage settled done — requirements approved, the doc set is frozen. */
@@ -93,6 +95,9 @@ export function FlightDocsPanel({
   summaryStatus?: FlightStageStatus
   /** Live requirement count from the folded prd-summary's evidence. */
   requirementCount?: number
+  /** R83: the stage hasn't settled — an empty half renders as its skeleton
+   *  rather than as a flat "none" sentence, which reads as a finding. */
+  awaiting?: AwaitingState
 }) {
   const docs = useFlightDocs(feature, refreshKey)
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
@@ -114,7 +119,9 @@ export function FlightDocsPanel({
           )}
         </div>
         {docs.sourceDocs.length === 0 ? (
-          <div className="text-[11px] text-muted">No source docs.</div>
+          awaiting
+            ? <SkeletonRows awaiting={awaiting} rows={2} sub={false} />
+            : <div className="text-[11px] text-muted">No source docs.</div>
         ) : (
           <div className="flex flex-col gap-2">
             {docs.sourceDocs.map((d) => (
@@ -146,17 +153,19 @@ export function FlightDocsPanel({
           artifact existing) so the running state has a card too — otherwise
           the panel is a blank gap for the whole distillation, which is the
           longest part of the stage. */}
-      {showDistilled && (
+      {(showDistilled || awaiting) && (
         <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE} data-testid="flight-distilled-panel">
           <div className="flex items-center gap-2">
             <div className={PANEL_KICKER_CLASS}>
               {requirementCount != null ? `Distilled requirements · ${requirementCount}` : 'Distilled requirements'}
             </div>
             <div className="flex-1" />
-            <span className="mb-1 flex items-center gap-1.5 text-[10px] text-muted" data-testid="docs-summary-chip">
-              Summary
-              <StageStatusChip status={summaryStatus} />
-            </span>
+            {summaryStatus && (
+              <span className="mb-1 flex items-center gap-1.5 text-[10px] text-muted" data-testid="docs-summary-chip">
+                Summary
+                <StageStatusChip status={summaryStatus} />
+              </span>
+            )}
           </div>
 
           {docs.generatedDocs.length > 0 ? (
@@ -177,6 +186,8 @@ export function FlightDocsPanel({
                 />
               ))}
             </div>
+          ) : awaiting && summaryStatus !== 'running' && summaryStatus !== 'failed' ? (
+            <SkeletonLines awaiting={awaiting} rows={2} />
           ) : (
             <div className="text-[11px] text-muted">
               {summaryStatus === 'running'

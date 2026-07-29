@@ -6,6 +6,8 @@ import { FixesCapturedPanel, RunRow } from '@/features/runs'
 import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
 import { FactsGrid, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
+import { awaitingFact } from './StageFacts'
+import { SkeletonBar, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 import { runHistoryStats } from './stage-metrics'
 import { formatDuration } from '@/shared/lib/format'
 
@@ -52,9 +54,12 @@ export function TestRunPanel({
   evidence,
   onOpenRun,
   onError,
+  awaiting,
 }: {
   feature: string
-  runId: string
+  /** Absent until the stage HAS a run — the hero then renders as its own
+   *  skeleton (R83) rather than the stage pane going blank. */
+  runId?: string
   /** A run for this feature is active right now — drives the poll cadence. */
   live: boolean
   evidence: RunStageEvidence
@@ -62,6 +67,9 @@ export function TestRunPanel({
    *  detail lands on the Playwright tab, scrolled to that test (R82). */
   onOpenRun?: (feature: string, runId: string, focusTest?: string) => void
   onError?: (msg: string) => void
+  /** R83: the run stage hasn't settled. Regions with nothing in them yet hold
+   *  their place as placeholders instead of collapsing the pane. */
+  awaiting?: AwaitingState
 }) {
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [runs, setRuns] = useState<RunIndexEntry[]>([])
@@ -75,7 +83,7 @@ export function TestRunPanel({
   useEffect(() => {
     let alive = true
     const load = (): void => {
-      api.getRunDetail(runId).then((d) => { if (alive) setDetail(d) }).catch(() => {})
+      if (runId) api.getRunDetail(runId).then((d) => { if (alive) setDetail(d) }).catch(() => {})
       api.listRuns({ feature }).then((r) => { if (alive) setRuns(r) }).catch(() => {})
     }
     load()
@@ -96,7 +104,7 @@ export function TestRunPanel({
     () => runs.filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify'),
     [runs],
   )
-  const idx = featureRuns.findIndex((r) => r.runId === runId)
+  const idx = runId ? featureRuns.findIndex((r) => r.runId === runId) : -1
   const ordinal = idx >= 0 ? featureRuns.length - idx : null
   const previous = featureRuns
     .filter((r) => r.runId !== runId)
@@ -106,8 +114,8 @@ export function TestRunPanel({
   // The identity row is a RunRow — same chrome as the runs list, so the run
   // reads as the one object it is. Prefer the live index entry; synthesize one
   // from the manifest/evidence before the list resolves.
-  const currentEntry: RunIndexEntry = featureRuns.find((r) => r.runId === runId) ?? {
-    runId,
+  const currentEntry: RunIndexEntry = (runId ? featureRuns.find((r) => r.runId === runId) : undefined) ?? {
+    runId: runId ?? '',
     feature,
     startedAt: manifest?.startedAt ?? '',
     status,
@@ -117,7 +125,7 @@ export function TestRunPanel({
   const stats = runStats({ summary, healCycles, healEnd, services: manifest?.services })
   const failing = summary?.failed ?? []
   const active = live && (status === 'running' || status === 'healing')
-  const runRef = shortRunRef(runId)
+  const runRef = runId ? shortRunRef(runId) : null
 
   const report = (err: unknown): void => onError?.(err instanceof Error ? err.message : String(err))
 
@@ -128,9 +136,19 @@ export function TestRunPanel({
           band-data hook would be two requests for one answer. It reports the
           HISTORY (how many runs, how they ended, how long they take); the hero
           below reports the latest run. Different scopes, so no number repeats. */}
-      <FactsGrid facts={runHistoryFacts(featureRuns)} />
+      <FactsGrid facts={runHistoryFacts(featureRuns, awaiting)} live={awaiting === 'live'} />
 
       <PanelCard kicker="Latest run" testId="test-run-hero">
+        {runId == null && awaiting ? (
+          // No run yet: the card still shows what a run report is shaped like —
+          // an identity row, the stats line under it, and the per-test rows.
+          <div data-testid="test-run-hero-skeleton" className="flex flex-col gap-2.5">
+            <SkeletonRows awaiting={awaiting} rows={1} />
+            <SkeletonBar awaiting={awaiting} width="58%" height={8} />
+            <SkeletonRows awaiting={awaiting} rows={2} sub={false} />
+          </div>
+        ) : (
+          <>
         <ul className="m-0 list-none p-0">
           <RunRow
             run={currentEntry}
@@ -167,6 +185,8 @@ export function TestRunPanel({
           <div data-testid="run-hero-external" className="mt-2 text-[11px] text-muted">
             {externalHealNote(manifest.externalHealSession)}
           </div>
+        )}
+          </>
         )}
       </PanelCard>
 
@@ -222,9 +242,13 @@ export function TestRunPanel({
  *  count comes from `runHistoryStats`, which keeps unfinished runs out of the
  *  outcome buckets — a run still going is not a failure, and a band that folded
  *  it into one would report a worse verdict than the evidence supports. */
-function runHistoryFacts(runs: RunIndexEntry[]): StageFact[] {
+function runHistoryFacts(runs: RunIndexEntry[], awaiting?: AwaitingState): StageFact[] {
   const stats = runHistoryStats(runs)
-  if (!stats) return []
+  // A suite that has never run has no history to report — but the stage is
+  // about to produce one, so the band announces its shape rather than being
+  // absent for the whole run. `Avg duration` is deliberately not promised: a
+  // single run reports its own duration, not an average.
+  if (!stats) return awaiting ? [awaitingFact('Runs performed'), awaitingFact('Succeeded')] : []
   const settled = stats.passed + stats.failed + stats.aborted
   return [
     {

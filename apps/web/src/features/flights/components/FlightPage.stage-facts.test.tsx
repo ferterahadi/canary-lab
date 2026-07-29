@@ -661,3 +661,178 @@ describe('trailer model (R14–R18)', () => {
     expect(row?.querySelector('[data-testid="download-report-task-9"]')).toBeNull()
   })
 })
+
+describe('R83 — every stage pane wears the settled layout, with placeholders for what it has not measured', () => {
+  const scoutFlight = (status: FlightManifest['stages'][number]['status'], evidence?: Record<string, unknown>) =>
+    manifest({
+      repoPaths: ['/repo/shop'],
+      currentStage: 'scout',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scout' ? status : ('pending' as const),
+        ...(key === 'scout' && evidence ? { evidence } : {}),
+      })),
+    })
+
+  const openScout = async () => {
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scout"]')?.click()
+    })
+  }
+
+  it('a pending stage still shows its band: the input-derived count is real, the unmeasured ones are placeholders', async () => {
+    mocks.getFlight.mockResolvedValue(scoutFlight('pending'))
+    await openScout()
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    // The pane used to collapse to a single sentence here.
+    expect(facts).not.toBeNull()
+    // Repos scanned counts what the USER named at launch, so it is known before
+    // the agent reads anything; the two config-derived tiles are not.
+    expect(facts?.textContent).toContain('Repos scanned')
+    expect(facts?.textContent).toContain('1')
+    expect(facts?.textContent).toContain('Services found')
+    expect(facts?.textContent).toContain('Port slots drafted')
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(2)
+    // Nothing is working, so nothing sweeps.
+    expect(facts?.querySelectorAll('.cl-skeleton')).toHaveLength(0)
+    // And the repo row stops claiming a scan that has not happened: the done
+    // tick is an svg, the not-yet states are dots/rings.
+    expect(container.querySelector('[data-testid="repo-card-shop"] svg')).toBeNull()
+  })
+
+  it('a running stage sweeps its placeholders and marks each repo row live', async () => {
+    mocks.getFlight.mockResolvedValue(scoutFlight('running'))
+    await openScout()
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(2)
+    expect(facts?.querySelectorAll('.cl-skeleton')).toHaveLength(2)
+    expect(container.querySelector('[data-testid="repo-card-shop"] .bg-running')).not.toBeNull()
+  })
+
+  it('a failed stage keeps the layout but stands still — the figures are not coming until the user acts', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'failed',
+      currentStage: 'scout',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scout' ? ('failed' as const) : ('pending' as const),
+        ...(key === 'scout' ? { error: 'draft feature.config.cjs does not parse' } : {}),
+      })),
+    }))
+    await openScout()
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(2)
+    expect(facts?.querySelectorAll('.cl-skeleton')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="stage-error"]')?.textContent).toContain('does not parse')
+    expect(container.querySelector('[data-testid="repo-card-shop"] .bg-danger')).not.toBeNull()
+  })
+
+  it('a settled stage never shows a placeholder — done and skipped have produced everything they will', async () => {
+    mocks.getFlight.mockResolvedValue(scoutFlight('done', { envFiles: ['/repo/shop/.env'] }))
+    await openScout()
+    expect(container.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="repo-card-shop"] svg')).not.toBeNull()
+
+    mocks.getFlight.mockResolvedValue(scoutFlight('skipped'))
+    await openScout()
+    expect(container.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(0)
+    // A skipped scan is settled too: the row reads as resolved, not as pending.
+    expect(container.querySelector('[data-testid="repo-card-shop"] svg')).not.toBeNull()
+  })
+})
+
+describe('R83 — every stage keeps its settled layout, card for card', () => {
+  // One pending flight; each test opens a different step and asserts the cards
+  // that step SETTLES into are present as their own skeletons.
+  const pendingFlight = (over: Partial<FlightManifest> = {}) => manifest({
+    status: 'running',
+    stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
+    ...over,
+  })
+
+  const open = async (railKey: string, flight = pendingFlight()) => {
+    mocks.getFlight.mockResolvedValue(flight)
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(`[data-testid="stage-rail-${railKey}"]`)?.click()
+    })
+  }
+
+  it('Suite setup: the boot proof and the config digest hold their places', async () => {
+    await open('scaffold')
+    expect(container.querySelector('[data-testid="boot-check-skeleton"]')?.textContent).toContain('Boot check')
+    expect(container.querySelector('[data-testid="setup-services-skeleton"]')?.textContent).toContain('Services')
+    expect(container.querySelector('[data-testid="setup-playwright-skeleton"]')?.textContent).toContain('Playwright')
+  })
+
+  it('Requirements: both halves render — source docs and the distilled output', async () => {
+    await open('docs')
+    const panel = container.querySelector('[data-testid="flight-docs-panel"]')
+    expect(panel).not.toBeNull()
+    // Not "No source docs." — that sentence reads as a finding on a step that
+    // has not run yet.
+    expect(panel?.textContent).not.toContain('No source docs')
+    expect(container.querySelector('[data-testid="flight-distilled-panel"]')).not.toBeNull()
+    expect(panel?.querySelectorAll('[data-testid="skeleton-bar"]').length ?? 0).toBeGreaterThan(0)
+  })
+
+  it('Test authoring: the composition card and the pass timeline both hold their places', async () => {
+    await open('specs-coverage')
+    expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')?.textContent).toContain('Composition')
+    expect(container.querySelector('[data-testid="specs-pass-skeleton"]')?.textContent).toContain('Passes')
+  })
+
+  it('Parallel readiness: the double-boot proof and the overlay diff hold their places', async () => {
+    await open('portify')
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Double-boot proof')
+    expect(container.querySelector('[data-testid="overlay-skeleton"]')?.textContent).toContain('Port-injection overlay')
+  })
+
+  it('Test Run: the hero renders its shape before any run exists', async () => {
+    await open('run')
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('Latest run')
+    expect(container.querySelector('[data-testid="test-run-hero-skeleton"]')).not.toBeNull()
+    // The history band announces the two counts a first run will produce —
+    // never an average, which one run cannot have.
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.textContent).toContain('Runs performed')
+    expect(facts?.textContent).toContain('Succeeded')
+    expect(facts?.textContent).not.toContain('Avg duration')
+    // No run id to fetch: the detail call must not fire on an empty run.
+    expect(mocks.getRunDetail).not.toHaveBeenCalled()
+  })
+
+  it('Evaluation Report: the deliverable and the reports list hold their places', async () => {
+    // No export has ever been built for this suite — `clearAllMocks` does not
+    // undo a `mockReturnValue`, so an earlier test's task list would otherwise
+    // still be standing here and the list would render for real.
+    mocks.evaluationTasks.mockReturnValue([])
+    await open('evaluation-export')
+    expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's report")
+    expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All reports for this suite')
+  })
+
+  it('placeholders sweep only on the step that is working', async () => {
+    await open('portify', pendingFlight({
+      currentStage: 'portify',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'portify' ? ('running' as const) : ('pending' as const) })),
+    }))
+    const swept = container.querySelectorAll('.cl-skeleton').length
+    expect(swept).toBeGreaterThan(0)
+    await open('portify')
+    expect(container.querySelectorAll('.cl-skeleton')).toHaveLength(0)
+    expect(container.querySelectorAll('[data-testid="skeleton-bar"]').length).toBeGreaterThan(0)
+  })
+
+  it('a settled step never renders a placeholder — an empty card there means it has nothing, not nothing yet', async () => {
+    await open('portify', manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    expect(container.querySelectorAll('[data-testid="skeleton-bar"]')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
+    expect(container.querySelector('[data-testid="overlay-skeleton"]')).toBeNull()
+  })
+})

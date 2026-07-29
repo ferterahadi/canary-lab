@@ -1,6 +1,6 @@
-import type { FlightManifest } from '@/shared/api/client'
+import type { FlightManifest, FlightStageStatus } from '@/shared/api/client'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '@/shared/ui/PanelCard'
-import { StepList, StepRow } from '@/shared/ui/StepList'
+import { StepList, StepRow, type StepState } from '@/shared/ui/StepList'
 import { STAGE_COLUMN } from './stage-meta'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
@@ -21,12 +21,26 @@ export function repoBaseName(p: string): string {
 // these panels and the stage facts card are literally the same surface.
 export const PANEL_KICKER_CLASS = `mb-1 ${SHARED_KICKER_CLASS}`
 
+/** Each repo row reports the SCAN's state, not the repo's existence (R83). The
+ *  rows used to be hard-coded `done`, so a flight parked before the scan showed
+ *  two green ticks for work that had not happened — the one claim on this panel
+ *  that isn't flight input. */
+export function repoRowState(status: FlightStageStatus): StepState {
+  if (status === 'done' || status === 'skipped') return 'done'
+  if (status === 'running') return 'active'
+  if (status === 'failed') return 'failed'
+  return 'pending'
+}
+
 export function RepoScanPanel({
   flight,
+  status,
   envFiles = [],
   onChangeInputs,
 }: {
   flight: FlightManifest
+  /** The scout stage's own status — drives each repo row's indicator. */
+  status: FlightStageStatus
   envFiles?: string[]
   /** R75: opens the launcher (prefilled, editable) — changing intent/repos is
    *  a full restart, and the launcher is its one home. */
@@ -92,7 +106,7 @@ export function RepoScanPanel({
               <StepRow
                 key={p}
                 testId={`repo-card-${repoBaseName(p)}`}
-                state="done"
+                state={repoRowState(status)}
                 title={repoBaseName(p)}
                 sub={
                   <span className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-2 gap-y-0.5">

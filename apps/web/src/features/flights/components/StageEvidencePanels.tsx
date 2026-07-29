@@ -4,6 +4,7 @@ import type { CoverageLedger, EvaluationExportTask, RunDetail, ServiceManifestEn
 import { useEvaluationExports } from '@/features/evaluation'
 import { GAP_META, SEG_ORDER, STRENGTH_META, STRENGTH_ORDER, countFor } from '@/features/coverage'
 import { PanelCard } from '@/shared/ui/PanelCard'
+import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { StatusDot } from '@/shared/ui/atoms'
 import { evaluationArchiveFilename, formatBytes, formatDuration, timeAgo } from '@/shared/lib/format'
 import { STAGE_COLUMN } from './stage-meta'
@@ -31,7 +32,12 @@ type BootRow = Pick<ServiceManifestEntry, 'name' | 'safeName' | 'allocatedPorts'
 /** Boot check (Suite setup): which services came up, on which port, and how long
  *  each took. The band above states the total; this names the services, so a
  *  slow or failed one is identifiable rather than hidden inside "2/2". */
-export function BootCheckPanel({ boot, recorded = [] }: {
+export function BootCheckPanel({ boot, recorded = [], awaiting }: {
+  /** R83: the stage hasn't settled and there is no boot yet — hold the card's
+   *  place with its skeleton instead of vanishing. A settled stage passes
+   *  nothing, so a suite that genuinely booted no services still renders no
+   *  card rather than an empty promise. */
+  awaiting?: AwaitingState
   boot: RunDetail | null
   /** Service names + statuses off the env-capture evidence. Used when the boot
    *  RUN is unavailable (its directory cleaned away), so the stage still names
@@ -45,7 +51,9 @@ export function BootCheckPanel({ boot, recorded = [] }: {
     : recorded
         .filter((s): s is { name: string; status?: string } => typeof s.name === 'string')
         .map((s) => ({ name: s.name, safeName: s.name, status: s.status }))
-  if (services.length === 0) return null
+  if (services.length === 0) {
+    return awaiting ? <SkeletonPanel kicker="Boot check" awaiting={awaiting} testId="boot-check-skeleton" variant="rows" rows={2} /> : null
+  }
   // Worst-first: a service that never passed its probe is the reason the stage
   // is worth looking at, so it sorts above the healthy ones.
   const rows = [...services].sort((a, b) =>
@@ -94,9 +102,11 @@ export function BootCheckPanel({ boot, recorded = [] }: {
 /** Double-boot proof (Parallel readiness): the two concurrent instances and the
  *  ports each was handed. This is the whole claim of the stage — that two runs of
  *  the same services can coexist — so the evidence is the port sets. */
-export function DoubleBootPanel({ portify }: { portify: PortifyManifest | null }) {
+export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifest | null; awaiting?: AwaitingState }) {
   const instances = portify?.verification?.instances ?? []
-  if (instances.length === 0) return null
+  if (instances.length === 0) {
+    return awaiting ? <SkeletonPanel kicker="Double-boot proof" awaiting={awaiting} testId="double-boot-skeleton" variant="rows" rows={2} /> : null
+  }
   return (
     <div className={STAGE_COLUMN}>
       <PanelCard kicker="Double-boot proof" testId="double-boot-panel">
@@ -133,9 +143,11 @@ export function DoubleBootPanel({ portify }: { portify: PortifyManifest | null }
  *
  *  The footer states what an overlay IS, because "7 files edited" otherwise reads
  *  as edits landing in the user's product repos. */
-export function OverlayPanel({ portify }: { portify: PortifyManifest | null }) {
+export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest | null; awaiting?: AwaitingState }) {
   const stat = overlayDiffStat(portify?.diff)
-  if (!stat) return null
+  if (!stat) {
+    return awaiting ? <SkeletonPanel kicker="Port-injection overlay" awaiting={awaiting} testId="overlay-skeleton" variant="rows" rows={3} /> : null
+  }
   const groups = groupOverlayFiles(stat.byFile)
   // Only count repos when every group IS one — a feature-config block is not a
   // repo, and an unlabelled group (pre-header capture) has nothing to count.
@@ -210,8 +222,10 @@ export function OverlayPanel({ portify }: { portify: PortifyManifest | null }) {
  *  Zero buckets RENDER, dimmed, rather than dropping out: on a suite that is 7
  *  shallow and nothing else, "0 strong" is the finding. A distribution that hides
  *  its empty classes reads as a shorter distribution, not an emptier one. */
-export function CoverageCompositionPanel({ ledger }: { ledger: CoverageLedger | null }) {
-  if (!ledger || ledger.totals.total === 0) return null
+export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: CoverageLedger | null; awaiting?: AwaitingState }) {
+  if (!ledger || ledger.totals.total === 0) {
+    return awaiting ? <SkeletonPanel kicker="Composition" awaiting={awaiting} testId="coverage-composition-skeleton" rows={3} /> : null
+  }
   const tests = ledger.tests
   const strengthOf = (t: TestCoverage): TestStrength => t.strength ?? 'shallow'
   return (
@@ -299,8 +313,10 @@ function CompositionGroup({ heading, rows, testId }: { heading: string; rows: Co
 /** This flight's report: the deliverable, named as the user will receive it, with
  *  the one download for it. The band above measures what the report SAYS; this
  *  says what it IS and hands it over. */
-export function EvaluationDeliverablePanel({ task }: { task: EvaluationExportTask | null }) {
-  if (!task) return null
+export function EvaluationDeliverablePanel({ task, awaiting }: { task: EvaluationExportTask | null; awaiting?: AwaitingState }) {
+  if (!task) {
+    return awaiting ? <SkeletonPanel kicker="This flight's report" awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /> : null
+  }
   const filename = evaluationArchiveFilename(task.feature, task.runId)
   return (
     <div className={STAGE_COLUMN}>
@@ -344,16 +360,22 @@ export function EvaluationDeliverablePanel({ task }: { task: EvaluationExportTas
 export function AllReportsPanel({
   feature,
   pinnedTaskId,
+  awaiting,
 }: {
   feature: string
   /** The task THIS flight's stage produced, badged in the list. */
   pinnedTaskId?: string
+  awaiting?: AwaitingState
 }) {
   const { tasks } = useEvaluationExports()
   // The provider already holds every task in the workspace, newest-first, and
   // keeps them live over workspace events — so this is a filter, not a fetch.
   const mine = tasks.filter((t) => t.feature === feature)
-  if (mine.length === 0) return null
+  if (mine.length === 0) {
+    // Safe to promise: this stage's own export becomes the first row, so the
+    // card is never a placeholder for something that will not arrive.
+    return awaiting ? <SkeletonPanel kicker="All reports for this suite" awaiting={awaiting} testId="all-reports-skeleton" variant="rows" rows={2} /> : null
+  }
   return (
     <div className={STAGE_COLUMN}>
       <PanelCard kicker="All reports for this suite" aside={<span className="cl-count-chip">{mine.length}</span>} testId="all-reports-panel">

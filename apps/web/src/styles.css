@@ -416,6 +416,30 @@ body {
   100% { transform: translateX(320%); }
 }
 
+/* Placeholder sweep for a value a stage hasn't produced yet (StageFact
+   `awaiting` → FactPlaceholder). Applied ON TOP of the bar's own token
+   background, so the element still reads as a placeholder with the animation
+   off — which is the state the headless preview always renders in. */
+.cl-skeleton {
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--text-muted) 55%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  animation: cl-skeleton-sweep 1.5s ease-in-out infinite;
+}
+
+@keyframes cl-skeleton-sweep {
+  0%   { background-position: 160% 0; }
+  100% { background-position: -60% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-skeleton { animation: none; }
+}
+
 .cl-menu-item:hover {
   background: var(--bg-input);
   color: var(--text-primary);

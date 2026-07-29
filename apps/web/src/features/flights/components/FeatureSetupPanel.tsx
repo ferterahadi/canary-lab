@@ -9,6 +9,7 @@ import {
 } from '@shared/configs/playwright-modes'
 import { STAGE_COLUMN } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
+import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 
 // ─── Feature Setup: the editable config digest (R43) ────────────────────────
 // The fields the user cares about at approval time, editable IN PLACE — every
@@ -47,6 +48,7 @@ export function FeatureSetupPanel({
   editable,
   refreshKey,
   onOpenAdvanced,
+  awaiting,
 }: {
   feature: string
   /** False while the flight is mid-run (edits then would race the conductor). */
@@ -56,6 +58,9 @@ export function FeatureSetupPanel({
   /** Opens FeatureConfigEditor. When absent the hint stays plain text — the
    *  sentence must never name a surface the user has no way to reach. */
   onOpenAdvanced?: () => void
+  /** R83: the suite isn't on disk yet — hold the digest's place with its
+   *  skeleton so the stage pane keeps the shape it will settle into. */
+  awaiting?: AwaitingState
 }) {
   const [config, setConfig] = useState<unknown>(null)
   const [playwright, setPlaywright] = useState<unknown>(null)
@@ -170,7 +175,16 @@ export function FeatureSetupPanel({
     savePlaywright(next)
   }
 
-  if (!cfg && !pw) return null
+  if (!cfg && !pw) {
+    // Two cards, because that is what a written config renders: the services
+    // digest and the Playwright digest.
+    return awaiting ? (
+      <section data-testid="feature-setup-skeleton" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
+        <SkeletonPanel kicker="Services" awaiting={awaiting} testId="setup-services-skeleton" variant="rows" rows={2} />
+        <SkeletonPanel kicker="Playwright" awaiting={awaiting} testId="setup-playwright-skeleton" rows={3} />
+      </section>
+    ) : null
+  }
 
   return (
     <section data-testid="feature-setup-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>

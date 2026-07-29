@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
-import type { FlightManifest, FlightStage, PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
+import type { FlightManifest, FlightStage, FlightStageKey, PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
 import { evaluationArchiveFilename, formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
+import { SkeletonBar } from '@/shared/ui/Skeleton'
 import { PORTIFY_PHASE_LABEL, STAGE_COLUMN, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
@@ -14,6 +15,11 @@ import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, type L
 export interface StageFact {
   label: string
   value: string
+  /** The stage has not produced this value yet — the tile renders a placeholder
+   *  bar instead of a figure, and animates while the stage is live. Only ever
+   *  set by `awaitingFact`, so no site can hand-write a tile that carries both a
+   *  value and a placeholder. */
+  awaiting?: true
   tone?: 'good' | 'warn' | 'bad'
   /** Render the value in the mono face (paths, filenames, commands). */
   mono?: boolean
@@ -140,12 +146,84 @@ export function evaluationTaskId(stage: FlightStage, flight: FlightManifest): st
   return str(evidenceOf(stage), 'taskId') ?? flight.links?.evaluationTaskId
 }
 
+/** The tiles a stage WILL show once it settles, in the order it shows them
+ *  (R83). Labels must match the ones the stage's own branch emits exactly — the
+ *  point of the list is that a value lands in the slot its placeholder held, so
+ *  nothing moves under the reader when the stage finishes.
+ *
+ *  Three stages are deliberately absent. `run`/`heal` render as the Test Run
+ *  hero, which owns every number (R80) — a band of placeholders above it would
+ *  promise tiles that never arrive. `similarity` is plumbing the rail hides
+ *  unless it parks or fails, and its one tile names a matched suite, which most
+ *  flights never have: a placeholder would announce a match as if one were
+ *  coming. */
+const AWAITED_FACT_LABELS: Partial<Record<FlightStageKey, readonly string[]>> = {
+  'scout': ['Repos scanned', 'Services found', 'Port slots drafted'],
+  'scaffold': ['Services booted', 'Boot time', 'Env files'],
+  'env-capture': ['Env files', 'Boot check'],
+  'docs': ['Source docs', 'Requirements distilled', 'Distilled to'],
+  'prd-summary': ['Requirements'],
+  'specs-coverage': ['Requirements covered', 'Requirements', 'Specs authored'],
+  'portify': ['Services injectable', 'Files edited', 'Instances proven'],
+  'evaluation-export': ['Requirements with specs', 'Spec depth', 'Specs that passed', 'Requirements proven'],
+}
+
+/** Settled = it has produced everything it ever will, so a placeholder there
+ *  would promise more. `failed` is NOT settled: the step stopped short, and the
+ *  tiles it never filled are exactly what a retry would fill. */
+function stageSettled(stage: FlightStage): boolean {
+  return stage.status === 'done' || stage.status === 'skipped'
+}
+
+/** A tile whose value the stage hasn't produced yet. The empty `value` is never
+ *  read — `FactTile` branches on `awaiting` before it looks at one. */
+export function awaitingFact(label: string): StageFact {
+  return { label, value: '', awaiting: true }
+}
+
+/** Fill the tiles the stage will have but hasn't measured yet (R83), so a
+ *  pending / running / failed stage shows the SHAPE of its evidence instead of
+ *  an empty pane — the layout the user already reads on a settled stage, with
+ *  placeholders where the figures go.
+ *
+ *  A settled stage is returned untouched: `done` and `skipped` have produced
+ *  everything they ever will, so a placeholder there would claim a value is
+ *  still coming. Real facts outside the awaited list (portify's live attempt and
+ *  phase, the authoring pass) lead — they are the news while the stage works —
+ *  and the awaited list follows in its fixed order. */
+export function withAwaitingTiles(stage: FlightStage, companion: FlightStage | undefined, known: StageFact[]): StageFact[] {
+  // A merged row settles when BOTH halves do. Reading the primary alone told the
+  // Suite setup row it was finished while its env capture had not started — the
+  // row said `pending`, and its band showed one lonely tile where the two the
+  // capture still owes belong.
+  if (stageSettled(stage) && (!companion || stageSettled(companion))) return known
+  const awaited = AWAITED_FACT_LABELS[stage.key]
+  if (!awaited) return known
+  const byLabel = new Map(known.map((f) => [f.label, f]))
+  return [
+    ...known.filter((f) => !awaited.includes(f.label)),
+    ...awaited.map((label) => byLabel.get(label) ?? awaitingFact(label)),
+  ]
+}
+
 export function stageFacts(
   stage: FlightStage,
   flight: FlightManifest,
   companion?: FlightStage,
   /** Sources outside the flight record (see StageBandData). Absent fields drop
    *  their tile — the band never pads itself to a fixed width. */
+  band: StageBandData = {},
+): StageFact[] {
+  return withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band))
+}
+
+/** What the stage has actually measured — evidence, live progress and the band's
+ *  outside sources. Absent values drop their tile here; `withAwaitingTiles` is
+ *  what turns those holes into placeholders. */
+function measuredStageFacts(
+  stage: FlightStage,
+  flight: FlightManifest,
+  companion?: FlightStage,
   band: StageBandData = {},
 ): StageFact[] {
   const evalTask = band.evalTask
@@ -155,7 +233,11 @@ export function stageFacts(
   // probed from the workspace, which means they exist on disk even though the step
   // never completed (specs authored, no requirements to map them onto). Hiding
   // those facts would misreport a part-done step as untouched.
-  if (stage.status === 'pending' && stage.evidenceSource !== 'workspace') return []
+  // `scout` is exempt: its first tile counts the repos the USER named when the
+  // flight was launched, which is flight input rather than stage evidence. It is
+  // as true before the scan as after, so hiding it would put a placeholder where
+  // a known figure belongs.
+  if (stage.status === 'pending' && stage.evidenceSource !== 'workspace' && stage.key !== 'scout') return []
   switch (stage.key) {
     case 'similarity': {
       const match = ev.match as Record<string, unknown> | null | undefined
@@ -721,6 +803,25 @@ export function FactStepper({ current, total }: { current: number; total: number
   )
 }
 
+/** The stand-in for a figure the stage hasn't produced (R83). Sized to the
+ *  22px metric line it replaces, so the tile keeps its height and the value
+ *  lands in place instead of pushing the card down when the stage settles.
+ *
+ *  The BAR is what says "not measured yet"; the sweep only adds "and something
+ *  is working on it". That split is deliberate — the headless preview forces
+ *  reduced-motion, and a viewer with no animation must still read this as a
+ *  placeholder rather than as a blank tile. */
+export function FactPlaceholder({ live }: { live: boolean }) {
+  return (
+    <div className="mt-1 flex h-[22px] items-center" data-testid="fact-awaiting" aria-label="not measured yet">
+      {/* Capped, not a flat 62%: a tile stretches to fill the grid, and a bar
+          that stretches with it reads as a sentence where a figure goes. The cap
+          keeps the placeholder the width of the number it stands in for. */}
+      <SkeletonBar awaiting={live ? 'live' : 'idle'} width="min(62%, 76px)" />
+    </div>
+  )
+}
+
 /** A thin progress bar under a `big` value — coverage filling toward target. */
 export function FactBar({ frac, color }: { frac: number; color: string }) {
   const pct = Math.max(0, Math.min(1, Number.isFinite(frac) ? frac : 0)) * 100
@@ -735,7 +836,13 @@ export function FactBar({ frac, color }: { frac: number; color: string }) {
  *  with an optional stepper/bar/sub; text, path, and sentence values stay in the
  *  quiet body size and truncate inside the tile — so a value like a file path or
  *  "Safe — services boot side by side" reads on the same grid as "0%". */
-export function FactTile({ fact: f }: { fact: StageFact }) {
+export function FactTile({ fact: f, live = false }: {
+  fact: StageFact
+  /** The stage is working right now — a placeholder sweeps to say the figure is
+   *  still being produced. A stopped stage (pending, failed) shows the same bar
+   *  standing still, because nothing is coming until the user acts. */
+  live?: boolean
+}) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
   return (
     <div className="min-w-0 rounded-md px-3 py-2.5 bg-elevated">
@@ -745,7 +852,9 @@ export function FactTile({ fact: f }: { fact: StageFact }) {
           kicker above the grid still carries the rubric voice, so the card keeps
           its register — this is the tile's own label, one level down. */}
       <div className="text-[11.5px] text-muted">{f.label}</div>
-      {f.big ? (
+      {f.awaiting ? (
+        <FactPlaceholder live={live} />
+      ) : f.big ? (
         <>
           <div className="mt-1 flex items-baseline gap-1 leading-none">
             <span className="text-[22px] font-medium" style={{ color: toneColor ?? 'var(--text-primary)' }}>{f.value}</span>
@@ -775,8 +884,10 @@ export function FactTile({ fact: f }: { fact: StageFact }) {
  *  Facts render as a responsive tile grid (R77): numeric facts get a large
  *  metric treatment (coverage %, pass N of M), text/path facts stay quiet — one
  *  layout that fits every stage's mix of scalar and sentence values. */
-export function FactsGrid({ facts, aside }: {
+export function FactsGrid({ facts, aside, live = false }: {
   facts: StageFact[]
+  /** Passed to every tile: placeholders sweep while the stage works. */
+  live?: boolean
   /** The stage's one card-level action, on the kicker line (PanelCard's `aside`)
    *  — the Evaluation Report's download sits with the archive it downloads
    *  instead of in the stage header. Only ever passed alongside the facts it acts
@@ -796,7 +907,7 @@ export function FactsGrid({ facts, aside }: {
           style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}
         >
           {facts.map((f, i) => (
-            <FactTile key={`${f.label}-${i}`} fact={f} />
+            <FactTile key={`${f.label}-${i}`} fact={f} live={live} />
           ))}
         </div>
       </PanelCard>
