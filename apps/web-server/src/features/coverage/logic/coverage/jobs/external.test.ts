@@ -424,3 +424,115 @@ describe('submitExternalSummary', () => {
     ).toThrow(/coverage job not found/)
   })
 })
+
+describe('external coverage — the answer must account for every test', () => {
+  /** A feature whose spec files hold `count` tests spread over 3 files. */
+  function writeBigFeature(name: string, count: number): string {
+    const dir = writeFeature(name)
+    fs.rmSync(path.join(dir, 'e2e', 'a.spec.ts'))
+    for (let f = 0; f < 3; f++) {
+      const bodies = Array.from({ length: Math.ceil(count / 3) }, (_, i) =>
+        `  test('f${f} case ${i} creates a todo', async () => { expect(1).toBe(1) })`,
+      ).join('\n')
+      fs.writeFileSync(
+        path.join(dir, 'e2e', `f${f}.spec.ts`),
+        `import { test, expect } from '@playwright/test'\n${bodies}\n`,
+      )
+    }
+    return dir
+  }
+
+  it('hands the client the fan-out rule plus the files to apply it to, and pins the roster', async () => {
+    writeBigFeature('big', 30)
+    await seedSummary('big')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalCoverage({ featuresDir, logsDir, feature: 'big', sessionId: 's1' }, { store })
+    if (res.kind !== 'started') throw new Error('expected started')
+
+    // Canary computes no split. It ships the grouping rule and the raw material
+    // the client needs to apply it — a `file` on every test. Without the file
+    // the rule is unfollowable, so the two are pinned together.
+    expect(res.context.prompt).toContain('Group the tests below by the `file` they live in')
+    expect(res.context.tests.length).toBeGreaterThan(1)
+    expect(res.context.tests.every((t) => !!t.file)).toBe(true)
+    expect(new Set(res.context.tests.map((t) => t.file)).size).toBeGreaterThan(1)
+    // The roster is pinned at start, not recomputed at submit — so a test added
+    // to the feature mid-job can't be held against the client.
+    expect(store.get(res.manifest.jobId)!.externalTestRoster).toEqual(res.context.tests.map((t) => t.testName))
+  })
+
+  it('REJECTS a submit that silently drops tests, naming the missing ones', async () => {
+    writeFeature('f1')
+    await seedSummary('f1')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalCoverage({ featuresDir, logsDir, feature: 'f1', sessionId: 's1' }, { store })
+    if (res.kind !== 'started') throw new Error('expected started')
+    const missingName = res.context.tests[0].testName
+
+    expect(() =>
+      submitExternalCoverage({ featuresDir, logsDir, jobId: res.manifest.jobId, mappings: [] }, { store }),
+    ).toThrow(new RegExp(missingName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    // The job stays open so the client can finish it rather than losing the pass.
+    expect(store.get(res.manifest.jobId)!.status).toBe('running')
+  })
+
+  it('caps the missing list at 10 names and counts the rest', async () => {
+    // A client that drops a whole feature's worth of tests would otherwise get
+    // an error message longer than the answer it failed to send.
+    writeBigFeature('huge', 30)
+    await seedSummary('huge')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalCoverage({ featuresDir, logsDir, feature: 'huge', sessionId: 's1' }, { store })
+    if (res.kind !== 'started') throw new Error('expected started')
+    const total = res.context.tests.length
+    expect(total).toBeGreaterThan(10)
+
+    try {
+      submitExternalCoverage({ featuresDir, logsDir, jobId: res.manifest.jobId, mappings: [] }, { store })
+      throw new Error('expected a rejection')
+    } catch (err) {
+      const message = (err as Error).message
+      expect(message).toContain(`accounts for 0 of ${total} tests`)
+      expect(message).toContain(`(+${total - 10} more)`)
+      expect(message.split(', ')).toHaveLength(10) // exactly ten names, then the count
+    }
+  })
+
+  it('accepts a submit where the remainder is declared unmappable', async () => {
+    writeFeature('f2')
+    await seedSummary('f2')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalCoverage({ featuresDir, logsDir, feature: 'f2', sessionId: 's1' }, { store })
+    if (res.kind !== 'started') throw new Error('expected started')
+
+    const { manifest } = submitExternalCoverage(
+      {
+        featuresDir,
+        logsDir,
+        jobId: res.manifest.jobId,
+        mappings: [],
+        unmappable: res.context.tests.map((t) => t.testName),
+      },
+      { store },
+    )
+    expect(manifest.status).toBe('done')
+  })
+
+  it('skips the check for a job written before the roster existed', async () => {
+    writeFeature('f3')
+    await seedSummary('f3')
+    const store = new CoverageJobRunStore(logsDir)
+    const res = startExternalCoverage({ featuresDir, logsDir, feature: 'f3', sessionId: 's1' }, { store })
+    if (res.kind !== 'started') throw new Error('expected started')
+    // Simulate an older manifest: no roster recorded at start.
+    const legacy = { ...store.get(res.manifest.jobId)! }
+    delete legacy.externalTestRoster
+    store.save(legacy)
+
+    const { manifest } = submitExternalCoverage(
+      { featuresDir, logsDir, jobId: res.manifest.jobId, mappings: [] },
+      { store },
+    )
+    expect(manifest.status).toBe('done') // no roster to check against → applied as before
+  })
+})

@@ -75,14 +75,28 @@ first.
 PRD summary exists:
 
 1. `start_external_coverage(feature)` → returns the active requirements, the
-   feature's tests (with file paths to read), and a `prompt`.
-2. Read each test file; decide its requirement id(s), path types, and
-   variant(s).
-3. `submit_external_coverage(jobId, mappings)`.
+   feature's tests (each with the spec `file` to read), and a `prompt`.
+2. **Fan out the reading.** Group the tests by their `file` — never split one
+   spec file across two readers, since a file's tests share fixtures that
+   only make sense read together. If that leaves more than one group and more
+   than a handful of tests, dispatch **one read-only subagent per group in a
+   single parallel round** (up to 5 at once), each reading only its own
+   files; below that, read them yourself. Give every subagent the FULL
+   requirement list unchanged — the tests divide, the requirements do not,
+   because a mapping judged against a subset of them is wrong rather than
+   partial. Merge their answers.
+3. `submit_external_coverage(jobId, mappings, unmappable)`.
 
 - One mapping entry per test: `{testName, requirements: [ids], pathTypes:
   ['happy'|'sad'|'edge'], variants: […]}` (`file`, `rationale`, and
-  `confidence` are optional; omit tests you cannot confidently map).
+  `confidence` are optional).
+- **Every test must come back — in `mappings` or in `unmappable`
+  (`{testName, reason}`), never neither.** A submit that leaves tests
+  unaccounted for is REJECTED with their names. A dropped test is
+  indistinguishable from one you read and found no requirement for, so the
+  ledger would score it uncovered on your silence instead of on evidence. If
+  a subagent fails to return, say so in `unmappable` rather than omitting
+  its tests.
 - Link each `test()` to its requirement with **Playwright tags on the
   test**: `test('…', { tag: ['@req-R3', '@path-happy', '@variant-email'] },
   …)` — `@req-<id>` (repeatable), `@path-happy|sad|edge`, and
@@ -96,9 +110,8 @@ PRD summary exists:
   is **no** accept/reject review gate.
 - No PRD summary yet → `status: "needs-summary"` (run `start_external_summary`
   first); single-flight per feature.
-- If your client supports subagents, give each a subset of tests to read and
-  merge their proposed mappings; otherwise read serially. Either way call
-  `submit_external_coverage` exactly once.
+- Split by spec file, never by test count, and call
+  `submit_external_coverage` exactly once with the merged answer.
 
 **Step 3 — read the ledger.** `get_feature_coverage(feature)`: per
 requirement → covering tests → `gapType` (`untested` / `path-incomplete` /

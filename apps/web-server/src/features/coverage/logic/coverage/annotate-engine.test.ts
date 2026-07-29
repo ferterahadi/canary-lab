@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   parseAnnotateOutput,
+  parseAnnotateAnswer,
   proposeCoverageMappings,
   buildAnnotatePrompt,
+  missingFromRoster,
 } from './annotate-engine'
 import type { Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
@@ -341,5 +343,143 @@ describe('parseAnnotateOutput — invalid JSON catch branch', () => {
   it('returns null when JSON.parse throws (invalid JSON with braces)', () => {
     // `{invalid}` has { and } so start/end checks pass, but JSON.parse throws.
     expect(parseAnnotateOutput('{invalid json}', KNOWN)).toBeNull()
+  })
+})
+
+
+// Fanning out is a written RULE in coverage-annotate.md, not a plan canary
+// computes — the dispatching model groups the tests itself. Each clause below
+// carries a failure canary cannot see afterwards, so a prose cleanup that drops
+// one is silent: a split spec file makes two readers each see half a file's
+// fixtures, and a divided requirement list makes every subagent judge its tests
+// against a subset, which is wrong rather than partial.
+describe('the annotate prompt carries the fan-out rule', () => {
+  const tests = [{ name: 'a-1', file: 'a.spec.ts' }, { name: 'b-1', file: 'b.spec.ts' }]
+
+  it('tells the agent to group by spec file and never split one', () => {
+    const prompt = buildAnnotatePrompt(REQS, tests)
+    expect(prompt).toContain('Group the tests below by the `file` they live in')
+    expect(prompt).toMatch(/never split one spec file\s+across two readers/)
+  })
+
+  it('tells the agent to dispatch read-only subagents in one parallel round', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).toMatch(
+      /one read-only subagent per group in a single\s+parallel round/,
+    )
+  })
+
+  it('keeps the requirement spine whole for every subagent', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).toContain(
+      'Give every subagent the full requirement list unchanged',
+    )
+  })
+
+  it('makes the dispatching agent own the merged answer', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).toContain('The merged answer is yours, not theirs')
+  })
+
+  it('leaves no unresolved placeholder where the computed plan used to be', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).not.toMatch(/\{\{\w+\}\}/)
+  })
+})
+
+describe('parseAnnotateAnswer + roster accounting', () => {
+  it('reads unmappable off the SAME envelope as mappings', () => {
+    const answer = parseAnnotateAnswer(
+      JSON.stringify({
+        mappings: [{ testName: 'a', requirements: ['R1'] }],
+        unmappable: [{ testName: 'b', reason: 'pure UI smoke, no requirement' }, { testName: '  ' }, null],
+      }),
+      KNOWN,
+    )
+    expect(answer!.mappings.map((m) => m.testName)).toEqual(['a'])
+    expect(answer!.unmappable).toEqual(['b']) // blank + non-object entries dropped
+  })
+
+  it('treats a missing unmappable key as an empty list', () => {
+    const answer = parseAnnotateAnswer(JSON.stringify({ mappings: [] }), KNOWN)
+    expect(answer!.unmappable).toEqual([])
+  })
+
+  it('names exactly the tests accounted for in neither list', () => {
+    const missing = missingFromRoster(
+      [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
+      { mappings: [{ testName: 'a', requirements: ['R1'], source: 'agent' }], unmappable: ['b'] },
+    )
+    expect(missing).toEqual(['c'])
+  })
+})
+
+describe('proposeCoverageMappings — the answer must account for every test', () => {
+  const TESTS = [{ name: 'a' }, { name: 'b' }, { name: 'c' }]
+
+  it('accepts an answer where every test is mapped OR declared unmappable', () => {
+    const out = proposeCoverageMappings(
+      { requirements: REQS, tests: TESTS },
+      {
+        resolveAgents: () => ['claude'],
+        runAgent: async () =>
+          JSON.stringify({
+            mappings: [{ testName: 'a', requirements: ['R1'] }],
+            unmappable: [{ testName: 'b', reason: 'no requirement' }, { testName: 'c', reason: 'setup only' }],
+          }),
+      },
+    )
+    return expect(out).resolves.toHaveLength(1)
+  })
+
+  it('REJECTS an answer that silently drops a test, and says which', async () => {
+    // A dropped test is indistinguishable downstream from a considered "no
+    // requirement applies" — the ledger would score it uncovered on silence.
+    const logs: string[] = []
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: TESTS, onOutput: (c) => logs.push(c) },
+        {
+          resolveAgents: () => ['claude'],
+          runAgent: async () => JSON.stringify({ mappings: [{ testName: 'a', requirements: ['R1'] }] }),
+        },
+      ),
+    ).rejects.toThrow(/accounted for only 1 of 3 tests/)
+    expect(logs.join('')).toContain('answer skipped 2/3 test(s)')
+  })
+
+  it('falls through to the next agent when the first returns an incomplete answer', async () => {
+    const seen: string[] = []
+    const out = await proposeCoverageMappings(
+      { requirements: REQS, tests: TESTS },
+      {
+        resolveAgents: () => ['claude', 'codex'],
+        runAgent: async (agent) => {
+          seen.push(agent)
+          if (agent === 'claude') return JSON.stringify({ mappings: [{ testName: 'a', requirements: ['R1'] }] })
+          return JSON.stringify({
+            mappings: [{ testName: 'a', requirements: ['R1'] }, { testName: 'b', requirements: ['R2'] }],
+            unmappable: [{ testName: 'c', reason: 'setup only' }],
+          })
+        },
+      },
+    )
+    expect(seen).toEqual(['claude', 'codex'])
+    expect(out).toHaveLength(2)
+  })
+
+  it('spawns exactly ONE agent — the fan-out is the agent\'s to run, not canary\'s', async () => {
+    let spawns = 0
+    const many = Array.from({ length: 40 }, (_, i) => ({ name: `t${i}`, file: `s${i}.spec.ts` }))
+    await proposeCoverageMappings(
+      { requirements: REQS, tests: many },
+      {
+        resolveAgents: () => ['claude'],
+        runAgent: async () => {
+          spawns++
+          return JSON.stringify({
+            mappings: many.map((t) => ({ testName: t.name, requirements: ['R1'] })),
+            unmappable: [],
+          })
+        },
+      },
+    )
+    expect(spawns).toBe(1)
   })
 })

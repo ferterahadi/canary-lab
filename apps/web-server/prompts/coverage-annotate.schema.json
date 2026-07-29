@@ -26,7 +26,19 @@
         },
         "required": ["testName", "requirements", "pathTypes", "variants", "rationale", "confidence"]
       }
+    },
+    "unmappable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "testName": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["testName", "reason"]
+      }
     }
   },
-  "required": ["mappings"]
+  "required": ["mappings", "unmappable"]
 }

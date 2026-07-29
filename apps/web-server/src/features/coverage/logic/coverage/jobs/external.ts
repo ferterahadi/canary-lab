@@ -82,6 +82,10 @@ export function startExternalCoverage(
     startedAt: now(),
     log: '[external] coverage offloaded to the calling client — Canary will recompute on submit_external_coverage\n',
     producer: 'external',
+    // Pin the roster the client is being handed, so submit can check the answer
+    // covers it. Recomputing the roster at submit time instead would blame the
+    // client for a test added to the feature after it started reading.
+    externalTestRoster: context.tests.map((t) => t.testName),
     ...(args.clientKind ? { externalClientKind: args.clientKind } : {}),
     externalSessionId: args.sessionId,
     ...(args.conversationName ? { externalConversationName: args.conversationName } : {}),
@@ -102,7 +106,24 @@ export interface SubmitExternalCoverageArgs {
   logsDir: string
   jobId: string
   mappings: ProposedMapping[]
+  /** Test names the client read and explicitly could not map. Together with
+   *  `mappings` this must account for the whole roster — see
+   *  `IncompleteCoverageAnswerError`. */
+  unmappable?: string[]
   now?: () => string
+}
+
+/** Thrown when a submitted answer leaves some of the job's tests unaccounted for.
+ *  Carries the names so the client can finish the job rather than guess. */
+export class IncompleteCoverageAnswerError extends Error {
+  constructor(public readonly missing: string[], total: number) {
+    super(
+      `answer accounts for ${total - missing.length} of ${total} tests — every test must appear in mappings[] `
+      + `or unmappable[]. Missing: ${missing.slice(0, 10).join(', ')}`
+      + `${missing.length > 10 ? ` (+${missing.length - 10} more)` : ''}`,
+    )
+    this.name = 'IncompleteCoverageAnswerError'
+  }
 }
 
 export interface SubmitExternalCoverageResult {
@@ -122,6 +143,19 @@ export function submitExternalCoverage(
   const job = deps.store.get(args.jobId)
   if (!job) throw new Error(`coverage job not found: ${args.jobId}`)
   if (job.producer !== 'external') throw new Error('only external coverage jobs can be submitted through this tool')
+
+  // The roster check — the price of the client owning its own fan-out. Once
+  // subagents do the reading, canary cannot see which tests were examined, and a
+  // test silently missing from the answer is indistinguishable from one read and
+  // found to have no requirement. The ledger would score it uncovered on the
+  // client's silence rather than on evidence, so an incomplete answer is
+  // rejected (recoverable — the client re-submits with the rest).
+  // Jobs started before the roster existed skip the check; see the field's doc.
+  if (job.externalTestRoster?.length) {
+    const accounted = new Set<string>([...args.mappings.map((m) => m.testName), ...(args.unmappable ?? [])])
+    const missing = job.externalTestRoster.filter((name) => !accounted.has(name))
+    if (missing.length) throw new IncompleteCoverageAnswerError(missing, job.externalTestRoster.length)
+  }
 
   const result = applyExternalCoverageMappings({
     featuresDir: args.featuresDir,

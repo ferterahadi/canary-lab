@@ -354,6 +354,12 @@ export interface CoverageJobManifest {
    *  itself (offload model) and Canary only tracks + recomputes the ledger; such
    *  a job has NO sessionRef, so the Generating screen renders it monitor-only. */
   producer?: 'internal' | 'external'
+  /** The exact test names handed to an external client at start, so submit can
+   *  check the answer accounts for every one of them. Absent on jobs written
+   *  before the roster check existed (and on internal jobs, which check against
+   *  their own in-memory input instead) — the check is skipped there rather than
+   *  failing a client for a roster it was never given. */
+  externalTestRoster?: string[]
   /** External-producer metadata, set only when producer === 'external'. */
   externalClientKind?: string
   externalSessionId?: string

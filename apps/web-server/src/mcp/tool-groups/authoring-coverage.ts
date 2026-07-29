@@ -21,7 +21,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
 
   registerTool('start_external_summary', {
     description:
-      'Start a PRD-summary pass YOU drive — no local agent. Returns the source docs (paths to read), the previous requirement ids to PRESERVE, and a `prompt`: read each source doc, extract testable requirements, then call submit_external_summary with the requirements[]. Canary reconciles ids against the prior summary (the stable spine) and writes docs/_prd-summary.{json,md} — never re-derives the requirements. Single-flight (rejected if a summary/coverage job is running). No source doc yet → status:"needs-docs" (ASK THE USER for the PRD; do not invent one). This is the FIRST step of coverage — follow it with start_external_coverage. Offload to a background task or fan out across docs when the PRD is large.',
+      'Start a PRD-summary pass YOU drive — no local agent. Returns the source docs (paths to read), the previous requirement ids to PRESERVE, and a `prompt`: read each source doc, extract testable requirements, then call submit_external_summary with the requirements[]. Canary reconciles ids against the prior summary (the stable spine) and writes docs/_prd-summary.{json,md} — never re-derives the requirements. Single-flight (rejected if a summary/coverage job is running). No source doc yet → status:"needs-docs" (ASK THE USER for the PRD; do not invent one). This is the FIRST step of coverage — follow it with start_external_coverage. Offload to a background task, or fan out one subagent per doc in a single parallel round (up to 5 at once) and merge their requirements, when the PRD is large.',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
@@ -102,7 +102,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
 
   registerTool('start_external_coverage', {
     description:
-      'Start a coverage mapping pass YOU drive — no local agent. Returns the active requirements, the feature\'s tests (with file paths to read), and a `prompt`: read each test, decide its requirement id(s), then call submit_external_coverage with the mappings. Canary writes the @req-* tags via its canonical tag-writer and recomputes the ledger (never re-derives the mapping). Single-flight (rejected if a coverage job is running). No PRD summary yet → status:"needs-summary" (call start_external_summary first). Offload to a background task or fan out across tests when there are many.',
+      'Start a coverage mapping pass YOU drive — no local agent. Returns the active requirements, the feature\'s tests (each with the spec `file` to read), and a `prompt`. FAN OUT the reading: group the tests by their `file` — never splitting one spec file across two readers, since a file\'s tests share fixtures that only make sense read together — and when that leaves more than one group and more than a handful of tests, dispatch ONE read-only subagent per group in a single parallel round (up to 5 at once), each reading only its own files. Give every subagent the FULL requirement list unchanged (the tests divide, the requirements do not — a mapping judged against a subset is wrong, not partial), then merge their answers. Then call submit_external_coverage — every test must come back in mappings[] or unmappable[]. Canary writes the @req-* tags via its canonical tag-writer and recomputes the ledger (never re-derives the mapping). Single-flight (rejected if a coverage job is running). No PRD summary yet → status:"needs-summary" (call start_external_summary first).',
     inputSchema: {
       feature: z.string().describe('Existing feature name (from list_features).'),
       session_id: z.string().describe('Stable id for your conversation — reuse it across calls.'),
@@ -138,7 +138,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         statusMeaning: 'You do the mapping using context.prompt; Canary spawns no agent — submit_external_coverage writes the tags + recomputes the ledger.',
         context: res.context,
         nextSteps: ['submit_external_coverage'],
-        next: `Follow context.prompt: read each test\'s file, decide its requirement id(s), then call submit_external_coverage with jobId "${res.manifest.jobId}" and mappings[].`,
+        next: `Follow context.prompt: group context.tests by their \`file\` and dispatch one read-only subagent per group in a single parallel round (up to 5 at once) when there is more than one group to read, otherwise read them yourself. Decide each test's requirement id(s), then call submit_external_coverage with jobId "${res.manifest.jobId}" — every test in mappings[] or unmappable[].`,
       })
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
@@ -149,12 +149,19 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
 
   registerTool('submit_external_coverage', {
     description:
-      'Submit your test→requirement mappings for an external coverage job. Canary writes each @req-* tag via its canonical tag-writer (idempotent/additive — never rewrites a test body), marks the job done, and recomputes the ledger; unknown ids/test names are dropped. Then call get_feature_coverage.',
+      'Submit your test→requirement mappings for an external coverage job. Canary writes each @req-* tag via its canonical tag-writer (idempotent/additive — never rewrites a test body), marks the job done, and recomputes the ledger; unknown ids/test names are dropped. EVERY test from the job\'s context must appear in `mappings` or in `unmappable` — a test in neither is rejected with the missing names, because silence is indistinguishable from a subagent that never reported and would score the test uncovered without evidence. Then call get_feature_coverage.',
     inputSchema: {
       jobId: z.string().describe('Job id returned by start_external_coverage.'),
-      mappings: z.array(coverageMappingInput).describe('One entry per test you could map. Omit tests you cannot confidently map.'),
+      mappings: z.array(coverageMappingInput).describe('One entry per test you mapped to at least one requirement.'),
+      unmappable: z
+        .array(z.object({
+          testName: z.string().describe('Exact test name from the job context.'),
+          reason: z.string().describe('One short sentence — why no requirement applies.'),
+        }))
+        .optional()
+        .describe('Tests you READ and found no requirement for. Required for any test not in mappings[]; the submit is rejected otherwise.'),
     },
-  }, async ({ jobId, mappings }) => {
+  }, async ({ jobId, mappings, unmappable }) => {
     try {
       const { manifest, result } = submitExternalCoverage(
         {
@@ -162,6 +169,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
           logsDir: deps.store.logsDir,
           jobId,
           mappings: mappings as ProposedMapping[],
+          unmappable: unmappable?.map((u) => u.testName),
         },
         { store: new CoverageJobRunStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
       )

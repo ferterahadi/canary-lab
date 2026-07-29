@@ -5,6 +5,26 @@ You are working inside an isolated, throwaway git worktree. Edit each repo's SOU
 Repos / start commands in this feature:
 {{reposSummary}}
 
+## Fan out across repos, then do the shared files yourself
+
+Each repo above is an independent unit of work — its own listeners, config
+files and env defaults. When there is more than one, dispatch **one sub-agent
+per repo in a single parallel round** (up to 5 at once), each scanning and
+editing only its own worktree path and each reporting back its own section-10
+accounting.
+
+Do the shared edits yourself, once, after they return: the feature config at
+{{featureConfigPath}} and the envsets (sections 4 and 6b) are single files that
+every repo's slots land in, so two sub-agents writing them concurrently would
+clobber each other.
+
+Merge their accountings into the single report in section 10, and treat an
+empty one as unfinished rather than as a repo with no listeners — say which
+repo and why, or scan it yourself. Verification will not cover for you here:
+the double-boot catches a missed listener only when it binds eagerly and dies
+loudly on the clash, so a lazily-bound or crash-tolerant one passes the check
+and breaks a later real run instead.
+
 ## The goal, and the mental model that makes it correct
 
 The harness boots the whole stack TWICE concurrently on two different injected port sets and requires BOTH to pass their health checks. The change succeeds only if, on the second boot, NOTHING tries to grab a port the first boot already holds. So your job is to find every port the app *binds* and make it come from an environment variable.
