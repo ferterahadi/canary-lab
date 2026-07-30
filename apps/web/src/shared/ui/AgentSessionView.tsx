@@ -23,7 +23,6 @@ export type { SystemGroup } from './AgentSessionRows'
 
 export type AgentSessionSource =
   | { kind: 'run'; runId: string; live?: boolean }
-  | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating'; live?: boolean }
   | { kind: 'benchmark'; benchmarkId: string; live?: boolean }
   | { kind: 'portify'; workflowId: string; live?: boolean }
   | { kind: 'coverage'; jobId: string; live?: boolean }
@@ -160,9 +159,7 @@ export function AgentSessionView({ source, systemRows }: Props) {
                     ? { kind: 'evaluation', taskId: source.taskId }
                     : source.kind === 'flight'
                       ? { kind: 'flight', flightId: source.flightId, stage: source.stage }
-                      : source.kind === 'flight-plan'
-                        ? { kind: 'flight-plan', taskId: source.taskId }
-                        : { kind: 'draft', draftId: source.draftId, stage: source.stage },
+                      : { kind: 'flight-plan', taskId: source.taskId },
           onSession: (session) => {
             if (cancelled) return
             setState((prev) => prev

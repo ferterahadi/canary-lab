@@ -122,24 +122,37 @@ describe('scout — external producer', () => {
     expect(ok).toMatchObject({ kind: 'done' })
   })
 
-  it('FAILS a draft whose config does not parse — a client cannot vouch for itself', async () => {
+  // Live-flight finding: settling `failed` here poisons the stage, because the
+  // checkpointResponse persists and a resume REPLAYS it — the flight then fails
+  // identically forever and only a full redo clears it. A rejection must re-park.
+  it('RE-PARKS a draft whose config does not parse, carrying the reason', async () => {
     const { ctx, setStage } = ctxFor(manifest())
     setStage('scout', { checkpoint: { kind: 'external-work', message: 'x' } })
     const bad = await scoutStage(deps()).onCheckpointResponse!(ctx, {
       choice: 'submit',
       data: { configSource: 'this is not a config', envFiles: [] },
     })
-    expect(bad).toMatchObject({ kind: 'failed' })
-    expect(String((bad as { error: string }).error)).toMatch(/does not parse/)
+    const cp = handOffOf(bad)
+    expect(cp.kind).toBe('external-work')
+    expect((cp.data.context as { lastRejection: string }).lastRejection).toMatch(/does not parse/)
   })
 
-  it('fails cleanly when the client submits nothing at all', async () => {
+  it('re-parks when the client submits nothing at all', async () => {
     const { ctx, setStage } = ctxFor(manifest())
     setStage('scout', { checkpoint: { kind: 'external-work', message: 'x' } })
-    expect(await scoutStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit' })).toMatchObject({
-      kind: 'failed',
-      error: 'external scout returned no draft',
-    })
+    const cp = handOffOf(await scoutStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit' }))
+    expect(cp.kind).toBe('external-work')
+    expect((cp.data.context as { lastRejection: string }).lastRejection).toBe('no draft was submitted')
+  })
+
+  it('a re-park keeps the flight advanceable — the next, valid submit settles it', async () => {
+    const { ctx, setStage } = ctxFor(manifest())
+    setStage('scout', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const adapter = scoutStage(deps())
+    await adapter.onCheckpointResponse!(ctx, { choice: 'submit', data: { configSource: 'nope', envFiles: [] } })
+    // Still parked on external-work, so the client can simply answer again.
+    const ok = await adapter.onCheckpointResponse!(ctx, { choice: 'submit', data: { configSource: CONFIG_SOURCE, envFiles: [] } })
+    expect(ok).toMatchObject({ kind: 'done' })
   })
 
   it('drops non-string entries out of a submitted envFiles list', async () => {

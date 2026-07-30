@@ -75,7 +75,6 @@ export interface DraftRecord {
   externalConversationName?: string
   externalSessionUrl?: string
   intentSummary?: string
-  wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
@@ -84,10 +83,6 @@ export interface DraftRecord {
   // the first byte of agent output. Codex has no equivalent flag — the WS
   // tailer discovers the rollout file post-hoc using `planAgentSpawnedAt` as
   // the lower bound and the draft dir as the cwd match.
-  planAgentSessionRef?: AgentSessionRef
-  planAgentSpawnedAt?: string
-  specAgentSessionRef?: AgentSessionRef
-  specAgentSpawnedAt?: string
   status: DraftStatus
   createdAt: string
   updatedAt: string
@@ -260,14 +255,9 @@ export interface TransitionPatch {
   externalSessionId?: string
   externalConversationName?: string
   externalSessionUrl?: string
-  wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
-  planAgentSessionRef?: AgentSessionRef
-  planAgentSpawnedAt?: string
-  specAgentSessionRef?: AgentSessionRef
-  specAgentSpawnedAt?: string
   errorMessage?: string
 }
 

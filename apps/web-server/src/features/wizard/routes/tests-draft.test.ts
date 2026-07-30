@@ -105,62 +105,6 @@ describe('GET /api/tests/draft', () => {
   })
 })
 
-describe('GET /api/tests/draft/:id/agent-session', () => {
-  it('404s an unknown draft', async () => {
-    const app = await makeApp(makeDeps())
-    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/nope/agent-session?stage=planning' })
-    expect(res.statusCode).toBe(404)
-    expect(res.json()).toEqual({ reason: 'draft-not-found' })
-  })
-
-  it('400s a stage outside planning/generating', async () => {
-    seedExternalDraft('d-1')
-    const app = await makeApp(makeDeps())
-    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/d-1/agent-session?stage=elsewhere' })
-    expect(res.statusCode).toBe(400)
-    expect(res.json()).toEqual({ reason: 'unknown-stage' })
-  })
-
-  it('404s no-session-ref for an external draft, which never carries one', async () => {
-    // External authoring has no local transcript — the conversation lives in the
-    // user's own client window, which is what ExternalDraftAgentPanel says.
-    seedExternalDraft('d-1')
-    const app = await makeApp(makeDeps())
-    for (const stage of ['planning', 'generating']) {
-      const res = await app.inject({ method: 'GET', url: `/api/tests/draft/d-1/agent-session?stage=${stage}` })
-      expect(res.statusCode).toBe(404)
-      expect(res.json()).toEqual({ reason: 'no-session-ref' })
-    }
-  })
-
-  it('404s session-log-missing when a ref resolves but its file is gone', async () => {
-    seedExternalDraft('d-1')
-    const p = draftPaths(logsDir, 'd-1')
-    resolveSessionRefOverride = () => ({
-      agent: 'claude',
-      sessionId: 'sess-1',
-      logPath: path.join(p.draftDir, 'nonexistent.jsonl'),
-    })
-    const app = await makeApp(makeDeps())
-    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/d-1/agent-session?stage=planning' })
-    expect(res.statusCode).toBe(404)
-    expect(res.json()).toEqual({ reason: 'session-log-missing' })
-  })
-
-  it('returns the parsed session when the ref resolves to a real log', async () => {
-    seedExternalDraft('d-1')
-    const p = draftPaths(logsDir, 'd-1')
-    const logPath = path.join(p.draftDir, 'session.jsonl')
-    fs.mkdirSync(p.draftDir, { recursive: true })
-    fs.writeFileSync(logPath, `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`, 'utf8')
-    resolveSessionRefOverride = () => ({ agent: 'claude', sessionId: 'sess-1', logPath })
-    const app = await makeApp(makeDeps())
-    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/d-1/agent-session?stage=generating' })
-    expect(res.statusCode).toBe(200)
-    expect(res.json()).toHaveProperty('events')
-  })
-})
-
 describe('POST /api/tests/draft/:id/cancel-generation', () => {
   it('settles the record of an in-flight external session', async () => {
     seedExternalDraft('d-1')

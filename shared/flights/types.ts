@@ -373,6 +373,12 @@ export interface PortifyStageProgress {
   /** Agent attempt counter from the workflow manifest (1-based). */
   attempt?: number
   maxAttempts?: number
+  /** How many files the producer has touched in the scratch worktree so far,
+   *  counted by Canary from the worktree it owns rather than reported by the
+   *  producer. Present only while an EXTERNAL client holds the editing window —
+   *  the one phase where `status`/`attempt` cannot move and so the stage would
+   *  otherwise look frozen (and, before this, get abandoned on the idle budget). */
+  editedFiles?: number
 }
 
 /** One row of the stage-entry menu: can a flight start AT this stage right

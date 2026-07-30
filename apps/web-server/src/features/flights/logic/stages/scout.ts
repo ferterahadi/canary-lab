@@ -3,7 +3,7 @@ import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent } from './context'
-import { externalizable } from './externalizable'
+import { externalizable, externalWorkCheckpoint } from './externalizable'
 
 // The one genuinely new agent prompt in the flight: read the target repo(s)
 // and draft a feature.config.cjs (dev commands, port slots, health checks) +
@@ -120,10 +120,25 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       // executors work from one set of instructions — including the fan-out rule.
       return { prompt: scoutPromptFor(m), context: { repoPaths: m.repoPaths, answerShape: { configSource: 'string', envFiles: 'string[]' } } }
     },
-    consume: async (_ctx, result) => {
+    consume: async (ctx, result) => {
+      // A rejected submission must RE-PARK, never settle `failed`. The stage's
+      // checkpointResponse persists, so a resume REPLAYS the last answer — and a
+      // failing one then fails identically forever, leaving the flight advanceable
+      // only by a full redo. Re-parking replaces that answer with the next attempt.
+      // (Found by driving a real flight; the unit test had asserted `failed` as
+      // correct. docs' collector already re-parks for the same reason.)
+      const reject = (why: string): StageOutcome => {
+        ctx.appendLog(`[scout] external draft rejected — ${why}\n`)
+        const m = ctx.manifest()
+        return externalWorkCheckpoint(ctx, 'scout', scoutPromptFor(m), {
+          message: `That draft was rejected: ${why}. Fix it and respond again with { configSource, envFiles } on \`data\` — or answer "run-internally" to hand the step to Canary's own agent.`,
+          context: { repoPaths: m.repoPaths, answerShape: { configSource: 'string', envFiles: 'string[]' }, lastRejection: why },
+        })
+      }
       const draft = typeof result === 'string' ? extractJson<ScoutDraft>(result) : (result as ScoutDraft | undefined)
-      if (!draft || typeof draft !== 'object') return { kind: 'failed', error: 'external scout returned no draft' }
-      return settleDraft({ ...draft })
+      if (!draft || typeof draft !== 'object') return reject('no draft was submitted')
+      const settled = settleDraft({ ...draft })
+      return settled.kind === 'failed' ? reject(settled.error) : settled
     },
   })
 }

@@ -4,7 +4,6 @@ import { deleteDraft, listDrafts, paths as draftPaths, readDraft } from '../logi
 import {
   buildAgentSessionResponse,
 } from '../../agent-sessions/logic/agent-session-log'
-import { resolveDraftStageSessionRef } from '../logic/draft-agent-session'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { isTransientGenerationStatus, transitionDraft } from './tests-draft-support'
 
@@ -38,42 +37,6 @@ export async function testsDraftRoutes(
       return { error: 'draft not found' }
     }
     return rec
-  })
-
-  // Structured agent-session snapshot for a draft. Equivalent to
-  // /api/runs/:id/agent-session but keyed on draft + stage. Returns the
-  // events parsed from the agent CLI's JSONL log at the time of the request.
-  // The live WS at /ws/draft/:id/agent-session streams events as they arrive.
-  app.get<{
-    Params: { id: string }
-    Querystring: { stage?: string }
-  }>('/api/tests/draft/:id/agent-session', async (req, reply) => {
-    const rec = readDraft(deps.logsDir, req.params.id)
-    if (!rec) {
-      reply.code(404)
-      return { reason: 'draft-not-found' }
-    }
-    const stage = req.query.stage
-    if (stage !== 'planning' && stage !== 'generating') {
-      reply.code(400)
-      return { reason: 'unknown-stage' }
-    }
-    const p = draftPaths(deps.logsDir, rec.draftId)
-    const resolved = resolveDraftStageSessionRef({
-      ref: stage === 'planning' ? rec.planAgentSessionRef : rec.specAgentSessionRef,
-      agent: rec.wizardAgent,
-      draftDir: p.draftDir,
-      spawnedAt: stage === 'planning' ? rec.planAgentSpawnedAt : rec.specAgentSpawnedAt,
-    })
-    if (!resolved) {
-      reply.code(404)
-      return { reason: 'no-session-ref' }
-    }
-    if (!fs.existsSync(resolved.logPath)) {
-      reply.code(404)
-      return { reason: 'session-log-missing' }
-    }
-    return buildAgentSessionResponse(resolved)
   })
 
   // An external draft sits in `generating` for every stage before ready/applied

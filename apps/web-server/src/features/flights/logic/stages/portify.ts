@@ -5,6 +5,7 @@ import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { PortifyStageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
+import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
 
 // Port-ification runs by default — every flight attempts to leave the feature
 // concurrency-ready. The stage drives the existing portify background job
@@ -26,6 +27,12 @@ interface PortifyView {
   maxAttempts?: number
   diff?: string
   error?: string
+  /** `external` means the user's own client holds the editing window. */
+  producer?: string
+  /** Scratch worktrees, read for the edit fingerprint during external editing. */
+  repos?: Array<{ worktreePath?: string }>
+  /** Set by this stage's own poll, not by the server — see awaitReview. */
+  editDigest?: string
   /** Double-boot outcome of the LATEST pass — a revise re-parks at
    *  ready-to-save even when its re-verify failed (save is then blocked). */
   verification?: { ok?: boolean; failureDetail?: string }
@@ -78,20 +85,37 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
   // view's attempt stepper + phase verb.
   const awaitReview = async (ctx: StageContext, workflowId: string): Promise<PortifyView> => {
     let publishedPhase = ''
+    let publishedEdits = ''
     return pollUntil(
       async () => {
         const v = await read(workflowId)
+        // While an EXTERNAL client holds the editing window, `status` and `attempt`
+        // are both pinned — nothing server-side is advancing. Read the worktree
+        // instead so the liveness key tracks real edits. Without this the
+        // 30-minute IDLE budget expires on a client that is still working and the
+        // stage abandons a live workflow — orphaning it exactly as the old
+        // fixed-wall-clock version did to slow double-boots.
+        // No .catch here on purpose: editFingerprint cannot reject — runGit only
+        // ever resolves (never rejects) and its stat lookups are already guarded —
+        // so a catch arm would be untestable defensive code.
+        const edits = v.status === 'editing' && v.producer === 'external' && v.repos
+          ? await editFingerprint(v.repos)
+          : null
         const phase = `${v.status ?? ''}#${v.attempt ?? ''}`
-        if (phase !== publishedPhase) {
+        if (phase !== publishedPhase || (edits !== null && edits.digest !== publishedEdits)) {
           publishedPhase = phase
+          publishedEdits = edits?.digest ?? ''
           ctx.setProgress({
             workflowId,
             ...(v.status ? { status: v.status } : {}),
             ...(v.attempt != null ? { attempt: v.attempt } : {}),
             ...(v.maxAttempts != null ? { maxAttempts: v.maxAttempts } : {}),
+            ...(edits === null ? {} : { editedFiles: edits.files }),
           } satisfies PortifyStageProgress)
         }
-        return v
+        // Carried on the polled value so progressKey below can see it — the poll
+        // helper only ever compares what `read` returns.
+        return { ...v, editDigest: edits?.digest ?? '' }
       },
       (v) => v.status === 'ready-to-save' || v.status === 'saved' || v.status === 'failed' || v.status === 'aborted',
       {
@@ -105,7 +129,11 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         // workflow that then SUCCEEDED, orphaned and unsaveable). The phase
         // key mirrors the progress the stage already publishes; a hung
         // workflow freezes it and still dies after PORTIFY_TIMEOUT_MS.
-        progressKey: (v) => `${v.status ?? ''}#${v.attempt ?? ''}`,
+        // The edit digest is the ONLY component that moves during an external
+        // editing window; status/attempt cover every other phase.
+        // editDigest is always a string here — the reader above sets it on every
+        // poll — so it needs no fallback.
+        progressKey: (v) => `${v.status ?? ''}#${v.attempt ?? ''}#${v.editDigest}`,
       },
     )
   }

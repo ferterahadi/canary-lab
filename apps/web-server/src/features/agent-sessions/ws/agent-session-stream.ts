@@ -14,8 +14,7 @@ import {
 } from '../logic/agent-session-log'
 import { readEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
 import { tailAgentSession } from '../logic/agent-session-tailer'
-import { resolveDraftStageSessionRef } from '../../wizard/logic/draft-agent-session'
-import { readDraft, paths as draftPaths } from '../../wizard/logic/draft-store'
+import { paths as draftPaths } from '../../wizard/logic/draft-store'
 import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'
@@ -89,46 +88,6 @@ export async function agentSessionStreamRoutes(
       }
       const runDir = runDirFor(deps.logsDir, req.params.runId)
       attachTail(socket, { ref: resolveRunRef(runDir), discoverRef: () => resolveRunRef(runDir) })
-    },
-  )
-
-  app.get<{ Params: { draftId: string }; Querystring: { stage?: string } }>(
-    '/ws/draft/:draftId/agent-session',
-    { websocket: true },
-    (socket, req) => {
-      const stage = parseStage(req.query.stage)
-      if (!stage) {
-        sendJson(socket, { type: 'error', error: 'unknown-stage' })
-        try { socket.close() } catch { /* ignore */ }
-        return
-      }
-      const draft = readDraft(deps.logsDir, req.params.draftId)
-      if (!draft) {
-        sendJson(socket, { type: 'error', error: 'draft-not-found' })
-        try { socket.close() } catch { /* ignore */ }
-        return
-      }
-      const ref = stage === 'planning' ? draft.planAgentSessionRef : draft.specAgentSessionRef
-      const agent = ref?.agent ?? draft.wizardAgent ?? 'claude'
-      const p = draftPaths(deps.logsDir, req.params.draftId)
-      attachTail(socket, {
-        ref: ref ?? { agent, sessionId: '', logPath: '' },
-        discoverRef: () => {
-          // Re-read the draft each time — refs may be filled in after the
-          // initial connection (race between WS attach and spawn writing the
-          // ref to disk). For codex, use the stage spawn timestamp so a new
-          // draft never displays an older draft session.
-          const fresh = readDraft(deps.logsDir, req.params.draftId)
-          const freshRef = stage === 'planning' ? fresh?.planAgentSessionRef : fresh?.specAgentSessionRef
-          const spawnedAt = stage === 'planning' ? fresh?.planAgentSpawnedAt : fresh?.specAgentSpawnedAt
-          return resolveDraftStageSessionRef({
-            ref: freshRef,
-            agent: freshRef?.agent ?? fresh?.wizardAgent ?? agent,
-            draftDir: p.draftDir,
-            spawnedAt,
-          })
-        },
-      })
     },
   )
 

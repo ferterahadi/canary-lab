@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 import fs from 'fs'
+import { runGit } from '../../../../shared/git-repo'
 
 import os from 'os'
 
@@ -422,4 +423,99 @@ describe('portify stage', () => {
     // save exists, so the decision starts over from the top.
     expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-gate' } })
   })
+
+  // Regression: an EXTERNAL portify pins `status:'editing'` and never advances
+  // `attempt`, so the stage's liveness key froze for the whole hand-off and the
+  // 30-minute IDLE budget abandoned clients that were still working. The key now
+  // folds in a worktree fingerprint, and the file count reaches the UI.
+  it('tracks a live external editing session from the worktree, not from status', async () => {
+    // A real worktree with an uncommitted edit — the fingerprint reads THIS.
+    const worktree = path.join(tmpDir, 'scratch-wt')
+    fs.mkdirSync(worktree, { recursive: true })
+    fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = 3000\n')
+    await runGit(worktree, ['init', '-q'])
+    await runGit(worktree, ['config', 'user.email', 't@t'])
+    await runGit(worktree, ['config', 'user.name', 'test'])
+    await runGit(worktree, ['add', '-A'])
+    await runGit(worktree, ['commit', '-q', '-m', 'init', '--no-verify'])
+    fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = process.env.PORT\n')
+
+    let reads = 0
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-ext' } }
+      if (call.url === '/api/portify/wf-ext') {
+        reads += 1
+        // First read: the client is mid-edit. Second: it submitted and verified.
+        return reads === 1
+          ? { statusCode: 200, body: { status: 'editing', producer: 'external', attempt: 1, repos: [{ worktreePath: worktree }] } }
+          : { statusCode: 200, body: { status: 'ready-to-save', producer: 'external', attempt: 1, diff: 'diff --git a/server.js b/server.js\n', verification: { ok: true } } }
+      }
+      return undefined
+    })
+
+    const ctxObj = ctxFor(manifest())
+    const outcome = await runPastGate(portifyStage(deps({ inject })), ctxObj)
+    // Parks for the human review, having followed the external edit window.
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply' } })
+
+    // Canary COUNTED the edit itself rather than taking the client's word: this is
+    // what both keeps the idle budget alive and gives the UI something to show.
+    const edited = ctxObj.progressLog.find((p) => (p as { editedFiles?: number }).editedFiles !== undefined)
+    expect(edited).toMatchObject({ workflowId: 'wf-ext', status: 'editing', editedFiles: 1 })
+  })
+
+  it('re-publishes on a moving fingerprint even when status and attempt are unchanged', async () => {
+    // The exact case that used to starve: two consecutive polls both report
+    // `editing`/attempt 1, so the phase key is identical — only the worktree moved.
+    const worktree = path.join(tmpDir, 'scratch-wt2')
+    fs.mkdirSync(worktree, { recursive: true })
+    fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = 3000\n')
+    await runGit(worktree, ['init', '-q'])
+    await runGit(worktree, ['config', 'user.email', 't@t'])
+    await runGit(worktree, ['config', 'user.name', 'test'])
+    await runGit(worktree, ['add', '-A'])
+    await runGit(worktree, ['commit', '-q', '-m', 'init', '--no-verify'])
+
+    let reads = 0
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-move' } }
+      if (call.url === '/api/portify/wf-move') {
+        reads += 1
+        if (reads === 1) {
+          fs.writeFileSync(path.join(worktree, 'server.js'), 'const PORT = process.env.PORT\n')
+          return { statusCode: 200, body: { status: 'editing', producer: 'external', attempt: 1, repos: [{ worktreePath: worktree }] } }
+        }
+        if (reads === 2) {
+          // Same status AND same attempt — but the client touched another file.
+          fs.writeFileSync(path.join(worktree, 'ports.js'), 'module.exports = {}\n')
+          return { statusCode: 200, body: { status: 'editing', producer: 'external', attempt: 1, repos: [{ worktreePath: worktree }] } }
+        }
+        return { statusCode: 200, body: { status: 'ready-to-save', producer: 'external', attempt: 1, diff: 'd\n', verification: { ok: true } } }
+      }
+      return undefined
+    })
+
+    const ctxObj = ctxFor(manifest())
+    await runPastGate(portifyStage(deps({ inject })), ctxObj)
+    const counts = ctxObj.progressLog
+      .map((p) => (p as { editedFiles?: number }).editedFiles)
+      .filter((n): n is number => n !== undefined)
+    // Two distinct publishes proving the key moved on evidence alone.
+    expect(counts).toEqual([1, 2])
+    // Three polls at the stage's 3s interval — past the default 5s test budget.
+  }, 20_000)
+
+  it('does not fingerprint an INTERNAL editing window — status/attempt already move there', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-int' } }
+      if (call.url === '/api/portify/wf-int') {
+        return { statusCode: 200, body: { status: 'ready-to-save', attempt: 2, diff: 'd\n', verification: { ok: true } } }
+      }
+      return undefined
+    })
+    const ctxObj = ctxFor(manifest())
+    await runPastGate(portifyStage(deps({ inject })), ctxObj)
+    expect(ctxObj.progressLog.every((p) => (p as { editedFiles?: number }).editedFiles === undefined)).toBe(true)
+  })
+
 })

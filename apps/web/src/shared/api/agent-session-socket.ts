@@ -3,7 +3,7 @@ import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/client'
 
 // WebSocket wrapper for live structured agent-session events. Source is
 // either a run id or a (draftId, stage) pair — the server routes are
-// /ws/runs/:runId/agent-session and /ws/draft/:draftId/agent-session?stage=
+// /ws/runs/:runId/agent-session and the per-subsystem agent-session streams
 // respectively, and emit messages of the form { type: 'session', ... } |
 // { type: 'event', event } | { type: 'error', error }.
 
@@ -66,10 +66,7 @@ function urlFor(base: string, source: AgentSessionSocketSource): string {
   if (source.kind === 'flight') {
     return `${base}/ws/flights/${encodeURIComponent(source.flightId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
   }
-  if (source.kind === 'flight-plan') {
-    return `${base}/ws/flight-plans/${encodeURIComponent(source.taskId)}/agent-session`
-  }
-  return `${base}/ws/draft/${encodeURIComponent(source.draftId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
+  return `${base}/ws/flight-plans/${encodeURIComponent(source.taskId)}/agent-session`
 }
 
 export function connectAgentSessionStream(opts: ConnectAgentSessionOptions): AgentSessionConnection {

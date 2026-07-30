@@ -70,16 +70,6 @@ describe('connectAgentSessionStream', () => {
     expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/portify/portify%2F1/agent-session')
   })
 
-  it('opens /ws/draft/:id/agent-session?stage= for draft sources', () => {
-    reset()
-    connectAgentSessionStream({
-      source: { kind: 'draft', draftId: 'd-1', stage: 'generating' },
-      onEvent: () => {},
-      wsBase: 'ws://h',
-      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
-    })
-    expect(FakeWebSocket.instances[0].url).toBe('ws://h/ws/draft/d-1/agent-session?stage=generating')
-  })
 
   it('opens /ws/coverage/jobs/:jobId/agent-session for coverage sources (line 59)', () => {
     reset()

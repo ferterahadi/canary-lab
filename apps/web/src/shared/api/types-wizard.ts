@@ -42,7 +42,6 @@ export interface DraftRecord {
   externalConversationName?: string
   externalSessionUrl?: string
   intentSummary?: string
-  wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
