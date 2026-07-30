@@ -111,7 +111,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   // Forward reference: the port-change hook needs `shutdown`, which is defined
   // after the server exists. createServer captures this stable delegate.
   let triggerPortChange: (port: number) => void = () => { /* assigned below */ }
-  const { app, runStore, revertAllEnvsets, cancelAllWizardAgents } = await createServer({
+  const { app, runStore, revertAllEnvsets } = await createServer({
     projectRoot,
     onPortChange: (newPort) => triggerPortChange(newPort),
   })
@@ -139,8 +139,6 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     // `.env` on prod.
     revertAllEnvsets()
     traceShutdown('cleanup:reverted-envsets')
-    cancelAllWizardAgents()
-    traceShutdown('cleanup:cancelled-wizard-agents')
     await runStore.abortAllActiveOrStale()
     traceShutdown('cleanup:aborted-runs')
   }

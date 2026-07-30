@@ -6,6 +6,7 @@ import path from 'path'
 import { flightStageRemedy } from '../../features/flights/logic/stage-remedy'
 import type { FlightManifest } from '../../../../../shared/flights/types'
 import { deriveFeatureSlug } from '../../../../../shared/flights/types'
+import { fanOutAdviceFor } from '../client-surface'
 import { type ToolGroupContext, asJsonResult, errorResult } from '../tool-support'
 
 export function registerFlightTools(ctx: ToolGroupContext): void {
@@ -21,9 +22,25 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       stages?: Array<{ key: string; status: string; error?: string; skipReason?: string; checkpoint?: unknown }>
     }
     const waiting = (m.stages ?? []).find((s) => s.status === 'waiting-for-approval')
-    let checkpoint = waiting?.checkpoint as { data?: unknown } | undefined
+    let checkpoint = waiting?.checkpoint as { kind?: string; data?: unknown } | undefined
     if (checkpoint?.data !== undefined && JSON.stringify(checkpoint.data).length > FLIGHT_DATA_INLINE_BUDGET) {
-      checkpoint = { ...checkpoint, data: { omitted: true, reason: 'payload over the inline budget — review it in the web UI flight view, then respond here' } }
+      // `external-work` is a work hand-off, not a question: its data IS the task,
+      // so "review it in the web UI" is not an action the client can take. Keep
+      // the structural fields and point at the prompt file the stage wrote, so an
+      // oversized task degrades to a Read instead of becoming undoable.
+      const d = checkpoint.data as { stage?: string; promptPath?: string; context?: unknown }
+      checkpoint = checkpoint.kind === 'external-work' && d.promptPath
+        ? {
+            ...checkpoint,
+            data: {
+              stage: d.stage,
+              promptPath: d.promptPath,
+              promptOmitted: true,
+              reason: 'the task prompt is over the inline budget — Read promptPath for the full task instead of expecting it inline',
+              ...(d.context !== undefined && JSON.stringify(d.context).length <= FLIGHT_DATA_INLINE_BUDGET ? { context: d.context } : {}),
+            },
+          }
+        : { ...checkpoint, data: { omitted: true, reason: 'payload over the inline budget — review it in the web UI flight view, then respond here' } }
     }
     return {
       flightId: m.flightId,
@@ -67,6 +84,20 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
             : 'ran but produced no requirements doc'
         return `${fork} NOTE — a previous "${String(last.mode)}" gather already ${what}. Do NOT simply repeat that same choice: the material is not in these repos. Prefer (a) supplying the docs yourself, or re-run the agent ONLY with feedback:"<what it missed>" or after the user points the flight at different repos.`
       }
+      // The one checkpoint kind that is WORK, not a question. It only appears on a
+      // flight started with stage_producer:"external". Steering rides the RESULT
+      // rather than the profile instructions because the CLI truncates a server's
+      // `instructions` at 2048 chars and the flight profile is already past it.
+      if (cp?.kind === 'external-work') {
+        const data = cp.data as { stage?: string; prompt?: string; promptPath?: string; context?: unknown } | undefined
+        const where = data?.promptPath && !data.prompt
+          ? `Read checkpoint.data.promptPath (${data.promptPath}) for the task — it was too large to inline`
+          : 'checkpoint.data.prompt is the task'
+        // Advice matched to what THIS client can do, rather than one line that
+        // tells a subagent-less chat client to fan out and then reads its
+        // serial behaviour as disobedience.
+        return `This flight hands its ${String(data?.stage ?? 'stage')} step to YOU (stage_producer:"external"). ${where}, rendered exactly as Canary's own agent would receive it. ${fanOutAdviceFor(ctx.clientFacts())} Do the work with your tools now (write the files the prompt names, on the real paths it gives), then release with respond_flight_checkpoint(flightId, choice:"submit", data:<the result shape the prompt asks for>). Canary re-validates independently — the config must parse, the doc must exist on disk, the specs must compile and raise the computed ledger — so a claim of success that did not land on disk re-parks or fails the stage rather than passing. If you cannot do this step (no file tools, permission refused, wrong machine), answer choice:"run-internally" and Canary's local agent takes just that step; the flight continues either way.`
+      }
       if (cp?.kind === 'config-approval') {
         return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
       }
@@ -102,10 +133,11 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       autopilot: z.boolean().optional().describe('Default true: safe checkpoints answer themselves (logged [autopilot]); similarity-choice, missing-env, docs-less prd-source, and re-parked checkpoints still park. Pass false to be asked at every checkpoint (e.g. to add conversation docs at the prd-source stop).'),
       fresh: z.boolean().optional().describe('Do not resume a paused flight — start over.'),
       agent: z.enum(['claude', 'codex']).optional().describe('R79: which CLI conducts the flight\'s stage agents (scout, requirements collector, PRD summary, spec author, coverage mapper). STICKY per record: jump/continue reuse the stored one; only redo:true may change it. Absent = the stored value, or claude for a fresh start.'),
+      stage_producer: z.enum(['internal', 'external']).optional().describe('WHO executes the hand-off-capable stages: scout (survey the repos, draft the feature config), docs (gather/infer requirement docs), and specs-coverage (author the spec files). "internal" (default) spawns the CLI named by `agent` on the server. "external" means YOU do those steps in THIS client: each one parks the flight on an `external-work` checkpoint whose data carries the rendered prompt — do the work with your own tools and subagents, then release it with respond_flight_checkpoint(choice:"submit", data:<result>). Canary still validates every result the same way it validates its own agent\'s (the config must parse, the doc must exist on disk, the specs must compile and raise the computed ledger), so the verdict stays evidence rather than your report. Answer choice:"run-internally" on any of those checkpoints to hand that one step back to Canary\'s local agent. STICKY per record for the same reason `agent` is. Pick this when you want the work done with your own context and subagents; the other stages (similarity, scaffold, env, portify, run, export) are unaffected.'),
       redo: z.boolean().optional().describe('Restart the feature\'s existing flight from stage 1. WIPES every step\'s on-disk artifacts back to zero — requirement docs (user-added included), specs, envsets, portify overlay, run record, export — as if the flight never ran; warn the user first if they may still want them.'),
       from_stage: z.string().optional().describe('Start at this stage instead of stage 1 (e.g. "specs-coverage", "run"). Prerequisite artifacts are checked; rejected with the missing one named. WIPES this step\'s and every later step\'s on-disk artifacts (user-added inputs included) back to zero before re-running; earlier steps keep theirs.'),
     },
-  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, autopilot, agent, fresh, redo, from_stage }) => {
+  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, autopilot, agent, stage_producer, fresh, redo, from_stage }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
     // Repos + intent are frozen once a flight exists, so redo / from_stage /
     // resume may OMIT repoPaths/description — but then we need `feature` to
@@ -150,6 +182,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         ...(yolo ? { yolo } : {}),
         ...(autopilot === false ? { autopilot: false } : {}),
         ...(agent ? { agent } : {}),
+        ...(stage_producer ? { stageProducer: stage_producer } : {}),
         ...(redo ? { mode: 'redo' } : from_stage ? { mode: 'jump' } : {}),
         ...(from_stage ? { fromStage: from_stage } : {}),
       },

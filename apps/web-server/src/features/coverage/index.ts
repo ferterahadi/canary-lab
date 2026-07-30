@@ -16,10 +16,6 @@ import type { ServerContext } from '../../server-context'
 import type { RunsFeature } from '../runs/index'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../../../shared/runtime/upgrade-check'
 import { loadFeatures } from '../../shared/feature-loader'
-import {
-  spawnPlanAgent as makePlanAgentSpawner,
-  spawnSpecAgent as makeSpecAgentSpawner,
-} from '../wizard/logic/wizard-agent-runner'
 import { generateRunId } from '../runs/logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from '../runs/logic/runtime/run-paths'
 import { RunOrchestrator } from '../runs/logic/runtime/orchestrator'

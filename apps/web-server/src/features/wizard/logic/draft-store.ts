@@ -1,10 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import {
-  applyFeatureScaffold,
-  validateFeatureTarget as validateScaffoldTarget,
-  type ApplyFeatureScaffoldResult,
-} from '../../../../../../shared/feature-scaffold'
+import { validateFeatureTarget as validateScaffoldTarget } from '../../../../../../shared/feature-scaffold'
 import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
 import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
@@ -15,9 +11,9 @@ import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-ta
 // pty logs. State transitions are guarded by `transition()` so the route
 // layer can't accidentally jump from `created` straight to `accepted`.
 //
-// All side effects are scoped to the draft directory — the only time we
-// touch the project root is on `applyToProject`, which copies files into
-// `features/<name>/`.
+// All side effects are scoped to the draft directory. Applying an authored
+// feature to the project root belongs to the MCP path (apply_external_draft →
+// applyExternalDraftFiles), not here.
 
 export type DraftStatus =
   | 'created'
@@ -298,24 +294,9 @@ export function deleteDraft(logsDir: string, draftId: string): boolean {
   return true
 }
 
-export interface ApplyToProjectInput {
-  draftId: string
-  featureName: string
-  generated: { path: string; content: string }[]
-  projectRoot: string
-}
-
-export type ApplyToProjectResult =
-  | { ok: true; featureDir: string; written: string[] }
-  | { ok: false; error: 'feature-exists' | 'invalid-name' | 'invalid-scaffold'; featureDir?: string; details?: string }
-
 export type ValidateFeatureTargetResult =
   | { ok: true; featureDir: string }
   | { ok: false; error: 'feature-exists' | 'invalid-name'; featureDir?: string }
-
-export type MergeDevDependenciesResult =
-  | { ok: true; packageJsonPath?: string; added: string[] }
-  | { ok: false; error: 'package-json-missing' | 'package-json-invalid' | 'package-json-not-object'; packageJsonPath: string }
 
 export function validateFeatureTarget(projectRoot: string, featureName: string): ValidateFeatureTargetResult {
   const result = validateScaffoldTarget(projectRoot, featureName)
@@ -323,74 +304,4 @@ export function validateFeatureTarget(projectRoot: string, featureName: string):
   // shared.validateFeatureTarget only emits 'feature-exists' | 'invalid-name';
   // 'invalid-scaffold' is reserved for the apply path.
   return { ok: false, error: result.error as 'feature-exists' | 'invalid-name', featureDir: result.featureDir }
-}
-
-export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult {
-  return applyFeatureScaffold({
-    featureName: input.featureName,
-    files: input.generated,
-    projectRoot: input.projectRoot,
-  }) as ApplyFeatureScaffoldResult
-}
-
-export function mergeRootDevDependencies(projectRoot: string, devDependencies: string[]): MergeDevDependenciesResult {
-  if (devDependencies.length === 0) return { ok: true, added: [] }
-  const packageJsonPath = path.join(projectRoot, 'package.json')
-  if (!fs.existsSync(packageJsonPath)) {
-    return { ok: false, error: 'package-json-missing', packageJsonPath }
-  }
-  let pkg: unknown
-  try {
-    pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
-  } catch {
-    return { ok: false, error: 'package-json-invalid', packageJsonPath }
-  }
-  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) {
-    return { ok: false, error: 'package-json-not-object', packageJsonPath }
-  }
-
-  const record = pkg as Record<string, unknown>
-  if (record.dependencies !== undefined && !isPackageDependencyMap(record.dependencies)) {
-    return { ok: false, error: 'package-json-invalid', packageJsonPath }
-  }
-  if (record.devDependencies !== undefined && !isPackageDependencyMap(record.devDependencies)) {
-    return { ok: false, error: 'package-json-invalid', packageJsonPath }
-  }
-  const dependencies = isPackageDependencyMap(record.dependencies) ? record.dependencies : {}
-  const existingDev = isPackageDependencyMap(record.devDependencies) ? record.devDependencies : {}
-  const nextDev = { ...existingDev }
-  const added: string[] = []
-
-  for (const name of devDependencies) {
-    if (Object.prototype.hasOwnProperty.call(existingDev, name)) continue
-    if (Object.prototype.hasOwnProperty.call(dependencies, name)) continue
-    nextDev[name] = 'latest'
-    added.push(name)
-  }
-
-  if (added.length === 0) return { ok: true, packageJsonPath, added }
-  record.devDependencies = nextDev
-  fs.writeFileSync(packageJsonPath, JSON.stringify(record, null, 2) + '\n', 'utf8')
-  return { ok: true, packageJsonPath, added }
-}
-
-function isPackageDependencyMap(value: unknown): value is Record<string, string> {
-  return Boolean(value)
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && Object.values(value as Record<string, unknown>).every((v) => typeof v === 'string')
-}
-
-// Slugify a string into a feature name candidate. Used as a fallback when the
-// user doesn't supply `featureName` — first 4 alpha words of the PRD title.
-export function slugifyFeatureName(prdText: string): string {
-  const firstLine = (prdText.split('\n').find((l) => l.trim()) ?? '').trim()
-  const words = firstLine
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length > 0)
-    .slice(0, 4)
-  const slug = words.join('-').replace(/-+/g, '-').replace(/^-|-$/g, '')
-  return slug || 'untitled-feature'
 }

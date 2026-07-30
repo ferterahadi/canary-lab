@@ -79,9 +79,15 @@ const scaffoldPaths = [
   'features/broken_todo_api/feature.config.cjs',
 ]
 
+// One prompt per agent-spawning path that ships, plus a schema sidecar — the
+// asset-copy step is only proven by the tarball. (The retired internal wizard's
+// stage1/stage2 prompts used to stand in here; the flight pipeline's scout and
+// specs-coverage cover the same ground now.)
 const installedPackagePaths = [
-  'node_modules/canary-lab/dist/apps/web-server/prompts/stage1-plan.md',
-  'node_modules/canary-lab/dist/apps/web-server/prompts/stage2-spec.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/scout.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/specs-coverage.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/portify.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/prd-summary.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/heal-agent.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.schema.json',

@@ -19,6 +19,7 @@ import { registerReadTools } from './tool-groups/reads'
 import { registerAuthoringTools } from './tool-groups/authoring'
 import { registerRunLifecycleTools } from './tool-groups/run-lifecycle'
 import { registerHealFlowTools } from './tool-groups/heal-flow'
+import { classifyMcpClient, type McpClientFacts } from './client-surface'
 
 export * from './tool-support'
 
@@ -43,7 +44,13 @@ export function registerCanaryLabTools(
     }
   }) as McpServer['registerTool']
 
-  const ctx = { registerTool, deps, clientKindInput }
+  // Read the peer at CALL time, not now: `clientInfo` and the client's declared
+  // capabilities only exist after the initialize handshake, which happens after
+  // registration. `server.server` is the public underlying Server.
+  const clientFacts = (): McpClientFacts =>
+    classifyMcpClient(server.server.getClientVersion(), server.server.getClientCapabilities())
+
+  const ctx = { registerTool, deps, clientKindInput, clientFacts }
   registerReadTools(ctx)
   registerAuthoringTools(ctx)
   registerRunLifecycleTools(ctx)

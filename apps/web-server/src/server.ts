@@ -42,11 +42,6 @@ import { register as registerVersion } from './features/version/index'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../shared/runtime/upgrade-check'
 import { PaneBroker } from './features/runs/logic/pane-broker'
 import { loadFeatures } from './shared/feature-loader'
-import {
-  spawnPlanAgent as makePlanAgentSpawner,
-  spawnSpecAgent as makeSpecAgentSpawner,
-} from './features/wizard/logic/wizard-agent-runner'
-import { WizardAgentRegistry } from './features/wizard/logic/wizard-agent-registry'
 import { reconcileInterruptedDrafts } from './features/wizard/logic/draft-store'
 import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './features/runs/logic/runtime/orchestrator'
@@ -109,7 +104,6 @@ export interface CreateServerResult {
   // SIGINT/SIGTERM so a crashed/killed run doesn't leave the user's `.env`
   // pointing at production.
   revertAllEnvsets: () => void
-  cancelAllWizardAgents: () => void
 }
 
 export async function createServer(opts: CreateServerOptions): Promise<CreateServerResult> {
@@ -225,7 +219,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // would prevent `canary-lab ui` from exiting cleanly on SIGINT/SIGTERM.
   if (typeof externalHealWatchdog.unref === 'function') externalHealWatchdog.unref()
   const brokers = new Map<string, PaneBroker>()
-  const wizardAgents = new WizardAgentRegistry()
   // Tracks runs with an active envset so we can revert on run-complete or on
   // process termination. Cleared as runs finish.
   const activeEnvsets = new Map<string, BackupRecord[]>()
@@ -255,7 +248,6 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     versionState,
     workspaceEvents,
     externalHealBroker,
-    wizardAgents,
     brokers,
     activeEnvsets,
     ptyFactory,
@@ -385,6 +377,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     // (REST); the MCP surface is external-producer only.
     startExternalPortify: (input) => portifyRunner.startExternalPortify(input),
     submitExternalPortify: (workflowId) => portifyRunner.submitExternalPortify(workflowId),
+    reviseExternalPortify: (workflowId, feedback) => portifyRunner.reviseExternalPortify(workflowId, feedback),
+    externalPortifyRetryPrompt: (workflowId) => portifyRunner.externalRetryPrompt(workflowId),
     getPortify: (workflowId) => portifyStore.get(workflowId),
     savePortify: (workflowId) => portifyRunner.save(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
@@ -438,9 +432,5 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     }
   }
 
-  const cancelAllWizardAgents = (): void => {
-    wizardAgents.cancelAll()
-  }
-
-  return { app, registry, runStore, brokers, revertAllEnvsets, cancelAllWizardAgents }
+  return { app, registry, runStore, brokers, revertAllEnvsets }
 }

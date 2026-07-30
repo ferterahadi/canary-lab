@@ -209,6 +209,21 @@ describe('flights routes', () => {
     expect((started.json() as { opts: { autopilot?: boolean; agent?: string } }).opts).toMatchObject({ autopilot: false, agent: 'codex' })
   })
 
+  it('carries stageProducer into the flight options, and drops an unknown value', async () => {
+    app = await buildApp(allDone())
+    const external = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ stageProducer: 'external' }) })
+    expect(external.statusCode).toBe(201)
+    expect((external.json() as { opts: { stageProducer?: string } }).opts.stageProducer).toBe('external')
+
+    // Unknown values DEGRADE to the internal default rather than 400 — same
+    // posture as `agent`, so an older client sending nonsense still starts a
+    // flight instead of failing at the door.
+    app = await buildApp(allDone())
+    const bogus = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ feature: 'other', stageProducer: 'sampling' }) })
+    expect(bogus.statusCode).toBe(201)
+    expect('stageProducer' in (bogus.json() as { opts: Record<string, unknown> }).opts).toBe(false)
+  })
+
   it('400s when repoPaths contains a non-string entry', async () => {
     app = await buildApp(allDone())
     const resp = await app.inject({

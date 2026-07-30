@@ -157,6 +157,36 @@ requirement you emit must trace back to something you actually read (see
 "Grounding" above) — if you can't point to where a document says it, leave it out.
 This is read-only analysis: do not edit any file.
 
+### Fan out when there is enough reading to divide
+
+A document is the unit of division, and never split one document across two
+readers — a requirement stated in one paragraph and qualified three paragraphs
+later only makes sense read together. When more than one document is listed
+below and there is more than a handful of reading, dispatch **one read-only
+subagent per document in a single parallel round** (up to 5 at once), each
+reading only its own file and the material that file references, and returning
+only that file's requirements. Below that, read them yourself; the round trips
+cost more than the reading.
+
+Give every subagent the previous requirement list unchanged, and tell it the id
+stability rule verbatim. The documents divide; the id spine does not, because a
+subagent that cannot see a surviving requirement's previous id will mint a new
+one for it and silently break every test annotation pointing at the old id.
+
+Two judgements stay yours and are never delegated, because both are properties
+of the WHOLE feature rather than of any one document:
+
+- the single `variantDimension` — it cross-cuts every document by definition, so
+  a per-document vote on it is a vote taken on partial evidence.
+- de-duplication across returns — two documents describing the same expectation
+  must collapse to ONE requirement, and only you can see both.
+
+The merged answer is yours, not theirs. Account for every document listed below
+before you send it: a subagent that returns nothing has **not** established that
+its document holds no requirements — it has failed to report. Say which document
+and why, or read that one yourself, rather than dropping it silently. Nothing
+downstream can tell an unread document from an empty one.
+
 ## Source documents to read
 
 Read each of these files with your tools before answering:

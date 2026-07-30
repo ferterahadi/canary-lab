@@ -9,7 +9,7 @@ import { PortifyOrchestrator } from './orchestrator'
 import { buildPortifyPaths, portifyDir } from './paths'
 import { discardWorktree } from './git-ops'
 import { writeOverlay } from './overlay'
-import { buildPortifyPrompt } from './prompt'
+import { buildPortifyPrompt, buildPortifyFeedbackPrompt, buildPortifyRetryPrompt } from './prompt'
 import type { PortifyManifest, PortifyProducer, PortifyExternalSession, StartPortifyInput, StartPortifyResult, StartExternalPortifyInput, StartExternalPortifyResult, ExternalPortifyEditTarget } from './types'
 import { captureOverlayRepos, readPendingOverlay, restoreConfig } from './portify-overlay-capture'
 import { RepoGroup, buildSeededNote, portifyConcurrencyCap } from './portify-worktree-borrow'
@@ -217,6 +217,53 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return deps.store.get(workflowId) ?? m
   }
 
+  // External twin of revise(): the human wants a change to a diff that already
+  // passed the double-boot. Canary spawns nothing — it reopens the workflow so
+  // the client keeps editing the SAME worktree, and hands back the feedback
+  // prompt because the constraints have to be restated (don't touch tests, don't
+  // commit, envsets stay token-driven, the double-boot runs again). Synchronous:
+  // unlike the internal revise there is no agent pass to float, so the caller
+  // gets the reopened manifest itself rather than a status to poll.
+  function reviseExternalPortify(workflowId: string, feedback: string): { manifest: PortifyManifest; instructions: string } {
+    const m = deps.store.get(workflowId)
+    if (!m) throw Object.assign(new Error('workflow not found'), { statusCode: 404 })
+    if (m.producer !== 'external') {
+      throw Object.assign(new Error('not an external port-ification workflow'), { statusCode: 409 })
+    }
+    if (m.status !== 'ready-to-save') {
+      throw Object.assign(new Error(`cannot revise a workflow in status "${m.status}"`), { statusCode: 409 })
+    }
+    const trimmed = feedback.trim()
+    if (!trimmed) throw Object.assign(new Error('feedback is required'), { statusCode: 400 })
+    const state = active.get(workflowId)
+    if (!state?.orchestrator) {
+      throw Object.assign(
+        new Error('worktree is no longer available — the server may have restarted; start a new workflow'),
+        { statusCode: 409 },
+      )
+    }
+    const feature = deps.loadFeatures().find((f) => f.name === m.feature)
+    if (!feature) throw Object.assign(new Error(`feature not found: ${m.feature}`), { statusCode: 404 })
+    return {
+      manifest: state.orchestrator.reopenExternal(m),
+      instructions: buildPortifyFeedbackPrompt(feature, trimmed),
+    }
+  }
+
+  // The retry playbook for a failed double-boot, rendered for an EXTERNAL client.
+  // The internal agent gets this automatically on its next attempt; without it the
+  // client sees only the raw failureDetail and none of its reading — the
+  // baseline-vs-concurrency verdict split, the non-HTTP listener hunt, the shared
+  // build-cache race. Returns null when there is no recorded failure to explain.
+  function externalRetryPrompt(workflowId: string): string | null {
+    const m = deps.store.get(workflowId)
+    if (!m || m.producer !== 'external') return null
+    if (m.status !== 'editing' || m.verification?.ok !== false) return null
+    const feature = deps.loadFeatures().find((f) => f.name === m.feature)
+    if (!feature) return null
+    return buildPortifyRetryPrompt(feature, m.verification.failureDetail ?? '(no detail recorded)')
+  }
+
   function dropPendingOverlay(workflowId: string): void {
     const paths = buildPortifyPaths(portifyDir(deps.logsDir, workflowId))
     try { fs.rmSync(paths.pendingOverlayPath, { force: true }) } catch { /* best-effort */ }
@@ -342,5 +389,5 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     return { workflowId, removed: true }
   }
 
-  return { startPortify, startExternalPortify, submitExternalPortify, save, cancel, revise, remove, abort: cancel }
+  return { startPortify, startExternalPortify, submitExternalPortify, reviseExternalPortify, externalRetryPrompt, save, cancel, revise, remove, abort: cancel }
 }

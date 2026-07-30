@@ -14,6 +14,7 @@ import type { SummaryState } from '../../../../shared/coverage/types'
 import { type DraftRecord, type ExternalDraftStage } from '../features/wizard/logic/draft-store'
 import { isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
+import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps } from './tool-schemas'
 
 export { BOOT_SESSION_MESSAGE, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_WINDOW_MS, bootSessionValue, classifyWaitForHealTask, dirtyTestsWarning, healWaitNext, isActiveBootRun, stillWaitingValue, waitForHealTask } from './heal-task-wait'
@@ -59,6 +60,11 @@ export function coverageBlockedNext(feature: string, summary: SummaryState, sour
 export interface ToolGroupContext {
   registerTool: McpServer['registerTool']
   deps: CanaryLabMcpDeps
+  /** Who is connected on THIS session, read at call time rather than at
+   *  registration: `clientInfo` only exists after the initialize handshake, which
+   *  happens after the tools are registered. Lets a tool result adapt its advice
+   *  (fan out vs read serially) to what the client can actually do. */
+  clientFacts: () => McpClientFacts
   // Derived, not restated: zod's ZodEnum generic shape is version-sensitive, so
   // spelling this type by hand breaks on a zod upgrade.
   clientKindInput: ReturnType<typeof CLIENT_KIND.default>

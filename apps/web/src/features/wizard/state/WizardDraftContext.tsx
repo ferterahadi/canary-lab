@@ -1,22 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
-import type { CreateDraftPayload, DraftRecord, PlanStep } from '@/shared/api/types'
+import type { DraftRecord } from '@/shared/api/types'
 
+// Live list of authoring drafts, fed by the REST list on mount and kept current
+// by workspace events. Every draft is authored by an external MCP client, so
+// this tracks records — it never starts, accepts or rejects an agent's work.
+// Open-state belongs to nav (App's routed `draftFor`), not here.
 interface WizardDraftContextValue {
   drafts: DraftRecord[]
-  latestTask: DraftRecord | null
-  selectedDraft: DraftRecord | null
-  wizardOpen: boolean
-  startNewWizard: () => void
-  startDraft: (payload: CreateDraftPayload) => Promise<DraftRecord>
-  openTask: (draftId?: string) => void
-  closeWizard: () => void
   refreshDraft: (draftId: string) => Promise<DraftRecord | null>
-  cancelGeneration: (draftId: string) => Promise<DraftRecord | null>
-  acceptPlan: (draftId: string, plan?: PlanStep[], intentSummary?: string) => Promise<DraftRecord | null>
-  acceptSpec: (draftId: string, featureName?: string) => Promise<DraftRecord | null>
-  rejectAndDelete: (draftId: string) => Promise<void>
   deleteTask: (draftId: string) => Promise<void>
 }
 
@@ -30,15 +23,12 @@ export interface WizardDraftProviderProps {
 
 export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardDraftProviderProps) {
   const [draftsById, setDraftsById] = useState<Record<string, DraftRecord>>({})
-  const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null)
-  const [wizardOpen, setWizardOpen] = useState(false)
 
   const forgetDraft = useCallback((draftId: string): void => {
     setDraftsById((current) => {
       const { [draftId]: _removed, ...rest } = current
       return rest
     })
-    setSelectedDraftId((selected) => (selected === draftId ? null : selected))
   }, [])
 
   const rememberDraft = useCallback((draft: DraftRecord): DraftRecord => {
@@ -60,9 +50,7 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
 
   const reconcileDraftList = useCallback((drafts: DraftRecord[]): void => {
     const visible = drafts.filter(isVisibleWizardTask)
-    const next = Object.fromEntries(visible.map((draft) => [draft.draftId, draft]))
-    setDraftsById(next)
-    setSelectedDraftId((selected) => (selected && !next[selected] ? null : selected))
+    setDraftsById(Object.fromEntries(visible.map((draft) => [draft.draftId, draft])))
   }, [])
 
   useEffect(() => {
@@ -103,68 +91,8 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [draftsById],
   )
-  const latestTask = drafts[0] ?? null
-  const selectedDraft = selectedDraftId ? draftsById[selectedDraftId] ?? null : null
-
-  const startNewWizard = useCallback((): void => {
-    setSelectedDraftId(null)
-    setWizardOpen(true)
-  }, [])
-
-  const startDraft = useCallback(async (payload: CreateDraftPayload): Promise<DraftRecord> => {
-    const created = await api.createDraft(payload)
-    const now = new Date().toISOString()
-    const optimistic: DraftRecord = {
-      draftId: created.draftId,
-      prdText: payload.prdText,
-      additionalNotes: payload.additionalNotes,
-      prdDocuments: payload.prdDocuments ?? [],
-      repos: payload.repos,
-      featureName: payload.featureName,
-      status: created.status,
-      activeAgentStage: created.status === 'planning' ? 'planning' : undefined,
-      createdAt: now,
-      updatedAt: now,
-    }
-    rememberDraft(optimistic)
-    setSelectedDraftId(created.draftId)
-    setWizardOpen(true)
-    void refreshDraft(created.draftId)
-    return optimistic
-  }, [refreshDraft, rememberDraft])
-
-  const openTask = useCallback((draftId?: string): void => {
-    const nextId = draftId ?? latestTask?.draftId ?? null
-    setSelectedDraftId(nextId)
-    if (nextId) setWizardOpen(true)
-  }, [latestTask?.draftId])
-
-  const closeWizard = useCallback((): void => {
-    setWizardOpen(false)
-  }, [])
-
-  const cancelGeneration = useCallback(async (draftId: string): Promise<DraftRecord | null> => {
-    await api.cancelDraftGeneration(draftId)
-    return refreshDraft(draftId)
-  }, [refreshDraft])
-
-  const acceptPlan = useCallback(async (draftId: string, plan?: PlanStep[], intentSummary?: string): Promise<DraftRecord | null> => {
-    await api.acceptPlan(draftId, plan, intentSummary)
-    return refreshDraft(draftId)
-  }, [refreshDraft])
-
-  const acceptSpec = useCallback(async (draftId: string, featureName?: string): Promise<DraftRecord | null> => {
-    await api.acceptSpec(draftId, featureName)
-    return refreshDraft(draftId)
-  }, [refreshDraft])
-
-  const rejectAndDelete = useCallback(async (draftId: string): Promise<void> => {
-    try { await api.rejectDraft(draftId) } catch { /* may already be terminal */ }
-    try { await api.deleteDraft(draftId) } catch { /* already gone */ }
-    forgetDraft(draftId)
-    setWizardOpen((open) => open && selectedDraftId !== draftId)
-  }, [forgetDraft, selectedDraftId])
-
+  // Stopping an in-flight authoring session settles the RECORD — there is no
+  // local process to kill, the agent runs in the user's own client window.
   const deleteTask = useCallback(async (draftId: string): Promise<void> => {
     const draft = draftsById[draftId]
     if (draft && isActiveWizardTask(draft.status)) {
@@ -176,35 +104,9 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
 
   const value = useMemo<WizardDraftContextValue>(() => ({
     drafts,
-    latestTask,
-    selectedDraft,
-    wizardOpen,
-    startNewWizard,
-    startDraft,
-    openTask,
-    closeWizard,
     refreshDraft,
-    cancelGeneration,
-    acceptPlan,
-    acceptSpec,
-    rejectAndDelete,
     deleteTask,
-  }), [
-    acceptPlan,
-    acceptSpec,
-    cancelGeneration,
-    closeWizard,
-    deleteTask,
-    drafts,
-    latestTask,
-    openTask,
-    refreshDraft,
-    rejectAndDelete,
-    selectedDraft,
-    startDraft,
-    startNewWizard,
-    wizardOpen,
-  ])
+  }), [deleteTask, drafts, refreshDraft])
 
   return (
     <WizardDraftContext.Provider value={value}>

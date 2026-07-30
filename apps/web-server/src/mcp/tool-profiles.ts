@@ -68,6 +68,7 @@ export type CanaryLabMcpToolName =
   | 'handoff_heal'
   | 'start_external_portify'
   | 'submit_external_portify'
+  | 'revise_external_portify'
   | 'get_portify'
   | 'save_portify'
   | 'cancel_portify'
@@ -175,6 +176,7 @@ export const PORTIFY_TOOLS = [
   'list_runs',
   'start_external_portify',
   'submit_external_portify',
+  'revise_external_portify',
   'get_portify',
   'save_portify',
   'cancel_portify',

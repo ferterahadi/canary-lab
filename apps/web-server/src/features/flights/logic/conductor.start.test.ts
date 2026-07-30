@@ -410,3 +410,58 @@ describe('checkpoints', () => {
     )
   })
 })
+
+// `stageProducer` decides whether the hand-off-capable stages (scout, docs,
+// specs-coverage) are executed by a locally spawned CLI or by the MCP client
+// driving the flight. It is sticky for the same reason `agent` is: the surviving
+// stage artifacts were produced by one executor, and the later stages read them.
+describe('startFlight — stageProducer stickiness', () => {
+  const externalArgs = (over: Partial<FlightOptions> = {}) => ({
+    ...args(),
+    opts: { ...OPTS, stageProducer: 'external' as const, ...over },
+  })
+
+  it('stores stageProducer on a fresh start', async () => {
+    const { manifest, completion } = startFlight(externalArgs(), deps(allDone()))
+    await completion
+    expect(store.get(manifest.flightId)!.opts.stageProducer).toBe('external')
+  })
+
+  it('a jump KEEPS the stored producer even when the caller sends a different one', async () => {
+    const first = startFlight(externalArgs(), deps(allDone()))
+    await first.completion
+    const jumped = startFlight(
+      { ...args(), opts: { ...OPTS, stageProducer: 'internal' as const }, mode: 'jump' as const, fromStage: 'run' as const },
+      { ...deps(allDone()), validateStageEntry: () => null },
+    )
+    await jumped.completion
+    // Mid-pipeline re-entry must not switch executor: scout/docs/specs artifacts
+    // on this record came from the external client.
+    expect(store.get(jumped.manifest.flightId)!.opts.stageProducer).toBe('external')
+  })
+
+  it('a full redo MAY change the producer, since every artifact is discarded', async () => {
+    const first = startFlight(externalArgs(), deps(allDone()))
+    await first.completion
+    const redone = startFlight(
+      { ...args(), opts: { ...OPTS, stageProducer: 'internal' as const }, mode: 'redo' as const },
+      deps(allDone()),
+    )
+    await redone.completion
+    expect(store.get(redone.manifest.flightId)!.opts.stageProducer).toBe('internal')
+  })
+
+  it('a redo that OMITS the producer keeps the stored one', async () => {
+    const first = startFlight(externalArgs(), deps(allDone()))
+    await first.completion
+    const redone = startFlight({ ...args(), mode: 'redo' as const }, deps(allDone()))
+    await redone.completion
+    expect(store.get(redone.manifest.flightId)!.opts.stageProducer).toBe('external')
+  })
+
+  it('leaves the key absent entirely for an internal flight — the GUI default', async () => {
+    const { manifest, completion } = startFlight(args(), deps(allDone()))
+    await completion
+    expect('stageProducer' in store.get(manifest.flightId)!.opts).toBe(false)
+  })
+})

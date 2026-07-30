@@ -168,6 +168,13 @@ export interface CanaryLabMcpDeps {
   /** External producer: verify the client's in-place edits (double-boot) and park
    *  at ready-to-save (pass) or back at editing (fail). */
   submitExternalPortify?: (workflowId: string) => Promise<PortifyManifest>
+  /** External producer: reopen a VERIFIED workflow (`ready-to-save` → `editing`)
+   *  so the client can act on human feedback without discarding the worktree, and
+   *  hand back the feedback prompt that restates the constraints. */
+  reviseExternalPortify?: (workflowId: string, feedback: string) => { manifest: PortifyManifest; instructions: string }
+  /** The retry playbook for a failed double-boot, rendered for an external client.
+   *  Null unless the workflow is external and parked at `editing` on a failure. */
+  externalPortifyRetryPrompt?: (workflowId: string) => string | null
   getPortify?: (workflowId: string) => PortifyManifest | null
   savePortify?: (workflowId: string) => Promise<PortifyManifest>
   cancelPortify?: (workflowId: string) => Promise<PortifyManifest>

@@ -28,6 +28,11 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
           /** R79: which CLI conducts the flight's stage agents; sticky per
            *  record (jump/continue reuse the stored one). Absent → claude. */
           agent?: string
+          /** Who executes the hand-off-capable stages (scout, docs,
+           *  specs-coverage): the local CLI, or the MCP client driving the
+           *  flight. Sticky per record. Absent → internal. A GUI start never
+           *  sends it — there is no MCP client to hand work to. */
+          stageProducer?: string
           /** continue | redo | jump — required when the feature already has a
            *  flight record (409 flight_exists_requires_choice otherwise). */
           mode?: string
@@ -96,6 +101,10 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
       yolo: body.yolo === true,
       ...(body.autopilot === false ? { autopilot: false } : {}),
       ...(body.agent === 'claude' || body.agent === 'codex' ? { agent: body.agent } : {}),
+      // Unknown values are dropped rather than rejected, matching `agent` above:
+      // an older client sending nonsense degrades to the internal default instead
+      // of failing a flight start.
+      ...(body.stageProducer === 'internal' || body.stageProducer === 'external' ? { stageProducer: body.stageProducer } : {}),
     }
 
     try {

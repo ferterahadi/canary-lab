@@ -84,6 +84,16 @@ export type FlightCheckpointKind =
   | 'portify-apply'     // portify agent proposes edits; approve before apply
   | 'run-failed'        // run ended failed/aborted after heal → rerun or export as-is
   | 'export-mode'       // pick the evaluation flavor before exporting: raw | localized
+  /** The stage handed its work to the external MCP client that drives the flight
+   *  (opts.stageProducer === 'external'): `data` carries the rendered prompt the
+   *  client should execute, and the client returns its result on the response's
+   *  `data`. Unlike every other kind this is not a question for a human — it is a
+   *  work hand-off — but it reuses the checkpoint machinery deliberately: a parked
+   *  checkpoint makes run() RETURN, so there is no poll and therefore no idle
+   *  deadline to starve (the flaw in portify's poll-based external path). It also
+   *  accepts choice:"run-internally" so a client that cannot do the job can hand
+   *  it back to Canary's own agent instead of failing the stage. */
+  | 'external-work'
 
 export interface FlightCheckpoint {
   kind: FlightCheckpointKind
@@ -222,6 +232,17 @@ export interface FlightOptions {
    *  the record's lifetime: jump/continue reuse the stored value; only a full
    *  redo may change it. Absent → claude. */
   agent?: 'claude' | 'codex'
+  /** Who executes the reading/authoring stages that CAN be handed off (scout,
+   *  docs, specs↔coverage). `internal` (the default, and the only option for a
+   *  GUI-started flight, which has no MCP client at all) spawns the CLI named by
+   *  `agent` above. `external` parks each of those stages on an `external-work`
+   *  checkpoint so the MCP client driving the flight does the job in its own
+   *  harness — with its own subagents, permissions and token accounting — and
+   *  returns the result via respond_flight_checkpoint. Sticky for the record's
+   *  lifetime for the same reason `agent` is: a flight that changes executor
+   *  mid-pipeline produces stage evidence from two different sources. Stages with
+   *  no hand-off spec (similarity, scaffold, env, portify, run, export) ignore it. */
+  stageProducer?: 'internal' | 'external'
   /** Base branch for diff-inferred requirements (auto-detected when absent). */
   base?: string
   /** Skip every checkpoint except missing-env. */

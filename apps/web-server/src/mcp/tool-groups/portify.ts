@@ -63,8 +63,33 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     }
   })
 
+  registerTool('revise_external_portify', {
+    description: 'Act on human feedback about an already-VERIFIED port-ification diff, WITHOUT losing it. Reopens the workflow (ready-to-save → editing) so you keep editing the SAME scratch worktree your verified edits live in, and returns a `prompt` restating the constraints (ports-only, never touch test files, never commit, envsets stay `${port.x}`-driven). Use this whenever the user asks for a change after the double-boot passed — cancel_portify would throw the verified worktree away and make you start over. Apply the feedback, then submit_external_portify to re-verify. Only valid when status is "ready-to-save".',
+    inputSchema: {
+      workflowId: z.string(),
+      feedback: z.string().describe("What the human wants changed, in their words. Required — a reopen with nothing to act on just loses the verified state."),
+    },
+  }, async ({ workflowId, feedback }) => {
+    if (!deps.reviseExternalPortify) return errorResult('reviseExternalPortify dependency is not configured')
+    try {
+      const { manifest, instructions } = deps.reviseExternalPortify(workflowId, feedback)
+      const { diff, ...rest } = manifest
+      return asJsonResult({
+        ...rest,
+        ...(diff ? { diffStats: summarizeUnifiedDiff(diff), diffOmitted: true, diffHint: 'call get_portify with includeDiff:true to inline the patch' } : {}),
+        canaryLabBehavior: 'tracking-only',
+        statusMeaning: 'The workflow is back in "editing" with your prior verified edits still on disk. Canary spawns no agent — you apply the feedback, then submit_external_portify re-runs the double-boot.',
+        prompt: instructions,
+        nextSteps: ['submit_external_portify'],
+        next: `Follow prompt: apply the feedback ON TOP of the existing edits in the worktree (they are still there — do not start over), then call submit_external_portify with workflowId "${workflowId}" to re-verify. The double-boot runs again, so re-check the change did not reintroduce a hardcoded listener.`,
+      })
+    } catch (err) {
+      return errorResult(err instanceof Error ? err.message : String(err))
+    }
+  })
+
   registerTool('get_portify', {
-    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-save/saved/failed/aborted), attempt count, and the double-boot verification result. The full unified diff is OMITTED by default (it can be a large multi-file patch) — `diffStats` summarizes it; pass includeDiff:true to inline the patch text.',
+    description: 'Read a port-ification workflow: status (planning/editing/verifying/ready-to-save/saved/failed/aborted), attempt count, and the double-boot verification result. When an external workflow is back at "editing" because verification FAILED, the result also carries `prompt` — the retry playbook for reading that failure (baseline-boot vs concurrency verdict, the non-HTTP listeners a first pass usually misses, the shared build-cache race). The full unified diff is OMITTED by default (it can be a large multi-file patch) — `diffStats` summarizes it; pass includeDiff:true to inline the patch text.',
     inputSchema: {
       workflowId: z.string(),
       includeDiff: z.boolean().default(false).describe('Inline the full unified diff. Off by default (the patch can be large); diffStats gives files/additions/deletions. Call again with includeDiff:true for the patch text.'),
@@ -73,11 +98,20 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     if (!deps.getPortify) return errorResult('getPortify dependency is not configured')
     const manifest = deps.getPortify(workflowId)
     if (!manifest) return errorResult(`port-ification workflow not found: ${workflowId}`)
-    if (includeDiff) return asJsonResult(manifest)
+    // A failed double-boot re-parks at `editing`, so this read is where an
+    // external client actually LEARNS it failed (submit is fire-and-forget).
+    // Ride the retry playbook along — the raw failureDetail carries the verdict
+    // but none of its reading.
+    const retryPrompt = deps.externalPortifyRetryPrompt?.(workflowId) ?? null
+    const retry = retryPrompt
+      ? { prompt: retryPrompt, nextSteps: ['submit_external_portify'], next: 'Verification FAILED and the workflow is back in "editing". Follow prompt: re-scan for the listener that still binds a hardcoded port, fix it in the worktree, then submit_external_portify again.' }
+      : {}
+    if (includeDiff) return asJsonResult({ ...manifest, ...retry })
     const { diff, ...rest } = manifest
     return asJsonResult({
       ...rest,
       ...(diff ? { diffStats: summarizeUnifiedDiff(diff), diffOmitted: true, diffHint: 'call get_portify with includeDiff:true to inline the patch' } : {}),
+      ...retry,
     })
   })
 
@@ -97,7 +131,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('save_portify', {
-    description: "Save a verified port-ification workflow as the feature's EPHEMERAL OVERLAY (captured patch under features/<feature>/portify/) and discard the scratch worktree — NOTHING is committed or merged; the product repo stays pristine. The overlay is applied into a fresh per-run worktree before each run and reverse-applied at teardown. Only valid when status is ready-to-save. Requires confirm: true.",
+    description: "Save a verified port-ification workflow as the feature's EPHEMERAL OVERLAY (captured patch under features/<feature>/portify/) and discard the scratch worktree — NOTHING is committed or merged; the product repo stays pristine. The overlay is applied into a fresh per-run worktree before each run and reverse-applied at teardown. Only valid when status is ready-to-save. Requires confirm: true. If the human wants a change first, call revise_external_portify (feedback) instead — it reopens the SAME verified worktree; cancel_portify would discard it.",
     inputSchema: {
       workflowId: z.string(),
       confirm: z.literal(true).describe('Must be true. Guards against saving an unreviewed rewrite.'),

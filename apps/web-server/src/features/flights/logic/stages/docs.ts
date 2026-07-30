@@ -9,6 +9,7 @@ import { detectBaseBranch } from '../../../../shared/git-repo'
 import type { PrdSourceAttempt } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps } from './context'
+import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork } from './externalizable'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
 //   manual — the user supplies docs (UI drop zone / MCP write_feature_doc),
@@ -256,6 +257,42 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     }
   }
 
+  /** Settle a collector attempt from what landed ON DISK. Shared verbatim by the
+   *  local-agent path and the external hand-off, and that sharing is the point:
+   *  the verdict is "did the doc get written", checked by Canary, not "did the
+   *  producer say it worked". An external client writes {{outPath}} with its own
+   *  file tools exactly as the local agent does, so there is nothing to trust
+   *  differently. `reply` is the producer's final message, mined for the
+   *  NOTHING_FOUND reason when no file appeared. */
+  const settleCollected = (
+    ctx: StageContext,
+    mode: 'collect-repo-docs' | 'infer-from-diff',
+    plan: { outName: string; outPath: string },
+    reply: string,
+  ): StageOutcome => {
+    const m = ctx.manifest()
+    const wrote = fs.existsSync(plan.outPath) && fs.statSync(plan.outPath).size > 0
+    if (!wrote) {
+      const reason = /NOTHING_FOUND:?\s*(.*)/.exec(reply)?.[1]?.trim()
+      const attempt: PrdSourceAttempt = reason
+        ? { mode, outcome: 'empty', reason }
+        : { mode, outcome: 'no-output' }
+      ctx.appendLog(attemptLogLine(attempt))
+      return park(ctx, [], attempt)
+    }
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
+    // Symmetric with attemptLogLine: the accepted attempt says so, so the band
+    // reads as a sequence of verdicts rather than undifferentiated noise.
+    ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) succeeded — wrote docs/${plan.outName}\n`)
+    return {
+      kind: 'done',
+      evidence: {
+        source: mode === 'collect-repo-docs' ? 'agent-repo-docs' : 'agent-diff',
+        docs: userDocs(featureDirFor(deps, m.feature)),
+      },
+    }
+  }
+
   /** The agent path of the fork: spawn a collector guided by the intent —
    *  read the repos (collect) or the branch diff vs base (infer) — writing ONE
    *  feature-named requirements doc. Success flows straight into distillation
@@ -266,6 +303,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     ctx: StageContext,
     mode: 'collect-repo-docs' | 'infer-from-diff',
     feedback?: string,
+    forceInternal?: boolean,
   ): Promise<StageOutcome> => {
     const m = ctx.manifest()
     const featureDir = featureDirFor(deps, m.feature)
@@ -287,56 +325,53 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     const outName = mode === 'collect-repo-docs' ? `${m.feature}-prd.md` : `${m.feature}-from-diff.md`
     const outPath = path.join(docsDir, outName)
     fs.mkdirSync(docsDir, { recursive: true })
-    // Trailing "…" is load-bearing: StageActivity splits the band after the
-    // last tagged line ending in an ellipsis when no agent chunks mirrored in.
-    ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) — ${mode === 'collect-repo-docs' ? 'reading the repos' : 'reading the git diff'} guided by the intent…\n`)
     // Respond-carried feedback wins; a Continue → from-a-step note targeting
     // this stage is the fallback (the fork re-parks first, so the choice that
     // follows should still carry the note).
     const note = feedback ?? stageFeedback(m, 'docs')
     const feedbackNote = note ? `Feedback on the previous attempt — take it into account: ${note}` : ''
+    const prompt =
+      mode === 'collect-repo-docs'
+        ? renderPrompt('flight-collect-docs.md', {
+            feature: m.feature,
+            description: m.description,
+            repoPaths: m.repoPaths.map((p) => `- ${p}`).join('\n'),
+            outPath,
+            feedbackNote,
+          })
+        : renderPrompt('flight-infer-diff.md', {
+            feature: m.feature,
+            description: m.description,
+            repoTargets,
+            outPath,
+            feedbackNote,
+          })
+    const plan = { outName, outPath }
+
+    // Hand off unless the caller forced the local path (the client answered
+    // `run-internally`). The client gets the SAME rendered prompt — including its
+    // fan-out rule and its NOTHING_FOUND contract — and writes the same outPath,
+    // so `settleCollected` judges both producers identically.
+    if (forceInternal !== true && handsOffToClient(ctx)) {
+      ctx.appendLog(`[docs] handed the ${MODE_LABEL[mode]} step to the external client…\n`)
+      return externalWorkCheckpoint(ctx, 'docs', prompt, {
+        message: `Gather requirement docs (${MODE_LABEL[mode]}) in your own client: write the doc to ${outPath}, then respond. Reply NOTHING_FOUND on \`data\` if there is nothing relevant.`,
+        context: { mode, outPath, outName, intent: m.description },
+      })
+    }
+
+    // Trailing "…" is load-bearing: StageActivity splits the band after the
+    // last tagged line ending in an ellipsis when no agent chunks mirrored in.
+    ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) — ${mode === 'collect-repo-docs' ? 'reading the repos' : 'reading the git diff'} guided by the intent…\n`)
     const { text } = await spawnAgent({
-      prompt:
-        mode === 'collect-repo-docs'
-          ? renderPrompt('flight-collect-docs.md', {
-              feature: m.feature,
-              description: m.description,
-              repoPaths: m.repoPaths.map((p) => `- ${p}`).join('\n'),
-              outPath,
-              feedbackNote,
-            })
-          : renderPrompt('flight-infer-diff.md', {
-              feature: m.feature,
-              description: m.description,
-              repoTargets,
-              outPath,
-              feedbackNote,
-            }),
+      prompt,
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'docs'),
       onChunk: ctx.appendLog,
       signal: ctx.signal,
       agent: m.opts.agent,
     })
-
-    const wrote = fs.existsSync(outPath) && fs.statSync(outPath).size > 0
-    if (!wrote) {
-      const reason = /NOTHING_FOUND:?\s*(.*)/.exec(text)?.[1]?.trim()
-      const attempt: PrdSourceAttempt = reason
-        ? { mode, outcome: 'empty', reason }
-        : { mode, outcome: 'no-output' }
-      ctx.appendLog(attemptLogLine(attempt))
-      return park(ctx, [], attempt)
-    }
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
-    // Symmetric with attemptLogLine: the accepted attempt says so, so the band
-    // reads as a sequence of verdicts rather than undifferentiated noise.
-    ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) succeeded — wrote docs/${outName}\n`)
-    const docs = userDocs(featureDir)
-    return {
-      kind: 'done',
-      evidence: { source: mode === 'collect-repo-docs' ? 'agent-repo-docs' : 'agent-diff', docs },
-    }
+    return settleCollected(ctx, mode, plan, text)
   }
 
   return {
@@ -358,6 +393,26 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       const m = ctx.manifest()
       const existing = userDocs(featureDirFor(deps, m.feature))
       const choice = response.choice ?? ''
+      // Releasing the external hand-off, NOT the human prd-source fork. Read the
+      // mode back off the checkpoint rather than re-deriving it: the client may
+      // have taken minutes, and the fork's own state has moved on.
+      if (parkedOnExternalWork(ctx, 'docs')) {
+        const handOff = m.stages.find((s) => s.key === 'docs')?.checkpoint?.data as
+          | { mode?: 'collect-repo-docs' | 'infer-from-diff'; outPath?: string; outName?: string }
+          | undefined
+        const mode = handOff?.mode ?? 'collect-repo-docs'
+        if (choice === 'run-internally') {
+          ctx.appendLog('[docs] client handed the step back — collecting here\n')
+          return collect(ctx, mode, response.feedback, true)
+        }
+        if (!handOff?.outPath || !handOff.outName) {
+          return { kind: 'failed', error: 'external docs hand-off lost its output path' }
+        }
+        // Same on-disk check the local agent's result goes through. `data` is only
+        // mined for a NOTHING_FOUND reason — it never decides the verdict.
+        const reply = typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? '')
+        return settleCollected(ctx, mode, { outName: handOff.outName, outPath: handOff.outPath }, reply)
+      }
       if (choice === 'continue') {
         if (existing.length > 0) {
           return { kind: 'done', evidence: { source: 'user-confirmed', docs: existing } }

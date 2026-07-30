@@ -30,7 +30,7 @@ import type { ExternalHealClientKind } from './types-runs'
 
 export type { CleanupListing, CleanupOrphan, CleanupRunEntry, CleanupWorktree, PortifyCleanupEntry, PortifyCleanupListing } from './types-cleanup'
 export type { ExternalHealClientKind, ExternalHealSession, ExternalHealSessionStatus, JournalEntry, PlaywrightArtifact, PlaywrightArtifactGroup, PlaywrightArtifactKind, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, PlaywrightRetainedArtifactMode, PlaywrightScreenshotMode, RepoBranchSnapshot, RunDetail, RunIndexEntry, RunManifest, RunSummary, RunSummaryFailedEntry, RunSummaryRunningStep, ServiceManifestEntry } from './types-runs'
-export type { AuditEntry, AuditList, CreateDraftPayload, CreateDraftResponse, DraftPrdDocument, DraftRecord, DraftRepo, DraftSource, DraftStatus, ExternalDraftStage, PlanStep } from './types-wizard'
+export type { AuditEntry, AuditList, DraftPrdDocument, DraftRecord, DraftRepo, DraftSource, DraftStatus, ExternalDraftStage } from './types-wizard'
 
 export type {
   DisplayStatus,

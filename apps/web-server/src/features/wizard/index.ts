@@ -12,10 +12,6 @@ import {
 import { allocateRunPorts, applyFeatureEnvset } from '../runs/logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../../../shared/runtime/upgrade-check'
-import {
-  spawnPlanAgent as makePlanAgentSpawner,
-  spawnSpecAgent as makeSpecAgentSpawner,
-} from './logic/wizard-agent-runner'
 import { generateRunId } from '../runs/logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from '../runs/logic/runtime/run-paths'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from '../runs/logic/runtime/orchestrator'
@@ -51,41 +47,14 @@ import {
  */
 export async function register(app: FastifyInstance, ctx: ServerContext) {
   const opts = ctx.options
-  const { projectRoot, logsDir, workspaceEvents, wizardAgents } = ctx
+  const { projectRoot, logsDir, workspaceEvents } = ctx
 
-
-  // Wizard route deps. Production: real claude -p via node-pty + on-demand
-  const productionTestsDraftDeps: TestsDraftRouteDeps = {
-    logsDir,
-    projectRoot: projectRoot,
-    workspaceEvents,
-    newDraftId: () => generateRunId(),
-    pickAgent: () => {
-      const projectConfig = loadProjectConfig(projectRoot)
-      if (projectConfig.healAgent === 'manual') {
-        return {
-          ok: false,
-          error: 'Add Test generation requires Claude, Codex, or Auto. Project settings are currently set to Manual.',
-        }
-      }
-      const agent = projectConfig.healAgent === 'auto'
-        ? pickAvailableHealAgent()
-        : pickAvailableHealAgent(projectConfig.healAgent)
-      if (!agent) {
-        return {
-          ok: false,
-          error: 'No configured wizard agent is available on PATH. Choose Auto, Claude, or Codex in settings and install the matching CLI.',
-        }
-      }
-      return { ok: true, agent }
-    },
-    spawnPlanAgent: (input) => makePlanAgentSpawner({ registry: wizardAgents })(input),
-    spawnSpecAgent: (input) => makeSpecAgentSpawner({ registry: wizardAgents })(input),
-    cancelGeneration: (draftId: string) => wizardAgents.cancel(draftId),
-  }
-
+  // Draft routes are read/track-only: every draft is authored by an external
+  // MCP client, so there is no agent to pick and none to spawn.
   const testsDraftDeps: TestsDraftRouteDeps = {
-    ...productionTestsDraftDeps,
+    logsDir,
+    projectRoot,
+    workspaceEvents,
     ...(opts.testsDraftDepsOverride ?? {}),
   }
   await app.register(testsDraftRoutes, testsDraftDeps)

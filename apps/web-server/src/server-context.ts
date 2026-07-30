@@ -13,7 +13,6 @@ import type { UpdateJobStore } from './features/version/logic/update-job'
 import type { VersionState } from './features/version/logic/version-state'
 import type { PaneBroker } from './features/runs/logic/pane-broker'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
-import type { WizardAgentRegistry } from './features/wizard/logic/wizard-agent-registry'
 import type { BackupRecord } from './features/runs/logic/runtime/env-switcher/types'
 
 /**
@@ -51,7 +50,6 @@ export interface ServerContext {
   versionState: VersionState
   workspaceEvents: WorkspaceEventBus
   externalHealBroker: ExternalHealBroker
-  wizardAgents: WizardAgentRegistry
 
   /**
    * How PTY-backed agent processes get spawned. Injected by tests; shared by

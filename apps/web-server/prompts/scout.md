@@ -15,6 +15,27 @@ Repos (one feature spans all of them):
 What to test: {{description}}
 {{feedbackNote}}
 
+**Fan out when there is more than one repo to survey.** A repo is the unit of
+division, and never split one repo across two readers — its start command, the
+env file that command reads, and the port that service binds are one answer, and
+they only make sense discovered together. When more than one repo is listed
+above, dispatch **one read-only subagent per repo in a single parallel round**
+(up to 5 at once), each inspecting only its own path and returning only that
+repo's findings: the boot command a developer would actually use, the real env
+file(s) that command reads, and each service's port and ready-path. With a single
+repo, survey it yourself; the round trip costs more than the reading.
+
+The `configSource` is yours to write and is never delegated. One config spans
+every repo above, so its shared shape — the feature name, the `envs` list, and
+the decision about which services are worth booting at all — is a property of the
+whole feature; a per-repo vote on it is a vote taken on partial evidence. Ask
+subagents for findings, not for config source.
+
+A subagent that returns nothing has **not** established that its repo boots no
+services or reads no env files — it has failed to report. Say which repo and why,
+or inspect that one yourself, rather than emitting a config that silently omits
+it. Nothing downstream can tell an unsurveyed repo from one with nothing to boot.
+
 Reply with ONLY a JSON object in a ```json fence, shaped exactly:
 { "configSource": "<complete feature.config.cjs source>", "envFiles": ["<absolute path of each env file the app reads>"] }
 

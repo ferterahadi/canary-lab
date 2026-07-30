@@ -13,10 +13,6 @@ import {
 import { allocateRunPorts, applyFeatureEnvset } from '../runs/logic/runtime/run-primitives'
 import type { ServerContext } from '../../server-context'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../../../shared/runtime/upgrade-check'
-import {
-  spawnPlanAgent as makePlanAgentSpawner,
-  spawnSpecAgent as makeSpecAgentSpawner,
-} from '../wizard/logic/wizard-agent-runner'
 import { runDirFor, buildRunPaths } from '../runs/logic/runtime/run-paths'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from '../runs/logic/runtime/orchestrator'
 import { RunScheduler, type SchedulerActiveRun } from '../runs/logic/runtime/run-scheduler'

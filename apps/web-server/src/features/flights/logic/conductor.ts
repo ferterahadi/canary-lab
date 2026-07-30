@@ -108,12 +108,21 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       // R79: the conducting agent is sticky like repos/intent — the surviving
       // artifacts were produced by it. Jump keeps the stored agent regardless
       // of the caller; a full redo may change it (omitted → stored survives).
+      // `stageProducer` is sticky for exactly the same reason: a flight that
+      // switched executor mid-pipeline would hold stage evidence from two
+      // different producers, and the earlier stages' artifacts are what the
+      // later ones read.
       opts: {
         ...args.opts,
         ...(mode === 'redo'
           ? { agent: args.opts.agent ?? existing.opts.agent }
           : existing.opts.agent
             ? { agent: existing.opts.agent }
+            : {}),
+        ...(mode === 'redo'
+          ? { stageProducer: args.opts.stageProducer ?? existing.opts.stageProducer }
+          : existing.opts.stageProducer
+            ? { stageProducer: existing.opts.stageProducer }
             : {}),
       },
       status: 'running',

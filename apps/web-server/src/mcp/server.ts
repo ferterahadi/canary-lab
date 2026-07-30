@@ -13,6 +13,7 @@ import {
   type CanaryLabMcpDeps,
   type CanaryLabMcpProfile,
 } from './tools'
+import { classifyMcpClient } from './client-surface'
 import { isClientKind, type ClientKind } from '../../../../shared/run-mode'
 
 // Singleton MCP server mounted on the existing Fastify instance at `/mcp`.
@@ -79,7 +80,7 @@ const EXPORT_INSTRUCTIONS = `Canary Lab — export profile. Produce the evaluati
 
 const PORTIFY_INSTRUCTIONS = `Canary Lab — portify profile. Make a feature's ports injectable so it can boot concurrently (benchmark arms / parallel runs).
 
-- Port-ify it YOURSELF (no local agent): start_external_portify(feature) sets up scratch worktree(s) and returns targets[] (edit paths) + configPath + instructions; edit the listeners IN PLACE to read an injected port, declare the matching \`ports\` slots in the config, then submit_external_portify(workflowId) — Canary boots the stack twice concurrently to verify. On "ready-to-save" call save_portify(workflowId, confirm:true); if it returns to "editing", read verification.failureDetail, fix the worktree, and submit_external_portify again (re-edit + re-submit is the revision loop — unbounded). get_portify(workflowId) re-reads status + the verification result at any time (diff omitted by default; includeDiff:true inlines it). cancel_portify(workflowId, confirm:true) discards it. One workflow PER FEATURE (a second start on the same feature is a 409); DIFFERENT features port-ify concurrently up to a resource cap, so to portify several features at once fan out a subagent per feature — at capacity start_external_portify returns a 429, so wait for one to finish (or save/cancel it) and retry. The GUI shows each live as an external session; list_portify_status shows which features are portified. Within ONE feature that has multiple repos, FAN OUT the per-repo edits: one subagent per repo in a single parallel round (up to 5 at once), each editing only its own worktree path — then do the SHARED files yourself, once (the feature config and the envsets are single files every repo's slots land in, so concurrent writers clobber each other), and submit once. Treat a subagent that reports nothing as unfinished, not as a repo with no listeners: the double-boot catches a missed listener only when it binds eagerly and dies loudly on the clash.
+- Port-ify it YOURSELF (no local agent): start_external_portify(feature) sets up scratch worktree(s) and returns targets[] (edit paths) + configPath + instructions; edit the listeners IN PLACE to read an injected port, declare the matching \`ports\` slots in the config, then submit_external_portify(workflowId) — Canary boots the stack twice concurrently to verify. On "ready-to-save" call save_portify(workflowId, confirm:true). If it returns to "editing" the double-boot FAILED: get_portify then carries a \`prompt\` — the retry playbook — alongside verification.failureDetail; follow it (a \`baseline-boot-failed\` verdict means the app's own solo boot is broken and ports are NOT the blocker; \`concurrency-failure\` means a listener still binds a hardcoded port, very often a NON-HTTP one — gRPC, WebSocket, raw TCP, a metrics/admin port — or the two boots race on a shared build dir), fix the worktree, and submit_external_portify again (re-edit + re-submit is unbounded). If the human asks for a CHANGE after verification passed, call revise_external_portify(workflowId, feedback) — it reopens the same verified worktree at "editing" and returns a \`prompt\` restating the constraints; do NOT cancel_portify to make a change, that discards verified work and you start over. get_portify(workflowId) re-reads status + the verification result at any time (diff omitted by default; includeDiff:true inlines it). cancel_portify(workflowId, confirm:true) discards it. One workflow PER FEATURE (a second start on the same feature is a 409); DIFFERENT features port-ify concurrently up to a resource cap, so to portify several features at once fan out a subagent per feature — at capacity start_external_portify returns a 429, so wait for one to finish (or save/cancel it) and retry. The GUI shows each live as an external session; list_portify_status shows which features are portified. Within ONE feature that has multiple repos, FAN OUT the per-repo edits: one subagent per repo in a single parallel round (up to 5 at once), each editing only its own worktree path — then do the SHARED files yourself, once (the feature config and the envsets are single files every repo's slots land in, so concurrent writers clobber each other), and submit once. Treat a subagent that reports nothing as unfinished, not as a repo with no listeners: the double-boot catches a missed listener only when it binds eagerly and dies loudly on the clash.
 - Already env-driven? If the repo ALREADY reads injected ports (e.g. it was portified for another feature, or the listeners are committed env-driven), no source edit is needed — just declare the matching \`ports\` slots in the config and submit_external_portify. The double-boot still verifies the concurrent boot, and save records an EMPTY overlay (a no-op at run time). An empty diff is only rejected when the boot also fails (the listeners genuinely don't read the injected ports yet).
 - Borrowed start: if ANOTHER feature already saved an overlay for the same app, Canary pre-applies that patch into your scratch worktree at setup (the returned instructions say so). Review the existing edits rather than rewriting from scratch — usually you only add this feature's \`ports\` slots — then submit. The borrowed lines are captured into THIS feature's own overlay, so it stays self-contained.
 - Saving captures the verified edits as an EPHEMERAL OVERLAY under features/<feature>/portify/ — nothing committed or merged, so the product repo stays pristine; each run applies the overlay into a fresh per-run worktree (disjoint ports) before boot and reverse-applies at teardown. If the overlay later stops applying (the repo moved under it), the run fails loudly asking you to re-portify (start_external_portify, or the GUI).
@@ -115,6 +116,14 @@ export async function registerMcpRoutes(
   // Fastify boot. Keyed by the session id the transport mints on init.
   const transports = new Map<string, StreamableHTTPServerTransport>()
 
+  // The session's McpServer, kept alongside its transport. Previously it was
+  // constructed in newSession and dropped on the floor, so nothing could reach
+  // `.server.getClientVersion()` / `.getClientCapabilities()` — which is why
+  // Canary never knew WHICH client was connected and instructed a subagent-less
+  // Desktop chat client exactly like the CLI. Read-only bookkeeping: the
+  // transport still owns the session lifecycle.
+  const sessionServers = new Map<string, McpServer>()
+
   // Tool counts are static per profile — register tools on detached McpServer
   // instances (never connected to a transport) so /mcp/health can answer
   // without requiring an active MCP session.
@@ -128,12 +137,21 @@ export async function registerMcpRoutes(
   ): Promise<StreamableHTTPServerTransport> => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (id) => { transports.set(id, transport) },
-      onsessionclosed: (id) => { transports.delete(id) },
+      onsessioninitialized: (id) => {
+        transports.set(id, transport)
+        sessionServers.set(id, mcp)
+      },
+      onsessionclosed: (id) => {
+        transports.delete(id)
+        sessionServers.delete(id)
+      },
     })
     transport.onclose = () => {
       const id = transport.sessionId
-      if (id) transports.delete(id)
+      if (id) {
+        transports.delete(id)
+        sessionServers.delete(id)
+      }
     }
     const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
     registerCanaryLabTools(mcp, deps, { profile, defaultClientKind })
@@ -215,6 +233,15 @@ export async function registerMcpRoutes(
       toolCount: toolCounts[context.profile],
       tools: toolsForCanaryLabMcpProfile(context.profile),
       activeSessions: transports.size,
+      // What is actually on the other end of each live session. Exposed as a
+      // PROBE: it answers "does any real client declare sampling?" and "which
+      // Claude surface is this?" from live handshakes instead of from a guess,
+      // and it is the cheapest way to confirm a capability landed before any
+      // feature is built on it.
+      clients: [...sessionServers.entries()].map(([sessionId, mcp]) => ({
+        sessionId,
+        ...classifyMcpClient(mcp.server.getClientVersion(), mcp.server.getClientCapabilities()),
+      })),
       projectRoot: deps.projectRoot,
     }
   })

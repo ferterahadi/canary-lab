@@ -4,6 +4,27 @@ Repos:
 {{repoPaths}}
 Testing intent: {{description}}
 
+**Fan out the reading when there is more than one repo.** A repo is the unit of
+division, and never split one repo across two readers — a user-facing capability
+is recognised from its routes, its domain modules and its README together, so a
+reader holding only part of a repo reports layers instead of capabilities. When
+more than one repo is listed above, dispatch **one read-only subagent per repo in
+a single parallel round** (up to 5 at once), each grounding itself in only its own
+path and returning only what it found there: the user-facing capabilities that
+repo exposes, one line each. With a single repo, read it yourself.
+
+Ask them for capabilities, never for a feature split. Every judgment rule below
+stays yours, because each is a property of the WHOLE set rather than of any one
+repo: whether the intent is one feature or several, the prefer-fewer bias, the
+hard cap of at most 6, merging the smallest related domains, and the shared
+`group` slug. A subagent reading one repo cannot see whether the running total
+has passed six, and cannot know that the domain it just found is the same
+capability another repo already reported.
+
+A subagent that returns nothing has **not** established that its repo exposes no
+user-facing capability — it has failed to report. Say which repo and why, or read
+that one yourself, rather than planning as though it were empty.
+
 Judgment rules:
 - Prefer FEWER features. Split only when the intent is broad ("test everything", "cover the whole app") AND the repo genuinely contains separable user-facing domains (e.g. auth, checkout, admin) that would each need their own test suite. A focused intent ("test the login flow") is ONE feature even in a large repo.
 - Never split by technical layer (api vs ui vs db) — split by user-facing capability.

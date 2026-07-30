@@ -247,6 +247,26 @@ export class PortifyOrchestrator {
     }
   }
 
+  // External producer: the human asked for a change to an already-VERIFIED diff.
+  // The external twin of revise(), minus every step the client owns out-of-band:
+  // no agent to resume, no verify to run here. It only reopens the workflow —
+  // `ready-to-save` back to `editing` — so the client can keep editing the SAME
+  // scratch worktree its verified edits already live in, then re-submit. Without
+  // this the only exits from ready-to-save are save and cancel, so a single
+  // late "also token-ise the health-check URL" costs the whole verified worktree.
+  // Synchronous and total: nothing here can fail, so unlike revise() there is no
+  // error path to re-park.
+  reopenExternal(current: PortifyManifest): PortifyManifest {
+    const m: PortifyManifest = {
+      ...current,
+      status: 'editing',
+      feedbackRounds: (current.feedbackRounds ?? 0) + 1,
+      error: undefined,
+    }
+    this.deps.persist(m)
+    return m
+  }
+
   // External producer: create the scratch worktree(s) and PARK at `editing` —
   // no agent is spawned here. The external client (running in the user's own
   // Claude/Codex) edits the worktree in place, then calls submit, which drives

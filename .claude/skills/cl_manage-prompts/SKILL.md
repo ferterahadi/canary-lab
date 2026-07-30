@@ -35,7 +35,7 @@ buried in a `.ts` file. One home, one loader:
    (see `coverage-annotate.schema.json`, `prd-summary.schema.json`,
    `evaluation-rewrite.schema.json`). Prompts that instead ask the agent to
    reply in a ` ```json ` fence (parsed with `extractJson`/hand-rolled parsing —
-   see `scout.md`, `stage1-plan.md`) don't need one.
+   see `scout.md`, `plan-features.md`) don't need one.
 3. In the `.ts` module that builds the prompt, import from
    `../../../shared/prompts` (adjust `../` depth to reach `apps/web-server/src/shared/`)
    and use:

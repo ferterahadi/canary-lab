@@ -3,6 +3,7 @@ import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runGit } from '../../../../shared/git-repo'
+import { loadFeatures } from '../../../../shared/feature-loader'
 import { createPortifyRunner } from './runner'
 import { runPortifyAgent } from './agent'
 import { overlayExists, readOverlay, writeOverlay } from './overlay'
@@ -186,6 +187,142 @@ it('submitExternalPortify re-parks at editing with a clear message when an empty
       expect(m.status).toBe('editing')
       expect(m.verification?.failureDetail).toMatch(/no edits detected/i)
       await runner.cancel(result.workflowId)
+    })
+it('reviseExternalPortify reopens a VERIFIED workflow instead of discarding the worktree', async () => {
+      // The whole point: before this, the only exits from ready-to-save were save
+      // and cancel, so one late "also change X" cost the verified worktree.
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
+      const editedFile = path.join(result.targets[0].editPath, 'src', 'server.js')
+      fs.appendFileSync(editedFile, '\n// port made injectable by external client\n')
+      await runner.submitExternalPortify(result.workflowId)
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'failed'])).toBe('ready-to-save')
+
+      const { manifest, instructions } = runner.reviseExternalPortify(
+        result.workflowId,
+        '  also token-ise the health-check URL  ',
+      )
+      expect(manifest.status).toBe('editing')
+      expect(manifest.feedbackRounds).toBe(1)
+      expect(manifest.error).toBeUndefined()
+      // The feedback rides into the prompt trimmed, with the constraints restated.
+      expect(instructions).toContain('also token-ise the health-check URL')
+      expect(instructions).not.toContain('  also token-ise')
+      expect(instructions).toContain('Do NOT touch test files')
+
+      // The verified edits are STILL on disk — nothing was thrown away.
+      expect(fs.readFileSync(editedFile, 'utf-8')).toContain('port made injectable by external client')
+
+      // And the reopened workflow accepts a fresh submit (the guard is `editing`).
+      await runner.submitExternalPortify(result.workflowId)
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'failed'])).toBe('ready-to-save')
+
+      // A second round of feedback counts on top of the first — the review loop
+      // is unbounded, same as the internal revise().
+      const second = runner.reviseExternalPortify(result.workflowId, 'and rename the slot')
+      expect(second.manifest.feedbackRounds).toBe(2)
+      await runner.cancel(result.workflowId)
+    })
+it('reviseExternalPortify rejects an unknown, internal, mid-edit or empty-feedback revise', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      expect(() => runner.reviseExternalPortify('nope', 'x')).toThrow(expect.objectContaining({ statusCode: 404 }))
+
+      const base = {
+        workflowId: 'w', feature: 'myfeat', featureDir: '/f', repos: [], agent: 'claude',
+        branch: 'b', attempt: 1, maxAttempts: 1, startedAt: 'now',
+      }
+      store.save({ ...base, producer: 'internal', status: 'ready-to-save' } as PortifyManifest)
+      expect(() => runner.reviseExternalPortify('w', 'x')).toThrow(expect.objectContaining({ statusCode: 409 }))
+
+      // Reopening is only meaningful once a diff has been VERIFIED.
+      store.save({ ...base, producer: 'external', status: 'editing' } as PortifyManifest)
+      expect(() => runner.reviseExternalPortify('w', 'x')).toThrow(expect.objectContaining({ statusCode: 409 }))
+
+      // Blank feedback would reopen with nothing to act on — losing the verified state for free.
+      store.save({ ...base, producer: 'external', status: 'ready-to-save' } as PortifyManifest)
+      expect(() => runner.reviseExternalPortify('w', '   ')).toThrow(expect.objectContaining({ statusCode: 400 }))
+
+      // Same record, real feedback: now it's the missing worktree that stops it.
+      expect(() => runner.reviseExternalPortify('w', 'change it')).toThrow(expect.objectContaining({ statusCode: 409 }))
+    })
+it('reviseExternalPortify 404s when the feature vanished under a live workflow', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      let features = loadFeatures(featuresDir)
+      const { store, runner } = makeRunner(featuresDir, logsDir, true, 'claude', () => features)
+
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
+      fs.appendFileSync(path.join(result.targets[0].editPath, 'src', 'server.js'), '\n// injectable\n')
+      await runner.submitExternalPortify(result.workflowId)
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'failed'])).toBe('ready-to-save')
+
+      features = [] // the feature was deleted while the client was reviewing
+      expect(() => runner.reviseExternalPortify(result.workflowId, 'change it'))
+        .toThrow(expect.objectContaining({ statusCode: 404 }))
+      await runner.cancel(result.workflowId)
+    })
+it('externalRetryPrompt renders the retry playbook once a double-boot has failed', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir, /* healthy */ false)
+
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'codex', sessionId: 's1' })
+      // Before any submit there is no failure to explain.
+      expect(runner.externalRetryPrompt(result.workflowId)).toBeNull()
+
+      await runner.submitExternalPortify(result.workflowId)
+      const deadline = Date.now() + 4000
+      let m = store.get(result.workflowId)!
+      while (Date.now() < deadline && !m.verification?.failureDetail) {
+        await new Promise((r) => setTimeout(r, 25))
+        m = store.get(result.workflowId)!
+      }
+      expect(m.status).toBe('editing')
+
+      const prompt = runner.externalRetryPrompt(result.workflowId)!
+      // The reading the raw failureDetail does not carry.
+      expect(prompt).toContain('baseline-boot-failed')
+      expect(prompt).toContain('gRPC server')
+      expect(prompt).toContain(m.verification!.failureDetail!)
+      await runner.cancel(result.workflowId)
+    })
+it('externalRetryPrompt returns null for unknown, internal, passing or feature-less workflows', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      let features = loadFeatures(featuresDir)
+      const { store, runner } = makeRunner(featuresDir, logsDir, true, 'claude', () => features)
+      expect(runner.externalRetryPrompt('nope')).toBeNull()
+
+      const base = {
+        workflowId: 'w', feature: 'myfeat', featureDir: '/f', repos: [], agent: 'claude',
+        branch: 'b', attempt: 1, maxAttempts: 1, startedAt: 'now', status: 'editing',
+      }
+      // An internal workflow gets its retry prompt from the agent loop, not here.
+      store.save({ ...base, producer: 'internal', verification: { ok: false, instances: [] } } as unknown as PortifyManifest)
+      expect(runner.externalRetryPrompt('w')).toBeNull()
+
+      // Parked at editing but nothing has been verified yet.
+      store.save({ ...base, producer: 'external' } as PortifyManifest)
+      expect(runner.externalRetryPrompt('w')).toBeNull()
+
+      // Verified and passing — there is no failure to explain.
+      store.save({ ...base, producer: 'external', status: 'ready-to-save', verification: { ok: true, instances: [] } } as unknown as PortifyManifest)
+      expect(runner.externalRetryPrompt('w')).toBeNull()
+
+      // A real failure, but the feature is gone so the prompt cannot be rendered.
+      store.save({ ...base, producer: 'external', verification: { ok: false, instances: [] } } as unknown as PortifyManifest)
+      features = []
+      expect(runner.externalRetryPrompt('w')).toBeNull()
+    })
+it('externalRetryPrompt falls back when a failure carries no detail', async () => {
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      store.save({
+        workflowId: 'w', feature: 'myfeat', featureDir: '/f', repos: [], agent: 'claude',
+        producer: 'external', branch: 'b', status: 'editing', attempt: 1, maxAttempts: 1, startedAt: 'now',
+        verification: { ok: false, instances: [] },
+      } as unknown as PortifyManifest)
+      expect(runner.externalRetryPrompt('w')).toContain('(no detail recorded)')
     })
 it('enforces one workflow PER FEATURE across local + external', async () => {
       const { featuresDir, logsDir } = await singleFixture()

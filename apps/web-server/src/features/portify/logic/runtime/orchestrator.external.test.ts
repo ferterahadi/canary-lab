@@ -179,5 +179,40 @@ describe('PortifyOrchestrator', () => {
       expect(m.status).toBe('editing')
       expect(m.error).toBe('capture string error')
     })
+
+    describe('reopenExternal', () => {
+      function verified(patch: Partial<PortifyManifest> = {}): PortifyManifest {
+        return {
+          ...baseManifest(),
+          status: 'ready-to-save',
+          attempt: 1,
+          diff: 'verified diff',
+          verification: { ok: true, instances: [] },
+          ...patch,
+        }
+      }
+
+      it('reopens a verified workflow for editing and clears a stale error', () => {
+        const { deps, saved } = makeDeps({})
+        const m = new PortifyOrchestrator(deps).reopenExternal(verified({ error: 'from an earlier round' }))
+        expect(m.status).toBe('editing')
+        expect(m.error).toBeUndefined()
+        // The verified diff stays on the record — the client edits ON TOP of it.
+        expect(m.diff).toBe('verified diff')
+        expect(saved).toEqual([m])
+      })
+
+      it('starts the feedback count at 1 when the record predates the counter', () => {
+        // `feedbackRounds` is optional on the manifest: prepare-workflow seeds it
+        // at 0 today, but a record written before it existed carries none.
+        const { deps } = makeDeps({})
+        expect(new PortifyOrchestrator(deps).reopenExternal(verified()).feedbackRounds).toBe(1)
+      })
+
+      it('increments an existing feedback count — the review loop is unbounded', () => {
+        const { deps } = makeDeps({})
+        expect(new PortifyOrchestrator(deps).reopenExternal(verified({ feedbackRounds: 3 })).feedbackRounds).toBe(4)
+      })
+    })
   })
 })

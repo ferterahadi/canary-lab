@@ -406,6 +406,50 @@ describe('buildPrdSummaryPrompt', () => {
   })
 })
 
+describe('the PRD-summary prompt carries the fan-out rule', () => {
+  // Fan-out is a WRITTEN rule the summarizing agent follows, never a batch plan
+  // canary computes (see the coverage-annotate twin). These pin the four clauses
+  // that make a divided read safe: the unit of division, the id spine that must
+  // NOT divide, the two whole-feature judgements the parent keeps, and the
+  // empty-return rule that stops an unread doc reading as an empty one.
+  const docs = collection([
+    { relPath: 'a.md', content: '# A' },
+    { relPath: 'b.md', content: '# B' },
+  ])
+
+  it('makes one document the unit of division and forbids splitting one', () => {
+    const prompt = buildPrdSummaryPrompt(docs, [])
+    expect(prompt).toContain('never split one document across two')
+    expect(prompt).toMatch(/one read-only\s+subagent per document in a single\s+parallel round/)
+  })
+
+  it('keeps the requirement id spine whole for every subagent', () => {
+    const prompt = buildPrdSummaryPrompt(docs, [])
+    // The id spine is what test annotations point at — a subagent that can't see
+    // a surviving id mints a new one and breaks every @req-* tag using the old.
+    expect(prompt).toContain('The documents divide; the id spine does not')
+  })
+
+  it('reserves the variant dimension and cross-document de-duplication for the parent', () => {
+    const prompt = buildPrdSummaryPrompt(docs, [])
+    expect(prompt).toContain('never delegated')
+    expect(prompt).toContain('`variantDimension`')
+    expect(prompt).toContain('de-duplication across returns')
+  })
+
+  it('treats an empty subagent return as unreported, not as a doc with no requirements', () => {
+    const prompt = buildPrdSummaryPrompt(docs, [])
+    // There is no roster check on this pass (unlike coverage's), so this clause
+    // is the only thing standing between a silent subagent and a lost document.
+    expect(prompt).toContain('has **not** established that')
+    expect(prompt).toContain('failed to report')
+  })
+
+  it('leaves no unresolved placeholder', () => {
+    expect(buildPrdSummaryPrompt(docs, [])).not.toMatch(/\{\{\w+\}\}/)
+  })
+})
+
 describe('parsePrdSummaryOutput — invalid JSON catch branch', () => {
   it('returns null when JSON.parse throws (invalid JSON with braces)', () => {
     // `{invalid}` has { and } so start/end checks pass, but JSON.parse throws.

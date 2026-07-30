@@ -22,13 +22,6 @@ export type ExternalDraftStage =
   | 'applied'
   | 'error'
 
-export interface PlanStep {
-  coverageType?: string
-  step: string
-  actions: string[]
-  expectedOutcome: string
-}
-
 export interface DraftRepo {
   name: string
   localPath: string
@@ -56,12 +49,9 @@ export interface DraftRecord {
   status: DraftStatus
   createdAt: string
   updatedAt: string
-  plan?: PlanStep[]
   generatedFiles?: string[]
   devDependencies?: string[]
   errorMessage?: string
-  planAgentLogTail?: string
-  specAgentLogTail?: string
 }
 
 export interface DraftPrdDocument {
@@ -70,19 +60,6 @@ export interface DraftPrdDocument {
   characters: number
   text?: string
   contentBase64?: string
-}
-
-export interface CreateDraftPayload {
-  prdText: string
-  additionalNotes?: string
-  prdDocuments?: DraftPrdDocument[]
-  repos: DraftRepo[]
-  featureName?: string
-}
-
-export interface CreateDraftResponse {
-  draftId: string
-  status: DraftStatus
 }
 
 export interface AuditEntry {

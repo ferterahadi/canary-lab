@@ -129,11 +129,25 @@ const FAILURE_DETAIL_INLINE_MAX_BYTES = 8 * 1024
 // needs_heal and get_heal_context) so skill-less clients read it exactly when a
 // heal is needed — keeping it OUT of the always-on MCP profile instructions.
 // Must stay in sync with the run-loop steps in the shipped SKILL.md files.
-const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
+// Exported so `mcp/repair-guardrail.test.ts` can pin the two invariants that sit
+// PAST the CLI's 2048-char `instructions` cut and therefore reach a skill-less
+// client only through this result: the repair rule and the pass-count rule.
+export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
+  // The repair rule rides the RESULT, not just session-init prose. A skill-less
+  // client may never see INSTRUCTIONS_BY_PROFILE.repair in full: the Claude Code
+  // CLI truncates a server's `instructions` at 2048 chars, and the rule's
+  // neighbours in that string (the pass-count rule, "never edit the test files")
+  // already sit past the cut. Tool results are not truncated, so this is the only
+  // channel that provably reaches the agent on the cycle it is about to edit code.
+  'Fix app/service code, not tests, unless a test is provably wrong. Never delete, skip, weaken, or loosen an assertion to turn the run green — a run that goes green because the test stopped checking is the exact failure Canary Lab exists to catch.',
   'Read context.healPrompt.startHere first. The packet is slim: context.healIndex / context.journal are PATHS (Read them when needed), and each context.failedTests[] entry carries a failureId plus pointer dirs (errorPath, traceDir, playwrightMcpDir).',
   'When SEVERAL tests fail, fan out the diagnosis AND the fix-drafting: spawn one read-only sub-agent per failure in a single parallel round (up to 5 at once), hand each the failureId, and have it call get_failure_detail(runId, failureId) to investigate just that slice in parallel and report back a hypothesis PLUS a concrete proposed patch (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must NOT touch the working tree or call signal_run; they only investigate and draft. A sub-agent that comes back empty has NOT cleared its failure — say so in the hypothesis or investigate that one yourself, rather than signalling as though its test were addressed.',
   'Apply the drafted patches YOURSELF, serially — if two patches touch the same file, reconcile them by hand before applying. Then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle — only investigation + drafting fan out; applying, re-testing, and signalling stay single-threaded.',
   'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
+  // Same reasoning as the repair rule above: this invariant lives at offset ~3549
+  // of INSTRUCTIONS_BY_PROFILE.repair, i.e. past the CLI's 2048-char cut, so the
+  // result is the only channel that delivers it.
+  'Read pass counts from result.counts.statusLine / counts.passed — never total - failed. A test absent from every result list is not run, not passed; do not report it as a pass.',
   'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). The run_ref rerun already covers skipped + pending, so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a fresh per-run worktree and resets THIS journal to Iteration 1. Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
 ]
 

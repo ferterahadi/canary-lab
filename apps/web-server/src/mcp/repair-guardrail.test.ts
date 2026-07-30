@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import { describe, expect, it } from 'vitest'
 import { INSTRUCTIONS_BY_PROFILE } from './server'
+import { EXTERNAL_HEAL_NEXT_STEPS } from '../features/runs/logic/heal/external-heal-surface'
 
 // The repair rule — "fix app/service code, not tests, unless a test is provably
 // wrong" — is the guardrail Canary Lab exists to enforce (docs/PRD.md, Problem +
@@ -56,6 +57,49 @@ describe('repair guardrail — MCP instructions', () => {
     // Counts come from the real result lines; `total - failed` silently converts
     // never-run tests into passes.
     expect(INSTRUCTIONS_BY_PROFILE.repair).toMatch(/never total - failed/i)
+  })
+})
+
+// Presence in the string above is NOT delivery. The Claude Code CLI truncates a
+// server's `instructions` at 2048 chars (`HB=2048` in the binary; 2,268 recorded
+// truncations of canary-lab under ~/Library/Caches/claude-cli-nodejs/*/
+// mcp-logs-canary-lab/). Every assertion above passes on text a skill-less client
+// may never receive — which is exactly how the two rules pinned below came to be
+// asserted-but-undelivered. So each load-bearing rule needs a home in a channel
+// the client provably gets: either inside the delivered window of `instructions`,
+// or in a tool result (results and tool descriptions are not truncated).
+describe('repair guardrail — delivery, not just presence', () => {
+  /** What the Claude Code CLI keeps of a server's `instructions`. */
+  const DELIVERED_WINDOW = 2048
+
+  const healProfiles = ['repair', 'lifecycle', 'full'] as const
+
+  it.each(healProfiles)('%s delivers the repair rule inside the un-truncated window', (profile) => {
+    const at = INSTRUCTIONS_BY_PROFILE[profile].indexOf('app/service code')
+    expect(at).toBeGreaterThanOrEqual(0)
+    // Fails if a future prose edit pushes the rule past the cut — the rule would
+    // still be "present" and every other test in this file would stay green.
+    expect(at).toBeLessThan(DELIVERED_WINDOW)
+  })
+
+  // These two live past the cut in `instructions` (measured: ~3549 and ~3847 in
+  // `repair`), so the heal RESULT is the only channel that delivers them. Do not
+  // "de-duplicate" them out of the nextSteps on the grounds that session-init
+  // prose already says it — that reasoning is what the truncation invalidates,
+  // and heal-task-wait.ts's own comment once recorded it as settled.
+  it('the pass-count invariant rides the heal result, not only session-init prose', () => {
+    const steps = EXTERNAL_HEAL_NEXT_STEPS.join('\n')
+    expect(steps).toMatch(/never total - failed/i)
+    expect(steps).toMatch(/statusLine/)
+    expect(steps).toMatch(/not run, not passed/i)
+  })
+
+  it('the repair rule rides the heal result for test failures, not just boot failures', () => {
+    // bootFailureNextSteps carried "not a test failure — fix the service/app code"
+    // already; the test-failure branch (the common case) did not.
+    const steps = EXTERNAL_HEAL_NEXT_STEPS.join('\n')
+    expect(steps).toMatch(/not tests, unless a test is provably wrong/i)
+    expect(steps).toMatch(/never delete, skip, weaken, or loosen an assertion/i)
   })
 })
 

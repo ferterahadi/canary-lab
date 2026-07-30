@@ -3,6 +3,7 @@ import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent } from './context'
+import { externalizable } from './externalizable'
 
 // The one genuinely new agent prompt in the flight: read the target repo(s)
 // and draft a feature.config.cjs (dev commands, port slots, health checks) +
@@ -51,34 +52,44 @@ function validateDraft(draft: ScoutDraft): string | null {
   return null
 }
 
+/** Normalize + validate a draft from EITHER executor. The external client's answer
+ *  is held to exactly the same bar as the local agent's — an unparseable
+ *  feature.config.cjs fails the stage whoever produced it, so the stage's evidence
+ *  stays evidence rather than becoming the producer's self-report. */
+function settleDraft(draft: ScoutDraft): StageOutcome {
+  draft.envFiles = Array.isArray(draft.envFiles) ? draft.envFiles.filter((f) => typeof f === 'string') : []
+  const invalid = validateDraft(draft)
+  if (invalid) return { kind: 'failed', error: invalid }
+  return { kind: 'done', evidence: draft }
+}
+
 export function scoutStage(deps: FlightStageDeps): StageAdapter {
   const spawnAgent = deps.spawnAgent ?? defaultSpawnAgent
+
+  const scoutPromptFor = (m: ReturnType<StageContext['manifest']>): string =>
+    buildScoutPrompt({
+      repoPaths: m.repoPaths,
+      description: m.description,
+      feature: m.feature,
+      env: m.opts.env,
+      feedback: stageFeedback(m, 'scout'),
+    })
 
   const draftAndValidate = async (ctx: StageContext): Promise<StageOutcome> => {
     const m = ctx.manifest()
     ctx.appendLog(`[scout] reading ${m.repoPaths.join(', ')}…\n`)
     const { text } = await spawnAgent({
-      prompt: buildScoutPrompt({
-        repoPaths: m.repoPaths,
-        description: m.description,
-        feature: m.feature,
-        env: m.opts.env,
-        feedback: stageFeedback(m, 'scout'),
-      }),
+      prompt: scoutPromptFor(m),
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'scout'),
       onChunk: ctx.appendLog,
       signal: ctx.signal,
       agent: m.opts.agent,
     })
-    const draft = extractJson<ScoutDraft>(text)
-    draft.envFiles = Array.isArray(draft.envFiles) ? draft.envFiles.filter((f) => typeof f === 'string') : []
-    const invalid = validateDraft(draft)
-    if (invalid) return { kind: 'failed', error: invalid }
-    return { kind: 'done', evidence: draft }
+    return settleDraft(extractJson<ScoutDraft>(text))
   }
 
-  return {
+  const internal: StageAdapter = {
     run: draftAndValidate,
     // LEGACY release path (remove after one release): manifests that parked on
     // scout's config-approval BEFORE the checkpoint moved to scaffold still
@@ -100,4 +111,19 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       return { kind: 'checkpoint', checkpoint: stage.checkpoint }
     },
   }
+
+  return externalizable('scout', internal, {
+    message: 'Survey the repos and draft the feature config in your own client, then respond with { configSource, envFiles } on `data`.',
+    handOff: (ctx) => {
+      const m = ctx.manifest()
+      // The client executes the SAME prompt the local CLI would have, so both
+      // executors work from one set of instructions — including the fan-out rule.
+      return { prompt: scoutPromptFor(m), context: { repoPaths: m.repoPaths, answerShape: { configSource: 'string', envFiles: 'string[]' } } }
+    },
+    consume: async (_ctx, result) => {
+      const draft = typeof result === 'string' ? extractJson<ScoutDraft>(result) : (result as ScoutDraft | undefined)
+      if (!draft || typeof draft !== 'object') return { kind: 'failed', error: 'external scout returned no draft' }
+      return settleDraft({ ...draft })
+    },
+  })
 }

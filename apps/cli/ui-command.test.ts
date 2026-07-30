@@ -89,7 +89,6 @@ describe('runUi signal cleanup', () => {
       close: vi.fn(async () => { events.push('close') }),
     }
     const revertAllEnvsets = vi.fn(() => { events.push('revert') })
-    const cancelAllWizardAgents = vi.fn(() => { events.push('cancel-wizard') })
     const exit = vi.fn((code: number) => { events.push(`exit-${code}`) })
     const clearActiveServer = vi.fn()
 
@@ -97,7 +96,6 @@ describe('runUi signal cleanup', () => {
       app,
       registry: {},
       revertAllEnvsets,
-      cancelAllWizardAgents,
       runStore,
       brokers: new Map(),
       draftBrokers: new Map(),
@@ -121,7 +119,6 @@ describe('runUi signal cleanup', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(clearActiveServer).toHaveBeenCalledOnce()
-    expect(cancelAllWizardAgents).toHaveBeenCalledOnce()
     expect(runStore.abortAllActiveOrStale).toHaveBeenCalledOnce()
     expect(revertAllEnvsets).toHaveBeenCalledOnce()
     expect(app.close).toHaveBeenCalledOnce()
@@ -129,7 +126,6 @@ describe('runUi signal cleanup', () => {
     expect(events).toEqual([
       'confirm',
       'revert',
-      'cancel-wizard',
       'abort-all',
       'close',
       'exit-130',
@@ -146,14 +142,12 @@ describe('runUi signal cleanup', () => {
       close: vi.fn(),
     }
     const revertAllEnvsets = vi.fn()
-    const cancelAllWizardAgents = vi.fn()
     const exit = vi.fn()
 
     mocks.createServer.mockResolvedValue({
       app,
       registry: {},
       revertAllEnvsets,
-      cancelAllWizardAgents,
       runStore,
       brokers: new Map(),
       draftBrokers: new Map(),
@@ -171,7 +165,6 @@ describe('runUi signal cleanup', () => {
     process.emit('SIGINT')
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(cancelAllWizardAgents).not.toHaveBeenCalled()
     expect(runStore.abortAllActiveOrStale).not.toHaveBeenCalled()
     expect(revertAllEnvsets).not.toHaveBeenCalled()
     expect(app.close).not.toHaveBeenCalled()
@@ -194,7 +187,6 @@ describe('runUi signal cleanup', () => {
       app,
       registry: {},
       revertAllEnvsets,
-      cancelAllWizardAgents: vi.fn(),
       runStore,
       brokers: new Map(),
       draftBrokers: new Map(),
@@ -243,7 +235,6 @@ describe('runUi port resolution', () => {
       app,
       registry: {},
       revertAllEnvsets: vi.fn(),
-      cancelAllWizardAgents: vi.fn(),
       runStore: { abortAllActiveOrStale: vi.fn() },
       brokers: new Map(),
       draftBrokers: new Map(),
@@ -381,8 +372,7 @@ describe('runUi port resolution', () => {
         app,
         registry: {},
         revertAllEnvsets: vi.fn(),
-        cancelAllWizardAgents: vi.fn(),
-        runStore: { abortAllActiveOrStale: vi.fn() },
+          runStore: { abortAllActiveOrStale: vi.fn() },
         brokers: new Map(),
         draftBrokers: new Map(),
       }
@@ -416,7 +406,6 @@ describe('runUi port resolution', () => {
       app,
       registry: {},
       revertAllEnvsets: vi.fn(),
-      cancelAllWizardAgents: vi.fn(),
       runStore: { abortAllActiveOrStale: vi.fn() },
       brokers: new Map(),
       draftBrokers: new Map(),

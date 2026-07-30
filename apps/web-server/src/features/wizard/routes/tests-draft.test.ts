@@ -1,16 +1,11 @@
 import fs from 'fs'
-
 import os from 'os'
-
 import path from 'path'
-
 import Fastify from 'fastify'
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
 import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 
-// Pass-through mock for the session-ref resolver. Tests can install a one-shot
+// Pass-through mock for the session-ref resolver. Tests install a one-shot
 // override to exercise the route's TOCTOU guard (a ref that resolves but whose
 // log file no longer exists by the time the handler stats it).
 let resolveSessionRefOverride: (() => AgentSessionRef | null) | null = null
@@ -30,64 +25,14 @@ vi.mock('../logic/draft-agent-session', async () => {
   }
 })
 
-// Pass-through mock for applyToProject so a test can force its not-ok return
-// (a TOCTOU race: the feature dir appears between the route's pre-checks and
-// the apply call — defense-in-depth that is otherwise unreachable).
-let applyToProjectOverride: (() => { ok: false; error: string; details?: string; featureDir?: string }) | null = null
+import { createDraft, paths as draftPaths, readDraft, writeDraft, type DraftRecord } from '../logic/draft-store'
+import { testsDraftRoutes, type TestsDraftRouteDeps } from './tests-draft'
 
-// Pass-through mock for resolveDraftFile so a test can force the outside-draft
-// reason (defence-in-depth: the route already rejects `..` and leading slashes,
-// so the resolver never actually emits outside-draft from route input).
-let resolveDraftFileOverride: (() => { ok: false; reason: 'invalid-path' | 'outside-draft' | 'not-found' }) | null = null
-
-vi.mock('../logic/draft-store', async () => {
-  const actual = await vi.importActual<typeof import('../logic/draft-store')>('../logic/draft-store')
-  return {
-    ...actual,
-    applyToProject: (input: Parameters<typeof actual.applyToProject>[0]) => {
-      if (applyToProjectOverride) {
-        const override = applyToProjectOverride
-        applyToProjectOverride = null
-        return override()
-      }
-      return actual.applyToProject(input)
-    },
-  }
-})
-
-vi.mock('../logic/draft-file-resolver', async () => {
-  const actual = await vi.importActual<typeof import('../logic/draft-file-resolver')>('../logic/draft-file-resolver')
-  return {
-    ...actual,
-    resolveDraftFile: (logsDir: string, draftId: string, requestPath: string) => {
-      if (resolveDraftFileOverride) {
-        const override = resolveDraftFileOverride
-        resolveDraftFileOverride = null
-        return override()
-      }
-      return actual.resolveDraftFile(logsDir, draftId, requestPath)
-    },
-  }
-})
-
-import { paths as draftPaths, readDraft, writeDraft } from '../logic/draft-store'
-
-import {
-  runPlanStage,
-  runSpecStage,
-  selectPlanTemplate,
-  testsDraftRoutes,
-  type PlanAgentInput,
-  type TestsDraftRouteDeps,
-} from './tests-draft'
-
-import {
-  STAGE1_DIFF_TEMPLATE,
-  STAGE1_TEMPLATE,
-} from '../logic/wizard-agent-spawner'
+// These routes are the READ/TRACK surface for drafts an external MCP client
+// authors (start_external_draft & friends). Canary spawns no local authoring
+// agent, so there is nothing here that starts a stage or accepts its output.
 
 let logsDir: string
-
 let projectRoot: string
 
 beforeEach(() => {
@@ -96,21 +41,13 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resolveSessionRefOverride = null
   fs.rmSync(logsDir, { recursive: true, force: true })
   fs.rmSync(projectRoot, { recursive: true, force: true })
 })
 
-let counter = 0
-
 function makeDeps(overrides: Partial<TestsDraftRouteDeps> = {}): TestsDraftRouteDeps {
-  return {
-    logsDir,
-    projectRoot,
-    newDraftId: () => `d-${++counter}`,
-    spawnPlanAgent: async () => '<plan-output>[]</plan-output>',
-    spawnSpecAgent: async () => '<file path="x.ts">x</file>',
-    ...overrides,
-  }
+  return { logsDir, projectRoot, ...overrides }
 }
 
 async function makeApp(deps: TestsDraftRouteDeps): Promise<ReturnType<typeof Fastify>> {
@@ -119,271 +56,158 @@ async function makeApp(deps: TestsDraftRouteDeps): Promise<ReturnType<typeof Fas
   return app
 }
 
-describe('POST /api/tests/draft', () => {
-  it('creates a draft and starts planning without PRD text', async () => {
-    const deps = makeDeps()
-    const app = await makeApp(deps)
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: '', repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    expect(r.statusCode).toBe(201)
-    expect(r.json().status).toBe('planning')
-    await app.close()
+/** An external-producer draft, as start_external_draft would have written it. */
+function seedExternalDraft(id = 'd-1', patch: Partial<DraftRecord> = {}): DraftRecord {
+  const record = createDraft(logsDir, {
+    draftId: id,
+    prdText: 'External client is authoring tests for checkout.',
+    prdDocuments: [],
+    repos: [{ name: 'app', localPath: '/tmp/app' }],
+    featureName: 'checkout',
+    producer: 'external',
+    externalStage: 'authoring-tests',
+    externalClientKind: 'claude',
+    externalSessionId: 's-1',
+  })
+  const next: DraftRecord = { ...record, status: 'generating', ...patch }
+  writeDraft(logsDir, next)
+  return next
+}
+
+describe('GET /api/tests/draft', () => {
+  it('lists the drafts on file', async () => {
+    seedExternalDraft('d-1')
+    seedExternalDraft('d-2')
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'GET', url: '/api/tests/draft' })
+    expect(res.statusCode).toBe(200)
+    expect((res.json() as DraftRecord[]).map((d) => d.draftId).sort()).toEqual(['d-1', 'd-2'])
   })
 
-  it('starts diff-only planning when no documents or notes are provided', async () => {
-    const spawnPlanAgent = vi.fn<(input: PlanAgentInput) => Promise<string>>(async () => '<plan-output>[]</plan-output>')
-    const deps = makeDeps({ spawnPlanAgent })
-    const app = await makeApp(deps)
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: '   ', prdDocuments: [], repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    expect(r.statusCode).toBe(201)
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(spawnPlanAgent).toHaveBeenCalled()
-    expect(spawnPlanAgent.mock.calls[0][0]).toMatchObject({
-      prdText: '   ',
-      planMode: 'diff-only',
-      planTemplatePath: STAGE1_DIFF_TEMPLATE,
-    })
-    await app.close()
+  it('returns the stored record as-is, with no agent-log tails', async () => {
+    seedExternalDraft('d-1')
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/d-1' })
+    expect(res.statusCode).toBe(200)
+    const body = res.json() as Record<string, unknown>
+    expect(body.draftId).toBe('d-1')
+    expect(body.externalStage).toBe('authoring-tests')
+    // The tails came from LOCAL stage-agent logs, which no longer exist.
+    expect(body).not.toHaveProperty('planAgentLogTail')
+    expect(body).not.toHaveProperty('specAgentLogTail')
   })
 
-  it('keeps context planning when notes are provided', async () => {
-    const spawnPlanAgent = vi.fn<(input: PlanAgentInput) => Promise<string>>(async () => '<plan-output>[]</plan-output>')
-    const deps = makeDeps({ spawnPlanAgent })
-    const app = await makeApp(deps)
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'Login flow', prdDocuments: [], repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    expect(r.statusCode).toBe(201)
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(spawnPlanAgent).toHaveBeenCalled()
-    expect(spawnPlanAgent.mock.calls[0][0]).toMatchObject({
-      prdText: 'Login flow',
-      planMode: 'context',
-      planTemplatePath: STAGE1_TEMPLATE,
-    })
-    await app.close()
+  it('404s an unknown draft', async () => {
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/nope' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ error: 'draft not found' })
+  })
+})
+
+describe('GET /api/tests/draft/:id/agent-session', () => {
+  it('404s an unknown draft', async () => {
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/nope/agent-session?stage=planning' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ reason: 'draft-not-found' })
   })
 
-  it('keeps context planning when documents are provided', async () => {
-    const spawnPlanAgent = vi.fn<(input: PlanAgentInput) => Promise<string>>(async () => '<plan-output>[]</plan-output>')
-    const deps = makeDeps({ spawnPlanAgent })
-    const app = await makeApp(deps)
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: {
-        prdText: '',
-        prdDocuments: [{ filename: 'prd.md', contentType: 'text/markdown', characters: 10 }],
-        repos: [{ name: 'app', localPath: '/p' }],
-      },
-    })
-    expect(r.statusCode).toBe(201)
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(spawnPlanAgent).toHaveBeenCalled()
-    expect(spawnPlanAgent.mock.calls[0][0]).toMatchObject({
-      prdText: '',
-      planMode: 'context',
-      planTemplatePath: STAGE1_TEMPLATE,
-    })
-    await app.close()
+  it('400s a stage outside planning/generating', async () => {
+    seedExternalDraft('d-1')
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/d-1/agent-session?stage=elsewhere' })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ reason: 'unknown-stage' })
   })
 
-  it('400s when prdText is not a string', async () => {
-    const deps = makeDeps()
-    const app = await makeApp(deps)
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: null, repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    expect(r.statusCode).toBe(400)
-    await app.close()
+  it('404s no-session-ref for an external draft, which never carries one', async () => {
+    // External authoring has no local transcript — the conversation lives in the
+    // user's own client window, which is what ExternalDraftAgentPanel says.
+    seedExternalDraft('d-1')
+    const app = await makeApp(makeDeps())
+    for (const stage of ['planning', 'generating']) {
+      const res = await app.inject({ method: 'GET', url: `/api/tests/draft/d-1/agent-session?stage=${stage}` })
+      expect(res.statusCode).toBe(404)
+      expect(res.json()).toEqual({ reason: 'no-session-ref' })
+    }
   })
 
-  it('400s on missing repos', async () => {
-    const deps = makeDeps()
-    const app = await makeApp(deps)
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'login', repos: [] },
+  it('404s session-log-missing when a ref resolves but its file is gone', async () => {
+    seedExternalDraft('d-1')
+    const p = draftPaths(logsDir, 'd-1')
+    resolveSessionRefOverride = () => ({
+      agent: 'claude',
+      sessionId: 'sess-1',
+      logPath: path.join(p.draftDir, 'nonexistent.jsonl'),
     })
-    expect(r.statusCode).toBe(400)
-    await app.close()
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/d-1/agent-session?stage=planning' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ reason: 'session-log-missing' })
   })
 
-  it('jumps to planning when a valid draft is supplied', async () => {
-    const deps = makeDeps({
-      spawnPlanAgent: async () => `<plan-output>[
-        {"step":"x","actions":["a"],"expectedOutcome":"y"}
-      ]</plan-output>`,
-    })
-    const app = await makeApp(deps)
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: {
-        prdText: 'Login',
-        repos: [{ name: 'app', localPath: '/p' }],
-      },
-    })
-    expect(r.statusCode).toBe(201)
-    expect(r.json().status).toBe('planning')
-    await app.close()
+  it('returns the parsed session when the ref resolves to a real log', async () => {
+    seedExternalDraft('d-1')
+    const p = draftPaths(logsDir, 'd-1')
+    const logPath = path.join(p.draftDir, 'session.jsonl')
+    fs.mkdirSync(p.draftDir, { recursive: true })
+    fs.writeFileSync(logPath, `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`, 'utf8')
+    resolveSessionRefOverride = () => ({ agent: 'claude', sessionId: 'sess-1', logPath })
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'GET', url: '/api/tests/draft/d-1/agent-session?stage=generating' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toHaveProperty('events')
   })
 })
 
 describe('POST /api/tests/draft/:id/cancel-generation', () => {
-  it('cancels planning and does not parse late plan output', async () => {
-    let releasePlan!: (value: string) => void
-    const cancelGeneration = vi.fn()
-    const deps = makeDeps({
-      cancelGeneration,
-      spawnPlanAgent: async () => new Promise<string>((resolve) => { releasePlan = resolve }),
-    })
-    const app = await makeApp(deps)
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    const id = post.json().draftId
-    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
-    expect(r.statusCode).toBe(200)
-    expect(r.json()).toEqual({ draftId: id, status: 'cancelled' })
-    expect(cancelGeneration).toHaveBeenCalledExactlyOnceWith(id)
+  it('settles the record of an in-flight external session', async () => {
+    seedExternalDraft('d-1')
+    const events: unknown[] = []
+    const app = await makeApp(makeDeps({ workspaceEvents: { publish: (e) => events.push(e) } }))
+    const res = await app.inject({ method: 'POST', url: '/api/tests/draft/d-1/cancel-generation' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ draftId: 'd-1', status: 'cancelled' })
 
-    releasePlan('<plan-output>[{"step":"late","actions":["x"],"expectedOutcome":"y"}]</plan-output>')
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(readDraft(logsDir, id)!.status).toBe('cancelled')
-    expect(fs.existsSync(path.join(logsDir, 'drafts', id, 'plan.json'))).toBe(false)
-    await app.close()
-  })
-
-  it('moves transient drafts to cancelled even when no pty is registered', async () => {
-    const deps = makeDeps({
-      spawnPlanAgent: async () => new Promise<string>(() => {}),
-    })
-    const app = await makeApp(deps)
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    const id = post.json().draftId
-    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
-    expect(r.statusCode).toBe(200)
-    const rec = readDraft(logsDir, id)!
+    const rec = readDraft(logsDir, 'd-1')!
     expect(rec.status).toBe('cancelled')
+    expect(rec.activeAgentStage).toBeUndefined()
     expect(rec.errorMessage).toBe('Generation cancelled by user')
-    await app.close()
+    expect(events).toContainEqual(expect.objectContaining({ type: 'draft-updated' }))
   })
 
-  it('cancels generating status', async () => {
-    const cancelGeneration = vi.fn()
-    const app = await makeApp(makeDeps({
-      cancelGeneration,
-      spawnPlanAgent: async () => new Promise<string>(() => {}),
-    }))
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    const id = post.json().draftId
-    const rec = readDraft(logsDir, id)!
-
-    writeDraft(logsDir, { ...rec, status: 'generating' })
-    const generating = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
-    expect(generating.statusCode).toBe(200)
-    expect(readDraft(logsDir, id)!.status).toBe('cancelled')
-    await app.close()
-  })
-
-  it('409s for non-transient drafts', async () => {
+  it('409s a draft that is not mid-generation', async () => {
+    seedExternalDraft('d-1', { status: 'spec-ready' })
     const app = await makeApp(makeDeps())
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'app', localPath: '/p' }] },
-    })
-    const id = post.json().draftId
-    const rec = readDraft(logsDir, id)!
-    writeDraft(logsDir, { ...rec, status: 'plan-ready' })
-    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/cancel-generation` })
-    expect(r.statusCode).toBe(409)
-    await app.close()
+    const res = await app.inject({ method: 'POST', url: '/api/tests/draft/d-1/cancel-generation' })
+    expect(res.statusCode).toBe(409)
+    expect((res.json() as { error: string }).error).toMatch(/cannot cancel-generation from status spec-ready/)
+  })
+
+  it('404s an unknown draft', async () => {
+    const app = await makeApp(makeDeps())
+    const res = await app.inject({ method: 'POST', url: '/api/tests/draft/nope/cancel-generation' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ error: 'draft not found' })
   })
 })
 
-describe('reject and delete', () => {
-  it('rejects', async () => {
-    const app = await makeApp(makeDeps())
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
-    })
-    const id = post.json().draftId
-    const rec = readDraft(logsDir, id)!
-    writeDraft(logsDir, { ...rec, status: 'plan-ready' })
-    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/reject` })
-    expect(r.statusCode).toBe(204)
-    expect(readDraft(logsDir, id)?.status).toBe('rejected')
-    await app.close()
+describe('DELETE /api/tests/draft/:id', () => {
+  it('removes the record and announces it', async () => {
+    seedExternalDraft('d-1')
+    const events: unknown[] = []
+    const app = await makeApp(makeDeps({ workspaceEvents: { publish: (e) => events.push(e) } }))
+    const res = await app.inject({ method: 'DELETE', url: '/api/tests/draft/d-1' })
+    expect(res.statusCode).toBe(204)
+    expect(readDraft(logsDir, 'd-1')).toBeNull()
+    expect(events).toContainEqual({ type: 'draft-deleted', draftId: 'd-1' })
   })
 
-  it('does not reject while generation is active', async () => {
-    const app = await makeApp(makeDeps({
-      spawnPlanAgent: async () => new Promise<string>(() => {}),
-    }))
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
-    })
-    const id = post.json().draftId
-    const r = await app.inject({ method: 'POST', url: `/api/tests/draft/${id}/reject` })
-    expect(r.statusCode).toBe(409)
-    expect(r.json().error).toContain('stop generation first')
-    expect(readDraft(logsDir, id)?.status).toBe('planning')
-    await app.close()
-  })
-
-  it('reject 404', async () => {
+  it('404s an unknown draft', async () => {
     const app = await makeApp(makeDeps())
-    const r = await app.inject({ method: 'POST', url: '/api/tests/draft/nope/reject' })
-    expect(r.statusCode).toBe(404)
-    await app.close()
-  })
-
-  it('deletes', async () => {
-    const app = await makeApp(makeDeps())
-    const post = await app.inject({
-      method: 'POST',
-      url: '/api/tests/draft',
-      payload: { prdText: 'X', repos: [{ name: 'a', localPath: '/' }] },
-    })
-    const id = post.json().draftId
-    const r = await app.inject({ method: 'DELETE', url: `/api/tests/draft/${id}` })
-    expect(r.statusCode).toBe(204)
-    expect(readDraft(logsDir, id)).toBeNull()
-    await app.close()
-  })
-
-  it('delete 404', async () => {
-    const app = await makeApp(makeDeps())
-    const r = await app.inject({ method: 'DELETE', url: '/api/tests/draft/nope' })
-    expect(r.statusCode).toBe(404)
-    await app.close()
+    const res = await app.inject({ method: 'DELETE', url: '/api/tests/draft/nope' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ error: 'draft not found' })
   })
 })
