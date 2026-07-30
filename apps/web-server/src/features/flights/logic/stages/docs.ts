@@ -10,6 +10,7 @@ import type { PrdSourceAttempt } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork } from './externalizable'
+import { agentProgressSink } from './agent-progress'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
 //   manual — the user supplies docs (UI drop zone / MCP write_feature_doc),
@@ -367,7 +368,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       prompt,
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'docs'),
-      onChunk: ctx.appendLog,
+      onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
     })

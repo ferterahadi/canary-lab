@@ -14,6 +14,7 @@ import type { SpecsCoveragePass, SpecsCoverageProgress } from '../../../../../..
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork } from './externalizable'
+import { agentProgressSink } from './agent-progress'
 
 // The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
 // (Read/Write/Edit tools — no JSON proposal), the existing draft-apply
@@ -266,7 +267,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       feature: m.feature,
       adapter: m.opts.agent,
       cwd: deps.projectRoot,
-      onOutput: ctx.appendLog,
+      onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
         writeWorkflowAgentRef(path.join(ctx.flightDir, 'coverage-map'), {
           agent: session.agent,
@@ -339,7 +340,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       // One stable sidecar dir per stage — each iteration re-pins the ref so
       // the flight view's AgentSessionView follows the newest spawn.
       stageDir: path.join(ctx.flightDir, 'specs-coverage'),
-      onChunk: ctx.appendLog,
+      onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
     })

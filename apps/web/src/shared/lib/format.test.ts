@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  formatCount,
   formatDuration,
   durationBetween,
   shortTime,
@@ -60,6 +61,16 @@ describe('formatBytes', () => {
     expect(formatBytes(1.5 * 1024 * 1024)).toBe('1.5 MB')
     expect(formatBytes(993 * 1024 * 1024)).toBe('993 MB')
     expect(formatBytes(4.26 * 1024 * 1024 * 1024)).toBe('4.3 GB')
+  })
+})
+
+describe('formatCount', () => {
+  it('groups thousands and leaves shorter numbers alone', () => {
+    expect(formatCount(0)).toBe('0')
+    expect(formatCount(999)).toBe('999')
+    expect(formatCount(1000)).toBe('1,000')
+    expect(formatCount(27627)).toBe('27,627')
+    expect(formatCount(1234567)).toBe('1,234,567')
   })
 })
 

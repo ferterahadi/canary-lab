@@ -55,6 +55,13 @@ export function formatBytes(bytes: number): string {
   return `${rounded} ${units[unit]}`
 }
 
+// Thousands-separated count for display: 27627 -> "27,627". Grouped by hand
+// rather than via toLocaleString because the separator must not depend on the
+// browser's locale — a band tile and its test have to agree on the same string.
+export function formatCount(n: number): string {
+  return `${n}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
 // Compact "time ago" from an ISO string, relative to `now` (ms). Examples:
 // "just now", "5m ago", "3h ago", "12d ago". Falls back to the raw input if
 // it doesn't parse.

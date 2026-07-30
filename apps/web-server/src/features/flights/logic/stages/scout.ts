@@ -4,6 +4,7 @@ import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent } from './context'
 import { externalizable, externalWorkCheckpoint } from './externalizable'
+import { agentProgressSink } from './agent-progress'
 
 // The one genuinely new agent prompt in the flight: read the target repo(s)
 // and draft a feature.config.cjs (dev commands, port slots, health checks) +
@@ -82,7 +83,7 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       prompt: scoutPromptFor(m),
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'scout'),
-      onChunk: ctx.appendLog,
+      onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
     })

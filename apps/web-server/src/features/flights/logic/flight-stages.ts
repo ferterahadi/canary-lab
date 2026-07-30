@@ -1,7 +1,7 @@
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { FLIGHT_STAGE_KEYS, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageErrorDetail, type FlightStageKey } from './types'
+import { FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageErrorDetail, type FlightStageKey } from './types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
 import { FlightStageEntryError } from './flight-errors'
@@ -35,6 +35,12 @@ export interface StageContext {
    *  same channel as appendLog). The last snapshot survives settle as the
    *  audit trail — see FlightStage.progress. */
   setProgress(progress: unknown): void
+  /** Publish what this stage's spawned agent is doing right now. A separate
+   *  channel from `setProgress` on purpose: the two are written by different
+   *  writers at very different rates (an agent streams; a stage transitions),
+   *  so sharing one field would have each clobbering the other. Adapters get
+   *  this for free by piping agent output through `agentProgressSink`. */
+  setAgentActivity(activity: AgentActivity): void
   /** Merge flight-level fields an adapter is allowed to settle: deliverable
    *  links, the run verdict, and the target feature (similarity re-pointing
    *  the flight at an existing feature). */
@@ -97,6 +103,7 @@ export async function interruptStage(
     signal: new AbortController().signal,
     appendLog: () => {},
     setProgress: () => {},
+    setAgentActivity: () => {},
     patchFlight: () => {},
   }
   try {
@@ -134,6 +141,7 @@ export async function resetStagesForRestart(
     signal: new AbortController().signal,
     appendLog: () => {},
     setProgress: () => {},
+    setAgentActivity: () => {},
     patchFlight: () => {},
   }
   for (const key of FLIGHT_STAGE_KEYS.slice(startIdx)) {

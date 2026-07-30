@@ -107,6 +107,9 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
         setProgress: (progress) => {
           patchStage(stage.key, { progress })
         },
+        setAgentActivity: (agentActivity) => {
+          patchStage(stage.key, { agentActivity })
+        },
         patchFlight: (patch) => {
           const cur = read()
           save({

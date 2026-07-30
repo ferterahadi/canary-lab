@@ -6,6 +6,7 @@ import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-sessi
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter } from '../conductor'
 import { featureDirFor, type FlightStageDeps } from './context'
+import { agentProgressSink } from './agent-progress'
 
 // Distill features/<f>/docs/ into the requirement summary through the
 // existing agentic PRD engine (stable requirement ids preserved by the engine
@@ -48,7 +49,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
         feature: m.feature,
         adapter: m.opts.agent,
         cwd: deps.projectRoot,
-        onOutput: ctx.appendLog,
+        onOutput: agentProgressSink(ctx),
         onAgentSession: (session) => {
           writeWorkflowAgentRef(stageDir, {
             agent: session.agent,

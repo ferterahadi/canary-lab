@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { FlightManifest, FlightStage, FlightStageKey, PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
-import { evaluationArchiveFilename, formatBytes, formatDuration } from '@/shared/lib/format'
+import { evaluationArchiveFilename, formatBytes, formatCount, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
@@ -214,6 +214,38 @@ export function withAwaitingTiles(stage: FlightStage, companion: FlightStage | u
   ]
 }
 
+/** The live agent tile: what the spawned agent is doing THIS second, from the
+ *  partial-message stream (see agent-stream-progress.ts server-side).
+ *
+ *  It leads the band, the slot portify's live phase already uses, because while
+ *  an agent works every other tile is a sweeping placeholder — and a sweeping
+ *  placeholder says "waiting", not "working". That gap is not theoretical: a
+ *  user watched a requirements agent think for two minutes, read the frozen
+ *  band and the empty Activity panel as a hang, and shut the machine down
+ *  three minutes into a step that was about to finish.
+ *
+ *  Gated on `running`: a settled stage's last snapshot would read as live work.
+ *  Either half of a merged row may be the one with an agent in flight. */
+export function agentActivityFacts(stage: FlightStage, companion?: FlightStage): StageFact[] {
+  const active = [stage, companion].find((s) => s?.status === 'running' && s.agentActivity)
+  const activity = active?.agentActivity
+  if (!activity) return []
+  switch (activity.phase) {
+    // The count IS the news — a number that climbs between two refetches is the
+    // whole proof of life, so it takes the tile's big metric slot.
+    case 'thinking':
+      return [{ label: 'Thinking', value: formatCount(activity.thinkingTokens), big: true, sub: 'tokens of reasoning so far' }]
+    case 'writing':
+      return [{ label: 'Writing', value: formatCount(activity.chars), big: true, sub: 'characters of the answer so far' }]
+    case 'tool':
+      return [{ label: 'Agent', value: activity.tool, mono: true, sub: 'running a tool' }]
+    // No number to show yet — but naming the wait still beats a bare skeleton,
+    // because it distinguishes "the model has not answered" from "nothing runs".
+    case 'requesting':
+      return [{ label: 'Agent', value: 'Waiting', sub: 'the model has not replied yet' }]
+  }
+}
+
 export function stageFacts(
   stage: FlightStage,
   flight: FlightManifest,
@@ -222,7 +254,10 @@ export function stageFacts(
    *  their tile — the band never pads itself to a fixed width. */
   band: StageBandData = {},
 ): StageFact[] {
-  return withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band))
+  return [
+    ...agentActivityFacts(stage, companion),
+    ...withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band)),
+  ]
 }
 
 /** What the stage has actually measured — evidence, live progress and the band's

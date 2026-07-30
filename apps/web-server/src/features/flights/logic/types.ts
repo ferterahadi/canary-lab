@@ -12,6 +12,7 @@ export {
 } from '../../../../../../shared/flights/types'
 
 export type {
+  AgentActivity,
   FlightStageKey,
   FlightStageStatus,
   FlightCheckpointKind,

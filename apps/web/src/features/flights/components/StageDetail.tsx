@@ -314,6 +314,7 @@ export function StageDetail({
             approved={stage.status === 'done'}
             refreshKey={docsRefreshKey}
             summaryStatus={companion?.status}
+            summaryStage={companion ?? undefined}
             requirementCount={
               typeof (companion?.evidence as Record<string, unknown> | undefined)?.requirementCount === 'number'
                 ? ((companion!.evidence as Record<string, unknown>).requirementCount as number)

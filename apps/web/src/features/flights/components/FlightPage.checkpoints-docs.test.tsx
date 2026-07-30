@@ -363,6 +363,39 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(container.querySelector('[data-testid="stage-drill-docs"]')).toBeNull()
   })
 
+  it('once the agent is writing, the output card reports it and shows the words arriving', async () => {
+    // The state the user shut their machine down in: the agent was two-thirds
+    // through a 27k-character answer and the card said only "progress in
+    // Activity below" — pointing at a panel that gains no row until the whole
+    // block completes.
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'prd-summary',
+      stages: FLIGHT_STAGE_KEYS.map((k) => ({
+        key: k,
+        status: k === 'prd-summary' ? ('running' as const) : k === 'scout' || k === 'scaffold' || k === 'env-capture' || k === 'similarity' || k === 'docs' ? ('done' as const) : ('pending' as const),
+        ...(k === 'prd-summary'
+          ? { agentActivity: { phase: 'writing' as const, thinkingTokens: 3900, chars: 27627, tail: '"description": "Cassandra shows FAILED rows"' } }
+          : {}),
+      })),
+    }))
+    mocks.listFeatureDocs.mockResolvedValue({
+      feature: 'checkout',
+      docs: [{ relPath: 'okr.md', absPath: '/ws/features/checkout/docs/okr.md', sizeBytes: 5100, generated: false }],
+      hasPrdSummary: false,
+      sourceDocCount: 1,
+      docsDrift: false,
+    })
+    await render('fl_1', { onOpenCoverage: vi.fn() })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
+    const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
+    expect(distilled?.textContent).toContain('Writing the answer — 27,627 characters so far')
+    // The old copy promised progress somewhere it wasn't; it must not survive.
+    expect(distilled?.textContent).not.toContain('progress in Activity below')
+    expect(distilled?.querySelector('[data-testid="docs-summary-tail"]')?.textContent)
+      .toContain('Cassandra shows FAILED rows')
+  })
+
   it('an unmapped kind/option degrades to its raw key, never blank', async () => {
     mocks.getFlight.mockResolvedValue(parkedOn('scout', {
       kind: 'future-kind', message: 'New question.', options: ['yes-do-it'],

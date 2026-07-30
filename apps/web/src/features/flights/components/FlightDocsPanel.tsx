@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { FlightStageStatus } from '@/shared/api/client'
+import type { FlightStage, FlightStageStatus } from '@/shared/api/client'
 import type { FeatureDocsListing } from '@/shared/api/types'
 import { DocPill, readAsBase64 } from '@/features/coverage/components/CoverageDocsRail'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
+import { agentActivityLine, agentAnswerTail } from './StageStatusLines'
 import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 
 // ─── Requirements (R74): the two-path fork + the resting docs panel ──────────
@@ -83,6 +84,7 @@ export function FlightDocsPanel({
   approved,
   refreshKey,
   summaryStatus,
+  summaryStage,
   requirementCount,
   awaiting,
 }: {
@@ -93,6 +95,10 @@ export function FlightDocsPanel({
   refreshKey?: number
   /** The folded prd-summary stage's status — chips the distilled card. */
   summaryStatus?: FlightStageStatus
+  /** The folded prd-summary stage itself. Carries the live agent snapshot, which
+   *  is what lets the running copy report progress instead of pointing at a
+   *  panel that stays empty while the agent works inside one block. */
+  summaryStage?: FlightStage
   /** Live requirement count from the folded prd-summary's evidence. */
   requirementCount?: number
   /** R83: the stage hasn't settled — an empty half renders as its skeleton
@@ -100,6 +106,8 @@ export function FlightDocsPanel({
   awaiting?: AwaitingState
 }) {
   const docs = useFlightDocs(feature, refreshKey)
+  const liveLine = summaryStage ? agentActivityLine(summaryStage) : null
+  const liveTail = summaryStage ? agentAnswerTail(summaryStage) : null
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
     <section data-testid="flight-docs-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
@@ -189,12 +197,27 @@ export function FlightDocsPanel({
           ) : awaiting && summaryStatus !== 'running' && summaryStatus !== 'failed' ? (
             <SkeletonLines awaiting={awaiting} rows={2} />
           ) : (
-            <div className="text-[11px] text-muted">
-              {summaryStatus === 'running'
-                ? 'Distilling the source docs into requirements — progress in Activity below.'
-                : summaryStatus === 'failed'
-                  ? 'Distillation failed before writing a summary — see Activity below.'
-                  : 'No summary artifact on disk.'}
+            <div className="flex min-w-0 flex-col gap-1">
+              <div className="text-[11px] text-muted">
+                {summaryStatus === 'running'
+                  // The live snapshot when there is one. The old copy pointed at
+                  // Activity for progress, which is empty for the minutes the
+                  // agent spends inside one block — a pointer to nothing. It
+                  // survives only as the pre-first-snapshot fallback, without
+                  // the promise it could not keep.
+                  ? (liveLine ?? 'Distilling the source docs into requirements…')
+                  : summaryStatus === 'failed'
+                    ? 'Distillation failed before writing a summary — see Activity below.'
+                    : 'No summary artifact on disk.'}
+              </div>
+              {/* The answer arriving, in the machine face because it is raw agent
+                  output rather than our copy. One line: it is a sign of life,
+                  not a transcript — AgentSessionView still owns the history. */}
+              {liveTail && (
+                <div data-testid="docs-summary-tail" className="truncate font-mono text-[10.5px] text-muted">
+                  {liveTail}
+                </div>
+              )}
             </div>
           )}
         </div>

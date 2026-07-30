@@ -189,6 +189,12 @@ export interface FlightStage {
    *  `SpecsCoverageProgress` so the UI can render the authoring↔mapping loop
    *  instead of parsing log text. */
   progress?: unknown
+  /** What the stage's spawned agent is doing RIGHT NOW. Its own field rather
+   *  than a corner of `progress` so publishing it can never clobber a stage's
+   *  structured progress (portify's phase mirror, specs-coverage's passes) and
+   *  vice versa. Only meaningful while the stage runs — a settled stage's last
+   *  snapshot would read as live work, so the UI gates on status. */
+  agentActivity?: AgentActivity
   /** Present while status is `waiting-for-approval`. */
   checkpoint?: FlightCheckpoint
   /** The response that released the checkpoint (kept for the audit trail). */
@@ -328,6 +334,37 @@ export interface FlightIndexEntry {
   endedAt?: string
   [key: string]: unknown
 }
+
+/** What a stage's spawned agent is doing between the rows that reach
+ *  AgentSessionView. That viewer tails the agent CLI's session JSONL, which
+ *  only gains a line when a whole content block COMPLETES — so a two-minute
+ *  think followed by a ninety-second answer produces two rows minutes apart and
+ *  the panel reads as hung. It cost a real flight: a user shut the machine down
+ *  mid-answer believing the agent had died. Derived instead from the
+ *  `--include-partial-messages` stdout the spawn already receives for its idle
+ *  clock (see agent-stream-progress.ts).
+ *
+ *  `chars`/`tail` describe the answer block being written, and reset when a new
+ *  one starts, so they measure THIS answer rather than the whole turn. */
+export type AgentActivity =
+  | {
+      /** `requesting` = waiting on the model; `thinking` = reasoning, no answer
+       *  text yet; `writing` = answer text arriving. */
+      phase: 'requesting' | 'thinking' | 'writing'
+      /** Cumulative thinking tokens the model reported for the current turn. */
+      thinkingTokens: number
+      chars: number
+      /** Tail of the answer text — the proof that words are still arriving. */
+      tail: string
+    }
+  | {
+      phase: 'tool'
+      thinkingTokens: number
+      chars: number
+      tail: string
+      /** Paired with the phase so "tool call with no tool name" cannot exist. */
+      tool: string
+    }
 
 /** One settled pass of the specs↔coverage loop: what the pass left behind,
  *  harness-computed (the ledger after mapping, or the validation verdict that

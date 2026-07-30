@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
+import { agentActivityLine, agentAnswerTail } from './StageStatusLines'
+import { agentActivityFacts } from './StageFacts'
 import type { EvaluationExportTask, FlightManifest, FlightStage } from '@/shared/api/client'
 import type { CoverageLedger, HealEnd } from '@/shared/api/types'
 
@@ -34,6 +36,93 @@ function ledger(over: Partial<CoverageLedger> = {}): CoverageLedger {
     ...over,
   }
 }
+
+// The gap this closes: a running agent produced no visible change for minutes,
+// because the only live surface (AgentSessionView) shows completed blocks and the
+// band showed sweeping placeholders. Every assertion below is about the screen
+// telling the truth WHILE the agent works.
+describe('live agent activity — the running stage reports what the agent is doing', () => {
+  const running = (agentActivity: FlightStage['agentActivity']): FlightStage =>
+    ({ key: 'prd-summary', status: 'running', startedAt: '2026-01-01T00:00:00Z', agentActivity } as FlightStage)
+
+  it('replaces the generic running sentence with the thinking token count', () => {
+    const stage = running({ phase: 'thinking', thinkingTokens: 3900, chars: 0, tail: '' })
+    expect(agentActivityLine(stage)).toBe('Thinking — 3,900 tokens of reasoning so far…')
+    expect(stageStateLine(stage, flight({ stages: [stage] }))).toBe('Thinking — 3,900 tokens of reasoning so far…')
+  })
+
+  it('reports the answer growing, which is the signal a frozen screen could not give', () => {
+    const stage = running({ phase: 'writing', thinkingTokens: 3900, chars: 27627, tail: '{ "tier": 2' })
+    expect(agentActivityLine(stage)).toBe('Writing the answer — 27,627 characters so far…')
+  })
+
+  it('names the tool and the wait for the model', () => {
+    expect(agentActivityLine(running({ phase: 'tool', thinkingTokens: 0, chars: 0, tail: '', tool: 'Read' }))).toBe('Running Read…')
+    expect(agentActivityLine(running({ phase: 'requesting', thinkingTokens: 0, chars: 0, tail: '' }))).toBe('Waiting for the model to reply…')
+  })
+
+  it('says nothing for a stage with no agent in flight, so the generic copy still shows', () => {
+    const bare = { key: 'similarity', status: 'running' } as FlightStage
+    expect(agentActivityLine(bare)).toBeNull()
+    expect(stageStateLine(bare, flight({ stages: [bare] }))).toBe('Checking whether a suite for this already exists…')
+  })
+
+  it('never reports a settled stage as still working, even though it keeps the snapshot', () => {
+    const settled = {
+      key: 'prd-summary',
+      status: 'done',
+      evidence: { requirementCount: 12 },
+      agentActivity: { phase: 'writing', thinkingTokens: 10, chars: 500, tail: 'tail' },
+    } as FlightStage
+    expect(agentActivityLine(settled)).toBeNull()
+    expect(agentAnswerTail(settled)).toBeNull()
+    expect(agentActivityFacts(settled)).toEqual([])
+  })
+
+  it('shows the newest words of the answer, sliced from the END', () => {
+    const long = running({ phase: 'writing', thinkingTokens: 0, chars: 400, tail: `${'a'.repeat(200)}THE NEWEST WORDS` })
+    const tail = agentAnswerTail(long)
+    // A CSS truncate would have hidden exactly this — the part still arriving.
+    expect(tail?.endsWith('THE NEWEST WORDS')).toBe(true)
+    expect(tail?.startsWith('…')).toBe(true)
+    expect(tail).toHaveLength(121)
+  })
+
+  it('flattens the answer to one line and drops a whitespace-only tail', () => {
+    expect(agentAnswerTail(running({ phase: 'writing', thinkingTokens: 0, chars: 9, tail: '{\n  "a": 1' }))).toBe('{ "a": 1')
+    expect(agentAnswerTail(running({ phase: 'writing', thinkingTokens: 0, chars: 2, tail: ' \n ' }))).toBeNull()
+    // Only the writing phase has an answer to show.
+    expect(agentAnswerTail(running({ phase: 'thinking', thinkingTokens: 5, chars: 0, tail: '' }))).toBeNull()
+  })
+
+  it('leads the band with the live tile, ahead of the placeholders it explains', () => {
+    const stage = running({ phase: 'thinking', thinkingTokens: 1250, chars: 0, tail: '' })
+    expect(agentActivityFacts(stage)).toEqual([
+      { label: 'Thinking', value: '1,250', big: true, sub: 'tokens of reasoning so far' },
+    ])
+    const facts = stageFacts(stage, flight({ stages: [stage] }))
+    expect(facts[0].label).toBe('Thinking')
+    // The awaited placeholders still follow, so the band keeps its settled shape.
+    expect(facts.length).toBeGreaterThan(1)
+  })
+
+  it('picks the running half of a merged row, whichever half owns the agent', () => {
+    const docsDone = { key: 'docs', status: 'done', evidence: {} } as FlightStage
+    const summaryRunning = running({ phase: 'writing', thinkingTokens: 0, chars: 40, tail: 'x' })
+    expect(agentActivityFacts(docsDone, summaryRunning)).toEqual([
+      { label: 'Writing', value: '40', big: true, sub: 'characters of the answer so far' },
+    ])
+  })
+
+  it('renders the tool and waiting phases as band tiles too', () => {
+    expect(agentActivityFacts(running({ phase: 'tool', thinkingTokens: 0, chars: 0, tail: '', tool: 'Grep' }))).toEqual([
+      { label: 'Agent', value: 'Grep', mono: true, sub: 'running a tool' },
+    ])
+    expect(agentActivityFacts(running({ phase: 'requesting', thinkingTokens: 0, chars: 0, tail: '' }))).toEqual([
+      { label: 'Agent', value: 'Waiting', sub: 'the model has not replied yet' },
+    ])
+  })
+})
 
 describe('stageStateLine — pending copy (R78 pause mid-step)', () => {
   it('a pending stage waits on a step it DEPENDS on, named as the rail names it', () => {

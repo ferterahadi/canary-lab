@@ -1,4 +1,5 @@
 import { STAGE_DEPENDS_ON } from '@shared/flights/types'
+import { formatCount } from '@/shared/lib/format'
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { HealEnd } from '@/shared/api/types'
 import { derivedFlightFeature } from '../lib/derived-stages'
@@ -127,6 +128,36 @@ export function partialProbedLine(stage: FlightStage): string | null {
   return num(ev, 'total') === 0 ? 'Tests are written, but there are no requirements to match them to yet.' : null
 }
 
+/** One sentence for what a stage's agent is doing right now, from the live
+ *  partial-message snapshot. Null when no agent is in flight, so a caller keeps
+ *  whatever line it would otherwise show.
+ *
+ *  Gated on `running`: a settled stage keeps its last snapshot, and reporting
+ *  that as present tense would claim work that has already finished. */
+export function agentActivityLine(stage: FlightStage): string | null {
+  const activity = stage.status === 'running' ? stage.agentActivity : undefined
+  if (!activity) return null
+  switch (activity.phase) {
+    case 'requesting': return 'Waiting for the model to reply…'
+    case 'thinking': return `Thinking — ${formatCount(activity.thinkingTokens)} tokens of reasoning so far…`
+    case 'tool': return `Running ${activity.tool}…`
+    case 'writing': return `Writing the answer — ${formatCount(activity.chars)} characters so far…`
+  }
+}
+
+/** The newest words of the answer as it streams — the difference between knowing
+ *  a count is climbing and seeing what is actually being written.
+ *
+ *  Sliced from the END and whitespace-flattened rather than CSS-truncated: the
+ *  tail is the part a reader wants, and `truncate` would hide exactly that. */
+export function agentAnswerTail(stage: FlightStage, max = 120): string | null {
+  const activity = stage.status === 'running' ? stage.agentActivity : undefined
+  if (!activity || activity.phase !== 'writing') return null
+  const flat = activity.tail.replace(/\s+/g, ' ').trim()
+  if (!flat) return null
+  return flat.length > max ? `…${flat.slice(-max)}` : flat
+}
+
 export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
   const { key, status } = stage
@@ -216,6 +247,13 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     const source = str(ev, 'source')
     return `${count != null ? `${count} requirement${count === 1 ? '' : 's'}` : 'Requirements'} distilled${docs != null ? ` from ${docs} doc${docs === 1 ? '' : 's'}` : ''}${source ? ` (${source})` : ''}.`
   }
+
+  // A running stage with a live agent snapshot says what the agent is doing
+  // instead of its generic "…ing" sentence. The generic line describes the whole
+  // step and never changes while it runs — exactly the stillness that reads as a
+  // hang. This is the same text the rail row's hover tooltip carries.
+  const liveAgent = agentActivityLine(stage)
+  if (liveAgent) return liveAgent
 
   const running = status === 'running'
   switch (key) {
