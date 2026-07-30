@@ -216,7 +216,7 @@ export function CheckpointControls({
             data-testid="checkpoint-revise-feedback"
             value={reviseText}
             onChange={(e) => setReviseText(e.target.value)}
-            placeholder="What should the agent change? The edits are re-verified with another double-boot."
+            placeholder="What should the agent change? The edits get another double-boot check."
             spellCheck={false}
             rows={3}
             className="cl-input w-full p-2 text-[11px] font-mono"

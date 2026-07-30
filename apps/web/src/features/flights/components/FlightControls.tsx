@@ -173,7 +173,7 @@ export function RedoFlightDialog({
       onClose={onClose}
       width={560}
       title="Re-run from a step"
-      description="Pick where the flight re-enters. Later results are discarded from that step onward; artifacts on disk are kept and reused."
+      description="Pick where the flight re-enters. Results from that step on are discarded; artifacts on disk are kept."
       footer={
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} className="cl-button px-3 py-1.5 text-xs">

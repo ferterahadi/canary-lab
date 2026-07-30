@@ -344,7 +344,7 @@ describe('stage summary + drill-through (R6)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('no edits needed')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('already be swapped')
     expect(container.querySelector('[data-testid="stage-drill-portify"]')?.textContent).toBe('Open ports config →')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
@@ -421,7 +421,7 @@ describe('stage summary + drill-through (R6)', () => {
     const asv = container.querySelector('[data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-kind')).toBe('portify')
     // The live phase mirror surfaces as facts + a phase-aware state line.
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('editing the services')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('Editing the services')
     const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
     expect(facts).toContain('Attempt')
     expect(facts).toContain('Agent editing services')

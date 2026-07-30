@@ -191,7 +191,7 @@ export function FlightDocsPanel({
           ) : (
             <div className="text-[11px] text-muted">
               {summaryStatus === 'running'
-                ? 'Distilling the source docs into requirements — the agent’s progress is in Activity below.'
+                ? 'Distilling the source docs into requirements — progress in Activity below.'
                 : summaryStatus === 'failed'
                   ? 'Distillation failed before writing a summary — see Activity below.'
                   : 'No summary artifact on disk.'}

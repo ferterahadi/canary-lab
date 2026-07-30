@@ -29,12 +29,12 @@ export function healEndLine(healEnd: HealEnd | undefined): string | null {
   switch (healEnd.reason) {
     case 'no-signal': {
       const cause = HEAL_CAUSE_PHRASE[healEnd.agentCause ?? 'unknown']
-      return `Auto-repair stopped: the repair agent went quiet without a fix${cause ? ` — ${cause}` : ''}.`
+      return `Auto-repair stopped — the agent went quiet without a fix${cause ? ` (${cause})` : ''}.`
     }
-    case 'max-cycles': return 'Auto-repair stopped after reaching the repair-cycle limit without passing.'
-    case 'no-progress': return 'Auto-repair stopped: repeated attempts made no progress.'
-    case 'spawn-failed': return 'Auto-repair stopped: the repair agent failed to start.'
-    case 'cancelled': return 'Auto-repair was stopped before the suite passed.'
+    case 'max-cycles': return 'Auto-repair stopped — it hit the cycle limit without passing.'
+    case 'no-progress': return 'Auto-repair stopped — repeated tries got nowhere.'
+    case 'spawn-failed': return 'Auto-repair stopped — the agent could not start.'
+    case 'cancelled': return 'Auto-repair was stopped before the tests passed.'
     default: return null
   }
 }
@@ -124,7 +124,7 @@ export function runOutcomeLine(stage: FlightStage, flight: FlightManifest, compa
 export function partialProbedLine(stage: FlightStage): string | null {
   if (stage.evidenceSource !== 'workspace' || stage.key !== 'specs-coverage') return null
   const ev = evidenceOf(stage)
-  return num(ev, 'total') === 0 ? 'Specs authored — no requirements to map them against yet.' : null
+  return num(ev, 'total') === 0 ? 'Tests are written, but there are no requirements to match them to yet.' : null
 }
 
 export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
@@ -142,7 +142,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
   // timestamp) — "waiting for earlier stages" would contradict the activity
   // shown right below it.
   if (status === 'pending') {
-    if (stage.startedAt) return 'Interrupted mid-step — Continue resumes it from here.'
+    if (stage.startedAt) return 'Stopped part way — Continue picks it up here.'
     // A part-done step: the artifacts are on disk but the step never completed,
     // so say what exists. "Not started" would hide real work — a suite with
     // authored specs and no requirements to map them against is the live case.
@@ -171,7 +171,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     // Nothing it depends on is outstanding — this step simply hasn't run. A
     // derived flight is never "paused by you": there is no record to have paused.
     return flight.status === 'paused' && derivedFlightFeature(flight.flightId) === null
-      ? 'Paused before it started — Continue begins this step.'
+      ? 'Paused before it started — Continue starts this step.'
       : 'Not started yet.'
   }
   if (status === 'waiting-for-approval') {
@@ -192,7 +192,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     if (stage.checkpoint?.kind === 'run-failed') {
       return runOutcomeLine(stage, flight, companion)
     }
-    return stage.checkpoint?.message ?? 'Paused — your decision is needed below.'
+    return stage.checkpoint?.message ?? 'Paused — pick an option below.'
   }
   if (status === 'skipped') return skippedLine(stage.skipReason)
   if (status === 'failed') return 'Failed — details below.'
@@ -206,8 +206,8 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     // The dry-run boot is a GATE the env-capture stage runs. Read-time evidence
     // only proves the envset is on disk — it could have been written by hand or
     // by write_envset — so a probed pair states the artifact and stops there.
-    if (companion?.evidenceSource === 'workspace') return `Suite "${flight.feature}" ${verb} — env captured${files}.`
-    return `Suite "${flight.feature}" ${verb} — env captured${files}, dry-run boot passed.`
+    if (companion?.evidenceSource === 'workspace') return `Suite "${flight.feature}" ${verb} — settings copied${files}.`
+    return `Suite "${flight.feature}" ${verb} — settings copied${files}, the app started fine.`
   }
   if (companionDone && key === 'docs') {
     const cev = (companion?.evidence ?? {}) as Record<string, unknown>
@@ -220,14 +220,14 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
   const running = status === 'running'
   switch (key) {
     case 'similarity': {
-      if (running) return 'Checking existing suites for a duplicate…'
+      if (running) return 'Checking whether a suite for this already exists…'
       const match = ev.match as Record<string, unknown> | null | undefined
       const scanned = num(ev, 'scanned')
       if (match && typeof match.feature === 'string') {
         const choice = str(ev, 'choice')
         return `Matched existing suite "${match.feature}"${choice ? ` — continuing as ${choice}` : ''}.`
       }
-      return `No duplicate found${scanned != null ? ` (${scanned} suite${scanned === 1 ? '' : 's'} scanned)` : ''} — proceeding fresh.`
+      return `No match found${scanned != null ? ` (${scanned} suite${scanned === 1 ? '' : 's'} checked)` : ''} — starting fresh.`
     }
     case 'scout': {
       const repos = flight.repoPaths.length
@@ -236,10 +236,10 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       // old `: 0` fallback turned "never measured" into "detected none", which on
       // a feature whose envset is captured contradicted the very next row.
       const envFiles = Array.isArray(ev.envFiles) ? ev.envFiles.length : null
-      const detected = envFiles != null ? `, ${plural(envFiles, 'environment file')} detected` : ''
+      const detected = envFiles != null ? `, ${plural(envFiles, 'settings file')} found` : ''
       return running
-        ? `Inspecting ${plural(repos, 'repo')} to learn how it boots and which environment files it uses…`
-        : `Scanned ${plural(repos, 'repo')} — suite configuration drafted${detected}.`
+        ? `Reading ${plural(repos, 'repo')} — how the app starts, which settings files it needs…`
+        : `Scanned ${plural(repos, 'repo')} — setup drafted${detected}.`
     }
     case 'scaffold':
       return running
@@ -248,20 +248,20 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
           ? `Suite "${flight.feature}" already existed — reused.`
           : `Suite "${flight.feature}" created in the workspace.`
     case 'env-capture': {
-      if (running) return 'Capturing env files and boot-testing the config…'
+      if (running) return 'Copying settings files and checking the app starts…'
       const captured = num(ev, 'captured')
-      return `Environment captured${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''} — dry-run boot passed.`
+      return `Settings copied${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''} — the app started fine.`
     }
     case 'docs': {
-      if (running) return 'Collecting requirement docs…'
+      if (running) return 'Collecting the documents…'
       const docs = Array.isArray(ev.docs) ? ev.docs.length : null
       const source = str(ev, 'source')
-      return `Requirement docs collected${docs != null ? ` (${docs})` : ''}${source ? ` from ${source}` : ''}.`
+      return `Documents collected${docs != null ? ` (${docs})` : ''}${source ? ` from ${source}` : ''}.`
     }
     case 'prd-summary': {
-      if (running) return 'Agent is distilling the docs into requirements…'
+      if (running) return 'Turning the documents into requirements…'
       const count = num(ev, 'requirementCount')
-      return `Requirements summary ready${count != null ? ` — ${count} requirement${count === 1 ? '' : 's'}` : ''}.`
+      return `Requirements ready${count != null ? ` — ${count} of them` : ''}.`
     }
     case 'specs-coverage': {
       const pct = num(ev, 'coveragePct')
@@ -273,15 +273,15 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         if (p) {
           const doing =
             p.phase === 'authoring'
-              ? `agent is authoring specs to close ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'}`
+              ? `writing tests to close ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'}`
               : p.phase === 'validating'
-                ? 'validating the authored specs (compile + list)'
-                : 'mapping the specs against the requirements'
+                ? 'checking the new tests compile'
+                : 'matching the tests to the requirements'
           return `Pass ${p.pass} of ${p.maxPasses} — ${doing}…`
         }
-        return 'Agent is authoring specs to close coverage gaps…'
+        return 'Writing tests to close the gaps…'
       }
-      if (ev.acceptedPartial) return `Coverage accepted at ${pct ?? '?'}% (partial, per your call).`
+      if (ev.acceptedPartial) return `Coverage accepted at ${pct ?? '?'}% — your call.`
       // Read-time evidence proves the specs EXIST; it cannot prove a target was
       // met, because no coverage loop ran to accept one. Report what the ledger
       // says right now instead — the number the old "target met" sentence was
@@ -292,9 +292,9 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         // No requirements means coverage is UNDEFINED, not zero. A suite with real
         // specs and no PRD to map them against would otherwise read "0% — 0 of 0
         // covered", which sounds like a failure instead of nothing to measure.
-        if (total === 0) return 'Specs authored — no requirements to map them against yet.'
+        if (total === 0) return 'Tests are written, but there are no requirements to match them to yet.'
         const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} covered` : ''
-        return `Specs authored, coverage at ${pct ?? '?'}%${of}.`
+        return `Tests written, coverage at ${pct ?? '?'}%${of}.`
       }
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
     }
@@ -305,29 +305,29 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
         const phase = str(portifyProgress(stage), 'status')
         return phase && PORTIFY_PHASE_LINE[phase]
           ? PORTIFY_PHASE_LINE[phase]
-          : 'Verifying the services boot concurrently (port injection)…'
+          : 'Checking the services start side by side…'
       }
       return ev.edits
-        ? 'Services are port-injectable — edits applied and double-boot verified.'
-        : 'Services are port-injectable — no edits needed, double-boot verified.'
+        ? 'Ports can be swapped now — two copies started side by side.'
+        : 'Ports could already be swapped — two copies started side by side.'
     }
     case 'run': {
       if (running) return 'Tests are running…'
       return runOutcomeLine(stage, flight, companion)
     }
     case 'heal': {
-      if (running) return 'Repair agent is fixing the failure…'
+      if (running) return 'An agent is fixing the app…'
       const cycles = num(ev, 'healCycles')
       const runStatus = str(ev, 'finalStatus') ?? str(ev, 'status') ?? flight.runVerdict
       if (cycles != null && cycles > 0) return `${cycles} repair cycle${cycles === 1 ? '' : 's'} — run ${runStatus ?? 'settled'}.`
       return `No repair needed — run ${runStatus ?? 'settled'}.`
     }
     case 'evaluation-export': {
-      if (running) return 'Building the evaluation archive…'
+      if (running) return 'Building the report…'
       // Deliberately unnamed here: the sentence used to end in `export.zip`, the
       // archive's internal filename inside the logs dir and NOT the name the
       // download hands over. The card's Archive tile carries the real one.
-      return 'Evaluation ready.'
+      return 'Report ready.'
     }
     default:
       return running ? 'Working…' : 'Done.'

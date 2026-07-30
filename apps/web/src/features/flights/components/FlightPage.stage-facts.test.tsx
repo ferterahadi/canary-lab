@@ -221,7 +221,7 @@ describe('trailer model (R14–R18)', () => {
     }))
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.textContent).toContain('Test authoring & coverage')
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 2 of 5 — agent is authoring specs to close 3 gaps…')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 2 of 5 — writing tests to close 3 gaps…')
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('2 of 5')
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('40% covered · 3 gaps open')
     expect(container.querySelector('[data-testid="specs-pass-live"]')?.textContent).toContain('authoring tests')
@@ -244,7 +244,7 @@ describe('trailer model (R14–R18)', () => {
       })),
     }))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 1 of 5 — mapping the specs against the requirements…')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 1 of 5 — matching the tests to the requirements…')
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-stage')).toBe('coverage-map')
   })
 
@@ -583,7 +583,8 @@ describe('trailer model (R14–R18)', () => {
     // Neither in the stage header nor on the band's kicker line: the band
     // measures what the report says, the card hands the file over. Three buttons
     // for one file is the duplication R82 removed for Restart.
-    const header = container.querySelector('[data-testid="stage-state-line"]')?.previousElementSibling
+    const header = container.querySelector('[data-testid="stage-actions"]')
+    expect(header).not.toBeNull()
     expect(header?.querySelector('[data-testid^="download-report-"]')).toBeNull()
     expect(container.querySelector('[data-testid="stage-facts-card"] [data-testid^="download-report-"]')).toBeNull()
     const card = container.querySelector('[data-testid="evaluation-deliverable"]')
@@ -597,7 +598,7 @@ describe('trailer model (R14–R18)', () => {
     expect(deliverable).toContain('2026-07-23T1603-z6kc')
     expect(deliverable).toContain('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
     expect(deliverable).not.toContain('export.zip')
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Evaluation ready.')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Report ready.')
   })
 
   it('a read-time-probed export (a derived flight has no zip path) still offers the download', async () => {
@@ -785,8 +786,8 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
 
   it('Parallel readiness: the double-boot proof and the overlay diff hold their places', async () => {
     await open('portify')
-    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Double-boot proof')
-    expect(container.querySelector('[data-testid="overlay-skeleton"]')?.textContent).toContain('Port-injection overlay')
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Side-by-side proof')
+    expect(container.querySelector('[data-testid="overlay-skeleton"]')?.textContent).toContain('Port changes')
   })
 
   it('Test Run: the hero renders its shape before any run exists', async () => {

@@ -121,10 +121,10 @@ export function FlightSummaryStrip({
             onClick={() => onToggleAutopilot(!autopilotOn)}
             className="group flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] outline-none transition-shadow duration-150 focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] disabled:cursor-default"
             title={flight.opts.yolo
-              ? 'This flight runs --yolo: every checkpoint except missing env is skipped regardless of autopilot'
+              ? 'This flight runs --yolo — every checkpoint except missing env is skipped, whatever autopilot says'
               : autopilotOn
-                ? 'Autopilot is answering the checkpoints that have a safe default — click to be asked at every checkpoint from the next one on'
-                : 'Every checkpoint parks for you — click to let the safe defaults answer themselves again'}
+                ? 'Autopilot answers the checkpoints with a safe default — click to be asked at every one from now on'
+                : 'Every checkpoint parks for you — click to let the safe defaults answer again'}
           >
             <span className="cl-rubric">
               Autopilot

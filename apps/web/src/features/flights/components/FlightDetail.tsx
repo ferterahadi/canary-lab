@@ -8,6 +8,7 @@ import type { FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatDuration, stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
+import { stageStateLine } from './StageStatusLines'
 import {
   buildDerivedManifest,
   derivedEntryStage,
@@ -379,6 +380,11 @@ export function FlightDetail({
             const primary = flight.stages.find((st) => st.key === s.key)
             const folded = flight.stages.find((st) => st.key === STAGE_COMPANION[s.key])
             const duration = formatDuration(primary?.startedAt, folded?.endedAt ?? primary?.endedAt)
+            // R84: the stage panel no longer paints its "where are we" sentence —
+            // it rides here instead, under the static blurb, so hovering a rail
+            // row still answers both "what is this step" and "what's it done".
+            const stateLine = primary ? stageStateLine(primary, flight, folded) : null
+            const tooltip = stateLine ? `${STAGE_BLURB[s.key]}\n\n${stateLine}` : STAGE_BLURB[s.key]
             return (
               <button
                 key={s.key}
@@ -386,7 +392,7 @@ export function FlightDetail({
                 data-testid={`stage-rail-${s.key}`}
                 aria-current={selected ? 'true' : undefined}
                 onClick={() => setSelectedStage(s.key)}
-                title={STAGE_BLURB[s.key]}
+                title={tooltip}
                 className={`cl-hover-row flex items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition-colors${selected ? ' bg-selected' : ''}`}
               >
                 {/* Status hue stays a computed token string (one source of

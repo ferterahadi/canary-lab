@@ -272,7 +272,7 @@ describe('FlightPage', () => {
 
   it('paused resume card: an interrupted step points up to the header Continue, no button of its own', async () => {
     // The screenshot case — paused mid specs-coverage. The stage kept its
-    // startedAt, so the state line reads "Interrupted mid-step" and the card
+    // startedAt, so the state line reads "Stopped part way" and the card
     // fills the void the sentence alone used to leave behind.
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'paused',
@@ -288,13 +288,13 @@ describe('FlightPage', () => {
     await render('fl_1')
     const card = container.querySelector('[data-testid="stage-paused"]')!
     expect(card).toBeTruthy()
-    expect(card.textContent).toContain('Paused mid-step')
+    expect(card.textContent).toContain('Paused part way')
     expect(card.textContent).toContain('↑ Continue')
     // Recovery stays the header's one Continue — the card carries no button.
     expect(card.querySelector('button')).toBeNull()
     // The card agrees with the always-present state sentence, never contradicts it.
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
-      .toBe('Interrupted mid-step — Continue resumes it from here.')
+      .toBe('Stopped part way — Continue picks it up here.')
   })
 
   it('paused resume card: the entry step of a paused flight reads "before this step"', async () => {
@@ -347,7 +347,7 @@ describe('FlightPage', () => {
     // The resume note is still there, but as ONE line above real evidence —
     // not a card filling a void, so it carries no PanelCard slab.
     const paused = container.querySelector('[data-testid="stage-paused"]')!
-    expect(paused.textContent).toContain('Paused mid-step')
+    expect(paused.textContent).toContain('Paused part way')
     expect(paused.textContent).toContain('↑ Continue')
     expect(paused.querySelector('button')).toBeNull()
   })

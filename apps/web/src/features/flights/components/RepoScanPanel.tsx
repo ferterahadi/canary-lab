@@ -58,7 +58,7 @@ export function RepoScanPanel({
     <section
       data-testid="repo-scan-panel"
       className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}
-      title="Repos and intent froze when this flight started — Change… reopens them and re-flies from the beginning."
+      title="Repos and intent froze when this flight started. Change… reopens them and re-flies from the start."
     >
       <div
         data-testid="flight-intent-card"
@@ -76,7 +76,7 @@ export function RepoScanPanel({
               data-testid="flight-inputs-change"
               onClick={onChangeInputs}
               className="text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent"
-              title="Change what this flight tests — opens the intent + repos prefilled; the flight re-flies from the beginning"
+              title="Change what this flight tests — reopens intent and repos prefilled, then re-flies from the start"
             >
               Change…
             </button>

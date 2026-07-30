@@ -359,7 +359,7 @@ describe('rail follow mode (R71/W2)', () => {
     mocks.getFlight.mockResolvedValue(manifest({ stages: runningStages() }))
     await render('fl_1')
     const title = container.querySelector('[data-testid="stage-rail-scout"]')?.getAttribute('title')
-    expect(title).toContain('Scans your repo')
+    expect(title).toContain('Reads your repo')
     expect(title).not.toBe('scout')
   })
 })

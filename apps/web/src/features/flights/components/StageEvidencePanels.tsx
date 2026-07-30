@@ -78,7 +78,7 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
                   style={{ color: failed ? 'var(--danger)' : 'var(--text-secondary)' }}
                 >
                   {failed
-                    ? 'never passed its health check'
+                    ? 'never answered'
                     : readyMs != null
                       ? `ready in ${formatDuration(readyMs)}`
                       /* No stamped pair (a boot recorded before the timings
@@ -88,7 +88,7 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
                          `finally` once they pass — and "stopped" sitting under
                          "Services booted 2/2" reads as a contradiction when both
                          are describing the same success. */
-                      : 'came up'}
+                      : 'started'}
                 </span>
               </li>
             )
@@ -105,11 +105,11 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
 export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifest | null; awaiting?: AwaitingState }) {
   const instances = portify?.verification?.instances ?? []
   if (instances.length === 0) {
-    return awaiting ? <SkeletonPanel kicker="Double-boot proof" awaiting={awaiting} testId="double-boot-skeleton" variant="rows" rows={2} /> : null
+    return awaiting ? <SkeletonPanel kicker="Side-by-side proof" awaiting={awaiting} testId="double-boot-skeleton" variant="rows" rows={2} /> : null
   }
   return (
     <div className={STAGE_COLUMN}>
-      <PanelCard kicker="Double-boot proof" testId="double-boot-panel">
+      <PanelCard kicker="Side-by-side proof" testId="double-boot-panel">
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
           {instances.map((instance: PortifyBootInstance, i: number) => (
             <li key={i} className="flex min-w-0 items-center gap-2 py-1.5 text-[12px]">
@@ -146,15 +146,15 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
 export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest | null; awaiting?: AwaitingState }) {
   const stat = overlayDiffStat(portify?.diff)
   if (!stat) {
-    return awaiting ? <SkeletonPanel kicker="Port-injection overlay" awaiting={awaiting} testId="overlay-skeleton" variant="rows" rows={3} /> : null
+    return awaiting ? <SkeletonPanel kicker="Port changes" awaiting={awaiting} testId="overlay-skeleton" variant="rows" rows={3} /> : null
   }
   const groups = groupOverlayFiles(stat.byFile)
   // Only count repos when every group IS one — a feature-config block is not a
   // repo, and an unlabelled group (pre-header capture) has nothing to count.
   const repoGroups = groups.filter((g) => g.group && g.group !== CONFIG_GROUP)
   const kicker = repoGroups.length > 1 && repoGroups.length === groups.length
-    ? `Overlay · ${plural(stat.files, 'file')} across ${plural(repoGroups.length, 'repo')}`
-    : `Overlay · ${plural(stat.files, 'file')}`
+    ? `Port changes · ${plural(stat.files, 'file')} across ${plural(repoGroups.length, 'repo')}`
+    : `Port changes · ${plural(stat.files, 'file')}`
   return (
     <div className={STAGE_COLUMN}>
       <PanelCard kicker={kicker} testId="overlay-panel">
@@ -197,8 +197,8 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
           </div>
         ))}
         <p className="mt-2 mb-0 text-[11px] text-muted">
-          Kept as the feature's overlay — applied into each run's worktree at boot and reversed at teardown.
-          Nothing lands in the product repos.
+          Saved as a patch. It goes on when a run starts and comes off when it ends —
+          nothing lands in the product repos.
         </p>
       </PanelCard>
     </div>
@@ -237,7 +237,7 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
               testId="composition-strength"
               // "Depth", not "strength": the heading has to say what the buckets
               // measure, and depth is what a tier ramp is.
-              heading={`Spec depth · ${plural(tests.length, 'spec')}`}
+              heading={`Test depth · ${plural(tests.length, 'test')}`}
               rows={STRENGTH_ORDER.map((s) => ({
                 key: s,
                 label: STRENGTH_META[s].label,
@@ -260,8 +260,8 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
         </div>
         {ledger.totals.orphanTests > 0 && (
           <p className="mt-2.5 mb-0 text-[11px] text-muted" data-testid="composition-orphans">
-            {plural(ledger.totals.orphanTests, 'spec')} map to no requirement — either a missing
-            tag or a test covering something nobody asked for.
+            {plural(ledger.totals.orphanTests, 'test')} match no requirement — either a missing label,
+            or a test for something nobody asked for.
           </p>
         )}
       </PanelCard>
@@ -386,7 +386,7 @@ export function AllReportsPanel({
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate text-[12px] font-medium">Run {task.runId}</span>
-                  <span className="cl-count-chip shrink-0">{task.mode === 'localized' ? 'agent-rewritten' : 'from evidence'}</span>
+                  <span className="cl-count-chip shrink-0">{task.mode === 'localized' ? 'agent-written' : 'from the run'}</span>
                   {task.taskId === pinnedTaskId && (
                     <span className="shrink-0 text-[10px] text-accent">this flight</span>
                   )}
@@ -438,7 +438,7 @@ function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTask; la
 }
 
 function builtBy(task: EvaluationExportTask): string {
-  const how = task.mode === 'localized' ? 'agent rewrite' : 'built from run evidence'
+  const how = task.mode === 'localized' ? 'an agent wrote it' : 'built from the run'
   const who = task.producer === 'external' ? 'your own client' : task.sessionRef?.agent
   return who ? `${how} · ${who}` : how
 }

@@ -51,16 +51,16 @@ export const STAGE_COLUMN = 'w-full max-w-[92ch]'
  *  (that lock is stated once, on the section header). */
 export const STAGE_BLURB: Record<FlightStageKey, string> = {
   'similarity': 'Runs every step below, start to finish.',
-  'scout': 'Scans your repo to learn its stack, structure, and how it boots.',
-  'scaffold': 'Creates the test suite in your workspace with a config and boot command.',
-  'env-capture': 'Captures the environment variables the app needs to start.',
-  'docs': 'Gathers the requirement docs (PRD, specs) that describe the feature.',
-  'prd-summary': 'Distills those docs into a short, testable requirements summary.',
-  'specs-coverage': 'Writes Playwright tests and maps them to requirements until covered.',
-  'portify': 'Makes services read their ports from env so runs can go concurrent.',
-  'run': 'Boots the app and runs the test suite, repairing failures as they surface.',
-  'heal': 'Fixes failing tests by editing app code, then reruns.',
-  'evaluation-export': 'Packages the finished run into a scored, downloadable report.',
+  'scout': 'Reads your repo to learn what it is built with and how it starts.',
+  'scaffold': 'Creates the test suite in your workspace, with settings and a start command.',
+  'env-capture': 'Copies the settings the app needs to start.',
+  'docs': 'Collects the documents that describe what the feature should do.',
+  'prd-summary': 'Turns those documents into a short list of things to test.',
+  'specs-coverage': 'Writes tests and matches them to requirements until all are covered.',
+  'portify': 'Lets each service take its port from settings, so two runs can go at once.',
+  'run': 'Starts the app and runs the tests, fixing failures as they come up.',
+  'heal': 'Fixes failures by editing the app, then runs the tests again.',
+  'evaluation-export': 'Packs the finished run into a report you can download.',
 }
 
 /** The single status hue map — rail, chip, mini rail, and any artifact surface
@@ -256,8 +256,8 @@ export const PORTIFY_PHASE_LABEL: Record<string, string> = {
 
 /** State-line sentence per live portify phase — same keys as the labels. */
 export const PORTIFY_PHASE_LINE: Record<string, string> = {
-  'planning': 'Planning which services need port-injection edits…',
-  'editing': 'Agent is editing the services to read injected ports…',
-  'verifying': 'Double-boot verifying the edits (two instances side by side)…',
-  'ready-to-save': 'Edits double-boot verified — preparing the review…',
+  'planning': 'Working out which services need port changes…',
+  'editing': 'Editing the services to take their port from settings…',
+  'verifying': 'Starting two copies side by side to check…',
+  'ready-to-save': 'Checks passed — getting the review ready…',
 }

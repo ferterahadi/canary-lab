@@ -60,7 +60,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
         </span>
       </div>
       <p className="text-[12px] text-secondary">
-        The step stopped on the error below. Resolve the cause if needed, then Continue from the header to retry.
+        This step stopped on the error below. Fix it, then hit Continue at the top to try again.
       </p>
       <pre
         data-testid="stage-error-detail"
@@ -104,12 +104,12 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
           {remedy.repos.length === 0 ? (
             // The error is stale: every repo is clean again (fixed by hand).
             <p className="text-[12px] text-secondary">
-              The repos are clean again — Continue from the header retries this step.
+              The repos are clean again — hit Continue at the top to try again.
             </p>
           ) : (
             <>
               <p className="text-[12px] text-secondary">
-                Clean the working trees, then the flight retries this step.
+                Clear the uncommitted changes and the flight will try this step again.
               </p>
               <div className="rounded border border-line">
                 {remedy.repos.map((repo, i) => (
@@ -197,10 +197,10 @@ export function StagePausedPanel({ kind, compact = false }: {
   compact?: boolean
 }) {
   const interrupted = kind === 'interrupted'
-  const heading = interrupted ? 'Paused mid-step' : 'Paused before this step'
+  const heading = interrupted ? 'Paused part way' : 'Paused before this step'
   const rest = interrupted
-    ? ' to resume this step from where it stopped — everything finished in earlier steps is kept.'
-    : ' to start this step — the earlier steps are already done.'
+    ? ' to pick this step up where it stopped. Earlier work is kept.'
+    : ' to start this step. The earlier steps are already done.'
   // An ↑ points at the header control by direction, not by a brittle
   // "top-right" — matches the failed card's "Continue from the header".
   const sentence = (

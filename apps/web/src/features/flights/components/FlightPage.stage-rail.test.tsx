@@ -276,7 +276,7 @@ describe('trailer model (R14–R18)', () => {
     })
     // Pair-settled state line speaks the whole step.
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
-      .toBe('Suite "checkout" created — env captured (2 files), dry-run boot passed.')
+      .toBe('Suite "checkout" created — settings copied (2 files), the app started fine.')
     const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
     // The band reports the boot PROOF, not the config it booted with: the suite
     // name, the reuse verb and the env FILE count already read in the state line
@@ -394,7 +394,7 @@ describe('trailer model (R14–R18)', () => {
     })
     // R72c: the intent card is distinct from the rearranged repo evidence.
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
-      .toBe('Scanned 2 repos — suite configuration drafted, 1 environment file detected.')
+      .toBe('Scanned 2 repos — setup drafted, 1 settings file found.')
     expect(container.querySelector('[data-testid="flight-intent-card"]')?.textContent).toContain('Flight input')
     expect(container.querySelector('[data-testid="flight-intent-card"]')?.textContent).toContain('Intent · what to test')
     expect(container.querySelector('[data-testid="flight-intent"]')?.textContent).toContain('checkout flow')

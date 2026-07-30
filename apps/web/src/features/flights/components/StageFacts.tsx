@@ -4,6 +4,7 @@ import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/a
 import { evaluationArchiveFilename, formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar } from '@/shared/ui/Skeleton'
+import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { PORTIFY_PHASE_LABEL, STAGE_COLUMN, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
@@ -38,8 +39,15 @@ export interface StageFact {
    *  show the leading part — and the sub-line then names the parts. Zero-value
    *  segments are dropped, so a clean split doesn't render slivers. */
   segments?: FactSegment[]
-  /** A quiet secondary line under a `big` value (e.g. the gap-kind breakdown). */
+  /** The measured second line — a breakdown the data produced (`4 failed · 17
+   *  never ran`). Omitted when there is nothing measured to say, in which case
+   *  `FACT_GLOSS` supplies the static line instead, so a tile is never one line
+   *  shorter than its neighbour. */
   sub?: string
+  /** Overrides the label-keyed `FACT_HELP` entry for a tile whose meaning differs
+   *  from every other tile carrying the same label. Nothing needs it yet — the
+   *  labels that repeat (`Requirements`, `Env files`) repeat the same concept. */
+  help?: string
 }
 
 /** One slice of a `segments` bar. `tone` reuses the status hues so a colour means
@@ -163,9 +171,9 @@ const AWAITED_FACT_LABELS: Partial<Record<FlightStageKey, readonly string[]>> = 
   'env-capture': ['Env files', 'Boot check'],
   'docs': ['Source docs', 'Requirements distilled', 'Distilled to'],
   'prd-summary': ['Requirements'],
-  'specs-coverage': ['Requirements covered', 'Requirements', 'Specs authored'],
+  'specs-coverage': ['Requirements covered', 'Requirements', 'Tests written'],
   'portify': ['Services injectable', 'Files edited', 'Instances proven'],
-  'evaluation-export': ['Requirements with specs', 'Spec depth', 'Specs that passed', 'Requirements proven'],
+  'evaluation-export': ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'],
 }
 
 /** Settled = it has produced everything it ever will, so a placeholder there
@@ -294,7 +302,7 @@ function measuredStageFacts(
               label: 'Boot time',
               value: formatDuration(bootMs),
               big: true as const,
-              sub: 'every run pays this first',
+              sub: 'every run waits this first',
             }]
           : []),
         ...envFileFacts(flight, capturedFiles),
@@ -393,7 +401,10 @@ function measuredStageFacts(
       // percentage tile (amber, empty bar) would read as a failing suite when the
       // truth is there is no PRD to measure its specs against.
       if (stage.evidenceSource === 'workspace' && num(ev, 'total') === 0) {
-        return [{ label: 'Requirements', value: 'None mapped yet' }]
+        // Its own second line, not the label's gloss: "what the documents asked
+        // for" under "None mapped yet" reads as a contradiction, when the truth
+        // is there were no documents to ask.
+        return [{ label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' }]
       }
       return [
         // Pass N of M — the big number carries the stepper so "3 passes still to
@@ -441,12 +452,12 @@ function measuredStageFacts(
         // no requirements, which has no composition card to fall back to.
         ...(band.ledger && band.ledger.tests.length > 0
           ? [{
-              label: 'Specs authored',
+              label: 'Tests written',
               value: String(band.ledger.tests.length),
               big: true as const,
               ...(!totals || totals.total === 0
                 ? specFileCount(band.ledger) != null
-                  ? { sub: `across ${plural(specFileCount(band.ledger)!, 'spec file')}` }
+                  ? { sub: `across ${plural(specFileCount(band.ledger)!, 'test file')}` }
                   : {}
                 : {}),
             }]
@@ -455,7 +466,7 @@ function measuredStageFacts(
     }
     case 'portify': {
       // R35: verdict → proof → what changed, in that order.
-      if (stage.status === 'skipped') return [{ label: 'Parallel', value: 'Already verified — safe for parallel runs', tone: 'good' }]
+      if (stage.status === 'skipped') return [{ label: 'Parallel', value: 'Already checked — safe to run two at once', tone: 'good' }]
       if (stage.status === 'running') {
         // Live phase mirror from the workflow (attempt stepper + phase verb) —
         // the embedded agent timeline below carries the detail.
@@ -505,7 +516,7 @@ function measuredStageFacts(
               value: `${instancesOk}/${instances.length}`,
               big: true as const,
               tone: instancesOk === instances.length ? 'good' as const : 'bad' as const,
-              sub: instancesOk === instances.length ? 'booted side by side' : 'a concurrent boot failed',
+              sub: instancesOk === instances.length ? 'started side by side' : 'one copy failed to start',
             }]
           : []),
         // Deliberately NOT here: the attempt count. While the stage runs it is the
@@ -559,7 +570,7 @@ function measuredStageFacts(
         // the band be compared at a glance instead of across a unit change.
         ...(led
           ? [{
-              label: 'Requirements with specs',
+              label: 'Requirements with tests',
               value: `${led.covered}/${led.total}`,
               big: true as const,
               // No divide-by-zero guard: `ledgerEvidence` returns null for a
@@ -571,7 +582,7 @@ function measuredStageFacts(
           : []),
         ...(led && led.strength.strong + led.strength.solid + led.strength.basic + led.strength.shallow > 0
           ? [{
-              label: 'Spec depth',
+              label: 'Test depth',
               value: `${led.strength.strong} strong`,
               big: true as const,
               // The whole distribution, strongest to weakest: a suite that is
@@ -591,7 +602,7 @@ function measuredStageFacts(
         // buries the numbers it qualifies.
         ...(led && led.proven != null && led.specs.mapped > 0
           ? [{
-              label: 'Specs that passed',
+              label: 'Tests that passed',
               value: `${led.specs.passed}/${led.specs.mapped}`,
               big: true as const,
               bar: led.specs.passed / led.specs.mapped,
@@ -628,7 +639,7 @@ function measuredStageFacts(
  *  and the incomplete case says how many fell short of it. */
 function claimedSub(led: LedgerEvidence): string {
   const gaps = led.total - led.covered
-  if (gaps <= 0) return 'every path has a spec claiming it'
+  if (gaps <= 0) return 'every part has a test'
   return `${gaps} still ${gaps === 1 ? 'has a gap' : 'have gaps'}`
 }
 
@@ -645,9 +656,9 @@ function passedSub(led: LedgerEvidence): string {
   const parts = [
     ...(specs.failed > 0 ? [`${specs.failed} failed`] : []),
     ...(specs.neverRan > 0 ? [`${specs.neverRan} never ran`] : []),
-    ...(led.testCount > specs.mapped ? [`${led.testCount - specs.mapped} unmapped`] : []),
+    ...(led.testCount > specs.mapped ? [`${led.testCount - specs.mapped} unlabelled`] : []),
   ]
-  return parts.length > 0 ? parts.join(' · ') : 'every spec passed'
+  return parts.length > 0 ? parts.join(' · ') : 'every test passed'
 }
 
 /** The conclusion tile's sub-line — the RULE that turns the three tiles to its
@@ -666,8 +677,8 @@ function provenSub(led: LedgerEvidence, reportRunId: string | undefined): string
   if (led.provenRunId != null && reportRunId != null && led.provenRunId !== reportRunId) {
     return `proven on run ${led.provenRunId}, not this one`
   }
-  if (led.proven != null && led.proven === led.total) return 'every requirement had a passing spec'
-  return 'needs every path backed by a passing spec'
+  if (led.proven != null && led.proven === led.total) return 'every requirement had a test that passed'
+  return 'every part needs a test that passed'
 }
 
 /** The Evaluation Report's pre-band fallback: name the deliverable when there
@@ -691,7 +702,7 @@ function evaluationIdentityFacts(
     : recordedBase ? `${recordedBase}.zip` : null
   return [
     ...(runId ? [{ label: 'From run', value: runId, mono: true }] : []),
-    ...(mode ? [{ label: 'Report', value: mode === 'localized' ? 'agent-rewritten' : 'built from evidence' }] : []),
+    ...(mode ? [{ label: 'Report', value: mode === 'localized' ? 'written by an agent' : 'built from the run' }] : []),
     ...(archive ? [{ label: 'Archive', value: archive, mono: true, title: archive }] : []),
   ]
 }
@@ -716,7 +727,7 @@ function envFileFacts(flight: FlightManifest, captured: number | null): StageFac
   const scoutEv = evidenceOf(flight.stages.find((s) => s.key === 'scout'))
   const declared = Array.isArray(scoutEv.envFiles) ? scoutEv.envFiles.length : null
   if (declared == null || declared <= 0) {
-    return [{ label: 'Env files', value: String(captured), big: true, sub: 'captured into the envset' }]
+    return [{ label: 'Env files', value: String(captured), big: true, sub: 'copied in for Canary' }]
   }
   const complete = captured >= declared
   return [{
@@ -725,7 +736,7 @@ function envFileFacts(flight: FlightManifest, captured: number | null): StageFac
     big: true,
     bar: Math.min(1, captured / declared),
     tone: complete ? 'good' : 'bad',
-    sub: complete ? 'all the app asked for' : `${declared - captured} waived or missing`,
+    sub: complete ? 'all the app asked for' : `${declared - captured} skipped or missing`,
   }]
 }
 
@@ -775,6 +786,97 @@ function strengthBreakdown(strength: StrengthCounts): string | undefined {
     ...(strength.ungraded > 0 ? [`${strength.ungraded} ungraded`] : []),
   ]
   return parts.length > 0 ? parts.join(' · ') : undefined
+}
+
+// ─── What a tile MEANS, keyed by its label ──────────────────────────────────
+// Two maps, both keyed on the tile's label rather than threaded through the 30
+// branch sites above. The label is already this file's identity key — it is what
+// `AWAITED_FACT_LABELS` matches a placeholder to its eventual value on — so
+// keying here means a tile that has not been measured yet still carries its
+// explanation and its second line, which nothing passed per-branch could give.
+//
+// Labels that repeat across stages (`Requirements`, `Env files`, `Files edited`)
+// repeat the same CONCEPT, so one entry serves them all. A tile whose meaning
+// genuinely diverges sets `help` on the fact itself.
+
+/** The hover explanation behind the `?`: what the figure is counted from, and
+ *  the catch a reader would otherwise have to discover. Two sentences at most —
+ *  the tooltip is 260px wide and it is read standing up, not studied.
+ *
+ *  A label with no entry renders NO `?` and no tooltip: the mark promises an
+ *  explanation, and one with nothing behind it is worse than none. */
+export const FACT_HELP: Record<string, string> = {
+  // Scout
+  'Matches': 'Another suite already tests this app. Reuse it instead of making a new one.',
+  'Repos scanned': 'The code folders you picked. Canary reads each one to see how the app starts.',
+  'Services found': 'The apps and servers Canary found. Every test run starts all of them first.',
+  'Port slots drafted': 'A port Canary can change per run, so two runs never fight over the same one.',
+  // Suite setup
+  'Services booted': 'How many started and answered. If any did not, a test will hit a missing service.',
+  'Boot time': 'How long the app takes to start. Every run waits this long before testing.',
+  'Env files': 'The app’s startup settings, copied for Canary. A missing one breaks a service later.',
+  'Boot check': 'Did each service start and answer? One shut down afterwards still counts as fine.',
+  // Requirements
+  'Source docs': 'The files Canary read — briefs, specs, notes. The requirements come only from these.',
+  'Source text': 'How much text those files hold. The token figure is a rough estimate, not a count.',
+  'Requirements distilled': 'One thing the app must do, small enough to test. Everything later is scored against these.',
+  'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
+  'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
+  // Test authoring
+  'Authoring pass': 'Canary writes tests, checks what they cover, then writes more — until it hits the target.',
+  'Requirements covered': 'Counted from labels in the test files. Nothing was run, so every test could still be failing.',
+  'Coverage gaps': 'Requirements with no test yet, or only part of one. The next pass goes after these.',
+  'Tests written': 'Tests labelled with a requirement. Unlabelled tests still run, they just are not counted here.',
+  // Parallel readiness
+  'Parallel': 'Can two runs of this suite start at once without fighting over a port? Checked once.',
+  'Attempt': 'The agent edits, starts two copies to check, and tries again if either fails.',
+  'Phase': 'What the agent is doing now — reading, editing, or starting two copies to check.',
+  'Services injectable': 'The service reads its port from settings instead of having it fixed in the code.',
+  'Files edited': 'Changes Canary made so ports can be swapped. Kept as a patch you can undo.',
+  'Instances proven': 'Two copies of the app ran at once and both answered. That is the real proof.',
+  // Test run history
+  'Runs performed': 'Every run Canary kept for this suite, not just this flight’s.',
+  'Succeeded': 'Runs where every test passed. A stopped run counts as neither a pass nor a fail.',
+  'Avg duration': 'Average time a finished run took, startup included. Runs still going are left out.',
+  'Repair cycles': 'One cycle: tests fail, an agent fixes the app, the tests run again. It never edits the test.',
+  // Evaluation report
+  'Requirements with tests': 'Counted from labels in the test files. Nothing was run to check they work.',
+  'Test depth': 'How much a test really checks. Shallow means it clicks around without checking the result.',
+  'Tests that passed': 'Only tests labelled with a requirement. They are the only ones that can prove anything.',
+  'Requirements proven': 'What the numbers on the left add up to. A test has to exist and pass.',
+  'From run': 'The test run this report came from.',
+  'Report': 'From the run: the numbers straight off it. Agent-written: an agent put them into words.',
+  'Archive': 'The zip you download — the evidence, the run’s results, and the report.',
+}
+
+/** The static second line, used only when the fact carries no measured `sub`.
+ *  Plain words, no jargon, and short enough for a 10.5px line at a 140px tile —
+ *  it says what the figure is FOR, where the tooltip says how it is counted.
+ *
+ *  Deliberately absent for the identity tiles (`From run`, `Archive`, `Report`)
+ *  and the sentence-valued ones (`Matches`, `Parallel`, `Boot check`): their
+ *  value already reads as a phrase, and a gloss under a filename is noise. */
+export const FACT_GLOSS: Record<string, string> = {
+  'Repos scanned': 'you picked these at the start',
+  'Services found': 'every run starts all of them',
+  'Port slots drafted': 'so two runs never clash',
+  'Services booted': 'checked on a test start',
+  'Source docs': 'where the requirements came from',
+  'Requirements distilled': 'things the app must do',
+  'Test depth': 'how much each test checks',
+  'Requirements': 'what the documents asked for',
+  'Authoring pass': 'write, check, write again',
+  'Requirements covered': 'a test claims it, nothing ran yet',
+  'Coverage gaps': 'no test covers these yet',
+  'Tests written': 'written for the requirements',
+  'Attempt': 'retries until both copies start',
+  'Phase': 'what the agent is doing now',
+  'Services injectable': 'each gets its port from the run',
+  'Files edited': 'fixed ports swapped out',
+  'Runs performed': 'this suite’s whole history',
+  'Succeeded': 'every test passed',
+  'Avg duration': 'finished runs only',
+  'Repair cycles': 'fail, fix the app, run again',
 }
 
 export const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
@@ -832,10 +934,41 @@ export function FactBar({ frac, color }: { frac: number; color: string }) {
   )
 }
 
-/** One fact as a tile. Numeric/scalar facts (`big`) render a large metric value
- *  with an optional stepper/bar/sub; text, path, and sentence values stay in the
- *  quiet body size and truncate inside the tile — so a value like a file path or
- *  "Safe — services boot side by side" reads on the same grid as "0%". */
+/** The mark that says an explanation exists. Half-opacity at rest so a band of
+ *  four tiles does not read as four punctuation marks, and full when the pointer
+ *  is anywhere on the tile — the same moment the tooltip it advertises appears.
+ *  `aria-hidden` because the explanation itself is in the tile's own sr-only
+ *  line, which a screen reader gets without a hover it cannot perform.
+ *
+ *  `TOOLTIP_ANCHOR_ATTR` makes the tip drop from THIS mark rather than from the
+ *  bottom of the whole tile — the mark is what advertised the explanation, so it
+ *  is where the explanation should appear. The tile stays the hover target. */
+function FactHelpMark() {
+  return (
+    <span
+      aria-hidden="true"
+      {...{ [TOOLTIP_ANCHOR_ATTR]: '' }}
+      className="flex h-3 w-3 flex-none items-center justify-center rounded-full border text-[8.5px] leading-none opacity-45 transition-opacity duration-150 group-hover/fact:opacity-100"
+      style={{ borderColor: 'currentColor' }}
+    >
+      ?
+    </span>
+  )
+}
+
+/** One fact as a tile, in three fixed lines: label (+ `?`), value, second line.
+ *  Numeric/scalar facts (`big`) render a large metric value with an optional
+ *  stepper/bar; text, path, and sentence values stay in the quiet body size and
+ *  truncate inside the tile — so a value like a file path or "Safe — services
+ *  boot side by side" reads on the same grid as "0%".
+ *
+ *  BOTH explanatory lines are resolved by LABEL, not passed in. The second line
+ *  prefers the measured `sub` a stage produced and falls back to the static
+ *  gloss, so a tile is never a line shorter than the one beside it just because
+ *  its news happens to be clean — which is exactly what a green run history used
+ *  to do. The tooltip is the whole TILE's, not the mark's: a 12px target is a
+ *  poor one, and the mark is there to say the explanation exists, not to be the
+ *  only way to reach it. */
 export function FactTile({ fact: f, live = false }: {
   fact: StageFact
   /** The stage is working right now — a placeholder sweeps to say the figure is
@@ -844,14 +977,23 @@ export function FactTile({ fact: f, live = false }: {
   live?: boolean
 }) {
   const toneColor = f.tone ? FACT_TONE[f.tone] : null
-  return (
-    <div className="min-w-0 rounded-md px-3 py-2.5 bg-elevated">
+  const help = f.help ?? FACT_HELP[f.label]
+  // The static gloss stands in for a missing `sub` on a placeholder too: it is
+  // true before the figure lands and after it, so the tile keeps its height and
+  // nothing shifts when the stage settles.
+  const sub = f.sub ?? FACT_GLOSS[f.label]
+  const tile = (
+    <div className="group/fact min-w-0 rounded-md px-3 py-2.5 bg-elevated" data-testid="fact-tile">
       {/* Sentence case, NOT the uppercase `.cl-rubric` the card kickers use. A
           tile label is read alongside a 22px number, and at that pairing the
           letter-spaced caps compete with the figure instead of labelling it. The
           kicker above the grid still carries the rubric voice, so the card keeps
           its register — this is the tile's own label, one level down. */}
-      <div className="text-[11.5px] text-muted">{f.label}</div>
+      <div className="flex min-w-0 items-center gap-1 text-[11.5px] text-muted">
+        <span className="min-w-0 truncate">{f.label}</span>
+        {help ? <FactHelpMark /> : null}
+      </div>
+      {help ? <span className="sr-only">{help}</span> : null}
       {f.awaiting ? (
         <FactPlaceholder live={live} />
       ) : f.big ? (
@@ -863,7 +1005,6 @@ export function FactTile({ fact: f, live = false }: {
           {f.stepper ? <FactStepper current={f.stepper[0]} total={f.stepper[1]} /> : null}
           {f.segments ? <FactSegments segments={f.segments} /> : null}
           {f.bar != null && !f.segments ? <FactBar frac={f.bar} color={toneColor ?? 'var(--accent)'} /> : null}
-          {f.sub ? <div className="mt-1.5 text-[10.5px] text-secondary">{f.sub}</div> : null}
         </>
       ) : (
         <div
@@ -874,8 +1015,10 @@ export function FactTile({ fact: f, live = false }: {
           {f.value}
         </div>
       )}
+      {sub ? <div data-testid="fact-sub" className="mt-1.5 text-[10.5px] text-secondary">{sub}</div> : null}
     </div>
   )
+  return help ? <Tooltip label={help}>{tile}</Tooltip> : tile
 }
 
 /** The one facts renderer every stage uses (R20): the 2–4 things that matter at

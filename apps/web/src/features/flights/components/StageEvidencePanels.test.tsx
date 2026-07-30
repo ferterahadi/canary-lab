@@ -59,13 +59,13 @@ describe('OverlayPanel', () => {
   it('counts the repos in the kicker so the header matches what the body shows', async () => {
     await render(TWO_REPOS)
     expect(container.querySelector('[data-testid="overlay-panel"]')?.textContent)
-      .toContain('Overlay · 4 files across 2 repos')
+      .toContain('Port changes · 4 files across 2 repos')
   })
 
   it('names no repo count when the diff carries no group headers', async () => {
     await render(['+++ b/build.gradle', '+canaryPort = 1'].join('\n'))
     const text = container.querySelector('[data-testid="overlay-panel"]')?.textContent
-    expect(text).toContain('Overlay · 1 file')
+    expect(text).toContain('Port changes · 1 file')
     expect(text).not.toContain('across')
   })
 
@@ -100,7 +100,7 @@ describe('OverlayPanel', () => {
   it('still says what an overlay IS — the card must not read as edits landing in the product repos', async () => {
     await render(TWO_REPOS)
     expect(container.querySelector('[data-testid="overlay-panel"]')?.textContent)
-      .toContain('Nothing lands in the product repos.')
+      .toContain('nothing lands in the product repos.')
   })
 })
 
@@ -148,7 +148,7 @@ describe('CoverageCompositionPanel', () => {
   it('counts every strength bucket, worst-first, in the coverage feature\'s own labels', async () => {
     await render(MIXED)
     const group = container.querySelector('[data-testid="composition-strength"]')
-    expect(group?.textContent).toContain('Spec depth · 4 specs')
+    expect(group?.textContent).toContain('Test depth · 4 tests')
     expect(row('composition-strength', 'shallow')).toContain('Shallow1')
     expect(row('composition-strength', 'solid')).toContain('Solid2')
     expect(row('composition-strength', 'strong')).toContain('Strong1')
@@ -188,7 +188,7 @@ describe('CoverageCompositionPanel', () => {
       tests: [spec({ strength: 'solid' })],
     }))
     expect(container.querySelector('[data-testid="composition-orphans"]')?.textContent)
-      .toContain('3 specs map to no requirement')
+      .toContain('3 tests match no requirement')
   })
 
   it('renders nothing without a ledger, or for a suite with no requirements to compose', async () => {

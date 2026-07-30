@@ -4,7 +4,7 @@ import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { evaluationTaskId, FactsGrid, STAGE_BLURB, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageLabel, stageStateLine, type StageRailRow } from './stage-meta'
+import { evaluationTaskId, FactsGrid, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageStateLine, type StageRailRow } from './stage-meta'
 import { useEvaluationExports } from '@/features/evaluation'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
@@ -154,16 +154,23 @@ export function StageDetail({
       {/* R66: header, facts and stage panels scroll here; the activity band
           below fills the rest of the pane so a long transcript scrolls in
           place instead of the whole stage view running off the bottom. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
-      {/* Stable header row: title truncates on the left, the chip + actions
-          anchor to the RIGHT edge — switching stages must not shift anything
-          horizontally (only the title text itself changes). min-h-6 (=the
-          .cl-button height) locks the row height too, so the vertically-centered
-          title does NOT drop on stages that carry an action button (Advanced
-          setup, drill-through, download) versus the plain chip-only stages. */}
-      <div className="flex min-h-6 items-center gap-2">
-        <h2 className="min-w-0 truncate text-[13px] font-semibold" title={STAGE_BLURB[stage.key]}>{row.label}</h2>
-        <div className="flex-1" />
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto p-3 scrollbar-thin" style={{ scrollbarGutter: 'stable' }}>
+      {/* R85: the chip + actions share a top edge with the first card instead of
+          sitting on a row of their own above it. The cards are capped at
+          STAGE_COLUMN (92ch) while the pane is wider, so the leftover width to
+          their right was empty anyway — the old dedicated row spent 36px of
+          vertical space to put a chip in it, pushing "At a glance" that much
+          further from the stage rail it belongs to.
+          `order-last` paints the column on the right while keeping the chip and
+          its actions FIRST in DOM (and so in tab order), where they read as the
+          stage's header. `items-start` keeps the actions at the top rather than
+          centring them against a pane-tall card stack. */}
+      <div className="flex items-start gap-2">
+      {/* min-h-6 (=the .cl-button height) locks the actions row height, so
+          neither the chip nor an action button drops when a stage carries one
+          (Advanced setup, drill-through, download) versus the plain chip-only
+          stages. */}
+      <div data-testid="stage-actions" className="order-last flex min-h-6 shrink-0 items-center gap-2">
         <StageStatusChip status={row.status} />
         {/* Advanced setup appears once the config EXISTS on disk — approved
             (done) or pre-existing (skipped, the scaffold had nothing to do).
@@ -199,8 +206,16 @@ export function StageDetail({
         )}
       </div>
 
-      {/* Where are we — one plain sentence, always present. */}
-      <div data-testid="stage-state-line" className="max-w-[76ch] text-[12px] text-secondary">
+      {/* The stage's own content column — every card on STAGE_COLUMN, stacked on
+          the same gap the pane used to carry. */}
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+
+      {/* Where are we — one plain sentence, always computed. R84: no longer
+          painted in the panel (the left rail already carries this stage's
+          name and status dot); it now surfaces as the rail row's hover
+          tooltip (see FlightDetail's railRows). Stays sr-only rather than
+          gone so a screen-reader user gets it without a mouse. */}
+      <div data-testid="stage-state-line" className="sr-only">
         {stageStateLine(stage, flight, companion ?? undefined)}
       </div>
 
@@ -389,6 +404,8 @@ export function StageDetail({
         <CheckpointControls flightId={flightId} flight={flight} checkpoint={checkpointStage.checkpoint} onResponded={onResponded} />
       )}
 
+      </div>
+      </div>
       </div>
       {/* R66: one activity rail per stage — the conductor's tagged system lines
           and the stage's agent timeline (if any) on a single block. The run
