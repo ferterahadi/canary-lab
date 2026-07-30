@@ -53,10 +53,15 @@ export function classifyMcpClient(
 ): McpClientFacts {
   const name = info?.name
   const lower = (name ?? '').toLowerCase()
-  // Desktop's local-agent mode reports as claude-code because it IS claude-code
-  // (`claude-code/2.1.156 (local-agent, agent-sdk/0.3.156)`), so this one branch
-  // correctly covers both the CLI and Desktop's agent surface.
-  const surface: McpClientSurface = lower.includes('claude-code')
+  // Desktop's local-agent mode runs the real Claude Code CLI through the Agent SDK
+  // (its user-agent is `claude-code/2.1.156 (local-agent, agent-sdk/0.3.156)`), so
+  // it HAS the Task subagent primitive. But its `clientInfo.name` is neither
+  // `claude-code` nor `claude-ai` — Desktop constructs the client as
+  // `local-agent-mode-<serverName>`, observed live here as
+  // `local-agent-mode-Canary_Lab`. Matching only on `claude-code` classified the
+  // one capable Desktop surface as unknown and told it to read serially, which is
+  // the exact mistake this module exists to stop.
+  const surface: McpClientSurface = lower.includes('claude-code') || lower.includes('local-agent-mode')
     ? 'claude-code'
     : lower.includes('claude-ai') || lower === 'claude' || lower.includes('desktop')
       ? 'claude-desktop-chat'

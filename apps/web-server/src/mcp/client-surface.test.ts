@@ -13,9 +13,21 @@ describe('classifyMcpClient — which surface is connected', () => {
     expect(facts).toMatchObject({ surface: 'claude-code', canFanOut: true, version: '2.1.220' })
   })
 
-  it('treats Desktop local-agent mode as claude-code — it runs the real CLI, so it HAS subagents', () => {
-    // The regression this guards: reading "Desktop" as one surface and concluding
-    // Desktop cannot fan out. Its agent mode can.
+  // Observed live on this machine: Desktop's local-agent mode identifies itself as
+  // `local-agent-mode-<serverName>`, NOT `claude-code` — even though it runs the
+  // real CLI through the Agent SDK and therefore HAS Task subagents. Matching only
+  // on `claude-code` classified it as unknown and told the one capable Desktop
+  // surface to read serially.
+  it.each(['local-agent-mode-Canary_Lab', 'local-agent-mode-something-else'])(
+    'treats Desktop local-agent mode (%s) as claude-code — it HAS subagents',
+    (name) => {
+      const facts = classifyMcpClient({ name, version: '1.0.0' })
+      expect(facts.surface).toBe('claude-code')
+      expect(facts.canFanOut).toBe(true)
+    },
+  )
+
+  it('still recognises a plain claude-code client', () => {
     const facts = classifyMcpClient({ name: 'claude-code', version: '2.1.156' })
     expect(facts.surface).toBe('claude-code')
     expect(facts.canFanOut).toBe(true)
