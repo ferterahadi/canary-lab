@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightEntryOptions, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
@@ -55,6 +56,8 @@ export function FlightDetail({
   activity,
   derivedStages,
   drill,
+  stage: routedStage,
+  onSelectStage,
 }: {
   flightId: string
   refreshKey: number
@@ -70,6 +73,12 @@ export function FlightDetail({
   activity?: Map<string, FeatureActivity>
   derivedStages?: Map<string, DerivedStage[]>
   drill: FlightDrillThroughs
+  /** The selected stage, when App owns it (routed as `?stage=…`) — null is
+   *  follow-mode. Controlled/uncontrolled hybrid: pass BOTH or neither. Without
+   *  them the pick stays internal, which is how this component's own tests run
+   *  it standalone. */
+  stage?: FlightStageKey | null
+  onSelectStage?: (stage: FlightStageKey | null) => void
 }) {
   // R81 — derived mode: `flightId` is a `feature:<name>` token, so there is no
   // record to GET. The rail comes from live workspace evidence and everything
@@ -79,7 +88,9 @@ export function FlightDetail({
   const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; env: string; evidence?: FlightEntryOptions['evidence'] } | null>(null)
   const [fetched, setFlight] = useState<FlightManifest | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [selectedStage, setSelectedStage] = useState<FlightStageKey | null>(null)
+  const [ownStage, setOwnStage] = useState<FlightStageKey | null>(null)
+  const selectedStage = onSelectStage ? routedStage ?? null : ownStage
+  const setSelectedStage = onSelectStage ?? setOwnStage
   // R71/W1: one inline error line under the header — every header/run control
   // failure lands here instead of a silent `.catch(() => {})`.
   const [actionError, setActionError] = useState<string | null>(null)
@@ -135,11 +146,19 @@ export function FlightDetail({
     requestAnimationFrame(() => {
       document.querySelector('[data-testid="checkpoint-controls"], [data-testid="requirements-fork"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
-  }, [])
+  }, [setSelectedStage])
 
   // R71/W2: switching flights returns selection to follow-mode — a stage pick
-  // made on flight A must not survive onto flight B.
-  useEffect(() => { setSelectedStage(null) }, [flightId])
+  // made on flight A must not survive onto flight B. Guarded on an actual
+  // CHANGE rather than firing on mount: the pick is routed now, and a mount is
+  // exactly what a refresh or a drill-through's way back produces — clearing
+  // there would wipe the stage the URL just restored.
+  const seenFlightRef = useRef(flightId)
+  useEffect(() => {
+    if (seenFlightRef.current === flightId) return
+    seenFlightRef.current = flightId
+    setSelectedStage(null)
+  }, [flightId, setSelectedStage])
 
   // WS `flights-changed` bumps refreshKey; the poll is the reconnect-safe
   // backstop while the flight is active (the bus has no replay).
@@ -244,7 +263,7 @@ export function FlightDetail({
                 : 'A stage failed — Continue retries it')
               : undefined}
             icon={flight.status === 'running' ? <StatusDot state="running" className="shrink-0" /> : undefined}
-            label={derivedFeature && flight.status !== 'done' ? 'idle' : flightStatusLabel(flight.status)}
+            label={capitalizeFirst(derivedFeature && flight.status !== 'done' ? 'idle' : flightStatusLabel(flight.status))}
           />
         </h1>
         {/* The one primary: the state's obvious next action. Running has none —

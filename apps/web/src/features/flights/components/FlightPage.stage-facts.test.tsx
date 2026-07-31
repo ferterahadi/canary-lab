@@ -286,7 +286,7 @@ describe('trailer model (R14–R18)', () => {
     await render('fl_1')
     const title = container.querySelector('h1')
     expect(title?.textContent).toContain('checkout')
-    expect(title?.querySelector('[data-testid="flight-status"]')?.textContent).toBe('done')
+    expect(title?.querySelector('[data-testid="flight-status"]')?.textContent).toBe('Done')
   })
 
   it('R14/R16: a generating stage leads with a live state line', async () => {
@@ -299,7 +299,7 @@ describe('trailer model (R14–R18)', () => {
     }))
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Creating the suite in the workspace…')
-    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('generating')
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('Generating')
     // Advanced setup only appears once the config is APPROVED (scaffold done).
     expect(container.querySelector('[data-testid="feature-setup-advanced"]')).toBeNull()
   })
@@ -812,6 +812,31 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     await open('evaluation-export')
     expect(container.querySelector('[data-testid="evaluation-deliverable-skeleton"]')?.textContent).toContain("This flight's report")
     expect(container.querySelector('[data-testid="all-reports-skeleton"]')?.textContent).toContain('All reports for this suite')
+  })
+
+  // R83's promise is that a value lands in the SLOT its placeholder held. These
+  // six returned a bare SkeletonPanel while their settled twin was wrapped in
+  // the stage column, so a working stage showed pane-wide placeholders that
+  // visibly narrowed the moment real figures arrived.
+  it('every placeholder card sits on the same column its settled card will', async () => {
+    const capped = (testId: string): boolean =>
+      container.querySelector(`[data-testid="${testId}"]`)?.closest('.max-w-\\[92ch\\]') != null
+
+    await open('scaffold')
+    expect(capped('boot-check-skeleton')).toBe(true)
+
+    await open('specs-coverage')
+    expect(capped('coverage-composition-skeleton')).toBe(true)
+    expect(capped('specs-pass-skeleton')).toBe(true)
+
+    await open('portify')
+    expect(capped('double-boot-skeleton')).toBe(true)
+    expect(capped('overlay-skeleton')).toBe(true)
+
+    mocks.evaluationTasks.mockReturnValue([])
+    await open('evaluation-export')
+    expect(capped('evaluation-deliverable-skeleton')).toBe(true)
+    expect(capped('all-reports-skeleton')).toBe(true)
   })
 
   it('placeholders sweep only on the step that is working', async () => {

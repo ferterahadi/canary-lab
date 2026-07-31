@@ -217,7 +217,7 @@ describe('derived flights (R81)', () => {
     expect(container.textContent).toContain('go-smoke')
     // Every step done → the same word a recorded flight gets. It flew; it just
     // wasn't conducted.
-    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('done')
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('Done')
   })
 
   it('offers exactly one primary and no record-scoped controls', async () => {

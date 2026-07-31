@@ -15,7 +15,6 @@ import {
   proposeRunPr,
   stopRun,
   deleteRun,
-  deleteJournalEntry,
   listJournal,
 } from './runs'
 import { ok, fail } from './__fixtures__/response'
@@ -112,18 +111,6 @@ describe('runs api', () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok([]))
     await listJournal({}, { fetchImpl })
     expect(fetchImpl).toHaveBeenCalledWith('/api/journal', { method: 'GET' })
-  })
-
-  it('deleteJournalEntry DELETEs the iteration and resolves on 204', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
-    await expect(deleteJournalEntry(7, { run: 'r1' }, { fetchImpl })).resolves.toBeUndefined()
-    expect(fetchImpl).toHaveBeenCalledWith('/api/journal/7?run=r1', { method: 'DELETE' })
-  })
-
-  it('deleteJournalEntry omits the query string when no run filter is provided', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
-    await expect(deleteJournalEntry(7, {}, { fetchImpl })).resolves.toBeUndefined()
-    expect(fetchImpl).toHaveBeenCalledWith('/api/journal/7', { method: 'DELETE' })
   })
 
   it('cancelHealRun POSTs to the cancel endpoint', async () => {

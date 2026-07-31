@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null, returnFlight: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, draft: null, configTab: null, focusTest: null, returnFlight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -317,6 +317,36 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(window.location.search).not.toContain('flight=')
     persistView(view({ view: 'flights', flight: 'fl_abc123' }))
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'flights', feature: null })
+  })
+
+  // The stage qualifies an OPEN flight. Without it a drill-through's way back
+  // re-ran the detail's auto-pick and landed on a different stage than the one
+  // the user drilled from.
+  it('round-trips the selected stage alongside its flight', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'specs-coverage' }))
+    expect(window.location.search).toContain('stage=specs-coverage')
+    expect(readPersistedView()).toEqual(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'specs-coverage' }))
+  })
+
+  it('drops the stage without a flight to hang it on', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'portify' }))
+    // The flights LANDING list — no flight open, so no stage to remember.
+    persistView(view({ view: 'flights', flight: null, flightStage: 'portify' }))
+    expect(window.location.search).not.toContain('stage=')
+    // …and off the flights view entirely.
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'portify' }))
+    persistView(view({ view: 'coverage', feature: 'checkout', flight: 'fl_abc123', flightStage: 'portify' }))
+    expect(window.location.search).not.toContain('stage=')
+  })
+
+  it('ignores a stray stage param when no flight is open', () => {
+    window.history.replaceState(null, '', '/?view=flights&stage=portify')
+    expect(readPersistedView()).toEqual(view({ view: 'flights' }))
+  })
+
+  it('keeps the selected stage OUT of localStorage (URL-only tier)', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'specs-coverage' }))
+    expect(localStorage.getItem(KEY)).not.toContain('specs-coverage')
   })
 
   it('round-trips the draft dialog + its draft id qualifier (URL-only, not mirrored)', () => {

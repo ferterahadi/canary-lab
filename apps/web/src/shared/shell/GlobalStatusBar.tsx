@@ -152,9 +152,7 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
         />
         <span className="cl-wordmark">Canary Lab</span>
       </span>
-      <span className="cl-divider shrink-0">·</span>
       <ConnectionBadge state={connection} />
-      <span className="cl-divider shrink-0">·</span>
       <McpHealthBadge />
       {/* R83: the way back to the flight a stage drill-through left. Only the
           run detail actually needs it (it's a workspace column, so it has no
@@ -163,37 +161,28 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           `cl-button` the flight header's "All flights" uses — a nav action, not
           a status. */}
       {returnFlight && onReturnToFlight && (
-        <>
-          <span className="cl-divider shrink-0">·</span>
-          <button
+        <button
             type="button"
             data-testid="return-to-flight"
             onClick={() => onReturnToFlight(returnFlight)}
             className="cl-button shrink-0 max-w-[220px] truncate px-2.5 py-1 text-xs"
             title={`Back to the ${returnFlightLabel ?? 'flight'} flight you came from`}
           >
-            ← {returnFlightLabel ?? 'Flight'}
-          </button>
-        </>
+          ← {returnFlightLabel ?? 'Flight'}
+        </button>
       )}
       {services.length > 0 && (
-        <>
-          <span className="cl-divider shrink-0">·</span>
-          <div className="shrink-0">
-            <StatusChip
-              label={`${services.length} service${services.length > 1 ? 's' : ''}`}
-              state={servicesActive ? 'running' : 'idle'}
-            />
-          </div>
-        </>
+        <div className="shrink-0">
+          <StatusChip
+            label={`${services.length} service${services.length > 1 ? 's' : ''}`}
+            state={servicesActive ? 'running' : 'idle'}
+          />
+        </div>
       )}
       {dirtyFeatureCount > 0 && (
-        <>
-          <span className="cl-divider shrink-0">·</span>
-          <div className="shrink-0">
-            <DirtyTestsPill count={dirtyFeatureCount} onOpen={() => setDirtyReviewOpen(true)} />
-          </div>
-        </>
+        <div className="shrink-0">
+          <DirtyTestsPill count={dirtyFeatureCount} onOpen={() => setDirtyReviewOpen(true)} />
+        </div>
       )}
       <div className="ml-auto hidden min-w-0 items-center justify-end sm:flex">
         {/* Collapsible action cluster. Defaults to expanded (so the actions

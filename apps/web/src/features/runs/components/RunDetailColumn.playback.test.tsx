@@ -2,7 +2,7 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, RunSummary } from '@/shared/api/types'
 import { PlaywrightPlayback } from './RunDetailColumn'
 
@@ -27,18 +27,43 @@ describe('PlaywrightPlayback', () => {
     renderPlayback()
 
     expect(container.textContent).toContain('passed checkout')
-    expect(container.textContent).toContain('Completed without a Playwright error.')
-    expect(container.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
-    expect(container.querySelector('.cl-card')?.firstElementChild?.querySelector('a[download="trace.zip"]')?.textContent).toBe('Download trace')
+    // The title owns its own row now, so it is no longer squeezed by the
+    // verdict/id/trace line above it.
+    // Icon + tooltip, not the widest words on the row.
+    const trace = container.querySelector('.cl-card')?.firstElementChild?.querySelector('a[download="trace.zip"]')
+    expect(trace).toBeTruthy()
+    expect(trace?.getAttribute('aria-label')).toBe('Download trace')
+    expect(trace?.textContent).toBe('')
+    expect(trace?.querySelector('svg')).toBeTruthy()
     expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('truncate')
     expect(container.querySelector('a[download="trace.zip"]')?.className).toContain('max-w-full')
     expect(container.textContent).toContain('Screenshot')
     expect(container.textContent).toContain('Video')
     expect(container.querySelector('img')).toBeNull()
     expect(container.textContent).not.toContain('Open video')
-    expect(container.textContent).toContain('Browser actions (2)')
+    expect(container.textContent).toContain('Steps (2)')
     expect(container.textContent).not.toContain('Opened /en_SG')
     expect(container.textContent).not.toContain('Clicked Redeem')
+  })
+
+  it('keeps at most one evidence panel open, so the card cannot stack three', () => {
+    renderPlayback()
+
+    const chip = (label: string): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll('button')].find((b) => b.textContent?.includes(label))
+
+    act(() => { chip('Screenshot')?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.querySelector('img')).toBeTruthy()
+
+    act(() => { chip('Steps (')?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(container.textContent).toContain('Opened /en_SG')
+    expect(container.querySelector('img')).toBeNull()
+  })
+
+  it('says nothing at all on a clean pass instead of narrating the absence of an error', () => {
+    renderPlayback()
+
+    expect(container.textContent).not.toContain('Completed without a Playwright error.')
   })
 
   it('numbers a played-back test by its canonical source-order id from knownTests', () => {
@@ -98,11 +123,11 @@ describe('PlaywrightPlayback', () => {
     expect(button?.textContent).toBe('Hide video')
   })
 
-  it('expands browser actions only when requested', () => {
+  it('expands the step trace only when requested', () => {
     renderPlayback()
 
     const button = [...container.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.includes('Browser actions'))
+      .find((candidate) => candidate.textContent?.includes('Steps ('))
     expect(button).toBeTruthy()
 
     act(() => {
@@ -113,15 +138,15 @@ describe('PlaywrightPlayback', () => {
     expect(container.textContent).toContain('Clicked Redeem')
   })
 
-  it('keeps browser actions after the eighth step in the collapsed trace count and expanded list', () => {
+  it('keeps steps after the eighth in the collapsed trace count and expanded list', () => {
     renderPlayback({ events: manyActionEvents })
 
-    expect(container.textContent).toContain('Browser actions (10)')
+    expect(container.textContent).toContain('Steps (10)')
     expect(container.textContent).not.toContain('Clicked Continue')
     expect(container.textContent).not.toContain('Verified Order confirmed')
 
     const button = [...container.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent?.includes('Browser actions'))
+      .find((candidate) => candidate.textContent?.includes('Steps ('))
     expect(button).toBeTruthy()
 
     act(() => {
@@ -141,7 +166,7 @@ describe('PlaywrightPlayback', () => {
     })
 
     expect(container.textContent).toContain('No screenshot retained')
-    expect(container.textContent).toContain('Download trace')
+    expect(container.querySelector('a[download="trace.zip"]')).toBeTruthy()
     expect(container.textContent).not.toContain('Open video')
   })
 
@@ -159,31 +184,23 @@ describe('PlaywrightPlayback', () => {
     expect(skippedPill?.className).not.toContain('danger')
   })
 
-  it('uses short artifact guidance and opens Playwright settings', () => {
-    const onOpenArtifactSettings = vi.fn()
+  it('uses short artifact guidance and keeps the settings control off the card', () => {
     renderPlayback({
       artifacts: [
         artifact('screenshot', 'canary-lab-final-page-checkout.png'),
         artifact('trace', 'trace.zip'),
       ],
       policy: { screenshot: 'on', trace: 'on', video: 'off' },
-      onOpenArtifactSettings,
     })
 
     expect(container.textContent).toContain('Video')
     expect(container.textContent).toContain('Disabled')
     expect(container.textContent).not.toContain('Feature Configuration > Playwright > Browser & Artifacts > Video')
-    expect(container.textContent).toContain('Download trace')
+    expect(container.querySelector('a[download="trace.zip"]')).toBeTruthy()
 
-    const settingsButton = [...container.querySelectorAll('button')]
-      .find((candidate) => candidate.textContent === 'Settings')
-    expect(settingsButton).toBeTruthy()
-
-    act(() => {
-      settingsButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-
-    expect(onOpenArtifactSettings).toHaveBeenCalledTimes(1)
+    // The artifact policy is per-feature, so its one control lives on the
+    // Playwright pane rail — repeating it on every card read as per-test.
+    expect([...container.querySelectorAll('button')].filter((b) => b.textContent?.includes('Settings'))).toHaveLength(0)
   })
 
   it('marks the currently running rerun attempt with the chip instead of a card highlight', () => {
@@ -227,7 +244,7 @@ describe('PlaywrightPlayback', () => {
     const runningPill = [...container.querySelectorAll('span')]
       .find((candidate) => candidate.textContent === 'running')
     expect(runningPill).toBeTruthy()
-    const cards = [...container.querySelectorAll('.cl-card.p-3')]
+    const cards = [...container.querySelectorAll('.cl-card')]
     expect(cards).toHaveLength(1)
     expect(cards[0]?.getAttribute('style') ?? '').not.toMatch(/background|box-shadow/)
   })
@@ -241,13 +258,11 @@ function renderPlayback({
   ],
   policy = { screenshot: 'on', trace: 'on', video: 'on' },
   events: playbackEvents = events,
-  onOpenArtifactSettings,
   summary,
 }: {
   artifacts?: PlaywrightArtifactGroup['artifacts']
   policy?: PlaywrightArtifactPolicy
   events?: PlaywrightPlaybackEvent[]
-  onOpenArtifactSettings?: () => void
   summary?: RunSummary
 } = {}) {
   act(() => {
@@ -256,7 +271,6 @@ function renderPlayback({
         events={playbackEvents}
         artifactGroups={[{ testName: 'checkout', artifacts }]}
         artifactPolicy={policy}
-        onOpenArtifactSettings={onOpenArtifactSettings}
         summary={summary}
       />,
     )

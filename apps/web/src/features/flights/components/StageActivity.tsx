@@ -3,6 +3,7 @@ import type { SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/a
 import { AgentSessionView, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
 import { StatusDot } from '@/shared/ui/atoms'
 import { StepList, StepRow } from '@/shared/ui/StepList'
+import { STAGE_COLUMN } from './stage-meta'
 
 /** The stage's activity band (R66): ONE consolidated block, identical for every
  *  stage. The conductor's `[tagged]` system lines and the stage's own agent
@@ -165,7 +166,7 @@ export function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageP
       ? Array.from({ length: Math.max(0, progress.maxPasses - progress.pass) }, (_, i) => progress.pass + 1 + i)
       : []
   return (
-    <div data-testid="specs-pass-timeline">
+    <div data-testid="specs-pass-timeline" className={STAGE_COLUMN}>
       <h3 className="cl-rubric mb-2">
         Passes
       </h3>

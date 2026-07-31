@@ -1,6 +1,7 @@
 import type { ConfigTab, PersistedView, RouteDialog, WorkspaceView } from '../lib/workspace-view-state'
 import { type FeatureActivity } from '@/features/flights'
-import type { FlightIndexEntry } from '../api/client'
+import type { FlightIndexEntry, FlightStageKey } from '../api/client'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 
 // The workspace's navigation state — what view is open, which feature / run /
 // flight is selected, and which routed dialog is up. Lifted out of App so the
@@ -29,6 +30,12 @@ export interface NavState {
   feature: string | null
   run: string | null
   flight: string | null
+  /** Which stage of the open flight is selected (routed as ?stage=…), or null
+   *  for follow-mode — the flight detail then auto-picks the stage needing eyes.
+   *  Lifted out of FlightDetail because a stage drill-through REPLACES the
+   *  flight view: coming back remounted the detail, which re-ran the auto-pick
+   *  and dropped the user on a different stage than they left. */
+  flightStage: FlightStageKey | null
   /** The Feature-config dialog (routed as ?dialog=config), by feature. */
   configFor: string | null
   /** Which tab that dialog is on (routed as ?tab=…). Null = the entry point's
@@ -66,6 +73,12 @@ export interface NavState {
   returnFlight: string | null
 }
 
+/** A URL stage name, or null when it isn't one of ours — an unknown/stale value
+ *  reads as follow-mode rather than a blank pane. */
+export function parseFlightStage(v: string | null): FlightStageKey | null {
+  return v != null && (FLIGHT_STAGE_KEYS as readonly string[]).includes(v) ? (v as FlightStageKey) : null
+}
+
 /** Build the initial nav state from a hydrated PersistedView (URL/localStorage). */
 export function initialNavState(persisted: PersistedView): NavState {
   return {
@@ -73,6 +86,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     feature: persisted.feature,
     run: persisted.run,
     flight: persisted.flight,
+    flightStage: persisted.flight ? parseFlightStage(persisted.flightStage) : null,
     configFor: persisted.dialog === 'config' ? persisted.feature : null,
     configTab: persisted.dialog === 'config' ? persisted.configTab : null,
     verifyOpen: persisted.dialog === 'verification',
@@ -111,6 +125,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     run: state.run,
     dialog: routedDialog(state),
     flight: state.flight,
+    flightStage: state.flightStage,
     draft: state.draftFor,
     configTab: state.configTab,
     // Only the CURRENT run's focus reaches the URL — a stale pair from a

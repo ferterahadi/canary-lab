@@ -23,7 +23,8 @@ export function Chip({
   testId,
   title,
 }: {
-  /** CSS colour driving the border (chrome="border") and, unless overridden by
+  /** CSS colour driving the border (chrome="border" falls back to a neutral
+   *  `--border-default` frame without it) and, unless overridden by
    *  `labelColor`, the label text. */
   tone?: string
   /** Explicit label colour, overriding the `tone` default (and `chrome="none"`'s
@@ -52,7 +53,7 @@ export function Chip({
   const resolvedLabelColor = labelColor ?? tone ?? 'var(--text-primary)'
   const shapeClass =
     chrome === 'fill' ? 'rounded-full px-2 py-0.5'
-    : chrome === 'border' ? 'rounded px-1.5 py-0.5'
+    : chrome === 'border' ? 'rounded-md px-2 py-0.5'
     : ''
   const style: CSSProperties = {
     color: resolvedLabelColor,
@@ -62,8 +63,8 @@ export function Chip({
     ...(chrome === 'fill'
       ? { background: background ?? (tone ? `color-mix(in srgb, ${tone} 15%, transparent)` : undefined) }
       : {}),
-    ...(chrome === 'border' && tone
-      ? { border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }
+    ...(chrome === 'border'
+      ? { border: tone ? `1px solid color-mix(in srgb, ${tone} 35%, transparent)` : '1px solid var(--border-default)' }
       : {}),
     ...(width
       ? { width, justifyContent: 'center', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }

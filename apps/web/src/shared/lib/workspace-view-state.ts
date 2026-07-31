@@ -56,6 +56,15 @@ export interface PersistedView {
   /** Flight id qualifier for `view: 'flights'` — which flight detail to open
    *  (URL only; absent = the flights landing list). */
   flight: string | null
+  /** Stage qualifier for `flight` — which stage of that flight is selected
+   *  (URL only; dropped unless a flight is open). Absent = follow-mode, where
+   *  the detail auto-picks the stage that needs eyes.
+   *
+   *  Routed because the stage IS a place: a drill-through (coverage ledger, run
+   *  detail) replaces the whole flight view, so without this the way back
+   *  re-ran the auto-pick and landed on the last done stage — usually Evaluation
+   *  Report — instead of the stage the drill-through left from. */
+  flightStage: string | null
   /** Draft id qualifier for `dialog: 'draft'` — which authoring draft to reopen
    *  (URL only; dropped unless the draft dialog is the open one). */
   draft: string | null
@@ -106,7 +115,7 @@ function setOrDelete(params: URLSearchParams, key: string, value: string | null)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, draft: null, configTab: null, focusTest: null, returnFlight: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, draft: null, configTab: null, focusTest: null, returnFlight: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog are never mirrored there). */
@@ -120,6 +129,10 @@ export function readPersistedView(): PersistedView {
     const dialog = parseDialog(params.get('dialog'))
     // `flight` only qualifies the flights view — dropped elsewhere.
     const flight = v === 'flights' ? params.get('flight') || null : null
+    // `stage` only qualifies an open flight — dropped elsewhere. Left unvalidated
+    // here (this module knows nothing of stage keys); the nav layer parses it and
+    // an unknown name falls back to follow-mode.
+    const flightStage = flight ? params.get('stage') || null : null
     // `draft` only qualifies the draft dialog — dropped elsewhere.
     const draft = dialog === 'draft' ? params.get('draft') || null : null
     // `tab` only qualifies the config dialog — dropped elsewhere, and an
@@ -132,8 +145,8 @@ export function readPersistedView(): PersistedView {
     const returnFlight = v === 'flights' ? null : params.get('from') || null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight, draft, configTab, focusTest, returnFlight }
-    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, draft, configTab, focusTest, returnFlight }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, draft, configTab, focusTest, returnFlight }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, draft, configTab, focusTest, returnFlight }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -163,6 +176,9 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'task', null)
     // `flight` only qualifies the flights view — drop it otherwise.
     setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
+    // `stage` only qualifies an OPEN flight — drop it on the flights landing
+    // list and off the view entirely, so a stage pick can't outlive its flight.
+    setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)
     // `draft` only qualifies the draft dialog — drop it otherwise.
     setOrDelete(params, 'draft', state.dialog === 'draft' ? state.draft : null)
     // `tab` only qualifies the config dialog — drop it otherwise.

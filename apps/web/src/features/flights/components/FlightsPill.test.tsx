@@ -153,13 +153,13 @@ describe('FlightsPill', () => {
     const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'authoring', draftId: 'd1' }]])
     act(() => { root.render(<FlightsPill flights={[flight({ status: 'done' })]} activity={activity} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
-    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('authoring')
+    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Authoring')
   })
 
   it('with no activity the chip shows the LAST state (done / failed / aborted)', () => {
     act(() => { root.render(<FlightsPill flights={[flight({ status: 'failed' })]} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
-    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('failed')
+    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Failed')
   })
 
   it('a parked checkpoint outranks live activity (the human is the blocker)', () => {
@@ -180,7 +180,7 @@ describe('FlightsPill', () => {
     expect(row).toBeTruthy()
     // R39: no "no flight" text — the live progress chip carries the state.
     expect(row?.textContent).not.toContain('no flight')
-    expect(row?.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('portifying')
+    expect(row?.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Portifying')
     // R56: a synthesized mini rail shows WHERE in the pipeline the live job
     // sits — the mapped stage (portify) renders in the sky "running" tone,
     // every other stage stays pending (grey). No fake 'done' squares.
@@ -233,7 +233,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     expect(row).toBeTruthy()
     // Same anatomy as a flight row: greyed mini rail squares + the chip (never a dash).
     expect(row!.querySelector('[data-testid="stage-mini-rail"]')).toBeTruthy()
-    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('not flown')
+    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Not flown')
     act(() => { row!.click() })
     expect(onStartFlight).toHaveBeenCalledWith('menu-management')
   })
@@ -266,7 +266,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     expect(row).toBeTruthy()
     // Nothing is running and the pipeline isn't finished → "idle"; the rail
     // (not the chip) carries the progress story.
-    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('idle')
+    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Idle')
     const railCell = (key: string) => row!.querySelector(`[data-testid="stage-mini-cell-${key}"]`) as HTMLElement | null
     expect(railCell('scaffold')?.style.background).toContain('var(--success)') // Suite setup done (green)
     expect(railCell('run')?.style.background).toContain('var(--success)') // latest run green
@@ -294,7 +294,7 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     })
     const row = document.body.querySelector<HTMLButtonElement>('[data-testid="derived-open-go-smoke"]')
     expect(row).toBeTruthy()
-    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('done')
+    expect(row!.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Done')
     act(() => { row!.click() })
     // Routes to the flight view under the derived token — never the launcher.
     expect(onOpenFlight).toHaveBeenCalledWith('feature:go-smoke')

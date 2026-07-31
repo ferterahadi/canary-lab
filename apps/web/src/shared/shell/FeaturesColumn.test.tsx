@@ -299,7 +299,7 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     // Placeholder rows have no config/coverage cogs — there's nothing on disk yet.
     expect(row?.querySelector('[aria-label^="Configure"]')).toBeNull()
     // The queued flight's status chip rides along.
-    expect(row?.textContent).toContain('queued')
+    expect(row?.textContent).toContain('Queued')
     act(() => {
       row?.querySelector('button')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     })

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
@@ -50,12 +50,6 @@ async function buildWithoutLegacyJournal() {
   const app = Fastify()
   await app.register(journalRoutes, { logsDir })
   return app
-}
-
-async function buildWithWorkspaceEvents(publish = vi.fn()) {
-  const app = Fastify()
-  await app.register(journalRoutes, { logsDir, journalPath, workspaceEvents: { publish } })
-  return { app, publish }
 }
 
 describe('GET /api/journal', () => {
@@ -196,69 +190,5 @@ Fix: noop
     const res = await app.inject({ method: 'GET', url: '/api/journal' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual([])
-  })
-})
-
-describe('DELETE /api/journal/:iteration', () => {
-  it('removes the section atomically and 204s', async () => {
-    const app = await build()
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1?run=r-bbbb' })
-    expect(res.statusCode).toBe(204)
-    expect(fs.readFileSync(runJournalPath, 'utf-8')).not.toContain('## Iteration 1')
-    expect(fs.readFileSync(journalPath, 'utf-8')).toContain('## Iteration 1')
-  })
-
-  it('publishes journal-changed after a successful delete', async () => {
-    const { app, publish } = await buildWithWorkspaceEvents()
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1?run=r-bbbb' })
-
-    expect(res.statusCode).toBe(204)
-    expect(publish).toHaveBeenCalledWith({ type: 'journal-changed', runId: 'r-bbbb' })
-  })
-
-  it('removes a matching legacy root section when the selected run journal is missing', async () => {
-    const app = await build()
-    fs.rmSync(runJournalPath, { force: true })
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/2?run=r-bbbb' })
-    expect(res.statusCode).toBe(204)
-    expect(fs.existsSync(runJournalPath)).toBe(false)
-    expect(fs.readFileSync(journalPath, 'utf-8')).not.toContain('## Iteration 2')
-    expect(fs.readFileSync(journalPath, 'utf-8')).toContain('## Iteration 1')
-  })
-
-  it('400s on non-numeric iteration', async () => {
-    const app = await build()
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/abc' })
-    expect(res.statusCode).toBe(400)
-  })
-
-  it('deletes from the legacy root journal without a run and does not publish (no runId to report)', async () => {
-    const { app, publish } = await buildWithWorkspaceEvents()
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1' })
-    expect(res.statusCode).toBe(204)
-    expect(fs.readFileSync(journalPath, 'utf-8')).not.toContain('## Iteration 1')
-    expect(publish).not.toHaveBeenCalled()
-  })
-
-  it('400s when deleting without a run and no legacy journal is configured', async () => {
-    const app = await buildWithoutLegacyJournal()
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/1' })
-    expect(res.statusCode).toBe(400)
-    expect(res.json()).toEqual({ error: 'run is required' })
-  })
-
-  it('404s when iteration not present', async () => {
-    const app = await build()
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/99' })
-    expect(res.statusCode).toBe(404)
-  })
-
-  it('404s when the legacy fallback also lacks a matching iteration', async () => {
-    const app = await build()
-    fs.rmSync(runJournalPath, { force: true })
-    // Iteration 99 does not exist in the legacy journal — the fallback check
-    // runs but ultimately reports not found.
-    const res = await app.inject({ method: 'DELETE', url: '/api/journal/99?run=r-bbbb' })
-    expect(res.statusCode).toBe(404)
   })
 })

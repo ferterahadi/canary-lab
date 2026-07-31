@@ -34,7 +34,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     ptyFactory,
   } = ctx
 
-  await app.register(journalRoutes, { logsDir, journalPath, workspaceEvents })
+  await app.register(journalRoutes, { logsDir, journalPath })
   // `restartLocalHeal` deferred until after the runs route declares its
   // production restartHeal closure — defined below and threaded back in via
   // a setter-style hook on the route deps.

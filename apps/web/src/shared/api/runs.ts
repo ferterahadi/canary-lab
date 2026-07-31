@@ -244,22 +244,6 @@ export async function deleteRun(runId: string, opts?: ClientOptions): Promise<vo
   )
 }
 
-export async function deleteJournalEntry(
-  iteration: number,
-  query: { run?: string } = {},
-  opts?: ClientOptions,
-): Promise<void> {
-  const { baseUrl, fetchImpl } = defaultOpts(opts)
-  const params = new URLSearchParams()
-  if (query.run) params.set('run', query.run)
-  const qs = params.toString() ? `?${params.toString()}` : ''
-  await request<unknown>(
-    `${baseUrl}/api/journal/${encodeURIComponent(String(iteration))}${qs}`,
-    { method: 'DELETE' },
-    fetchImpl,
-  )
-}
-
 export function listJournal(
   query: { feature?: string; run?: string } = {},
   opts?: ClientOptions,

@@ -339,7 +339,7 @@ describe('FlightPage', () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', error: 'boot failed' }))
     mocks.resumeFlight.mockResolvedValue(manifest())
     await render('fl_1')
-    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('paused')
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('Paused')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.click() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-resume"]')?.click() })
     expect(mocks.resumeFlight).toHaveBeenCalledWith('fl_1')

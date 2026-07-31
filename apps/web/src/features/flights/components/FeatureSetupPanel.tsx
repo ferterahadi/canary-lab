@@ -47,7 +47,6 @@ export function FeatureSetupPanel({
   feature,
   editable,
   refreshKey,
-  onOpenAdvanced,
   awaiting,
 }: {
   feature: string
@@ -55,9 +54,6 @@ export function FeatureSetupPanel({
   editable: boolean
   /** Bumped on features-changed so an Advanced-setup save shows here live. */
   refreshKey?: number
-  /** Opens FeatureConfigEditor. When absent the hint stays plain text — the
-   *  sentence must never name a surface the user has no way to reach. */
-  onOpenAdvanced?: () => void
   /** R83: the suite isn't on disk yet — hold the digest's place with its
    *  skeleton so the stage pane keeps the shape it will settle into. */
   awaiting?: AwaitingState
@@ -254,24 +250,11 @@ export function FeatureSetupPanel({
         </div>
       )}
 
-      {editable && (
-        <div className="text-[10.5px] text-muted">
-          Synced live with{' '}
-          {onOpenAdvanced ? (
-            <button
-              type="button"
-              data-testid="setup-open-advanced"
-              onClick={onOpenAdvanced}
-              className="underline underline-offset-2 text-accent"
-            >
-              Advanced setup
-            </button>
-          ) : (
-            'Advanced setup'
-          )}
-          {' '}— the full config editor. Edits apply both ways.
-        </div>
-      )}
+      {/* No "synced live with Advanced setup" footnote: the stage header already
+          carries the ⚙ Advanced setup button, so the sentence spent a line
+          re-announcing a control sitting a few pixels above it — and the fact it
+          stated (edits write the same on-disk config both ways) is what the
+          panel DOES, not something the user has to be told before editing. */}
       {error && <div className="text-[11px] text-danger">{error}</div>}
     </section>
   )

@@ -4,7 +4,7 @@ import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { evaluationTaskId, FactsGrid, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageStateLine, type StageRailRow } from './stage-meta'
+import { evaluationTaskId, FactsGrid, STAGE_COLUMN, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageStateLine, type StageRailRow } from './stage-meta'
 import { useEvaluationExports } from '@/features/evaluation'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
@@ -284,11 +284,6 @@ export function StageDetail({
           awaiting={awaiting}
           editable={flight.status !== 'running'}
           refreshKey={configRefreshKey}
-          /* Same gate as the header action: only once the config exists on
-             disk, so the checkpoint fork stays a two-button decision. */
-          onOpenAdvanced={onOpenConfig && (stage.status === 'done' || stage.status === 'skipped')
-            ? () => onOpenConfig(flight.feature)
-            : undefined}
         />
       )}
 
@@ -363,7 +358,7 @@ export function StageDetail({
             // The loop's own shape before it starts: the same rubric heading and
             // row list the timeline becomes, so the card doesn't appear from
             // nowhere on the first pass.
-            <div data-testid="specs-pass-skeleton">
+            <div data-testid="specs-pass-skeleton" className={STAGE_COLUMN}>
               <h3 className="cl-rubric mb-2">Passes</h3>
               <SkeletonRows awaiting={awaiting} rows={2} />
             </div>

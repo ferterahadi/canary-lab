@@ -33,6 +33,11 @@ export interface WorkspaceNavigation {
   selectedFeature: string | null
   selectedRunId: string | null
   selectedFlightId: string | null
+  /** Which stage of the open flight is selected — null is follow-mode. Routed
+   *  (?stage=…) so a drill-through's way back, and a refresh, land on the stage
+   *  the user was actually on. */
+  flightStage: FlightStageKey | null
+  setFlightStage: (stage: FlightStageKey | null) => void
   configFor: string | null
   /** Which tab the config dialog is on (null = the default the mount picks). */
   configTab: ConfigTab | null
@@ -101,6 +106,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [selectedFeature, setSelectedFeature] = useState<string | null>(SEED.feature)
   const [selectedRunId, setSelectedRunId] = useState<string | null>(SEED.run)
   const [selectedFlightId, setSelectedFlightId] = useState<string | null>(SEED.flight)
+  const [flightStage, setFlightStage] = useState<FlightStageKey | null>(SEED.flightStage)
   const [configFor, setConfigForState] = useState<string | null>(SEED.configFor)
   const [configTab, setConfigTab] = useState<ConfigTab | null>(SEED.configTab)
   // One opener for the dialog + its tab so the tab can never outlive the open
@@ -131,14 +137,19 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED.run)
   const selectedFeatureRef = useRef<string | null>(null)
   const selectedRunIdRef = useRef<string | null>(PERSISTED.run)
+  // Read synchronously by openFlight, which must tell "same flight, coming back"
+  // apart from "a different flight" without taking a changing dep.
+  const selectedFlightIdRef = useRef<string | null>(SEED.flight)
   useEffect(() => { selectedFeatureRef.current = selectedFeature }, [selectedFeature])
   useEffect(() => { selectedRunIdRef.current = selectedRunId }, [selectedRunId])
+  useEffect(() => { selectedFlightIdRef.current = selectedFlightId }, [selectedFlightId])
 
   const state: NavState = {
     view,
     feature: selectedFeature,
     run: selectedRunId,
     flight: selectedFlightId,
+    flightStage,
     configFor,
     configTab,
     verifyOpen,
@@ -167,7 +178,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     // focusTest is listed for the same reason as draftFor/configTab: the run
     // stays the same while the focused test changes, so keying on selectedRunId
     // alone would leave the URL's `test` param stale.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, draftFor, configTab, focusTest, returnFlight])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, draftFor, configTab, focusTest, returnFlight])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -176,6 +187,11 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   }), [])
 
   const openFlight = useCallback((flightId: string | null) => {
+    // A stage pick belongs to the flight it was made on, so opening a DIFFERENT
+    // flight returns to follow-mode. Re-opening the SAME one keeps it — that
+    // call is a drill-through's way back, and dropping the stage there is the
+    // bug this exists to fix.
+    if (flightId !== selectedFlightIdRef.current) setFlightStage(null)
     setSelectedFlightId(flightId)
     setView('flights')
     // Arriving at a flight IS the return — drop the origin so the way back
@@ -212,6 +228,8 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     selectedFeature,
     selectedRunId,
     selectedFlightId,
+    flightStage,
+    setFlightStage,
     configFor,
     configTab,
     verifyOpen,

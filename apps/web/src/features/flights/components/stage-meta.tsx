@@ -1,4 +1,6 @@
+import type { ReactNode } from 'react'
 import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '@/shared/api/client'
+import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 
@@ -44,6 +46,16 @@ export function stageLabel(key: string): string {
  *  third of a pane with nothing in the rest of it. Prose (the state line, panel
  *  blurbs) deliberately stays at the narrower 76ch reading measure. */
 export const STAGE_COLUMN = 'w-full max-w-[92ch]'
+
+/** The column as a wrapper, so a panel with two render branches cannot cap one
+ *  and forget the other. Six evidence panels wrapped their SETTLED output in a
+ *  bare `<div className={STAGE_COLUMN}>` and returned their skeleton unwrapped,
+ *  so a working stage showed pane-wide placeholders that visibly narrowed the
+ *  moment real figures arrived — the exact opposite of the R83 promise that a
+ *  value lands in the slot its placeholder held. */
+export function StageColumn({ children }: { children: ReactNode }) {
+  return <div className={STAGE_COLUMN}>{children}</div>
+}
 
 /** One-line "what this stage does", in plain language — shown in the flight
  *  launcher's full-flight preview so the pipeline explains itself, instead of
@@ -106,7 +118,7 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
       icon={status === 'running'
         ? <StatusDot state="running" className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
-      label={STAGE_STATUS_LABEL[status]}
+      label={capitalizeFirst(STAGE_STATUS_LABEL[status])}
     />
   )
 }

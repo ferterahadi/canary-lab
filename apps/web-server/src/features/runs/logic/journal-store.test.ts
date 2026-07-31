@@ -8,7 +8,6 @@ import {
   newestFirst,
   parseStructured,
   readJournal,
-  deleteIterationSection,
 } from './journal-store'
 
 const SAMPLE = `# Diagnosis Journal
@@ -144,36 +143,5 @@ describe('readJournal', () => {
     fs.writeFileSync(file, SAMPLE)
     const { sections } = readJournal(file)
     expect(sections).toHaveLength(3)
-  })
-})
-
-describe('deleteIterationSection', () => {
-  it('removes the named iteration and rewrites the file', () => {
-    const file = path.join(tmpDir, 'j.md')
-    fs.writeFileSync(file, SAMPLE)
-    expect(deleteIterationSection(file, 2)).toBe(true)
-    const after = fs.readFileSync(file, 'utf-8')
-    expect(after).not.toContain('## Iteration 2')
-    expect(after).toContain('## Iteration 1')
-    expect(after).toContain('## Iteration 3')
-  })
-
-  it('returns false when iteration not present', () => {
-    const file = path.join(tmpDir, 'j.md')
-    fs.writeFileSync(file, SAMPLE)
-    expect(deleteIterationSection(file, 99)).toBe(false)
-  })
-
-  it('returns false when file missing', () => {
-    expect(deleteIterationSection(path.join(tmpDir, 'absent.md'), 1)).toBe(false)
-  })
-
-  it('handles a final-iteration deletion (skipping continues to EOF)', () => {
-    const file = path.join(tmpDir, 'j.md')
-    fs.writeFileSync(file, SAMPLE)
-    expect(deleteIterationSection(file, 3)).toBe(true)
-    const after = fs.readFileSync(file, 'utf-8')
-    expect(after).not.toContain('## Iteration 3')
-    expect(after).toContain('## Iteration 2')
   })
 })

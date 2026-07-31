@@ -236,6 +236,63 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-stage')).toBe('prd-summary')
   })
 
+  // A stage drill-through (coverage ledger, run detail) REPLACES the flight
+  // view, so the way back remounts this page. With the pick local to the detail
+  // that remount re-ran the auto-pick and dropped the user on the last done
+  // stage — Evaluation Report — instead of the one they drilled from. App owns
+  // the pick now and routes it (?stage=…); this pins both halves.
+  it('the stage pick is owned above the page, so a drill-through round trip comes back to it', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    const onSelectStage = vi.fn()
+    await render('fl_1', { stage: null, onSelectStage })
+    // Follow-mode: the auto-pick lands on the last done stage.
+    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.getAttribute('aria-current')).toBe('true')
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
+    })
+    expect(onSelectStage).toHaveBeenCalledWith('specs-coverage')
+
+    // The way back from the ledger: a fresh mount carrying the routed stage.
+    await render('fl_1', { stage: 'specs-coverage', onSelectStage })
+    expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.getAttribute('aria-current')).toBe('true')
+    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.getAttribute('aria-current')).toBeNull()
+    // The follow-mode reset must fire on a flight CHANGE, never on a mount —
+    // clearing here is exactly what threw the pick away.
+    expect(onSelectStage).not.toHaveBeenCalledWith(null)
+  })
+
+  it('a different flight drops the previous one’s stage pick', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    const onSelectStage = vi.fn()
+    // One mount, two flight ids — the prop change FlightDetail sees when the
+    // derived→real redirect or a picker jump switches flights under it.
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <FlightPage flightId="fl_1" onSelectFlight={vi.fn()} onClose={vi.fn()} stage="specs-coverage" onSelectStage={onSelectStage} />
+        </InvalidationProvider>,
+      )
+    })
+    expect(onSelectStage).not.toHaveBeenCalled()
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <FlightPage flightId="fl_2" onSelectFlight={vi.fn()} onClose={vi.fn()} stage="specs-coverage" onSelectStage={onSelectStage} />
+        </InvalidationProvider>,
+      )
+    })
+    expect(onSelectStage).toHaveBeenCalledWith(null)
+  })
+
   it('R32: Feature setup absorbs env-capture — merged facts, boot proof, config digest', async () => {
     mocks.getFeatureConfigDoc.mockResolvedValue({
       path: '/ws/features/checkout/feature.config.cjs',
@@ -429,7 +486,7 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
       .toBe('7 requirements distilled from 2 docs (repo-docs).')
     // R59: the folded prd-summary's status chips the Requirements header.
-    expect(container.querySelector('[data-testid="docs-summary-chip"]')?.textContent).toContain('done')
+    expect(container.querySelector('[data-testid="docs-summary-chip"]')?.textContent).toContain('Done')
     // Counts, not filenames. The band used to spend one tile per doc printing
     // the same names the Requirement docs card lists below — with their sizes —
     // so it was a worse copy of that card. It now reports the shape of the work.

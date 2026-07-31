@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { PlaywrightArtifactGroup, PlaywrightArtifactPolicy, PlaywrightPlaybackEvent, RunLifecycleEvent, RunSummary, VerificationDiagnostics } from '@/shared/api/types'
 import { isTerminalLifecyclePhase, type TimelineRow } from '../utils/run-timeline'
 import { PaneTerminal } from './PaneTerminal'
+import { RunPane } from './RunPane'
 import { PlaywrightPlayback, PlaywrightView, SegmentButton, formatSummaryTestName, isPlaywrightLifecyclePhase, shortLocation } from './RunPlaybackPanels'
 
 export function PlaywrightPanel({
@@ -31,27 +32,58 @@ export function PlaywrightPanel({
   focusTest?: string
 }) {
   return (
-    <div className="flex h-full flex-col">
-      <div className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs">
-        <SegmentButton active={view === 'terminal'} onClick={() => onViewChange('terminal')}>Terminal</SegmentButton>
-        <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
-      </div>
-      <div className="flex-1 min-h-0">
-        {view === 'terminal' && (
-          <PaneTerminal
-            runId={runId}
-            paneId="playwright"
-            emptyState={{ title: 'Playwright', hint: 'Test output appears here once Playwright starts running.' }}
-          />
-        )}
-        {view === 'playback' && (
-          <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
-            {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
-            <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
-          </div>
-        )}
-      </div>
-    </div>
+    <RunPane
+      scroll={false}
+      bar={
+        <>
+          <SegmentButton active={view === 'playback'} onClick={() => onViewChange('playback')}>Playback</SegmentButton>
+          <SegmentButton active={view === 'terminal'} onClick={() => onViewChange('terminal')}>Terminal</SegmentButton>
+          {/* One artifact-policy control for the whole pane. It used to repeat
+              on every playback card, which read as a per-test setting — it is
+              a per-feature one. */}
+          {onOpenArtifactSettings && (
+            <>
+              <div className="min-w-2 flex-1" />
+              {/* Reads as a control, not a caption: bordered, gear-marked, and
+                  it lifts on hover. As bare muted text it was indistinguishable
+                  from the labels around it. */}
+              <button
+                type="button"
+                onClick={onOpenArtifactSettings}
+                title="Choose which Playwright artifacts this feature keeps — screenshots, video, trace"
+                className="cl-button mb-1 inline-flex shrink-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium"
+              >
+                <GearIcon />
+                Artifact settings
+              </button>
+            </>
+          )}
+        </>
+      }
+    >
+      {view === 'terminal' && (
+        <PaneTerminal
+          runId={runId}
+          paneId="playwright"
+          emptyState={{ title: 'Playwright hasn’t written anything yet', hint: 'The raw test output streams here line by line once the run reaches the test phase.' }}
+        />
+      )}
+      {view === 'playback' && (
+        <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
+          {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
+          <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
+        </div>
+      )}
+    </RunPane>
+  )
+}
+
+function GearIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.35.4.64.73.83.3.17.63.26.97.26H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   )
 }
 

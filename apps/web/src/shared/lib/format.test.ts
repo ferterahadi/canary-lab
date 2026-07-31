@@ -8,7 +8,20 @@ import {
   timeAgo,
   evaluationArchiveFilename,
   safeFilename,
+  capitalizeFirst,
 } from './format'
+
+describe('capitalizeFirst', () => {
+  it('raises only the first character, leaving later words alone', () => {
+    expect(capitalizeFirst('done')).toBe('Done')
+    expect(capitalizeFirst('needs approval')).toBe('Needs approval')
+  })
+
+  it('leaves an empty string and an already-capitalized word untouched', () => {
+    expect(capitalizeFirst('')).toBe('')
+    expect(capitalizeFirst('MCP ready')).toBe('MCP ready')
+  })
+})
 
 describe('formatDuration', () => {
   it('formats sub-second durations as ms', () => {

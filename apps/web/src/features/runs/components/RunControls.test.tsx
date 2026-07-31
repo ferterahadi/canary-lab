@@ -269,7 +269,7 @@ describe('run overview', () => {
     })
 
     await act(async () => {
-      clickButton('📊 Review Evaluation')
+      clickButton('Review Evaluation')
     })
     await act(async () => {
       clickButton('Raw output')
@@ -285,7 +285,7 @@ describe('run overview', () => {
     expect(startExport).toHaveBeenCalledWith('run-1', 'raw')
 
     await act(async () => {
-      clickButton('📊 Review Evaluation')
+      clickButton('Review Evaluation')
     })
     await act(async () => {
       clickButton('Localized output')

@@ -50,6 +50,7 @@ export function App() {
     portifyTarget, setPortifyTarget,
     focusTest,
     openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
+    flightStage, setFlightStage,
     pendingRunSelectionRef, selectedFeatureRef, selectedRunIdRef,
   } = nav
 
@@ -407,6 +408,12 @@ export function App() {
                  return chip in the top bar instead. */
               onOpenRun={(feature, runId, focusTest) => navigateToRun(feature, runId, focusTest, selectedFlightId)}
               onOpenCoverage={(feature) => navigateToCoverage(feature, selectedFlightId)}
+              /* The stage pick is routed (?stage=…) rather than local to the
+                 detail: a drill-through replaces this whole view, so without an
+                 owner above it the way back remounted the detail and re-ran its
+                 auto-pick — landing on the last done stage, not the one left. */
+              stage={flightStage}
+              onSelectStage={setFlightStage}
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
             />
           : <ResizablePanels panels={panels} />}

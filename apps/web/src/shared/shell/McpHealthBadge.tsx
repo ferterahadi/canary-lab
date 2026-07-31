@@ -2,6 +2,7 @@ import { forwardRef, useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as api from '../api/client'
+import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, ChevronRightIcon, type StatusDotState } from '@/shared/ui/atoms'
 
 const MCP_PROFILES = [
@@ -117,7 +118,13 @@ export function McpHealthBadge() {
           updateMenuPosition()
           setOpen((current) => !current)
         }}
-        className="cl-button flex items-center gap-1.5 px-2 py-0.5 text-[11px]"
+        className="cl-button flex items-center gap-1.5 px-2 py-0.5"
+        // Inline, not a `text-[11px]` utility: `.cl-button` sits outside
+        // Tailwind's layer, so its own 12px font-size wins over the class and
+        // the badge silently renders a size larger than the ConnectionBadge
+        // beside it. These two values match that chip's line box exactly, so the
+        // pair is the same height either side of the divider.
+        style={{ fontSize: 11, lineHeight: 1.5 }}
         title={title}
         aria-label="MCP connection details"
         aria-expanded={open}
@@ -125,7 +132,7 @@ export function McpHealthBadge() {
         <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />
         <span>MCP</span>
         <span style={{ color: 'var(--text-muted)', fontSize: 11, fontWeight: 400 }}>
-          {p.label}
+          {capitalizeFirst(p.label)}
         </span>
       </button>
       {open && createPortal(

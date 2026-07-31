@@ -28,6 +28,8 @@ export function FlightPage({
   onOpenConfig,
   onOpenRun,
   onOpenCoverage,
+  stage,
+  onSelectStage,
 }: {
   /** A real flight id, or a `feature:<name>` derived token (R81). */
   flightId: string
@@ -46,6 +48,10 @@ export function FlightPage({
   /** Opens FeatureConfigEditor — the Feature Setup panel's Advanced setup, and
    *  the Parallel-readiness drill-through (which aims at the Ports tab). */
   onOpenConfig?: (feature: string, tab?: ConfigTab) => void
+  /** The routed stage selection (`?stage=…`) and its setter — App owns them so
+   *  the pick survives a drill-through and a refresh. Pass both or neither. */
+  stage?: FlightStageKey | null
+  onSelectStage?: (stage: FlightStageKey | null) => void
 } & FlightDrillThroughs) {
   // The flight detail refetches on `flights-changed`; the setup digest on
   // `features-changed` (repos); the Requirements docs list on `coverage-changed`.
@@ -54,7 +60,7 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col bg-canvas text-primary">
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} />
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
     </div>
   )
 }

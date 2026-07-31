@@ -1,6 +1,7 @@
 import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, FlightStatus, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
+import { capitalizeFirst } from '@/shared/lib/format'
 import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { stageLabel } from './stage-meta'
@@ -249,7 +250,7 @@ export function FlightStatusChip({
 }) {
   const chip = featureChipState(flight, activity, derived)
   return (
-    <Chip testId="flight-status-chip" chrome="fill" tone={chip.tone} fontSize={10} label={chip.label} width={72} title={chip.title} />
+    <Chip testId="flight-status-chip" chrome="fill" tone={chip.tone} fontSize={10} label={capitalizeFirst(chip.label)} width={72} title={chip.title} />
   )
 }
 

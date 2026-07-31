@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { AuditEntry, EvaluationExportMode, RepoBranchSnapshot, ServiceManifestEntry, RunManifest, RunStatus, RunSummary } from '@/shared/api/types'
+import { useEffect, useMemo, useState } from 'react'
+import type { AuditEntry, RepoBranchSnapshot, ServiceManifestEntry, RunManifest, RunStatus, RunSummary } from '@/shared/api/types'
 import { getRunAudit } from '@/shared/api/client'
 import { formatDuration, durationBetween } from '@/shared/lib/format'
 import { buildTimelineRows } from '../utils/run-timeline'
 import { branchForService, branchLabel } from '../utils/run-detail-playback'
-import { useEvaluationExports } from '@/features/evaluation'
-import { useMcpPromo } from '@/shared/shell/McpPromoContext'
 import { type RunViewModel } from '../utils/run-view-model'
 import { isRestartableRunStatus } from '@shared/run-state'
 import { RecoveryTimeline, alertClass, useTimelineNow } from './RunDiagnosticsPanels'
+import { EmptyGlyph } from '@/shared/ui/EmptyState'
+import { ReviewEvaluationMenu } from './ReviewEvaluationMenu'
+import { RunPane } from './RunPane'
 import { EmptyPane, SectionHeader } from './RunPlaybackPanels'
 import { ServiceCard } from './RunServicePanels'
 import { isAssertionExportable, isTerminalRunStatus } from './run-export-links'
@@ -48,113 +49,54 @@ export function RunOverviewTab({
   repoBranches,
 }: RunOverviewTabProps) {
   const duration = durationBetween(manifest.startedAt, manifest.endedAt)
-  const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const [exportError, setExportError] = useState(false)
-  const { startExport } = useEvaluationExports()
-  const { gatePromo } = useMcpPromo()
-  // R38: run detail keeps only the "Review Evaluation" trigger — the export's
-  // progress/output is watched via the Flights pill (it blinks on an active
-  // export) and the flight's Evaluation Report stage, not inline here.
-  const handleExportEvaluation = useCallback(async (mode: EvaluationExportMode) => {
-    setExportMenuOpen(false)
-    setExportError(false)
-    gatePromo('export-evaluation', () => {
-      void Promise.resolve(startExport(manifest.runId, mode))
-        .catch(() => setExportError(true))
-    })
-  }, [gatePromo, manifest.runId, startExport])
-
+  // The "Review Evaluation" trigger moved to the run's tab row
+  // (`ReviewEvaluationMenu`) — it is a run-level action, not an Overview one.
   return (
-    <div className="h-full overflow-y-auto scrollbar-none p-4 text-sm">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-          Run
-        </h2>
-        <div className="flex shrink-0 items-center gap-2">
-          {/* Retest is surfaced as an icon-only button on each run row in
-              RunsColumn — see RetestIconButton. The inline button used to
-              live here, but it duplicated that affordance and felt heavy
-              on the overview header. */}
-          {isAssertionExportable(manifest.status) && (
-            <div className="relative shrink-0">
-              <button
-                type="button"
-                onClick={() => setExportMenuOpen((open) => !open)}
-                aria-haspopup="menu"
-                aria-expanded={exportMenuOpen}
-                title="Produce the evaluation report and review it — per-test reasoning + verdicts, with video playback where the tests drive a browser. This is the run's deliverable."
-                className="inline-flex items-center gap-1.5 rounded px-2.5 py-1 text-[11px] font-medium disabled:cursor-wait disabled:opacity-80"
-                style={{ background: 'var(--bg-selected)', color: 'var(--accent)' }}
-              >
-                {exportError ? 'Export failed' : '📊 Review Evaluation'}
-                <span aria-hidden="true" style={{ color: 'var(--text-muted)' }}>▾</span>
-              </button>
-              {exportMenuOpen && (
-                <div
-                  role="menu"
-                  className="cl-popover absolute right-0 z-20 mt-1 w-44 overflow-hidden py-1 text-xs"
-                  style={{ color: 'var(--text-primary)' }}
-                >
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => void handleExportEvaluation('raw')}
-                  className="cl-hover-row block w-full px-3 py-2 text-left"
-                >
-                  <span className="block font-medium">Raw output</span>
-                  <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Fast report, no LLM rewrite</span>
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => void handleExportEvaluation('localized')}
-                  className="cl-hover-row block w-full px-3 py-2 text-left"
-                >
-                  <span className="block font-medium">Localized output</span>
-                  <span className="block text-[11px]" style={{ color: 'var(--text-muted)' }}>Uses the LLM rewrite</span>
-                </button>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-      <dl className="grid grid-cols-[110px_minmax(0,1fr)] gap-y-1.5 text-xs">
-        <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
+    <RunPane padded>
+      {/* The run's facts read down the left; the deliverable sits in the gutter
+          they leave empty on the right. It is the one thing you *do* from this
+          pane, so it belongs beside the facts rather than in the chrome above,
+          where a fixed-width button squeezed the tab row on a narrow panel. */}
+      <div className="flex items-start gap-4">
+        <dl className="grid min-w-0 flex-1 grid-cols-[92px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs">
+        <dt className="cl-rubric self-center">Feature</dt>
         <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
-        <dt style={{ color: 'var(--text-muted)' }}>Envset</dt>
+        <dt className="cl-rubric self-center">Envset</dt>
         <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={manifest.env ?? ''}>{manifest.env ?? '-'}</dd>
-        <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
+        <dt className="cl-rubric self-center">Duration</dt>
         <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt style={{ color: 'var(--text-muted)' }}>Started</dt>
+        <dt className="cl-rubric self-center">Started</dt>
         <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
         {manifest.endedAt && (
           <>
-            <dt style={{ color: 'var(--text-muted)' }}>Ended</dt>
+            <dt className="cl-rubric self-center">Ended</dt>
             <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.endedAt}>{manifest.endedAt}</dd>
           </>
         )}
         {manifest.healCycles > 0 && (
           <>
-            <dt style={{ color: 'var(--text-muted)' }}>Heal cycles</dt>
+            <dt className="cl-rubric self-center">Heal cycles</dt>
             <dd style={{ color: 'var(--text-secondary)' }}>{manifest.healCycles}</dd>
           </>
         )}
         {healAgentOverviewLabel(manifest) && (
           <>
-            <dt style={{ color: 'var(--text-muted)' }}>Heal agent</dt>
+            <dt className="cl-rubric self-center">Heal agent</dt>
             <dd className="truncate" style={{ color: 'var(--text-secondary)' }} title={healAgentOverviewLabel(manifest) ?? undefined}>
               {healAgentOverviewLabel(manifest)}
             </dd>
           </>
         )}
-        {manifest.lifecycle && (
-          <>
-            <dt style={{ color: 'var(--text-muted)' }}>State</dt>
-            <dd style={{ color: 'var(--text-secondary)' }}>{view.headline}</dd>
-          </>
+        {/* No `State` row: the run's verdict is already the status badge in the
+            run header a few pixels above, and "Run passed" under a green PASSED
+            chip is the same fact told twice. Anything the headline says that the
+            badge cannot (a held boot session, a recovery note) arrives as the
+            alert below or in the Run Logs timeline. */}
+        </dl>
+        {isAssertionExportable(manifest.status) && (
+          <div className="shrink-0"><ReviewEvaluationMenu runId={manifest.runId} /></div>
         )}
-      </dl>
+      </div>
       {/* For a boot-only session the held-state message is the point of the
           screen, so surface it on the overview (normal runs keep it in the
           Run Logs timeline only). */}
@@ -164,7 +106,12 @@ export function RunOverviewTab({
         </div>
       )}
       <div className="mt-4">
-        <SectionHeader>{manifest.executionType === 'boot' ? 'Services (open to exercise)' : 'Services'}</SectionHeader>
+        {/* No `Services` heading: a stack of named service cards is self-evident,
+            and the label was one more line of chrome between the run's facts and
+            the thing they describe. The boot-session hint still needs saying. */}
+        {manifest.executionType === 'boot' && services.length > 0 && (
+          <SectionHeader>Open to exercise</SectionHeader>
+        )}
         {services.length === 0 ? (
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No services configured.</div>
         ) : (
@@ -175,7 +122,7 @@ export function RunOverviewTab({
           </ul>
         )}
       </div>
-    </div>
+    </RunPane>
   )
 }
 
@@ -212,26 +159,21 @@ export function VerifyOverviewTab({
   const verification = manifest.verification
   const targets = verification?.targets ?? []
   return (
-    <div className="h-full overflow-y-auto scrollbar-none p-4 text-sm">
-      <div className="mb-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-          Verify
-        </h2>
-      </div>
-      <dl className="grid grid-cols-[130px_minmax(0,1fr)] gap-y-1.5 text-xs">
-        <dt style={{ color: 'var(--text-muted)' }}>Feature</dt>
+    <RunPane padded>
+      <dl className="grid grid-cols-[118px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-xs">
+        <dt className="cl-rubric self-center">Feature</dt>
         <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={manifest.feature}>{manifest.feature}</dd>
-        <dt style={{ color: 'var(--text-muted)' }}>Configuration</dt>
+        <dt className="cl-rubric self-center">Configuration</dt>
         <dd className="truncate" style={{ color: 'var(--text-primary)' }} title={verification?.configName ?? 'Unsaved'}>{verification?.configName ?? 'Unsaved'}</dd>
-        <dt style={{ color: 'var(--text-muted)' }}>Playwright envset</dt>
+        <dt className="cl-rubric self-center">Playwright envset</dt>
         <dd className="truncate" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }} title={verification?.playwrightEnvsetId ?? manifest.env ?? ''}>{verification?.playwrightEnvsetId ?? manifest.env ?? '-'}</dd>
-        <dt style={{ color: 'var(--text-muted)' }}>Duration</dt>
+        <dt className="cl-rubric self-center">Duration</dt>
         <dd style={{ color: 'var(--text-primary)' }}>{duration == null ? 'in progress' : formatDuration(duration)}</dd>
-        <dt style={{ color: 'var(--text-muted)' }}>Started</dt>
+        <dt className="cl-rubric self-center">Started</dt>
         <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.startedAt}>{manifest.startedAt}</dd>
         {manifest.endedAt && (
           <>
-            <dt style={{ color: 'var(--text-muted)' }}>Ended</dt>
+            <dt className="cl-rubric self-center">Ended</dt>
             <dd className="truncate" style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }} title={manifest.endedAt}>{manifest.endedAt}</dd>
           </>
         )}
@@ -250,9 +192,9 @@ export function VerifyOverviewTab({
           <div className="text-xs" style={{ color: 'var(--text-muted)' }}>No target services recorded.</div>
         ) : (
           <div className="overflow-hidden rounded-md border" style={{ borderColor: 'var(--border-default)' }}>
-            <div className="grid grid-cols-[180px_minmax(0,1fr)] border-b px-3 py-2 text-[11px] font-semibold uppercase tracking-wider" style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}>
-              <div>Service</div>
-              <div>URL</div>
+            <div className="grid grid-cols-[180px_minmax(0,1fr)] border-b px-3 py-2" style={{ borderColor: 'var(--border-default)' }}>
+              <div className="cl-rubric">Service</div>
+              <div className="cl-rubric">URL</div>
             </div>
             {targets.map((target) => (
               <div key={target.id} className="grid grid-cols-[180px_minmax(0,1fr)] gap-3 border-b px-3 py-2 text-xs last:border-b-0" style={{ borderColor: 'var(--border-default)' }}>
@@ -263,7 +205,7 @@ export function VerifyOverviewTab({
           </div>
         )}
       </div>
-    </div>
+    </RunPane>
   )
 }
 
@@ -285,24 +227,26 @@ export function RunLogsTab({
     [view.recoveryTimeline, audit, now],
   )
 
-  if (rows.length === 0) {
-    return (
-      <EmptyPane
-        title="No run logs yet."
-        body="Lifecycle events will appear here once Canary Lab records service startup, test execution, recovery, or final status."
-      />
-    )
-  }
-
   return (
-    <div className="h-full overflow-y-auto scrollbar-thin p-4 text-sm">
-      <div className="mb-2">
-        <h2 className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>
-          Run Logs
-        </h2>
-      </div>
-      <RecoveryTimeline rows={rows} alert={view.primaryAlert} summary={summary} />
-    </div>
+    <RunPane padded>
+      {rows.length === 0 ? (
+        <EmptyPane
+          icon={EmptyGlyph.timeline}
+          title="No lifecycle events yet"
+          body="Canary Lab records one row per moment that matters — a service coming up, the test process starting, a recovery attempt, the final verdict. The first one lands as soon as this run does something."
+        />
+      ) : (
+        <RecoveryTimeline
+          rows={rows}
+          /* A `success` alert only ever says "Run passed." — which the header
+             badge says above and the timeline's own last row says below. Only
+             alerts that carry something the rest of the pane cannot (a failure
+             reason, an abort, a held boot session) earn the banner. */
+          {...(view.primaryAlert && view.primaryAlert.tone !== 'success' ? { alert: view.primaryAlert } : {})}
+          {...(summary ? { summary } : {})}
+        />
+      )}
+    </RunPane>
   )
 }
 

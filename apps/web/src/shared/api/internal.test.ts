@@ -11,7 +11,6 @@ import {
   startRun,
   pauseHealRun,
   stopRun,
-  deleteJournalEntry,
 } from './runs'
 import {
   deleteDraft,
@@ -77,11 +76,6 @@ describe('api client core', () => {
   it('pauseHealRun throws ApiError on 404', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'run not active' }))
     await expect(pauseHealRun('ghost', { fetchImpl })).rejects.toMatchObject({ status: 404 })
-  })
-
-  it('deleteJournalEntry throws ApiError on 404', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'iteration not found' }))
-    await expect(deleteJournalEntry(99, { run: 'r1' }, { fetchImpl })).rejects.toBeInstanceOf(ApiError)
   })
 
   it('deleteDraft throws ApiError on 404', async () => {

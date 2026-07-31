@@ -12,6 +12,7 @@ import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import { PlaywrightPanel } from './RunDiagnosticsPanels'
 import { RunLogsTab, RunOverviewTab, VerifyOverviewTab } from './RunOverviewTabs'
+import { RunPane } from './RunPane'
 import type { PlaywrightView } from './RunPlaybackPanels'
 import { ServiceTabButton, TabButton } from './RunServicePanels'
 import { isTerminalRunStatus } from './run-export-links'
@@ -21,6 +22,31 @@ export { PlaywrightPlayback, shortLocation } from './RunPlaybackPanels'
 export { assertionFilename, assertionHref, downloadEvaluationReport, evaluationFilename, evaluationHref, hasAssertionVideos, isAssertionExportable, isEvaluationExportable, isTerminalRunStatus } from './run-export-links'
 
 type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal'
+
+/** Why this run has no repair transcript. A run that passed never spawned an
+ *  agent at all — saying so is the whole answer, where "no structured session
+ *  log found" reads as a missing file the user should go hunting for. */
+export function healEmptyCopy(status: RunStatus, healCycles: number): { title: string; body: string; tone: 'neutral' | 'good' } {
+  if (healCycles === 0 && status === 'passed') {
+    return {
+      title: 'No repairs needed',
+      body: 'Every test passed on the first attempt, so no repair agent was ever started. Nothing was changed in your code.',
+      tone: 'good',
+    }
+  }
+  if (healCycles === 0) {
+    return {
+      title: 'No repair agent ran',
+      body: 'This run ended before a repair cycle started — it was aborted, or heal is switched off for this feature.',
+      tone: 'neutral',
+    }
+  }
+  return {
+    title: 'Transcript unavailable',
+    body: `This run went through ${healCycles} repair ${healCycles === 1 ? 'cycle' : 'cycles'}, but the agent CLI left no readable session file. The Journal tab still holds what each cycle concluded.`,
+    tone: 'neutral',
+  }
+}
 
 export function RunDetailColumn({
   runId,
@@ -151,14 +177,14 @@ export function RunDetailColumn({
             {isVerify ? 'Verify' : isBootRun ? 'Boot' : 'Run'}
           </span>
           <span
-            className="shrink-0 truncate text-xs"
+            className="min-w-0 shrink truncate text-xs"
             title={m.feature}
             style={{ color: 'var(--text-muted)' }}
           >
             {m.feature}
           </span>
         </div>
-        <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-thin">
+        <nav className="mt-3 flex gap-5 overflow-x-auto scrollbar-none">
           <TabButton active={tab === 'overview'} onClick={() => setTab('overview')}>Overview</TabButton>
           {!isVerify && <TabButton active={tab === 'run-logs'} onClick={() => setTab('run-logs')}>Run Logs</TabButton>}
           {!isVerify && <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>}
@@ -184,28 +210,30 @@ export function RunDetailColumn({
           <RunLogsTab view={view} summary={detail.summary} runId={m.runId} runStatus={m.status} />
         )}
         {!isVerify && tab === 'services' && services.length > 0 && (
-          <div className="flex h-full flex-col">
-            <div className="cl-panel-header flex gap-1 overflow-x-auto px-3 py-1.5 text-xs scrollbar-thin">
-              {services.map((s, i) => (
-                <ServiceTabButton
-                  key={s.safeName}
-                  service={s}
-                  branch={branchForService(s, repoBranches)}
-                  active={i === serviceIdx}
-                  onClick={() => setServiceIdx(i)}
-                />
-              ))}
-            </div>
-            <div className="flex-1 min-h-0">
-              {activeService && (
-                <PaneTerminal
-                  runId={m.runId}
-                  paneId={`service:${activeService.safeName}`}
-                  emptyState={{ title: 'Services', hint: 'Output appears here once this service writes to its log.' }}
-                />
-              )}
-            </div>
-          </div>
+          <RunPane
+            scroll={false}
+            bar={
+              <>
+                {services.map((s, i) => (
+                  <ServiceTabButton
+                    key={s.safeName}
+                    service={s}
+                    branch={branchForService(s, repoBranches)}
+                    active={i === serviceIdx}
+                    onClick={() => setServiceIdx(i)}
+                  />
+                ))}
+              </>
+            }
+          >
+            {activeService && (
+              <PaneTerminal
+                runId={m.runId}
+                paneId={`service:${activeService.safeName}`}
+                emptyState={{ title: 'Nothing logged yet', hint: 'This service’s stdout and stderr stream here the moment it writes its first line.' }}
+              />
+            )}
+          </RunPane>
         )}
         {tab === 'playwright' && (
           <PlaywrightPanel
@@ -227,38 +255,43 @@ export function RunDetailColumn({
             TUI isn't replayed from scratch on tab return — replaying the raw
             stream re-executes every clear-screen redraw and collapses scrollback
             to the last frame. */}
-        {!isVerify && <div hidden={tab !== 'agent'} className="flex h-full min-h-0 flex-col overflow-hidden">
-          {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
-            <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
-          )}
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {m.healMode === 'external' ? (
-              // External heal: there is no local PTY to attach. The agent
-              // transcript lives in the user's Claude / Codex window once a
-              // client claims the run; before that, show the parked state.
-              <ExternalHealPanel
-                runId={m.runId}
-                runStatus={m.status}
-                session={m.externalHealSession}
-              />
-            ) : showAgentSession ? (
-              <AgentSessionView source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }} />
-            ) : (
-              <PaneTerminal
-                key={`${m.runId}:agent:${agentPaneRestartKey}`}
-                runId={m.runId}
-                paneId="agent"
-                onExit={handleAgentPaneExit}
-                emptyState={{ title: 'Heal agent', hint: 'Waiting for the heal agent to start — its session streams here once it begins.' }}
-              />
+        {!isVerify && <div hidden={tab !== 'agent'} className="h-full min-h-0">
+          <RunPane scroll={false}>
+            {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
+              <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
             )}
-          </div>
-          {/* Retest lives as a per-row icon in RunsColumn now (see
-              RetestIconButton). The footer-bar variant that used to sit here
-              duplicated that affordance. */}
+            <div className="flex h-full min-h-0 flex-col overflow-hidden">
+              {m.healMode === 'external' ? (
+                // External heal: there is no local PTY to attach. The agent
+                // transcript lives in the user's Claude / Codex window once a
+                // client claims the run; before that, show the parked state.
+                <ExternalHealPanel
+                  runId={m.runId}
+                  runStatus={m.status}
+                  session={m.externalHealSession}
+                />
+              ) : showAgentSession ? (
+                <AgentSessionView
+                  source={{ kind: 'run', runId: m.runId, live: !isTerminalRunStatus(m.status) }}
+                  empty={healEmptyCopy(m.status, m.healCycles)}
+                />
+              ) : (
+                <PaneTerminal
+                  key={`${m.runId}:agent:${agentPaneRestartKey}`}
+                  runId={m.runId}
+                  paneId="agent"
+                  onExit={handleAgentPaneExit}
+                  emptyState={{ title: 'No repair agent running', hint: 'If the tests fail, the agent starts here and its reasoning streams live.' }}
+                />
+              )}
+            </div>
+            {/* Retest lives as a per-row icon in RunsColumn now (see
+                RetestIconButton). The footer-bar variant that used to sit here
+                duplicated that affordance. */}
+          </RunPane>
         </div>}
         {!isVerify && tab === 'journal' && (
-          <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} />
+          <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} healCycles={m.healCycles} />
         )}
       </div>
     </div>

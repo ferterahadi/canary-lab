@@ -3,6 +3,7 @@ import * as api from '@/shared/api/client'
 import type { AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 import { EventRow, SystemRow, groupSystemLines, shortSession } from './AgentSessionRows'
+import { EmptyGlyph, EmptyState, type EmptyStateTone } from './EmptyState'
 import { TIMELINE_CSS } from './agent-session-css'
 
 export { Markdown, SubagentThreadRow, SystemRow, formatJson, groupSystemLines, summarizeInput, threadDuration } from './AgentSessionRows'
@@ -42,6 +43,10 @@ interface Props {
    *  stage has system rows but no agent session, the block still renders them
    *  instead of the empty "no session log" state. */
   systemRows?: { pre: string[]; post: string[] }
+  /** Host-supplied copy for the "there is no session" state. A host usually
+   *  knows WHY there's no transcript ("this run passed, so no repair agent was
+   *  ever spawned") — far more use than the generic fallback below. */
+  empty?: { title: string; body?: string; tone?: EmptyStateTone }
 }
 
 const NO_SYSTEM_ROWS = { pre: [] as string[], post: [] as string[] }
@@ -88,7 +93,7 @@ export function indexSubagents(threads: SubagentThread[] | undefined): Map<strin
   return map
 }
 
-export function AgentSessionView({ source, systemRows }: Props) {
+export function AgentSessionView({ source, systemRows, empty }: Props) {
   const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -240,23 +245,34 @@ export function AgentSessionView({ source, systemRows }: Props) {
 
   if (error && !hasSystem) {
     return (
-      <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
-        Failed to load session log: {error}
-      </div>
+      <EmptyState
+        icon={EmptyGlyph.agent}
+        title="Couldn't load the session log"
+        body="The agent's transcript is read from the CLI's own session file. This one couldn't be opened."
+        footnote={<code style={{ fontFamily: 'var(--font-mono)' }}>{error}</code>}
+      />
     )
   }
   if (loading && !hasSystem) {
-    return (
-      <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-        Loading session…
-      </div>
-    )
+    return <EmptyState icon={EmptyGlyph.waiting} title="Loading session…" />
   }
   if ((!state || (!state.sessionId && state.events.length === 0)) && !hasSystem) {
+    if (source?.live) {
+      return (
+        <EmptyState
+          icon={EmptyGlyph.waiting}
+          title="Waiting for the agent's first output"
+          body="The session is starting. Thinking, tool calls, and results stream in here the moment the agent writes its first line — nothing is buffered until the end."
+        />
+      )
+    }
     return (
-      <div className="px-4 py-3 text-sm" style={{ color: 'var(--text-muted)' }}>
-        {source?.live ? 'Waiting for agent output…' : 'No structured session log found.'}
-      </div>
+      <EmptyState
+        icon={empty?.tone === 'good' ? EmptyGlyph.check : EmptyGlyph.agent}
+        {...(empty?.tone ? { tone: empty.tone } : {})}
+        title={empty?.title ?? 'No agent session was recorded'}
+        body={empty?.body ?? 'Nothing ran here, or it ran outside Canary Lab — there is no transcript to replay.'}
+      />
     )
   }
 

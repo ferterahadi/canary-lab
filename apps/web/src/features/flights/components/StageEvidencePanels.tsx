@@ -7,7 +7,7 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { StatusDot } from '@/shared/ui/atoms'
 import { evaluationArchiveFilename, formatBytes, formatDuration, timeAgo } from '@/shared/lib/format'
-import { STAGE_COLUMN } from './stage-meta'
+import { StageColumn } from './stage-meta'
 import { plural } from './StageFacts'
 import { CONFIG_GROUP, groupOverlayFiles, overlayDiffStat, serviceReadyMs, splitFilePath } from './stage-metrics'
 
@@ -52,14 +52,14 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
         .filter((s): s is { name: string; status?: string } => typeof s.name === 'string')
         .map((s) => ({ name: s.name, safeName: s.name, status: s.status }))
   if (services.length === 0) {
-    return awaiting ? <SkeletonPanel kicker="Boot check" awaiting={awaiting} testId="boot-check-skeleton" variant="rows" rows={2} /> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker="Boot check" awaiting={awaiting} testId="boot-check-skeleton" variant="rows" rows={2} /></StageColumn> : null
   }
   // Worst-first: a service that never passed its probe is the reason the stage
   // is worth looking at, so it sorts above the healthy ones.
   const rows = [...services].sort((a, b) =>
     Number(b.status === 'timeout') - Number(a.status === 'timeout'))
   return (
-    <div className={STAGE_COLUMN}>
+    <StageColumn>
       <PanelCard kicker="Boot check" testId="boot-check-panel">
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
           {rows.map((service) => {
@@ -95,7 +95,7 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
           })}
         </ul>
       </PanelCard>
-    </div>
+    </StageColumn>
   )
 }
 
@@ -105,10 +105,10 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
 export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifest | null; awaiting?: AwaitingState }) {
   const instances = portify?.verification?.instances ?? []
   if (instances.length === 0) {
-    return awaiting ? <SkeletonPanel kicker="Side-by-side proof" awaiting={awaiting} testId="double-boot-skeleton" variant="rows" rows={2} /> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker="Side-by-side proof" awaiting={awaiting} testId="double-boot-skeleton" variant="rows" rows={2} /></StageColumn> : null
   }
   return (
-    <div className={STAGE_COLUMN}>
+    <StageColumn>
       <PanelCard kicker="Side-by-side proof" testId="double-boot-panel">
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
           {instances.map((instance: PortifyBootInstance, i: number) => (
@@ -128,7 +128,7 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
           <p className="mt-2 mb-0 text-[11px] text-danger">{portify.verification.failureDetail}</p>
         )}
       </PanelCard>
-    </div>
+    </StageColumn>
   )
 }
 
@@ -146,7 +146,7 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
 export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest | null; awaiting?: AwaitingState }) {
   const stat = overlayDiffStat(portify?.diff)
   if (!stat) {
-    return awaiting ? <SkeletonPanel kicker="Port changes" awaiting={awaiting} testId="overlay-skeleton" variant="rows" rows={3} /> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker="Port changes" awaiting={awaiting} testId="overlay-skeleton" variant="rows" rows={3} /></StageColumn> : null
   }
   const groups = groupOverlayFiles(stat.byFile)
   // Only count repos when every group IS one — a feature-config block is not a
@@ -156,7 +156,7 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
     ? `Port changes · ${plural(stat.files, 'file')} across ${plural(repoGroups.length, 'repo')}`
     : `Port changes · ${plural(stat.files, 'file')}`
   return (
-    <div className={STAGE_COLUMN}>
+    <StageColumn>
       <PanelCard kicker={kicker} testId="overlay-panel">
         {groups.map((group) => (
           <div key={group.group ?? '·'} className="mb-1.5 last:mb-0">
@@ -201,7 +201,7 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
           nothing lands in the product repos.
         </p>
       </PanelCard>
-    </div>
+    </StageColumn>
   )
 }
 
@@ -224,12 +224,12 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
  *  its empty classes reads as a shorter distribution, not an emptier one. */
 export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: CoverageLedger | null; awaiting?: AwaitingState }) {
   if (!ledger || ledger.totals.total === 0) {
-    return awaiting ? <SkeletonPanel kicker="Composition" awaiting={awaiting} testId="coverage-composition-skeleton" rows={3} /> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker="Composition" awaiting={awaiting} testId="coverage-composition-skeleton" rows={3} /></StageColumn> : null
   }
   const tests = ledger.tests
   const strengthOf = (t: TestCoverage): TestStrength => t.strength ?? 'shallow'
   return (
-    <div className={STAGE_COLUMN}>
+    <StageColumn>
       <PanelCard kicker="Composition" testId="coverage-composition">
         <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
           {tests.length > 0 && (
@@ -265,7 +265,7 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
           </p>
         )}
       </PanelCard>
-    </div>
+    </StageColumn>
   )
 }
 
@@ -315,11 +315,11 @@ function CompositionGroup({ heading, rows, testId }: { heading: string; rows: Co
  *  says what it IS and hands it over. */
 export function EvaluationDeliverablePanel({ task, awaiting }: { task: EvaluationExportTask | null; awaiting?: AwaitingState }) {
   if (!task) {
-    return awaiting ? <SkeletonPanel kicker="This flight's report" awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker="This flight's report" awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /></StageColumn> : null
   }
   const filename = evaluationArchiveFilename(task.feature, task.runId)
   return (
-    <div className={STAGE_COLUMN}>
+    <StageColumn>
       <PanelCard kicker="This flight's report" testId="evaluation-deliverable">
         <dl className="m-0 grid gap-x-3 gap-y-1 text-[12px]" style={{ gridTemplateColumns: 'auto 1fr' }}>
           <dt className="cl-rubric self-center">From run</dt>
@@ -350,7 +350,7 @@ export function EvaluationDeliverablePanel({ task, awaiting }: { task: Evaluatio
           <ArchiveDownloadButton task={task} label="Download" />
         </div>
       </PanelCard>
-    </div>
+    </StageColumn>
   )
 }
 
@@ -374,10 +374,10 @@ export function AllReportsPanel({
   if (mine.length === 0) {
     // Safe to promise: this stage's own export becomes the first row, so the
     // card is never a placeholder for something that will not arrive.
-    return awaiting ? <SkeletonPanel kicker="All reports for this suite" awaiting={awaiting} testId="all-reports-skeleton" variant="rows" rows={2} /> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker="All reports for this suite" awaiting={awaiting} testId="all-reports-skeleton" variant="rows" rows={2} /></StageColumn> : null
   }
   return (
-    <div className={STAGE_COLUMN}>
+    <StageColumn>
       <PanelCard kicker="All reports for this suite" aside={<span className="cl-count-chip">{mine.length}</span>} testId="all-reports-panel">
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
           {mine.map((task) => (
@@ -406,7 +406,7 @@ export function AllReportsPanel({
           ))}
         </ul>
       </PanelCard>
-    </div>
+    </StageColumn>
   )
 }
 

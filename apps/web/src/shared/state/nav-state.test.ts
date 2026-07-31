@@ -14,6 +14,7 @@ const base: NavState = {
   feature: null,
   run: null,
   flight: null,
+  flightStage: null,
   configFor: null,
   configTab: null,
   verifyOpen: false,
@@ -33,6 +34,7 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   run: null,
   dialog: null,
   flight: null,
+  flightStage: null,
   draft: null,
   configTab: null,
   focusTest: null,
@@ -51,6 +53,16 @@ describe('initialNavState', () => {
     const s = initialNavState(persisted({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_1' }))
     expect(s.returnFlight).toBe('fl_1')
     expect(navToPersistedView(s).returnFlight).toBe('fl_1')
+  })
+
+  it('hydrates the selected stage, and only alongside a flight', () => {
+    const s = initialNavState(persisted({ view: 'flights', flight: 'fl_1', flightStage: 'specs-coverage' }))
+    expect(s.flightStage).toBe('specs-coverage')
+    expect(navToPersistedView(s).flightStage).toBe('specs-coverage')
+    // No flight to hang it on → follow-mode.
+    expect(initialNavState(persisted({ view: 'flights', flightStage: 'specs-coverage' })).flightStage).toBeNull()
+    // A stale or hand-typed stage name reads as follow-mode, never a blank pane.
+    expect(initialNavState(persisted({ view: 'flights', flight: 'fl_1', flightStage: 'not-a-stage' })).flightStage).toBeNull()
   })
 
   it('opens the config dialog on the persisted feature + tab', () => {
@@ -147,12 +159,12 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', draft: null, configTab: 'ports', focusTest: null, returnFlight: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, draft: null, configTab: 'ports', focusTest: null, returnFlight: null })
   })
 
   it('projects the open draft id + dialog=draft', () => {
     const s: NavState = { ...base, draftFor: 'dr_9' }
-    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, draft: 'dr_9', configTab: null, focusTest: null, returnFlight: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, flightStage: null, draft: 'dr_9', configTab: null, focusTest: null, returnFlight: null })
   })
 })
 

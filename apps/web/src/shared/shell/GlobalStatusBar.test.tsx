@@ -257,7 +257,7 @@ describe('GlobalStatusBar', () => {
 
     expect(container.textContent).not.toContain('Playwright')
     expect(container.textContent).toContain('MCP')
-    expect(container.textContent).toContain('ready')
+    expect(container.textContent).toContain('Ready')
     expect(container.textContent).not.toContain('12 tools')
     expect(container.textContent).not.toContain('Check health')
     expect(container.textContent).not.toContain('Test MCP')

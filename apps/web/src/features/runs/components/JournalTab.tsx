@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { JournalEntry } from '@/shared/api/types'
+import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
+import { RunPane } from './RunPane'
 import {
   classifyOutcome,
   newestFirst,
@@ -13,13 +15,15 @@ interface Props {
   feature: string
   runId: string
   refreshKey?: number
+  /** Repair cycles this run went through. Zero means the journal is empty
+   *  because nothing needed repairing — a different fact from "the agent ran
+   *  and wrote nothing", and the empty state says which. */
+  healCycles?: number
 }
 
-export function JournalTab({ feature, runId, refreshKey = 0 }: Props) {
+export function JournalTab({ feature, runId, refreshKey = 0, healCycles = 0 }: Props) {
   const [entries, setEntries] = useState<JournalEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<JournalEntry | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const refresh = useCallback((isCancelled: () => boolean = () => false) => {
     api.listJournal({ feature, run: runId })
@@ -46,109 +50,109 @@ export function JournalTab({ feature, runId, refreshKey = 0 }: Props) {
     return () => window.clearInterval(id)
   }, [entries, refresh])
 
-  const handleConfirmDelete = useCallback(async () => {
-    if (!pendingDelete || pendingDelete.iteration == null) return
-    try {
-      await api.deleteJournalEntry(pendingDelete.iteration, { run: runId })
-      setPendingDelete(null)
-      setDeleteError(null)
-      refresh()
-    } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : String(err))
-    }
-  }, [pendingDelete, refresh, runId])
-
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
-        {error && (
-          <div className="mb-3 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
-            Failed to load journal: {error}
-          </div>
-        )}
-        {!entries ? (
-          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>Loading journal...</div>
-        ) : entries.length === 0 ? (
-          <div className="text-sm" style={{ color: 'var(--text-muted)' }}>
-            No journal entries for this run.
-          </div>
-        ) : (
-          <ul className="space-y-3">
-            {entries.map((entry, i) => (
-              <EntryCard
-                key={`${entry.iteration ?? 'x'}:${i}`}
-                entry={entry}
-                onDelete={() => { setPendingDelete(entry); setDeleteError(null) }}
-              />
-            ))}
-          </ul>
-        )}
-      </div>
-      {pendingDelete && (
-        <ConfirmDeleteDialog
-          entry={pendingDelete}
-          error={deleteError}
-          onCancel={() => { setPendingDelete(null); setDeleteError(null) }}
-          onConfirm={handleConfirmDelete}
-        />
+    <RunPane padded>
+      {error && (
+        <div className="mb-3 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
+          Failed to load journal: {error}
+        </div>
       )}
-    </div>
+      {!entries ? (
+        <EmptyState icon={EmptyGlyph.journal} title="Loading journal…" />
+      ) : entries.length === 0 ? (
+        <EmptyState
+          icon={healCycles > 0 ? EmptyGlyph.journal : EmptyGlyph.check}
+          tone={healCycles > 0 ? 'neutral' : 'good'}
+          title={healCycles > 0 ? 'No journal entries were written' : 'Nothing to repair'}
+          body={
+            healCycles > 0
+              ? 'The repair agent ran on this run but left no journal entry. Its reasoning is still in the Heal agent tab.'
+              : 'The journal records one entry per repair attempt — what the agent believed was broken, what it changed, and whether that fixed it. This run never needed one.'
+          }
+        />
+      ) : (
+        <ul className="space-y-3">
+          {entries.map((entry, i) => (
+            <EntryCard key={`${entry.iteration ?? 'x'}:${i}`} entry={entry} />
+          ))}
+        </ul>
+      )}
+    </RunPane>
   )
 }
 
-function EntryCard({ entry, onDelete }: { entry: JournalEntry; onDelete: () => void }) {
+/**
+ * One repair cycle.
+ *
+ * A cycle is a short story — what the agent thought was wrong, what it changed,
+ * and whether that worked — so the hypothesis is the card's headline instead of
+ * the first row of a four-row key/value table with the code's own field names
+ * down the left. The remaining fields sit under it as a compact ledger in the
+ * same mono-caps rubric the service cards use, and the raw markdown is a
+ * disclosure that no longer pushes the card sideways when a field runs long.
+ */
+function EntryCard({ entry }: { entry: JournalEntry }) {
   const [expanded, setExpanded] = useState(false)
   const fields = presentJournalFields(parseBodyFields(entry.body))
+  const headline = fields.find((f) => f.key === 'hypothesis')
+  const rest = fields.filter((f) => f !== headline)
   const outcome = classifyOutcome(entry.outcome)
   return (
-    <li className="rounded-lg p-3" style={{ border: '1px solid var(--border-default)', background: 'var(--bg-elevated)' }}>
-      <header className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="text-xs" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-            Iteration {entry.iteration ?? '?'}
+    <li className="cl-card p-3.5">
+      <header className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-[11px] font-medium" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+          Iteration {entry.iteration ?? '?'}
+        </span>
+        {entry.timestamp && (
+          <span
+            className="min-w-0 truncate text-[10px]"
+            style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+            title={entry.timestamp}
+          >
+            {formatLocalDateTime(entry.timestamp)}
           </span>
-          {entry.timestamp && (
-            <span
-              className="text-[10px]"
-              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
-              title={entry.timestamp}
-            >
-              {formatLocalDateTime(entry.timestamp)}
-            </span>
-          )}
-          <span className={`rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${outcomeBadgeClass(outcome)}`}>
-            {outcome}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={entry.iteration == null}
-          className="rounded-md border border-danger/30 px-2 py-0.5 text-[11px] text-danger transition-colors duration-150 hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Delete
-        </button>
+        )}
+        <div className="min-w-2 flex-1" />
+        <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${outcomeBadgeClass(outcome)}`}>
+          {outcome}
+        </span>
       </header>
-      {fields.length > 0 && (
-        <dl className="mt-2 grid grid-cols-[120px_1fr] gap-x-2 gap-y-0.5 text-xs">
-          {fields.map((f, idx) => (
+      {headline && (
+        <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+          {headline.value}
+        </p>
+      )}
+      {rest.length > 0 && (
+        <dl className="mt-2.5 grid grid-cols-[118px_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+          {rest.map((f, idx) => (
             <FieldRow key={`${f.key}-${idx}`} field={f} />
           ))}
         </dl>
       )}
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="mt-2 text-[11px] transition-colors duration-150"
-        style={{ color: 'var(--text-muted)' }}
-      >
-        {expanded ? 'Hide raw markdown' : 'Show raw markdown'}
-      </button>
-      {expanded && (
-        <pre className="mt-1.5 overflow-x-auto rounded-md p-2 text-[11px]" style={{ background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-          {entry.body}
-        </pre>
-      )}
+      <div className="mt-2.5 border-t pt-2" style={{ borderColor: 'var(--border-default)' }}>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors duration-150 -ml-1.5"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+          Raw entry
+          <span className="font-normal" style={{ opacity: 0.7 }}>as the agent wrote it</span>
+        </button>
+        {expanded && (
+          // `whitespace-pre-wrap` + `break-all`, not a horizontal scroller: a
+          // journal body carries hyphen-joined test names hundreds of characters
+          // long, and a `<pre>` that scrolls sideways hides them off-card.
+          <pre
+            className="mt-1.5 max-h-72 overflow-y-auto whitespace-pre-wrap break-all rounded-md p-2.5 text-[11px] leading-relaxed scrollbar-thin"
+            style={{ background: 'var(--bg-base)', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}
+          >
+            {entry.body}
+          </pre>
+        )}
+      </div>
     </li>
   )
 }
@@ -165,53 +169,9 @@ function formatLocalDateTime(iso: string): string {
 function FieldRow({ field }: { field: { key: string; value: string } }) {
   return (
     <>
-      <dt style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{field.key}</dt>
-      <dd className="break-all" style={{ color: 'var(--text-primary)' }}>{field.value}</dd>
+      {/* Same rubric as every other field label in the run panes. */}
+      <dt className="cl-rubric pt-0.5">{field.key}</dt>
+      <dd className="min-w-0 break-words" style={{ color: 'var(--text-secondary)' }}>{field.value}</dd>
     </>
-  )
-}
-
-function ConfirmDeleteDialog({
-  entry,
-  error,
-  onCancel,
-  onConfirm,
-}: {
-  entry: JournalEntry
-  error: string | null
-  onCancel: () => void
-  onConfirm: () => void
-}) {
-  return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.6)' }}>
-      <div className="w-[420px] rounded-lg p-4 shadow-2xl" style={{ background: 'var(--bg-overlay)', border: '1px solid var(--border-default)' }}>
-        <h2 className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>Delete iteration {entry.iteration}?</h2>
-        <p className="mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-          This permanently removes only this iteration section from the diagnosis journal. The rest of the journal file stays intact.
-        </p>
-        {error && (
-          <div className="mt-2 rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger">
-            {error}
-          </div>
-        )}
-        <div className="mt-4 flex justify-end gap-2 text-xs">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="rounded-md px-3 py-1.5 transition-colors duration-150"
-            style={{ border: '1px solid var(--border-default)', color: 'var(--text-secondary)' }}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className="rounded-md border border-danger/40 bg-danger/10 px-3 py-1.5 text-danger transition-colors duration-150 hover:bg-danger/20"
-          >
-            Delete
-          </button>
-        </div>
-      </div>
-    </div>
   )
 }

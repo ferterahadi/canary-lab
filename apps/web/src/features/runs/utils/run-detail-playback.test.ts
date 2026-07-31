@@ -392,3 +392,94 @@ describe('playbackTests', () => {
     ])
   })
 })
+
+// Every case below was taken from the real playback corpus (32,575 step events
+// across 79 recorded runs), not invented — the previous compactor rendered a
+// column of identical `Verified toBe` rows for the API suites because it read
+// Playwright's matcher name as the assertion's target.
+describe('playback step compaction against real Playwright step titles', () => {
+  const step = (title: string, category: string): PlaywrightPlaybackEvent => ({
+    type: 'step-begin',
+    time: '2026-01-01T00:00:01.000Z',
+    test: { name: 'api', title: 'API' },
+    step: { title, category },
+  })
+  const around = (...steps: PlaywrightPlaybackEvent[]): PlaywrightPlaybackEvent[] => [
+    { type: 'test-begin', time: '2026-01-01T00:00:00.000Z', test: { name: 'api', title: 'API', location: 'api.spec.ts:1' } },
+    ...steps,
+  ]
+  const titles = (events: PlaywrightPlaybackEvent[]): string[] =>
+    playbackTests(events)[0].steps.map((s) => s.title)
+
+  it('tallies matcher-only assertions instead of repeating them verbatim', () => {
+    expect(titles(around(
+      step('Expect "toBe"', 'expect'),
+      step('Expect "toBeTruthy"', 'expect'),
+      step('Expect "toBe"', 'expect'),
+    ))).toEqual(['Verified 3 assertions'])
+  })
+
+  it('treats space-separated negation as the same matcher-only shape', () => {
+    expect(titles(around(step('Expect "not toBeNaN"', 'expect')))).toEqual(['Verified 1 assertion'])
+  })
+
+  it('keeps the assertion when the matcher names a target, in reading order', () => {
+    expect(titles(around(
+      step('Expect "toBe"', 'expect'),
+      step(`Expect "toBeVisible" getByRole('button', { name: /^authorize$/i })`, 'expect'),
+      step('Expect "toBe"', 'expect'),
+    ))).toEqual(['Verified 1 assertion', 'Verified authorize is visible', 'Verified 1 assertion'])
+  })
+
+  it('reads regex-literal locator names, which are as common as quoted ones', () => {
+    expect(titles(around(
+      step('Expect "toBeVisible" getByText(/token created/i)', 'expect'),
+      step(`Click getByRole('button', { name: /login|sign in/i })`, 'pw:api'),
+    ))).toEqual(['Verified token created is visible', 'Clicked login / sign in'])
+  })
+
+  it('surfaces API requests, which are the whole trace for a non-browser suite', () => {
+    expect(titles(around(
+      step('Create request context', 'pw:api'),
+      step('POST "/oauth/token"', 'pw:api'),
+      step('GET "/api/queues/%2f"', 'pw:api'),
+    ))).toEqual(['POST /oauth/token', 'GET /api/queues/%2f'])
+  })
+
+  it("passes an author's own assertion message through untouched", () => {
+    expect(titles(around(step('auth probe should return a userId', 'expect'))))
+      .toEqual(['auth probe should return a userId'])
+  })
+
+  it('drops attachment bookkeeping', () => {
+    expect(titles(around(
+      step('Attach "canary-lab-final-page"', 'test.attach'),
+      step('POST "/api/login"', 'pw:api'),
+    ))).toEqual(['POST /api/login'])
+  })
+})
+
+describe('branchForService', () => {
+  const repo = { name: 'mighty-cns', path: '/Users/me/Documents/mighty-cns', branch: 'main', dirty: false, detached: false }
+
+  it('matches a service running in a per-run worktree by repo name', () => {
+    // The isolated-run default: cwd is under `logs/runs/<id>/worktrees/<repo>`,
+    // nowhere near the repo snapshot's own path — path containment found nothing
+    // and the ref silently disappeared from every isolated run.
+    const service = {
+      cwd: '/Users/me/Documents/canary-lab-workspace/logs/runs/2026-07-01T0245-o456/worktrees/mighty-cns',
+      repoName: 'mighty-cns',
+    }
+    expect(branchForService(service, [repo])).toBe(repo)
+  })
+
+  it('still falls back to the deepest containing path when no repo name is recorded', () => {
+    const nested = { name: 'inner', path: '/Users/me/Documents/mighty-cns/packages/inner', branch: 'dev', dirty: false, detached: false }
+    const service = { cwd: '/Users/me/Documents/mighty-cns/packages/inner/src' }
+    expect(branchForService(service, [repo, nested])).toBe(nested)
+  })
+
+  it('returns null when the named repo is absent rather than guessing by path', () => {
+    expect(branchForService({ cwd: '/tmp/elsewhere', repoName: 'unknown-repo' }, [repo])).toBeNull()
+  })
+})

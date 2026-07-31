@@ -410,7 +410,7 @@ describe('FlightPage', () => {
     expect(onOpenConfig).toHaveBeenCalledWith('checkout')
   })
 
-  it('a SKIPPED scaffold still reaches Advanced setup — header action and the synced-live hint', async () => {
+  it('a SKIPPED scaffold still reaches Advanced setup — the header action is the ONE route in', async () => {
     const onOpenConfig = vi.fn()
     mocks.getFeatureConfigDoc.mockResolvedValue({
       path: '/ws/features/checkout/feature.config.cjs',
@@ -423,7 +423,7 @@ describe('FlightPage', () => {
       },
     })
     // Scaffold skipped = the config already existed on disk. The setup panel
-    // renders it, so both routes into the full editor must be live.
+    // renders it, so the route into the full editor must be live.
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
       stages: FLIGHT_STAGE_KEYS.map((key) => ({
@@ -438,10 +438,11 @@ describe('FlightPage', () => {
     await act(async () => { header?.click() })
     expect(onOpenConfig).toHaveBeenCalledWith('checkout')
 
-    // The hint sentence names Advanced setup — so it must BE the link.
-    const hint = container.querySelector<HTMLButtonElement>('[data-testid="setup-open-advanced"]')
-    expect(hint?.textContent).toBe('Advanced setup')
-    await act(async () => { hint?.click() })
-    expect(onOpenConfig).toHaveBeenCalledTimes(2)
+    // The panel's own "Synced live with Advanced setup" footnote is gone: it
+    // re-announced the header button a few pixels above it. The header action
+    // stays the only way in, so a second one must not come back.
+    expect(container.querySelector('[data-testid="setup-open-advanced"]')).toBeNull()
+    expect(container.querySelector('[data-testid="feature-setup-panel"]')?.textContent).not.toContain('Synced live')
+    expect(onOpenConfig).toHaveBeenCalledTimes(1)
   })
 })
