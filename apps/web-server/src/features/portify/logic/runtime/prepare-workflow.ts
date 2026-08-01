@@ -209,7 +209,7 @@ export async function prepareWorkflow(
             fs.writeFileSync(seedPatch, borrowed.patch)
             const outcome = await applyOverlay(wt.handle.worktreeRoot, seedPatch)
             if (outcome.kind === 'ok') {
-              state.seededFrom.push({ feature: borrowed.feature, repos: group.members.map((m) => m.name) })
+              state.seededFrom.push({ feature: borrowed.feature, repos: group.members.map((m) => m.name), ports: borrowed.ports })
             } else {
               // A conflict/error means we couldn't cleanly seed (base drift,
               // overlapping edits). `--3way` leaves conflict markers in the
@@ -316,7 +316,9 @@ export async function prepareWorkflow(
     // overlay after the worktrees are gone (see paths.pendingOverlayPath).
     persistReviewCapture: async () => {
       try {
-        const repos = await captureOverlayRepos(state)
+        // Fresh config: the slots recorded alongside the patch must be the ones
+        // this port-ification just declared, not the pre-edit set.
+        const repos = await captureOverlayRepos(state, deps.loadFeatures().find((f) => f.name === feature.name) ?? feature)
         fs.writeFileSync(
           paths.pendingOverlayPath,
           JSON.stringify({ version: 1, capturedAt: deps.now(), repos, originalConfig: state.originalConfig }, null, 2),

@@ -12,6 +12,7 @@ import {
   applyRunFixes,
   getGhStatus,
   getRunPrPreflight,
+  getRunFixPatch,
   proposeRunPr,
   stopRun,
   deleteRun,
@@ -175,6 +176,18 @@ describe('runs api', () => {
   it('applyRunFixes surfaces the 409 when a run captured no fixes', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(409, { error: 'this run captured no fixes to apply' }))
     await expect(applyRunFixes('r1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ name: 'ApiError', status: 409 })
+  })
+
+  it('getRunFixPatch GETs one repo\'s captured patch text', async () => {
+    const body = { repoName: 'mighty cns', patchPath: '/p.patch', files: 3, diff: '@@ -1 +1 @@\n+x\n' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(getRunFixPatch('run 9', 'mighty cns', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/fixes/mighty%20cns/patch', { method: 'GET' })
+  })
+
+  it('getRunFixPatch surfaces the 410 once the patch has been cleaned away', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(410, { error: 'the patch file is no longer on disk' }))
+    await expect(getRunFixPatch('r1', 'prod', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ name: 'ApiError', status: 410 })
   })
 
   it('getGhStatus GETs the app-level gh status', async () => {

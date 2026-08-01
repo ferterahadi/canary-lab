@@ -38,6 +38,7 @@ export type {
   RunBootFailure,
   RunFixCapture,
   RunFixCaptureRepo,
+  RunPrAttempt,
   RunProposedPr,
   RunLifecycleAbortReason,
   RunLifecycleEvent,

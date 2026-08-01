@@ -1,5 +1,5 @@
 import path from 'path'
-import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
+import type { FeatureConfig, PortSlot } from '../../../../../../../shared/launcher/types'
 import { resolveRepoPath, getGitRoot } from '../../../../shared/git-repo'
 import { type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { computeSlotBudget, readSystemResources, resolveAdmissionConfig } from '../../../runs/logic/runtime/admission'
@@ -38,6 +38,18 @@ export interface BorrowCandidate {
   baseSha: string
   /** ISO capture time — newest wins when several siblings match. */
   capturedAt: string
+  /** The slots the sibling declared for this repo. The patch makes the source
+   *  read these env vars; declaring them is the half that does NOT travel with
+   *  the patch, so they ride along as a hint. Empty on legacy overlays. */
+  ports: PortSlot[]
+}
+
+/** One group's borrow, recorded for the prompt/instructions note. */
+export interface SeededFrom {
+  feature: string
+  repos: string[]
+  /** Slots the source feature declared — see {@link BorrowCandidate.ports}. */
+  ports: PortSlot[]
 }
 
 /**
@@ -65,7 +77,7 @@ export async function buildSiblingOverlayIndex(
       try { root = await getGitRoot(resolveRepoPath(decl.localPath)) } catch { /* unresolved repo — skip */ }
       if (!root) continue
       const list = index.get(root) ?? []
-      list.push({ feature: f.name, patch, baseSha: repo.baseSha, capturedAt: overlay.meta.capturedAt })
+      list.push({ feature: f.name, patch, baseSha: repo.baseSha, capturedAt: overlay.meta.capturedAt, ports: repo.ports ?? [] })
       index.set(root, list)
     }
   }
@@ -77,11 +89,68 @@ export async function buildSiblingOverlayIndex(
  * worktree — so it reviews the existing edits + declares config slots instead
  * of rewriting from scratch (and isn't surprised by a populated tree).
  */
-export function buildSeededNote(seededFrom: { feature: string; repos: string[] }[]): string | undefined {
+export function buildSeededNote(seededFrom: SeededFrom[]): string | undefined {
   if (seededFrom.length === 0) return undefined
   const from = seededFrom.map((s) => `"${s.feature}" (${s.repos.join(', ')})`).join('; ')
-  return `NOTE: the same app was already port-ified for another feature, so its port-injection patch from ${from} has been PRE-APPLIED to the worktree source — the listeners likely already read injected ports. Review the existing edits; you may only need to declare the matching \`ports\` slots in the feature config. A no-op source change is fine — the concurrent double-boot is what proves it.`
+  const note = `NOTE: the same app was already port-ified for another feature, so its port-injection patch from ${from} has been PRE-APPLIED to the worktree source — the listeners likely already read injected ports. Review the existing edits; you may only need to declare the matching \`ports\` slots in the feature config. A no-op source change is fine — the concurrent double-boot is what proves it.`
+  const declared = describeSeededSlots(seededFrom)
+  return declared ? `${note}\n\n${declared}` : note
 }
+
+/**
+ * The slot list the source feature declared for the seeded repos, rendered for
+ * the prompt. This is the half of the rewrite the patch does NOT carry, so
+ * handing it over is what turns a borrow into "confirm these" instead of
+ * "re-derive them from the diff". Deliberately framed as a starting point, not
+ * a fact: this feature may boot the same repo a DIFFERENT way (a command that
+ * exposes a listener the source feature never booted), and only the double-boot
+ * can settle that.
+ */
+export function describeSeededSlots(seededFrom: SeededFrom[]): string | undefined {
+  const lines: string[] = []
+  for (const s of seededFrom) {
+    for (const slot of s.ports) {
+      const decl = slot.env ? `{ name: '${slot.name}', env: '${slot.env}' }` : `{ name: '${slot.name}' }`
+      lines.push(`  - \`${decl}\`  (repo: ${s.repos.join(', ')})`)
+    }
+  }
+  if (lines.length === 0) return undefined
+  return (
+    'The source feature declared these `ports` slots for the seeded repo(s) — the patched source reads exactly these env vars, ' +
+    'so START from this list rather than re-deriving it from the diff:\n' +
+    lines.join('\n') +
+    '\nConfirm each one against the start command(s) THIS feature boots, and add a slot for any listener those commands expose ' +
+    'that is missing here — a differently-booted stack can bind a port the source feature never did.'
+  )
+}
+
+/**
+ * True when the seed left the client NOTHING to write: the borrowed patch
+ * already makes the source read injected ports, and this feature already
+ * declares every env var those slots name. Matched on `env` — that is what the
+ * patched source actually reads; slot NAMES are each config's own handle and
+ * may legitimately differ between features.
+ *
+ * Deliberately strict: a legacy overlay records no slots, so this is false and
+ * the client edits exactly as before. It gates only whether canary starts the
+ * double-boot itself — the boot is still the sole proof either way.
+ */
+export function seededSlotsAlreadyDeclared(seededFrom: SeededFrom[], declared: PortSlot[]): boolean {
+  const wanted = seededFrom.flatMap((s) => s.ports).map((p) => p.env).filter((e): e is string => Boolean(e))
+  if (wanted.length === 0) return false
+  const have = new Set(declared.map((p) => p.env).filter(Boolean))
+  return wanted.every((e) => have.has(e))
+}
+
+/** Prepended to the external instructions when canary started the double-boot
+ *  itself (see {@link seededSlotsAlreadyDeclared}) — the client must poll, not
+ *  edit-and-submit, or it fights a verification already in flight. */
+export const SEEDED_AUTO_VERIFY_NOTE =
+  'NOTE: nothing to edit. The same app was already port-ified for another feature, its patch is PRE-APPLIED to the ' +
+  'worktree, and this feature already declares every matching `ports` slot — so the concurrent double-boot that proves ' +
+  'it is ALREADY RUNNING. Do NOT edit the worktree and do NOT call submit_external_portify (it returns 409 while the ' +
+  'boot is in flight). Poll get_portify instead: `ready-to-save` means you are done — call save_portify. `editing` means ' +
+  'the boot did NOT pass; `verification.failureDetail` says why, and you then fix the worktree and submit as usual.'
 
 /** Pick the best sibling patch for a root: exact base-SHA match first, then newest. */
 export function pickBorrowable(candidates: BorrowCandidate[] | undefined, baseSha: string): BorrowCandidate | null {

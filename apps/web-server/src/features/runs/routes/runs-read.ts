@@ -62,6 +62,30 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
     return detectGhStatus()
   })
 
+  // The captured patch as text, for the Changes tab's inline diff. The repo
+  // name is looked up in the run's OWN capture rather than joined into a path,
+  // so this can only ever read a patch this run wrote.
+  app.get<{ Params: { runId: string; repoName: string } }>('/api/runs/:runId/fixes/:repoName/patch', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const repo = detail.manifest.fixCapture?.repos.find((r) => r.repoName === req.params.repoName)
+    if (!repo) {
+      reply.code(404)
+      return { error: 'no captured patch for this repo' }
+    }
+    try {
+      return { repoName: repo.repoName, patchPath: repo.patchPath, files: repo.files, diff: fs.readFileSync(repo.patchPath, 'utf-8') }
+    } catch {
+      // The run dir can be trimmed or deleted from the Cleanup page while the
+      // manifest still names the patch — that's a gone file, not a bad request.
+      reply.code(410)
+      return { error: 'the patch file is no longer on disk' }
+    }
+  })
+
   // Can we open a PR from this run's captured fix? Per-repo origin + default
   // branch + push rights (side-effect-free). The PR dialog re-runs this on open
   // (auth changes outside the app). 404/409 mirror apply-fixes.
@@ -100,14 +124,30 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       return { error: 'no repo is pushable — connect GitHub (Settings) or check push access', preflight }
     }
     const results = await proposeFixesForRun({ runId: detail.runId, feature: detail.manifest.feature, fixCapture, preflight })
-    // Merge the freshly-opened PRs into the manifest by repo name (idempotent).
+    // Merge the freshly-opened PRs into the manifest by repo name (idempotent),
+    // and record the attempt either way — the Changes tab reads the same
+    // per-repo reasons whether the run proposed on its own or the user did.
     const opened = results.filter((r): r is typeof r & { pr: RunProposedPr } => r.ok && !!r.pr).map((r) => r.pr)
+    const prAttempt = {
+      at: new Date().toISOString(),
+      auto: false,
+      results: results.map((r) => ({
+        repoName: r.repoName,
+        ok: r.ok,
+        ...(r.pr ? { url: r.pr.url } : {}),
+        ...(r.reason ? { reason: r.reason } : {}),
+      })),
+    }
+    // Written through the store, not straight to the file: the store's emitter
+    // is what pushes the change over the runs WebSocket, so an open Changes tab
+    // shows the new PR link without a refetch.
     if (opened.length > 0) {
       const prev = detail.manifest.proposedPrs ?? []
       const byRepo = new Map<string, RunProposedPr>(prev.map((p) => [p.repoName, p]))
       for (const pr of opened) byRepo.set(pr.repoName, pr)
-      const manifestPath = path.join(runDirFor(deps.store.logsDir, detail.runId), 'manifest.json')
-      updateManifest(manifestPath, { proposedPrs: [...byRepo.values()] })
+      deps.store.patchManifest(detail.runId, { proposedPrs: [...byRepo.values()], prAttempt })
+    } else {
+      deps.store.patchManifest(detail.runId, { prAttempt })
     }
     reply.code(200)
     return { results }

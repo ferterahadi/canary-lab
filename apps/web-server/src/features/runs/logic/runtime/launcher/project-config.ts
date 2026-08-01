@@ -9,6 +9,11 @@ export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
   personalWikiPath: string | null
+  /** Open a draft pull request automatically when a run heals green. On by
+   *  default: an unattended repair should leave something to review. Turn it
+   *  off for a workspace whose repos shouldn't receive machine-pushed
+   *  branches. */
+  autoProposePr: boolean
   /** Localhost port for the UI + MCP HTTP server. Absent → DEFAULT_PORT. */
   port?: number
 }
@@ -16,7 +21,7 @@ export interface ProjectConfig {
 // Default to `external` — the modern Claude/Codex via MCP flow. `auto` is
 // still accepted by the validator for backwards compatibility with older
 // configs, but new installs and the settings UI prefer external.
-const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null }
+const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true }
 const FILENAME = 'canary-lab.config.json'
 
 // The historical fixed port. Used whenever a project does not pin its own.
@@ -85,6 +90,7 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
       healAgent: isHealAgentChoice(json?.healAgent) ? json.healAgent : DEFAULT.healAgent,
       editor: isEditorChoice(json?.editor) ? json.editor : DEFAULT.editor,
       personalWikiPath: normalizePersonalWikiPath(json?.personalWikiPath),
+      autoProposePr: json?.autoProposePr !== false,
       ...(port === undefined ? {} : { port }),
     }
   } catch {
@@ -98,6 +104,7 @@ export function saveProjectConfig(projectRoot: string, config: ProjectConfig): v
     healAgent: isHealAgentChoice(config.healAgent) ? config.healAgent : DEFAULT.healAgent,
     editor: isEditorChoice(config.editor) ? config.editor : DEFAULT.editor,
     personalWikiPath: normalizePersonalWikiPath(config.personalWikiPath),
+    autoProposePr: config.autoProposePr !== false,
     ...(port === undefined ? {} : { port }),
   }
   fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify(next, null, 2) + '\n')

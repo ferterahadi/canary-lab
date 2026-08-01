@@ -53,6 +53,10 @@ export interface RunContext {
   readonly paths: RunPaths
   readonly services: ServiceSpec[]
   readonly logsRoot: string
+  /** The workspace root, when the caller knows it — the only way teardown can
+   *  read `canary-lab.config.json` (the auto-PR setting lives there). Absent in
+   *  unit tests and the CLI shim, which have no project config to consult. */
+  readonly projectRoot?: string
   readonly portMap?: Map<string, number>
   readonly worktreeHandles: WorktreeHandle[]
   readonly repoPathOverrides: Record<string, string>
@@ -170,6 +174,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     env: opts.env,
     paths,
     logsRoot,
+    ...(opts.projectRoot === undefined ? {} : { projectRoot: opts.projectRoot }),
     portMap: opts.portMap,
     worktreeHandles,
     repoPathOverrides,

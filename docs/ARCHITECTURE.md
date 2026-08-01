@@ -477,6 +477,27 @@ patch (plain `git apply`, `--3way` fallback) before boot after a staleness check
 the agent also writes are PERMANENT (Canary Lab reads the slots in `allocateRunPorts`
 before the overlay applies), so only the product-repo source is ephemeral.
 
+**Cross-feature reuse** (the overlay is filed per feature but the patch belongs to a
+git ROOT): at setup `buildSiblingOverlayIndex` (`portify-worktree-borrow.ts`) indexes
+every OTHER feature's non-empty patches by resolved git toplevel, `pickBorrowable`
+prefers an exact base-SHA match then the newest capture, and the winner is
+`applyOverlay`-ed into the scratch worktree AFTER the diff baseline — so the borrowed
+lines flow into THIS feature's own captured overlay (self-contained, no pointer back to
+the source feature). A conflict resets the worktree and the agent starts from scratch;
+borrowing is an optimization, never fatal. What does NOT travel is the config half: the
+`ports` slots are per feature, so each overlay ALSO records the slots its feature
+declared (`OverlayRepo.ports`) purely as a hint — `buildSeededNote` hands that list to
+the borrowing agent/client, which confirms it against the start commands THIS feature
+boots (a differently-booted stack can bind a listener the source feature never did)
+instead of re-deriving it from the diff. When the borrowing feature already declares
+every recorded slot there is nothing left to edit at all, and `start_external_portify`
+begins the double-boot itself (`seededSlotsAlreadyDeclared`) rather than waiting for a
+submit — the internal path has the equivalent attempt-0 gate in `orchestrator.run()`.
+The concurrent double-boot stays the only proof on every path. Because a borrowed patch
+lands in features that may not boot the same peers, `portify.md` requires every port
+rewrite — listener AND inter-service client — to keep its original value as a fallback,
+so an un-injected peer is dialled exactly where it always was.
+
 **Benchmark** (`apps/web-server/src/features/benchmark/logic/runtime/`, ~10 files) runs multi-arm
 self-heal benchmarking (race/sabotage verification) — measuring how the repair loop
 performs vs running tests without Canary Lab. The product surface was retired in 1.0.0

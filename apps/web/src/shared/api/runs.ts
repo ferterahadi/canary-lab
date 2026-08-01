@@ -189,6 +189,18 @@ export function applyRunFixes(
   )
 }
 
+// The captured patch as text, for the Changes tab's inline diff. 404 when the
+// run has no patch for that repo; 410 once the run dir has been trimmed away.
+export interface RunFixPatch { repoName: string; patchPath: string; files: number; diff: string }
+export function getRunFixPatch(runId: string, repoName: string, opts?: ClientOptions): Promise<RunFixPatch> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<RunFixPatch>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/fixes/${encodeURIComponent(repoName)}/patch`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
 // gh (GitHub CLI) connection status — detect-and-instruct only.
 export interface GhStatus { installed: boolean; authenticated: boolean; account?: string; host?: string }
 export function getGhStatus(opts?: ClientOptions): Promise<GhStatus> {

@@ -49,9 +49,24 @@ composite `lifecycle`/`full` profiles carry the same tools).
 | --- | --- |
 | `still_waiting` | Not terminal — re-call with the same `runId` + `session_id`. |
 | `needs_heal` | Fix (see step 10), `signal_run` once, then wait again. |
-| `passed` | Report `result.counts.statusLine`, stop. |
+| `passed` | Report `result.counts.statusLine`, plus what happened to your fix (see below), then stop. |
 | `failed` | Report `result.counts.statusLine` + failure summary, stop. |
 | `boot_session` | Report which services came up, stop — never wait again. |
+
+## What happens to your fix when the run passes
+
+Your edits are never left only in your head or only on disk. At teardown Canary Lab diffs the
+run's working copy, saves the result as a patch per repo, and — unless the workspace turned it
+off — opens a **draft pull request** from it. So on `passed`:
+
+- **Do not open a pull request yourself**, and do not push a branch. The run does it, on a branch
+  named per feature + repo, so healing the same feature again updates that same pull request
+  instead of opening a second one.
+- Report what the run reports: the pull request URL when there is one, or the per-repo reason
+  there isn't (gh not signed in, no push rights, the patch no longer applies). Both live on the
+  run's `prAttempt`; the diff itself is on the run's **Changes** tab in the Canary Lab UI.
+- A run that ends red, or that gives up after its cycle cap, opens nothing — a fix that didn't
+  make the tests pass is not a fix to propose.
 
 ## Guardrails
 

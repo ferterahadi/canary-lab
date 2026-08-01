@@ -6,6 +6,7 @@ import type {
   QueueReason,
   RunBootFailure,
   RunFixCapture,
+  RunPrAttempt,
   RunProposedPr,
   RunLifecycleSnapshot,
   RunStatus,
@@ -23,6 +24,7 @@ export type {
   RunBootFailure,
   RunFixCapture,
   RunFixCaptureRepo,
+  RunPrAttempt,
   RunProposedPr,
   RunLifecycleAbortReason,
   RunLifecycleEvent,
@@ -186,8 +188,12 @@ export interface RunManifest {
   /** The heal agent's edits captured from the per-run worktree at teardown.
    *  Absent on green runs, in-place runs, and runs the agent didn't change. */
   fixCapture?: RunFixCapture
-  /** PRs opened from this run's captured fix, per repo. On-demand only. */
+  /** PRs opened from this run's captured fix, per repo — by the user's own
+   *  request, or automatically when the run healed green. */
   proposedPrs?: RunProposedPr[]
+  /** The last PR attempt including its failures, so a run that captured a fix
+   *  but opened nothing can say why. */
+  prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
 }
 

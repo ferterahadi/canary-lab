@@ -311,6 +311,30 @@ describe('PortifyOrchestrator', () => {
       expect(deps.cleanup).not.toHaveBeenCalled()
     })
 
+    it('invalidates the PREVIOUS passing verification when the feedback agent throws', async () => {
+      // The agent normally edits before it dies, so the worktree now holds
+      // changes nothing has judged. Re-parking with the last pass's `ok: true`
+      // still attached is what let save() capture them as if the double-boot
+      // had approved them — assert the verdict is replaced, not just the error.
+      const { deps } = makeDeps({ runFeedbackAgent: vi.fn(async () => { throw new Error('agent died') }) })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-save')
+      expect(m.verification?.ok).toBe(false)
+      expect(m.verification?.failureDetail).toContain('never double-booted')
+      expect(m.verification?.failureDetail).toContain('agent died')
+    })
+
+    it('invalidates the verification when the double-boot itself throws mid-revise', async () => {
+      // The worst case: the agent's feedback edits are COMPLETE and in the
+      // worktree, and the only thing that could have judged them crashed.
+      const { deps } = makeDeps({ verify: async () => { throw new Error('boot harness crashed') } })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-save')
+      expect(m.verification?.ok).toBe(false)
+      expect(m.verification?.failureDetail).toContain('boot harness crashed')
+      expect(deps.cleanup).not.toHaveBeenCalled() // worktree kept for more feedback
+    })
+
     it('stringifies a non-Error throw mid-revise into the re-parked error', async () => {
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       const { deps } = makeDeps({ runFeedbackAgent: vi.fn(async () => { throw 'raw revise failure' }) })

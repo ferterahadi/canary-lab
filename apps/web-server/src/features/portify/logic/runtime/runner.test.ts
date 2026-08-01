@@ -210,6 +210,58 @@ describe('createPortifyRunner (integration)', () => {
     expect(log.stdout.trim().split('\n')).toHaveLength(1) // only the fixture's init commit
   })
 
+  it('save() refuses after a revise pass whose agent mutated the worktree and then threw', async () => {
+    // The defect this pins: revise() re-parks at ready-to-save (deliberately —
+    // the user must be able to give more feedback), and the manifest still
+    // carried the PREVIOUS pass's passing verification. save() reads that field
+    // to decide the diff is safe, then captures whatever is on disk NOW — which
+    // is the feedback edit below, never double-booted.
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+    expect(store.get(workflowId)!.verification?.ok).toBe(true)
+
+    // The revise pass: edit the worktree the way a real agent would, THEN die.
+    // Mutating first is load-bearing — a throw before any edit would leave the
+    // worktree in its verified state and prove nothing.
+    vi.mocked(runPortifyAgent).mockImplementation((async (opts: { cwd: string }) => {
+      fs.appendFileSync(path.join(opts.cwd, 'src', 'server.js'), '\n// UNVERIFIED feedback edit\n')
+      throw new Error('agent died mid-revise')
+    }) as typeof runPortifyAgent)
+
+    await runner.revise(workflowId, 'also token-ise the health check')
+    expect(await waitForStatus(store, workflowId, ['ready-to-save'])).toBe('ready-to-save')
+    const reparked = store.get(workflowId)!
+    expect(reparked.error).toContain('agent died mid-revise')
+    expect(reparked.verification?.ok).toBe(false)
+
+    await expect(runner.save(workflowId)).rejects.toMatchObject({ statusCode: 409 })
+    // Nothing was written, so the feature is still un-portified and the user can
+    // revise again rather than having silently shipped the unjudged edit.
+    expect(overlayExists(path.join(featuresDir, 'myfeat'))).toBe(false)
+    await runner.cancel(workflowId)
+  })
+
+  it('save() refuses a parked review that carries no verification at all', async () => {
+    // Reachable through the persisted store rather than in-process: a manifest
+    // restored from disk without a verdict. The old guard read "no failing
+    // verification" as consent; for a call that captures the live worktree,
+    // no verdict has to be as disqualifying as a failed one.
+    const { featuresDir, logsDir } = await singleFixture()
+    const { store, runner } = makeRunner(featuresDir, logsDir)
+
+    const { workflowId } = await runner.startPortify({ feature: 'myfeat', agent: 'claude', maxAttempts: 1 })
+    expect(await waitForStatus(store, workflowId, TERMINAL)).toBe('ready-to-save')
+    const m = store.get(workflowId)!
+    store.save({ ...m, verification: undefined })
+
+    await expect(runner.save(workflowId)).rejects.toMatchObject({ statusCode: 409 })
+    expect(overlayExists(path.join(featuresDir, 'myfeat'))).toBe(false)
+    await runner.cancel(workflowId)
+  })
+
   it('save() works ACROSS a server restart: reclaim keeps the parked review, a fresh runner saves from the persisted capture', async () => {
     const { featuresDir, logsDir, appRepo } = await singleFixture()
     const featureDir = path.join(featuresDir, 'myfeat')

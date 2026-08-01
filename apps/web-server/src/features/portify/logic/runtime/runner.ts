@@ -12,11 +12,12 @@ import { writeOverlay } from './overlay'
 import { buildPortifyPrompt, buildPortifyFeedbackPrompt, buildPortifyRetryPrompt } from './prompt'
 import type { PortifyManifest, PortifyProducer, PortifyExternalSession, StartPortifyInput, StartPortifyResult, StartExternalPortifyInput, StartExternalPortifyResult, ExternalPortifyEditTarget } from './types'
 import { captureOverlayRepos, readPendingOverlay, restoreConfig } from './portify-overlay-capture'
-import { RepoGroup, buildSeededNote, portifyConcurrencyCap } from './portify-worktree-borrow'
+import { RepoGroup, SeededFrom, SEEDED_AUTO_VERIFY_NOTE, buildSeededNote, portifyConcurrencyCap, seededSlotsAlreadyDeclared } from './portify-worktree-borrow'
+import { collectPortSlots } from '../../../runs/logic/runtime/service-specs'
 
-export { canonicalConfigDiff, captureOverlayRepos, readFileOrNull, realpathOrSelf, restoreConfig } from './portify-overlay-capture'
-export { buildSeededNote, buildSiblingOverlayIndex, pickBorrowable, portifyConcurrencyCap, safeKey } from './portify-worktree-borrow'
-export type { GroupMember, RepoGroup } from './portify-worktree-borrow'
+export { canonicalConfigDiff, captureOverlayRepos, declaredPortsForRepo, readFileOrNull, realpathOrSelf, restoreConfig } from './portify-overlay-capture'
+export { buildSeededNote, buildSiblingOverlayIndex, describeSeededSlots, pickBorrowable, portifyConcurrencyCap, safeKey } from './portify-worktree-borrow'
+export type { GroupMember, RepoGroup, SeededFrom } from './portify-worktree-borrow'
 
 // Wires the real I/O behind the (tested) PortifyOrchestrator: a git branch +
 // worktree per GIT ROOT, the port-ification agent, the double-boot verifier,
@@ -58,7 +59,7 @@ export interface ActiveWorkflow {
    *  agent/client doesn't redo a rewrite the same app already received. Surfaced
    *  in the prompt + external instructions; the borrowed lines also flow into
    *  this feature's own captured diff/overlay (self-contained, no dependency). */
-  seededFrom: { feature: string; repos: string[] }[]
+  seededFrom: SeededFrom[]
   /** Set once the orchestrator is constructed; drives user-feedback revise passes. */
   orchestrator?: PortifyOrchestrator
 }
@@ -159,11 +160,19 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     const targets: ExternalPortifyEditTarget[] = state.groups
       .flatMap((g) => g.members)
       .map((member) => ({ name: member.name, editPath: member.editPath! }))
+    // A complete borrow leaves the client nothing to write, so making it
+    // round-trip an empty edit just to reach submit is pure latency. Start the
+    // double-boot here instead — the gate is unchanged, it simply begins now.
+    // Fire-and-forget like startPortify's run(): verifyExternalEdits handles all
+    // its own errors internally (re-parking at `editing`), so it never rejects.
+    const autoVerifying = seededSlotsAlreadyDeclared(state.seededFrom, collectPortSlots(feature, m.env))
+    if (autoVerifying) void state.orchestrator!.verifyExternalEdits(m)
+    const seededNote = autoVerifying ? SEEDED_AUTO_VERIFY_NOTE : buildSeededNote(state.seededFrom)
     return {
       workflowId,
       targets,
       configPath: path.join(feature.featureDir, 'feature.config.cjs'),
-      instructions: buildPortifyPrompt(feature, targets.map((t) => ({ name: t.name, editPath: t.editPath })), buildSeededNote(state.seededFrom)),
+      instructions: buildPortifyPrompt(feature, targets.map((t) => ({ name: t.name, editPath: t.editPath })), seededNote),
     }
   }
 
@@ -178,7 +187,14 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       throw Object.assign(new Error('not an external port-ification workflow'), { statusCode: 409 })
     }
     if (m.status !== 'editing') {
-      throw Object.assign(new Error(`cannot submit a workflow in status "${m.status}"`), { statusCode: 409 })
+      // `verifying` right after a start means canary began the double-boot
+      // itself (a complete borrow left nothing to edit). A client that missed
+      // that note in `instructions` lands here, so the error is where it learns
+      // — a bare status name would read as a bug in its own sequencing.
+      const detail = m.status === 'verifying'
+        ? 'the concurrent double-boot is already running — poll get_portify instead: `ready-to-save` means you are done, `editing` means it failed and carries the detail to fix'
+        : `cannot submit a workflow in status "${m.status}"`
+      throw Object.assign(new Error(detail), { statusCode: 409 })
     }
     const state = active.get(workflowId)
     if (!state?.orchestrator) {
@@ -286,7 +302,12 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     if (m.status !== 'ready-to-save') {
       throw Object.assign(new Error(`cannot save a workflow in status "${m.status}"`), { statusCode: 409 })
     }
-    if (m.verification && !m.verification.ok) {
+    // Require a PASSING verification, not merely the absence of a failing one:
+    // save() captures whatever the worktree holds right now, so "no verdict"
+    // must be as disqualifying as "failed". Every in-process park at
+    // ready-to-save sets this; a manifest restored from disk without it (an
+    // older build, a hand-edit) is exactly the case that cannot be trusted.
+    if (!m.verification?.ok) {
       throw Object.assign(
         new Error('the latest changes did not pass verification — give more feedback or cancel'),
         { statusCode: 409 },
@@ -314,7 +335,7 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
       return next
     }
 
-    const overlayRepos = await captureOverlayRepos(state)
+    const overlayRepos = await captureOverlayRepos(state, deps.loadFeatures().find((f) => f.name === m.feature))
     writeOverlay(m.featureDir, {
       featureName: m.feature,
       agent: m.agent,

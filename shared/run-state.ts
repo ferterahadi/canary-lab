@@ -134,11 +134,24 @@ export interface RunFixCapture {
 export interface RunProposedPr {
   repoName: string
   url: string
-  /** The pushed head branch (deterministic per run+repo). */
+  /** The pushed head branch (deterministic per FEATURE+repo, so every healed
+   *  run of a feature updates one review thread instead of opening its own). */
   branch: string
   /** The base branch the PR targets. */
   base: string
   createdAt: string
+}
+
+/** What a pull-request attempt did, per repo — failures included. A green run
+ *  proposes automatically, and a repo that could not open one (no push rights,
+ *  gh not signed in, patch no longer applies) has to say so somewhere: without
+ *  this the Changes view would show a fix with no PR and no explanation. */
+export interface RunPrAttempt {
+  /** ISO timestamp of the attempt. */
+  at: string
+  /** True when the run proposed on its own; false for the user-driven dialog. */
+  auto: boolean
+  results: Array<{ repoName: string; ok: boolean; url?: string; reason?: string }>
 }
 
 export interface RunLifecycleSnapshot {

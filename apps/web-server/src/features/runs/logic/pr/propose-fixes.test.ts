@@ -34,8 +34,12 @@ function recordingGit(overrides: (args: string[]) => GitResult | null = () => nu
 
 describe('fixBranchName', () => {
   it('is deterministic and filesystem/ref safe', () => {
-    expect(fixBranchName('2026-07-23T1603-z6kc', 'merchant-pass'))
-      .toBe('canary-lab/fix-2026-07-23t1603-z6kc-merchant-pass')
+    expect(fixBranchName('CNS Line integration', 'merchant-pass'))
+      .toBe('canary-lab/fix-cns-line-integration-merchant-pass')
+  })
+
+  it('is scoped to the feature, so two runs of it share one branch', () => {
+    expect(fixBranchName('fnb', 'repo')).toBe(fixBranchName('fnb', 'repo'))
   })
 })
 
@@ -53,25 +57,62 @@ describe('proposeFixesForRun', () => {
       runId: 'run-9', feature: 'fnb', fixCapture, preflight,
       deps: { git: git.run, gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt' },
     })
-    expect(results).toEqual([{ repoName: 'fnb', ok: true, pr: { repoName: 'fnb', url: 'https://github.com/org/fnb/pull/7', branch: fixBranchName('run-9', 'fnb'), base: 'development', createdAt: 'T' } }])
+    expect(results).toEqual([{ repoName: 'fnb', ok: true, pr: { repoName: 'fnb', url: 'https://github.com/org/fnb/pull/7', branch: fixBranchName('fnb', 'fnb'), base: 'development', createdAt: 'T' } }])
     // The command sequence lands in order (worktree from baseSha, force-with-lease push).
     const seq = git.calls.map((c) => c[0])
     expect(seq).toContain('worktree')
     expect(git.calls.find((c) => c[0] === 'worktree' && c[1] === 'add')).toEqual(['worktree', 'add', '--detach', '/tmp/wt', 'base123'])
     expect(git.calls.some((c) => c[0] === 'push' && c.includes('--force-with-lease'))).toBe(true)
     expect(git.calls.some((c) => c[0] === 'worktree' && c[1] === 'remove')).toBe(true) // cleaned up
+    // A plain (non-draft) create is what the user-driven dialog asks for.
+    expect(ghCalls.find((c) => c[1] === 'create')).not.toContain('--draft')
   })
 
-  it('is idempotent: an existing PR short-circuits without pushing', async () => {
+  it('fetches the shared branch before pushing so the lease is not stale info', async () => {
+    // Second and later runs of a feature push onto a branch this scratch
+    // worktree has never seen; `--force-with-lease` rejects that outright
+    // unless the remote-tracking ref exists first.
     const git = recordingGit()
-    const gh = async (args: string[]): Promise<GhResult> =>
-      args[1] === 'list' ? ok('https://github.com/org/fnb/pull/3') : ok()
+    const gh = async (args: string[]): Promise<GhResult> => (args[1] === 'list' ? ok('') : ok('https://github.com/org/fnb/pull/8'))
+    await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight,
+      deps: { git: git.run, gh, tmpWorktreeDir: () => '/tmp/wt' },
+    })
+    const fetched = git.calls.find((c) => c[0] === 'fetch')
+    expect(fetched).toEqual(['fetch', 'origin', `+refs/heads/${fixBranchName('fnb', 'fnb')}:refs/remotes/origin/${fixBranchName('fnb', 'fnb')}`])
+    expect(git.calls.findIndex((c) => c[0] === 'fetch')).toBeLessThan(git.calls.findIndex((c) => c[0] === 'push'))
+  })
+
+  it('reuses an open PR on the shared branch — but only AFTER pushing the new fix onto it', async () => {
+    const git = recordingGit()
+    const ghCalls: string[][] = []
+    const gh = async (args: string[]): Promise<GhResult> => {
+      ghCalls.push(args)
+      return args[1] === 'list' ? ok('https://github.com/org/fnb/pull/3') : ok()
+    }
     const results = await proposeFixesForRun({
       runId: 'run-9', feature: 'fnb', fixCapture, preflight,
       deps: { git: git.run, gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt' },
     })
     expect(results[0]).toMatchObject({ ok: true, pr: { url: 'https://github.com/org/fnb/pull/3' } })
-    expect(git.calls.some((c) => c[0] === 'push')).toBe(false) // never pushed
+    // The whole point of the reorder: the existing review thread now carries
+    // THIS run's fix instead of the earlier attempt it was opened with.
+    expect(git.calls.some((c) => c[0] === 'push')).toBe(true)
+    expect(ghCalls.some((c) => c[1] === 'create')).toBe(false) // no duplicate PR
+  })
+
+  it('opens a draft PR when the automatic end-of-run trigger asks for one', async () => {
+    const ghCalls: string[][] = []
+    const gh = async (args: string[]): Promise<GhResult> => {
+      ghCalls.push(args)
+      return args[1] === 'list' ? ok('') : ok('https://github.com/org/fnb/pull/9')
+    }
+    const results = await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight, draft: true,
+      deps: { git: recordingGit().run, gh, tmpWorktreeDir: () => '/tmp/wt' },
+    })
+    expect(results[0].ok).toBe(true)
+    expect(ghCalls.find((c) => c[1] === 'create')).toContain('--draft')
   })
 
   it('reports a per-repo failure when the patch no longer applies', async () => {

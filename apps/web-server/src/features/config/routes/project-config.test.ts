@@ -52,7 +52,7 @@ describe('GET /api/project-config', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null , autoProposePr: true})
     } finally {
       await app.close()
     }
@@ -66,7 +66,7 @@ describe('GET /api/project-config', () => {
     const app = await makeApp()
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
-      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null , autoProposePr: true})
     } finally {
       await app.close()
     }
@@ -86,7 +86,7 @@ describe('PUT /api/project-config', () => {
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null , autoProposePr: true})
     } finally {
       await app.close()
     }
@@ -105,7 +105,7 @@ describe('PUT /api/project-config', () => {
         payload: {},
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null , autoProposePr: true})
     } finally {
       await app.close()
     }
@@ -134,11 +134,11 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'cursor' },
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true})
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
+      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true})
     } finally {
       await app.close()
     }
@@ -153,6 +153,26 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'vim' },
       })
       expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('writes the auto-PR preference and rejects a non-boolean', async () => {
+    const app = await makeApp()
+    try {
+      const off = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { autoProposePr: false } })
+      expect(off.statusCode).toBe(200)
+      expect(off.json().autoProposePr).toBe(false)
+
+      // Omitting it preserves the stored choice rather than silently re-enabling
+      // a push the user turned off.
+      const other = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { editor: 'vscode' } })
+      expect(other.json().autoProposePr).toBe(false)
+
+      const bad = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { autoProposePr: 'yes' } })
+      expect(bad.statusCode).toBe(400)
+      expect(bad.json()).toEqual({ error: 'autoProposePr must be a boolean' })
     } finally {
       await app.close()
     }
@@ -173,6 +193,7 @@ describe('PUT /api/project-config', () => {
         healAgent: 'external',
         editor: 'auto',
         personalWikiPath: fs.realpathSync(wiki),
+        autoProposePr: true,
       })
     } finally {
       await app.close()

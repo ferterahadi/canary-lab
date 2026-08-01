@@ -239,9 +239,28 @@ export class PortifyOrchestrator {
       return m
     } catch (err) {
       if (d.isAborted?.()) return m
-      // Don't tear down on a revise error — re-park at ready-to-save so the
-      // user can give more feedback or commit the last good diff.
-      m = { ...m, status: 'ready-to-save', error: err instanceof Error ? err.message : String(err) }
+      // Don't tear down on a revise error — re-park at ready-to-save so the user
+      // can give more feedback (runner.revise() accepts no other status).
+      //
+      // But REPLACE the verification while doing it. By this point the feedback
+      // agent has usually already edited the worktree, and nothing has judged
+      // those edits; the manifest still carries the PREVIOUS pass's passing
+      // verification, which save() reads to decide the diff is safe to capture.
+      // Left alone it would capture the current, unverified worktree as if the
+      // double-boot had approved it. Clearing the field is not enough either —
+      // save()'s guard treats an absent verification as no objection — so the
+      // unverified state has to be spelled out as a FAILED one.
+      const detail = err instanceof Error ? err.message : String(err)
+      m = {
+        ...m,
+        status: 'ready-to-save',
+        error: detail,
+        verification: {
+          ok: false,
+          instances: [],
+          failureDetail: `The revise pass did not finish, so its edits were never double-booted: ${detail}`,
+        },
+      }
       d.persist(m)
       return m
     }

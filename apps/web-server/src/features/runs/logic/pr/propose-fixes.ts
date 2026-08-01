@@ -6,13 +6,20 @@ import { runGh as realRunGh, type GhResult } from '../../../../shared/gh-cli'
 import type { RunFixCapture, RunProposedPr } from '../../../../../../../shared/run-state'
 import type { PrPreflight } from './pr-preflight'
 
-// Open a pull request from a run's captured fix, per pushable repo. On demand
-// only. The product repo is NEVER touched: the patch is applied in a THROWAWAY
-// worktree cut from the run's captured baseSha, committed, force-pushed to a
-// deterministic branch, and turned into a PR via `gh pr create`. Idempotent —
-// a repeat request finds the existing PR and returns its URL rather than
-// opening a duplicate. gh's own credential does the push/create; we never see
-// or handle the token.
+// Open a pull request from a run's captured fix, per pushable repo. Driven
+// either by the user (the Propose PR dialog) or automatically at the end of a
+// green healed run. The product repo is NEVER touched: the patch is applied in
+// a THROWAWAY worktree cut from the run's captured baseSha, committed,
+// force-pushed to a deterministic branch, and turned into a PR via
+// `gh pr create`. gh's own credential does the push/create; we never see or
+// handle the token.
+//
+// The branch is scoped to FEATURE + repo, not to the run: healing the same
+// feature three times keeps ONE pull request carrying the newest fix rather
+// than leaving three competing ones open. That makes the push-then-look-up
+// order load-bearing — an existing PR is reused only AFTER the new patch has
+// been pushed onto its branch, so the PR a reviewer opens is never a stale
+// earlier attempt.
 
 export interface ProposeResult {
   repoName: string
@@ -29,10 +36,13 @@ export interface ProposeDeps {
   now?: () => string
 }
 
-/** Deterministic per run+repo so a retry targets the same branch/PR (idempotent). */
-export function fixBranchName(runId: string, repoName: string): string {
+/** Deterministic per feature+repo, so every healed run of a feature updates the
+ *  SAME branch — and therefore the same pull request — instead of opening one
+ *  per run. The run id lives in the commit message and PR body instead, which
+ *  keeps the traceability without multiplying review requests. */
+export function fixBranchName(feature: string, repoName: string): string {
   const slug = (s: string): string => s.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase()
-  return `canary-lab/fix-${slug(runId)}-${slug(repoName)}`
+  return `canary-lab/fix-${slug(feature)}-${slug(repoName)}`
 }
 
 export async function proposeFixesForRun(opts: {
@@ -40,6 +50,10 @@ export async function proposeFixesForRun(opts: {
   feature: string
   fixCapture: RunFixCapture
   preflight: PrPreflight
+  /** Open the PR in GitHub's draft state — no reviewer is requested and no
+   *  review notification fires until a human marks it ready. The automatic
+   *  end-of-run trigger uses this; the user-driven dialog does not. */
+  draft?: boolean
   deps?: ProposeDeps
 }): Promise<ProposeResult[]> {
   const git = opts.deps?.git ?? realRunGit
@@ -60,19 +74,12 @@ export async function proposeFixesForRun(opts: {
       continue
     }
     const repoRoot = resolveRepoPath(fixRepo.repoRoot)
-    const branch = fixBranchName(opts.runId, pre.repoName)
+    const branch = fixBranchName(opts.feature, pre.repoName)
     const repoSlug = `${pre.origin.owner}/${pre.origin.name}`
-
-    // Idempotent: an existing PR for this head short-circuits everything.
-    const existing = await gh(['pr', 'list', '--repo', repoSlug, '--head', branch, '--state', 'all', '--json', 'url', '--jq', '.[0].url'])
-    if (existing.code === 0 && existing.stdout.trim()) {
-      results.push({ repoName: pre.repoName, ok: true, pr: { repoName: pre.repoName, url: existing.stdout.trim(), branch, base: pre.base, createdAt: now() } })
-      continue
-    }
 
     const wt = tmpWorktreeDir(opts.runId, pre.repoName)
     try {
-      const outcome = await createPrInWorktree({ git, gh, repoRoot, wt, branch, base: pre.base, repoSlug, baseSha: fixRepo.baseSha, patchPath: fixRepo.patchPath, feature: opts.feature, runId: opts.runId })
+      const outcome = await createPrInWorktree({ git, gh, repoRoot, wt, branch, base: pre.base, repoSlug, baseSha: fixRepo.baseSha, patchPath: fixRepo.patchPath, feature: opts.feature, runId: opts.runId, draft: opts.draft === true })
       results.push(outcome.ok
         ? { repoName: pre.repoName, ok: true, pr: { repoName: pre.repoName, url: outcome.url, branch, base: pre.base, createdAt: now() } }
         : { repoName: pre.repoName, ok: false, reason: outcome.reason })
@@ -97,11 +104,19 @@ async function createPrInWorktree(a: {
   patchPath: string
   feature: string
   runId: string
+  draft: boolean
 }): Promise<{ ok: true; url: string } | { ok: false; reason: string }> {
   const fail = (r: GitResult | GhResult, what: string) => ({ ok: false as const, reason: `${what}: ${(r.stderr || r.stdout).trim().split('\n')[0] || 'failed'}` })
 
   const add = await a.git(a.repoRoot, ['worktree', 'add', '--detach', a.wt, a.baseSha || 'HEAD'])
   if (add.code !== 0) return fail(add, 'could not create a scratch worktree')
+  // Give `--force-with-lease` something to lease against. The feature-scoped
+  // branch usually already exists on origin (an earlier healed run pushed it),
+  // and a lease with no remote-tracking ref is rejected as stale info — so the
+  // second run of every feature would fail to push without this. A branch that
+  // isn't on origin yet simply makes the fetch fail, and the push then creates
+  // it.
+  await a.git(a.wt, ['fetch', 'origin', `+refs/heads/${a.branch}:refs/remotes/origin/${a.branch}`])
   const branchOut = await a.git(a.wt, ['checkout', '-B', a.branch])
   if (branchOut.code !== 0) return fail(branchOut, 'could not create the fix branch')
   const applied = await a.git(a.wt, ['apply', '--3way', '--whitespace=nowarn', a.patchPath])
@@ -111,8 +126,17 @@ async function createPrInWorktree(a: {
   if (commit.code !== 0) return fail(commit, 'nothing to commit / commit failed')
   const push = await a.git(a.wt, ['push', '-u', 'origin', a.branch, '--force-with-lease'])
   if (push.code !== 0) return fail(push, 'push to origin was rejected')
+  // Look the PR up only NOW: the branch already carries this run's fix, so a
+  // PR found here is the same review thread updated in place rather than a
+  // stale earlier attempt short-circuiting the push.
+  const existing = await a.gh(['pr', 'list', '--repo', a.repoSlug, '--head', a.branch, '--state', 'open', '--json', 'url', '--jq', '.[0].url'])
+  if (existing.code === 0 && existing.stdout.trim()) return { ok: true, url: existing.stdout.trim() }
   const body = `Automated fix captured by Canary Lab from run \`${a.runId}\` (based on \`${a.baseSha.slice(0, 12)}\`). Review before merging.`
-  const pr = await a.gh(['pr', 'create', '--repo', a.repoSlug, '--base', a.base, '--head', a.branch, '--title', `fix(${a.feature}): canary-lab heal fixes`, '--body', body])
+  const pr = await a.gh([
+    'pr', 'create', '--repo', a.repoSlug, '--base', a.base, '--head', a.branch,
+    '--title', `fix(${a.feature}): canary-lab heal fixes`, '--body', body,
+    ...(a.draft ? ['--draft'] : []),
+  ])
   if (pr.code !== 0) return fail(pr, 'gh pr create failed')
   const url = pr.stdout.trim().split('\n').filter(Boolean).pop() ?? ''
   return url ? { ok: true, url } : { ok: false, reason: 'gh pr create returned no URL' }

@@ -4,6 +4,7 @@ import { recordFullSuiteTerminalRestartFallback, runPlaywright, runVerification,
 import { interjectHealAgent, runHealAgent, waitForHealSignal } from './run-heal-agent'
 import type { StoppedEarlyReason } from './manifest'
 import { applyPortifyOverlay, captureFixBaseline, captureFixes, hydrateWorktreeEnvsets, reversePortifyOverlay } from './run-fix-capture'
+import { autoProposeFixes } from '../pr/auto-propose'
 import fs from 'fs'
 import path from 'path'
 import { EventEmitter } from 'events'
@@ -439,8 +440,16 @@ export class RunOrchestrator extends EventEmitter {
     // reversed or the worktree is removed — the baseline was taken after overlay
     // + envset + WIP, so this diff is exactly the repair (R80). Best-effort:
     // never blocks finalization.
-    await captureFixes(this.ctx).catch((err) => {
+    const capture = await captureFixes(this.ctx).catch((err) => {
       this.ctx.runnerLog?.warn(`Fix capture failed: ${(err as Error).message}`)
+      return null
+    })
+    // A green healed run proposes its own fix as a draft PR (unless the
+    // workspace turned that off). Best-effort in the strongest sense: GitHub
+    // being unreachable must never change the run's verdict, so every failure
+    // is recorded on the manifest as a per-repo reason and nothing more.
+    await autoProposeFixes({ ctx: this.ctx, capture, finalStatus }).catch((err) => {
+      this.ctx.runnerLog?.warn(`Auto PR failed: ${(err as Error).message}`)
     })
     // Release per-run isolation resources. Ports go back to the pool. For a
     // PORTIFIED run we reverse the overlay but KEEP the worktree — it holds the

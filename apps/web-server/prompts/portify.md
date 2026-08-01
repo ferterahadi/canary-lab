@@ -69,6 +69,8 @@ Language gotchas — get these right or the boot fails in confusing ways:
 
 For every CLIENT call that targets a local listener you just moved — `http://localhost:3007`, `localhost:50051`, a TCP client's `{ host, port }`, an inter-service base URL — make the port env-driven too, reading the SAME var the listener now reads, so the caller follows the listener to its injected port. (Shared-broker / external connections from the mental model stay as-is — do not touch them here.)
 
+**Keep the current value as the fallback here too** — `Number(process.env.RECOVERY_PORT ?? 3007)`, never a bare `process.env.X`. This is what makes the rewrite reusable: the saved patch is per-REPO, so another feature that uses this app WITHOUT its peers will borrow these same lines. With a fallback, an un-injected peer is dialled exactly where it always was; without one, that feature gets `undefined`/`NaN` and fails for a reason no health check reports.
+
 ## 4. Update the feature config at {{featureConfigPath}}
 
 - On EACH `startCommand` that boots listening service(s), declare a `ports: [{ name: '<slot>', env: '<ENV_VAR>' }]` slot for EVERY listener that command exposes — using the SAME env var name the source now reads. The slot `env` is REQUIRED. One command that boots a whole stack (e.g. `yarn start:all:dev`) declares MULTIPLE slots, one per listener.
@@ -118,6 +120,7 @@ Some ports are fixed by something outside the app and converting them won't help
 ## 9. Self-verify before finishing
 
 - Re-grep each worktree for the original hardcoded port literals; every remaining one should be a fallback default (`?? 3007`), a test file, or an item you justified in section 8.
+- Re-grep for the env vars you introduced: every read — listener (section 2) AND client re-point (section 3) — must carry its original value as the fallback. A bare `process.env.X` with no `??` is the one form that breaks another feature borrowing this patch.
 - Re-grep the feature's `envsets/` for `localhost:<digits>` (and the original port literals); every hit should be shared external infra (section 6b) — anything targeting a relocated listener must use `${port.<slot>}`.
 - Confirm each feature-config slot `env` matches a var the source actually reads, and each `${port.<slot>}` token names a slot you declared.
 - If a typecheck/build is cheap in the worktree, run it — the enum→const change is exactly the kind that breaks types at call sites.

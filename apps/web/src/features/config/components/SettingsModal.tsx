@@ -51,6 +51,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
       draft.healAgent !== config.healAgent
       || draft.editor !== config.editor
       || (draft.personalWikiPath ?? '') !== (config.personalWikiPath ?? '')
+      || (draft.autoProposePr !== false) !== (config.autoProposePr !== false)
     )
 
   const onSave = async (): Promise<void> => {
@@ -260,6 +261,23 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
               <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
                 GitHub
               </div>
+              {/* Sits with GitHub rather than with the heal agent: what it
+                  controls is a push to your remote, not how the repair runs. */}
+              <label className="cl-card-hover mb-1.5 flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5">
+                <input
+                  type="checkbox"
+                  data-testid="settings-auto-propose-pr"
+                  checked={draft.autoProposePr !== false}
+                  onChange={(e) => setDraft({ ...draft, autoProposePr: e.target.checked })}
+                  className="mt-1"
+                />
+                <div className="flex-1">
+                  <div className="text-sm" style={{ color: 'var(--text-primary)' }}>Open a draft PR when a run heals green</div>
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    One pull request per feature, force-pushed to the same branch each time so it always carries the newest fix. Nothing is pushed for a run that failed or gave up.
+                  </div>
+                </div>
+              </label>
               <GitHubSection />
             </>
           )}

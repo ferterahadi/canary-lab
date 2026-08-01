@@ -8,6 +8,7 @@ import { RunStatusIndicator } from './RunStatusIndicator'
 import { PaneTerminal } from './PaneTerminal'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { ExternalHealPanel } from './ExternalHealPanel'
+import { ChangesTab } from './ChangesTab'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import { PlaywrightPanel } from './RunDiagnosticsPanels'
@@ -21,7 +22,7 @@ export { canRestartHeal, servicePrimaryLabel, serviceTabLabelParts } from './Run
 export { PlaywrightPlayback, shortLocation } from './RunPlaybackPanels'
 export { assertionFilename, assertionHref, downloadEvaluationReport, evaluationFilename, evaluationHref, hasAssertionVideos, isAssertionExportable, isEvaluationExportable, isTerminalRunStatus } from './run-export-links'
 
-type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'journal'
+type Tab = 'overview' | 'run-logs' | 'services' | 'playwright' | 'agent' | 'changes' | 'journal'
 
 /** Why this run has no repair transcript. A run that passed never spawned an
  *  agent at all — saying so is the whole answer, where "no structured session
@@ -190,6 +191,18 @@ export function RunDetailColumn({
           {!isVerify && <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>}
           {!isBootRun && <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>}
           {!isVerify && !isBootRun && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
+          {/* What the repair actually changed. Disabled rather than hidden when
+              a run changed nothing, so its absence reads as "no edits" instead
+              of a tab that moved. */}
+          {!isVerify && !isBootRun && (
+            <TabButton
+              active={tab === 'changes'}
+              onClick={() => setTab('changes')}
+              disabled={!m.fixCapture || m.fixCapture.repos.length === 0}
+            >
+              Changes
+            </TabButton>
+          )}
           {!isVerify && !isBootRun && <TabButton active={tab === 'journal'} onClick={() => setTab('journal')}>Journal</TabButton>}
         </nav>
       </header>
@@ -298,6 +311,16 @@ export function RunDetailColumn({
                 duplicated that affordance. */}
           </RunPane>
         </div>}
+        {!isVerify && !isBootRun && tab === 'changes' && (
+          <div className="h-full overflow-auto">
+            <ChangesTab
+              runId={m.runId}
+              fixCapture={m.fixCapture}
+              proposedPrs={m.proposedPrs}
+              prAttempt={m.prAttempt}
+            />
+          </div>
+        )}
         {!isVerify && tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} healCycles={m.healCycles} />
         )}

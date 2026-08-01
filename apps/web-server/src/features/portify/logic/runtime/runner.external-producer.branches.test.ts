@@ -60,6 +60,18 @@ it('submitExternalPortify 409s when workflow is not in editing state', async () 
       await expect(runner.submitExternalPortify(result.workflowId)).rejects.toMatchObject({ statusCode: 409 })
       await runner.cancel(result.workflowId)
     })
+it('submitExternalPortify 409s with polling instructions while a canary-started double-boot is in flight', async () => {
+      // Reached when a complete borrow left nothing to edit, so start kicked off
+      // the verification itself. A bare status name would read to the client as
+      // its own sequencing bug — the error has to name the poll instead.
+      const { featuresDir, logsDir } = await singleFixture()
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const result = await runner.startExternalPortify({ feature: 'myfeat', clientKind: 'claude', sessionId: 's1' })
+      await waitForStatus(store, result.workflowId, ['editing'])
+      store.save({ ...store.get(result.workflowId)!, status: 'verifying' })
+      await expect(runner.submitExternalPortify(result.workflowId)).rejects.toThrow(/poll get_portify/)
+      await runner.cancel(result.workflowId)
+    })
 it('submitExternalPortify 409s when there is no active orchestrator (server restart simulation)', async () => {
       const { featuresDir, logsDir } = await singleFixture()
       const { store, runner: runner1 } = makeRunner(featuresDir, logsDir)

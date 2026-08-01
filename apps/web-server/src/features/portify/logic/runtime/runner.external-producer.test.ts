@@ -168,6 +168,107 @@ it('borrows a sibling feature\'s saved overlay for the same app and pre-applies 
       expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'editing', 'failed'])).toBe('ready-to-save')
       await runner.save(result.workflowId)
       expect(readOverlay(featBDir)!.patches['app']).toContain('borrowed: listener reads injected PORT')
+      // The slots feat-b declared are recorded alongside the patch, so the NEXT
+      // feature over this app is handed them instead of re-deriving them.
+      expect(readOverlay(featBDir)!.meta.repos[0].ports).toEqual([{ name: 'api', env: 'PORT' }])
+    })
+it('starts the double-boot itself when a borrow leaves the client nothing to declare', async () => {
+      // feat-a's overlay records the slots it declared. feat-b borrows the patch
+      // AND already declares the same env var, so there is no edit for the client
+      // to make — canary runs the verification without waiting for a submit. The
+      // double-boot is still the only proof; it just begins now.
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-borrow-auto-'))
+      roots.push(root)
+      const featuresDir = path.join(root, 'features')
+      const appRepo = path.join(root, 'app')
+      const logsDir = path.join(root, 'logs')
+      fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+      fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT ?? 3007\n')
+      await gitInit(appRepo)
+
+      const cfg = (name: string) =>
+        `const config = { name: ${JSON.stringify(name)}, description: 't', envs: ['local'], repos: [ { name: 'app', localPath: ${JSON.stringify(appRepo)}, startCommands: [ { command: 'node src/server.js', name: 'app', ports: [{ name: 'api', env: 'PORT' }], healthCheck: { http: { url: 'http://localhost:\${port.api}/', timeoutMs: 30, deadlineMs: 250 } } } ] } ], featureDir: __dirname }\nmodule.exports = { config }\n`
+      const featADir = path.join(featuresDir, 'feat-a')
+      const featBDir = path.join(featuresDir, 'feat-b')
+      fs.mkdirSync(featADir, { recursive: true })
+      fs.mkdirSync(featBDir, { recursive: true })
+      fs.writeFileSync(path.join(featADir, 'feature.config.cjs'), cfg('feat-a'))
+      fs.writeFileSync(path.join(featBDir, 'feature.config.cjs'), cfg('feat-b'))
+
+      const serverPath = path.join(appRepo, 'src', 'server.js')
+      const origServer = fs.readFileSync(serverPath, 'utf-8')
+      fs.appendFileSync(serverPath, '// borrowed: listener reads injected PORT\n')
+      const patch = (await runGit(appRepo, ['diff'])).stdout
+      fs.writeFileSync(serverPath, origServer)
+      const baseSha = (await runGit(appRepo, ['rev-parse', 'HEAD'])).stdout.trim()
+      writeOverlay(featADir, {
+        featureName: 'feat-a',
+        agent: 'claude',
+        capturedAt: '2026-06-07T00:00:00.000Z',
+        repos: [{ name: 'app', baseSha, patch, touchedFiles: [], ports: [{ name: 'api', env: 'PORT' }] }],
+      })
+
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const result = await runner.startExternalPortify({ feature: 'feat-b', clientKind: 'codex', sessionId: 's1' })
+
+      // The client is told to poll rather than edit-and-submit — submitting into
+      // an in-flight verification is what the note exists to prevent.
+      expect(result.instructions).toContain('nothing to edit')
+      expect(result.instructions).toContain('do NOT call submit_external_portify')
+
+      // No submit call anywhere in this test: the verification runs on its own.
+      expect(await waitForStatus(store, result.workflowId, ['ready-to-save', 'editing', 'failed'])).toBe('ready-to-save')
+      expect(store.get(result.workflowId)!.verification?.ok).toBe(true)
+      await runner.save(result.workflowId)
+      expect(readOverlay(featBDir)!.patches['app']).toContain('borrowed: listener reads injected PORT')
+    })
+it('still hands the client the recorded slot list when it has slots left to declare', async () => {
+      // Same borrow, but feat-b declares NO slots — so the auto-verify must not
+      // fire (there is real work to do), and the instructions must carry the
+      // exact slots feat-a declared rather than making the client re-derive them.
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'portify-borrow-slots-'))
+      roots.push(root)
+      const featuresDir = path.join(root, 'features')
+      const appRepo = path.join(root, 'app')
+      const logsDir = path.join(root, 'logs')
+      fs.mkdirSync(path.join(appRepo, 'src'), { recursive: true })
+      fs.writeFileSync(path.join(appRepo, 'src', 'server.js'), 'const PORT = process.env.PORT ?? 3007\n')
+      await gitInit(appRepo)
+
+      const featADir = path.join(featuresDir, 'feat-a')
+      const featBDir = path.join(featuresDir, 'feat-b')
+      fs.mkdirSync(featADir, { recursive: true })
+      fs.mkdirSync(featBDir, { recursive: true })
+      fs.writeFileSync(
+        path.join(featADir, 'feature.config.cjs'),
+        `const config = { name: 'feat-a', description: 't', envs: ['local'], repos: [ { name: 'app', localPath: ${JSON.stringify(appRepo)}, startCommands: [ { command: 'node src/server.js', name: 'app', ports: [{ name: 'api', env: 'PORT' }] } ] } ], featureDir: __dirname }\nmodule.exports = { config }\n`,
+      )
+      // feat-b: same repo, NO ports declared yet.
+      fs.writeFileSync(
+        path.join(featBDir, 'feature.config.cjs'),
+        `const config = { name: 'feat-b', description: 't', envs: ['local'], repos: [ { name: 'app', localPath: ${JSON.stringify(appRepo)}, startCommands: [ { command: 'node src/server.js', name: 'app' } ] } ], featureDir: __dirname }\nmodule.exports = { config }\n`,
+      )
+
+      const serverPath = path.join(appRepo, 'src', 'server.js')
+      const origServer = fs.readFileSync(serverPath, 'utf-8')
+      fs.appendFileSync(serverPath, '// borrowed: listener reads injected PORT\n')
+      const patch = (await runGit(appRepo, ['diff'])).stdout
+      fs.writeFileSync(serverPath, origServer)
+      const baseSha = (await runGit(appRepo, ['rev-parse', 'HEAD'])).stdout.trim()
+      writeOverlay(featADir, {
+        featureName: 'feat-a',
+        agent: 'claude',
+        capturedAt: '2026-06-07T00:00:00.000Z',
+        repos: [{ name: 'app', baseSha, patch, touchedFiles: [], ports: [{ name: 'api', env: 'PORT' }] }],
+      })
+
+      const { store, runner } = makeRunner(featuresDir, logsDir)
+      const result = await runner.startExternalPortify({ feature: 'feat-b', clientKind: 'codex', sessionId: 's1' })
+
+      expect(result.instructions).toContain("{ name: 'api', env: 'PORT' }")
+      expect(result.instructions).not.toContain('nothing to edit')
+      expect(store.get(result.workflowId)!.status).toBe('editing')
+      await runner.cancel(result.workflowId)
     })
 it('submitExternalPortify re-parks at editing with a clear message when an empty diff also fails to boot', async () => {
       // healthy=false → the double-boot fails; with no edits to point at, the

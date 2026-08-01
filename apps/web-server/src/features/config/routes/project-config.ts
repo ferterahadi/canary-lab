@@ -52,6 +52,11 @@ export async function projectConfigRoutes(
       reply.code(400)
       return { error: 'personalWikiPath must be an existing directory path, null, or empty string' }
     }
+    const incomingAutoProposePr = req.body?.autoProposePr
+    if (incomingAutoProposePr !== undefined && typeof incomingAutoProposePr !== 'boolean') {
+      reply.code(400)
+      return { error: 'autoProposePr must be a boolean' }
+    }
     const current = loadProjectConfig(deps.projectRoot)
     const next: ProjectConfig = {
       healAgent: incomingHealAgent ?? current.healAgent,
@@ -59,6 +64,7 @@ export async function projectConfigRoutes(
       personalWikiPath: incomingPersonalWikiPath !== undefined
         ? personalWikiPath!
         : current.personalWikiPath,
+      autoProposePr: incomingAutoProposePr ?? current.autoProposePr,
     }
     saveProjectConfig(deps.projectRoot, next)
     return next

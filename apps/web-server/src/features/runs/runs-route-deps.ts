@@ -289,6 +289,7 @@ export function buildRunsRouteDeps(
           // these events.
           runStateSink: runStore,
           dirtySpecHooks: dirtySpecStore,
+          projectRoot,
         })
       } catch (err) {
         if (backups) restore(backups)
@@ -465,6 +466,7 @@ export function buildRunsRouteDeps(
           initialHealCycles: manifest.healCycles,
           runStateSink: runStore,
           dirtySpecHooks: dirtySpecStore,
+          projectRoot,
         })
       } catch (err) {
         if (backups) restore(backups)

@@ -44,8 +44,8 @@ export async function captureFixBaseline(ctx: RunContext): Promise<void> {
  *  source files ride the patch too; gitignored/untracked-at-baseline state
  *  (envset .env, hydrated WIP) never leaks in — the baseline already had it or
  *  git ignores it. */
-export async function captureFixes(ctx: RunContext): Promise<void> {
-  if (ctx.fixBaselines.size === 0) return
+export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | null> {
+  if (ctx.fixBaselines.size === 0) return null
   const repos: RunFixCapture['repos'] = []
   for (const [repoName, base] of ctx.fixBaselines) {
     // Stage ONLY agent-created files (untracked now, but not at baseline) so
@@ -69,13 +69,14 @@ export async function captureFixes(ctx: RunContext): Promise<void> {
     }
     repos.push({ repoName, patchPath, patchFile, repoRoot: base.sourceRoot, baseSha: base.baseSha, files: names.length })
   }
-  if (repos.length === 0) return
+  if (repos.length === 0) return null
   const fixCapture: RunFixCapture = { repos, capturedAt: new Date().toISOString() }
   try {
     fs.writeFileSync(path.join(ctx.paths.fixesDir, 'fixes.json'), JSON.stringify(fixCapture, null, 2) + '\n')
   } catch { /* the manifest carries the same data — index file is a convenience */ }
   ctx.stateSink.patchManifest(ctx.runId, { fixCapture })
   ctx.runnerLog?.info(`Captured heal fix diff for ${repos.map((r) => r.repoName).join(', ')} → ${ctx.paths.fixesDir}`)
+  return fixCapture
 }
 
 /** Hydrate the feature's envset into every per-run worktree (portified or

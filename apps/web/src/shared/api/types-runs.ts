@@ -2,7 +2,7 @@
 // shapes in apps/web-server/lib/{run-store,feature-loader,journal-store}.ts.
 // Run-state primitives are shared with the server so recovery behavior has one
 // semantic model; feature/journal/wizard shapes remain web-local API mirrors.
-import type { HealEnd, RunBootFailure, RunFixCapture, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
+import type { HealEnd, RunBootFailure, RunFixCapture, RunPrAttempt, RunProposedPr, RunLifecycleEvent, RunLifecycleSnapshot, RunStatus, ServiceStatus } from '@shared/run-state'
 import type { ExecutionType, VerificationRunMetadata } from '@shared/verification'
 import type { ClientKind } from '@shared/run-mode'
 
@@ -111,8 +111,12 @@ export interface RunManifest {
   /** The heal agent's edits captured from the per-run worktree at teardown —
    *  what the FixesCapturedPanel surfaces (patch path, apply-locally, PR). */
   fixCapture?: RunFixCapture
-  /** PRs opened from this run's captured fix, per repo (on-demand). */
+  /** PRs opened from this run's captured fix, per repo — automatically when the
+   *  run healed green, or on demand from the Changes tab. */
   proposedPrs?: RunProposedPr[]
+  /** The last PR attempt including failures, so a captured fix with no PR can
+   *  say why (gh not signed in, no push rights, patch no longer applies). */
+  prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
 }
 

@@ -94,9 +94,38 @@ export interface DirtyTestsWarning {
   message: string
 }
 
+// What became of the repair once the run went green. Rides the `passed` result
+// because a skill-less agent follows tool results, not the session prose — and
+// without this it has no way to know a pull request already exists and would
+// reasonably try to push one of its own.
+export interface HealFixOutcome {
+  repos: Array<{ repoName: string; files: number; pr?: string; noPrReason?: string }>
+  note: string
+}
+
+/** Build the `passed` result's fix block, or nothing when the run changed no
+ *  code at all (it passed first try, or ran in place without a capture). */
+export function healFixOutcome(detail: RunDetail): HealFixOutcome | undefined {
+  const captured = detail.manifest.fixCapture?.repos ?? []
+  if (captured.length === 0) return undefined
+  const prByRepo = new Map((detail.manifest.proposedPrs ?? []).map((p) => [p.repoName, p.url]))
+  const reasonByRepo = new Map(
+    (detail.manifest.prAttempt?.results ?? []).filter((r) => !r.ok && r.reason).map((r) => [r.repoName, r.reason!]),
+  )
+  return {
+    repos: captured.map((r) => ({
+      repoName: r.repoName,
+      files: r.files,
+      ...(prByRepo.has(r.repoName) ? { pr: prByRepo.get(r.repoName)! } : {}),
+      ...(reasonByRepo.has(r.repoName) ? { noPrReason: reasonByRepo.get(r.repoName)! } : {}),
+    })),
+    note: 'Canary Lab already saved this diff and handled the pull request. Do NOT open or push one yourself — report the pr url, or noPrReason where there is none.',
+  }
+}
+
 export type WaitForHealTaskValue =
   | { type: 'needs_heal'; runId: string; cycle: number; context: ExternalHealContext; dirtyTests?: DirtyTestsWarning }
-  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
+  | { type: 'passed'; runId: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning; fix?: HealFixOutcome }
   | { type: 'failed'; runId: string; status: string; summary: RunDetail['summary'] | null; counts: NormalizedRunCounts; dirtyTests?: DirtyTestsWarning }
   | {
       type: 'still_waiting'
@@ -143,6 +172,7 @@ export function classifyWaitForHealTask(
   const status = detail.manifest.status
   const dirtyTests = dirtyTestsWarning(deps, detail.manifest.feature)
   if (status === 'passed') {
+    const fix = healFixOutcome(detail)
     return {
       ok: true,
       value: {
@@ -151,6 +181,7 @@ export function classifyWaitForHealTask(
         summary: detail.summary ?? null,
         counts: normalizeRunCounts(detail.summary ?? null),
         ...(dirtyTests ? { dirtyTests } : {}),
+        ...(fix ? { fix } : {}),
       },
     }
   }

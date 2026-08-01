@@ -205,7 +205,7 @@ describe('GitHub / PR routes (R80)', () => {
     ])
   })
 
-  it('POST propose-pr leaves the manifest alone when nothing opened', async () => {
+  it('POST propose-pr leaves proposedPrs alone when nothing opened — but records why', async () => {
     writeManifestWithCapture('r1')
     prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)
     prMocks.proposeFixesForRun.mockResolvedValueOnce([{ repoName: 'prod', ok: false, reason: 'push rejected' }])
@@ -214,6 +214,66 @@ describe('GitHub / PR routes (R80)', () => {
     const res = await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })
 
     expect(res.statusCode).toBe(200)
-    expect(readManifest(path.join(runDirFor(logsDir, 'r1'), 'manifest.json'))!.proposedPrs).toBeUndefined()
+    const saved = readManifest(path.join(runDirFor(logsDir, 'r1'), 'manifest.json'))!
+    expect(saved.proposedPrs).toBeUndefined()
+    // The Changes tab reads this: a captured fix with no PR has to say why.
+    expect(saved.prAttempt).toMatchObject({ auto: false, results: [{ repoName: 'prod', ok: false, reason: 'push rejected' }] })
+  })
+
+  it('POST propose-pr records the attempt alongside the opened PRs', async () => {
+    writeManifestWithCapture('r1')
+    prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)
+    prMocks.proposeFixesForRun.mockResolvedValueOnce([
+      { repoName: 'prod', ok: true, pr: { repoName: 'prod', url: 'https://github.com/org/prod/pull/2', branch: 'b', base: 'main', createdAt: 'T' } },
+    ])
+    const { app } = await build()
+
+    await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })
+
+    const saved = readManifest(path.join(runDirFor(logsDir, 'r1'), 'manifest.json'))!
+    expect(saved.prAttempt).toMatchObject({
+      auto: false,
+      results: [{ repoName: 'prod', ok: true, url: 'https://github.com/org/prod/pull/2' }],
+    })
+  })
+})
+
+describe('captured patch text (the Changes tab diff)', () => {
+  it('serves the patch for a repo this run actually captured', async () => {
+    const patchPath = path.join(tmpDir, 'prod.patch')
+    fs.writeFileSync(patchPath, '@@ -1 +1 @@\n-old\n+new\n')
+    writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath, patchFile: 'prod.patch', repoRoot: '/repos/prod', baseSha: 'abc', files: 2 }])
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/fixes/prod/patch' })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ repoName: 'prod', patchPath, files: 2, diff: '@@ -1 +1 @@\n-old\n+new\n' })
+  })
+
+  it('404s an unknown run and a repo the run never captured', async () => {
+    writeManifestWithCapture('r1')
+    const { app } = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/fixes/prod/patch' })).statusCode).toBe(404)
+    // `other` is not in this run's capture — the lookup is the guard that stops
+    // a crafted repo name from reaching an arbitrary file.
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/fixes/other/patch' })).statusCode).toBe(404)
+  })
+
+  it('404s a run that captured nothing at all', async () => {
+    writeManifestForRun('r1', 'foo', 'passed')
+    const { app } = await build()
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r1/fixes/prod/patch' })).statusCode).toBe(404)
+  })
+
+  it('410s once the patch file has been cleaned off disk', async () => {
+    // The manifest still names it; Cleanup trimmed the run dir underneath.
+    writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: path.join(tmpDir, 'gone.patch'), patchFile: 'gone.patch', repoRoot: '/repos/prod', baseSha: 'abc', files: 1 }])
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/fixes/prod/patch' })
+
+    expect(res.statusCode).toBe(410)
+    expect(res.json().error).toMatch(/no longer on disk/i)
   })
 })
