@@ -451,6 +451,56 @@ describe('playback step compaction against real Playwright step titles', () => {
       .toEqual(['auth probe should return a userId'])
   })
 
+  it('never renders a negated assertion as its positive', () => {
+    // The pane is evidence: reporting `not toBeVisible` as "is visible" states
+    // the opposite of what the test asserted.
+    expect(titles(around(
+      step(`Expect "not toBeVisible" getByRole('button', { name: 'Deny' })`, 'expect'),
+      step(`Expect "not toHaveText" getByText('Welcome')`, 'expect'),
+      step(`Expect "not toBeFrobnicated" getByLabel('Widget')`, 'expect'),
+    ))).toEqual([
+      'Verified Deny is not visible',
+      'Verified Welcome does not have the expected text',
+      'Verified Widget does not match toBeFrobnicated',
+    ])
+  })
+
+  it('does not let a matcher name be read as an action verb', () => {
+    // `toBeChecked` contains "check" and `toBeSelected` contains "select" — the
+    // verb branches used to claim them and report an assertion as a click.
+    expect(titles(around(
+      step(`Expect "toBeChecked" getByLabel('Terms')`, 'expect'),
+      step(`Expect "toBeVisible" getByLabel('Terms')`, 'expect'),
+    ))).toEqual(['Verified Terms is checked', 'Verified Terms is visible'])
+  })
+
+  it('does not invent words out of regex character classes', () => {
+    // `/^Pickup\\s/` matches a button labelled "Pickup"; stripping the backslash
+    // rendered "Pickups", a string that appears neither in the test nor the UI.
+    expect(titles(around(
+      step(`Click getByRole('button', { name: /^Pickup\\s/ })`, 'pw:api'),
+      step(`Click getByRole('button', { name: /Hi,\\s+\\S+/ })`, 'pw:api'),
+      step(`Click getByRole('button', { name: /^allow\\b/i })`, 'pw:api'),
+      step(`Click getByText(/example\\.com/)`, 'pw:api'),
+    ))).toEqual(['Clicked Pickup', 'Clicked Hi', 'Clicked allow', 'Clicked example.com'])
+  })
+
+  it('holds a tally open while any assertion under it is still running', () => {
+    const events = around(
+      step('Expect "toBe"', 'expect'),
+      step('Expect "toBe"', 'expect'),
+    )
+    events.push({
+      type: 'step-end',
+      time: '2026-01-01T00:00:02.000Z',
+      test: { name: 'api', title: 'API' },
+      step: { title: 'Expect "toBe"', category: 'expect' },
+    })
+    const [tally] = playbackTests(events)[0].steps
+    expect(tally.title).toBe('Verified 2 assertions')
+    expect(tally.ended).toBe(false)
+  })
+
   it('drops attachment bookkeeping', () => {
     expect(titles(around(
       step('Attach "canary-lab-final-page"', 'test.attach'),

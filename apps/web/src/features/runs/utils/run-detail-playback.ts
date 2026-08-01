@@ -168,17 +168,23 @@ export function branchTooltip(service: Pick<ServiceManifestEntry, 'cwd'>, repo: 
   return parts.join('\n')
 }
 
-/** Marker for an assertion whose only content was the matcher name
- *  (`Expect "toBe"`). One such row says nothing; eleven in a column say nothing
- *  eleven times — but the fact that eleven assertions ran is worth one line. */
-const BARE_ASSERTION = Symbol('bare-assertion')
+type PlaybackStep = PlaybackTest['steps'][number]
+
+/** A step that survived filtering. `title: null` marks an assertion whose only
+ *  content was the matcher name (`Expect "toBe"`): one such row says nothing,
+ *  eleven in a column say nothing eleven times — but the fact that eleven
+ *  assertions ran is worth one line, so they collapse into a tally. */
+interface MappedStep {
+  step: PlaybackStep
+  title: string | null
+}
 
 function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
-  const mapped = steps.flatMap((step) => {
+  const mapped = steps.flatMap<MappedStep>((step) => {
     // Hooks, fixtures and attachments are Playwright's own bookkeeping —
     // `Before Hooks`, `Fixture "request"`, `Attach "canary-lab-final-page"`.
     if (step.category === 'hook' || step.category === 'fixture' || step.category === 'test.attach') return []
-    if (isBareAssertion(step.title, step.category)) return [{ step, title: BARE_ASSERTION as const }]
+    if (isBareAssertion(step.title, step.category)) return [{ step, title: null }]
     const title = compactStepTitle(step.title, step.category)
     return title ? [{ step, title }] : []
   })
@@ -186,18 +192,21 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
   // Collapse each consecutive run of bare assertions into one tally, in place,
   // so the surrounding steps keep their order.
   const out: PlaybackTest['steps'] = []
-  let pending = 0
-  let pendingStep: PlaybackTest['steps'][number] | null = null
+  const pending: PlaybackStep[] = []
   const flush = (): void => {
-    if (pending === 0 || !pendingStep) return
-    out.push({ ...pendingStep, title: `Verified ${pending} assertion${pending === 1 ? '' : 's'}` })
-    pending = 0
-    pendingStep = null
+    if (pending.length === 0) return
+    out.push({
+      ...pending[pending.length - 1],
+      // A tally is only finished when every assertion under it is: one still
+      // open must not be reported as done.
+      ended: pending.every((step) => step.ended),
+      title: `Verified ${pending.length} assertion${pending.length === 1 ? '' : 's'}`,
+    })
+    pending.length = 0
   }
   for (const entry of mapped) {
-    if (entry.title === BARE_ASSERTION) {
-      pending += 1
-      pendingStep = entry.step
+    if (entry.title === null) {
+      pending.push(entry.step)
       continue
     }
     flush()
@@ -251,7 +260,7 @@ const API_REQUEST_RE = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+["']([^"']+)
  *  code read it as a target and rendered 11 identical `Verified toBe` rows for
  *  an API test. Matchers are universally named `to<Something>` (optionally
  *  negated), which is what separates them from an author's own message. */
-const EXPECT_MATCHER_RE = /^[Ee]xpect(?:\.soft|\.poll)?\s*["'](?:not[. ])?(to[A-Z]\w*)["']/
+const EXPECT_MATCHER_RE = /^[Ee]xpect(?:\.soft|\.poll)?\s*["'](not[. ])?(to[A-Z]\w*)["']/
 
 /**
  * One playback step in plain words, or `null` to drop it.
@@ -275,13 +284,10 @@ function compactStepTitle(title: string, category?: string): string | null {
   if (harnessVerb) return harnessStepLabel(harnessVerb)
 
   const quoted = title.match(/['"]([^'"]{1,80})['"]/)?.[1]
-  if (lower.includes('navigate')) return quoted ? `Opened ${quoted}` : 'Opened page'
-  if (lower.includes('click')) return `Clicked ${describeActionTarget(title, quoted) ?? 'page element'}`
-  if (lower.includes('fill')) return describeFillAction(title) ?? 'Filled field'
-  if (lower.includes('press')) return quoted ? `Pressed ${quoted}` : 'Pressed key'
-  if (lower.includes('select')) return quoted ? `Selected ${friendlyTarget(quoted)}` : 'Selected option'
-  if (lower.includes('check')) return `Checked ${describeActionTarget(title, quoted) ?? 'option'}`
 
+  // Assertions are settled BEFORE the action verbs, because a matcher name
+  // contains one: `Expect "toBeChecked" …` hits `includes('check')` and would
+  // be reported as a *click on a checkbox* rather than as an assertion.
   if (category === 'expect' || lower.startsWith('expect')) {
     const matcher = EXPECT_MATCHER_RE.exec(title)
     if (matcher) {
@@ -291,7 +297,12 @@ function compactStepTitle(title: string, category?: string): string | null {
       // can name, so it earns no row.
       const rest = title.slice(matcher[0].length)
       const target = describeActionTarget(rest, rest.match(/['"]([^'"]{1,80})['"]/)?.[1])
-      return target ? `Verified ${target} ${matcherPhrase(matcher[1])}`.trimEnd() : null
+      if (!target) return null
+      // The negation is load-bearing. Dropping it renders `not toBeVisible` as
+      // "is visible" — the opposite of what the test asserted, in a pane whose
+      // whole job is to be evidence.
+      const phrase = matcherPhrase(matcher[2], Boolean(matcher[1]))
+      return `Verified ${target} ${phrase}`.trimEnd()
     }
     // Not the matcher shape. Either the author supplied their own message
     // (`expect(x, 'auth probe should return a userId')` — Playwright uses the
@@ -300,6 +311,13 @@ function compactStepTitle(title: string, category?: string): string | null {
     if (lower.startsWith('expect')) return `Verified ${describeActionTarget(title, quoted) ?? 'expectation'}`
     return title.replace(/\s+/g, ' ').slice(0, 120)
   }
+
+  if (lower.includes('navigate')) return quoted ? `Opened ${quoted}` : 'Opened page'
+  if (lower.includes('click')) return `Clicked ${describeActionTarget(title, quoted) ?? 'page element'}`
+  if (lower.includes('fill')) return describeFillAction(title) ?? 'Filled field'
+  if (lower.includes('press')) return quoted ? `Pressed ${quoted}` : 'Pressed key'
+  if (lower.includes('select')) return quoted ? `Selected ${friendlyTarget(quoted)}` : 'Selected option'
+  if (lower.includes('check')) return `Checked ${describeActionTarget(title, quoted) ?? 'option'}`
 
   return isBrowserAction(title) ? title.replace(/\s+/g, ' ').slice(0, 80) : null
 }
@@ -316,20 +334,31 @@ function harnessStepLabel(verb: string): string | null {
 }
 
 /** Matcher name → the tail of a sentence. Unknown matchers add nothing, so they
- *  return an empty string and the row reads `Verified <target>`. */
-function matcherPhrase(matcher: string): string {
-  switch (matcher) {
-    case 'toBeVisible': return 'is visible'
-    case 'toBeHidden': return 'is hidden'
-    case 'toBeEnabled': return 'is enabled'
-    case 'toBeDisabled': return 'is disabled'
-    case 'toBeChecked': return 'is checked'
-    case 'toHaveText': return 'has the expected text'
-    case 'toHaveValue': return 'has the expected value'
-    case 'toHaveURL': return 'has the expected URL'
-    case 'toContainText': return 'contains the expected text'
-    default: return ''
-  }
+ *  return an empty string and the row reads `Verified <target>` — but a negated
+ *  unknown matcher still has to say so, or the row asserts the opposite of the
+ *  test. */
+function matcherPhrase(matcher: string, negated = false): string {
+  const phrase = ((): string => {
+    switch (matcher) {
+      case 'toBeVisible': return 'is visible'
+      case 'toBeHidden': return 'is hidden'
+      case 'toBeEnabled': return 'is enabled'
+      case 'toBeDisabled': return 'is disabled'
+      case 'toBeChecked': return 'is checked'
+      case 'toHaveText': return 'has the expected text'
+      case 'toHaveValue': return 'has the expected value'
+      case 'toHaveURL': return 'has the expected URL'
+      case 'toContainText': return 'contains the expected text'
+      default: return ''
+    }
+  })()
+  if (!negated) return phrase
+  // `is visible` → `is not visible`; an unphrased matcher falls back to naming
+  // the matcher itself rather than silently dropping the negation.
+  if (phrase.startsWith('is ')) return `is not ${phrase.slice(3)}`
+  if (phrase.startsWith('has ')) return `does not have ${phrase.slice(4)}`
+  if (phrase.startsWith('contains ')) return `does not contain ${phrase.slice(9)}`
+  return `does not match ${matcher}`
 }
 
 /** `/^authorize$/i` → `authorize`. Anchors and escapes are regex syntax, not
@@ -338,9 +367,18 @@ function unanchorPattern(pattern: string): string {
   return pattern
     .replace(/^\^/, '')
     .replace(/\$$/, '')
+    // Character classes and their quantifiers are wildcards standing in for
+    // text nobody can predict — `/^Pickup\\s/` matches a button labelled
+    // "Pickup". Dropping the backslash alone rendered it "Pickups", a word that
+    // appears neither in the test nor on the page.
+    .replace(/\\[dDsSwWbB]\+?\*?\??/g, ' ')
+    // What is left is an escaped literal (`example\\.com`, `Order \\#`).
     .replace(/\\(?=.)/g, '')
     // An alternation is a set of acceptable labels, not a pipe-delimited string.
     .replace(/\|/g, ' / ')
+    .replace(/\s+/g, ' ')
+    // A trailing separator left behind by a stripped wildcard reads as a typo.
+    .replace(/[\s,;:.-]+$/, '')
     .trim()
 }
 

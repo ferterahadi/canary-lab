@@ -256,11 +256,18 @@ export function RunDetailColumn({
             stream re-executes every clear-screen redraw and collapses scrollback
             to the last frame. */}
         {!isVerify && <div hidden={tab !== 'agent'} className="h-full min-h-0">
+          {/* One flex column, not a banner beside a `h-full` block: the pane's
+              wrapper clips at its own height, so a `h-full` agent view under a
+              banner overflowed by exactly the banner's height and cut that much
+              off the bottom of the transcript. */}
           <RunPane scroll={false}>
-            {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
-              <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
-            )}
             <div className="flex h-full min-h-0 flex-col overflow-hidden">
+              {m.healMode === 'manual' && view.actions.cancelHeal.enabled && m.signalPaths && (
+                <div className="shrink-0">
+                  <ManualHealBanner runId={m.runId} signalPaths={m.signalPaths} />
+                </div>
+              )}
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
               {m.healMode === 'external' ? (
                 // External heal: there is no local PTY to attach. The agent
                 // transcript lives in the user's Claude / Codex window once a
@@ -284,6 +291,7 @@ export function RunDetailColumn({
                   emptyState={{ title: 'No repair agent running', hint: 'If the tests fail, the agent starts here and its reasoning streams live.' }}
                 />
               )}
+              </div>
             </div>
             {/* Retest lives as a per-row icon in RunsColumn now (see
                 RetestIconButton). The footer-bar variant that used to sit here

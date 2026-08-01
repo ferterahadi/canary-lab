@@ -110,7 +110,7 @@ export function PlaywrightPlayback({
                   {test.error.message}
                 </pre>
               ) : isCurrent ? (
-                <div className="mt-1.5 text-[11px]" style={{ color: 'var(--accent)' }}>
+                <div className="mt-1.5 text-[11px]" style={{ color: 'var(--running)' }}>
                   Currently executing in this Playwright process.
                 </div>
               ) : test.passed !== true && test.status ? (
@@ -303,7 +303,7 @@ export function PlaybackHeader({ test, current }: { test: PlaybackTest; current:
     <div className="mt-2.5 min-w-0">
       <div
         className="min-w-0 text-[12.5px] font-medium leading-snug"
-        style={{ color: current ? 'var(--accent)' : 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+        style={{ color: current ? 'var(--running)' : 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
         title={test.title}
       >
         {stripLeadingTestOrdinal(test.title)}

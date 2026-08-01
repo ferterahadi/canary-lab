@@ -71,7 +71,7 @@ export function PlaywrightPanel({
       {view === 'playback' && (
         <div className="h-full overflow-y-auto scrollbar-thin" style={{ background: 'var(--bg-base)' }}>
           {diagnostics && <VerificationDiagnosticsPanel diagnostics={diagnostics} />}
-          <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} onOpenArtifactSettings={onOpenArtifactSettings} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
+          <PlaywrightPlayback events={events} artifactGroups={artifactGroups} artifactPolicy={artifactPolicy} summary={summary} totalTests={totalTests} {...(focusTest ? { focusTest } : {})} embedded />
         </div>
       )}
     </RunPane>
