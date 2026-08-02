@@ -84,7 +84,9 @@ under `[General]` there).
   (worktree or queue), and resource-aware admission queueing.
 - **The repair never lands in the user's checkout.** Every test run boots in a per-run
   git worktree (WIP hydrated in), and the heal agent's edits are diffed out to
-  `logs/runs/<runId>/fixes/` at teardown. Applying the patch is the user's call.
+  `logs/runs/<runId>/fixes/` at teardown. The checkout is never modified; a run that heals
+  green force-pushes the patch to a per-feature branch and opens a draft pull request
+  instead (opt out via `autoProposePr`).
 - Boot-only sessions: start a feature's services without running tests, for manual
   exploration.
 - Envset switching: run one feature against `local`/`staging`/`production` env files

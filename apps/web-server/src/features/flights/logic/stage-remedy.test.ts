@@ -96,6 +96,50 @@ describe('applyFlightStageRemedy', () => {
     expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: a }).toString().trim()).toBe('canary-lab: wip')
   })
 
+  // A feature repo is often a SUBDIRECTORY of a much larger git root — the
+  // demo storefront's services sit beside `features/` in one workspace repo.
+  // Both the remedy's own count and portify's gate are scoped with `-- .`, so
+  // the sweep has to be too, or a button reading "2 modified" quietly commits
+  // every unrelated dirty file in the workspace.
+  function nestedRepo(prefix: string): { root: string; service: string } {
+    const root = makeRepo(prefix)
+    const service = path.join(root, 'demo-app', 'checkout-service')
+    fs.mkdirSync(service, { recursive: true })
+    fs.writeFileSync(path.join(service, 'server.ts'), 'v1')
+    fs.writeFileSync(path.join(root, 'sibling.txt'), 'committed')
+    git(root, 'add', '-A')
+    git(root, 'commit', '-m', 'nested baseline')
+    // Dirty on BOTH sides of the pathspec.
+    fs.writeFileSync(path.join(service, 'server.ts'), 'v2')
+    fs.writeFileSync(path.join(service, 'untracked.ts'), 'new')
+    fs.writeFileSync(path.join(root, 'sibling.txt'), 'unrelated edit')
+    fs.writeFileSync(path.join(root, 'sibling-new.txt'), 'unrelated new')
+    return { root, service }
+  }
+
+  const siblingState = (root: string): string =>
+    execFileSync('git', ['status', '--porcelain', '--', 'sibling.txt', 'sibling-new.txt'], { cwd: root })
+      .toString().trim()
+
+  it('stash touches only the feature repo, not the rest of its git root', async () => {
+    const { root, service } = nestedRepo('remedy-nested-stash-')
+    const before = siblingState(root)
+    await applyFlightStageRemedy(manifestWith([service], DIRTY_ERROR), 'stash')
+    expect(execFileSync('git', ['status', '--porcelain', '--', '.'], { cwd: service }).toString().trim()).toBe('')
+    expect(siblingState(root)).toBe(before)
+  })
+
+  it('commit records only the feature repo, leaving unrelated dirt alone', async () => {
+    const { root, service } = nestedRepo('remedy-nested-commit-')
+    const before = siblingState(root)
+    await applyFlightStageRemedy(manifestWith([service], DIRTY_ERROR), 'commit')
+    expect(execFileSync('git', ['status', '--porcelain', '--', '.'], { cwd: service }).toString().trim()).toBe('')
+    expect(siblingState(root)).toBe(before)
+    const committed = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: root }).toString()
+    expect(committed).toContain('demo-app/checkout-service/untracked.ts')
+    expect(committed).not.toContain('sibling')
+  })
+
   it('409s when no remedy applies', async () => {
     await expect(applyFlightStageRemedy(manifestWith([makeRepo('remedy-none-')], 'agent timed out'), 'stash'))
       .rejects.toMatchObject({ statusCode: 409 })

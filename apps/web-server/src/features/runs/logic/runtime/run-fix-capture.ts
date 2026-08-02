@@ -23,6 +23,11 @@ import { listUntracked, sanitizeRepoFileName } from './repo-worktree'
  *  have its fix captured — never blocks the boot. */
 export async function captureFixBaseline(ctx: RunContext): Promise<void> {
   for (const handle of ctx.worktreeHandles) {
+    // The stash probe is what makes an unreadable tree safe: it fails on
+    // exactly the cases that would also break the untracked listing, so a repo
+    // git cannot describe gets no baseline and therefore no capture — rather
+    // than an empty baseline that would file every pre-existing file as the
+    // agent's work.
     const ref = await snapshotWorkingTree(handle.worktreeRoot)
     if (ref === null) continue
     const head = await runGit(handle.worktreeRoot, ['rev-parse', 'HEAD'])
@@ -46,6 +51,14 @@ export async function captureFixBaseline(ctx: RunContext): Promise<void> {
  *  git ignores it. */
 export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | null> {
   if (ctx.fixBaselines.size === 0) return null
+  // No heal cycle, no repair to capture. Teardown runs this for EVERY worktree
+  // run, so without this gate anything a worktree accumulated on its own — a
+  // file a booted service wrote, a stray untracked path the baseline could not
+  // see — is filed as an agent's fix, and the Changes tab then offers to open a
+  // pull request for it. `noteHealCycle` fires at the top of both heal loops
+  // (local and external), so a genuine repair always carries at least one.
+  // Same predicate `shouldAutoPropose` already uses for "a repair happened".
+  if (ctx.healCycles <= 0) return null
   const repos: RunFixCapture['repos'] = []
   for (const [repoName, base] of ctx.fixBaselines) {
     // Stage ONLY agent-created files (untracked now, but not at baseline) so

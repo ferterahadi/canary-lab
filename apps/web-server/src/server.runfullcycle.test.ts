@@ -10,7 +10,7 @@ import { runDirFor } from './features/runs/logic/runtime/run-paths'
 import type { PaneMessage, PaneSubscriber } from './features/runs/logic/pane-broker'
 import type { PtyFactory, PtyHandle, PtySpawnOptions } from './features/runs/logic/runtime/pty-spawner'
 
-// End-to-end check: POST /api/runs against the broken_todo_api fixture, drive
+// End-to-end check: POST /api/runs against the demo_catalog fixture, drive
 // the orchestrator with a fake ptyFactory so we don't need real Playwright,
 // and verify that the orchestrator emits its events in the right order and
 // produces a manifest plus a per-failure dir.

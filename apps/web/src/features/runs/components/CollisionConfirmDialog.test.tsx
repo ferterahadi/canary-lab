@@ -11,8 +11,8 @@ import { CollisionConfirmDialog } from './CollisionConfirmDialog'
 const info: RepoCollisionChoice = {
   type: 'repo_collision_requires_choice',
   conflictingRunId: 'other-1',
-  conflictingFeature: 'broken_todo_api',
-  repoPaths: ['/repos/broken_todo_api'],
+  conflictingFeature: 'demo_catalog',
+  repoPaths: ['/repos/demo_catalog'],
   options: ['worktree', 'queue'],
   message: 'collision',
 }
@@ -41,10 +41,10 @@ function clickButton(label: string): void {
 describe('CollisionConfirmDialog', () => {
   it('names the conflicting feature and offers both choices', async () => {
     await act(async () => {
-      root.render(<CollisionConfirmDialog info={info} feature="broken_todo_api" onChoose={() => {}} onCancel={() => {}} />)
+      root.render(<CollisionConfirmDialog info={info} feature="demo_catalog" onChoose={() => {}} onCancel={() => {}} />)
     })
     const text = container.textContent ?? ''
-    expect(text).toContain('broken_todo_api')
+    expect(text).toContain('demo_catalog')
     expect([...container.querySelectorAll('button')].map((b) => b.textContent?.trim()))
       .toEqual(expect.arrayContaining(['Cancel', 'Queue', 'Run isolated (worktree)']))
   })
@@ -52,7 +52,7 @@ describe('CollisionConfirmDialog', () => {
   it('fires onChoose with worktree and queue', async () => {
     const onChoose = vi.fn()
     await act(async () => {
-      root.render(<CollisionConfirmDialog info={info} feature="broken_todo_api" onChoose={onChoose} onCancel={() => {}} />)
+      root.render(<CollisionConfirmDialog info={info} feature="demo_catalog" onChoose={onChoose} onCancel={() => {}} />)
     })
     await act(async () => clickButton('Run isolated (worktree)'))
     expect(onChoose).toHaveBeenCalledWith('worktree')

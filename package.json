@@ -81,6 +81,7 @@
     "prepack": "npm run build",
     "e2e:flight": "tsx apps/cli/e2e-flight-drive.ts",
     "smoke:pack": "node tools/smoke-pack.mjs",
+    "smoke:demo": "node tools/smoke-demo.mjs",
     "publish:package": "node tools/publish-package.mjs",
     "changelog": "node tools/generate-changelog.mjs",
     "changelog:preview": "node tools/generate-changelog.mjs --dry-run",

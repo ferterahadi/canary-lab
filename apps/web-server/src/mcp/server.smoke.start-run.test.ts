@@ -110,7 +110,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'reuse-active',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
@@ -122,7 +122,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-reuse',
@@ -137,7 +137,7 @@ describe('MCP HTTP server (smoke)', () => {
         status: 'healing',
         claimed: true,
       })
-      expect(runStore.list({ feature: 'broken_todo_api' }).map((entry) => entry.runId)).toEqual(['reuse-active'])
+      expect(runStore.list({ feature: 'demo_catalog' }).map((entry) => entry.runId)).toEqual(['reuse-active'])
       expect(runStore.get('reuse-active')?.manifest.externalHealSession).toMatchObject({
         sessionId: 'sess-reuse',
         clientKind: 'claude',
@@ -172,7 +172,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-pty',
@@ -220,7 +220,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-interactive',
@@ -264,7 +264,7 @@ describe('MCP HTTP server (smoke)', () => {
       client = await connectClient(address, '/mcp?profile=full')
       runStore.bootstrap({
         runId: '2026-05-19T0841-7cvh',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-05-19T08:41:00.000Z',
         status: 'failed',
@@ -274,7 +274,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           run_ref: '7cvh',
           claim_heal: true,
@@ -316,7 +316,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'suppress-active',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
@@ -328,7 +328,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-pty',

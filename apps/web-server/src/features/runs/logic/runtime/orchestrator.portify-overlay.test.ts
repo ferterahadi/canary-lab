@@ -194,6 +194,10 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
       worktrees: [handle],
       healthCheck: async () => true,
       delay: async () => undefined,
+      // These tests hand-simulate the agent's edits instead of driving a heal
+      // loop, so they must declare the cycle that loop would have counted —
+      // capture is gated on a repair having happened.
+      initialHealCycles: 1,
     })
     await orch.start()
     // Simulate the heal agent editing a tracked file + adding a new one.
@@ -227,6 +231,7 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
     const orch = new RunOrchestrator({
       feature: makeFeature(), runId: RUN_ID, runDir, ptyFactory: factory,
       worktrees: [handle], healthCheck: async () => true, delay: async () => undefined,
+      initialHealCycles: 1,
     })
     await orch.start() // baseline records wip-note.txt + docs/generated.md as pre-existing
     // The "agent" edits a tracked file and adds ITS OWN new file.
@@ -258,6 +263,70 @@ describe('fix capture (R80): the heal edit diff captured from the worktree at te
     })
     await orch.start()
     await orch.stop('passed')
+    expect(readManifest(buildRunPaths(runDir).manifestPath)!.fixCapture).toBeUndefined()
+  })
+
+  // Regression for run 2026-07-24T0711-xvpr: healCycles 0, aborted after 3.7s,
+  // no agent ever spawned — yet it wrote an 87-file capture, and the Changes
+  // tab then offered to open a pull request for files nobody had edited. The
+  // untracked-delta guard closes the path that run took; this closes the class.
+  it('writes no fixCapture when no heal cycle ran, even though the worktree changed', async () => {
+    const handle = await makeWorktree()
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(),
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: factory,
+      worktrees: [handle],
+      healthCheck: async () => true,
+      delay: async () => undefined,
+      // No initialHealCycles: nothing repaired anything.
+    })
+    await orch.start()
+    // Something that is NOT a repair mutates the worktree — a booted service
+    // writing a cache file, say.
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'app.js'), BASE + '// not a repair\n')
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'service-wrote-this.json'), '{}\n')
+    await orch.stop('aborted')
+
+    expect(readManifest(buildRunPaths(runDir).manifestPath)!.fixCapture).toBeUndefined()
+  })
+
+  // Fail closed, both ends. If git cannot list a worktree's untracked files we
+  // cannot tell the agent's new files from what was already there, so the
+  // honest output is no patch — never a patch built on a guessed-empty baseline.
+  it('takes no baseline for a worktree git cannot describe', async () => {
+    const handle = await makeWorktree()
+    fs.rmSync(handle.worktreeRoot, { recursive: true, force: true })
+    fs.mkdirSync(handle.worktreeRoot, { recursive: true }) // present, but not a work tree
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(), runId: RUN_ID, runDir, ptyFactory: factory,
+      worktrees: [handle], healthCheck: async () => true, delay: async () => undefined,
+      initialHealCycles: 1,
+    })
+    await orch.start()
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'app.js'), BASE + '// unattributable\n')
+    await orch.stop('failed')
+
+    expect(readManifest(buildRunPaths(runDir).manifestPath)!.fixCapture).toBeUndefined()
+  })
+
+  it('captures nothing for a worktree that stops being readable mid-run', async () => {
+    const handle = await makeWorktree()
+    const { factory } = makeFakeFactory()
+    const orch = new RunOrchestrator({
+      feature: makeFeature(), runId: RUN_ID, runDir, ptyFactory: factory,
+      worktrees: [handle], healthCheck: async () => true, delay: async () => undefined,
+      initialHealCycles: 1,
+    })
+    await orch.start() // baseline taken while the worktree is still healthy
+    fs.writeFileSync(path.join(handle.worktreeRoot, 'app.js'), BASE + '// healed\n')
+    // The worktree disappears before teardown can diff it.
+    fs.rmSync(path.join(handle.worktreeRoot, '.git'), { recursive: true, force: true })
+    await orch.stop('failed')
+
     expect(readManifest(buildRunPaths(runDir).manifestPath)!.fixCapture).toBeUndefined()
   })
 })

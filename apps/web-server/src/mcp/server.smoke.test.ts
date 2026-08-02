@@ -338,8 +338,8 @@ describe('MCP HTTP server (smoke)', () => {
       const text = toolText(result)
       const features = decode(text) as Array<{ name: string }>
       const featureNames = features.map((f) => f.name).sort()
-      expect(featureNames).toContain('broken_todo_api')
-      expect(featureNames).toContain('example_todo_api')
+      expect(featureNames).toContain('demo_catalog')
+      expect(featureNames).toContain('demo_inventory')
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -363,7 +363,7 @@ describe('MCP HTTP server (smoke)', () => {
         summary: { total: number; portified: number; notPortified: number }
       }
       expect(parsed.features.length).toBeGreaterThan(0)
-      expect(parsed.features.map((f) => f.feature)).toContain('example_todo_api')
+      expect(parsed.features.map((f) => f.feature)).toContain('demo_inventory')
       for (const f of parsed.features) expect(typeof f.portified).toBe('boolean')
       expect(parsed.summary.total).toBe(parsed.features.length)
       expect(parsed.summary.portified + parsed.summary.notPortified).toBe(parsed.summary.total)

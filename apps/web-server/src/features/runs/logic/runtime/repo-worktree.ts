@@ -163,6 +163,11 @@ export function sanitizeRepoFileName(name: string): string {
 // Non-ignored untracked files in a working tree, as a set of repo-relative
 // paths. Used by the fix-capture baseline/teardown to tell agent-created files
 // apart from WIP/docs that were already present before the run.
+// An empty set on failure is safe here only because the caller cannot act on it
+// alone: every way git fails to list untracked files (a bad `core.excludesFile`,
+// a directory that is not a work tree) also fails `git stash create`, so
+// captureFixBaseline skips the repo before an empty set could be mistaken for a
+// clean tree. Measured on git 2.50.1 — both return 128 together.
 export async function listUntracked(worktreeRoot: string): Promise<Set<string>> {
   const res = await runGit(worktreeRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
   if (res.code !== 0) return new Set()

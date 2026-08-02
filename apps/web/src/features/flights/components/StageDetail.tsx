@@ -4,13 +4,13 @@ import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { evaluationTaskId, FactsGrid, STAGE_COLUMN, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageStateLine, type StageRailRow } from './stage-meta'
+import { evaluationTaskId, FactsGrid, StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageStateLine, type StageRailRow } from './stage-meta'
 import { useEvaluationExports } from '@/features/evaluation'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
-import { SkeletonRows, awaitingFor } from '@/shared/ui/Skeleton'
+import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { useStageBandData } from './use-stage-band-data'
 import {
   AllReportsPanel,
@@ -355,13 +355,12 @@ export function StageDetail({
         ? <SpecsPassTimeline progress={loopProgress} live={live} />
         : stage.key === 'specs-coverage' && awaiting
           ? (
-            // The loop's own shape before it starts: the same rubric heading and
+            // The loop's own shape before it starts: the same card, kicker and
             // row list the timeline becomes, so the card doesn't appear from
             // nowhere on the first pass.
-            <div data-testid="specs-pass-skeleton" className={STAGE_COLUMN}>
-              <h3 className="cl-rubric mb-2">Passes</h3>
-              <SkeletonRows awaiting={awaiting} rows={2} />
-            </div>
+            <StageColumn>
+              <SkeletonPanel kicker="Passes" awaiting={awaiting} testId="specs-pass-skeleton" variant="rows" rows={2} />
+            </StageColumn>
           )
           : null}
 

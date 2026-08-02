@@ -30,7 +30,7 @@ vi.mock('../../runs/logic/runtime/launcher/project-config', () => ({ loadProject
 function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
     benchmarkId: 'b1',
-    feature: 'example_todo_api',
+    feature: 'demo_inventory',
     skill: 'broken-delete-contract',
     level: 'med',
     iterations: 2,

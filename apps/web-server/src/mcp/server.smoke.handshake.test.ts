@@ -150,7 +150,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'context-map',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
         healCycles: 1,
@@ -191,7 +191,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       expect(body).toMatchObject({
         runId: 'context-map',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         counts: {
           totalKnown: 3,
           passed: 1,
@@ -291,7 +291,7 @@ describe('MCP HTTP server (smoke)', () => {
       for (let i = 0; i < 3; i += 1) {
         runStore.bootstrap({
           runId: `run-${i}`,
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           startedAt: `2026-05-0${i + 1}T00:00:00.000Z`,
           status: 'passed',
           healCycles: 0,
@@ -323,7 +323,7 @@ describe('MCP HTTP server (smoke)', () => {
       // a `[N]{col,...}:` header (runId is the first column) then one row each.
       const limitedText = toolText(await client.callTool({
         name: 'list_runs',
-        arguments: { feature: 'broken_todo_api', limit: 2 },
+        arguments: { feature: 'demo_catalog', limit: 2 },
       }))
       const limitedLines = limitedText.trim().split('\n')
       expect(limitedLines[0]).toMatch(/^\[2\]\{runId,/)

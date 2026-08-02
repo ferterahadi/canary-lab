@@ -32,7 +32,7 @@ vi.mock('../../runs/logic/runtime/launcher/project-config', () => ({ loadProject
 function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
     benchmarkId: 'b1',
-    feature: 'example_todo_api',
+    feature: 'demo_inventory',
     skill: 'broken-delete-contract',
     level: 'med',
     iterations: 2,
@@ -93,11 +93,11 @@ describe('benchmarkRoutes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/benchmarks',
-      payload: { feature: 'example_todo_api', skill: 'broken-delete-contract', level: 'med', iterations: 2 },
+      payload: { feature: 'demo_inventory', skill: 'broken-delete-contract', level: 'med', iterations: 2 },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ benchmarkId: 'bench-xyz' })
-    expect(received).toMatchObject({ feature: 'example_todo_api', level: 'med', iterations: 2 })
+    expect(received).toMatchObject({ feature: 'demo_inventory', level: 'med', iterations: 2 })
     await app.close()
   })
 
@@ -204,12 +204,12 @@ describe('benchmarkRoutes', () => {
           summary: 'one subtle bug',
           description: 'desc',
           recipe: 'secret recipe',
-          appliesTo: ['example_todo_api'],
+          appliesTo: ['demo_inventory'],
           dir: '/abs',
         },
       ],
     })
-    const res = await app.inject({ method: 'GET', url: '/api/benchmark-skills?feature=example_todo_api' })
+    const res = await app.inject({ method: 'GET', url: '/api/benchmark-skills?feature=demo_inventory' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual([
       { name: 'off-by-one', title: 'Off-by-one nudge', level: 'min', summary: 'one subtle bug', description: 'desc', recipe: 'secret recipe' },
@@ -322,7 +322,7 @@ describe('benchmarkRoutes', () => {
 
     it('frozen creates the inspect worktree and opens it', async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
-      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'example_todo_api', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
+      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'demo_inventory', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
       const app = await buildApp({
         logsDir: tmp,
         store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
@@ -389,7 +389,7 @@ describe('benchmarkRoutes', () => {
       const inspectParent = path.join(tmp, 'benchmarks', 'b1', 'worktrees', 'inspect')
       fs.mkdirSync(inspectParent, { recursive: true })
       fs.writeFileSync(path.join(inspectParent, 'stray.txt'), 'not a dir') // file, not a checkout
-      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'example_todo_api', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
+      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'demo_inventory', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
       const app = await buildApp({
         logsDir: tmp,
         store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),

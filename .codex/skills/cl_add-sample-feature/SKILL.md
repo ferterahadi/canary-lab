@@ -12,14 +12,17 @@ Sample features are the scaffold every consumer starts from, and they only ship 
 the build (`templates/project/` → `dist/templates/`, copied by
 `tools/prepare-assets.mjs`). Editing them without `smoke:pack` proves nothing.
 
-## The four existing samples (pick the closest as a model)
+## What ships (pick the closest as a model)
+
+Two features over one demo app — `templates/project/demo-app/`, a storefront of
+three services. The four toy samples (`example_todo_api`, `broken_todo_api`,
+`flaky_orders_api`, `tricky_checkout_api`) were retired in 1.6.0.
 
 | Sample | Role |
 | --- | --- |
-| `example_todo_api` | Happy path; the canonical config to copy |
-| `broken_todo_api` | Intentionally failing — the heal-loop target |
-| `flaky_orders_api` | Intermittent failures |
-| `tricky_checkout_api` | Hard-to-diagnose failures |
+| `demo_inventory` → `demo-app/inventory-service` | **Deliberately correct.** The green first Run, and the Benchmark's subject — it sabotages a working app, so a red baseline can never score. Its specs are un-annotated on purpose: the "before you annotate" state. **Keep it passing.** |
+| `demo_catalog` → `demo-app/catalog-service` | Two planted defects — the heal-loop target. Carries the annotated PRD (`docs/prd.md` + the `_prd-summary.json` sidecar) and the `@req-`/`@path-` tags, so it is also the requirement-coverage demonstration. |
+| *(none)* → `demo-app/checkout-service` | Deliberately **not** onboarded, so a flight has something to build from scratch. Nothing in `features/` may point at it, or the similarity gate skips seven stages. |
 
 ## Anatomy
 
@@ -29,10 +32,15 @@ templates/project/features/<name>/
 ├── playwright.config.ts
 ├── e2e/                    # specs + helpers/
 ├── envsets/                # envsets.config.json + <env>/<slot>.env
-└── scripts/                # service entrypoints (e.g. server.ts)
+└── docs/                   # prd.md + the generated _prd-summary.* sidecars
 ```
 
-`feature.config.cjs` essentials (see `example_todo_api` for a commented example):
+Both shipped features point `localPath` **outward** at `demo-app/<service>`
+rather than at their own folder — the feature and the app it tests are separate
+things, which is how a real feature looks. No shipped sample is self-contained
+any more, so `scripts/` inside a feature dir is a legacy shape only.
+
+`feature.config.cjs` essentials (see `demo_catalog` for a commented example):
 
 - `envs: ['local', 'production']` — which envsets exist for the feature.
 - Each `startCommand`: `command`, `envs: ['local']` to gate local-only boots,

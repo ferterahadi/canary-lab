@@ -75,7 +75,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'failure-detail',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
         healCycles: 1,
@@ -143,7 +143,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'journal-run',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
         healCycles: 2,
@@ -188,7 +188,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'journal-run',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
         healCycles: 2,

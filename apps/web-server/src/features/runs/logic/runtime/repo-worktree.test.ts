@@ -204,6 +204,10 @@ describe('listUntracked', () => {
   it('returns an empty set when the path is not a git repo', async () => {
     // The fix-capture baseline runs before we know a repo is usable, so a
     // non-repo must read as "nothing untracked" rather than throw mid-run.
+    // Safe only because `git stash create` fails on the same inputs (measured:
+    // both exit 128 for a non-work-tree and for a bad core.excludesFile), so
+    // the baseline skips such a repo before this empty set can be mistaken for
+    // a clean tree — which is what would file pre-existing files as agent-new.
     const dir = path.join(root, 'not-a-repo')
     fs.mkdirSync(dir, { recursive: true })
 

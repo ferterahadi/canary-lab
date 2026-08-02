@@ -73,10 +73,25 @@ run(
   tempRoot,
 )
 
+// The demo storefront is the first thing a new workspace can Run or fly, so it
+// has to survive packaging: the feature, the service it points at, and the
+// un-onboarded sibling a flight targets. A missing file here is a demo that
+// silently didn't ship.
 const scaffoldPaths = [
   'package.json',
-  'features/example_todo_api/feature.config.cjs',
-  'features/broken_todo_api/feature.config.cjs',
+  'features/demo_catalog/feature.config.cjs',
+  'features/demo_catalog/e2e/catalog.spec.ts',
+  'features/demo_catalog/docs/_prd-summary.md',
+  'demo-app/catalog-service/server.ts',
+  'demo-app/checkout-service/server.ts',
+  'demo-app/checkout-service/REQUIREMENTS.md',
+  // The known-good half of the demo. Its suite passing is what the Benchmark
+  // needs (it sabotages a working app) and what makes a new workspace's first
+  // Run green, so a packaging slip here is not cosmetic.
+  'features/demo_inventory/feature.config.cjs',
+  'features/demo_inventory/e2e/inventory.spec.ts',
+  'features/demo_inventory/envsets/local/demo_inventory.env',
+  'demo-app/inventory-service/server.ts',
 ]
 
 // One prompt per agent-spawning path that ships, plus a schema sidecar — the
@@ -111,7 +126,12 @@ for (const relPath of [
   '.codex/self-fixing-loop.md',
   '.codex/env-import.md',
   '.codex/canary-lab-feature.md',
-  'features/example_todo_api/src/config.ts',
+  // The four toy samples retired in 1.6.0 when the demo storefront replaced
+  // them — a scaffold still carrying one means a stale template shipped.
+  'features/example_todo_api/feature.config.cjs',
+  'features/broken_todo_api/feature.config.cjs',
+  'features/flaky_orders_api/feature.config.cjs',
+  'features/tricky_checkout_api/feature.config.cjs',
 ]) {
   if (fs.existsSync(path.join(projectDir, relPath))) {
     throw new Error(`Smoke test failed: deprecated path still present: ${relPath}`)

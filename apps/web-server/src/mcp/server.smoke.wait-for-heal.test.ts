@@ -75,7 +75,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'wait-needs-heal',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
         healCycles: 1,
@@ -141,7 +141,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'wait-passed',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'passed',
         healCycles: 0,
@@ -158,7 +158,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'wait-failed',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'failed',
         healCycles: 0,
@@ -225,7 +225,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'wait-timeout',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'running',
         healCycles: 0,
@@ -270,7 +270,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'wait-claim',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
         healCycles: 1,

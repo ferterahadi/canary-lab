@@ -61,14 +61,14 @@ entry. The three places that must agree for the web aliases are
 | `apps/cli/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`apps/cli/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/src/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
 | `apps/web-server/src/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions); `tools.ts` builds the profile gate and delegates to `tool-groups/{reads,authoring,run-lifecycle,heal-flow}.ts` (`authoring.ts` composes seven domain siblings); `tool-schemas.ts` holds the input schemas and deps interface, `tool-profiles.ts` the tool-name union and profile arrays, `heal-task-wait.ts` the wait/boot-session steering, `tool-support.ts` the run-resolution and result helpers |
-| `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, and `logic/heal/` external-heal broker/surface/claim-policy), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `flights` (flight store, conductor/drive loop, per-stage adapters), `wizard` (draft records for external authoring sessions, tests-draft route — read/track only; the internal plan→spec agents were retired in favour of the flight pipeline), `evaluation` (export archive/store, test-review export, localized-rewrite agent), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark`, `version` (npm-registry update check) |
+| `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, `logic/heal/` external-heal broker/surface/claim-policy, and `logic/pr/` fix-to-pull-request: preflight, propose, end-of-run auto-propose), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `flights` (flight store, conductor/drive loop, per-stage adapters), `wizard` (draft records for external authoring sessions, tests-draft route — read/track only; the internal plan→spec agents were retired in favour of the flight pipeline), `evaluation` (export archive/store, test-review export, localized-rewrite agent), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark`, `version` (npm-registry update check) |
 | `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `gh-cli`, `ring-buffer`, `simple-zip`, `toon`, `workspace-events`, `editor-launch`, `open-browser`, `prompts` (the `.md` template loader), `feature-loader`, `launcher-startup` (service startup + health probes), `config-ast`, `ast-extractor` (the Playwright tag/assertion parser the coverage ledger reads), and `ws/workspace-stream` |
 | `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Scaffolded workspace files, incl. four sample features: `example_todo_api` (happy path), `broken_todo_api` (heal target), `flaky_orders_api`, `tricky_checkout_api` |
+| `templates/project/` | Scaffolded workspace files. `demo-app/` is the demo storefront a new workspace runs and flies — three services, each opening a different door: `inventory-service` is onboarded by `demo_inventory` and **deliberately correct** (a green first Run, and the Benchmark's subject — it sabotages a working app, so a red baseline can never score); `catalog-service` is onboarded by `demo_catalog` and carries two planted defects (the repair loop); `checkout-service` is deliberately *not* onboarded, so a flight has something to build from scratch. Those two features are the only samples shipped, and they back the integration tests. |
 | `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions` |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
@@ -218,7 +218,9 @@ runs Playwright, and captures evidence. On failure, the run either spawns a loca
 (`auto-heal.ts`) or parks for an external client (see [Heal System](#heal-system)).
 The agent fixes code and drops a `rerun`/`restart` signal; the orchestrator continues
 the same run until pass or terminal failure. At teardown the agent's edits are diffed out
-of each worktree into `<runDir>/fixes/` before the worktree is released.
+of each worktree into `<runDir>/fixes/` before the worktree is released, and a run that
+healed green proposes that diff as a draft pull request (see
+[End-of-run pull request](#end-of-run-pull-request)).
 
 ### Logging and retention
 
@@ -274,8 +276,11 @@ overlay could not apply and it would boot un-portified.
 The point is fix capture. `captureFixBaseline` stashes a baseline ref after
 overlay + envset + WIP hydration, so the teardown diff is exactly the repair; `captureFixes`
 writes it to `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture` before the
-worktree goes away. **The heal agent never mutates the product repo** — the user applies the
-patch or doesn't. Non-portified worktrees are removed at teardown; a portified run reverses
+worktree goes away. **The heal agent never mutates the product repo's working copy** — its
+edits reach the user as a patch file and, on a green healed run, as a draft pull request
+pushed from a throwaway worktree (see [End-of-run pull request](#end-of-run-pull-request));
+HEAD and the checkout are left exactly as they were, though the repo does gain the fix
+branch ref. Non-portified worktrees are removed at teardown; a portified run reverses
 its overlay but *keeps* the worktree (it holds the repair, and the Cleanup page's Worktrees
 tab owns its lifecycle). Boot, verify and benchmark sessions keep the older
 portified/collision-only behaviour — they don't heal, so there is nothing to capture.
@@ -380,6 +385,46 @@ the same path (`restartExternalRun` with `claimable: false`) rather than being r
 `handoff_heal`: active runs can only hand off to `manual` (the orchestrator can't add
 a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted run.
 
+### End-of-run pull request
+
+A run that healed green does not stop at the patch file. `autoProposeFixes`
+(`apps/web-server/src/features/runs/logic/pr/auto-propose.ts`) runs right after
+`captureFixes` in the orchestrator's teardown and opens a **draft** pull request per repo,
+so an unattended overnight repair leaves a review thread rather than a patch nobody knows
+about. `shouldAutoPropose` is deliberately narrow, because a push is the one step here that
+leaves the machine and can't be taken back: `executionType: 'run'` only (boot, verify and
+benchmark sessions never heal), `status === 'passed'` only (a loop that gave up produced a
+fix that did *not* work), `healCycles > 0`, and a non-empty `fixCapture`. Consent is the
+workspace setting `autoProposePr` in `canary-lab.config.json` — default **on**, defaulted
+and parsed in
+`apps/web-server/src/features/runs/logic/runtime/launcher/project-config.ts`, validated on
+write in `apps/web-server/src/features/config/routes/project-config.ts`, toggled under
+Settings → GitHub. A `RunContext` with no `projectRoot` has no config to read, so it never
+pushes.
+
+`proposeFixesForRun` (`apps/web-server/src/features/runs/logic/pr/propose-fixes.ts`) is the
+single mechanism behind both the automatic trigger and the user's own **Propose PR** dialog
+(`POST /api/runs/:runId/propose-pr`); only the `draft` flag differs. The working copy is
+still never touched: the patch is applied in a throwaway worktree cut from the captured
+`baseSha`, committed, force-pushed, and turned into a PR by `gh`, whose own credential does
+the push — Canary Lab never handles a token. What the product repo *does* gain is the fix
+branch ref and its remote-tracking ref. The branch is scoped to **feature + repo**
+(`fixBranchName(feature, repoName)` → `canary-lab/fix-<feature>-<repo>`), not to the run, so
+healing the same feature three times updates ONE pull request instead of opening three. That
+makes the order load-bearing: the push happens FIRST and an existing PR is looked up only
+afterwards, so a reviewer never opens a stale earlier attempt.
+
+Failure is recorded, never raised — a run's verdict must not depend on GitHub being
+reachable. Every outcome, success and failure, lands on `manifest.prAttempt` (`RunPrAttempt`
+in `shared/run-state.ts`: `at`, `auto`, and a per-repo `{ ok, url?, reason? }`), written
+through `stateSink.patchManifest` so the runs WebSocket pushes it live; successes also merge
+into `manifest.proposedPrs`. The web **Changes** tab
+(`apps/web/src/features/runs/components/ChangesTab.tsx`, a tab of `RunDetailColumn`, disabled
+rather than hidden when a run changed nothing) renders the captured diff per repo — served as
+text by `GET /api/runs/:runId/fixes/:repoName/patch`, which 404s when the run captured nothing
+for that repo and 410s once the Cleanup page trimmed the run directory away — next to the PR
+link, or the per-repo reason there is none.
+
 ## MCP Layer
 
 - The MCP HTTP server mounts at `localhost:<port>/mcp` (streamable HTTP) inside
@@ -428,7 +473,13 @@ a local autoHeal mid-flight); `auto`/`claude`/`codex` require a failed/aborted r
   (`executionType: 'boot'`, started via `boot_services`) instead returns
   `type: 'boot_session'` (`bootSessionValue`/`isActiveBootRun`, `mcp/heal-task-wait.ts`) from
   `start_run` and `wait_for_heal_task` — no heal claim, no `healWaitNext`, and
-  `wait_for_heal_task` returns immediately rather than dead-waiting until timeout.
+  `wait_for_heal_task` returns immediately rather than dead-waiting until timeout. A
+  `passed` result additionally carries a `fix` block (`healFixOutcome`,
+  `mcp/heal-task-wait.ts`) — per repo: files changed, plus the draft-PR url or the
+  `noPrReason` there is none — whose `note` tells the client not to open or push one of its
+  own. It has to ride the *result*: `REPAIR_INSTRUCTIONS` never mentions the pull request at
+  all, so a skill-less client would otherwise push a duplicate branch on top of the one the
+  run just opened.
 - **Feature docs convention**: feature-scoped prose (distilled sessions, plans,
   notes) lives at `features/<name>/docs/<slug>.md`. The `write_feature_doc` MCP tool
   (`coverage` / `flight` / `lifecycle` / `full` profiles — **not** `author`) is the only
@@ -563,6 +614,7 @@ procedure.
 | Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/src/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/heal-task-wait.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | nothing automated — discipline only | `cl_sync-agent-surfaces` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tool-groups/`) ↔ instructions ↔ the same discovered skill set | partial: tool unit tests | `cl_sync-agent-surfaces` |
 | **Repair rule + honest counts on every agent surface** | `MODE_COPY` (`runs/logic/runtime/auto-heal.ts`) ↔ `REPAIR_INSTRUCTIONS` (`mcp/server.ts`) ↔ `EXTERNAL_HEAL_NEXT_STEPS` (`runs/logic/heal/external-heal-surface.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "fix app/service code, not tests, unless provably wrong"; counts from `statusLine`, never `total - failed`. **Presence in `instructions` is not delivery**: the Claude Code CLI truncates a server's `instructions` at 2048 chars, so a rule must sit inside that window OR ride a tool result (results and tool descriptions are not truncated). The pass-count rule and the test-failure repair rule ride the heal result for exactly this reason. | `mcp/repair-guardrail.test.ts` (asserts POSITION, not just presence) + `auto-heal.test.ts` | `cl_run-evidence-invariants` |
+| Auto-PR on a healed green run | `shouldAutoPropose` gate (`runs/logic/pr/auto-propose.ts`) ↔ `autoProposePr` default + parse (`runs/logic/runtime/launcher/project-config.ts`) + write validator (`config/routes/project-config.ts`) ↔ `RunPrAttempt` / `proposedPrs` on the manifest (`shared/run-state.ts`) ↔ the `fix` block on the `passed` result (`healFixOutcome`, `mcp/heal-task-wait.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "the run opens the draft PR; the agent reports it and opens none of its own". The rule is **not** in `REPAIR_INSTRUCTIONS`, so it reaches skill-less clients through the tool result alone: loosen the gate and the result text has to move with it, or an agent pushes a duplicate branch onto the one the run just opened. | `pr/auto-propose.test.ts` (gate + manifest writes) + `mcp/heal-fix-outcome.test.ts` (result shape); the skill prose is discipline only | `cl_sync-agent-surfaces` |
 | Flight stage hand-off (`stage_producer: "external"`) | `externalizable.ts` (`flights/logic/stages/`) ↔ the three wired adapters (`scout.ts`, `docs.ts`, `specs-coverage.ts`) ↔ `'external-work'` in `FlightCheckpointKind` (`shared/flights/types.ts`) ↔ `flightNext` steering + the oversized-payload fallback (`mcp/tool-groups/flight.ts`) ↔ the umbrella `canary-lab/SKILL.md` in all three channels ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`) | `stages.external-producer.test.ts` + `externalizable.test.ts` | `cl_sync-agent-surfaces` |
 | Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |

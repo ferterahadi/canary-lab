@@ -87,7 +87,7 @@ describe('MCP HTTP server (smoke)', () => {
       for (const runId of ['2026-05-19T0841-7cvh', '2026-05-19T0941-17cvh']) {
         runStore.bootstrap({
           runId,
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           startedAt: '2026-05-19T08:41:00.000Z',
           status: 'failed',
@@ -99,7 +99,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           run_ref: '7cvh',
           claim_heal: true,
@@ -149,7 +149,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-new',
@@ -162,7 +162,7 @@ describe('MCP HTTP server (smoke)', () => {
         reused: false,
         claimed: true,
       })
-      expect(starts).toEqual(['broken_todo_api'])
+      expect(starts).toEqual(['demo_catalog'])
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -191,7 +191,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       const result = await client.callTool({
         name: 'boot_services',
-        arguments: { feature: 'example_todo_api', env: 'local' },
+        arguments: { feature: 'demo_inventory', env: 'local' },
       })
 
       expect(JSON.parse(toolText(result))).toMatchObject({
@@ -199,7 +199,7 @@ describe('MCP HTTP server (smoke)', () => {
         booted: true,
       })
       expect(calls).toHaveLength(1)
-      expect(calls[0]).toMatchObject({ feature: 'example_todo_api', env: 'local', executionType: 'boot' })
+      expect(calls[0]).toMatchObject({ feature: 'demo_inventory', env: 'local', executionType: 'boot' })
       // Boot sessions never heal — no external heal agent is attached.
       expect(calls[0].healAgent).toBeUndefined()
     } finally {

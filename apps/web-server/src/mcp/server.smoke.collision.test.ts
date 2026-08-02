@@ -108,17 +108,21 @@ describe('MCP HTTP server (smoke)', () => {
       )
       await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
 
-      // A run already occupying the broken_todo_api repo (running, not healing,
+      // A run already occupying the demo_catalog repo (running, not healing,
       // so the route's heal-reuse path doesn't short-circuit).
       runStore.bootstrap({
         runId: 'busy-run',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'running',
         healCycles: 0,
         services: [],
-        repoPaths: [path.join(projectRoot, 'features', 'broken_todo_api')],
+        // The feature's repo, NOT its feature dir — demo_catalog points outward
+        // at the demo storefront's product code. Collision is an exact resolved
+        // path intersection, so a feature-dir path here would silently never
+        // collide and the test would pass for the wrong reason.
+        repoPaths: [path.join(projectRoot, 'demo-app', 'catalog-service')],
       })
 
       // A fresh same-app start detects the collision and asks how to resolve it
@@ -126,7 +130,7 @@ describe('MCP HTTP server (smoke)', () => {
       const collision = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-block',
@@ -159,7 +163,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'older-waiting-heal',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'healing',
@@ -175,7 +179,7 @@ describe('MCP HTTP server (smoke)', () => {
       })
       runStore.bootstrap({
         runId: 'newer-running',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-05-08T00:01:00.000Z',
         status: 'running',
@@ -186,7 +190,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-heal-first',
@@ -232,7 +236,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: '2026-05-19T0841-7cvh',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-05-19T08:41:00.000Z',
         status: 'aborted',
@@ -244,7 +248,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           run_ref: '7cvh',
           claim_heal: true,
@@ -288,7 +292,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: '2026-06-04T1525-6qdm',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         env: 'local',
         startedAt: '2026-06-04T15:25:00.000Z',
         status: 'running',
@@ -301,7 +305,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'broken_todo_api',
+          feature: 'demo_catalog',
           env: 'local',
           run_ref: '6qdm',
           claim_heal: true,
@@ -338,7 +342,7 @@ describe('MCP HTTP server (smoke)', () => {
 
       runStore.bootstrap({
         runId: 'wait-boot',
-        feature: 'broken_todo_api',
+        feature: 'demo_catalog',
         startedAt: '2026-06-04T15:25:00.000Z',
         status: 'running',
         executionType: 'boot',

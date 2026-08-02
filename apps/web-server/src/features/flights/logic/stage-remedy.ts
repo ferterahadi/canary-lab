@@ -50,9 +50,16 @@ export async function applyFlightStageRemedy(
   if (!remedy) throw Object.assign(new Error('no remedy applies to this flight'), { statusCode: 409 })
   const cleaned: string[] = []
   for (const repo of remedy.repos) {
+    // Every argv ends in `-- .` so the sweep matches the count. A feature repo
+    // is often a SUBDIRECTORY of a much larger git root (the whole workspace,
+    // when a feature points at a folder beside `features/`), and both the
+    // count above and portify's own gate are scoped with `-- .`. Without the
+    // pathspec, `add -A` / `stash push -u` run from any subdirectory take the
+    // entire root — so a button reading "2 modified" would commit or stash
+    // every unrelated dirty file in the workspace.
     const argvs = action === 'stash'
-      ? [['stash', 'push', '-u', '-m', `canary-lab: pre-flight stash (${manifest.flightId})`]]
-      : [['add', '-A'], ['commit', '-m', 'canary-lab: wip']]
+      ? [['stash', 'push', '-u', '-m', `canary-lab: pre-flight stash (${manifest.flightId})`, '--', '.']]
+      : [['add', '-A', '--', '.'], ['commit', '-m', 'canary-lab: wip', '--', '.']]
     for (const argv of argvs) {
       const r = await runGit(repo.path, argv)
       if (r.code !== 0) {

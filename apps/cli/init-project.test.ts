@@ -162,7 +162,7 @@ describe('main (init-project orchestration)', () => {
 
     const target = path.join(workspace, 'my-project')
     expect(
-      fs.existsSync(path.join(target, 'features', 'example_todo_api', 'feature.config.cjs')),
+      fs.existsSync(path.join(target, 'features', 'demo_inventory', 'feature.config.cjs')),
     ).toBe(true)
 
     const pkg = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf-8'))
@@ -265,7 +265,7 @@ describe('main (init-project orchestration)', () => {
     const gitignore = fs.readFileSync(path.join(workspace, 'my-project', '.gitignore'), 'utf-8')
     expect(gitignore).toContain('envsets/*/*')
     expect(gitignore).toContain('features/*/envsets/*/*')
-    expect(gitignore).toContain('!features/example_todo_api/envsets/local/*')
+    expect(gitignore).toContain('!features/demo_inventory/envsets/local/*')
     expect(gitignore).not.toContain('!envsets/*/*')
     expect(gitignore).not.toContain('!features/*/envsets/*/*')
   })

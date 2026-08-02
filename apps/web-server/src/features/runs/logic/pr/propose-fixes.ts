@@ -106,7 +106,17 @@ async function createPrInWorktree(a: {
   runId: string
   draft: boolean
 }): Promise<{ ok: true; url: string } | { ok: false; reason: string }> {
-  const fail = (r: GitResult | GhResult, what: string) => ({ ok: false as const, reason: `${what}: ${(r.stderr || r.stdout).trim().split('\n')[0] || 'failed'}` })
+  // `git push` always leads with `To <remote>` and puts the cause underneath,
+  // so the first line alone tells the user nothing. Prefer the `! [rejected]`
+  // or `error:` line — but fall back to the FIRST line rather than to a
+  // `fatal:` one: a transport failure reads `ssh: Could not resolve hostname …`
+  // then `fatal: Could not read from remote repository.`, where the real cause
+  // is line 1 and the `fatal:` is boilerplate.
+  const fail = (r: GitResult | GhResult, what: string) => {
+    const lines = (r.stderr || r.stdout).trim().split('\n').map((l) => l.trim()).filter(Boolean)
+    const cause = lines.find((l) => /^(!|error:)/.test(l)) ?? lines[0] ?? ''
+    return { ok: false as const, reason: `${what}: ${cause || 'failed'}` }
+  }
 
   const add = await a.git(a.repoRoot, ['worktree', 'add', '--detach', a.wt, a.baseSha || 'HEAD'])
   if (add.code !== 0) return fail(add, 'could not create a scratch worktree')

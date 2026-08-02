@@ -85,7 +85,7 @@ green.** A test edited into passing is the exact failure this product exists to 
    `npx vitest run apps/web-server/src/mcp apps/web-server/src/features/runs/logic/runtime/auto-heal.test.ts`
    and then `cl_sync-agent-surfaces` for the surfaces that must agree.
 3. Did you change the run loop's observable behavior? Tier 4 in `cl_verify-changes` —
-   drive `broken_todo_api` end to end and read the counts off a real result.
+   drive `demo_catalog` end to end and read the counts off a real result.
 
 ## Common mistakes
 

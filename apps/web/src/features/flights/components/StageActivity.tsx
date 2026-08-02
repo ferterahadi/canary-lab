@@ -2,8 +2,9 @@ import { useState, type ReactNode } from 'react'
 import type { SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/api/client'
 import { AgentSessionView, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
 import { StatusDot } from '@/shared/ui/atoms'
+import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow } from '@/shared/ui/StepList'
-import { STAGE_COLUMN } from './stage-meta'
+import { StageColumn } from './stage-meta'
 
 /** The stage's activity band (R66): ONE consolidated block, identical for every
  *  stage. The conductor's `[tagged]` system lines and the stage's own agent
@@ -166,36 +167,35 @@ export function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageP
       ? Array.from({ length: Math.max(0, progress.maxPasses - progress.pass) }, (_, i) => progress.pass + 1 + i)
       : []
   return (
-    <div data-testid="specs-pass-timeline" className={STAGE_COLUMN}>
-      <h3 className="cl-rubric mb-2">
-        Passes
-      </h3>
-      <StepList>
-        {progress.passes.map((p) => (
-          <StepRow
-            key={p.pass}
-            testId={`specs-pass-${p.pass}`}
-            state={p.note ? 'warn' : 'done'}
-            title={p.note ? `Pass ${p.pass} — ${p.note}` : `Pass ${p.pass} — authored → mapped`}
-            sub={
-              p.note
-                ? 'retried with the errors in the next prompt'
-                : `${p.coveragePct}% covered · ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'} open`
-            }
-          />
-        ))}
-        {live && (
-          <StepRow
-            testId="specs-pass-live"
-            state="active"
-            title={`Pass ${progress.pass} — ${phaseLabel}…`}
-            sub={specsPhaseSub(progress.phase, progress.gapsOpen)}
-          />
-        )}
-        {pending.map((n) => (
-          <StepRow key={n} testId={`specs-pass-pending-${n}`} state="pending" title={`Pass ${n} — pending`} />
-        ))}
-      </StepList>
-    </div>
+    <StageColumn>
+      <PanelCard kicker="Passes" testId="specs-pass-timeline">
+        <StepList>
+          {progress.passes.map((p) => (
+            <StepRow
+              key={p.pass}
+              testId={`specs-pass-${p.pass}`}
+              state={p.note ? 'warn' : 'done'}
+              title={p.note ? `Pass ${p.pass} — ${p.note}` : `Pass ${p.pass} — authored → mapped`}
+              sub={
+                p.note
+                  ? 'retried with the errors in the next prompt'
+                  : `${p.coveragePct}% covered · ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'} open`
+              }
+            />
+          ))}
+          {live && (
+            <StepRow
+              testId="specs-pass-live"
+              state="active"
+              title={`Pass ${progress.pass} — ${phaseLabel}…`}
+              sub={specsPhaseSub(progress.phase, progress.gapsOpen)}
+            />
+          )}
+          {pending.map((n) => (
+            <StepRow key={n} testId={`specs-pass-pending-${n}`} state="pending" title={`Pass ${n} — pending`} />
+          ))}
+        </StepList>
+      </PanelCard>
+    </StageColumn>
   )
 }

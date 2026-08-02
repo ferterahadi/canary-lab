@@ -7,7 +7,7 @@ import type { BenchmarkReport } from './report'
 function makeManifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
     benchmarkId: 'b1',
-    feature: 'example_todo_api',
+    feature: 'demo_inventory',
     skill: 'broken-delete-contract',
     level: 'med',
     iterations: 1,

@@ -34,7 +34,7 @@ describe('createServer smoke (templates/project)', () => {
       expect(res.status).toBe(200)
       const body = (await res.json()) as Array<{ name: string }>
       expect(body.map((f) => f.name).sort()).toEqual(
-        expect.arrayContaining(['broken_todo_api', 'example_todo_api']),
+        expect.arrayContaining(['demo_catalog', 'demo_inventory']),
       )
     } finally {
       await app.close()
@@ -52,12 +52,12 @@ describe('createServer smoke (templates/project)', () => {
       expect(features.statusCode).toBe(200)
       const featuresJson = features.json() as Array<{ name: string }>
       const names = featuresJson.map((f) => f.name).sort()
-      expect(names).toContain('example_todo_api')
-      expect(names).toContain('broken_todo_api')
+      expect(names).toContain('demo_inventory')
+      expect(names).toContain('demo_catalog')
 
       const tests = await app.inject({
         method: 'GET',
-        url: '/api/features/example_todo_api/tests',
+        url: '/api/features/demo_inventory/tests',
       })
       expect(tests.statusCode).toBe(200)
       const testsJson = tests.json() as Array<{ file: string; tests: unknown[] }>
@@ -107,7 +107,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     fs.mkdirSync(dir, { recursive: true })
     writeManifest(path.join(dir, 'manifest.json'), {
       runId,
-      feature: 'example_todo_api',
+      feature: 'demo_inventory',
       startedAt: '2026-01-01T00:00:00Z',
       status: 'running',
       healCycles: 0,
@@ -115,7 +115,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
       heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
     })
     writeRunsIndex(logsDir, [
-      { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+      { runId, feature: 'demo_inventory', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
@@ -139,7 +139,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     fs.mkdirSync(dir, { recursive: true })
     writeManifest(path.join(dir, 'manifest.json'), {
       runId,
-      feature: 'example_todo_api',
+      feature: 'demo_inventory',
       startedAt: '2026-01-01T00:00:00Z',
       status: 'running',
       healCycles: 0,
@@ -147,7 +147,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
       heartbeatAt: new Date().toISOString(),
     })
     writeRunsIndex(logsDir, [
-      { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+      { runId, feature: 'demo_inventory', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
@@ -168,7 +168,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     fs.mkdirSync(dir, { recursive: true })
     writeManifest(path.join(dir, 'manifest.json'), {
       runId,
-      feature: 'example_todo_api',
+      feature: 'demo_inventory',
       startedAt: '2026-01-01T00:00:00Z',
       status: 'running',
       healCycles: 0,
@@ -176,7 +176,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
       // no heartbeatAt — pre-feature manifest
     })
     writeRunsIndex(logsDir, [
-      { runId, feature: 'example_todo_api', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
+      { runId, feature: 'demo_inventory', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
     ])
 
     const projectRoot = path.resolve(__dirname, '..', '..', '..', 'templates', 'project')
@@ -197,7 +197,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     fs.mkdirSync(dir, { recursive: true })
     writeManifest(path.join(dir, 'manifest.json'), {
       runId,
-      feature: 'example_todo_api',
+      feature: 'demo_inventory',
       startedAt: '2026-01-01T00:00:00Z',
       endedAt: '2026-01-01T00:00:05Z',
       status: 'passed',
@@ -208,7 +208,7 @@ describe('createServer boot-time active-orphan cleanup', () => {
     writeRunsIndex(logsDir, [
       {
         runId,
-        feature: 'example_todo_api',
+        feature: 'demo_inventory',
         startedAt: '2026-01-01T00:00:00Z',
         status: 'passed',
         endedAt: '2026-01-01T00:00:05Z',
