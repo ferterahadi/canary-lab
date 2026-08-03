@@ -318,6 +318,10 @@ describe('restart wipe (R78)', () => {
         expect(ctx.signal.aborted).toBe(false)
         ctx.appendLog('[docs] wiping\n')
         ctx.setProgress({ anything: true } as never)
+        // A reset that re-spawns an agent publishes progress through the same
+        // helper a live stage uses (`reportAgentActivity`), so the inert context
+        // has to absorb that call too — not just the three older ones.
+        ctx.setAgentActivity({ phase: 'thinking', thinkingTokens: 12, chars: 0, tail: '' })
         ctx.patchFlight({ runVerdict: 'failed' })
       },
     }

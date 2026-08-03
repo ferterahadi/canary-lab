@@ -417,3 +417,72 @@ describe('recoverStaleEvaluationExports race condition — patchEvaluationExport
     expect(events.filter((e) => e.type === 'evaluation-export-updated')).toHaveLength(0)
   })
 })
+
+// Which voice writes the report is decided from the project's `healAgent`, and
+// that field answers a different question — who drives REPAIR. `external` (the
+// shipped default) used to map straight to `deterministic`, so on a default
+// workspace "Localized output" handed back raw wording and said nothing about
+// it. These pin the mapping, because the symptom is silent: you get a report
+// either way, just not the one you asked for.
+describe('localized export — which voice writes the report', () => {
+  const writeConfig = (root: string, healAgent: string) => {
+    fs.mkdirSync(root, { recursive: true })
+    fs.writeFileSync(path.join(root, 'canary-lab.config.json'), JSON.stringify({ healAgent }))
+  }
+
+  /** Runs a localized export and returns the audienceAdapter the route chose. */
+  async function adapterFor(healAgent: string, runId: string): Promise<unknown> {
+    const projectRoot = path.join(tmpDir, `proj-${healAgent}`)
+    writeConfig(projectRoot, healAgent)
+    writeManifestForRun(runId, 'checkout', 'passed')
+    const seen: unknown[] = []
+    const { app } = await build({
+      projectRoot,
+      generateEvaluationRewrite: vi.fn(async (_detail: unknown, adapter: unknown) => {
+        seen.push(adapter)
+        return null
+      }),
+    })
+    const started = await app.inject({
+      method: 'POST',
+      url: `/api/runs/${runId}/evaluation-export`,
+      payload: { mode: 'localized' },
+    })
+    expect(started.statusCode).toBe(202)
+    await waitForEvaluationTask(app, started.json().taskId)
+    return seen[0]
+  }
+
+  it('looks for a local CLI when repair is driven externally — the default workspace', async () => {
+    // NOT 'deterministic': `external` means an outside MCP client heals this
+    // workspace, which says nothing about whether a claude/codex CLI is on the
+    // machine. `auto` lets the resolver look; only a machine with neither CLI
+    // falls back to raw wording, and that is a fact about the machine.
+    expect(await adapterFor('external', 'r-adapter-external')).toBe('auto')
+  })
+
+  it('honours an explicitly configured agent', async () => {
+    expect(await adapterFor('claude', 'r-adapter-claude')).toBe('claude')
+  })
+
+  it('says in the export log when no CLI was found, instead of quietly shipping raw wording', async () => {
+    const projectRoot = path.join(tmpDir, 'proj-nocli')
+    writeConfig(projectRoot, 'external')
+    writeManifestForRun('r-adapter-nocli', 'checkout', 'passed')
+    const { app } = await build({
+      projectRoot,
+      generateEvaluationRewrite: vi.fn(async () => null),
+    })
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-adapter-nocli/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    const taskId = started.json().taskId
+    await waitForEvaluationTask(app, taskId)
+
+    const log = fs.readFileSync(path.join(evaluationExportsDir(logsDir), taskId, 'export.log'), 'utf-8')
+    expect(log).toContain('no claude or codex CLI available')
+    expect(log).toContain('raw wording')
+  })
+})

@@ -10,17 +10,56 @@ import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
 // (wizard, coverage annotate/PRD, eval rewrite, portify, sabotage) composes this
 // instead of re-implementing spawn+tee+idle. See the `cl_reuse-shared-logic` skill.
 
+// The tools a read-only agent is allowed to hold. `--tools` is a hard
+// capability allowlist, not a prompt instruction: the tools left out are absent
+// from the session entirely, so the agent cannot use them even under
+// `--dangerously-skip-permissions`. Verified against claude 2.1.220 — with this
+// list the agent reports having no Edit and no Bash, and a file it was told to
+// write is not created.
+//
+// It bounds BUILT-IN tools only. MCP tools come from the user's own config
+// whether or not this spawn asks for any, so the allowlist alone left a
+// read-only agent holding a browser — `--strict-mcp-config` below is what
+// actually closes that.
+export const CLAUDE_READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'] as const
+
+// Outbound tools no unattended canary agent has a use for. Every agent spawned
+// through here works on local code the user already has: a scout reads a repo,
+// portify edits ports, sabotage plants a bug. None of them need to fetch a URL
+// or run a search, and an unattended window is the worst time to allow one.
+//
+// `--disallowedTools` is evaluated BEFORE `--dangerously-skip-permissions`, so
+// the deny survives the bypass — verified against claude 2.1.220.
+export const CLAUDE_DENIED_TOOLS = ['WebFetch', 'WebSearch'] as const
+
 // The claude agentic argv — tools on, plus stream-json so stdout streams
 // token-by-token (claude `-p` is otherwise silent during its final-message
 // composition, which trips the idle clock). Consumed only for liveness + answer
 // recovery; the live view is the session JSONL tail.
+//
+// Permissions ARE bypassed here, and have to be: `-p` has no human to approve a
+// tool call, so a prompt would hang until the idle watchdog killed it. What the
+// bypass must not mean is unbounded power — an agent whose job is to read and
+// answer is spawned with `readOnly`, which takes the write tools away entirely
+// rather than trusting it not to use them.
 export function buildClaudeAgenticArgs(
   prompt: string,
-  opts: { model?: string | null; sessionId?: string; resume?: boolean } = {},
+  opts: { model?: string | null; sessionId?: string; resume?: boolean; readOnly?: boolean } = {},
 ): string[] {
   return [
     '-p', prompt,
     '--dangerously-skip-permissions',
+    // No MCP server this spawn did not ask for. `--tools` bounds the BUILT-IN
+    // tools only — measured on 2.1.220, a read-only spawn without this still
+    // arrived holding whatever MCP servers the user happens to have connected,
+    // `browser_run_code_unsafe` among them. None of these agents pass an
+    // `--mcp-config`, so the correct set is empty: they read the workspace and
+    // answer, and an unattended window is no place to inherit a human's
+    // connected tools. (The heal REPL is a different builder and keeps its
+    // Playwright MCP config.)
+    '--strict-mcp-config',
+    '--disallowedTools', CLAUDE_DENIED_TOOLS.join(','),
+    ...(opts.readOnly ? ['--tools', CLAUDE_READ_ONLY_TOOLS.join(',')] : []),
     '--output-format=stream-json',
     '--include-partial-messages',
     '--verbose',

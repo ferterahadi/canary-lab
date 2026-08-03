@@ -98,10 +98,12 @@ async function until(label, timeoutMs, check) {
   throw new Error(`timed out waiting for ${label} after ${Math.round(timeoutMs / 1000)}s`)
 }
 
-// The two planted bugs in the sample's server, and the repair an agent would
-// make: honour `done` on PATCH, and actually remove the todo on DELETE. Kept as
-// literal replacements so a drift in the sample fails loudly here rather than
-// silently "repairing" nothing.
+// The three planted bugs in the sample's server, and the repair an agent would
+// make: honour `price` on PATCH, actually remove the product on DELETE, and
+// hand out ids from a counter rather than from the catalog's size — the third
+// only starts failing once the second is fixed, which is what makes a real
+// repair take more than one pass. Kept as literal replacements so a drift in
+// the sample fails loudly here rather than silently "repairing" nothing.
 const REPAIRS = [
   {
     find: `      if (patch.name !== undefined) product.name = patch.name\n      res.end(JSON.stringify(product))`,
@@ -110,6 +112,10 @@ const REPAIRS = [
   {
     find: `      res.writeHead(405)\n      res.end(JSON.stringify({ error: 'delete is not supported' }))\n      return`,
     replace: `      const [, , id] = url.pathname.split('/')\n      const index = products.findIndex((entry) => entry.id === id)\n      if (index < 0) {\n        res.writeHead(404)\n        res.end(JSON.stringify({ error: 'not found' }))\n        return\n      }\n      products.splice(index, 1)\n      res.writeHead(204)\n      res.end()\n      return`,
+  },
+  {
+    find: `const nextProductId = () => String(products.length + 1)`,
+    replace: `let issuedIds = 0\nconst nextProductId = () => String(++issuedIds)`,
   },
 ]
 
@@ -167,7 +173,7 @@ async function main() {
     }
   })
 
-  say(`Starting a run of ${FEATURE} — its API ignores PATCH done and refuses DELETE, so two tests must fail`)
+  say(`Starting a run of ${FEATURE} — its API ignores the price on PATCH and refuses DELETE, so tests must fail`)
   const started = await api(port, 'POST', '/api/runs', { feature: FEATURE, env: 'local' })
   const runId = started.runId ?? started.run?.runId
   if (!runId) throw new Error(`no runId in start response: ${JSON.stringify(started)}`)
@@ -185,19 +191,25 @@ async function main() {
   console.log(`    ${failedNames.length} failing: ${failedNames.join(' · ') || '(none reported)'}`)
   if (failedNames.length === 0) throw new Error('the broken sample passed — it is no longer a repair demo')
 
-  const worktree = failed.manifest.worktrees?.[FEATURE]
-  if (!worktree) throw new Error('no per-run worktree recorded — the run fell back to running in place')
+  // `worktrees` is keyed by REPO name, not by feature name — one run can
+  // isolate several repos, and a feature's repo rarely shares its name (this
+  // sample's feature is `demo_catalog`, its repo `catalog_service`). Every
+  // entry belongs to this run, so probe them all.
+  const worktrees = Object.values(failed.manifest.worktrees ?? {})
+  if (worktrees.length === 0) throw new Error('no per-run worktree recorded — the run fell back to running in place')
   // The worktree is cut from the REPO root — the whole scaffolded project —
   // and the demo feature points OUTWARD at product code beside `features/`,
   // so the service sits under demo-app/. The older layout (a self-contained
   // feature carrying its own scripts/) is kept as a fallback so this still
   // works against a hand-made feature of that shape.
-  const serverPath = [
-    path.join(worktree, 'demo-app', 'catalog-service', 'server.ts'),
-    path.join(worktree, 'scripts', 'server.ts'),
-    path.join(worktree, 'features', FEATURE, 'scripts', 'server.ts'),
-  ].find((candidate) => fs.existsSync(candidate))
-  if (!serverPath) throw new Error(`could not find the demo service's server.ts under ${worktree}`)
+  const serverPath = worktrees
+    .flatMap((worktree) => [
+      path.join(worktree, 'demo-app', 'catalog-service', 'server.ts'),
+      path.join(worktree, 'scripts', 'server.ts'),
+      path.join(worktree, 'features', FEATURE, 'scripts', 'server.ts'),
+    ])
+    .find((candidate) => fs.existsSync(candidate))
+  if (!serverPath) throw new Error(`could not find the demo service's server.ts under ${worktrees.join(', ')}`)
   say(`Playing the repair agent inside the run's own working copy\n    ${serverPath}`)
   repairServer(serverPath)
 

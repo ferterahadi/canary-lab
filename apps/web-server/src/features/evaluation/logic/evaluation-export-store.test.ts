@@ -116,6 +116,13 @@ describe('evaluation-export-store', () => {
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', error: 7 },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', sessionRef: { agent: 'gpt', sessionId: 'x' } },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', sessionRef: { agent: 'claude', sessionId: 7 } },
+      // `archive` is what the reports list reads for the size column, and it is
+      // ALSO what withArchiveSize backfills when absent — so a half-written one
+      // has to fail the whole record rather than survive as a partial figure.
+      // A non-object first (the shape check), then a wrong member type.
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', archive: 4096 },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', archive: null },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', archive: { bytes: '4096', videos: 0, assets: 0 } },
     ]
     for (const v of variants) {
       fs.writeFileSync(p.taskJson, JSON.stringify(v), 'utf8')

@@ -111,7 +111,10 @@ export function runEvaluationAgent(
   // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
   // from stdin (`-`) and writes the final message to --output-last-message.
   const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { model: EVALUATION_REWRITE_MODELS.claude, sessionId: claudeSessionId })
+    // `readOnly` matches the codex arm's `--sandbox read-only`. It matters most
+    // here: this agent rewrites the wording of a finished run's report, and a
+    // report that could edit the evidence it describes would not be evidence.
+    ? buildClaudeAgenticArgs(prompt, { model: EVALUATION_REWRITE_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
     : evaluationCodexArgs('-', outputPath, EVALUATION_REWRITE_SCHEMA_PATH)
   onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 

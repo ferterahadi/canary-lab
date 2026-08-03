@@ -102,6 +102,19 @@ export interface AgentSpawnArgs {
  * is right there in the pane and can approve / deny each tool — bypassing
  * also hides MCP auth prompts the user needs to see.
  *
+ * File edits are the exception, and `--permission-mode acceptEdits` is how we
+ * ask for them. Editing is the entire job of a repair agent: with per-edit
+ * approval it writes the correct fix, stops on "Do you want to make this edit
+ * to server.ts?", and is killed by the idle watchdog — the run then reports
+ * "No code changes were made", which reads as a failed repair rather than an
+ * unanswered question. Everything else still prompts in the pane.
+ *
+ * This was previously supplied by accident: Claude Code's own auto mode is on
+ * by default and auto-approves edits. But auto mode is a per-MODEL capability
+ * — measured on 2.1.220, a haiku session prints "auto mode unavailable for
+ * this model" and drops to manual, and unattended repair stops dead. Asking
+ * for the posture we need beats inheriting one we never requested.
+ *
  * Claude session flag:
  * - `--session-id <uuid>`: starts a NEW conversation pinned to that uuid.
  *   Used on first spawn for a run so the orchestrator knows the id without
@@ -152,9 +165,10 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
       }
       mcp = ` ${buildClaudeMcpConfigArg(args.mcpOutputDir, args.mcpConfigFile)}`
     }
-    // No `--dangerously-skip-permissions` — REPL hands tool approval back
-    // to the user.
-    return `${head}${modelFlag}${sid}${mcp}${promptArg}`
+    // No `--dangerously-skip-permissions` — every tool but file editing still
+    // asks in the pane. `acceptEdits` is the one grant a repair agent needs to
+    // be able to work unattended; see the note above.
+    return `${head}${modelFlag} --permission-mode acceptEdits${sid}${mcp}${promptArg}`
   }
   // codex interactive REPL. No `--full-auto`: tool approvals stay
   // interactive in the pane. Codex has no `--session-id` analogue, so the

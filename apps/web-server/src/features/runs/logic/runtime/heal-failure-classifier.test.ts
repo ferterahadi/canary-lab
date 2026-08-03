@@ -49,4 +49,33 @@ describe('classifyHealFailure', () => {
     // "usage limit" also contains "limit"; usage-limit must win over rate-limit.
     expect(classifyHealFailure('monthly usage limit — rate limit note below')).toBe('usage-limit')
   })
+
+  // Verbatim from run 2026-08-02T1142-aih6's heal-agent-tail.txt, where the
+  // agent sat on this prompt for its whole idle window. A full-screen TUI
+  // places each word with a cursor escape instead of a space, so stripping ANSI
+  // leaves one run-together word — the reason the matcher also squeezes space.
+  const REAL_TRUST_PROMPT_TAIL =
+    '\x1b[2GAccessing\x1b[12Gworkspace:\r\n\r\n' +
+    '\x1b[2G/private/var/folders/T/canary-flight-lab/demo-project/logs/runs/2026-08-02T1142-aih6\r\n\r\n' +
+    '\x1b[2GQuick\x1b[8Gsafety\x1b[15Gcheck:\x1b[22GIs\x1b[25Gthis\x1b[30Ga\x1b[32Gproject\x1b[40Gyou\x1b[44Gcreated' +
+    '\x1b[52Gor\x1b[55Gone\x1b[59Gyou\x1b[63Gtrust?\r\n\r\n' +
+    "\x1b[2GClaude\x1b[9GCode'll\x1b[17Gbe\x1b[20Gable\x1b[25Gto\x1b[28Gread,\x1b[34Gedit,\x1b[40Gand\x1b[44Gexecute\x1b[52Gfiles\x1b[58Ghere.\r\n\r\n" +
+    '\x1b[2G❯\x1b[4G1.\x1b[7GYes,\x1b[12GI\x1b[14Gtrust\x1b[20Gthis\x1b[25Gfolder\r\n\x1b[4G2.\x1b[7GNo,\x1b[11Gexit\r\n'
+
+  it('classifies the folder-trust prompt from a real captured tail', () => {
+    expect(classifyHealFailure(REAL_TRUST_PROMPT_TAIL, 'claude')).toBe('trust-prompt')
+  })
+
+  it('classifies the trust prompt ahead of crash — its body says "execute"', () => {
+    // 'killed'/'command not found' aren't present, but the prompt's own copy is
+    // full of words a looser fingerprint table could misread. Pin the order.
+    expect(classifyHealFailure('Is this a project you created or one you trust?')).toBe('trust-prompt')
+    expect(classifyHealFailure('❯ 1. Yes, I trust this folder')).toBe('trust-prompt')
+  })
+
+  it('still classifies spaced fingerprints after the squeeze pass', () => {
+    // The squeeze is additive: everything that matched before must still match.
+    expect(classifyHealFailure('You have reached your usage limit')).toBe('usage-limit')
+    expect(classifyHealFailure('\x1b[31mtoo\x1b[0m many requests')).toBe('rate-limit')
+  })
 })

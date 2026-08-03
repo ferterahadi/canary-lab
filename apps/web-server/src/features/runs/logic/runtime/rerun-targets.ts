@@ -270,11 +270,6 @@ export function uniqueByName(tests: KnownSummaryTest[]): KnownSummaryTest[] {
   return out
 }
 
-// Always returns a usable selector: `knownTestsFromSummary` is the only source
-// of a KnownSummaryTest and it drops any entry without a non-empty `title`, and
-// the sole caller has already returned early on an empty selection. The return
-// type says `string` so a future edit that breaks either invariant is a compile
-// error rather than a silently-widened full-suite rerun.
 /**
  * The `--test-list` lines for a selection, or `null` when even one selected test
  * lacks a `listLine`.
@@ -284,6 +279,12 @@ export function uniqueByName(tests: KnownSummaryTest[]): KnownSummaryTest[] {
  * that skipped tests nobody chose to skip. Returning null hands the caller back
  * to `--grep`, which over-selects rather than under-selects — the safe direction
  * when we cannot be exact.
+ *
+ * `lines` is empty only when `tests` is (a non-empty selection either pushes a
+ * line or returns null above), and `computeRerunTargetsOrdered` — the sole
+ * caller — has already returned `all-passed` on an empty selection. So there is
+ * no empty-result arm to guard: an added one would be dead code, and dead code
+ * here is worse than none, because it would read as a live safety net.
  */
 export function testListForKnownTests(tests: KnownSummaryTest[]): string[] | null {
   const lines: string[] = []
@@ -291,9 +292,14 @@ export function testListForKnownTests(tests: KnownSummaryTest[]): string[] | nul
     if (!test.listLine) return null
     if (!lines.includes(test.listLine)) lines.push(test.listLine)
   }
-  return lines.length > 0 ? lines : null
+  return lines
 }
 
+// Always returns a usable selector: `knownTestsFromSummary` is the only source
+// of a KnownSummaryTest and it drops any entry without a non-empty `title`, and
+// the sole caller has already returned early on an empty selection. The return
+// type says `string` so a future edit that breaks either invariant is a compile
+// error rather than a silently-widened full-suite rerun.
 export function grepForKnownTests(tests: KnownSummaryTest[]): string {
   const titles = Array.from(new Set(tests.map((test) => test.title)))
   const escaped = titles.map(escapeRegExp)

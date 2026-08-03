@@ -257,11 +257,15 @@ describe('pauseFlight', () => {
         // ctx.manifest() re-reads the record fresh from the store — confirm
         // it resolves to the live (still-present) flight, not a stale value.
         seenFlightId = ctx.manifest().flightId
-        // interruptStage's ctx wires appendLog/setProgress/patchFlight as
-        // deliberate no-ops (interrupt is teardown, not stage work) — calling
-        // them must be harmless rather than throwing or erroring.
+        // interruptStage's ctx wires appendLog/setProgress/setAgentActivity/
+        // patchFlight as deliberate no-ops (interrupt is teardown, not stage
+        // work) — calling them must be harmless rather than throwing or
+        // erroring. setAgentActivity is in that list because an adapter whose
+        // interrupt drains a live agent stream reports through it like any
+        // other stage step.
         ctx.appendLog('interrupt log line')
         ctx.setProgress({ note: 'interrupting' })
+        ctx.setAgentActivity({ phase: 'writing', thinkingTokens: 0, chars: 4, tail: 'bye.' })
         ctx.patchFlight({ feature: 'should-not-apply' })
       },
     }

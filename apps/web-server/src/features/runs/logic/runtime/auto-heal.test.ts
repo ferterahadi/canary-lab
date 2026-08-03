@@ -73,6 +73,19 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--mcp-config')).toBe(false)
   })
 
+  it('claude REPL: grants edits up front, because editing IS the repair', () => {
+    // Without this the agent writes the correct fix, stops on "Do you want to
+    // make this edit?", and is killed by the idle watchdog — the run then says
+    // "No code changes were made", blaming the agent for an unanswered
+    // question. It used to work only because Claude Code's auto mode is on by
+    // default, and that is a per-MODEL capability: a haiku session drops to
+    // manual mode and unattended repair stops dead. Measured on 2.1.220.
+    const cmd = buildAgentSpawnCommand('claude', { sessionId: 'x' })
+    expect(cmd).toContain('--permission-mode acceptEdits')
+    // Still the narrow grant, not the blanket one — every other tool asks.
+    expect(cmd.includes('--dangerously-skip-permissions')).toBe(false)
+  })
+
   it('launches via the quoted absolute binaryPath when provided (restricted PATH)', () => {
     const claudeCmd = buildAgentSpawnCommand('claude', {
       binaryPath: '/Users/me/.local/bin/claude',

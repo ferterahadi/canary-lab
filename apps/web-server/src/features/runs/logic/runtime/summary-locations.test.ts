@@ -166,6 +166,26 @@ describe('SummaryReporter', () => {
     expect(readSummary().failed[0].errorContextFile).toBeUndefined()
   })
 
+  it('drops the pointer, not the failure, when the attachment is gone before the copy', () => {
+    // The exact race the copy exists to survive: Playwright records the
+    // attachment, then the next `--output` invocation of a heal cycle wipes the
+    // output dir before the reporter reads it. The bullet disappears from the
+    // heal-index; the failure itself, its error and its slug all stay.
+    process.env.CANARY_LAB_BENCHMARK_MODE = 'baseline'
+    const reporter = new SummaryReporter()
+    const wipedPath = path.join(tmpRoot, 'already-wiped', 'error-context.md')
+
+    reporter.onTestEnd(mkTest('vanished context', '/specs/checkout.spec.ts', 30), mkResult({
+      status: 'failed',
+      error: { message: 'expected enabled' },
+      attachments: [{ name: 'error-context', contentType: 'text/markdown', path: wipedPath }],
+    }))
+
+    const entry = readSummary().failed[0]
+    expect(entry.errorContextFile).toBeUndefined()
+    expect(entry.error.message).toContain('expected enabled')
+  })
+
   it('records a step end with no locations and no error', () => {
     const reporter = new SummaryReporter()
     const test = mkTest('Step end no loc', '/specs/no-loc.spec.ts', 3)

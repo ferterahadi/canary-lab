@@ -10,6 +10,7 @@ import path from 'path'
 import { randomUUID } from 'crypto'
 import { type HealEnd, type HealSignal } from '../../../../../../../shared/run-state'
 import { classifyHealFailure } from './heal-failure-classifier'
+import { ensureClaudeWorkspaceTrusted } from '../../../agent-sessions/logic/agent-workspace-trust'
 import type { PtyHandle } from './pty-spawner'
 import { HealCycleState } from './heal-cycle'
 import { ESCALATION_THRESHOLD } from './heal-escalation'
@@ -125,6 +126,36 @@ export function echoUserInterject(ctx: RunContext, text: string): void {
 
 export function emitAgentSystemMessage(ctx: RunContext, message: string): void {
   ctx.emit('agent-output', { chunk: `\n[orchestrator] ${message}\n` })
+}
+
+/**
+ * Grant the claude CLI folder trust over the project root so the heal pty
+ * opens straight into the REPL. Trust inherits down, so one entry covers every
+ * future run directory (see agent-workspace-trust.ts for the measured rules).
+ *
+ * This grants NO tool permissions — the REPL still asks before each call. Set
+ * `CANARY_LAB_NO_WORKSPACE_TRUST=1` to leave the prompt in place and answer it
+ * by hand in the agent pane.
+ *
+ * Both outcomes are announced in the transcript: a silent edit to the user's
+ * CLI config would be the wrong kind of helpful, and a silent failure would
+ * leave the next stall unexplained.
+ */
+export function ensureHealWorkspaceTrusted(ctx: RunContext): void {
+  if (process.env.CANARY_LAB_NO_WORKSPACE_TRUST === '1') return
+  if (!ctx.projectRoot) return
+  const result = ensureClaudeWorkspaceTrusted(ctx.projectRoot)
+  if (result.outcome === 'granted') {
+    emitAgentSystemMessage(
+      ctx,
+      `Marked ${result.trustedPath} as a trusted folder for the claude CLI — without it the agent stops at its first-run trust prompt before reading anything. Tool approval is unchanged.`,
+    )
+  } else if (result.outcome === 'unavailable') {
+    emitAgentSystemMessage(
+      ctx,
+      `Could not pre-trust the workspace for the claude CLI (${result.reason}). If the agent stalls on "Is this a project you created or one you trust?", answer it in the agent pane.`,
+    )
+  }
 }
 
 export function agentPtyEnv(ctx: RunContext): Record<string, string> {
@@ -367,6 +398,12 @@ export function spawnHealAgentRepl(ctx: RunContext): void {
     emitAgentSystemMessage(ctx, `Failed to build heal-agent spawn command: ${(err as Error).message}`)
     throw err
   }
+
+  // Claude Code prompts "Is this a project you trust?" for any interactive cwd
+  // with no trusted ancestor, and the run directory is new every run. Nobody is
+  // there to answer it under autopilot, so the cycle would burn its whole idle
+  // window and report "no code changes were made". Settle it before the spawn.
+  if (cfg.agent === 'claude') ensureHealWorkspaceTrusted(ctx)
 
   let pty: PtyHandle
   try {

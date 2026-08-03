@@ -32,8 +32,25 @@ export const PRD_SUMMARY_MODELS: AgentModelChoice = { ...AGENT_DEFAULT }
 /** Evaluation-export localized rewrite — test-review-export.ts. */
 export const EVALUATION_REWRITE_MODELS: AgentModelChoice = { ...AGENT_DEFAULT }
 
-/** Interactive heal / auto-repair REPL — runtime/auto-heal.ts. */
-export const HEAL_MODELS: AgentModelChoice = { ...AGENT_DEFAULT }
+/**
+ * Interactive heal / auto-repair REPL — runtime/auto-heal.ts.
+ *
+ * `CANARY_LAB_HEAL_MODEL` pins the repair agent for one server, read once at
+ * boot. The default stays agent-default deliberately: repair is the product,
+ * and a weaker model there is a worse product for everyone.
+ *
+ * What it is for is demonstrating the loop. On the strongest model the repair
+ * agent reads the whole service and fixes every defect in a single pass — a
+ * good outcome that shows none of the try / rerun / try again the loop exists
+ * for. A smaller model needs the cycles it was built for. Both agents take the
+ * same value; only one of them runs a given repair.
+ */
+export const HEAL_MODELS: AgentModelChoice = healModelsFromEnv()
+
+export function healModelsFromEnv(env: NodeJS.ProcessEnv = process.env): AgentModelChoice {
+  const pinned = env.CANARY_LAB_HEAL_MODEL?.trim()
+  return pinned ? { claude: pinned, codex: pinned } : { ...AGENT_DEFAULT }
+}
 
 /** Port-ification agent — runtime/portify/agent.ts. */
 export const PORTIFY_MODELS: AgentModelChoice = { ...AGENT_DEFAULT }

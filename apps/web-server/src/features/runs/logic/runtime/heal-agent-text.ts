@@ -27,6 +27,8 @@ export function healAgentCauseSuffix(cause: HealEnd['agentCause']): string {
       return ' Its last output suggests the agent was rate-limited or the model was overloaded.'
     case 'crash':
       return ' Its last output suggests the agent crashed or failed to start.'
+    case 'trust-prompt':
+      return ' It stopped at the CLI\'s "do you trust this folder?" prompt and never started work.'
     default:
       return ''
   }

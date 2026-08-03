@@ -41,8 +41,41 @@ describe('buildClaudeAgenticArgs', () => {
   it('builds tools-on stream-json args', () => {
     expect(buildClaudeAgenticArgs('hi')).toEqual([
       '-p', 'hi', '--dangerously-skip-permissions',
+      '--strict-mcp-config',
+      '--disallowedTools', 'WebFetch,WebSearch',
       '--output-format=stream-json', '--include-partial-messages', '--verbose',
     ])
+  })
+
+  it('inherits no MCP server the spawn did not ask for', () => {
+    // Without this, a read-only spawn still arrived holding the user's
+    // connected MCP servers — `--tools` bounds built-ins only.
+    expect(buildClaudeAgenticArgs('hi')).toContain('--strict-mcp-config')
+    expect(buildClaudeAgenticArgs('hi', { readOnly: true })).toContain('--strict-mcp-config')
+  })
+
+  it('denies the outbound tools on every headless spawn, bypass or not', () => {
+    // `--disallowedTools` is evaluated before the bypass, so this deny holds
+    // even though the same argv carries `--dangerously-skip-permissions`.
+    for (const args of [buildClaudeAgenticArgs('hi'), buildClaudeAgenticArgs('hi', { readOnly: true })]) {
+      const at = args.indexOf('--disallowedTools')
+      expect(args.slice(at, at + 2)).toEqual(['--disallowedTools', 'WebFetch,WebSearch'])
+    }
+  })
+
+  it('holds no tool allowlist by default — a repairing agent needs to write', () => {
+    expect(buildClaudeAgenticArgs('hi')).not.toContain('--tools')
+  })
+
+  it('takes the write tools away entirely for a read-only agent', () => {
+    // `--tools` is a capability allowlist, not an instruction: Edit/Write/Bash
+    // are absent from the session, so `--dangerously-skip-permissions` cannot
+    // hand them back. Verified live against claude 2.1.220.
+    const args = buildClaudeAgenticArgs('hi', { readOnly: true })
+    expect(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2)).toEqual([
+      '--tools', 'Read,Glob,Grep',
+    ])
+    expect(args).toContain('--dangerously-skip-permissions')
   })
 
   it('pins a session id', () => {

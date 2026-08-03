@@ -140,9 +140,13 @@ export function readEvaluationExportTask(logsDir: string, taskId: string): Evalu
  *  persisted: the record stays a description of what the export wrote. */
 function withArchiveSize(logsDir: string, record: EvaluationExportTaskRecord): EvaluationExportTaskRecord {
   if (record.archive || !record.downloadReady) return record
-  const paths = evaluationExportTaskPaths(logsDir, record.taskId)
-  if (!paths) return record
   try {
+    // Never null here: `normalizeTaskRecord` rejects any stored record whose own
+    // `taskId` fails `isSafeTaskId`, which is the only thing the path build
+    // validates. Asserting rather than branching keeps an arm no test could ever
+    // reach out of the file — and if that invariant is ever broken, the throw
+    // lands in the same catch, which already means "no size known".
+    const paths = evaluationExportTaskPaths(logsDir, record.taskId)!
     return { ...record, archive: { bytes: fs.statSync(paths.zipPath).size, videos: 0, assets: 0 } }
   } catch {
     // The archive is gone (hand-deleted logs dir) — say nothing rather than 0 B.

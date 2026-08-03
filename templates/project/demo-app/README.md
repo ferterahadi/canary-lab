@@ -29,12 +29,20 @@ run it the moment the installer finishes:
 npx canary-lab ui
 ```
 
-Pick **demo_catalog**, press Run. Two of its tests fail. If you have an agent
+Pick **demo_catalog**, press Run. Three of its tests fail. If you have an agent
 connected, the repair loop opens, edits `catalog-service/server.ts`, and reruns
-until the suite is green. The diff it produced is on the run's **Changes** tab.
+until the suite is green. Each attempt is one entry in the run's **Journal**
+tab; the diff it produced is on the **Changes** tab.
 
-No agent installed? The run still executes and still reports the two failures —
-you just fix them yourself.
+Expect more than one attempt, on purpose. Two defects show up on the first run —
+a reprice that does not change the price, and a delete that is not implemented.
+The third cannot fail until the second is fixed: ids are handed out from the
+catalog's size, which is only wrong once something can leave the catalog. That
+is what a repair loop is for, and a demo that fixed everything in one edit
+would not show it.
+
+No agent installed? The run still executes and still reports the failures — you
+just fix them yourself.
 
 ## `checkout-service` — not onboarded yet
 

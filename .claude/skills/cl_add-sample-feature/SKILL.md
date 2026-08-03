@@ -18,7 +18,7 @@ three services. The four toy samples (`example_todo_api`, `broken_todo_api`,
 | Sample | Role |
 | --- | --- |
 | `demo_inventory` → `demo-app/inventory-service` | **Deliberately correct.** The green first Run, and the Benchmark's subject — it sabotages a working app, so a red baseline can never score. Its specs are un-annotated on purpose: the "before you annotate" state. **Keep it passing.** |
-| `demo_catalog` → `demo-app/catalog-service` | Two planted defects — the heal-loop target. Carries the annotated PRD (`docs/prd.md` + the `_prd-summary.json` sidecar) and the `@req-`/`@path-` tags, so it is also the requirement-coverage demonstration. |
+| `demo_catalog` → `demo-app/catalog-service` | Three planted defects — the heal-loop target. **Two fail on the first run; the third cannot fail until the second is fixed** (ids come from the catalog's size, which only breaks once removal works), so the loop genuinely takes several cycles. Keep that staging if you edit the service — a one-pass demo hides the product. Also carries the annotated PRD (`docs/prd.md` + the `_prd-summary.json` sidecar) and the `@req-`/`@path-` tags, so it is the requirement-coverage demonstration too. |
 | *(none)* → `demo-app/checkout-service` | Deliberately **not** onboarded, so a flight has something to build from scratch. Nothing in `features/` may point at it, or the similarity gate skips seven stages. |
 
 ## Anatomy

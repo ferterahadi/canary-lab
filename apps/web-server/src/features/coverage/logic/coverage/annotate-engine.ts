@@ -274,7 +274,10 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
   // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
   // from stdin (`-`) and writes the final message to --output-last-message.
   const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { model: ANNOTATE_MODELS.claude, sessionId: claudeSessionId })
+    // `readOnly` matches the codex arm's `--sandbox read-only`: the annotator
+    // returns the edits it wants as data for canary to apply, so it must not be
+    // able to reach into the spec files itself.
+    ? buildClaudeAgenticArgs(prompt, { model: ANNOTATE_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
     : codexArgs(outputPath!)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 

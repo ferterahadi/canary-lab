@@ -11,6 +11,9 @@ describe('healAgentCauseSuffix', () => {
     expect(healAgentCauseSuffix('auth')).toContain('not signed in')
     expect(healAgentCauseSuffix('rate-limit')).toContain('rate-limited')
     expect(healAgentCauseSuffix('crash')).toContain('crashed')
+    // Says the agent never started, not that it tried and failed — the whole
+    // point of telling a trust-prompt stall apart from a real repair attempt.
+    expect(healAgentCauseSuffix('trust-prompt')).toContain('never started work')
   })
 
   it('stays silent when the cause was not recognized', () => {

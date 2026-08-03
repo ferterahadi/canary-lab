@@ -249,6 +249,28 @@ describe('autopilot (R71/W4)', () => {
   })
 })
 
+describe('live stage context', () => {
+  it('setAgentActivity lands on the running stage and the last report wins', async () => {
+    // The counterpart to the inert contexts interrupt/reset get: during a real
+    // drive this call must reach the record, because it is the ONLY thing that
+    // distinguishes a long-thinking agent from a hung one in the stage panel
+    // (a stage gains a transcript row only per completed block — 3cde98f).
+    const adapters = allDone()
+    adapters.scout = {
+      run: async (ctx) => {
+        ctx.setAgentActivity({ phase: 'requesting', thinkingTokens: 0, chars: 0, tail: '' })
+        ctx.setAgentActivity({ phase: 'writing', thinkingTokens: 240, chars: 11, tail: 'scouting...' })
+        return { kind: 'done' }
+      },
+    }
+    const started = startFlight(args(), deps(adapters))
+    await started.completion
+
+    const scout = store.get(started.manifest.flightId)!.stages.find((s) => s.key === 'scout')!
+    expect(scout.agentActivity).toEqual({ phase: 'writing', thinkingTokens: 240, chars: 11, tail: 'scouting...' })
+  })
+})
+
 describe('flight agent stickiness (R79: once codex, always codex)', () => {
   const withAgent = (agent: 'claude' | 'codex' | undefined): FlightOptions =>
     ({ ...OPTS, ...(agent ? { agent } : {}) })

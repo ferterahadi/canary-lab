@@ -371,20 +371,33 @@ describe('startDirtySpecWatcher', () => {
   })
 
   it('close() clears pending debounce timers and is safe to call twice', async () => {
-    const dir = writeFeature('alpha', { withE2eDir: true })
+    writeFeature('alpha', { withE2eDir: true })
     const { store, recompute } = fakeStore()
-    watcher = startDirtySpecWatcher({ featuresDir, store, debounceMs: 500 })
-    await waitFor(() => recompute.mock.calls.length >= 1)
-    recompute.mockClear()
+    const captured = captureE2eWatch('alpha')
+    try {
+      watcher = startDirtySpecWatcher({ featuresDir, store, debounceMs: 500 })
+      await waitFor(() => recompute.mock.calls.length >= 1)
+      recompute.mockClear()
 
-    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'test()')
-    await new Promise((r) => setTimeout(r, 50)) // inside the debounce window
-    expect(() => {
-      watcher!.close()
-      watcher!.close()
-    }).not.toThrow()
+      // Fired through the seam rather than by writing the spec file. A real
+      // fs.watch event that lands AFTER close() leaves no pending timer at all,
+      // and "recompute never ran" is then trivially true — the test would pass
+      // having proven nothing, and close()'s clear-timers loop would never run.
+      // On a loaded machine that is exactly what happened, which is why this
+      // one statement went uncovered intermittently.
+      captured.fire()
 
-    await new Promise((r) => setTimeout(r, 600))
-    expect(recompute).not.toHaveBeenCalled()
+      expect(() => {
+        watcher!.close()
+        watcher!.close()
+      }).not.toThrow()
+
+      // Past the full debounce window: the timer was cancelled, not merely
+      // outrun. Without the clear, this is where the recompute would land.
+      await new Promise((r) => setTimeout(r, 600))
+      expect(recompute).not.toHaveBeenCalled()
+    } finally {
+      captured.restore()
+    }
   })
 })

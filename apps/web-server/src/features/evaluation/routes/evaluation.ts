@@ -59,14 +59,19 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
   ): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
-    // When the project default is the new `external` heal-agent, there is no
-    // local LLM voice for evaluation rewriting — fall back to the deterministic
-    // adapter so exports stay reproducible.
+    // `healAgent` says who drives REPAIR, not whether a CLI exists for a
+    // one-shot rewrite. `external` means an outside MCP client heals this
+    // workspace — it is the default, so mapping it to `deterministic` here used
+    // to hand back raw wording to everyone who asked for localized, silently.
+    // Map it to `auto` instead and let `resolveEvaluationAgents` look for a
+    // claude/codex CLI; with neither installed it still returns none and the
+    // deterministic fallback applies, but now that is a fact about the machine
+    // rather than about a config field that meant something else.
     const projectHealAgent = mode === 'localized' && deps.projectRoot
       ? loadProjectConfig(deps.projectRoot).healAgent
       : 'deterministic'
     const audienceAdapter: 'auto' | 'claude' | 'codex' | 'manual' | 'deterministic' =
-      projectHealAgent === 'external' ? 'deterministic' : projectHealAgent
+      projectHealAgent === 'external' ? 'auto' : projectHealAgent
     const runDir = runDirFor(deps.store.logsDir, detail.runId)
     const rewrite = mode === 'localized'
       ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal, onSession)
@@ -352,6 +357,11 @@ async function loadEvaluationRewrite(
       writeCachedEvaluationRewrite(runDir, generated)
       onOutput?.('[evaluation] localized wording cached\n')
     } else {
+      // The report is about to ship with raw wording under a localized label.
+      // Say so in the export log — the sidecar file alone is not somewhere
+      // anyone looks, and a silently downgraded report is a report that lies
+      // about how it was written.
+      onOutput?.('[evaluation] no claude or codex CLI available — the report keeps its raw wording\n')
       writeEvaluationRewriteError(runDir, `No evaluation rewrite was generated for adapter "${audienceAdapter}".`)
     }
     return generated ?? undefined

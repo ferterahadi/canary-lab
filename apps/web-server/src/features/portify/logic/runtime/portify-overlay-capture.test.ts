@@ -52,6 +52,21 @@ describe('declaredPortsForRepo', () => {
     expect(declaredPortsForRepo(f, 'app')).toEqual([{ name: 'api', env: 'PORT' }])
   })
 
+  it('steps over an object start command that declares no ports at all', () => {
+    // A not-yet-portified command is an object with no `ports` key, so this is
+    // the shape EVERY repo has before its first port-ification — it has to be
+    // skipped like a bare string rather than reading as an empty declaration.
+    const f = feature([{
+      name: 'app',
+      localPath: '/a',
+      startCommands: [
+        { command: 'node worker.js' },
+        { command: 'node api.js', ports: [{ name: 'api', env: 'PORT' }] },
+      ],
+    }])
+    expect(declaredPortsForRepo(f, 'app')).toEqual([{ name: 'api', env: 'PORT' }])
+  })
+
   it('reads only the named repo, not the whole feature', () => {
     const f = feature([
       { name: 'app', localPath: '/a', startCommands: [{ command: 'node a.js', ports: [{ name: 'api', env: 'PORT' }] }] },

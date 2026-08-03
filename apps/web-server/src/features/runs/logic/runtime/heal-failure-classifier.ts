@@ -19,6 +19,20 @@ type HealFailureCause = NonNullable<HealEnd['agentCause']>
 // "limit", but we want usage-limit, not rate-limit).
 const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly string[] }> = [
   {
+    // Claude Code's first-run folder-trust prompt. It is not an error and the
+    // agent is not wedged — it is waiting for a keypress nobody will send.
+    // `ensureHealWorkspaceTrusted` normally settles this before the spawn, so
+    // reaching here means the opt-out is set or the CLI config was unwritable.
+    // Listed first: the prompt's own body says "read, edit, and execute", and
+    // "execute" must not be mistaken for a crash fingerprint.
+    cause: 'trust-prompt',
+    needles: [
+      'is this a project you created or one you trust',
+      'yes, i trust this folder',
+      'do you trust the files in this folder',
+    ],
+  },
+  {
     cause: 'usage-limit',
     needles: [
       'usage limit',
@@ -103,10 +117,21 @@ export function classifyHealFailure(
   const trimmed = tail.trim()
   if (trimmed === '') return undefined
   const haystack = stripAnsi(trimmed).toLowerCase()
+  // A full-screen TUI positions each word with its own cursor escape rather
+  // than emitting spaces, so a stripped banner arrives as one run-together
+  // word ("isthisaprojectyoutrust"). Match against a space-free copy too, with
+  // the needle squeezed the same way — strictly additive, so every fingerprint
+  // that matched the plain text still matches.
+  const squeezed = squeezeSpace(haystack)
   for (const { cause, needles } of FINGERPRINTS) {
-    if (needles.some((needle) => haystack.includes(needle))) return cause
+    const hit = needles.some((needle) => haystack.includes(needle) || squeezed.includes(squeezeSpace(needle)))
+    if (hit) return cause
   }
   return 'unknown'
+}
+
+function squeezeSpace(s: string): string {
+  return s.replace(/\s+/g, '')
 }
 
 // Terminal capture is full of SGR/erase escape sequences that can split a

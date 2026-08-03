@@ -1,8 +1,13 @@
 import http, { type IncomingMessage } from 'node:http'
 
-// Catalog service for the demo storefront. Two defects are planted here on
-// purpose — see the notes at each one. They are what the `demo_catalog` feature
-// catches, and what the repair loop is meant to fix.
+// Catalog service for the demo storefront. Three defects are planted here on
+// purpose. They are what the `demo_catalog` feature catches, and what the
+// repair loop is meant to fix.
+//
+// Two of them fail on the first run. The third cannot fail until the second is
+// fixed — removing a product is what breaks the assumption its id scheme rests
+// on — so repairing this service genuinely takes more than one pass. That is
+// the point of the demo: a repair loop, not a single edit.
 
 interface Product {
   id: string
@@ -11,7 +16,10 @@ interface Product {
 }
 
 const products: Product[] = []
-let nextId = 1
+
+// Ids are handed out from the catalog's current size, which stays unique for as
+// long as the catalog only ever grows.
+const nextProductId = () => String(products.length + 1)
 
 const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
   let body = ''
@@ -44,7 +52,7 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'name is required' }))
         return
       }
-      const product: Product = { id: String(nextId++), name, price: price ?? 0 }
+      const product: Product = { id: nextProductId(), name, price: price ?? 0 }
       products.push(product)
       res.writeHead(201)
       res.end(JSON.stringify(product))

@@ -53,6 +53,35 @@ describe('writeHealIndex cross-run flake history', () => {
     )
   })
 
+  it('counts a legacy prior run that names its feature as `featureName`', () => {
+    // Manifests written before the field was renamed carry `featureName`. They
+    // are the OLDEST runs in a long-lived workspace — exactly the ones a flake
+    // history most wants — so dropping them would silently shorten the window
+    // and turn a persistent failure into a "new" one.
+    const runsRoot = path.join(tmpDir, 'runs')
+    const legacy = path.join(runsRoot, '2026-01-01T0001-old')
+    fs.mkdirSync(legacy, { recursive: true })
+    fs.writeFileSync(path.join(legacy, 'manifest.json'), JSON.stringify({ featureName: 'demo' }))
+    fs.writeFileSync(
+      path.join(legacy, 'e2e-summary.json'),
+      JSON.stringify({ failed: [{ name: 'a-test' }] }),
+    )
+    const currentDir = path.join(runsRoot, '2026-01-02T0001-new')
+    fs.mkdirSync(currentDir, { recursive: true })
+    const healIndexPath = path.join(currentDir, 'heal-index.md')
+
+    writeHealIndex({
+      manifest: { feature: 'demo' },
+      summary: { failed: [{ name: 'a-test' }] },
+      healIndexPath,
+      journalPath: path.join(currentDir, 'diagnosis-journal.md'),
+    })
+
+    expect(fs.readFileSync(healIndexPath, 'utf-8')).toContain(
+      'failed in 1 of the last 1 run of this feature (persistent)',
+    )
+  })
+
   it('adds a per-test history line from prior sibling runs of the same feature', () => {
     const runsRoot = path.join(tmpDir, 'runs')
     mkRun(runsRoot, '2026-01-01T0001-aaa', ['a-test'])

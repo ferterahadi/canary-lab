@@ -135,7 +135,10 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
   // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
   // from stdin (`-`) and writes the final message to --output-last-message.
   const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { model: PRD_SUMMARY_MODELS.claude, sessionId: claudeSessionId })
+    // `readOnly` matches what the codex arm below already declares with
+    // `--sandbox read-only`: this agent reads docs and answers with JSON, so it
+    // has no business holding a write tool on either arm.
+    ? buildClaudeAgenticArgs(prompt, { model: PRD_SUMMARY_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
     : codexArgs(outputPath!)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 

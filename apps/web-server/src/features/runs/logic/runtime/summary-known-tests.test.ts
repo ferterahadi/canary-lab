@@ -28,7 +28,8 @@ vi.mock('./trace-enrichment', () => ({
 }))
 
 const { slugify, testIdFor, default: SummaryReporter } = await import('./summary-reporter')
-const { listLineFromTitlePath } = await import('./summary-known-tests')
+const { listLineFromTitlePath, knownTestFromTest, knownTestsFromExistingSummary } =
+  await import('./summary-known-tests')
 
 // Every expectation here was measured against Playwright 1.62 by feeding the
 // output back through `playwright test --list --test-list <file>`. A line that
@@ -61,6 +62,47 @@ describe('listLineFromTitlePath', () => {
   it('ignores non-string parts rather than rendering them', () => {
     expect(listLineFromTitlePath(['', '', 'a.spec.ts', undefined, 'a title']))
       .toBe('a.spec.ts › a title')
+  })
+})
+
+// A `listLine` is only worth capturing if it SURVIVES to the rerun, and the two
+// halves of that journey live in different functions: one reads Playwright's
+// TestCase, the other re-reads the summary file a restart left behind. Testing
+// them apart would let the write side keep emitting a field the read side had
+// quietly started dropping, and the symptom is a rerun that selects zero tests
+// and reports it as an ordinary empty run.
+describe('listLine round trip: TestCase → summary file → replay', () => {
+  const testCase = (titlePath: string[]) => ({
+    title: titlePath[titlePath.length - 1],
+    titlePath: () => titlePath,
+    location: { file: '/repo/a.spec.ts', line: 12 },
+  }) as never
+
+  it('captures the rendered line off a TestCase and hands it back on replay', () => {
+    const entry = knownTestFromTest(testCase(['', 'chromium', 'a.spec.ts', 'checkout flow', 'applies a discount']))
+    expect(entry.listLine).toBe('[chromium] › a.spec.ts › checkout flow › applies a discount')
+    // titlePath is the filtered form — it has lost the project slot, which is
+    // exactly why listLine has to be stored rather than rebuilt from it later.
+    expect(entry.titlePath).toEqual(['chromium', 'a.spec.ts', 'checkout flow', 'applies a discount'])
+
+    const replayed = knownTestsFromExistingSummary({ knownTests: [JSON.parse(JSON.stringify(entry))] })
+    expect(replayed).toHaveLength(1)
+    expect(replayed[0].listLine).toBe(entry.listLine)
+    expect(replayed[0].id).toBe(entry.id)
+  })
+
+  it('omits the field entirely when the TestCase cannot identify a file plus title', () => {
+    // Not `listLine: undefined` — the entry is JSON-serialized into the summary,
+    // and an absent key is what the replay side's string check expects.
+    const entry = knownTestFromTest(testCase(['', '', 'only-a-title']))
+    expect('listLine' in entry).toBe(false)
+  })
+
+  it('drops a replayed listLine that is present but empty', () => {
+    const replayed = knownTestsFromExistingSummary({
+      knownTests: [{ id: 'test-id-x', name: 'test-case-a', title: 'A', listLine: '' }],
+    })
+    expect('listLine' in replayed[0]).toBe(false)
   })
 })
 

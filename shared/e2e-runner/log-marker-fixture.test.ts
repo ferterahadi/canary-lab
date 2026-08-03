@@ -350,6 +350,59 @@ describe('per-test HAR recording', () => {
     expect(tracing.stopHar).not.toHaveBeenCalled()
   })
 
+  // The three ways HAR recording can fail mid-flight. All of them are
+  // best-effort by design: this fixture is published into feature repos and
+  // wraps EVERY test, so a network log that cannot be produced must cost the
+  // run nothing. A throw here would fail tests that were otherwise passing.
+  it('reports no HAR path when starting the recording throws', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    tracing.startHar = vi.fn(async () => { throw new Error('tracing already started') })
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+
+    // null, not the path — so stopHarRecording later short-circuits rather than
+    // trying to stop a recording that never began.
+    expect(await startHarRecording(page as never, testInfo as never)).toBeNull()
+  })
+
+  it('leaves the HAR alone when stopping it throws', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({
+      outputPath: (name: string) => path.join(dir, name),
+      status: 'failed',
+      expectedStatus: 'passed',
+    })
+    const harPath = await startHarRecording(page as never, testInfo as never)
+    fs.writeFileSync(harPath!, '{"log":{}}')
+    tracing.stopHar = vi.fn(async () => { throw new Error('context closed') })
+
+    await stopHarRecording(page as never, testInfo as never, harPath)
+
+    // A half-written HAR is not attached (the reporter would point at a file it
+    // cannot parse) and not deleted either — on disk it is still failure signal.
+    expect(testInfo.attach).not.toHaveBeenCalled()
+    expect(fs.existsSync(harPath!)).toBe(true)
+  })
+
+  it('stops cleanly when the page lost its tracing between start and stop', async () => {
+    // A real path on disk, so the `!harPath` guard passes and the tracing
+    // lookup is what actually decides — the page was closed and re-derived
+    // without tracing after recording began.
+    const harPath = path.join(mkTmp(), 'canary-lab-network-my-case.har')
+    fs.writeFileSync(harPath, '{"log":{}}')
+    const testInfo = fakeTestInfo({ status: 'failed', expectedStatus: 'passed' })
+
+    await stopHarRecording(fakeHarPage(undefined) as never, testInfo as never, harPath)
+
+    // Nothing is attached (there is no completed recording to point at) and
+    // nothing is deleted — the partial file stays as whatever evidence it is.
+    expect(testInfo.attach).not.toHaveBeenCalled()
+    expect(fs.existsSync(harPath)).toBe(true)
+  })
+
   it('brackets the test body: starts before it, stops after the screenshot', async () => {
     const dir = mkTmp()
     const order: string[] = []
