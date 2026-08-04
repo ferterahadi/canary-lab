@@ -312,14 +312,16 @@ export function RunDetailColumn({
           </RunPane>
         </div>}
         {!isVerify && !isBootRun && tab === 'changes' && (
-          <div className="h-full overflow-auto">
-            <ChangesTab
-              runId={m.runId}
-              fixCapture={m.fixCapture}
-              proposedPrs={m.proposedPrs}
-              prAttempt={m.prAttempt}
-            />
-          </div>
+          // No wrapper scroller: the tab renders its own `RunPane`, the same
+          // frame every other tab uses. The extra `overflow-auto` div around it
+          // made this the one pane with two nested scrollers.
+          <ChangesTab
+            runId={m.runId}
+            fixCapture={m.fixCapture}
+            proposedPrs={m.proposedPrs}
+            prAttempt={m.prAttempt}
+            repoBranches={repoBranches}
+          />
         )}
         {!isVerify && tab === 'journal' && (
           <JournalTab feature={m.feature} runId={m.runId} refreshKey={journalRefreshKey} healCycles={m.healCycles} />

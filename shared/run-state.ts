@@ -79,11 +79,15 @@ export interface RunBootFailure {
  * - `max-cycles`  — hit the hard cycle cap (AUTO_HEAL_MAX_CYCLES).
  * - `no-progress` — the same failing set survived the no-progress limit of
  *                   consecutive fix attempts, or a fixless rerun made no gain.
- * - `spawn-failed`— the heal agent process failed to spawn.
  * - `cancelled`   — the user stopped heal (or the run was aborted) mid-loop.
+ *
+ * There is deliberately no `spawn-failed`: a heal agent that fails to spawn
+ * throws out of the loop rather than settling it, so no run has ever ended with
+ * that reason. Reinstate it here (and in the UI) only alongside a `recordHealEnd`
+ * call that can actually produce it.
  */
 export interface HealEnd {
-  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'spawn-failed' | 'cancelled'
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled'
   /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
   agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
   /** Best-effort classification of why the agent went quiet, from its output
@@ -120,7 +124,23 @@ export interface RunFixCaptureRepo {
   baseSha: string
   /** Number of files the fix touched. */
   files: number
+  /**
+   * Repo-relative paths of those files, so the Changes tab can name what the
+   * repair touched instead of only counting it. Once the patch is applied into
+   * the real repo, the user's editor shows these interleaved with whatever they
+   * were already working on — this list is the only thing that separates them.
+   *
+   * Capped at FIX_CAPTURE_MAX_FILE_NAMES; `files` still carries the true count,
+   * so a repair past the cap reads as "n of N" rather than a short list
+   * pretending to be complete. Absent on captures written before this field.
+   */
+  fileNames?: string[]
 }
+
+/** Name-list cap for RunFixCaptureRepo.fileNames. The manifest is re-read on
+ *  every run-detail fetch, and a pathological repair must not turn it into a
+ *  path dump; the count and the patch itself both survive the cap. */
+export const FIX_CAPTURE_MAX_FILE_NAMES = 200
 
 export interface RunFixCapture {
   repos: RunFixCaptureRepo[]

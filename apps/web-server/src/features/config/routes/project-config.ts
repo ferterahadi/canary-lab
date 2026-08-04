@@ -65,6 +65,12 @@ export async function projectConfigRoutes(
         ? personalWikiPath!
         : current.personalWikiPath,
       autoProposePr: incomingAutoProposePr ?? current.autoProposePr,
+      // Carried, never accepted from the body: the port is owned by
+      // POST /api/project-config/port, which rebinds the server as it saves.
+      // Rebuilding the config without it drops a pinned port silently — the
+      // file is not reread until the next boot, which then lands on
+      // DEFAULT_PORT and strands every client aimed at the pinned one.
+      ...(current.port === undefined ? {} : { port: current.port }),
     }
     saveProjectConfig(deps.projectRoot, next)
     return next

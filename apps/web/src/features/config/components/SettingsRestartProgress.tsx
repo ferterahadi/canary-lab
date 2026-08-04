@@ -211,7 +211,7 @@ export function RestartStepGlyph({ state }: { state: 'done' | 'active' | 'pendin
       <span
         aria-hidden="true"
         className="inline-flex items-center justify-center rounded-full"
-        style={{ width: 14, height: 14, background: 'var(--accent)', color: '#fff', fontSize: 9, fontWeight: 700 }}
+        style={{ width: 14, height: 14, background: 'var(--accent)', color: 'var(--on-accent)', fontSize: 9, fontWeight: 700 }}
       >
         ✓
       </span>

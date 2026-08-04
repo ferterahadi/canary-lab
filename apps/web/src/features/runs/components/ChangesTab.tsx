@@ -1,26 +1,27 @@
-import { useCallback, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { RunFixCapture, RunPrAttempt, RunProposedPr } from '@/shared/api/types'
-import { DiffView } from '@/shared/ui/DiffView'
+import { useState } from 'react'
+import type { RepoBranchSnapshot, RunFixCapture, RunPrAttempt, RunProposedPr } from '@/shared/api/types'
+import { RunPane } from './RunPane'
+import { RepairedRepoCard, useRepoOpener } from './RepairedRepoCard'
 import { ProposePrDialog } from './ProposePrDialog'
 
 // What the repair agent actually changed, on the run it changed it in.
 //
-// A run repairs in a throwaway working copy that is deleted at teardown, so the
-// diff is the ONLY durable record — and it used to live exclusively on the
-// flight page, which meant a repair could finish with the run screen showing no
-// sign anything had happened. This tab is that record, per repo: how many files,
-// the diff itself, and what became of the pull request.
+// Every repo the feature declares gets a card, not just the ones that changed:
+// with several repos in play, "which of these did the agent touch?" is the
+// question the tab is opened to answer, and a list that silently omits the
+// untouched ones answers it only by absence. Repos with a repair sort to the
+// top — the ones that need reading come first.
 //
 // Per repo, not per service: several services can share one repo and therefore
-// one working copy, so their fix is one diff. A repo with no local path (a
-// tunnel, say) never gets a working copy and never appears here at all.
+// one working copy, so their fix is one diff. Splitting the cards per service
+// would either duplicate that diff or invent a division git cannot make.
 
 export function ChangesTab({
   runId,
   fixCapture,
   proposedPrs,
   prAttempt,
+  repoBranches,
 }: {
   runId: string
   fixCapture?: RunFixCapture
@@ -28,180 +29,63 @@ export function ChangesTab({
   /** The last attempt, including its failures — the only place a captured fix
    *  with no PR can explain itself. */
   prAttempt?: RunPrAttempt
+  /** Every repo the run booted from, which is the roster the untouched cards
+   *  come from. Absent on runs recorded before it was captured; the tab then
+   *  falls back to showing only what changed. */
+  repoBranches?: RepoBranchSnapshot[]
 }) {
   const [prOpen, setPrOpen] = useState(false)
   const repos = fixCapture?.repos ?? []
+  const changed = new Map(repos.map((r) => [r.repoName, r]))
   const prByRepo = new Map((proposedPrs ?? []).map((p) => [p.repoName, p]))
   const reasonByRepo = new Map(
     (prAttempt?.results ?? []).filter((r) => !r.ok && r.reason).map((r) => [r.repoName, r.reason!]),
   )
+  const opener = useRepoOpener(runId, repos.length > 0)
 
   if (repos.length === 0) {
     return (
-      <div className="p-4 text-[12px]" style={{ color: 'var(--text-muted)' }} data-testid="changes-empty">
-        Nothing was changed in your code on this run. A run only records changes when a repair
-        agent edited something — a run that passed first time never started one.
-      </div>
+      <RunPane padded>
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }} data-testid="changes-empty">
+          Nothing was changed in your code on this run. A run only records changes when a repair
+          agent edited something — a run that passed first time never started one.
+        </div>
+      </RunPane>
     )
   }
 
   return (
-    <div className="flex flex-col gap-3 p-3" data-testid="changes-tab">
-      <p className="m-0 text-[11.5px]" style={{ color: 'var(--text-secondary)' }}>
-        The repair ran in an isolated copy of your code — your repos were untouched. Each diff below
-        is saved as a patch you can apply or open as a pull request.
-      </p>
-      {repos.map((repo) => (
-        <RepoChanges
-          key={repo.repoName}
-          runId={runId}
-          repoName={repo.repoName}
-          files={repo.files}
-          patchPath={repo.patchPath}
-          pr={prByRepo.get(repo.repoName)}
-          blockedReason={reasonByRepo.get(repo.repoName)}
-          auto={prAttempt?.auto === true}
-          onProposeClick={() => setPrOpen(true)}
-        />
-      ))}
+    <RunPane padded>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0" data-testid="changes-tab">
+        {rosterFor(repos.map((r) => r.repoName), repoBranches).map((repoName) => (
+          <RepairedRepoCard
+            key={repoName}
+            repoName={repoName}
+            {...(changed.has(repoName) ? { repo: changed.get(repoName)! } : {})}
+            {...opener.cardProps(repoName)}
+            {...(prByRepo.has(repoName) ? { pr: prByRepo.get(repoName)! } : {})}
+            {...(reasonByRepo.has(repoName) ? { blockedReason: reasonByRepo.get(repoName)! } : {})}
+            auto={prAttempt?.auto === true}
+            onProposeClick={() => setPrOpen(true)}
+          />
+        ))}
+      </ul>
+      {opener.confirm}
       {/* The dialog's write goes through the run store, so the opened PR
           arrives here over the runs WebSocket — nothing to re-poll. */}
       <ProposePrDialog open={prOpen} onClose={() => setPrOpen(false)} runId={runId} />
-    </div>
+    </RunPane>
   )
 }
 
-function RepoChanges({
-  runId,
-  repoName,
-  files,
-  patchPath,
-  pr,
-  blockedReason,
-  auto,
-  onProposeClick,
-}: {
-  runId: string
-  repoName: string
-  files: number
-  patchPath: string
-  pr?: RunProposedPr
-  blockedReason?: string
-  auto: boolean
-  onProposeClick: () => void
-}) {
-  const [diff, setDiff] = useState<string | null>(null)
-  const [open, setOpen] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [fetched, setFetched] = useState(false)
-
-  // Fetch on first expand only: a patch can run to hundreds of kilobytes, and
-  // several repos' worth on mount would be a wall of text nobody asked for.
-  // The `fetched` latch covers the failure case too — a rejected read must not
-  // be retried on every render, which is an endless request loop against a
-  // patch file that is gone for good.
-  const toggle = useCallback(() => {
-    const next = !open
-    setOpen(next)
-    if (!next || fetched || loading) return
-    setFetched(true)
-    setLoading(true)
-    api.getRunFixPatch(runId, repoName)
-      .then((r) => setDiff(r.diff))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false))
-  }, [open, fetched, loading, runId, repoName])
-
-  return (
-    <section
-      className="flex min-w-0 flex-col gap-1.5 rounded-md px-3 py-2.5"
-      style={{ background: 'var(--bg-elevated)' }}
-      data-testid={`changes-repo-${repoName}`}
-    >
-      <div className="flex min-w-0 flex-wrap items-baseline gap-1.5 text-[12px]">
-        <span className="truncate font-medium" style={{ color: 'var(--text-primary)' }}>{repoName}</span>
-        <span style={{ color: 'var(--text-muted)' }}>·</span>
-        <span style={{ color: 'var(--text-secondary)' }}>{files} file{files === 1 ? '' : 's'} changed</span>
-      </div>
-
-      <PrLine repoName={repoName} pr={pr} blockedReason={blockedReason} auto={auto} onProposeClick={onProposeClick} />
-
-      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          data-testid={`changes-view-diff-${repoName}`}
-          onClick={toggle}
-          className="cl-button px-2 py-0.5 text-[11px]"
-          style={{ color: 'var(--accent)' }}
-        >
-          {open ? 'Hide diff' : 'View diff'}
-        </button>
-        <button
-          type="button"
-          data-testid={`changes-open-editor-${repoName}`}
-          onClick={() => { api.openEditor({ file: patchPath }).catch(() => {}) }}
-          className="cl-button px-2 py-0.5 text-[11px]"
-        >
-          Open in editor
-        </button>
-        <button
-          type="button"
-          data-testid={`changes-copy-path-${repoName}`}
-          onClick={() => { void navigator.clipboard?.writeText(patchPath).catch(() => {}) }}
-          className="cl-button px-2 py-0.5 text-[11px]"
-        >
-          Copy path
-        </button>
-      </div>
-
-      {open && (
-        <div className="mt-1">
-          {loading && <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>Loading the diff…</div>}
-          {error && <div className="text-[11px]" style={{ color: 'var(--danger)' }} data-testid={`changes-diff-error-${repoName}`}>{error}</div>}
-          {diff !== null && <DiffView diff={diff} />}
-        </div>
-      )}
-    </section>
-  )
-}
-
-/** What became of the pull request for this repo — a link, the reason there
- *  isn't one, or the offer to open it by hand. Never silent: a captured fix with
- *  no PR and no explanation is the thing this tab exists to stop. */
-function PrLine({
-  repoName,
-  pr,
-  blockedReason,
-  auto,
-  onProposeClick,
-}: {
-  repoName: string
-  pr?: RunProposedPr
-  blockedReason?: string
-  auto: boolean
-  onProposeClick: () => void
-}) {
-  if (pr) {
-    return (
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px]" data-testid={`changes-pr-${repoName}`}>
-        <span style={{ color: 'var(--text-muted)' }}>{auto ? 'Draft pull request opened by this run' : 'Pull request opened'}</span>
-        <a href={pr.url} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{pr.url}</a>
-      </div>
-    )
-  }
-  if (blockedReason) {
-    return (
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px]" data-testid={`changes-pr-blocked-${repoName}`}>
-        <span style={{ color: 'var(--text-muted)' }}>No pull request — {blockedReason}</span>
-        <button type="button" onClick={onProposeClick} className="cl-button px-2 py-0.5 text-[11px]">Try again…</button>
-      </div>
-    )
-  }
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 text-[11px]" data-testid={`changes-pr-none-${repoName}`}>
-      <span style={{ color: 'var(--text-muted)' }}>No pull request yet</span>
-      <button type="button" onClick={onProposeClick} className="cl-button px-2 py-0.5 text-[11px]">Propose PR…</button>
-    </div>
-  )
+/**
+ * Repo names to render, repaired ones first. The roster is the run's own repo
+ * list; a repaired repo missing from it is still listed rather than dropped —
+ * the capture is the harder evidence of the two, and losing a card that has a
+ * patch behind it would be the one failure this tab cannot afford.
+ */
+export function rosterFor(changedNames: string[], repoBranches?: RepoBranchSnapshot[]): string[] {
+  const changed = new Set(changedNames)
+  const untouched = (repoBranches ?? []).map((r) => r.name).filter((name) => !changed.has(name))
+  return [...changedNames, ...untouched]
 }

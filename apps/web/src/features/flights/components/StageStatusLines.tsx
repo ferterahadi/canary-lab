@@ -35,7 +35,6 @@ export function healEndLine(healEnd: HealEnd | undefined): string | null {
     }
     case 'max-cycles': return 'Auto-repair stopped — it hit the cycle limit without passing.'
     case 'no-progress': return 'Auto-repair stopped — repeated tries got nowhere.'
-    case 'spawn-failed': return 'Auto-repair stopped — the agent could not start.'
     case 'cancelled': return 'Auto-repair was stopped before the tests passed.'
     default: return null
   }
@@ -52,7 +51,6 @@ export function healEndShort(healEnd: HealEnd | undefined): string | null {
         : 'stopped — agent went quiet'
     case 'max-cycles': return 'stopped — cycle limit'
     case 'no-progress': return 'stopped — no progress'
-    case 'spawn-failed': return 'stopped — agent failed to start'
     case 'cancelled': return 'stopped by you'
     default: return null
   }

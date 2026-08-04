@@ -75,11 +75,11 @@ export function writeInitialManifest(ctx: RunContext, serviceStatus: ServiceMani
     // Reflect the actual paths this run occupies: worktree-isolated repos
     // point at their worktree so a later run can take the freed source in
     // place without a false collision.
+    // `resolvePath` always hands back a string and `existsSync` reports a bad
+    // path as `false` rather than throwing, so this needs no error handling.
     repoPaths: (ctx.feature.repos ?? [])
       .map((r) => ctx.repoPathOverrides[r.name] ?? resolvePath(r.localPath))
-      .filter((p) => {
-        try { return fs.existsSync(p) } catch { return false }
-      }),
+      .filter((p) => fs.existsSync(p)),
     ...(Object.keys(worktreeMap).length > 0 ? { worktrees: worktreeMap } : {}),
     repoBranches: ctx.repoBranchSnapshots,
     playwrightArtifacts: readPlaywrightArtifactPolicy(ctx.feature.featureDir),

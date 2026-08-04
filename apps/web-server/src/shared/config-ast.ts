@@ -28,8 +28,13 @@ export type ConfigValue =
   | ConfigValue[]
   | { [k: string]: ConfigValue }
 
+/** A config file's root value. Every locator below resolves to an
+ *  `ObjectExpression`, so a parsed config is always a plain object — callers
+ *  never have to re-check for null, a scalar, or an array. */
+export type ConfigObject = { [k: string]: ConfigValue }
+
 export interface ParsedConfig {
-  value: ConfigValue
+  value: ConfigObject
   /** Field paths whose value is a non-literal expression (read-only in UI). */
   complexFields: string[]
 }
@@ -136,25 +141,8 @@ function nodeToValue(
           ? nodeToValue(el as K.ExpressionKind, complex, `${path}[${i}]`)
           : null,
       )
-    case 'ObjectExpression': {
-      const out: { [k: string]: ConfigValue } = {}
-      for (const prop of node.properties) {
-        if (prop.type !== 'ObjectProperty' && prop.type !== 'Property') continue
-        const key = (() => {
-          const k = (prop as N.ObjectProperty).key
-          if (k.type === 'Identifier') return k.name
-          if (k.type === 'StringLiteral') return k.value
-          return null
-        })()
-        if (key == null) continue
-        out[key] = nodeToValue(
-          (prop as N.ObjectProperty).value as K.ExpressionKind,
-          complex,
-          path ? `${path}.${key}` : key,
-        )
-      }
-      return out
-    }
+    case 'ObjectExpression':
+      return objectNodeToValue(node, complex, path)
     case 'UnaryExpression': {
       const u = node as N.UnaryExpression
       if (u.operator === '-' && u.argument.type === 'NumericLiteral') {
@@ -167,6 +155,33 @@ function nodeToValue(
       complex.push(path)
       return { [EXPR]: recast.print(node).code }
   }
+}
+
+/** The `ObjectExpression` arm of `nodeToValue`, split out so the locators —
+ *  which only ever resolve to an object literal — can hand back a
+ *  `ConfigObject` without a cast. */
+function objectNodeToValue(
+  node: N.ObjectExpression,
+  complex: string[],
+  path: string,
+): ConfigObject {
+  const out: ConfigObject = {}
+  for (const prop of node.properties) {
+    if (prop.type !== 'ObjectProperty' && prop.type !== 'Property') continue
+    const key = (() => {
+      const k = (prop as N.ObjectProperty).key
+      if (k.type === 'Identifier') return k.name
+      if (k.type === 'StringLiteral') return k.value
+      return null
+    })()
+    if (key == null) continue
+    out[key] = nodeToValue(
+      (prop as N.ObjectProperty).value as K.ExpressionKind,
+      complex,
+      path ? `${path}.${key}` : key,
+    )
+  }
+  return out
 }
 
 /** Build a Babel AST node from a ConfigValue tree. `$expr` placeholders
@@ -339,7 +354,7 @@ export function readFeatureConfig(source: string): ReadResult {
   const loc = locateFeatureConfigObject(ast)
   if (!loc) throw new Error('Unable to locate feature config object literal')
   const complex: string[] = []
-  const value = nodeToValue(loc.node, complex, '')
+  const value = objectNodeToValue(loc.node, complex, '')
   return { value, complexFields: complex, source }
 }
 
@@ -359,7 +374,7 @@ export function readPlaywrightConfig(source: string): ReadResult {
   const loc = locatePlaywrightConfigObject(ast)
   if (!loc) throw new Error('Unable to locate playwright config object literal')
   const complex: string[] = []
-  const value = nodeToValue(loc.node, complex, '')
+  const value = objectNodeToValue(loc.node, complex, '')
   return { value, complexFields: complex, source }
 }
 

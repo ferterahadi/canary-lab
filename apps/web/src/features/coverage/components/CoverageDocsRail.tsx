@@ -377,11 +377,8 @@ export function CoverageDocsRail(props: Props): JSX.Element {
             data-testid="generate-summary"
             onClick={() => onGenerate('summary')}
             disabled={generating || sourceCount === 0}
-            className="cl-button w-full px-3 py-1.5"
+            className={`${!generating && sourceCount > 0 ? 'cl-button-primary' : 'cl-button'} w-full px-3 py-1.5`}
             title={sourceCount === 0 ? 'Add a source doc first' : 'Generate the PRD summary from these docs'}
-            style={!generating && sourceCount > 0
-              ? { background: 'var(--accent)', color: '#ffffff', borderColor: 'var(--accent)', fontWeight: 600 }
-              : undefined}
           >
             {generating ? 'Generating…' : 'Generate'}
           </button>
@@ -396,7 +393,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
               onClick={() => void redoFromStart()}
               disabled={locked}
               className="cl-button w-full px-3 py-1.5"
-              style={{ background: 'var(--danger)', color: '#ffffff', borderColor: 'var(--danger)', fontWeight: 600 }}
+              style={{ background: 'var(--danger)', color: 'var(--on-accent)', borderColor: 'var(--danger)', fontWeight: 600 }}
             >
               Wipe everything &amp; start over
             </button>

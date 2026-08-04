@@ -61,11 +61,11 @@ const BASELINE = {
   // file-level coverage exclude — is strictly coarser here, since it would drop
   // a 530-line file out of the gate to excuse four lines.
   'no-v8-ignore': new Map([
-    ['apps/web-server/src/features/config/logic/feature-authoring.ts', '4 pragmas — 3 isWithin path-traversal guards behind sanitizeSlotName/validateGeneratedSpecFiles, 1 non-object-config guard the AST locator cannot produce'],
+    ['apps/web-server/src/features/config/logic/feature-authoring.ts', '3 pragmas — isWithin path-traversal guards behind sanitizeSlotName/validateGeneratedSpecFiles. The 4th (a non-object-config guard) is gone: readFeatureConfig now returns ConfigObject, so that state is unrepresentable rather than excused'],
     ['apps/web-server/src/features/runs/logic/runtime/trace-cli.ts', '1 pragma — corrupt-install branch; reachable with a mocked fs, so this one is real debt. Moved here from trace-enrichment.ts when the CLI shell was split out; the debt did not change, only its file'],
   ]),
   'no-console': new Map([
-    ['apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts', 'is itself a CLI entry point'],
+    ['apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts', 'its `main` IS the `canary-lab env` CLI body — console output is the command\'s output, not server logging'],
     ['apps/web-server/src/shared/feature-loader.ts', 'warns on a broken feature.config at load time'],
   ]),
 }

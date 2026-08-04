@@ -5,8 +5,8 @@
 // orchestrator.ts; the bodies are unchanged.
 import { type RunContext } from './run-context'
 import type { CancelHealResult, PauseResult } from './orchestrator'
-import { runPlaywright, waitForPlaywrightExit } from './run-playwright'
-import { recordHealEnd, waitForHealSignal } from './run-heal-agent'
+import { waitForPlaywrightExit } from './run-playwright'
+import { recordHealEnd } from './run-heal-agent'
 import { type RunManifest } from './manifest'
 import { summarizeFailures } from './run-verdict'
 import { killTree, scheduleSigkillFallback } from './run-spawn'

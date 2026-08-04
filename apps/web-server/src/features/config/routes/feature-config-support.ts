@@ -1,7 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
+import { readFeatureConfig, writeFeatureConfig } from '../../../shared/config-ast'
 import { getProjectRoot } from '../../../../../../shared/runtime/project-root'
 
 export const FEATURE_CONFIG_NAMES = ['feature.config.cjs', 'feature.config.js', 'feature.config.ts']
@@ -43,12 +43,24 @@ export function syncEnvsInConfig(featureDir: string): void {
   const cfg = findExistingConfig(featureDir, FEATURE_CONFIG_NAMES)
   if (!cfg) return
   const source = fs.readFileSync(cfg.path, 'utf-8')
-  const parsed = readFeatureConfig(source)
-  const value = parsed.value
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return
-  const next = { ...(value as { [k: string]: ConfigValue }), envs: listEnvFolders(featureDir) }
+  const { value } = readFeatureConfig(source)
+  const next = { ...value, envs: listEnvFolders(featureDir) }
   const written = writeFeatureConfig(source, next)
   if (written !== source) fs.writeFileSync(cfg.path, written)
+}
+
+export const SLOT_NAME_PATTERN = /^[a-zA-Z0-9._-]+$/
+
+/** A slot is one file name inside `envsets/<env>/`, so it must be a single path
+ *  segment that names a file. The character class bars a separator; `.` and
+ *  `..` are barred on top of it because they name a *directory* — without that
+ *  second rule `path.join(envsetsDir, env, slot)` resolves to `envsets/<env>`
+ *  or to `envsetsDir` itself, and the write lands on a directory (EISDIR).
+ *  Together the two rules are what make the joined path provably a file inside
+ *  `envsetsDir`, so callers that build a path this way need no `isWithin`
+ *  re-check. Routes taking a raw `:slot` param still do — see `envset-routes`. */
+export function isValidSlotName(name: string): boolean {
+  return SLOT_NAME_PATTERN.test(name) && name !== '.' && name !== '..'
 }
 
 /** True when `target` is the same as or a descendant of `root`. */

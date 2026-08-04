@@ -111,6 +111,34 @@ describe('PUT /api/project-config', () => {
     }
   })
 
+  it('preserves a pinned port when an unrelated setting changes', async () => {
+    fs.writeFileSync(
+      path.join(projectRoot, 'canary-lab.config.json'),
+      JSON.stringify({ healAgent: 'external', port: 7420 }),
+    )
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { editor: 'cursor' },
+      })
+      expect(r.statusCode).toBe(200)
+      const written = JSON.parse(
+        fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
+      )
+      // `port` is settings-adjacent but never travels in this body: it is owned
+      // by POST /api/project-config/port, which rebinds the server as it saves.
+      // Dropping the pin here is silent — nothing rereads the file until the
+      // next boot, which then lands on DEFAULT_PORT and strands every client
+      // still pointed at the pinned one.
+      expect(written.port).toBe(7420)
+      expect(r.json().port).toBe(7420)
+    } finally {
+      await app.close()
+    }
+  })
+
   it('rejects an invalid healAgent value', async () => {
     const app = await makeApp()
     try {

@@ -177,7 +177,11 @@ export function waitForPlaywrightExit(ctx: RunContext, timeoutMs: number): Promi
   if (!ctx.playwrightPty) return Promise.resolve(null)
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      if (ctx.playwrightExitWaiter) ctx.playwrightExitWaiter = null
+      // Unconditional: the only other clearer is the pty-exit handler, which
+      // nulls the waiter AND clears this timer via the waiter it just called —
+      // so if we are running, the waiter is still ours. Assigning null to an
+      // already-null field would be a no-op regardless.
+      ctx.playwrightExitWaiter = null
       resolve(null)
     }, timeoutMs)
     ctx.playwrightExitWaiter = (info) => {

@@ -2,9 +2,14 @@ import { describe, it, expect } from 'vitest'
 import { HealCycleState, AUTO_HEAL_MAX_CYCLES, DEFAULT_NO_PROGRESS_LIMIT } from './heal-cycle'
 
 describe('HealCycleState.observeFailures', () => {
-  it('returns shouldHeal=false when slug list is empty', () => {
+  it('refuses with a no-progress reason when the slug list is empty', () => {
     const s = new HealCycleState()
-    expect(s.observeFailures([])).toEqual({ shouldHeal: false })
+    expect(s.observeFailures([])).toEqual({ shouldHeal: false, reason: 'no-progress' })
+  })
+
+  it('refuses with a reason for blank slugs too, so no refusal is reason-less', () => {
+    const s = new HealCycleState()
+    expect(s.observeFailures([''])).toEqual({ shouldHeal: false, reason: 'no-progress' })
   })
 
   it('agrees to heal on first failure', () => {

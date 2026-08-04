@@ -126,6 +126,16 @@ export function ProposePrDialog({
             )}
           </div>
         ))}
+
+        {/* Says where the wording comes from, and why the confirm can sit for a
+            while: an agent reads the diff first. Without this the pause after
+            clicking reads as a hang. */}
+        {!results && pushable.length > 0 && (
+          <p className="m-0 text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }} data-testid="propose-pr-authoring-note">
+            The commit message and pull request description are written from the diff, so this can
+            take a minute. Your repo is not touched — the commit is made in a scratch copy.
+          </p>
+        )}
       </div>
     </Modal>
   )

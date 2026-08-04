@@ -20,7 +20,6 @@ import { healAgentCauseSuffix } from './heal-agent-text'
 import { ensureServicesRunning } from './run-service-boot'
 import { appendJournalIteration, markStoppedEarly, noteHealCycle, recordLifecycle, setStatus } from './run-manifest-writer'
 import type { RunOrchestrator } from './orchestrator'
-import { cancelHeal } from './run-heal-controls'
 
 export { cancelHeal, continueAfterTestRun, pauseAndHeal, restartHealFromFailure } from './run-heal-controls'
 
@@ -209,10 +208,9 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
       // string stays as the human-readable lifecycle-event detail.
       const decision = heal.observeFailures(failedSlugs)
       if (!decision.shouldHeal) {
-        // `decision.reason` is always defined here (failedSlugs is non-empty,
-        // so the empty-signature `shouldHeal:false` branch can't fire). Record
-        // WHY the loop stops so the Test Run surface can state it plainly.
-        const reason = decision.reason ?? 'no-progress'
+        // Record WHY the loop stops so the Test Run surface can state it
+        // plainly. Every refusal carries a reason — see `HealDecision`.
+        const reason = decision.reason
         const cyclesDone = heal.snapshot().cycle
         recordHealEnd(ctx, {
           reason,
@@ -241,7 +239,9 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
       setStatus(ctx, 'healing')
       noteHealCycle(ctx)
       recordLifecycle(ctx, 'agent-healing', `Heal cycle ${cycleNum} started`, {
-        detail: signature ? `Failures: ${signature}` : 'No failure signature was available.',
+        // Non-empty by construction: `observeFailures` only returns
+        // `shouldHeal` for a non-empty signature, which is this same string.
+        detail: `Failures: ${signature}`,
         activeCycle: cycleNum,
       })
 
@@ -286,8 +286,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           reason === 'idle-timeout' ? `Heal agent went silent for ${idleSec}s without writing a signal.`
             : reason === 'hard-timeout' ? `Heal cycle hit the ${hardMin}-minute ceiling without a signal.`
               : reason === 'pty-died' ? 'Heal agent exited without writing a signal.'
-                : reason === 'spawn-failed' ? 'Heal agent failed to spawn.'
-                  : `Heal cycle ended without a signal (reason: ${reason}).`
+                : `Heal cycle ended without a signal (reason: ${reason}).`
         emitAgentSystemMessage(ctx, reasonMessage)
 
         if (filesChanged.length === 0) {
@@ -306,24 +305,17 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           // The agent produced no signal and changed nothing. Its own output
           // tail is the only evidence of why — capture + classify it so the
           // Test Run surface can say "usage limit" vs "tried and couldn't".
-          if (reason === 'spawn-failed') {
-            recordHealEnd(ctx, {
-              reason: 'spawn-failed',
-              cycle: cycleNum,
-              message: 'Auto-repair stopped: the heal agent failed to spawn.',
-              at: new Date().toISOString(),
-            })
-          } else {
-            const agentCause = captureHealAgentCause(ctx)
-            recordHealEnd(ctx, {
-              reason: 'no-signal',
-              agentWait: reason as HealEnd['agentWait'],
-              agentCause,
-              cycle: cycleNum,
-              message: `${reasonMessage}${healAgentCauseSuffix(agentCause)} No code changes were made, so auto-repair stopped after cycle ${cycleNum}.`,
-              at: new Date().toISOString(),
-            })
-          }
+          // (No `spawn-failed` arm: a spawn failure throws out of the loop
+          // rather than arriving here as a reason — see `runHealAgent`.)
+          const agentCause = captureHealAgentCause(ctx)
+          recordHealEnd(ctx, {
+            reason: 'no-signal',
+            agentWait: reason as HealEnd['agentWait'],
+            agentCause,
+            cycle: cycleNum,
+            message: `${reasonMessage}${healAgentCauseSuffix(agentCause)} No code changes were made, so auto-repair stopped after cycle ${cycleNum}.`,
+            at: new Date().toISOString(),
+          })
           finalStatus = 'failed'
           setStatus(ctx, finalStatus)
           break

@@ -9,7 +9,7 @@ import { parseDotenv, writeDotenv, type KvEntry } from '../logic/dotenv-edit'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { resolveVars } from '../../runs/logic/runtime/env-switcher/switch'
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
-import { EnvsetsConfigJson, buildAppRoots, isWithin, listEnvFolders, readEnvsetsConfig, shortenHome, syncEnvsInConfig, writeEnvsetsConfig } from './feature-config-support'
+import { EnvsetsConfigJson, buildAppRoots, isValidSlotName, isWithin, listEnvFolders, readEnvsetsConfig, shortenHome, syncEnvsInConfig, writeEnvsetsConfig } from './feature-config-support'
 
 export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
   // ─── envsets ──────────────────────────────────────────────────────────
@@ -223,9 +223,9 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       return { error: 'sourcePath is not a file' }
     }
     const slotName = (req.body?.slotName ?? path.basename(sourcePath)).trim()
-    if (!/^[a-zA-Z0-9._-]+$/.test(slotName)) {
+    if (!isValidSlotName(slotName)) {
       reply.code(400)
-      return { error: 'slotName must match /^[a-zA-Z0-9._-]+$/' }
+      return { error: 'slotName must match /^[a-zA-Z0-9._-]+$/ and name a file' }
     }
     const envsetsDir = path.join(feature.featureDir, 'envsets')
     const envs = listEnvFolders(feature.featureDir)
@@ -247,10 +247,10 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       reply.code(400)
       return { error: `cannot read sourcePath: ${(err as Error).message}` }
     }
+    // `isValidSlotName` above and the on-disk env folder names make every
+    // joined path a file inside `envsetsDir`, so no traversal re-check here.
     for (const env of envs) {
-      const slotPath = path.join(envsetsDir, env, slotName)
-      if (!isWithin(envsetsDir, slotPath)) continue
-      fs.writeFileSync(slotPath, content)
+      fs.writeFileSync(path.join(envsetsDir, env, slotName), content)
     }
     const nextCfg: EnvsetsConfigJson = {
       ...cfg,
@@ -276,15 +276,16 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
         return { error: 'feature not found' }
       }
       const slotName = req.params.slot
-      if (!/^[a-zA-Z0-9._-]+$/.test(slotName)) {
+      if (!isValidSlotName(slotName)) {
         reply.code(400)
         return { error: 'invalid slot name' }
       }
       const envsetsDir = path.join(feature.featureDir, 'envsets')
       const envs = listEnvFolders(feature.featureDir)
+      // Same reasoning as the create route: the validated slot name plus a real
+      // env folder name cannot join to a path outside `envsetsDir`.
       for (const env of envs) {
         const slotPath = path.join(envsetsDir, env, slotName)
-        if (!isWithin(envsetsDir, slotPath)) continue
         if (fs.existsSync(slotPath)) fs.rmSync(slotPath, { force: true })
       }
       const cfg = readEnvsetsConfig(envsetsDir)

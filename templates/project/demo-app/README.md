@@ -36,10 +36,13 @@ tab; the diff it produced is on the **Changes** tab.
 
 Expect more than one attempt, on purpose. Two defects show up on the first run —
 a reprice that does not change the price, and a delete that is not implemented.
-The third cannot fail until the second is fixed: ids are handed out from the
-catalog's size, which is only wrong once something can leave the catalog. That
-is what a repair loop is for, and a demo that fixed everything in one edit
-would not show it.
+A third cannot fail until one of those is fixed, so it only appears partway
+through the repair. That is what a repair loop is for, and a demo that fixed
+everything in one edit would not show it.
+
+The defects are deliberately not labelled in `catalog-service/server.ts`: an
+agent that can read `// PLANTED DEFECT` off a comment fixes everything in one
+pass and demonstrates nothing. Please leave that file unannotated.
 
 No agent installed? The run still executes and still reports the failures — you
 just fix them yourself.

@@ -32,6 +32,14 @@ export interface HealCycleStateOptions {
   noProgressLimit?: number
 }
 
+/** Why the loop should stop, or that it shouldn't. A discriminated union rather
+ *  than `{ shouldHeal: boolean; reason?: … }`: every refusal names a reason, so
+ *  the caller reports `decision.reason` directly instead of guessing a default
+ *  for a case that cannot occur. */
+export type HealDecision =
+  | { shouldHeal: true }
+  | { shouldHeal: false; reason: 'max-cycles' | 'no-progress' }
+
 export interface HealCycleSnapshot {
   cycle: number              // 0-based count of heal cycles completed so far
   lastFailureSignature: string
@@ -82,9 +90,12 @@ export class HealCycleState {
   // delta-vs-previous-cycle section. The set-identity check keys off a
   // sorted-join signature so ordering changes from the test runner can't
   // masquerade as progress.
-  observeFailures(slugs: string[]): { shouldHeal: boolean; reason?: 'max-cycles' | 'no-progress' } {
+  observeFailures(slugs: string[]): HealDecision {
     const signature = slugs.slice().sort().join('|')
-    if (signature === '') return { shouldHeal: false }
+    // Nothing failing (or every slug blank) means there is nothing for a heal
+    // cycle to fix. It carries a reason like every other stop so callers never
+    // have to invent one for a `reason`-less refusal.
+    if (signature === '') return { shouldHeal: false, reason: 'no-progress' }
     if (this.cycle >= this.maxCycles) return { shouldHeal: false, reason: 'max-cycles' }
     if (signature === this.lastFailureSignature) {
       this.consecutiveSameFailures += 1

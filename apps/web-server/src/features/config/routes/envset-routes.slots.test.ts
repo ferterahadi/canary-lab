@@ -402,4 +402,35 @@ describe('envset slot management — additional branches', () => {
       await app.close()
     }
   })
+
+  // `.` and `..` pass the character class but name a directory, not a file.
+  // Before they were rejected, `path.join(envsetsDir, env, slotName)` resolved
+  // to `envsets/<env>` (or to `envsets/` itself) and the write hit EISDIR — a
+  // 500. Rejecting them up front is also what makes the joined path provably
+  // inside the envsets dir, so the routes need no traversal re-check.
+  //
+  // Only exercised through POST, where the name arrives in the JSON body. The
+  // DELETE route takes it as a URL segment, and the router normalises `.`/`..`
+  // away before the handler ever sees them — `isValidSlotName` is unit-tested
+  // directly in feature-config-support.test.ts for that side.
+  for (const slotName of ['.', '..']) {
+    it(`POST 400 when slotName is "${slotName}" (names a directory, not a file)`, async () => {
+      buildFeature('alpha', { envsets: { local: { 'feature.env': '' } } })
+      const seedFile = path.join(tmpDir, 'seed.env')
+      fs.writeFileSync(seedFile, 'A=1')
+      const app = await makeApp()
+      try {
+        const r = await app.inject({
+          method: 'POST',
+          url: '/api/features/alpha/envsets/slots',
+          payload: { sourcePath: seedFile, slotName },
+        })
+        expect(r.statusCode).toBe(400)
+        // The env folder is untouched — no stray write, no EISDIR crash.
+        expect(fs.readdirSync(path.join(featuresDir, 'alpha', 'envsets', 'local'))).toEqual(['feature.env'])
+      } finally {
+        await app.close()
+      }
+    })
+  }
 })

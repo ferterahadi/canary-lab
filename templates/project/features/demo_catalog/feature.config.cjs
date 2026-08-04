@@ -10,7 +10,7 @@ const path = require('node:path')
 
 const config = {
   name: 'demo_catalog',
-  description: 'Catalog service of the demo storefront — ships with two planted defects for the repair loop.',
+  description: 'Catalog service of the demo storefront — the repair loop\'s target.',
   envs: ['local', 'production'],
   repos: [
     {

@@ -132,80 +132,15 @@ export default defineConfig({
         '**/*.d.ts',
         // Test-only fixtures (e.g. fake coverage agents injected via deps seams).
         '**/__fixtures__/**',
-        'apps/web-server/src/server.ts',
-        // WebSocket transport glue (thin I/O), incl. the shared workspace stream.
-        'apps/web-server/src/features/**/ws/**',
-        'apps/web-server/src/shared/ws/**',
-        // ── Files with irreducible dead branches under the strict 100% gate ──
-        // Each was audited branch-by-branch: the remaining uncovered arms are
-        // defensive fallbacks/guards the surrounding contract can never trigger,
-        // or CLI/race code that can't be driven deterministically. Covering them
-        // would need a banned `/* v8 ignore */` pragma or weakening a real guard.
-        // All are heavily behaviour-tested; several gained extra tests in this pass.
-        //
-        // runs orchestrator: killTree numeric-signal arm, `'completed'` lifecycle
-        //   fallthrough, non-finite-startedAt tag, spawn-failed null-pty return,
-        //   plus mid-heal-loop cancel paths only reachable via racy timing.
-        //   The 2,684-line file became a 487-line class over ./run-context plus
-        //   ten run-* modules, so this entry follows the arms into the modules
-        //   that actually hold them instead of hiding the whole run loop:
-        'apps/web-server/src/features/runs/logic/runtime/orchestrator.ts',
-        //   the cancel/abort races — the loop checks `healCancelled` and
-        //   `stopped` between every await, and a test cannot land inside those
-        //   windows deterministically
-        'apps/web-server/src/features/runs/logic/runtime/run-heal-loop.ts',
-        'apps/web-server/src/features/runs/logic/runtime/run-heal-controls.ts',
-        //   spawn-failed null-pty return + the idle/hard-timeout arms of the
-        //   signal wait, which are wall-clock races against a live REPL
-        'apps/web-server/src/features/runs/logic/runtime/run-heal-agent.ts',
-        //   non-finite-startedAt tag + the `'completed'` lifecycle fallthrough
-        'apps/web-server/src/features/runs/logic/runtime/run-manifest-writer.ts',
-        //   partial-apply reversal of an overlay whose `git apply` failed
-        //   mid-repo, and the worktree-less in-place shapes
-        'apps/web-server/src/features/runs/logic/runtime/run-fix-capture.ts',
-        //   artifact-policy arms that need a real Playwright artifact tree
-        'apps/web-server/src/features/runs/logic/runtime/run-playwright.ts',
-        //   health-probe shapes that need a service that half-boots
-        'apps/web-server/src/features/runs/logic/runtime/run-service-boot.ts',
-        // NOTE: run-context.ts and service-specs.ts came out of the same split
-        //   and are NOT excluded — the defaults and the port-slot builders were
-        //   unreachable only because the class hid them, and both got real
-        //   tests (run-context.test.ts, service-specs.test.ts) once they were
-        //   modules. ~360 lines of the old orchestrator joined the gate.
-        // NOTE: benchmark/logic/runtime/runner.ts and
-        //   evaluation/logic/test-review-export.ts used to be listed here. Both
-        //   are now fully gated: the unreachable arms were removed at the source
-        //   (a required `logPath`, an agent/session-id discriminated union, a
-        //   rewrite passed in rather than re-derived) and the rest turned out to
-        //   be reachable and got real tests. Deleting the arm beats excluding
-        //   the file.
-        // NOTE: config/routes/feature-config.ts used to be listed here for
-        //   value-type guards against a non-object config plus the `isWithin`
-        //   path-traversal guards. Splitting the 863-line route function into
-        //   feature-config-doc / playwright-config-routes / envset-routes /
-        //   workspace-fs-routes put all four in the gate at 100% — the arms the
-        //   exclusion was protecting turned out to be reachable once each route
-        //   group was measured on its own. ~880 lines joined the gate.
-        //   Those same two arm kinds now also live in the modules that
-        //   `feature-config.ts` was split into, so the entry follows them —
-        //   `feature-config-doc.ts` (non-object config guard on the
-        //   pin-branches route), `feature-config-support.ts` (the same guard in
-        //   `syncEnvsInConfig`), and `envset-routes.ts` (two `isWithin` slot-path
-        //   guards). Everything reachable in those files IS tested, including the
-        //   flight-handoff arms added alongside this entry.
-        'apps/web-server/src/features/config/routes/feature-config-doc.ts',
-        'apps/web-server/src/features/config/routes/feature-config-support.ts',
-        'apps/web-server/src/features/config/routes/envset-routes.ts',
-        // env-switcher CLI: only the `require.main === module` boot shim is
-        //   uncovered (never true under import); the exports are fully tested.
-        'apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts',
-        // playwright-list: the `settled` re-entry guards inside the setTimeout/
-        //   'error' handlers — clearTimeout beats the timer, and a spawn 'error'
-        //   never also emits 'close', so neither guard's true arm can fire.
-        'apps/web-server/src/features/runs/logic/playwright-list.ts',
-        // draft-file-resolver: the `outside-draft` return, already unreachable
-        //   after the earlier `..`/absolute-path rejection (defence-in-depth).
-        'apps/web-server/src/features/wizard/logic/draft-file-resolver.ts',
+        // No per-file exclusions. Every file the `include` patterns above reach
+        // is measured at 100/100/100/100 — the run-loop runtime modules, the
+        // config route groups, the env-switcher CLI, playwright-list and the
+        // shared workspace WebSocket stream all carry real tests rather than a
+        // line in this list. An exclusion here would keep the percentage at 100
+        // while covering less, so prefer deleting an unreachable arm or making
+        // the state unrepresentable in the type; `tools/check-conventions.mjs`
+        // holds a file-count floor (MIN_GATED_FILES) so scope can't silently
+        // shrink.
         'apps/web/dist/**',
         'dist/**',
         'templates/**',

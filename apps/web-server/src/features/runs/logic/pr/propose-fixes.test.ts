@@ -287,3 +287,83 @@ describe('proposeFixesForRun', () => {
     expect(fs.existsSync(wt)).toBe(false)
   })
 })
+
+describe('proposeFixesForRun — agent-written wording', () => {
+  const written = {
+    commitSubject: 'fix(catalog): implement product deletion',
+    commitBody: 'DELETE /products/:id answered 405, so a discontinued item\ncould never leave the catalog.',
+    prTitle: 'Discontinued products can now be removed',
+    prBody: '## What changed\n- `server.ts`: implement the DELETE branch',
+  }
+
+  /** git + gh that record everything and report a created PR. */
+  function harness() {
+    const git = recordingGit()
+    const ghCalls: string[][] = []
+    const gh = async (args: string[]): Promise<GhResult> => {
+      ghCalls.push(args)
+      return args[1] === 'list' ? ok('') : ok('https://github.com/org/fnb/pull/7')
+    }
+    return { git, gh, ghCalls }
+  }
+
+  it('commits the agent subject and body as separate -m args', async () => {
+    const h = harness()
+    await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight,
+      deps: { git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt', writeMessage: async () => written },
+    })
+    const commit = h.git.calls.find((c) => c[0] === 'commit')!
+    // Two -m args, not one folded string: git composes the blank line itself,
+    // and a single fold would make the whole message the subject line.
+    expect(commit.filter((a) => a === '-m')).toHaveLength(2)
+    expect(commit[commit.indexOf('-m') + 1]).toBe(written.commitSubject)
+    const body = commit[commit.lastIndexOf('-m') + 1]
+    expect(body).toContain('could never leave the catalog')
+    expect(body).toContain('run `run-9`')
+  })
+
+  it('titles and bodies the PR from the agent, keeping provenance exact', async () => {
+    const h = harness()
+    await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight,
+      deps: { git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt', writeMessage: async () => written },
+    })
+    const create = h.ghCalls.find((c) => c[1] === 'create')!
+    expect(create[create.indexOf('--title') + 1]).toBe(written.prTitle)
+    const body = create[create.indexOf('--body') + 1]
+    expect(body).toContain('implement the DELETE branch')
+    // The footer is appended by us, never left to the agent — it is the one
+    // part of the body that has to be exactly right.
+    expect(body).toContain('run `run-9`')
+    expect(body).toContain('`base123`')
+  })
+
+  it('falls back to the deterministic wording when no agent could write one', async () => {
+    const h = harness()
+    const results = await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight,
+      deps: { git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt', writeMessage: async () => null },
+    })
+    expect(results[0].ok).toBe(true)
+    const commit = h.git.calls.find((c) => c[0] === 'commit')!
+    expect(commit.filter((a) => a === '-m')).toHaveLength(1)
+    expect(commit[commit.indexOf('-m') + 1]).toBe('fix(fnb): canary-lab heal fixes from run run-9')
+    const create = h.ghCalls.find((c) => c[1] === 'create')!
+    expect(create[create.indexOf('--title') + 1]).toBe('fix(fnb): canary-lab heal fixes')
+  })
+
+  it('still opens the PR when the message agent throws', async () => {
+    // A dull message beats no pull request.
+    const h = harness()
+    const results = await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight,
+      deps: {
+        git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt',
+        writeMessage: async () => { throw new Error('claude is not installed') },
+      },
+    })
+    expect(results[0].ok).toBe(true)
+    expect(h.ghCalls.some((c) => c[1] === 'create')).toBe(true)
+  })
+})

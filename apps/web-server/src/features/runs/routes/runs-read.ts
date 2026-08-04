@@ -5,7 +5,10 @@ import type { RunsRouteDeps } from './runs-route-deps'
 import fs from 'fs'
 import path from 'path'
 import { updateManifest, type RunProposedPr } from '../logic/runtime/manifest'
-import { applyFixCapture } from '../logic/apply-fixes'
+import { applyFixCapture, buildApplyPreflight } from '../logic/apply-fixes'
+import { resolveRepoPath } from '../../../shared/git-repo'
+import { launchEditorDir } from '../../../shared/editor-launch'
+import { loadProjectConfig } from '../logic/runtime/launcher/project-config'
 import { buildPrPreflight } from '../logic/pr/pr-preflight'
 import { proposeFixesForRun } from '../logic/pr/propose-fixes'
 import { detectGhStatus } from '../../../shared/gh-cli'
@@ -39,7 +42,9 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
   // demand — the only path a run's edits reach the user's source tree. 404 when
   // the run is unknown, 409 when it captured no fixes, otherwise 200 with a
   // per-repo result (a 3-way conflict is `ok:false` with a reason, not a throw).
-  app.post<{ Params: { runId: string } }>('/api/runs/:runId/apply-fixes', async (req, reply) => {
+  // `repoName` narrows it to one repo (the Changes tab opens one at a time);
+  // omitted keeps the run-level "every repo" behaviour.
+  app.post<{ Params: { runId: string }; Body: { repoName?: string } }>('/api/runs/:runId/apply-fixes', async (req, reply) => {
     const detail = deps.store.get(req.params.runId)
     if (!detail) {
       reply.code(404)
@@ -50,9 +55,63 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'this run captured no fixes to apply' }
     }
-    const outcome = await applyFixCapture(fixCapture)
+    const repoName = req.body?.repoName
+    if (repoName !== undefined && !fixCapture.repos.some((r) => r.repoName === repoName)) {
+      reply.code(404)
+      return { error: 'no captured patch for this repo' }
+    }
+    const outcome = await applyFixCapture(fixCapture, repoName === undefined ? {} : { repoName })
     reply.code(200)
     return outcome
+  })
+
+  // What each captured repo looks like RIGHT NOW — does its path still exist,
+  // is it still a git tree, which branch is it on, and does it already carry
+  // uncommitted edits that aren't this run's repair. The Changes tab asks
+  // before offering to open a repo, because applying into a tree the user is
+  // mid-edit in mixes two sets of changes in their editor with nothing marking
+  // which is which. Read-only. 404/409 mirror apply-fixes.
+  app.get<{ Params: { runId: string } }>('/api/runs/:runId/apply-preflight', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const fixCapture = detail.manifest.fixCapture
+    if (!fixCapture || fixCapture.repos.length === 0) {
+      reply.code(409)
+      return { error: 'this run captured no fixes' }
+    }
+    return { targets: await buildApplyPreflight(fixCapture) }
+  })
+
+  // Open a captured repo's working tree in the user's editor. The path is
+  // looked up in the run's OWN capture rather than taken from the request, so
+  // this can only ever open a directory this run already recorded — the same
+  // guard the patch-read route uses, and the reason no path allowlist is
+  // needed. Best-effort launch: a failure is reported, not thrown.
+  app.post<{ Params: { runId: string }; Body: { repoName?: string } }>('/api/runs/:runId/open-repo', async (req, reply) => {
+    const detail = deps.store.get(req.params.runId)
+    if (!detail) {
+      reply.code(404)
+      return { error: 'run not found' }
+    }
+    const repo = detail.manifest.fixCapture?.repos.find((r) => r.repoName === req.body?.repoName)
+    if (!repo) {
+      reply.code(404)
+      return { error: 'no captured patch for this repo' }
+    }
+    const target = resolveRepoPath(repo.repoRoot)
+    if (!fs.existsSync(target)) {
+      reply.code(410)
+      return { error: 'the repo path no longer exists' }
+    }
+    const editor = deps.projectRoot ? loadProjectConfig(deps.projectRoot).editor : 'auto'
+    try {
+      return { opened: true, path: target, editor: launchEditorDir(editor, target) }
+    } catch (err) {
+      return { opened: false, path: target, error: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   // gh (GitHub CLI) connection status — detect-and-instruct only (never runs
@@ -123,7 +182,15 @@ export async function registerRunReadRoutes(app: FastifyInstance, deps: RunsRout
       reply.code(409)
       return { error: 'no repo is pushable — connect GitHub (Settings) or check push access', preflight }
     }
-    const results = await proposeFixesForRun({ runId: detail.runId, feature: detail.manifest.feature, fixCapture, preflight })
+    const results = await proposeFixesForRun({
+      runId: detail.runId,
+      feature: detail.manifest.feature,
+      fixCapture,
+      preflight,
+      // The failures the repair answered — the message agent's evidence for
+      // WHY the diff exists. Empty on a run whose summary no longer lists any.
+      ...(detail.summary?.failed?.length ? { failed: detail.summary.failed } : {}),
+    })
     // Merge the freshly-opened PRs into the manifest by repo name (idempotent),
     // and record the attempt either way — the Changes tab reads the same
     // per-repo reasons whether the run proposed on its own or the user did.

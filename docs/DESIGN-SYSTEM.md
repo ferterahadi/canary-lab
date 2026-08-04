@@ -63,6 +63,9 @@ from tokens.
 | `--accent` | `#2563eb` | `#3b82f6` | **Interactive** — "you can click this". Never a status. |
 | `--accent-strong` | `#1d4ed8` | `#60a5fa` | Accent hover/active |
 | `--accent-soft` | `accent @10%` | `accent @14%` | Focus ring, recommended-option wash |
+| `--on-accent` | `#ffffff` | `#ffffff` | Label/icon **on** an accent- or danger-filled fill. Not a theme value — the contrast pair. |
+| `--accent-glow` | `accent @18%` | `accent @18%` | Elevation shadow under an accent-filled button (`.cl-button-primary`) |
+| `--accent-glow-strong` | `accent @28%` | `accent @28%` | Its hover/active step |
 | `--running` | `#0ea5e9` | `#38bdf8` | **Running / in progress** (sky) |
 | `--success` | `#10b981` | `#34d399` | **Passed / verified** (emerald) |
 | `--warning` | `#f59e0b` | `#fbbf24` | **Healing / stale / shallow** (amber) |
@@ -327,7 +330,7 @@ command that produced it — re-run before trusting a number.
 | **Status hues** | ✅ | **Was 210 raw palette classes; all rewritten to token utilities.** Zero remain outside the xterm theme |
 | Typography size | 🔥 None | **414** arbitrary `text-[Npx]` across 11 distinct sizes; no `--text-*` step defined |
 | Spacing | ➖ Tailwind only | A handful of arbitrary `p-[…]` / `gap-[…]` escapes; everything else is on Tailwind's 4px scale |
-| Hardcoded hex | ✅ Contained | **19** total — 9 are the xterm terminal theme (legitimate, xterm takes hex), 8 are `#fff` on accent/danger fills, 2 are external-client brand colours |
+| Hardcoded hex | ✅ Contained | 9 are the xterm terminal theme (legitimate — xterm takes literal hex), 2 are external-client brand colours. Every `#fff`-on-a-fill is now `var(--on-accent)`; the only hex left in `apps/web/src` outside those two exemptions is the token *declarations* themselves, which is where hex belongs |
 
 ```bash
 grep -roh "text-\[[0-9.]*px\]" apps/web/src --include="*.tsx" | sort | uniq -c | sort -rn

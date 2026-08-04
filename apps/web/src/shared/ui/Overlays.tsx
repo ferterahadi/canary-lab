@@ -267,7 +267,7 @@ export function ConfirmModal({
           disabled={busy || confirmDisabled}
           className="rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-wider transition-colors"
           style={{
-            color: variant === 'danger' ? '#fff' : 'var(--text-primary)',
+            color: variant === 'danger' ? 'var(--on-accent)' : 'var(--text-primary)',
             background: variant === 'danger' ? 'var(--danger)' : 'transparent',
             border: variant === 'danger'
               ? '1px solid var(--danger)'

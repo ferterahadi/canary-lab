@@ -31,6 +31,13 @@
   --accent: #2563eb;
   --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
   --accent-strong: #1d4ed8;
+  /* Label/icon colour on an accent- or danger-filled fill. The one legitimate
+     hardcoded hex: white is not a theme value, it's the contrast pair. */
+  --on-accent: #ffffff;
+  /* Elevation glow under accent-filled buttons. Derived from --accent so it
+     tracks the theme instead of restating the accent's hex per rule. */
+  --accent-glow: color-mix(in srgb, var(--accent) 18%, transparent);
+  --accent-glow-strong: color-mix(in srgb, var(--accent) 28%, transparent);
 
   --success: #10b981;
   --warning: #f59e0b;
@@ -708,24 +715,28 @@ body {
   text-underline-offset: 2px;
 }
 
+/* The one accent-filled button skin. `.cl-run-menu-button` adds geometry on top
+   of this rather than restating the fill — they had drifted into two verbatim
+   copies of the same 40 lines. */
 .cl-button-primary {
   background: var(--accent);
   border: 1px solid var(--accent);
   border-radius: var(--radius-md);
-  color: #ffffff;
+  color: var(--on-accent);
   font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
   transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
+  box-shadow: 0 1px 2px var(--accent-glow);
 }
 
 .cl-button-primary:hover,
-.cl-button-primary:focus-visible {
+.cl-button-primary:focus-visible,
+.cl-button-primary[aria-expanded="true"] {
   background: var(--accent-strong);
   border-color: var(--accent-strong);
   outline: none;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
+  box-shadow: 0 2px 6px var(--accent-glow-strong);
 }
 
 .cl-button-primary:disabled {
@@ -736,38 +747,32 @@ body {
 
 .dark .cl-button-primary {
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, white 8%), var(--accent));
-  color: #ffffff;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 0 1px rgba(59, 130, 246, 0.2),
-    0 8px 24px -8px rgba(59, 130, 246, 0.6);
+    inset 0 1px 0 color-mix(in srgb, var(--on-accent) 8%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent),
+    0 8px 24px -8px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
 .dark .cl-button-primary:hover,
-.dark .cl-button-primary:focus-visible {
+.dark .cl-button-primary:focus-visible,
+.dark .cl-button-primary[aria-expanded="true"] {
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 92%, white 8%), var(--accent-strong));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.10),
-    0 0 0 1px rgba(96, 165, 250, 0.3),
-    0 10px 28px -8px rgba(59, 130, 246, 0.7);
+    inset 0 1px 0 color-mix(in srgb, var(--on-accent) 10%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent-strong) 30%, transparent),
+    0 10px 28px -8px color-mix(in srgb, var(--accent) 70%, transparent);
 }
 
+/* Geometry only — the accent fill, hover, disabled and dark-mode gradient all
+   come from .cl-button-primary, which this composes with. */
 .cl-run-menu-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
   height: 30px;
-  border: 1px solid var(--accent);
-  border-radius: var(--radius-md);
-  background: var(--accent);
-  color: #ffffff;
-  font-family: var(--font-sans);
-  font-size: 12px;
   font-weight: 600;
   padding: 0 0.85rem;
-  transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
-  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
 }
 
 .cl-run-menu-button-compact {
@@ -776,33 +781,45 @@ body {
   gap: 0;
 }
 
-.cl-run-menu-button:hover,
-.cl-run-menu-button:focus-visible,
-.cl-run-menu-button[aria-expanded="true"] {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
-  outline: none;
-  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
-}
-
-.cl-run-menu-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.5;
-  box-shadow: none;
-}
-
 .cl-run-launch-menu {
   overflow: hidden;
+}
+
+/* ── Launch popover: one skeleton every mode fills ──────────────────────────
+   Boot / Test / Verify are three states of ONE menu, so they share the same
+   three slots in the same order with the same metrics: note → section label →
+   action rows. Nothing in this popover has a *status* — every row is a choice
+   the user has not made yet — so the status-hue vocabulary stays out of it and
+   mode identity is carried by the mode's own icon (shape), not by colour. */
+
+/* Fixed two-line box so switching modes never resizes the popover. */
+.cl-run-launch-note {
+  min-height: 2.7em;
+  padding: 0.25rem 0.5rem 0.5rem;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--text-muted);
+}
+
+/* Micro-label above the action rows. Present in every mode — its absence in
+   Verify was what made that tab read as a different menu. */
+.cl-run-launch-label {
+  padding: 0.4rem 0.5rem 0.25rem;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 .cl-run-env-option {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.5rem;
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  padding: 0.55rem 0.6rem;
+  padding: 0.4rem 0.5rem;
   text-align: left;
   transition: background 120ms ease, color 120ms ease;
 }
@@ -813,27 +830,30 @@ body {
   outline: none;
 }
 
-.cl-run-env-option-dot {
-  width: 0.45rem;
-  height: 0.45rem;
+/* Leading glyph slot — a fixed box so every row's label starts on the same
+   x whatever the icon is (or if a mode has none). */
+.cl-run-env-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.75rem;
   flex: 0 0 auto;
-  border-radius: 9999px;
-  background: var(--success);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 12%, transparent);
+  color: var(--text-muted);
+  transition: color 120ms ease;
 }
 
-/* Boot mode recolours the envset dots teal so the popover itself previews the
-   "services up" identity the held run will take. */
-.cl-run-launch-menu[data-mode="boot"] .cl-run-env-option-dot {
-  background: var(--boot);
-  box-shadow: 0 0 0 3px var(--boot-soft);
+.cl-run-env-option:hover .cl-run-env-option-icon,
+.cl-run-env-option:focus-visible .cl-run-env-option-icon {
+  color: var(--text-secondary);
 }
 
-/* Tests | Boot segmented control at the top of the launch popover. */
+/* Boot | Test | Verify segmented control at the top of the launch popover. */
 .cl-mode-toggle {
   display: flex;
   gap: 2px;
-  margin: 2px 2px 4px;
+  /* Flush with the popover's own padding so the segmented box and the action
+     rows below share one left edge. */
+  margin: 0 0 4px;
   padding: 2px;
   border-radius: 7px;
   background: var(--bg-elevated);
@@ -859,36 +879,13 @@ body {
   color: var(--text-primary);
 }
 
+/* Selection is shown by the raised surface alone. Boot used to tint its label
+   teal and Verify blue while Test stayed plain — three different bases for the
+   same control, and blue-as-identity collides with accent = "clickable". */
 .cl-mode-toggle-btn[data-active="true"] {
   background: var(--bg-surface);
   color: var(--text-primary);
   box-shadow: var(--shadow-panel);
-}
-
-.cl-mode-toggle-btn[data-mode="boot"][data-active="true"] {
-  color: var(--boot);
-}
-
-.cl-mode-toggle-btn[data-mode="verify"][data-active="true"] {
-  color: var(--accent-strong);
-}
-
-.dark .cl-run-menu-button {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 92%, white 8%), var(--accent));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 0 1px rgba(59, 130, 246, 0.2),
-    0 8px 24px -8px rgba(59, 130, 246, 0.6);
-}
-
-.dark .cl-run-menu-button:hover,
-.dark .cl-run-menu-button:focus-visible,
-.dark .cl-run-menu-button[aria-expanded="true"] {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent-strong) 92%, white 8%), var(--accent-strong));
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.10),
-    0 0 0 1px rgba(96, 165, 250, 0.3),
-    0 10px 28px -8px rgba(59, 130, 246, 0.7);
 }
 
 /* Hairline-separated rows. */

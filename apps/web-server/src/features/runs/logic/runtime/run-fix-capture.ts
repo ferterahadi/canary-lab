@@ -5,7 +5,7 @@
 import { type RunContext } from './run-context'
 import fs from 'fs'
 import path from 'path'
-import { type RunFixCapture } from '../../../../../../../shared/run-state'
+import { FIX_CAPTURE_MAX_FILE_NAMES, type RunFixCapture } from '../../../../../../../shared/run-state'
 import { resolvePortTokens } from './launcher/interpolate'
 import { hydrateEnvsetIntoWorktrees } from './env-switcher/worktree-hydrate'
 import { overlayExists, readOverlay, checkStaleness, overlayDir } from '../../../portify/logic/runtime/overlay'
@@ -80,7 +80,18 @@ export async function captureFixes(ctx: RunContext): Promise<RunFixCapture | nul
       ctx.runnerLog?.warn(`Fix capture write failed for "${repoName}": ${(err as Error).message}`)
       continue
     }
-    repos.push({ repoName, patchPath, patchFile, repoRoot: base.sourceRoot, baseSha: base.baseSha, files: names.length })
+    repos.push({
+      repoName,
+      patchPath,
+      patchFile,
+      repoRoot: base.sourceRoot,
+      baseSha: base.baseSha,
+      files: names.length,
+      // `files` stays the true count; the list is what lets the Changes tab
+      // say WHICH files, so the user can pick them out of their own editor's
+      // changed-files list after the patch lands in the real repo.
+      fileNames: names.slice(0, FIX_CAPTURE_MAX_FILE_NAMES),
+    })
   }
   if (repos.length === 0) return null
   const fixCapture: RunFixCapture = { repos, capturedAt: new Date().toISOString() }

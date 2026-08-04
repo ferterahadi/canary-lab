@@ -198,7 +198,6 @@ export function TestRunPanel({
           fixCapture={manifest.fixCapture}
           runId={runId}
           proposedPrs={manifest.proposedPrs}
-          onError={onError}
           onProposed={() => setReloadKey((k) => k + 1)}
         />
       )}

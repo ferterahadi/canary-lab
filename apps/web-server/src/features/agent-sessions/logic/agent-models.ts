@@ -32,6 +32,9 @@ export const PRD_SUMMARY_MODELS: AgentModelChoice = { ...AGENT_DEFAULT }
 /** Evaluation-export localized rewrite — test-review-export.ts. */
 export const EVALUATION_REWRITE_MODELS: AgentModelChoice = { ...AGENT_DEFAULT }
 
+/** Commit message + PR body for a captured repair — pr/commit-message-agent.ts. */
+export const COMMIT_MESSAGE_MODELS: AgentModelChoice = { ...AGENT_DEFAULT }
+
 /**
  * Interactive heal / auto-repair REPL — runtime/auto-heal.ts.
  *

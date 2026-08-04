@@ -348,9 +348,7 @@ function syncFeatureEnvs(featureDir: string, envs: string[]): void {
   if (!configPath) return
   const source = fs.readFileSync(configPath, 'utf8')
   const parsed = readFeatureConfig(source)
-  /* v8 ignore next 2 -- loaded feature configs are object exports; this is defensive for stale hand edits. */
-  if (!parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) return
-  const next = { ...(parsed.value as Record<string, ConfigValue>), envs } as ConfigValue
+  const next: ConfigValue = { ...parsed.value, envs }
   fs.writeFileSync(configPath, writeFeatureConfig(source, next), 'utf8')
 }
 

@@ -277,3 +277,81 @@ describe('captured patch text (the Changes tab diff)', () => {
     expect(res.json().error).toMatch(/no longer on disk/i)
   })
 })
+
+describe('open-repo + apply-preflight routes', () => {
+  it('opens the repo the run captured, resolving the path server-side', async () => {
+    // The request carries a repo NAME, never a path: the server looks it up in
+    // the run's own capture, so this route can only ever open a directory the
+    // run already recorded.
+    const repoRoot = fs.mkdtempSync(path.join(tmpDir, 'prod-'))
+    writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot, baseSha: 'abc', files: 1 }])
+    const { app } = await build({ projectRoot: tmpDir })
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ opened: true, path: repoRoot, editor: 'vscode' })
+    expect(vi.mocked(launchEditorDir)).toHaveBeenCalledWith('auto', repoRoot)
+  })
+
+  it('404s a repo name this run never captured', async () => {
+    writeManifestWithCapture('r1')
+    const { app } = await build()
+    // The suite shares one module mock, so clear it here rather than trusting
+    // an earlier case to have left it untouched.
+    vi.mocked(launchEditorDir).mockClear()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'not-mine' } })
+    expect(res.statusCode).toBe(404)
+    expect(vi.mocked(launchEditorDir)).not.toHaveBeenCalled()
+  })
+
+  it('404s an unknown run and 410s a repo whose path is gone', async () => {
+    writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot: path.join(tmpDir, 'vanished'), baseSha: 'abc', files: 1 }])
+    const { app } = await build()
+    expect((await app.inject({ method: 'POST', url: '/api/runs/nope/open-repo', payload: { repoName: 'prod' } })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })).statusCode).toBe(410)
+  })
+
+  it('reports an editor that would not launch instead of throwing', async () => {
+    const repoRoot = fs.mkdtempSync(path.join(tmpDir, 'prod-'))
+    writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot, baseSha: 'abc', files: 1 }])
+    vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw new Error('spawn ENOENT') })
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ opened: false, error: 'spawn ENOENT' })
+  })
+
+  it('apply-preflight reports each captured repo, 404/409 like its siblings', async () => {
+    const repoRoot = fs.mkdtempSync(path.join(tmpDir, 'prod-'))
+    writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot, baseSha: 'abc', files: 1 }])
+    writeManifestForRun('r2', 'foo', 'failed')
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'GET', url: '/api/runs/r1/apply-preflight' })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().targets).toEqual([expect.objectContaining({ repoName: 'prod', repoRoot })])
+
+    expect((await app.inject({ method: 'GET', url: '/api/runs/nope/apply-preflight' })).statusCode).toBe(404)
+    expect((await app.inject({ method: 'GET', url: '/api/runs/r2/apply-preflight' })).statusCode).toBe(409)
+  })
+
+  it('apply-fixes 404s a repoName the run never captured', async () => {
+    writeManifestWithCapture('r1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes', payload: { repoName: 'not-mine' } })
+    expect(res.statusCode).toBe(404)
+  })
+
+  it('apply-fixes still accepts an empty body, applying every repo', async () => {
+    writeManifestWithCapture('r1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes' })
+    // The patch path is fake, so the apply reports a per-repo failure — the
+    // point is that the route accepted the request rather than 404ing.
+    expect(res.statusCode).toBe(200)
+    expect(res.json().results).toHaveLength(1)
+  })
+})

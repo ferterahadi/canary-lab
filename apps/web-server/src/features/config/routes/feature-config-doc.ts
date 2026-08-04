@@ -228,9 +228,7 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
       }
       const source = fs.readFileSync(cfg.path, 'utf-8')
       const { value } = readFeatureConfig(source)
-      const repos = value && typeof value === 'object' && !Array.isArray(value)
-        ? (value as { repos?: unknown }).repos
-        : undefined
+      const repos: unknown = value.repos
       if (!Array.isArray(repos)) {
         reply.code(400)
         return { error: 'config has no editable repos array' }

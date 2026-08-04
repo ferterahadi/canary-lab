@@ -1,15 +1,10 @@
 import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
 import { CatalogApi } from './helpers/api'
 
-// Three of these tests fail against the shipped catalog service, and every
+// Some of these tests fail against the shipped catalog service, and every
 // failure is a real defect in the app — not a mistake in the test. Fixing them
 // means editing demo-app/catalog-service/server.ts. Making the tests agree with
 // the broken behaviour instead would hide exactly what this tool exists to find.
-//
-// The last one fails twice for different reasons: first because removal is not
-// implemented, and then — once it is — because the id scheme assumed nothing
-// ever leaves the catalog. That second failure is invisible until the first is
-// fixed, which is why repairing this service takes more than one pass.
 
 const api = new CatalogApi()
 

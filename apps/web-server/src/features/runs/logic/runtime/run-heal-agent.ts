@@ -165,6 +165,24 @@ export function agentPtyEnv(ctx: RunContext): Record<string, string> {
     // session id — the orchestrator writes the UUID to this path itself
     // (no formatter sidecar in REPL mode).
     CANARY_LAB_AGENT_SESSION_ID_FILE: ctx.paths.agentSessionIdPath,
+    // Keep the agent's own JSONL transcript on disk. An interactive claude REPL
+    // stops writing one the moment it sees an inherited `CLAUDE_CODE_CHILD_SESSION`
+    // marker, and that marker rides in on `process.env` whenever the UI server was
+    // itself launched from a Claude Code session — Desktop, an MCP client, or the
+    // local `canary-apply` cycle. Measured on 2.1.220: the pane prints "Transcript
+    // saving is off" and no `<session-id>.jsonl` is ever created.
+    //
+    // Canary depends on that file twice: AgentSessionView renders the heal agent
+    // by tailing it, and Restart Heal continues the prior investigation with
+    // `--resume <uuid>`. Both fail silently — as an agent that produced nothing
+    // rather than a transcript we failed to find.
+    //
+    // This overrides the inherited-marker rule only. A user who deliberately turned
+    // transcripts off (`CLAUDE_CODE_SKIP_PROMPT_HISTORY`, or the setting) still
+    // wins, because the CLI resolves those causes first. The headless `-p` spawns
+    // in `runAgentProcess` need nothing here: suppression is gated on the session
+    // being interactive, confirmed by spawning both kinds with the marker set.
+    CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1',
   }
 }
 
@@ -279,7 +297,10 @@ export async function runHealAgent(ctx: RunContext, args: {
 }): Promise<{
   exitCode: number
   signal: { kind: 'restart' | 'rerun' | 'heal'; body: Record<string, unknown> } | null
-  reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled' | 'spawn-failed'
+  // No `spawn-failed`: a heal-agent spawn failure throws out of the loop
+  // instead of settling the cycle with a reason. Add it back here (and in the
+  // heal loop's give-up handling) if that ever becomes a caught outcome.
+  reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
 }> {
   const cfg = ctx.autoHeal
   if (!cfg) throw new Error('autoHeal not configured')
@@ -302,14 +323,11 @@ export async function runHealAgent(ctx: RunContext, args: {
   })
 
   const isFirstSpawn = !ctx.healAgentPty
-  if (isFirstSpawn) {
-    spawnHealAgentRepl(ctx)
-  }
-  const pty = ctx.healAgentPty
-  if (!pty) {
-    // spawn failed; spawnHealAgentRepl already surfaced the error.
-    return { exitCode: 1, signal: null, reason: 'spawn-failed' }
-  }
+  // Hands back the live REPL when one is already up (cycle 2+), so this is the
+  // single place the handle comes from. A spawn failure throws out of here and
+  // out of the heal loop — deliberately, and pinned by
+  // `orchestrator.spawn-failures.test.ts` — so there is no null-pty case.
+  const pty = spawnHealAgentRepl(ctx)
 
   if (args.userGuidance) echoUserInterject(ctx, args.userGuidance)
 
@@ -354,8 +372,10 @@ export async function runHealAgent(ctx: RunContext, args: {
  * the failing set changes across cycles, so a per-failure dir would
  * misattribute cycle 2+ captures.
  */
-export function spawnHealAgentRepl(ctx: RunContext): void {
-  if (ctx.healAgentPty) return
+export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
+  // Returns the handle so the caller never has to re-read a nullable field:
+  // this either yields a live REPL or throws.
+  if (ctx.healAgentPty) return ctx.healAgentPty
   const cfg = ctx.autoHeal
   if (!cfg) throw new Error('autoHeal not configured')
 
@@ -439,6 +459,7 @@ export function spawnHealAgentRepl(ctx: RunContext): void {
   // transcript; we don't fire a second agent-started here so consumers see
   // one event per cycle, matching the headless flow.
   void command
+  return pty
 }
 
 /**

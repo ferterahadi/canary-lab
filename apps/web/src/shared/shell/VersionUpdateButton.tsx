@@ -194,8 +194,7 @@ function VersionPopover({
           <button
             type="button"
             onClick={onUpdate}
-            className="mt-0.5 w-full rounded-md px-2.5 py-1.5 text-[12px] font-semibold transition-colors"
-            style={{ background: 'var(--accent)', color: '#fff' }}
+            className="cl-button-primary mt-0.5 w-full px-2.5 py-1.5"
           >
             {view.mode === 'failed' ? 'Retry update' : `Update to v${latest}`}
           </button>

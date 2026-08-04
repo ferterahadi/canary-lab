@@ -103,13 +103,19 @@ function ghStub(calls: string[][]) {
 const originHead = (origin: string, branch: string): string =>
   execFileSync('git', ['--git-dir', origin, 'rev-parse', branch], { encoding: 'utf-8' }).trim()
 
+// This suite runs git and gh for real; the commit-message agent is the one
+// dependency that must stay stubbed. The patches here are real files, so the
+// live agent would actually spawn a CLI and every case would time out waiting
+// on it. What it writes is covered by propose-fixes.test.ts instead.
+const noMessage = async (): Promise<null> => null
+
 describe('proposeFixesForRun against a real git remote', () => {
   it('pushes the fix branch to origin and opens a draft PR', async () => {
     const f = fixture()
     const calls: string[][] = []
     const results = await proposeFixesForRun({
       runId: 'r1', feature: 'checkout', fixCapture: capture(f, f.patches[0]), preflight: preflight(f),
-      draft: true, deps: { gh: ghStub(calls) },
+      draft: true, deps: { gh: ghStub(calls), writeMessage: noMessage },
     })
 
     expect(results).toEqual([expect.objectContaining({ repoName: 'svc', ok: true })])
@@ -127,7 +133,7 @@ describe('proposeFixesForRun against a real git remote', () => {
     const f = fixture()
     await proposeFixesForRun({
       runId: 'r1', feature: 'checkout', fixCapture: capture(f, f.patches[0]), preflight: preflight(f),
-      draft: true, deps: { gh: ghStub([]) },
+      draft: true, deps: { gh: ghStub([]), writeMessage: noMessage },
     })
     const first = originHead(f.origin, BRANCH)
 
@@ -138,7 +144,7 @@ describe('proposeFixesForRun against a real git remote', () => {
 
     const results = await proposeFixesForRun({
       runId: 'r2', feature: 'checkout', fixCapture: capture(f, f.patches[1]), preflight: preflight(f),
-      draft: true, deps: { gh: ghStub([]) },
+      draft: true, deps: { gh: ghStub([]), writeMessage: noMessage },
     })
 
     expect(results).toEqual([expect.objectContaining({ ok: true })])
@@ -151,7 +157,7 @@ describe('proposeFixesForRun against a real git remote', () => {
     const f = fixture()
     await proposeFixesForRun({
       runId: 'r1', feature: 'checkout', fixCapture: capture(f, f.patches[0]), preflight: preflight(f),
-      draft: true, deps: { gh: ghStub([]) },
+      draft: true, deps: { gh: ghStub([]), writeMessage: noMessage },
     })
     const first = originHead(f.origin, BRANCH)
     await runGit(f.product, ['update-ref', '-d', `refs/remotes/origin/${BRANCH}`])
@@ -163,7 +169,7 @@ describe('proposeFixesForRun against a real git remote', () => {
 
     const results = await proposeFixesForRun({
       runId: 'r2', feature: 'checkout', fixCapture: capture(f, f.patches[1]), preflight: preflight(f),
-      draft: true, deps: { gh: ghStub([]), git: noFetch },
+      draft: true, deps: { gh: ghStub([]), git: noFetch, writeMessage: noMessage },
     })
 
     expect(results[0].ok).toBe(false)

@@ -5,6 +5,8 @@ import { runGit as realRunGit, resolveRepoPath, type GitResult } from '../../../
 import { runGh as realRunGh, type GhResult } from '../../../../shared/gh-cli'
 import type { RunFixCapture, RunProposedPr } from '../../../../../../../shared/run-state'
 import type { PrPreflight } from './pr-preflight'
+import type { RunSummaryFailedEntry } from '../run-detail'
+import { writeFixCommitMessage, type FixCommitMessage, type FixCommitMessageInput } from './commit-message-agent'
 
 // Open a pull request from a run's captured fix, per pushable repo. Driven
 // either by the user (the Propose PR dialog) or automatically at the end of a
@@ -34,6 +36,9 @@ export interface ProposeDeps {
   gh?: (args: string[]) => Promise<GhResult>
   tmpWorktreeDir?: (runId: string, repoName: string) => string
   now?: () => string
+  /** Override the commit-message agent (tests, and the one seam that keeps this
+   *  module spawn-free when nothing needs a message written). */
+  writeMessage?: (input: FixCommitMessageInput) => Promise<FixCommitMessage | null>
 }
 
 /** Deterministic per feature+repo, so every healed run of a feature updates the
@@ -54,11 +59,15 @@ export async function proposeFixesForRun(opts: {
    *  review notification fires until a human marks it ready. The automatic
    *  end-of-run trigger uses this; the user-driven dialog does not. */
   draft?: boolean
+  /** Failing tests from the run, passed through to the message agent as the
+   *  evidence for WHY the repair happened. */
+  failed?: RunSummaryFailedEntry[]
   deps?: ProposeDeps
 }): Promise<ProposeResult[]> {
   const git = opts.deps?.git ?? realRunGit
   const gh = opts.deps?.gh ?? realRunGh
   const now = opts.deps?.now ?? (() => new Date().toISOString())
+  const writeMessage = opts.deps?.writeMessage ?? writeFixCommitMessage
   const tmpWorktreeDir = opts.deps?.tmpWorktreeDir
     ?? ((runId, repoName) => path.join(os.tmpdir(), `canary-pr-${slugForDir(runId)}-${slugForDir(repoName)}`))
 
@@ -78,8 +87,21 @@ export async function proposeFixesForRun(opts: {
     const repoSlug = `${pre.origin.owner}/${pre.origin.name}`
 
     const wt = tmpWorktreeDir(opts.runId, pre.repoName)
+    // Written from the diff before the worktree exists, so a slow or missing
+    // agent costs nothing but the default wording — the scratch tree is not
+    // held open while it thinks.
+    const written = await writeMessage({
+      feature: opts.feature,
+      repoName: pre.repoName,
+      runId: opts.runId,
+      baseSha: fixRepo.baseSha,
+      patchPath: fixRepo.patchPath,
+      ...(fixRepo.fileNames ? { fileNames: fixRepo.fileNames } : {}),
+      ...(opts.failed ? { failed: opts.failed } : {}),
+      cwd: repoRoot,
+    }).catch(() => null)
     try {
-      const outcome = await createPrInWorktree({ git, gh, repoRoot, wt, branch, base: pre.base, repoSlug, baseSha: fixRepo.baseSha, patchPath: fixRepo.patchPath, feature: opts.feature, runId: opts.runId, draft: opts.draft === true })
+      const outcome = await createPrInWorktree({ git, gh, repoRoot, wt, branch, base: pre.base, repoSlug, baseSha: fixRepo.baseSha, patchPath: fixRepo.patchPath, feature: opts.feature, runId: opts.runId, draft: opts.draft === true, ...(written ? { written } : {}) })
       results.push(outcome.ok
         ? { repoName: pre.repoName, ok: true, pr: { repoName: pre.repoName, url: outcome.url, branch, base: pre.base, createdAt: now() } }
         : { repoName: pre.repoName, ok: false, reason: outcome.reason })
@@ -105,6 +127,9 @@ async function createPrInWorktree(a: {
   feature: string
   runId: string
   draft: boolean
+  /** Agent-written wording for this repair. Absent when no agent could write
+   *  one; the deterministic template below then stands in. */
+  written?: FixCommitMessage
 }): Promise<{ ok: true; url: string } | { ok: false; reason: string }> {
   // `git push` always leads with `To <remote>` and puts the cause underneath,
   // so the first line alone tells the user nothing. Prefer the `! [rejected]`
@@ -132,7 +157,15 @@ async function createPrInWorktree(a: {
   const applied = await a.git(a.wt, ['apply', '--3way', '--whitespace=nowarn', a.patchPath])
   if (applied.code !== 0) return fail(applied, 'the fix no longer applies to the base — rerun to refresh it')
   await a.git(a.wt, ['add', '-A'])
-  const commit = await a.git(a.wt, ['commit', '-m', `fix(${a.feature}): canary-lab heal fixes from run ${a.runId}`, '--no-verify'])
+  // Subject and body as separate `-m` args so git composes the blank line
+  // between them itself — one folded string would make the whole message the
+  // subject line in every log and PR-title default.
+  const commit = await a.git(a.wt, [
+    'commit',
+    '-m', a.written?.commitSubject ?? `fix(${a.feature}): canary-lab heal fixes from run ${a.runId}`,
+    ...(a.written ? ['-m', `${a.written.commitBody}\n\nCanary Lab run \`${a.runId}\` · based on \`${a.baseSha.slice(0, 12)}\``] : []),
+    '--no-verify',
+  ])
   if (commit.code !== 0) return fail(commit, 'nothing to commit / commit failed')
   const push = await a.git(a.wt, ['push', '-u', 'origin', a.branch, '--force-with-lease'])
   if (push.code !== 0) return fail(push, 'push to origin was rejected')
@@ -141,10 +174,16 @@ async function createPrInWorktree(a: {
   // stale earlier attempt short-circuiting the push.
   const existing = await a.gh(['pr', 'list', '--repo', a.repoSlug, '--head', a.branch, '--state', 'open', '--json', 'url', '--jq', '.[0].url'])
   if (existing.code === 0 && existing.stdout.trim()) return { ok: true, url: existing.stdout.trim() }
-  const body = `Automated fix captured by Canary Lab from run \`${a.runId}\` (based on \`${a.baseSha.slice(0, 12)}\`). Review before merging.`
+  // The provenance footer is appended rather than left to the agent: it is the
+  // one part of the body that must be exact, and a written line is a claim the
+  // agent could get wrong.
+  const provenance = `\n\n---\nCaptured by Canary Lab from run \`${a.runId}\`, based on \`${a.baseSha.slice(0, 12)}\`. Review before merging.`
+  const body = a.written
+    ? `${a.written.prBody}${provenance}`
+    : `Automated fix captured by Canary Lab from run \`${a.runId}\` (based on \`${a.baseSha.slice(0, 12)}\`). Review before merging.`
   const pr = await a.gh([
     'pr', 'create', '--repo', a.repoSlug, '--base', a.base, '--head', a.branch,
-    '--title', `fix(${a.feature}): canary-lab heal fixes`, '--body', body,
+    '--title', a.written?.prTitle ?? `fix(${a.feature}): canary-lab heal fixes`, '--body', body,
     ...(a.draft ? ['--draft'] : []),
   ])
   if (pr.code !== 0) return fail(pr, 'gh pr create failed')

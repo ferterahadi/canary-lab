@@ -106,6 +106,8 @@ const installedPackagePaths = [
   'node_modules/canary-lab/dist/apps/web-server/prompts/heal-agent.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.schema.json',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/fix-commit-message.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/fix-commit-message.schema.json',
 ]
 
 for (const relPath of scaffoldPaths) {

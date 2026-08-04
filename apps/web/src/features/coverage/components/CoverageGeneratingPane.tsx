@@ -198,7 +198,7 @@ function PhaseRow({ n, title, body, done, active }: { n: number; title: string; 
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 13, fontWeight: 600,
           background: done || active ? accent : 'var(--bg-base)',
-          color: done || active ? '#ffffff' : 'var(--text-muted)',
+          color: done || active ? 'var(--on-accent)' : 'var(--text-muted)',
           border: done || active ? 'none' : '1px solid var(--border-default)',
         }}
       >

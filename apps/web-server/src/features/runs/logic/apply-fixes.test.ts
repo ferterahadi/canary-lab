@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { applyFixCapture } from './apply-fixes'
+import { applyFixCapture, buildApplyPreflight, porcelainPath } from './apply-fixes'
 import type { RunFixCapture } from '../../../../../../shared/run-state'
 
 let root: string
@@ -103,5 +103,84 @@ describe('applyFixCapture', () => {
     expect(out.allOk).toBe(false)
     expect(out.results[0].ok).toBe(false)
     expect(out.results[0].reason).toBeTruthy()
+  })
+
+  it('applies only the named repo, leaving the others untouched', async () => {
+    // The Changes tab opens one repo at a time; applying the rest as a side
+    // effect would edit trees the user never asked about.
+    const patchPath = makePatch()
+    const other = path.join(root, 'other')
+    fs.mkdirSync(other, { recursive: true })
+    const out = await applyFixCapture({
+      capturedAt: 'now',
+      repos: [
+        { repoName: 'repo', patchPath, patchFile: 'repo.patch', repoRoot: repo, baseSha: 'x', files: 1 },
+        { repoName: 'other', patchPath: path.join(fixesDir, 'gone.patch'), patchFile: 'gone.patch', repoRoot: other, baseSha: 'y', files: 1 },
+      ],
+    }, { repoName: 'repo' })
+
+    expect(out.results).toEqual([{ repoName: 'repo', ok: true }])
+    expect(fs.readFileSync(path.join(repo, 'app.js'), 'utf-8')).toBe('const x = 2\n')
+  })
+})
+
+describe('porcelainPath', () => {
+  it('drops the two status columns', () => {
+    expect(porcelainPath(' M src/app.ts')).toBe('src/app.ts')
+    expect(porcelainPath('?? new/file.ts')).toBe('new/file.ts')
+  })
+
+  it('takes the destination of a rename', () => {
+    expect(porcelainPath('R  old/name.ts -> new/name.ts')).toBe('new/name.ts')
+  })
+
+  it('unquotes a path git had to escape', () => {
+    expect(porcelainPath(' M "src/with space.ts"')).toBe('src/with space.ts')
+  })
+})
+
+describe('buildApplyPreflight', () => {
+  it('reads the branch and reports a clean repo as having nothing foreign', async () => {
+    const [t] = await buildApplyPreflight(capture(makePatch()))
+    expect(t).toMatchObject({ repoName: 'repo', repoRoot: repo, ready: true, foreignDirty: [] })
+    expect(t.branch).toBeTruthy()
+  })
+
+  it("counts the user's own uncommitted work but not the repair's own files", async () => {
+    const patchPath = makePatch()
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 2\n')   // what the repair touches
+    fs.writeFileSync(path.join(repo, 'mine.js'), 'my wip\n')       // what the user was doing
+    const [t] = await buildApplyPreflight({
+      capturedAt: 'now',
+      repos: [{ repoName: 'repo', patchPath, patchFile: 'repo.patch', repoRoot: repo, baseSha: 'x', files: 1, fileNames: ['app.js'] }],
+    })
+    // `app.js` is dirty too, but it is OUR dirt — warning about it would nag on
+    // every re-open of a repo the user already applied into.
+    expect(t.foreignDirty).toEqual(['mine.js'])
+  })
+
+  it('treats a capture with no recorded file names as all-foreign', async () => {
+    fs.writeFileSync(path.join(repo, 'app.js'), 'const x = 2\n')
+    const [t] = await buildApplyPreflight(capture(makePatch()))
+    expect(t.foreignDirty).toEqual(['app.js'])
+  })
+
+  it('marks a repo whose path is gone as not ready, with the reason', async () => {
+    const [t] = await buildApplyPreflight({
+      capturedAt: 'now',
+      repos: [{ repoName: 'repo', patchPath: 'p', patchFile: 'p', repoRoot: path.join(root, 'vanished'), baseSha: 'x', files: 1 }],
+    })
+    expect(t).toMatchObject({ ready: false, foreignDirty: [], branch: null })
+    expect(t.reason).toMatch(/no longer exists/)
+  })
+
+  it('marks a directory that is not a git tree as not ready', async () => {
+    const plain = path.join(root, 'plain')
+    fs.mkdirSync(plain, { recursive: true })
+    const [t] = await buildApplyPreflight({
+      capturedAt: 'now',
+      repos: [{ repoName: 'repo', patchPath: 'p', patchFile: 'p', repoRoot: plain, baseSha: 'x', files: 1 }],
+    })
+    expect(t).toMatchObject({ ready: false, reason: 'not a git working tree' })
   })
 })

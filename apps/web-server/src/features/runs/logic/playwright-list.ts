@@ -150,36 +150,37 @@ export async function listPlaywrightTests(
       cwd: inv.cwd,
       env: { ...process.env, ...(opts.env ?? {}), ...(inv.env ?? {}) },
     })
-    const timer = setTimeout(() => {
-      if (settled) return
+    // The single re-entry guard for all three outcomes — timeout, spawn
+    // failure, exit. It has to be one place rather than one check per handler,
+    // because a failed spawn emits 'error' AND then 'close': the second arrival
+    // must neither resolve again nor emit a second diagnostic line. Returns
+    // whether this call is the one that settled, so a caller can skip its own
+    // side effects when it lost the race.
+    const settle = (value: string | null, diagnostic?: string): boolean => {
+      if (settled) return false
       settled = true
+      clearTimeout(timer)
+      if (diagnostic) opts.onDiagnostics?.(diagnostic)
+      resolve(value)
+      return true
+    }
+    const timer = setTimeout(() => {
       try { child.kill('SIGKILL') } catch { /* ignore */ }
-      opts.onDiagnostics?.(`playwright test --list timed out after ${timeoutMs}ms\n${err}`.trim())
-      resolve(null)
+      settle(null, `playwright test --list timed out after ${timeoutMs}ms\n${err}`.trim())
     }, timeoutMs)
     child.stdout.on('data', (b) => { out += b.toString() })
     child.stderr.on('data', (b) => { err += b.toString() })
     child.on('error', (e) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      opts.onDiagnostics?.(`playwright test --list failed to spawn: ${String(e)}`)
-      resolve(null)
+      settle(null, `playwright test --list failed to spawn: ${String(e)}`)
     })
     child.on('close', (code) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
       // `--list` exits 0 when discovery succeeded; any non-zero indicates a
       // discovery failure and stdout may not be valid JSON.
-      if (code !== 0) {
-        // Attach stderr to help debugging; consumers ignore the value but logs help.
-        if (err) process.stderr.write(`[playwright-list] exit ${code}: ${err.slice(0, 500)}\n`)
-        opts.onDiagnostics?.(`playwright test --list exited with code ${code}\n${err}\n${out}`.trim())
-        resolve(null)
-        return
+      if (code === 0) { settle(out); return }
+      // Attach stderr to help debugging; consumers ignore the value but logs help.
+      if (settle(null, `playwright test --list exited with code ${code}\n${err}\n${out}`.trim()) && err) {
+        process.stderr.write(`[playwright-list] exit ${code}: ${err.slice(0, 500)}\n`)
       }
-      resolve(out)
     })
   })
 

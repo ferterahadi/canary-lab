@@ -179,12 +179,57 @@ export function restartRun(
 export interface ApplyFixResult { repoName: string; ok: boolean; reason?: string }
 export function applyRunFixes(
   runId: string,
+  /** One repo, or every captured repo when omitted. */
+  repoName?: string,
   opts?: ClientOptions,
 ): Promise<{ results: ApplyFixResult[]; allOk: boolean }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<{ results: ApplyFixResult[]; allOk: boolean }>(
     `${baseUrl}/api/runs/${encodeURIComponent(runId)}/apply-fixes`,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(repoName === undefined ? {} : { repoName }),
+    },
+    fetchImpl,
+  )
+}
+
+// What applying would land on, per captured repo, read live. `foreignDirty`
+// lists uncommitted paths that are NOT this run's repair — the Changes tab
+// warns on those alone, so re-opening an already-applied repo doesn't nag.
+export interface ApplyTarget {
+  repoName: string
+  repoRoot: string
+  ready: boolean
+  reason?: string
+  foreignDirty: string[]
+  branch: string | null
+}
+export function getRunApplyPreflight(runId: string, opts?: ClientOptions): Promise<{ targets: ApplyTarget[] }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ targets: ApplyTarget[] }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/apply-preflight`,
+    { method: 'GET' },
+    fetchImpl,
+  )
+}
+
+// Open a captured repo's working tree in the configured editor. The server
+// resolves the path from the run's own capture — the repo name is all it takes.
+export function openRunRepo(
+  runId: string,
+  repoName: string,
+  opts?: ClientOptions,
+): Promise<{ opened: boolean; path: string; editor?: string; error?: string }> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<{ opened: boolean; path: string; editor?: string; error?: string }>(
+    `${baseUrl}/api/runs/${encodeURIComponent(runId)}/open-repo`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ repoName }),
+    },
     fetchImpl,
   )
 }

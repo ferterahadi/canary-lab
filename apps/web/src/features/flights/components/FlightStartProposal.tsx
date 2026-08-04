@@ -167,7 +167,7 @@ export function ProposalView({
                 className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[11px] font-medium"
                 style={
                   isEditing
-                    ? { background: 'var(--accent)', color: '#ffffff' }
+                    ? { background: 'var(--accent)', color: 'var(--on-accent)' }
                     : { border: '1px solid color-mix(in srgb, var(--accent) 55%, transparent)', color: 'var(--accent)' }
                 }
               >
