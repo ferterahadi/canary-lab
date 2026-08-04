@@ -21,7 +21,15 @@ import type { PtyFactory, PtyHandle } from './pty-spawner'
 
 let tmpDir: string
 
+// cleanupHealAgentPty calls the REAL killTree + scheduleSigkillFallback, which
+// signal process GROUPS via process.kill(-pid). Block the real process.kill so
+// a fake pty can never reach one (same convention as boot-probe.test.ts — a
+// fake `pid: 1` here once became kill(-1), a SIGTERM to every user process).
+// The fixtures below keep `pid: 1` DELIBERATELY: pids ≤ 1 are refused by the
+// helpers' own pgid guard, so even the unref'd 2s SIGKILL-fallback timer that
+// fires after this suite's mocks are restored stays inert.
 beforeEach(() => {
+  vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('blocked in test') })
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-agent-')))
 })
 

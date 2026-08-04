@@ -66,12 +66,19 @@ let runDir: string
 const RUN_ID = '2026-04-28T1015-aaaa'
 
 beforeEach(() => {
+  // Loop teardown (cleanupHealAgentPty, orch.stop) calls the REAL killTree,
+  // which signals process GROUPS via process.kill(-pid). Block the real
+  // process.kill so the fake pids (100+) can never hit a live process group;
+  // killTree falls back to pty.kill, which the fakes record. (Same convention
+  // as boot-probe.test.ts.)
+  vi.spyOn(process, 'kill').mockImplementation(() => { throw new Error('blocked in test') })
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-orc-')))
   runDir = runDirFor(path.join(tmpDir, 'logs'), RUN_ID)
   fs.mkdirSync(runDir, { recursive: true })
 })
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
 })
 

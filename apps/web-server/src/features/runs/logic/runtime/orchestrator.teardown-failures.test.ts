@@ -16,6 +16,8 @@ import { RunnerLog } from './runner-log'
 
 const h = vi.hoisted(() => ({
   ensureServicesRunning: vi.fn(),
+  spawnService: vi.fn(),
+  waitForHealth: vi.fn(),
   runPlaywright: vi.fn(),
   captureFixes: vi.fn(),
   reversePortifyOverlay: vi.fn(),
@@ -26,6 +28,8 @@ const h = vi.hoisted(() => ({
 vi.mock('./run-service-boot', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./run-service-boot')>()),
   ensureServicesRunning: h.ensureServicesRunning,
+  spawnService: h.spawnService,
+  waitForHealth: h.waitForHealth,
 }))
 vi.mock('./run-playwright', async (importOriginal) => ({
   ...(await importOriginal<typeof import('./run-playwright')>()),
@@ -51,6 +55,7 @@ beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-teardown-')))
   vi.clearAllMocks()
   h.ensureServicesRunning.mockResolvedValue([])
+  h.waitForHealth.mockResolvedValue(undefined)
   h.runPlaywright.mockResolvedValue(0)
   h.captureFixes.mockResolvedValue(null)
   h.reversePortifyOverlay.mockResolvedValue(undefined)

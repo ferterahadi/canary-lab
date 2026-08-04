@@ -18,6 +18,33 @@ const EXPECTED_STDERR_NOISE: { match: (s: string) => boolean; tag: string }[] = 
   },
 ]
 
+// Machine-wide kill guard. Run/boot teardown signals process GROUPS via
+// `process.kill(-pid)`, and orchestrator tests hand it fake ptys with small
+// placeholder pids — negating one turns the group kill into a broadcast:
+// kill(-1) SIGTERMs every process the user may signal (on 2026-08-04 it
+// twice logged out the whole machine mid-suite), kill(0) is our own group,
+// pid 1 is launchd. No test may signal any of those, so refuse every target
+// below 2 for the entire worker. This complements the per-file
+// `vi.spyOn(process, 'kill')` convention rather than replacing it: a spy is
+// gone after `vi.restoreAllMocks()`, while the 2s SIGKILL-fallback timers the
+// teardown schedules are unref'd and fire AFTER the test's mocks are restored
+// — restoration lands back on this wrapper, which still blocks. New test
+// files are covered without opting in.
+const KILL_GUARD = Symbol.for('canary-lab.test.killGuard')
+if (!(process.kill as unknown as Record<symbol, boolean>)[KILL_GUARD]) {
+  const realKill = process.kill.bind(process)
+  const guarded = ((pid: number, signal?: string | number) => {
+    if (!(Number.isInteger(pid) && pid > 1)) {
+      throw new Error(
+        `vitest.setup.ts blocked process.kill(${pid}): a group/broadcast signal from a test can kill real processes`,
+      )
+    }
+    return realKill(pid, signal)
+  }) as typeof process.kill
+  ;(guarded as unknown as Record<symbol, boolean>)[KILL_GUARD] = true
+  process.kill = guarded
+}
+
 if (!process.env.VITEST_VERBOSE) {
   const announced = new Set<string>()
   const realWrite = process.stderr.write.bind(process.stderr)

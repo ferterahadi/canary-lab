@@ -80,24 +80,43 @@ export function writeRerunTestList(
   return true
 }
 
+// A pgid this process may legitimately blast. node-pty always reports a real
+// child pid (> 1), so anything else can only come from a stale or fabricated
+// handle — and negating it turns the group kill into a broadcast: kill(-1)
+// signals EVERY process the user may signal (it has logged this machine out),
+// kill(-0)/kill(0) our own process group, and pid 1 is launchd. Refusing here
+// is a correctness rule, not test convenience: no such pid ever names the
+// run's children, so the per-pty fallback is the only honest thing left.
+function canSignalGroup(pid: number): boolean {
+  return Number.isInteger(pid) && pid > 1
+}
+
 // Send `signal` to the entire process group of `pty`. node-pty spawns its
 // child in a fresh session, so the pty's pid is the pgid — `process.kill(-pid, ...)`
 // hits the shell AND its pipeline children (claude, formatter). Falls back to
-// the pty's own kill (which only signals the shell) if pgkill fails — better
-// than nothing.
+// the pty's own kill (which only signals the shell) if the pid can't name a
+// child process group or pgkill fails — better than nothing.
 export function killTree(pty: PtyHandle, signal: NodeJS.Signals | number): void {
-  try {
-    process.kill(-pty.pid, signal)
-    return
-  } catch { /* fall through */ }
+  if (canSignalGroup(pty.pid)) {
+    try {
+      process.kill(-pty.pid, signal)
+      return
+    } catch { /* fall through */ }
+  }
   try { pty.kill(typeof signal === 'string' ? signal : undefined) } catch { /* already dead */ }
 }
 
 // SIGTERM gives the agent time to flush. If it's still alive 2s later, SIGKILL
-// the group so a wedged child doesn't outlive the run.
+// the group so a wedged child doesn't outlive the run. Same pgid guard as
+// killTree — this timer outlives any per-test process.kill mock, so a bogus
+// pid here must stay inert forever, not just while a suite's spies are up.
 export function scheduleSigkillFallback(pty: PtyHandle, ms = 2000): void {
   setTimeout(() => {
-    try { process.kill(-pty.pid, 'SIGKILL') } catch { /* already dead */ }
+    if (canSignalGroup(pty.pid)) {
+      try { process.kill(-pty.pid, 'SIGKILL') } catch { /* already dead */ }
+    } else {
+      try { pty.kill('SIGKILL') } catch { /* already dead */ }
+    }
   }, ms).unref?.()
 }
 
