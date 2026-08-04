@@ -13,6 +13,8 @@ import {
   getGhStatus,
   getRunPrPreflight,
   getRunFixPatch,
+  getRunApplyPreflight,
+  openRunRepo,
   proposeRunPr,
   stopRun,
   deleteRun,
@@ -166,16 +168,31 @@ describe('runs api', () => {
     )
   })
 
-  it('applyRunFixes POSTs and returns the per-repo result set', async () => {
+  it('applyRunFixes POSTs every captured repo when no repo is named', async () => {
     const body = { results: [{ repoName: 'fnb', ok: true }], allOk: true }
     const fetchImpl = vi.fn().mockResolvedValue(ok(body))
-    await expect(applyRunFixes('run 9', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
-    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/apply-fixes', { method: 'POST' })
+    await expect(applyRunFixes('run 9', undefined, { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/apply-fixes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+  })
+
+  it('applyRunFixes narrows the body to one repo when named', async () => {
+    const body = { results: [{ repoName: 'fnb', ok: true }], allOk: true }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(applyRunFixes('r1', 'fnb', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/r1/apply-fixes', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"repoName":"fnb"}',
+    })
   })
 
   it('applyRunFixes surfaces the 409 when a run captured no fixes', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(409, { error: 'this run captured no fixes to apply' }))
-    await expect(applyRunFixes('r1', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ name: 'ApiError', status: 409 })
+    await expect(applyRunFixes('r1', undefined, { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ name: 'ApiError', status: 409 })
   })
 
   it('getRunFixPatch GETs one repo\'s captured patch text', async () => {
@@ -188,6 +205,24 @@ describe('runs api', () => {
   it('getRunFixPatch surfaces the 410 once the patch has been cleaned away', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(410, { error: 'the patch file is no longer on disk' }))
     await expect(getRunFixPatch('r1', 'prod', { baseUrl: 'http://x', fetchImpl })).rejects.toMatchObject({ name: 'ApiError', status: 410 })
+  })
+
+  it('getRunApplyPreflight GETs what applying would land on, per repo', async () => {
+    const body = { targets: [{ repoName: 'fnb', repoRoot: '/r', ready: true, foreignDirty: [], branch: 'main' }] }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(getRunApplyPreflight('run 9', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/run%209/apply-preflight', { method: 'GET' })
+  })
+
+  it('openRunRepo POSTs the repo name and returns what the editor did', async () => {
+    const body = { opened: true, path: '/r/fnb', editor: 'code' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(body))
+    await expect(openRunRepo('r1', 'mighty cns', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(body)
+    expect(fetchImpl).toHaveBeenCalledWith('http://x/api/runs/r1/open-repo', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"repoName":"mighty cns"}',
+    })
   })
 
   it('getGhStatus GETs the app-level gh status', async () => {

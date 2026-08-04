@@ -7,6 +7,7 @@ import type { RunFixCapture } from '../../../../../../../shared/run-state'
 import type { PrPreflight } from './pr-preflight'
 import type { GitResult } from '../../../../shared/git-repo'
 import type { GhResult } from '../../../../shared/gh-cli'
+import type { FixCommitMessageInput } from './commit-message-agent'
 
 const ok = (stdout = ''): GitResult & GhResult => ({ code: 0, stdout, stderr: '' })
 const fail = (stderr: string): GitResult & GhResult => ({ code: 1, stdout: '', stderr })
@@ -321,6 +322,40 @@ describe('proposeFixesForRun — agent-written wording', () => {
     const body = commit[commit.lastIndexOf('-m') + 1]
     expect(body).toContain('could never leave the catalog')
     expect(body).toContain('run `run-9`')
+  })
+
+  it('hands the message agent the file list and the failures it is explaining', async () => {
+    // Both are optional on the capture/summary — a healed run can end with an
+    // empty failure list, and an older capture recorded no file names. When
+    // they ARE there they are the agent's only evidence for what broke.
+    const h = harness()
+    const seen: FixCommitMessageInput[] = []
+    await proposeFixesForRun({
+      runId: 'run-9',
+      feature: 'fnb',
+      fixCapture: { ...fixCapture, repos: [{ ...fixCapture.repos[0], fileNames: ['server.ts'] }] },
+      preflight,
+      failed: [{ name: 'deletes a product' }],
+      deps: {
+        git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt',
+        writeMessage: async (input) => { seen.push(input); return written },
+      },
+    })
+    expect(seen[0]).toMatchObject({ fileNames: ['server.ts'], failed: [{ name: 'deletes a product' }] })
+  })
+
+  it('omits both when the capture and summary carry neither', async () => {
+    const h = harness()
+    const seen: FixCommitMessageInput[] = []
+    await proposeFixesForRun({
+      runId: 'run-9', feature: 'fnb', fixCapture, preflight,
+      deps: {
+        git: h.git.run, gh: h.gh, now: () => 'T', tmpWorktreeDir: () => '/tmp/wt',
+        writeMessage: async (input) => { seen.push(input); return written },
+      },
+    })
+    expect(seen[0]).not.toHaveProperty('fileNames')
+    expect(seen[0]).not.toHaveProperty('failed')
   })
 
   it('titles and bodies the PR from the agent, keeping provenance exact', async () => {

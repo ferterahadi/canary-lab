@@ -34,7 +34,12 @@ const ROOTS = ['apps', 'shared', 'tools']
 // Coverage-gate floor. Percentage alone does not prove scope: a file lifted out
 // of the gate keeps it at 100% while covering less. Raise this when it grows.
 // 187 → 210 when the root `shared/` tree (23 files) joined the gate.
-const MIN_GATED_FILES = 210
+// 210 → 302 when the per-file exclusion list was deleted outright: the run-loop
+//   runtime modules, the config route groups, the env-switcher CLI,
+//   playwright-list and the shared workspace WebSocket stream all now carry real
+//   tests. `vitest.config.ts` has no per-file excludes left, so this floor is
+//   what stops one reappearing.
+const MIN_GATED_FILES = 302
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']

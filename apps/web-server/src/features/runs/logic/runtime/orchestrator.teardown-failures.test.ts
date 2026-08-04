@@ -12,6 +12,7 @@ import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import type { OrchestratorOptions } from './run-orchestrator-types'
 import type { RunContext } from './run-context'
+import type { ServiceSpec } from './orchestrator'
 import { RunnerLog } from './runner-log'
 
 const h = vi.hoisted(() => ({
@@ -155,6 +156,58 @@ describe('restartTerminalRun', () => {
     await orch.restartTerminalRun('look at the cart total')
 
     expect(infos).toEqual([expect.stringContaining('look at the cart total')])
+  })
+})
+
+describe('restart', () => {
+  /** Put services on the context directly — `buildServiceSpecs` derives them
+   *  from the feature's start commands, and these tests are about the restart
+   *  bookkeeping rather than the spec builder. */
+  function withServices(orch: ReturnType<typeof makeOrchestrator>, specs: Partial<ServiceSpec>[]) {
+    const ctx = (orch as unknown as { ctx: RunContext }).ctx
+    ;(ctx as { services: ServiceSpec[] }).services = specs as ServiceSpec[]
+    return ctx
+  }
+
+  it('skips the health wait entirely when the feature declares no services', async () => {
+    const orch = makeOrchestrator()
+
+    const plan = await orch.restart()
+
+    expect(plan).toEqual({ restarted: [], kept: [], startedBecauseMissing: [] })
+    expect(h.waitForHealth).not.toHaveBeenCalled()
+    expect(h.spawnService).not.toHaveBeenCalled()
+  })
+
+  it('starts a service that has no live pty instead of trying to kill one', async () => {
+    const orch = makeOrchestrator()
+    const svc = { name: 'api', safeName: 'api', command: 'noop', cwd: tmpDir }
+    const ctx = withServices(orch, [svc])
+    // No entry in servicePtys — the process already exited, or a restart-heal
+    // is running in a fresh orchestrator that never spawned it.
+    expect(ctx.servicePtys.size).toBe(0)
+
+    const plan = await orch.restart()
+
+    expect(plan.startedBecauseMissing).toEqual(['api'])
+    expect(h.spawnService).toHaveBeenCalledTimes(1)
+    expect(h.waitForHealth).toHaveBeenCalledTimes(1)
+  })
+
+  it('kills the live pty before respawning when one is attached', async () => {
+    const orch = makeOrchestrator()
+    const svc = { name: 'api', safeName: 'api', command: 'noop', cwd: tmpDir }
+    const ctx = withServices(orch, [svc])
+    const kill = vi.fn()
+    ctx.servicePtys.set('api', { kill } as never)
+
+    const plan = await orch.restart()
+
+    expect(kill).toHaveBeenCalledWith('SIGTERM')
+    expect(ctx.servicePtys.has('api')).toBe(false)
+    // It had a pty, so it was not "missing" — only the no-pty case reports that.
+    expect(plan.startedBecauseMissing).toEqual([])
+    expect(h.spawnService).toHaveBeenCalledTimes(1)
   })
 })
 

@@ -150,6 +150,21 @@ function isFilled(v: unknown): v is string {
  *  recovery as every other non-interactive agent here. Read-only on both arms:
  *  this pass describes a diff, and one that could edit the repo it is
  *  describing would be able to make its own description true. */
+/** Codex argv. Takes the answer-file path rather than re-deriving it, so the
+ *  "codex arm ⇒ there is an output file" pairing is a parameter rather than a
+ *  guard the caller has to keep true. */
+function codexArgs(outputPath: string): string[] {
+  return [
+    'exec',
+    '--skip-git-repo-check',
+    '--sandbox', 'read-only',
+    ...modelArgs(modelFor(COMMIT_MESSAGE_MODELS, 'codex')),
+    '--output-last-message', outputPath,
+    '--output-schema', COMMIT_MESSAGE_SCHEMA_PATH,
+    '-',
+  ]
+}
+
 export function runCommitMessageAgent(
   agent: HealAgent,
   prompt: string,
@@ -161,15 +176,7 @@ export function runCommitMessageAgent(
   const claudeSessionId = agent === 'claude' ? crypto.randomUUID() : undefined
   const args = agent === 'claude'
     ? buildClaudeAgenticArgs(prompt, { model: COMMIT_MESSAGE_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
-    : [
-        'exec',
-        '--skip-git-repo-check',
-        '--sandbox', 'read-only',
-        ...modelArgs(modelFor(COMMIT_MESSAGE_MODELS, 'codex')),
-        ...(outputPath ? ['--output-last-message', outputPath] : []),
-        '--output-schema', COMMIT_MESSAGE_SCHEMA_PATH,
-        '-',
-      ]
+    : codexArgs(outputPath!)
 
   let idled = false
   const handle = runAgentProcess({

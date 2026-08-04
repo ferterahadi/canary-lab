@@ -181,6 +181,34 @@ describe('GitHub / PR routes (R80)', () => {
     ])
   })
 
+  it('POST propose-pr forwards the run\'s failures as the message agent\'s evidence', async () => {
+    writeManifestWithCapture('r1')
+    fs.writeFileSync(
+      path.join(runDirFor(logsDir, 'r1'), 'e2e-summary.json'),
+      JSON.stringify({ total: 1, passed: 0, failed: [{ name: 'deletes a product', location: 'e2e/catalog.spec.ts:31' }] }),
+    )
+    prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)
+    prMocks.proposeFixesForRun.mockResolvedValueOnce([])
+    const { app } = await build()
+
+    await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })
+
+    expect(prMocks.proposeFixesForRun).toHaveBeenCalledWith(
+      expect.objectContaining({ failed: [expect.objectContaining({ name: 'deletes a product' })] }),
+    )
+  })
+
+  it('POST propose-pr sends no failures when a healed run no longer lists any', async () => {
+    writeManifestWithCapture('r1')
+    prMocks.buildPrPreflight.mockResolvedValueOnce(PREFLIGHT_PUSHABLE)
+    prMocks.proposeFixesForRun.mockResolvedValueOnce([])
+    const { app } = await build()
+
+    await app.inject({ method: 'POST', url: '/api/runs/r1/propose-pr' })
+
+    expect(prMocks.proposeFixesForRun.mock.calls[0][0]).not.toHaveProperty('failed')
+  })
+
   it('POST propose-pr upserts by repo name over previously proposed PRs', async () => {
     // A retry re-opens the same repo's PR; the row is replaced, not duplicated,
     // and an unrelated earlier PR survives.
@@ -343,6 +371,26 @@ describe('open-repo + apply-preflight routes', () => {
     const { app } = await build()
     const res = await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes', payload: { repoName: 'not-mine' } })
     expect(res.statusCode).toBe(404)
+  })
+
+  it('apply-fixes narrows to the one repo the body names', async () => {
+    writeManifestWithCapture('r1')
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/apply-fixes', payload: { repoName: 'prod' } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().results).toEqual([expect.objectContaining({ repoName: 'prod' })])
+  })
+
+  it('stringifies an editor failure that was not thrown as an Error', async () => {
+    const repoRoot = fs.mkdtempSync(path.join(tmpDir, 'prod-'))
+    writeManifestWithCapture('r1', [{ repoName: 'prod', patchPath: '/p.patch', patchFile: 'p.patch', repoRoot, baseSha: 'abc', files: 1 }])
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    vi.mocked(launchEditorDir).mockImplementationOnce(() => { throw 'editor exploded' })
+    const { app } = await build()
+
+    const res = await app.inject({ method: 'POST', url: '/api/runs/r1/open-repo', payload: { repoName: 'prod' } })
+
+    expect(res.json()).toMatchObject({ opened: false, error: 'editor exploded' })
   })
 
   it('apply-fixes still accepts an empty body, applying every repo', async () => {
