@@ -447,6 +447,22 @@ body {
   .cl-skeleton { animation: none; }
 }
 
+/* R86 — the FAILED placeholder: the same held-open outline the idle state uses
+   (set inline by `SkeletonBar`), hued `--danger` and struck through the middle.
+   Struck rather than filled so it can never be mistaken for a bar about to
+   become a figure.
+   ONE line, not a hatch: these bars are 7–9px tall and a diagonal hatch at that
+   size renders as a row of slashes — six of them in a card read as ASCII noise
+   rather than as the slots a retry still owes. */
+.cl-skeleton-void {
+  background-image: linear-gradient(
+    to bottom,
+    transparent calc(50% - 0.5px),
+    color-mix(in srgb, var(--danger) 55%, transparent) calc(50% - 0.5px) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+
 .cl-menu-item:hover {
   background: var(--bg-input);
   color: var(--text-primary);

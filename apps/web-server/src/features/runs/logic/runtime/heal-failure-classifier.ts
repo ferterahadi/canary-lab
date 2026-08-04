@@ -84,6 +84,22 @@ const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly s
     ],
   },
   {
+    // A tool-approval prompt the agent is still sitting on. Distinct from
+    // `trust-prompt`: that one fires before any work, this one can fire *after*
+    // a complete repair is already on disk, which is how a working fix gets
+    // reported as "no code changes were made". Listed after the hard blockers
+    // (a limit or auth failure is the actionable cause when both appear) but
+    // before `crash`, because an agent reading shell output leaves `enoent` /
+    // `killed` / `command not found` in the tail as ordinary content.
+    cause: 'approval-prompt',
+    needles: [
+      'do you want to proceed',
+      'contains simple_expansion',
+      'allow reading from',
+      'do you want to make this edit',
+    ],
+  },
+  {
     cause: 'crash',
     needles: [
       'panic:',

@@ -289,7 +289,7 @@ describe('FlightPage', () => {
     const card = container.querySelector('[data-testid="stage-paused"]')!
     expect(card).toBeTruthy()
     expect(card.textContent).toContain('Paused part way')
-    expect(card.textContent).toContain('↑ Continue')
+    expect(card.textContent).toContain('↑Continue')
     // Recovery stays the header's one Continue — the card carries no button.
     expect(card.querySelector('button')).toBeNull()
     // The card agrees with the always-present state sentence, never contradicts it.
@@ -348,7 +348,7 @@ describe('FlightPage', () => {
     // not a card filling a void, so it carries no PanelCard slab.
     const paused = container.querySelector('[data-testid="stage-paused"]')!
     expect(paused.textContent).toContain('Paused part way')
-    expect(paused.textContent).toContain('↑ Continue')
+    expect(paused.textContent).toContain('↑Continue')
     expect(paused.querySelector('button')).toBeNull()
   })
 

@@ -14,6 +14,10 @@ describe('healAgentCauseSuffix', () => {
     // Says the agent never started, not that it tried and failed — the whole
     // point of telling a trust-prompt stall apart from a real repair attempt.
     expect(healAgentCauseSuffix('trust-prompt')).toContain('never started work')
+    // The opposite of trust-prompt: this stall can happen *after* a finished
+    // repair, so the wording has to say the work survived rather than imply the
+    // cycle achieved nothing.
+    expect(healAgentCauseSuffix('approval-prompt')).toContain('still on disk')
   })
 
   it('stays silent when the cause was not recognized', () => {

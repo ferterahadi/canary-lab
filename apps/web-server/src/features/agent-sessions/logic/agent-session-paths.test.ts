@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import {
   encodeClaudeProjectDir,
+  claudeProjectDirCandidates,
   claudeConfigDir,
   codexConfigDir,
   claudeSessionLogPath,
@@ -132,8 +133,29 @@ describe('encodeClaudeProjectDir', () => {
     expect(encodeClaudeProjectDir('/Users/dev/foo')).toBe('-Users-dev-foo')
   })
 
-  it('preserves dots, hyphens, and underscores', () => {
-    expect(encodeClaudeProjectDir('/a/b-c.d_e/2026-05-11')).toBe('-a-b-c.d_e-2026-05-11')
+  it('folds dots and underscores to - like the current CLI, keeping alphanumerics', () => {
+    expect(encodeClaudeProjectDir('/a/b-c.d_e/2026-05-11')).toBe('-a-b-c-d-e-2026-05-11')
+  })
+
+  // The real-world regression: every macOS temp dir carries `s_`, so the old
+  // slash-only rule mislocated every demo/smoke/temp-dir run's transcript.
+  it('encodes a macOS temp path the way claude 2.1.220 does on disk', () => {
+    expect(encodeClaudeProjectDir('/private/var/folders/s_/xy/T/run')).toBe(
+      '-private-var-folders-s--xy-T-run',
+    )
+  })
+})
+
+describe('claudeProjectDirCandidates', () => {
+  it('offers the current slug first, then the legacy slash-only slug', () => {
+    expect(claudeProjectDirCandidates('/var/folders/s_/x')).toEqual([
+      '-var-folders-s--x',
+      '-var-folders-s_-x',
+    ])
+  })
+
+  it('collapses to a single candidate when both rules agree', () => {
+    expect(claudeProjectDirCandidates('/Users/dev/foo')).toEqual(['-Users-dev-foo'])
   })
 })
 
@@ -156,6 +178,43 @@ describe('locateClaudeSessionLog', () => {
 
   it('returns null when sessionId is falsy', () => {
     expect(locateClaudeSessionLog('/some/dir', '', homeDir)).toBeNull()
+  })
+
+  // Regression: a run under a macOS temp dir. The predicted slug and the slug
+  // claude actually wrote used to disagree, so the log was on disk but the
+  // viewer rendered blank.
+  it('finds the log under the folded slug for an underscore-bearing runDir', () => {
+    const runDir = '/private/var/folders/s_/xy/T/demo/logs/runs/r1'
+    const sessionId = 'f4bd4dc1-9d5c-4853-bb3a-d738ab57b5e5'
+    const projectDir = path.join(homeDir, '.claude', 'projects', '-private-var-folders-s--xy-T-demo-logs-runs-r1')
+    fs.mkdirSync(projectDir, { recursive: true })
+    const jsonl = path.join(projectDir, `${sessionId}.jsonl`)
+    fs.writeFileSync(jsonl, '')
+
+    expect(locateClaudeSessionLog(runDir, sessionId, homeDir)).toBe(jsonl)
+  })
+
+  it('still finds a log written under the legacy slash-only slug', () => {
+    const runDir = '/var/folders/s_/legacy/runs/r2'
+    const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444'
+    const projectDir = path.join(homeDir, '.claude', 'projects', '-var-folders-s_-legacy-runs-r2')
+    fs.mkdirSync(projectDir, { recursive: true })
+    const jsonl = path.join(projectDir, `${sessionId}.jsonl`)
+    fs.writeFileSync(jsonl, '')
+
+    expect(locateClaudeSessionLog(runDir, sessionId, homeDir)).toBe(jsonl)
+  })
+
+  // Last-resort net: even if claude changes the slug rule again, a pinned
+  // session id still resolves.
+  it('falls back to a by-id scan when no candidate slug matches', () => {
+    const sessionId = 'bbbbbbbb-5555-6666-7777-888888888888'
+    const projectDir = path.join(homeDir, '.claude', 'projects', '-some-unrelated-future-slug')
+    fs.mkdirSync(projectDir, { recursive: true })
+    const jsonl = path.join(projectDir, `${sessionId}.jsonl`)
+    fs.writeFileSync(jsonl, '')
+
+    expect(locateClaudeSessionLog('/totally/other/dir', sessionId, homeDir)).toBe(jsonl)
   })
 })
 
@@ -201,6 +260,29 @@ describe('findClaudeLogBySessionId', () => {
       agent: 'claude',
       sessionId: 'fedcba98-7654-3210-fedc-ba9876543210',
       logPath: newer,
+    })
+  })
+
+  // No session id to fall back on here, so both slugs must be scanned — and a
+  // run straddling a CLI upgrade legitimately has logs under each.
+  it('picks the newest log across both the folded and legacy slugs', () => {
+    const runDir = '/var/folders/s_/straddle/runs/r3'
+    const base = path.join(homeDir, '.claude', 'projects')
+    const foldedDir = path.join(base, '-var-folders-s--straddle-runs-r3')
+    const legacyDir = path.join(base, '-var-folders-s_-straddle-runs-r3')
+    fs.mkdirSync(foldedDir, { recursive: true })
+    fs.mkdirSync(legacyDir, { recursive: true })
+    const legacyLog = path.join(legacyDir, '11111111-1111-1111-1111-111111111111.jsonl')
+    const foldedLog = path.join(foldedDir, '22222222-2222-2222-2222-222222222222.jsonl')
+    fs.writeFileSync(legacyLog, '')
+    fs.writeFileSync(foldedLog, '')
+    fs.utimesSync(legacyLog, new Date('2026-04-08T00:00:00.000Z'), new Date('2026-04-08T00:00:00.000Z'))
+    fs.utimesSync(foldedLog, new Date('2026-08-04T00:00:00.000Z'), new Date('2026-08-04T00:00:00.000Z'))
+
+    expect(locateLatestClaudeSessionLog(runDir, homeDir)).toEqual({
+      agent: 'claude',
+      sessionId: '22222222-2222-2222-2222-222222222222',
+      logPath: foldedLog,
     })
   })
 

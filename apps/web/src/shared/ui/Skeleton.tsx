@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import { PanelCard } from './PanelCard'
 
 // R83 — the one placeholder vocabulary. A stage pane keeps the layout its
@@ -6,24 +7,52 @@ import { PanelCard } from './PanelCard'
 // lands in the slot its placeholder held instead of pushing the pane around
 // when the stage finishes.
 //
-// The BAR is what says "not measured yet". The sweep only adds "and something is
-// working on it right now" — a split that matters because the headless preview
-// forces reduced-motion, so a viewer with no animation must still read a
-// placeholder rather than a blank card.
+// R86 — the placeholder's FILL is what says why the slot is empty, because the
+// shape alone said the same thing in three different situations:
+//   live   filled bar, sweeping   a value is being produced right now
+//   idle   hollow dashed track    the slot is held open; nothing comes until you act
+//   failed struck danger track    the value will never land here
+// The fill (not the animation) carries this, deliberately: the headless preview
+// forces reduced-motion, so a viewer with no animation must still be able to
+// tell a working stage from a parked one from a broken one.
 
-/** Why a card is showing placeholders: `live` (a stage is working on it, so the
- *  bars sweep) or `idle` (pending, paused, failed — nothing is coming until the
- *  user acts, so they stand still). Absent means "not awaiting anything", which
- *  is how a settled stage keeps its `return null` for a card it genuinely has
- *  no content for. */
-export type AwaitingState = 'live' | 'idle'
+/** Why a card is showing placeholders: `live` (a stage is working on it),
+ *  `idle` (pending or paused — nothing is coming until the user acts) or
+ *  `failed` (the stage stopped short, so these slots stay empty until a retry).
+ *  Absent means "not awaiting anything", which is how a settled stage keeps its
+ *  `return null` for a card it genuinely has no content for. */
+export type AwaitingState = 'live' | 'idle' | 'failed'
 
 /** The pane's awaiting state, from the stage's own status. One home so every
  *  panel is told the same thing: a settled stage has produced everything it ever
  *  will, and must never render a placeholder promising more. */
 export function awaitingFor(status: string, live: boolean): AwaitingState | undefined {
   if (status === 'done' || status === 'skipped') return undefined
-  return live ? 'live' : 'idle'
+  if (live) return 'live'
+  return status === 'failed' ? 'failed' : 'idle'
+}
+
+/** The fill per state. `live` is the only filled bar — the sweep class adds the
+ *  motion on top of it. `idle` and `failed` are the same held-open outline in
+ *  different hues, which is the point: the slot is identical, only the reason it
+ *  is empty differs. `failed` takes its strike-through from `.cl-skeleton-void`,
+ *  so it sets no background here.
+ *
+ *  The outline is SOLID, not dashed: a bar is 7–9px tall, and a dashed border at
+ *  that size reads as a dotted texture — the pill stops looking like a slot. */
+const BAR_FILL: Record<AwaitingState, CSSProperties> = {
+  live: { background: 'var(--border-strong)' },
+  idle: { border: '1px solid var(--border-strong)', boxSizing: 'border-box' },
+  failed: {
+    border: '1px solid color-mix(in srgb, var(--danger) 45%, transparent)',
+    boxSizing: 'border-box',
+  },
+}
+
+const BAR_CLASS: Record<AwaitingState, string> = {
+  live: ' cl-skeleton',
+  idle: '',
+  failed: ' cl-skeleton-void',
 }
 
 /** One placeholder bar. Widths are given per site rather than randomized —
@@ -39,8 +68,9 @@ export function SkeletonBar({ awaiting, width = '62%', height = 10, className = 
     <span
       aria-hidden
       data-testid="skeleton-bar"
-      className={`block rounded-full${awaiting === 'live' ? ' cl-skeleton' : ''}${className ? ` ${className}` : ''}`}
-      style={{ width, height, background: 'var(--border-strong)' }}
+      data-awaiting={awaiting}
+      className={`block rounded-full${BAR_CLASS[awaiting]}${className ? ` ${className}` : ''}`}
+      style={{ width, height, ...BAR_FILL[awaiting] }}
     />
   )
 }
@@ -64,17 +94,41 @@ export function SkeletonLines({ awaiting, rows = 2, height = 9 }: {
   )
 }
 
+/** The leading indicator a row carries (StepList's bead, RunRow's status dot).
+ *  Exported because a card that composes its OWN row geometry — the Test Run
+ *  hero, whose three blocks each sit at a different left edge — must reuse this
+ *  bead rather than hand-roll a second circle that drifts from it.
+ *
+ *  The bead tracks the same three states as the bars: a failed row's indicator
+ *  is the one dot the user will look for when scanning which rows a retry still
+ *  owes. */
+export function SkeletonBead({ awaiting, size = 9, className = '' }: {
+  awaiting: AwaitingState
+  /** Match the dot the real row carries — RunRow's is 0.55rem, a failure row's 6px. */
+  size?: number
+  className?: string
+}) {
+  return (
+    <span
+      aria-hidden
+      data-testid="skeleton-bead"
+      className={`shrink-0 rounded-full border${className ? ` ${className}` : ''}`}
+      style={{
+        height: size,
+        width: size,
+        borderColor: awaiting === 'failed' ? 'var(--danger)' : 'var(--border-strong)',
+      }}
+    />
+  )
+}
+
 /** A list row's shape: the leading indicator every row-list on a stage carries
- *  (StepList's bead, RunRow's status dot) plus a title bar and a quieter
- *  sub-line, so a skeleton list reads as the list it will become. */
+ *  plus a title bar and a quieter sub-line, so a skeleton list reads as the list
+ *  it will become. */
 export function SkeletonRow({ awaiting, sub = true }: { awaiting: AwaitingState; sub?: boolean }) {
   return (
     <li className="flex items-start gap-2.5 py-1.5" data-testid="skeleton-row">
-      <span
-        aria-hidden
-        className="mt-[3px] h-[9px] w-[9px] shrink-0 rounded-full border"
-        style={{ borderColor: 'var(--border-strong)' }}
-      />
+      <SkeletonBead awaiting={awaiting} className="mt-[3px]" />
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <SkeletonBar awaiting={awaiting} width="46%" height={9} />
         {sub && <SkeletonBar awaiting={awaiting} width="72%" height={7} />}

@@ -1,4 +1,5 @@
 import type { RunSummary, RunSummaryFailedEntry } from '@/shared/api/types'
+import { HERO_ROW } from './stage-meta'
 
 // The failing tests, rendered as evidence instead of a list of truncated slugs.
 //
@@ -92,7 +93,15 @@ function FailureRow({ failure, onOpen }: { failure: ParsedFailure; onOpen?: () =
   const { entry, title, tags, shortLoc, fullLoc } = failure
   const body = (
     <>
-      <span aria-hidden="true" className="mt-[6px] h-1.5 w-1.5 shrink-0 rounded-full bg-danger" />
+      {/* Smaller dot than the run row's, centred in that row's dot lane — see
+          HERO_ROW. Keeps the subordinate weight without a second left edge. */}
+      <span
+        aria-hidden="true"
+        className="mt-[6px] flex shrink-0 items-center justify-center"
+        style={{ width: HERO_ROW.DOT }}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-danger" />
+      </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="line-clamp-2 text-[12px] leading-snug text-primary" title={title}>
           {title}
@@ -124,12 +133,13 @@ function FailureRow({ failure, onOpen }: { failure: ParsedFailure; onOpen?: () =
           data-testid={`failing-open-${entry.name}`}
           onClick={onOpen}
           title="Open this failure on the run detail"
-          className="cl-hover-row flex w-full items-start gap-2 rounded px-1.5 py-2 text-left transition-colors"
+          className="cl-hover-row flex w-full items-start gap-2 rounded py-2 text-left transition-colors"
+          style={{ paddingInline: HERO_ROW.GUTTER }}
         >
           {body}
         </button>
       ) : (
-        <div className="flex w-full items-start gap-2 px-1.5 py-2">{body}</div>
+        <div className="flex w-full items-start gap-2 py-2" style={{ paddingInline: HERO_ROW.GUTTER }}>{body}</div>
       )}
     </li>
   )

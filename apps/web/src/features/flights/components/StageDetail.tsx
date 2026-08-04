@@ -227,7 +227,7 @@ export function StageDetail({
           has evidence, placeholders where it doesn't yet, sweeping while it
           works. A stage pane no longer collapses to a bare sentence, and a value
           lands in the slot its placeholder held. */}
-      <FactsGrid facts={facts} live={live} />
+      <FactsGrid facts={facts} awaiting={awaiting} />
 
       {/* Paused with nothing else to act on (no checkpoint, no error): the
           "how to pick it back up" card fills the void the state sentence alone

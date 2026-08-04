@@ -138,7 +138,10 @@ describe('RunOrchestrator.runFullCycle', () => {
       .map((line) => JSON.parse(line) as RunLifecycleEvent)
   }
 
-  it('infers a rerun and writes a journal entry when the agent edits files but exits without a signal', async () => {
+  // The edited file lives under the service's cwd, so the inference is a
+  // RESTART: rerunning without one would re-test the still-running pre-fix
+  // process and report a working repair as a failure.
+  it('infers a restart and writes a journal entry when the agent edits service files but exits without a signal', async () => {
     // tmpDir is the feature's repo localPath — make it a git repo so the
     // orchestrator's snapshot/diff sees the agent's edits.
     execFileSync('git', ['init', '-q'], { cwd: tmpDir })
@@ -174,20 +177,21 @@ describe('RunOrchestrator.runFullCycle', () => {
     // Agent edits a tracked file then exits without writing a signal file.
     fs.writeFileSync(path.join(tmpDir, 'svc.ts'), '// patched by agent\n')
     f.spawned[2].emitExit(0)
-    // Inferred .rerun: no service restart, just a second playwright run.
-    while (f.spawned.length < 4) await new Promise((r) => setTimeout(r, 5))
-    f.spawned[3].emitExit(1) // still failing; cap=1 → loop exits
+    // Inferred .restart: the service respawns (idx 3) so the rerun (idx 4)
+    // tests the patched code rather than the process that predates the fix.
+    while (f.spawned.length < 5) await new Promise((r) => setTimeout(r, 5))
+    f.spawned[4].emitExit(1) // still failing; cap=1 → loop exits
 
     const status = await promise
     expect(status).toBe('failed')
 
     const journal = fs.readFileSync(orch.paths.diagnosisJournalPath, 'utf-8')
     expect(journal).toContain('Heal agent exited without writing a signal.')
-    expect(journal).toContain('Runner inferred a rerun from git diff.')
+    expect(journal).toContain('Runner inferred a restart from git diff.')
     expect(journal).toContain(path.join(tmpDir, 'svc.ts'))
-    // The 4th spawn (idx 3) is the inferred-rerun's playwright; without the
-    // fallback the loop would have bailed before that pty existed.
-    expect(f.spawned.length).toBeGreaterThanOrEqual(4)
+    // Without the fallback the loop would have bailed before the restart and
+    // rerun ptys existed at all.
+    expect(f.spawned.length).toBeGreaterThanOrEqual(5)
     await orch.stop('failed')
   }, 15000)
 

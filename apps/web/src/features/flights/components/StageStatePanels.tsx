@@ -203,9 +203,15 @@ export function StagePausedPanel({ kind, compact = false }: {
     : ' to start this step. The earlier steps are already done.'
   // An ↑ points at the header control by direction, not by a brittle
   // "top-right" — matches the failed card's "Continue from the header".
+  // The arrow is glued to the word (a hair of margin, no space character): the
+  // arrow is part of the control's name here, and a full space made it read as
+  // a separate glyph floating between "Use" and "Continue".
   const sentence = (
     <>
-      Use <span className="whitespace-nowrap font-semibold text-accent">↑ Continue</span> in the header{rest}
+      Use{' '}
+      <span className="whitespace-nowrap font-semibold text-accent">
+        <span aria-hidden="true" className="mr-[0.08em]">↑</span>Continue
+      </span> in the header{rest}
     </>
   )
   if (compact) {

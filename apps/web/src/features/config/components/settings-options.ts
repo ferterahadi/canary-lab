@@ -52,6 +52,12 @@ export const EDITOR_OPTIONS: { value: EditorChoice; label: string; description: 
   },
 ]
 
+/** Human name for an editor choice — `vscode` is a command id, not something to
+ *  show a user. Read by any surface that reports which editor it launched. */
+export function editorLabel(editor: string): string {
+  return EDITOR_OPTIONS.find((o) => o.value === editor)?.label ?? editor
+}
+
 export const DEFAULT_PORT = 7421
 
 export function parsePort(origin: string): number | null {

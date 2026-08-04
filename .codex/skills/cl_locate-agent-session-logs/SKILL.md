@@ -55,11 +55,29 @@ otherwise.)
 - **Never recompute a session-log path by hand.** Building
   `path.join(home, '.claude', 'projects', …)` or reading `process.env.HOME`
   inline is the recurring smell — it skips the env override, the realpath, and
-  the `/`→`-` encoding, and it drifts from the canonical version. Route through:
+  the project-dir slug encoding, and it drifts from the canonical version.
+  Route through:
   - `claudeSessionLogPath(cwd, sessionId)` — the deterministic claude path
   - `claudeConfigDir()` / `codexConfigDir()` — the config-dir base
   - the existing locators (`findClaudeLogBySessionId`, `locateCodexSessionLog`,
     `locateLatest*`, `resolveManifestSessionRef`, `resolveWorkflowAgentRef`)
+- **The slug is not `/`→`-`, and it has already changed once.** claude 2.1.220
+  folds **every** non-alphanumeric character to `-` (`/var/folders/s_/x` →
+  `-var-folders-s--x`); older builds folded only `/`, leaving `.` and `_`
+  intact. Measured 2026-08-04: 118 of 119 dirs in `~/.claude/projects` are pure
+  `[A-Za-z0-9-]`, and the lone underscore-preserving dir was last written
+  2026-04-08. Treat the slug as a **guess at someone else's private format**:
+  - **Prefer the session id whenever you have one.** It's ours, pinned via
+    `--session-id`, globally unique, and encoding-proof.
+    `locateClaudeSessionLog` falls back to `findClaudeLogBySessionId` for
+    exactly this reason.
+  - **When you have no id**, try `claudeProjectDirCandidates(cwd)` (current slug
+    then legacy) rather than one encoding — a run straddling a CLI upgrade has
+    logs under both.
+  - The failure mode is the usual one: log on disk, viewer blank. It hid for
+    months because workspace run dirs have no `_`, while every macOS temp dir
+    (`/var/folders/s_/…`) does — so it only bit demo, smoke, and temp-dir
+    flight runs.
 - **In session-log / config-dir path code, the `.claude` / `.codex` string
   literals belong in exactly two places** — the fallback inside the two
   resolvers. If a literal appears anywhere else on a path that will be *read

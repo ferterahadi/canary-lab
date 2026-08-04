@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FACT_GLOSS, FACT_HELP, FactTile, type StageFact } from './StageFacts'
+import type { AwaitingState } from '@/shared/ui/Skeleton'
 
 // The three lines every tile owes: label (+ the `?` that says an explanation
 // exists), value, and a second line that is never blank. The band used to drop
@@ -26,10 +27,43 @@ afterEach(() => {
   document.body.querySelector('[role="tooltip"]')?.remove()
 })
 
+function renderWith(fact: StageFact, awaiting: AwaitingState) {
+  act(() => { root.render(<FactTile fact={fact} awaiting={awaiting} />) })
+  return container.querySelector<HTMLDivElement>('[data-testid="fact-tile"]')!
+}
+
 function render(fact: StageFact) {
   act(() => { root.render(<FactTile fact={fact} />) })
   return container.querySelector<HTMLDivElement>('[data-testid="fact-tile"]')!
 }
+
+describe('FactPlaceholder — a bar is a promise, a dash is not (R86)', () => {
+  const slot = (tile: HTMLElement) => tile.querySelector<HTMLElement>('[data-testid="fact-awaiting"]')!
+  const fact: StageFact = { label: 'Requirements distilled', value: '', awaiting: true }
+
+  it('gives only a live tile a bar', () => {
+    expect(slot(renderWith(fact, 'live')).querySelector('[data-testid="skeleton-bar"]')).not.toBeNull()
+  })
+
+  it('shows a dash while parked, hued to say the slot is merely held open', () => {
+    const held = slot(renderWith(fact, 'idle'))
+    expect(held.querySelector('[data-testid="skeleton-bar"]')).toBeNull()
+    expect(held.textContent).toBe('—')
+    expect(held.querySelector<HTMLElement>('span')?.style.color).toBe('var(--text-muted)')
+  })
+
+  it('reddens the dash once the step failed, and says so to a screen reader', () => {
+    const struck = slot(renderWith(fact, 'failed'))
+    expect(struck.querySelector<HTMLElement>('span')?.style.color).toBe('var(--danger)')
+    expect(struck.getAttribute('aria-label')).toBe('not measured — the step failed')
+  })
+
+  it('keeps the tile height the figure will need, in every state', () => {
+    for (const awaiting of ['live', 'idle', 'failed'] as const) {
+      expect(slot(renderWith(fact, awaiting)).className).toContain('h-[22px]')
+    }
+  })
+})
 
 describe('FactTile explanations', () => {
   it('marks a tile that has an explanation and shows it on hovering the TILE, not just the mark', () => {
@@ -75,6 +109,14 @@ describe('FactTile second line', () => {
     const tile = render({ label: 'Services booted', value: '', awaiting: true })
     expect(tile.querySelector('[data-testid="fact-awaiting"]')).not.toBeNull()
     expect(subOf(tile)).toBe(FACT_GLOSS['Services booted'])
+  })
+
+  it('says what happened instead of the gloss once the step failed', () => {
+    // The gloss describes a figure this tile is now never going to hold, so a
+    // failed placeholder replaces it rather than promising the meaning of a
+    // number that isn't coming.
+    const tile = renderWith({ label: 'Services booted', value: '', awaiting: true }, 'failed')
+    expect(subOf(tile)).toBe('not measured')
   })
 
   it('leaves an identity tile two lines — a gloss under a filename is noise', () => {

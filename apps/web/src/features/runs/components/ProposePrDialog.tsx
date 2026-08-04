@@ -1,21 +1,14 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { PrBlockedReason, PrPreflight, ProposePrResult } from '@/shared/api/client'
+import type { PrPreflight, ProposePrResult } from '@/shared/api/client'
 import { Modal } from '@/shared/ui/atoms'
+import { BLOCKED_HELP } from '../utils/pr-blocked-copy'
 
 // R80 — the PR confirm dialog. Pushing to origin is teammate-visible, so a PR is
 // never automatic: this is the explicit gate. It re-runs the preflight on open
 // (auth changes outside the app — the enforcement point), shows a per-repo
 // verdict with detect-and-instruct remediation for anything blocked, and opens
 // PRs only for the pushable subset on confirm.
-
-const BLOCKED_HELP: Record<PrBlockedReason, { line: string; command?: string }> = {
-  'no-origin': { line: 'This repo has no `origin` remote — a PR needs one.' },
-  'not-github': { line: 'The origin remote isn’t a GitHub repo, so gh can’t open a PR.' },
-  'gh-missing': { line: 'The GitHub CLI isn’t installed.', command: 'brew install gh' },
-  'not-authed': { line: 'You’re not signed in to GitHub.', command: 'gh auth login --hostname github.com --web' },
-  'wrong-account': { line: 'The signed-in account can’t push to this repo.', command: 'gh auth switch' },
-}
 
 export function ProposePrDialog({
   open,

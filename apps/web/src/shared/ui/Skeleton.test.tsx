@@ -17,11 +17,15 @@ describe('awaitingFor — a settled stage never promises more', () => {
     expect(awaitingFor('done', true)).toBeUndefined()
   })
 
-  it('sweeps only while the stage is actually working', () => {
+  it('separates the three reasons a slot is empty (R86)', () => {
     expect(awaitingFor('running', true)).toBe('live')
+    // Parked: nothing is coming until the user acts.
     expect(awaitingFor('pending', false)).toBe('idle')
-    expect(awaitingFor('failed', false)).toBe('idle')
     expect(awaitingFor('waiting-for-approval', false)).toBe('idle')
+    // Stopped short: these slots stay empty until a retry, which is a different
+    // thing to say than "not yet" — and the only state that used to be
+    // indistinguishable from a parked one.
+    expect(awaitingFor('failed', false)).toBe('failed')
   })
 })
 
@@ -40,11 +44,38 @@ describe('Skeleton primitives', () => {
     container.remove()
   })
 
-  it('the bar carries the sweep only when live — the shape alone must read as a placeholder', () => {
+  it('the FILL says why the slot is empty, so the three states differ with motion off', () => {
+    const bar = () => container.querySelector<HTMLElement>('[data-testid="skeleton-bar"]')!
+    // Live: the only FILLED bar — a bar is the promise of a value.
     act(() => root.render(<SkeletonBar awaiting="live" />))
-    expect(container.querySelector('[data-testid="skeleton-bar"]')?.className).toContain('cl-skeleton')
+    expect(bar().className).toContain('cl-skeleton')
+    expect(bar().style.background).toBe('var(--border-strong)')
+    // Idle: an outline holding the slot open, with nothing inside it. (happy-dom
+    // drops the colour from a border shorthand, so the hue is not assertable
+    // here — the state attribute below is what a caller reads it back by.)
     act(() => root.render(<SkeletonBar awaiting="idle" />))
-    expect(container.querySelector('[data-testid="skeleton-bar"]')?.className).not.toContain('cl-skeleton')
+    expect(bar().className).not.toContain('cl-skeleton')
+    expect(bar().style.border).toContain('solid')
+    expect(bar().style.background).toBe('')
+    expect(bar().dataset.awaiting).toBe('idle')
+    // Failed: the same held-open outline, hued danger and struck through — never
+    // a fill that could be mistaken for a value about to land.
+    act(() => root.render(<SkeletonBar awaiting="failed" />))
+    expect(bar().className).toContain('cl-skeleton-void')
+    // The sweep is `live`'s alone — a struck slot is not being worked on.
+    expect(bar().className).not.toMatch(/cl-skeleton(?!-)/)
+    expect(bar().style.background).toBe('')
+    // Same held-open outline as idle — the class carries the strike and the hue.
+    expect(bar().style.border).toContain('solid')
+    expect(bar().dataset.awaiting).toBe('failed')
+  })
+
+  it('the row bead reddens on a failed stage — the dot a retry is scanned by', () => {
+    const bead = () => container.querySelector<HTMLElement>('[data-testid="skeleton-row"] span')!
+    act(() => root.render(<SkeletonRows awaiting="failed" rows={1} />))
+    expect(bead().style.borderColor).toBe('var(--danger)')
+    act(() => root.render(<SkeletonRows awaiting="idle" rows={1} />))
+    expect(bead().style.borderColor).toBe('var(--border-strong)')
   })
 
   it('line widths repeat deterministically, so a re-render never reshuffles the card', () => {

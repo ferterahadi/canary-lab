@@ -89,6 +89,13 @@ export interface AgentSpawnArgs {
    *  restricted (e.g. a Desktop-launched UI server). Omitted in unit tests,
    *  which keep asserting against the bare command name. */
   binaryPath?: string
+  /** Directories the agent must be able to read and write outside its cwd —
+   *  the service repos it repairs and the feature dir holding the specs. The
+   *  agent's cwd is the run directory, so every repo it edits is out of scope
+   *  by default and each first touch raises an "allow reading from …?" prompt
+   *  that nothing answers under autopilot. Effective (worktree-aware) paths:
+   *  pass service `cwd`s, not the feature's declared `localPath`s. */
+  writableDirs?: readonly string[]
 }
 
 /**
@@ -96,24 +103,42 @@ export interface AgentSpawnArgs {
  * flags — the orchestrator writes the per-cycle prompt to the pty's stdin
  * after spawn, so this command does not include any `-p`/positional prompt.
  *
- * Permissions are intentionally NOT bypassed here. With the headless `-p`
- * flow we passed `--dangerously-skip-permissions` (resp. codex `--full-auto`)
- * because there was no human to approve tool calls. In REPL mode the user
- * is right there in the pane and can approve / deny each tool — bypassing
- * also hides MCP auth prompts the user needs to see.
+ * The permission posture asks for exactly what an UNATTENDED repair needs, and
+ * no more. The REPL was originally treated as interactive — "the user is right
+ * there in the pane and can approve each tool" — but that describes the
+ * exception, not the operating mode: heal runs on autopilot behind a 300s idle
+ * watchdog, and a prompt nobody answers is indistinguishable from a hung agent.
  *
- * File edits are the exception, and `--permission-mode acceptEdits` is how we
- * ask for them. Editing is the entire job of a repair agent: with per-edit
- * approval it writes the correct fix, stops on "Do you want to make this edit
- * to server.ts?", and is killed by the idle watchdog — the run then reports
- * "No code changes were made", which reads as a failed repair rather than an
- * unanswered question. Everything else still prompts in the pane.
+ * Three separate gates can each strand a repair, and they need different flags:
  *
- * This was previously supplied by accident: Claude Code's own auto mode is on
- * by default and auto-approves edits. But auto mode is a per-MODEL capability
- * — measured on 2.1.220, a haiku session prints "auto mode unavailable for
- * this model" and drops to manual, and unattended repair stops dead. Asking
- * for the posture we need beats inheriting one we never requested.
+ * 1. **File edits** — `acceptEdits` covered these, and only these. Editing is
+ *    the entire job: with per-edit approval the agent writes the correct fix,
+ *    stops on "Do you want to make this edit to server.ts?", and dies to the
+ *    watchdog. The run then says "No code changes were made" — blaming the
+ *    agent for an unanswered question.
+ * 2. **Bash commands** — NOT covered by `acceptEdits`, which grants edits plus
+ *    `mkdir`/`touch`/`mv`/`cp` only. Everything else goes to Claude Code's
+ *    command-safety classifier, and a glob or `$var` expansion defeats static
+ *    classification (it reports `Contains simple_expansion`) — which also means
+ *    a prefix-scoped `Bash(cat:*)` allow rule cannot cover it. Observed live on
+ *    2026-08-04: the agent finished a complete, correct repair, then froze
+ *    reading its own evidence files, and the run reported FAILED 3/8.
+ * 3. **Directory scope** — the agent's cwd is the run directory, so every repo
+ *    it must edit is outside it and the first touch asks "allow reading from
+ *    …?". `--add-dir` per `writableDirs` is what settles this one; no
+ *    permission mode does.
+ *
+ * `--permission-mode auto` covers 1 and 2 while keeping the background safety
+ * classifier that `--dangerously-skip-permissions` discards — the narrowest
+ * posture that actually closes the freeze. Codex's equivalent is `-a never`.
+ *
+ * KNOWN HAZARD: auto mode's availability is a per-MODEL capability — measured
+ * on 2.1.220, a haiku session prints "auto mode unavailable for this model" and
+ * drops to manual, where even edits prompt. A weak model pinned via
+ * `CANARY_LAB_HEAL_MODEL` can therefore still freeze, and more readily than
+ * under `acceptEdits`. That failure is no longer silent: the classifier's
+ * `approval-prompt` cause names it, and the loop's inferred-restart arm means a
+ * repair finished before the freeze is still verified rather than discarded.
  *
  * Claude session flag:
  * - `--session-id <uuid>`: starts a NEW conversation pinned to that uuid.
@@ -152,6 +177,12 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   const model = HEAL_MODELS[agent]
   const modelFlag = model ? ` --model ${JSON.stringify(model)}` : ''
 
+  // Both CLIs spell it `--add-dir`. Deduped: two services in one repo would
+  // otherwise pass the same directory twice.
+  const addDirs = [...new Set(args.writableDirs ?? [])]
+    .map((dir) => ` --add-dir ${JSON.stringify(dir)}`)
+    .join('')
+
   if (agent === 'claude') {
     const sid = args.sessionId
       ? (args.resume
@@ -165,20 +196,26 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
       }
       mcp = ` ${buildClaudeMcpConfigArg(args.mcpOutputDir, args.mcpConfigFile)}`
     }
-    // No `--dangerously-skip-permissions` — every tool but file editing still
-    // asks in the pane. `acceptEdits` is the one grant a repair agent needs to
-    // be able to work unattended; see the note above.
-    return `${head}${modelFlag} --permission-mode acceptEdits${sid}${mcp}${promptArg}`
+    // Still not `--dangerously-skip-permissions`: `auto` keeps Claude Code's
+    // background safety classifier in the loop, which the blanket bypass drops.
+    return `${head}${modelFlag} --permission-mode auto${addDirs}${sid}${mcp}${promptArg}`
   }
-  // codex interactive REPL. No `--full-auto`: tool approvals stay
-  // interactive in the pane. Codex has no `--session-id` analogue, so the
-  // first run starts normally. Once the orchestrator discovers Codex's
-  // persisted session id, Restart Heal can use `codex resume <id>`.
+  // codex interactive REPL. `-a never` is codex's spelling of the same posture:
+  // it never asks for approval, and a command the sandbox refuses comes back to
+  // the model as an execution failure it can react to — a failure it can report
+  // rather than a prompt it waits on. Not `--dangerously-bypass-approvals-and-
+  // sandbox`, which drops the sandbox too. `--add-dir` is what makes the repos
+  // writable under that sandbox; without it `-a never` would turn the freeze
+  // into a silent write failure, since escalation-on-approval can no longer
+  // happen. Codex has no `--session-id` analogue, so the first run starts
+  // normally. Once the orchestrator discovers Codex's persisted session id,
+  // Restart Heal can use `codex resume <id>`.
+  const codexAuto = ` -a never${addDirs}`
   if (args.resume && args.sessionId) {
-    return `${head}${modelFlag} resume ${JSON.stringify(args.sessionId)}${promptArg}`
+    return `${head}${modelFlag}${codexAuto} resume ${JSON.stringify(args.sessionId)}${promptArg}`
   }
   // Codex accepts a positional prompt the same way as claude.
-  return `${head}${modelFlag}${promptArg}`
+  return `${head}${modelFlag}${codexAuto}${promptArg}`
 }
 
 /**

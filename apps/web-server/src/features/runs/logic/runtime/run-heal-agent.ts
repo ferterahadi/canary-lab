@@ -413,6 +413,10 @@ export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
       // caller (`runHealAgent`); the wired spawn-command builder
       // appends `"@<promptFile>"` so claude reads it on startup.
       promptFile: healPromptFile(ctx),
+      // Service `cwd`s, not the feature's declared `localPath`s: on a
+      // worktree-isolated run those differ, and the agent must be granted the
+      // tree it will actually edit. The feature dir carries the specs.
+      writableDirs: [...ctx.services.map((svc) => svc.cwd), ctx.feature.featureDir],
     })
   } catch (err) {
     emitAgentSystemMessage(ctx, `Failed to build heal-agent spawn command: ${(err as Error).message}`)

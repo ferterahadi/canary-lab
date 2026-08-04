@@ -73,6 +73,34 @@ describe('classifyHealFailure', () => {
     expect(classifyHealFailure('❯ 1. Yes, I trust this folder')).toBe('trust-prompt')
   })
 
+  // Captured from a real 2026-08-04 demo_catalog heal run: the agent had made a
+  // complete, correct repair and then stopped on a Bash approval prompt nobody
+  // was there to answer. The watchdog reported it as "no code changes were
+  // made", which was false. This cause exists so that failure is named.
+  it('classifies an unanswered Bash approval prompt', () => {
+    expect(classifyHealFailure('Contains simple_expansion\n\nDo you want to proceed?\n❯ 1. Yes\n  2. No', 'claude'))
+      .toBe('approval-prompt')
+    expect(classifyHealFailure('Do you want to proceed?\n  2. Yes, allow reading from workspace/ from this project'))
+      .toBe('approval-prompt')
+    expect(classifyHealFailure('Do you want to make this edit to server.ts?', 'claude'))
+      .toBe('approval-prompt')
+  })
+
+  it('lets a hard blocker outrank a pending approval prompt', () => {
+    // A tail can hold both: the prompt was rendered, then the session died on a
+    // limit. The blocker is the actionable cause, so it wins. The reverse order
+    // would report "answer the prompt" for a session that could not continue.
+    expect(classifyHealFailure('Do you want to proceed?\n\nYou have reached your usage limit'))
+      .toBe('usage-limit')
+  })
+
+  it('classifies an approval prompt ahead of crash — a REPL tail is full of shell noise', () => {
+    // `enoent`/`killed`/`command not found` show up in ordinary Bash output the
+    // agent was reading. A rendered prompt is the specific signal; pin the order.
+    expect(classifyHealFailure('cat: logs/x: ENOENT\n\nDo you want to proceed?\n❯ 1. Yes'))
+      .toBe('approval-prompt')
+  })
+
   it('still classifies spaced fingerprints after the squeeze pass', () => {
     // The squeeze is additive: everything that matched before must still match.
     expect(classifyHealFailure('You have reached your usage limit')).toBe('usage-limit')

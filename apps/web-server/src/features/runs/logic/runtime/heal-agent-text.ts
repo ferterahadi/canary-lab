@@ -29,6 +29,8 @@ export function healAgentCauseSuffix(cause: HealEnd['agentCause']): string {
       return ' Its last output suggests the agent crashed or failed to start.'
     case 'trust-prompt':
       return ' It stopped at the CLI\'s "do you trust this folder?" prompt and never started work.'
+    case 'approval-prompt':
+      return ' It stopped on a CLI tool-approval prompt with nobody there to answer it — any work it had already finished is still on disk.'
     default:
       return ''
   }

@@ -73,17 +73,44 @@ describe('buildAgentSpawnCommand', () => {
     expect(cmd.includes('--mcp-config')).toBe(false)
   })
 
-  it('claude REPL: grants edits up front, because editing IS the repair', () => {
-    // Without this the agent writes the correct fix, stops on "Do you want to
-    // make this edit?", and is killed by the idle watchdog — the run then says
-    // "No code changes were made", blaming the agent for an unanswered
-    // question. It used to work only because Claude Code's auto mode is on by
-    // default, and that is a per-MODEL capability: a haiku session drops to
-    // manual mode and unattended repair stops dead. Measured on 2.1.220.
+  it('claude REPL: grants edits AND bash up front, because both strand a repair', () => {
+    // `acceptEdits` covered edits only. Bash went to the command-safety
+    // classifier, and a glob or `$var` expansion defeats it ("Contains
+    // simple_expansion") — observed live 2026-08-04, where a finished, correct
+    // repair was reported as FAILED because the agent froze reading its own
+    // evidence. `auto` covers both and keeps the safety classifier that
+    // --dangerously-skip-permissions discards.
     const cmd = buildAgentSpawnCommand('claude', { sessionId: 'x' })
-    expect(cmd).toContain('--permission-mode acceptEdits')
-    // Still the narrow grant, not the blanket one — every other tool asks.
+    expect(cmd).toContain('--permission-mode auto')
+    expect(cmd.includes('acceptEdits')).toBe(false)
+    // Still not the blanket bypass.
     expect(cmd.includes('--dangerously-skip-permissions')).toBe(false)
+  })
+
+  it('grants each writable dir on both arms — cwd is the run dir, so repos are out of scope', () => {
+    // The third gate, which no permission mode covers: the agent's cwd is the
+    // run directory, so its first touch of a repo asks "allow reading from …?"
+    // and nothing answers. Deduped, because two services can share one repo.
+    for (const agent of ['claude', 'codex'] as const) {
+      const cmd = buildAgentSpawnCommand(agent, {
+        sessionId: 'x',
+        writableDirs: ['/repos/api', '/repos/api', '/ws/features/demo'],
+      })
+      expect(cmd).toContain('--add-dir "/repos/api"')
+      expect(cmd).toContain('--add-dir "/ws/features/demo"')
+      expect(cmd.match(/--add-dir/g)).toHaveLength(2)
+    }
+  })
+
+  it('codex REPL: never asks for approval, on a fresh spawn and on resume', () => {
+    // A sandbox refusal returns to the model as an execution failure it can
+    // report; an approval prompt is one it waits on until the watchdog fires.
+    expect(buildAgentSpawnCommand('codex', {})).toContain('-a never')
+    const resumed = buildAgentSpawnCommand('codex', { sessionId: 'sid', resume: true })
+    expect(resumed).toContain('-a never')
+    expect(resumed).toContain('resume "sid"')
+    // Approvals off, but the sandbox stays on.
+    expect(resumed.includes('--dangerously-bypass-approvals-and-sandbox')).toBe(false)
   })
 
   it('launches via the quoted absolute binaryPath when provided (restricted PATH)', () => {
@@ -99,7 +126,7 @@ describe('buildAgentSpawnCommand', () => {
       resume: true,
       sessionId: 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f',
     })
-    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
+    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" -a never resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
   })
 
   it('claude REPL: throws when mcpOutputDir is set but mcpConfigFile is not', () => {
@@ -167,7 +194,9 @@ describe('buildAgentSpawnCommand', () => {
       resume: true,
       promptFile: '/tmp/run/heal-prompt.md',
     })
-    expect(cmd).toBe('codex resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f" -- "@/tmp/run/heal-prompt.md"')
+    // `-a never` sits before the subcommand, same as `--model` — clap reads it
+    // as a global flag there. Verified against the codex CLI's own parser.
+    expect(cmd).toBe('codex -a never resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f" -- "@/tmp/run/heal-prompt.md"')
     expect(cmd.includes('--session-id')).toBe(false)
     expect(cmd.includes('--resume')).toBe(false)
   })

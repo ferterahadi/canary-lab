@@ -47,6 +47,27 @@ export function stageLabel(key: string): string {
  *  blurbs) deliberately stays at the narrower 76ch reading measure. */
 export const STAGE_COLUMN = 'w-full max-w-[92ch]'
 
+/** The Test Run hero's row geometry, in ONE place. Four blocks stack inside that
+ *  card — the run identity row, the stats line, the failing-test rows, and the
+ *  skeleton that stands in for all three — and each used to state its own gutter
+ *  and dot size. RunRow sat at `px-3` with a 0.55rem dot while a failure row sat
+ *  at `px-1.5` with a 6px one, so the card had two left edges 6px apart and the
+ *  eye read the failures as belonging to a different list.
+ *
+ *  A failure's dot stays visually smaller (it IS a subordinate row) but is
+ *  centred in a `DOT` -wide lane, so the smaller dot shares the run row's dot
+ *  centre and every title in the card starts on `TEXT_INDENT`. */
+export const HERO_ROW = {
+  /** RunRow's `px-3`. */
+  GUTTER: '0.75rem',
+  /** RunRow's StatusDot — also the lane a smaller row dot is centred in. */
+  DOT: '0.55rem',
+  /** RunRow's `gap-2`. */
+  GAP: '0.5rem',
+  /** Where every title/meta/stats line in the hero begins. */
+  TEXT_INDENT: 'calc(0.75rem + 0.55rem + 0.5rem)',
+} as const
+
 /** The column as a wrapper, so a panel with two render branches cannot cap one
  *  and forget the other. Six evidence panels wrapped their SETTLED output in a
  *  bare `<div className={STAGE_COLUMN}>` and returned their skeleton unwrapped,

@@ -15,6 +15,7 @@ import {
   diffFeatureRepos,
   snapshotFeatureRepos,
 } from './feature-repo-diff'
+import { planRestart } from './restart-planner'
 import { computeVerificationPlan, decideRunStatus, extractFailedSlugs, nonPassedSignatureFromPlan, readSummary, selectionForPlan, summarizeFailures, summaryHasPassingEvidence } from './run-verdict'
 import { healAgentCauseSuffix } from './heal-agent-text'
 import { ensureServicesRunning } from './run-service-boot'
@@ -320,11 +321,22 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
           setStatus(ctx, finalStatus)
           break
         }
-        emitAgentSystemMessage(ctx, 'Code changes detected — inferring a rerun from git diff.')
+        // Restart vs rerun by who owns the changed files, not by a fixed
+        // choice. An app-code fix cannot survive a bare rerun: the service
+        // process is still serving the pre-fix code, so the rerun re-tests the
+        // old binary and the run reports a repair that in fact worked as a
+        // failure — a false FAIL, the one direction that must never happen.
+        // Spec-only edits own no service and need no restart. `planRestart` is
+        // the same matcher the restart itself runs on, so the inference can
+        // never disagree with the plan it produces.
+        const inferred = planRestart(filesChanged, ctx.services).toRestart.length > 0
+          ? 'restart' as const
+          : 'rerun' as const
+        emitAgentSystemMessage(ctx, `Code changes detected — inferring a ${inferred} from git diff.`)
         effectiveSignal = {
-          kind: 'rerun',
+          kind: inferred,
           body: {
-            hypothesis: `${reasonMessage} Runner inferred a rerun from git diff.`,
+            hypothesis: `${reasonMessage} Runner inferred a ${inferred} from git diff.`,
             fixDescription: 'Inferred from git diff — agent did not write a signal body.',
           },
         }

@@ -5,9 +5,9 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { FixesCapturedPanel, RunRow } from '@/features/runs'
 import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
-import { FactsGrid, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
+import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
 import { awaitingFact } from './StageFacts'
-import { SkeletonBar, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
+import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
 import { runHistoryStats } from './stage-metrics'
 import { formatDuration } from '@/shared/lib/format'
 
@@ -136,17 +136,11 @@ export function TestRunPanel({
           band-data hook would be two requests for one answer. It reports the
           HISTORY (how many runs, how they ended, how long they take); the hero
           below reports the latest run. Different scopes, so no number repeats. */}
-      <FactsGrid facts={runHistoryFacts(featureRuns, awaiting)} live={awaiting === 'live'} />
+      <FactsGrid facts={runHistoryFacts(featureRuns, awaiting)} awaiting={awaiting} />
 
       <PanelCard kicker="Latest run" testId="test-run-hero">
         {runId == null && awaiting ? (
-          // No run yet: the card still shows what a run report is shaped like —
-          // an identity row, the stats line under it, and the per-test rows.
-          <div data-testid="test-run-hero-skeleton" className="flex flex-col gap-2.5">
-            <SkeletonRows awaiting={awaiting} rows={1} />
-            <SkeletonBar awaiting={awaiting} width="58%" height={8} />
-            <SkeletonRows awaiting={awaiting} rows={2} sub={false} />
-          </div>
+          <RunHeroSkeleton awaiting={awaiting} />
         ) : (
           <>
         <ul className="m-0 list-none p-0">
@@ -342,14 +336,63 @@ interface RunStat {
  *  fact here that the verdict chip does NOT say: a red run whose services all
  *  booted is failing tests, a red run missing a service never got off the
  *  ground. So the line is neutral whenever nothing is wrong with it. */
+/** The hero before there is a run to report: the same blocks the filled card
+ *  has, on the same left edge.
+ *
+ *  Composed here rather than stacked out of `SkeletonRows`, because a generic row
+ *  list drew every block flush at x=0 — a left edge no value in this card ever
+ *  lands on. It also made the widest bar in the card a 7px sub-line and the two
+ *  test rows identical twins, so the placeholders promised a layout the card does
+ *  not have. Everything now hangs off `HERO_ROW`, the same constant RunRow's
+ *  stats line and the failure rows use.
+ *
+ *  Widths follow what actually arrives: a short "Run 4f2a" title over a longer
+ *  meta line, then wrapping test titles over a shorter tag line. */
+function RunHeroSkeleton({ awaiting }: { awaiting: AwaitingState }) {
+  return (
+    <div data-testid="test-run-hero-skeleton" className="flex flex-col">
+      {/* Identity row — RunRow's gutter, dot size and two-line text column. */}
+      <div className="flex items-center gap-2 py-2" style={{ paddingInline: HERO_ROW.GUTTER }}>
+        <SkeletonBead awaiting={awaiting} size={8.8} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <SkeletonBar awaiting={awaiting} width="28%" height={10} />
+          <SkeletonBar awaiting={awaiting} width="52%" height={7} />
+        </div>
+      </div>
+
+      {/* Tests · Repairs · Services land on this bar, not beside it. */}
+      <div style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}>
+        <SkeletonBar awaiting={awaiting} width="40%" height={8} />
+      </div>
+
+      {/* The per-test rows, in FailureRow's dot lane and hairline dividers. */}
+      <ul className="m-0 mt-3 flex list-none flex-col p-0">
+        {['64%', '46%'].map((width) => (
+          <li
+            key={width}
+            className="flex items-start gap-2 border-t border-line-subtle py-2 first:border-t-0"
+            style={{ paddingInline: HERO_ROW.GUTTER }}
+          >
+            <span className="mt-[5px] flex shrink-0 items-center justify-center" style={{ width: HERO_ROW.DOT }}>
+              <SkeletonBead awaiting={awaiting} size={6} />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <SkeletonBar awaiting={awaiting} width={width} height={9} />
+              <SkeletonBar awaiting={awaiting} width="24%" height={7} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function RunStatsLine({ stats }: { stats: RunStat[] }) {
   return (
     <div
       data-testid="run-hero-stats"
       className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-3 text-[11px] leading-tight"
-      /* Hangs under RunRow's text column, not its dot — derived from that row's
-         own gutter + dot + gap so this line reads as its second meta line. */
-      style={{ paddingLeft: 'calc(0.75rem + 0.55rem + 0.5rem)' }}
+      style={{ paddingLeft: HERO_ROW.TEXT_INDENT }}
     >
       {stats.map((s, i) => (
         <span key={s.label} className="flex items-center gap-1.5" {...(s.title ? { title: s.title } : {})}>

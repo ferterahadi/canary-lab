@@ -50,11 +50,34 @@ export function codexConfigDir(homeDir: string = os.homedir()): string {
 
 // ─── Claude locator ────────────────────────────────────────────────────────
 
-// Claude encodes a project directory as the absolute path with every `/`
-// replaced by `-`. So `/Users/dev/foo` becomes `-Users-dev-foo`. Dots,
-// hyphens, and underscores pass through. Verified against a live install.
+// Claude encodes a project directory as the absolute path with every character
+// outside `[A-Za-z0-9]` replaced by `-`. So `/Users/dev/foo` becomes
+// `-Users-dev-foo`, and `/var/folders/s_/x` becomes `-var-folders-s--x`.
+//
+// This slug is an observed convention of the published CLI, and it CHANGED:
+// older builds folded only `/`, leaving dots and underscores intact. Measured
+// against a live install on 2026-08-04 (claude 2.1.220): of 119 project dirs in
+// `~/.claude/projects`, the 118 written by recent builds are pure
+// `[A-Za-z0-9-]`, and the single dir preserving an underscore was last written
+// 2026-04-08. Assuming the old rule silently mislocated every log whose cwd held
+// a `.` or `_` — which is every macOS temp dir (`/var/folders/s_/…`), so every
+// demo, smoke, and temp-dir flight run.
+//
+// Treat this as a best guess at someone else's private format, not a contract:
+// prefer `findClaudeLogBySessionId` whenever a pinned session id is in hand, and
+// use `claudeProjectDirCandidates` when it isn't.
 export function encodeClaudeProjectDir(cwd: string): string {
-  return cwd.replace(/\//g, '-')
+  return cwd.replace(/[^A-Za-z0-9]/g, '-')
+}
+
+// Every project-dir slug a log for `cwd` could plausibly live under, newest
+// convention first. Lookups that have no session id to fall back on must try
+// both, or a run whose log was written by an older CLI stops resolving the
+// moment we adopt the new rule.
+export function claudeProjectDirCandidates(cwd: string): string[] {
+  const current = encodeClaudeProjectDir(cwd)
+  const legacy = cwd.replace(/\//g, '-')
+  return current === legacy ? [current] : [current, legacy]
 }
 
 // The path claude writes its session JSONL to for a pinned session id — computed
@@ -73,9 +96,18 @@ export function locateClaudeSessionLog(
   homeDir: string = os.homedir(),
 ): string | null {
   if (!sessionId) return null
-  const encoded = encodeClaudeProjectDir(runDir)
-  const candidate = path.join(claudeConfigDir(homeDir), 'projects', encoded, `${sessionId}.jsonl`)
-  return fs.existsSync(candidate) ? candidate : null
+  const base = path.join(claudeConfigDir(homeDir), 'projects')
+  // Claude encodes the RESOLVED cwd, so a symlinked runDir predicts the wrong
+  // slug — same silent miss as a stale encoding rule.
+  for (const encoded of claudeProjectDirCandidates(realpathOrSelf(runDir))) {
+    const candidate = path.join(base, encoded, `${sessionId}.jsonl`)
+    if (fs.existsSync(candidate)) return candidate
+  }
+  // The slug is a guess at claude's private format; the session id is ours,
+  // pinned via `--session-id`, and globally unique. When the cwd-derived path
+  // misses, scanning by id is strictly more reliable than a cleverer slug —
+  // it's what `resolveWorkflowAgentRef` already does for the same reason.
+  return findClaudeLogBySessionId(sessionId, homeDir)
 }
 
 // Locate a Claude session log by its (globally-unique) session id alone,
@@ -104,19 +136,24 @@ export function locateLatestClaudeSessionLog(
   runDir: string,
   homeDir: string = os.homedir(),
 ): AgentSessionRef | null {
-  const encoded = encodeClaudeProjectDir(runDir)
-  const projectDir = path.join(claudeConfigDir(homeDir), 'projects', encoded)
+  const base = path.join(claudeConfigDir(homeDir), 'projects')
   let best: { logPath: string; sessionId: string; mtimeMs: number } | null = null
-  for (const name of readDirNames(projectDir)) {
-    if (!name.endsWith('.jsonl')) continue
-    const sessionId = name.slice(0, -'.jsonl'.length)
-    if (!sessionId) continue
-    const candidate = path.join(projectDir, name)
-    let stat: fs.Stats
-    try { stat = fs.statSync(candidate) } catch { continue }
-    if (!stat.isFile()) continue
-    if (!best || stat.mtimeMs > best.mtimeMs) {
-      best = { logPath: candidate, sessionId, mtimeMs: stat.mtimeMs }
+  // No session id here, so there's no by-id fallback to lean on — scan every
+  // slug this cwd could have been written under and take the newest log across
+  // all of them. A run straddling a CLI upgrade legitimately has logs in both.
+  for (const encoded of claudeProjectDirCandidates(realpathOrSelf(runDir))) {
+    const projectDir = path.join(base, encoded)
+    for (const name of readDirNames(projectDir)) {
+      if (!name.endsWith('.jsonl')) continue
+      const sessionId = name.slice(0, -'.jsonl'.length)
+      if (!sessionId) continue
+      const candidate = path.join(projectDir, name)
+      let stat: fs.Stats
+      try { stat = fs.statSync(candidate) } catch { continue }
+      if (!stat.isFile()) continue
+      if (!best || stat.mtimeMs > best.mtimeMs) {
+        best = { logPath: candidate, sessionId, mtimeMs: stat.mtimeMs }
+      }
     }
   }
   if (!best) return null

@@ -77,7 +77,7 @@ describe('FixesCapturedPanel (R80)', () => {
     expect(mocks.applyRunFixes).toHaveBeenCalledWith('r1', 'merchant-pass')
     expect(mocks.openRunRepo).toHaveBeenCalledWith('r1', 'merchant-pass')
     expect(container.querySelector('[data-testid="changes-open-done-merchant-pass"]')?.textContent)
-      .toContain('opened in vscode')
+      .toContain('opened in VS Code')
   })
 
   it('warns here too before mixing into the user’s own uncommitted work', async () => {

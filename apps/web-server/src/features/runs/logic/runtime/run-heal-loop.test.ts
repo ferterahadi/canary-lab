@@ -536,6 +536,32 @@ describe('runAutoHealLoop', () => {
       }))
     })
 
+    // A silent agent that fixed app code must get a RESTART, not a bare rerun:
+    // the service process is still serving the pre-fix code, so a rerun re-tests
+    // the old binary and reports a repair that actually worked as a failure.
+    it('infers a restart when the silent agent edited a file inside a service repo', async () => {
+      const svcCwd = path.join(tmpDir, 'services', 'catalog')
+      const { ctx } = ctxFor(
+        { services: [{ name: 'catalog', safeName: 'catalog', cwd: svcCwd }] } as unknown as Partial<RunContext>,
+        { autoHeal: AUTO },
+      )
+      h.runHealAgent.mockResolvedValue({ signal: undefined, reason: 'idle-timeout' })
+      h.diffFeatureRepos.mockResolvedValue([path.join(svcCwd, 'server.ts')])
+      h.decideRunStatus.mockReturnValue('passed')
+      const host = makeLoopHost()
+
+      expect(await runAutoHealLoop(ctx, host)).toBe('passed')
+      expect(h.emitAgentSystemMessage).toHaveBeenCalledWith(
+        ctx,
+        'Code changes detected — inferring a restart from git diff.',
+      )
+      expect(h.appendJournalIteration).toHaveBeenCalledWith(ctx, expect.objectContaining({
+        signal: '.restart',
+        filesChanged: [path.join(svcCwd, 'server.ts')],
+      }))
+      expect(host.restart).toHaveBeenCalledWith([path.join(svcCwd, 'server.ts')])
+    })
+
     it('warns about a malformed signal body field instead of dropping it silently', async () => {
       const { ctx } = ctxFor({}, { autoHeal: AUTO })
       h.runHealAgent.mockResolvedValue({ signal: rerunSignal({ hypothesis: 7 }), reason: 'signal' })
