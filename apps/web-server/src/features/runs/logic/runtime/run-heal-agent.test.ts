@@ -129,6 +129,14 @@ describe('agentPtyEnv', () => {
     // resume — both reading as an agent that did nothing.
     expect(agentPtyEnv(ctx).CLAUDE_CODE_FORCE_SESSION_PERSISTENCE).toBe('1')
   })
+
+  it('uses Claude fullscreen rendering only for its own Claude heal REPL', () => {
+    const { ctx: claude } = ctxFor({}, { autoHeal: { agent: 'claude', maxCycles: 1 } })
+    const { ctx: codex } = ctxFor({}, { autoHeal: { agent: 'codex', maxCycles: 1 } })
+
+    expect(agentPtyEnv(claude).CLAUDE_CODE_NO_FLICKER).toBe('1')
+    expect(agentPtyEnv(codex).CLAUDE_CODE_NO_FLICKER).toBeUndefined()
+  })
 })
 
 describe('spawnHealAgentRepl', () => {
@@ -162,12 +170,13 @@ describe('spawnHealAgentRepl', () => {
     const { factory, spawns } = fakePtyFactory()
     const { ctx } = ctxFor({}, {
       ptyFactory: factory,
-      autoHeal: { agent: 'codex', maxCycles: 1 },
+      autoHeal: { agent: 'claude', maxCycles: 1 },
     })
 
     spawnHealAgentRepl(ctx)
 
     expect(spawns[0].env?.CLAUDE_CODE_FORCE_SESSION_PERSISTENCE).toBe('1')
+    expect(spawns[0].env?.CLAUDE_CODE_NO_FLICKER).toBe('1')
   })
 
   it('clears the handle and reports the exit when its own REPL dies', () => {

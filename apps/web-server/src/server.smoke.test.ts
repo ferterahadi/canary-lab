@@ -33,9 +33,7 @@ describe('createServer smoke (templates/project)', () => {
       const res = await fetch(`${address}/api/features`)
       expect(res.status).toBe(200)
       const body = (await res.json()) as Array<{ name: string }>
-      expect(body.map((f) => f.name).sort()).toEqual(
-        expect.arrayContaining(['demo_catalog', 'demo_inventory']),
-      )
+      expect(body).toEqual([])
     } finally {
       await app.close()
     }
@@ -51,17 +49,7 @@ describe('createServer smoke (templates/project)', () => {
       const features = await app.inject({ method: 'GET', url: '/api/features' })
       expect(features.statusCode).toBe(200)
       const featuresJson = features.json() as Array<{ name: string }>
-      const names = featuresJson.map((f) => f.name).sort()
-      expect(names).toContain('demo_inventory')
-      expect(names).toContain('demo_catalog')
-
-      const tests = await app.inject({
-        method: 'GET',
-        url: '/api/features/demo_inventory/tests',
-      })
-      expect(tests.statusCode).toBe(200)
-      const testsJson = tests.json() as Array<{ file: string; tests: unknown[] }>
-      expect(testsJson.length).toBeGreaterThan(0)
+      expect(featuresJson).toEqual([])
 
       const runs = await app.inject({ method: 'GET', url: '/api/runs' })
       expect(runs.statusCode).toBe(200)
@@ -88,6 +76,7 @@ describe('createServer smoke (templates/project)', () => {
       await app.close()
     }
   }, 15_000)
+
 })
 
 describe('createServer boot-time active-orphan cleanup', () => {
@@ -229,4 +218,3 @@ describe('createServer boot-time active-orphan cleanup', () => {
     }
   })
 })
-

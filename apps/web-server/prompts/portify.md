@@ -73,7 +73,7 @@ For every CLIENT call that targets a local listener you just moved — `http://l
 
 ## 4. Update the feature config at {{featureConfigPath}}
 
-- On EACH `startCommand` that boots listening service(s), declare a `ports: [{ name: '<slot>', env: '<ENV_VAR>' }]` slot for EVERY listener that command exposes — using the SAME env var name the source now reads. The slot `env` is REQUIRED. One command that boots a whole stack (e.g. `yarn start:all:dev`) declares MULTIPLE slots, one per listener.
+- On EACH `startCommand` that boots listening service(s), declare a `ports: [{ name: '<slot>', env: '<ENV_VAR>' }]` slot for EVERY listener that command exposes — using the SAME env var name the source now reads. The slot `env` is REQUIRED. When a command exposes exactly one listener, name the slot exactly the same as the start command's `name`; specs authored before this stage already reserve that stable slot. Canary exposes its Playwright key with every character outside letters, digits, and `_` normalized to `_` (slot `checkout-service` becomes `CANARY_PORT_checkout_service`) because interactive shells drop invalid environment names. One command that boots a whole stack (e.g. `yarn start:all:dev`) declares MULTIPLE slots, one per listener.
 - A slot is how the port gets injected; it is independent of whether that port is health-checked. Every binding listener needs a slot even if nothing health-checks it — otherwise the second boot reuses the hardcoded fallback and clashes.
 - Rewrite the command's `healthCheck` URL and any inter-service URL in the config to use the `${port.<slot>}` token instead of a hardcoded port — e.g. `http://localhost:${port.gateway}/healthz`.
 
@@ -107,7 +107,7 @@ The feature has envset files under `envsets/<env>/` next to {{featureConfigPath}
 
 ## 7. Do NOT touch test files
 
-Anything under `e2e/` or matching `*.spec.[tj]s` / `*.test.[tj]s` is off-limits. This is purely a port-injection change. (Test helpers already resolve the target as `CANARY_PORT_<slot>` → a URL env var → a hardcoded default; you don't need to edit them.)
+Anything under `e2e/` or matching `*.spec.[tj]s` / `*.test.[tj]s` is off-limits. This is purely a port-injection change. (Test helpers already resolve the target as the shell-safe `CANARY_PORT_<env-slot>` → a URL env var → a hardcoded default; you don't need to edit them.)
 
 ## 8. Flag what you CANNOT relocate
 

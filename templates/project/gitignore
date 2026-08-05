@@ -11,5 +11,3 @@ features/*/.env
 # envsets.config.json is one level up, so it stays tracked.
 envsets/*/*
 features/*/envsets/*/*
-!features/demo_catalog/envsets/local/*
-!features/demo_inventory/envsets/local/*

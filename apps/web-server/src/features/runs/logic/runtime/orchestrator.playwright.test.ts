@@ -132,7 +132,7 @@ describe('RunOrchestrator.runPlaywright', () => {
     await orch.stop('passed')
   })
 
-  it('exposes per-run allocated ports to Playwright as CANARY_PORT_<slot>', async () => {
+  it('exposes per-run allocated ports to Playwright under shell-safe CANARY_PORT keys', async () => {
     const { factory, spawned } = makeFakeFactory()
     const orch = new RunOrchestrator({
       feature: makeFeature({ repos: [] }),
@@ -141,7 +141,7 @@ describe('RunOrchestrator.runPlaywright', () => {
       ptyFactory: factory,
       delay: async () => undefined,
       playwrightSpawner: () => ({ command: 'fake-pw', cwd: tmpDir }),
-      portMap: new Map([['api', 51999], ['admin', 51998]]),
+      portMap: new Map([['api', 51999], ['admin', 51998], ['checkout-service', 51997]]),
     })
     await orch.start()
     const exitPromise = orch.runPlaywright()
@@ -151,6 +151,7 @@ describe('RunOrchestrator.runPlaywright', () => {
     expect(pwPty.options.env).toMatchObject({
       CANARY_PORT_api: '51999',
       CANARY_PORT_admin: '51998',
+      CANARY_PORT_checkout_service: '51997',
     })
     await orch.stop('passed')
   })

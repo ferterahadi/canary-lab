@@ -189,6 +189,13 @@ export function agentPtyEnv(ctx: RunContext): Record<string, string> {
     // in `runAgentProcess` need nothing here: suppression is gated on the session
     // being interactive, confirmed by spawning both kinds with the marker set.
     CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1',
+    // The classic Claude renderer continuously redraws the transcript as tokens
+    // arrive. That overwhelms an embedded terminal more readily than a native
+    // emulator, especially while the pane is resizing. Its fullscreen renderer
+    // uses the alternate screen and sends only changed cells instead. Keep this
+    // scoped to Canary's Claude REPL: Codex does not recognise the setting, and
+    // the user's global Claude TUI preference remains untouched.
+    ...(ctx.autoHeal?.agent === 'claude' ? { CLAUDE_CODE_NO_FLICKER: '1' } : {}),
   }
 }
 

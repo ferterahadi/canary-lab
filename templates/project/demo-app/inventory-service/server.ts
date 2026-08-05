@@ -1,17 +1,7 @@
 import http, { type IncomingMessage } from 'node:http'
 
-// Inventory service for the demo storefront. Unlike its two siblings, this one
-// is DELIBERATELY CORRECT — no planted defects. It is the demo's "known good"
-// service, which two things need:
-//
-//   • a brand-new workspace should have one feature that simply passes, so the
-//     first Run someone presses shows green rather than red-by-design;
-//   • the Benchmark scores a repair agent by sabotaging a WORKING app and
-//     checking the suite comes back green. Starting from an already-failing
-//     baseline, no arm could ever score — so the benchmark needs a service
-//     whose tests pass before anything is broken.
-//
-// Keep it correct. If you want something to repair, use catalog-service.
+// Second service in the storefront journey. It consumes the SKU produced by
+// catalog and turns a reservation into the stock evidence checkout relies on.
 
 interface StockItem {
   sku: string
@@ -30,7 +20,7 @@ const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> 
   return body ? JSON.parse(body) : {}
 }
 
-const available = (item: StockItem): number => item.onHand - item.reserved
+const available = (item: StockItem): number => item.onHand + item.reserved
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', 'http://localhost')

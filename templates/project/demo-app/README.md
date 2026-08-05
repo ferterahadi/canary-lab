@@ -1,73 +1,56 @@
-# Demo app — a tiny storefront
+# Canary Storefront — the one full-Flight demo
 
-This is the product Canary Lab tests in your new workspace. It is deliberately
-small, and where it is buggy the defects are planted so you can watch the repair
-loop find and fix one.
+This is a deliberately small, un-onboarded product repository. There is no
+prebuilt feature under `features/`: the demo begins before Repo scan so a tester
+can watch Canary Lab conduct the complete Flight instead of opening a suite that
+has already skipped half the journey.
 
-Three services, each opening a different door into Canary Lab.
+The repository contains one customer flow across three services:
 
-## `inventory-service` — already onboarded, and it works
-
-`features/demo_inventory` points at this one, and its suite passes as shipped.
-Run it first if you want to see what green looks like:
-
-```
-npx canary-lab ui
+```text
+catalog-service → inventory-service → checkout-service
+ product + SKU       reservation        final total
 ```
 
-It is also what **Benchmark** scores agents against. A benchmark works by
-sabotaging a service that works and checking the agent brings the suite back to
-green — so it needs a subject that starts green. If you edit this service, keep
-its tests passing.
+The public acceptance contract is in [REQUIREMENTS.md](REQUIREMENTS.md). It is
+deliberately limited to one happy-path journey: create `Espresso Beans`, reserve
+two units, and apply `WELCOME10`. The API's other validation responses make the
+fixture realistic but are not part of this demo feature. Its checks are
+intentionally dependent: catalog must produce the right SKU before inventory
+can prove its reservation, and inventory must succeed before checkout can prove
+the total.
 
-## `catalog-service` — already onboarded
+The services contain one defect at each layer. They are not labelled in source;
+the current failure is the evidence a repair agent should act on. Once that fix
+passes, the next layer becomes observable on the following run. A successful
+demo therefore leaves separate Journal entries and application changes under
+all three service directories.
 
-A feature (`features/demo_catalog`) already points at this service, so you can
-run it the moment the installer finishes:
+## Start the interactive demo
 
-```
-npx canary-lab ui
-```
+From the Canary Lab source checkout, run:
 
-Pick **demo_catalog**, press Run. Three of its tests fail. If you have an agent
-connected, the repair loop opens, edits `catalog-service/server.ts`, and reruns
-until the suite is green. Each attempt is one entry in the run's **Journal**
-tab; the diff it produced is on the **Changes** tab.
-
-Expect more than one attempt, on purpose. Two defects show up on the first run —
-a reprice that does not change the price, and a delete that is not implemented.
-A third cannot fail until one of those is fixed, so it only appears partway
-through the repair. That is what a repair loop is for, and a demo that fixed
-everything in one edit would not show it.
-
-The defects are deliberately not labelled in `catalog-service/server.ts`: an
-agent that can read `// PLANTED DEFECT` off a comment fixes everything in one
-pass and demonstrates nothing. Please leave that file unannotated.
-
-No agent installed? The run still executes and still reports the failures — you
-just fix them yourself.
-
-## `checkout-service` — not onboarded yet
-
-Nothing in `features/` points at this one, which is the point. Aim a flight at
-it and Canary Lab builds the whole feature from scratch: reads the code, writes
-the config, captures the environment, distills the requirements, writes the
-specs, makes it safe to run concurrently, runs it, and repairs what fails.
-
-```
-npx canary-lab flight ./demo-app/checkout-service
+```bash
+npm run demo
 ```
 
-This needs `claude` or `codex` on your PATH — the pipeline's stages are agent
-work. It takes a while; the UI shows each stage as it lands.
+The command creates a fresh persistent workspace, initializes this folder as
+its own product git repository, starts Canary Lab, and prints a link to the
+new-Flight dialog. It does not start a Flight or heal anything. Use the
+repository path and intent printed in the terminal, then control every stage
+from the UI.
 
-Two things in `checkout-service` exist specifically to give the pipeline work to
-do: its port is hardcoded (so the concurrency-prep stage has something to
-change), and `REQUIREMENTS.md` is written as prose (so the requirements stage
-has a real source to distill).
+The full Flight must cover Repo scan, Suite setup, Requirements, Test authoring
+and coverage, Parallel readiness, Test Run and iterative healing, and Evaluation
+Report. Agent timelines, service logs, captured changes, and the Journal remain
+in the workspace after the server stops.
 
-## Once you understand it, delete it
+## Service commands
 
-This app is scaffolding for the tour, not a dependency. Delete `demo-app/`,
-`features/demo_catalog/` and `features/demo_inventory/` whenever you want to
-start on your own code.
+- `npm run dev:catalog` — catalog API; reads `PORT` (standalone default 4200).
+- `npm run dev:inventory` — inventory API; reads `PORT` (standalone default 4400).
+- `npm run dev:checkout` — checkout API; initially binds 4300 directly so the
+  Parallel readiness stage has a real concurrency issue to correct.
+
+This repository is training material, not a dependency. Delete `demo-app/`
+after the tour when you are ready to point Flights at your own product repos.

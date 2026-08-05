@@ -80,7 +80,9 @@ test('applying SAVE10 produces a 10% discount on the summary', async ({ request 
 })
 ```
 
-The scaffold ships sample features (some intentionally broken) so you can watch a full repair loop before writing your own.
+The scaffold ships one bare three-service storefront instead of a pre-authored
+feature. Point a Flight at `demo-app/` to watch Canary Lab discover the repo,
+author the suite, prepare its ports, and repair the complete journey.
 
 ## How the Repair Loop Works
 
@@ -132,7 +134,17 @@ scout the repo → draft `feature.config.cjs` (you approve) → capture env file
 
 Re-running `flight` on the same repo never duplicates work: an interrupted flight resumes from its failed stage, and a finished one parks on a rerun / enhance / new choice. Watch it live in the web UI's **Flights** pill, or drive the same flight from Claude/Codex over MCP (`start_flight`).
 
-`flight` creates the workspace if none exists. To set one up yourself (sample features included):
+Contributors can launch that exact tour from this source checkout with:
+
+```bash
+npm run demo -- --agent codex
+```
+
+The command provisions a persistent workspace and prints a deep link to **New
+Flight**. It does not start or heal anything; the tester controls all seven
+stages in the UI.
+
+`flight` creates the workspace if none exists. To set one up yourself:
 
 ```bash
 npx canary-lab init my-lab
@@ -140,7 +152,10 @@ cd my-lab
 npx canary-lab ui
 ```
 
-`init` scaffolds a workspace with sample features, installs deps, downloads the Playwright browser, and registers your agent's tools — so `canary-lab ui` opens at `http://localhost:7421` straight away. Add `--no-open` to skip the browser.
+`init` scaffolds a workspace with the bare storefront demo app, installs deps,
+downloads the Playwright browser, and registers your agent's tools — so
+`canary-lab ui` opens at `http://localhost:7421` straight away. Add `--no-open`
+to skip the browser.
 
 CI / offline? Pass `--no-install`, then run the steps manually:
 

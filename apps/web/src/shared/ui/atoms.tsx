@@ -77,6 +77,7 @@ export function Section({
   right,
   children,
   bodyClassName = 'px-3.5 py-3',
+  headerPadding = 'default',
 }: {
   title: ReactNode
   /** Optional right-aligned header slot (e.g. an action button). */
@@ -84,6 +85,9 @@ export function Section({
   children: ReactNode
   /** Override the body padding/layout (e.g. a flex list). */
   bodyClassName?: string
+  /** A custom header may own its spacing, while ordinary section titles keep
+   *  the shared inset rhythm. */
+  headerPadding?: 'default' | 'none'
 }) {
   return (
     <section
@@ -91,10 +95,11 @@ export function Section({
       style={{ border: '1px solid var(--border-default)', background: 'var(--bg-elevated)' }}
     >
       <div
-        className="flex items-center gap-2 px-3.5 py-2.5"
+        className={headerPadding === 'none' ? 'flex min-h-[39px] items-center gap-2' : 'flex items-center gap-2 px-3.5 py-2.5'}
         style={{
           borderBottom: '1px solid var(--border-default)',
           background: 'color-mix(in srgb, var(--bg-selected) 45%, transparent)',
+          padding: headerPadding === 'none' ? 0 : undefined,
         }}
       >
         <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>{title}</span>

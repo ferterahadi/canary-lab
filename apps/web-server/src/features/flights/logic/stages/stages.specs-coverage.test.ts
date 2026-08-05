@@ -184,6 +184,23 @@ describe('specs-coverage stage', () => {
     expect(prompts[0]).not.toContain('{{')
   })
 
+  it('keeps tests on the allocated port when a hardcoded listener is portified later', () => {
+    const prompt = buildSpecsPrompt({
+      feature: 'checkout',
+      description: 'checkout flow',
+      configPath: path.join(featuresDir, 'checkout', 'feature.config.cjs'),
+      requirements: [],
+      gaps: [],
+      featureDir: path.join(featuresDir, 'checkout'),
+      iteration: 1,
+    })
+
+    expect(prompt).toContain("reserve the start command's `name` as the future slot")
+    expect(prompt).toContain('slot `checkout-service` is exposed as `CANARY_PORT_checkout_service`')
+    expect(prompt).toContain('every local service URL must check its shell-safe `CANARY_PORT_<env-slot>` first')
+    expect(prompt).toContain("const baseUrl = 'http://localhost:4300'")
+  })
+
   it('R27: publishes the loop shape — authoring/validating/mapping per pass, with the pass history', async () => {
     const ledgers = [ledger(0), ledger(40), ledger(100)]
     const d = deps({

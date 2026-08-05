@@ -73,25 +73,19 @@ run(
   tempRoot,
 )
 
-// The demo storefront is the first thing a new workspace can Run or fly, so it
-// has to survive packaging: the feature, the service it points at, and the
-// un-onboarded sibling a flight targets. A missing file here is a demo that
-// silently didn't ship.
+// The demo storefront is deliberately a bare product repository. It has no
+// pre-authored feature because the public demo must begin at Repo scan and let
+// the tester conduct every Flight stage. A missing app contract or service here
+// is a demo that silently did not ship.
 const scaffoldPaths = [
   'package.json',
-  'features/demo_catalog/feature.config.cjs',
-  'features/demo_catalog/e2e/catalog.spec.ts',
-  'features/demo_catalog/docs/_prd-summary.md',
+  'features/README.md',
+  'demo-app/package.json',
+  'demo-app/README.md',
+  'demo-app/REQUIREMENTS.md',
   'demo-app/catalog-service/server.ts',
-  'demo-app/checkout-service/server.ts',
-  'demo-app/checkout-service/REQUIREMENTS.md',
-  // The known-good half of the demo. Its suite passing is what the Benchmark
-  // needs (it sabotages a working app) and what makes a new workspace's first
-  // Run green, so a packaging slip here is not cosmetic.
-  'features/demo_inventory/feature.config.cjs',
-  'features/demo_inventory/e2e/inventory.spec.ts',
-  'features/demo_inventory/envsets/local/demo_inventory.env',
   'demo-app/inventory-service/server.ts',
+  'demo-app/checkout-service/server.ts',
 ]
 
 // One prompt per agent-spawning path that ships, plus a schema sidecar — the
@@ -134,6 +128,11 @@ for (const relPath of [
   'features/broken_todo_api/feature.config.cjs',
   'features/flaky_orders_api/feature.config.cjs',
   'features/tricky_checkout_api/feature.config.cjs',
+  // Earlier 1.6.0 drafts shipped partially onboarded demo suites. They bypassed
+  // the beginning of a Flight, so the canonical scaffold must not retain them.
+  'features/demo_catalog/feature.config.cjs',
+  'features/demo_inventory/feature.config.cjs',
+  'features/demo_storefront/feature.config.cjs',
 ]) {
   if (fs.existsSync(path.join(projectDir, relPath))) {
     throw new Error(`Smoke test failed: deprecated path still present: ${relPath}`)

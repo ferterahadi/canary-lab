@@ -43,6 +43,8 @@ npm run smoke:pack     # after any template/packaging change
 | `npm run check:boundaries` | web feature barrels — no deep cross-feature imports, no stale `ALLOWED_DEEP` entry |
 | `npm run check:docs` | contributor docs — every backticked repo path, link and `#anchor` resolves |
 | `npm run smoke:pack` | packs, scaffolds, installs, verifies scaffold flow |
+| `npm run smoke:demo` | LLM-free gate for the canonical three-service repair cascade; exits and removes its throwaway workspace |
+| `npm run demo -- --agent codex` | provisions the one full-Flight demo, then leaves every stage under tester control and keeps the workspace for inspection |
 
 Run all three `check:*` gates before opening a PR; they catch what tests don't.
 `check:docs` only proves references resolve, never that the prose is still true —

@@ -4,55 +4,55 @@ import net from 'net'
 import os from 'os'
 import path from 'path'
 
-// A smoke test you can WATCH. `smoke:pack` proves the tarball scaffolds; this
-// proves the product actually repairs something, by driving one full loop
-// against a throwaway workspace and then leaving the UI open on the result:
+// One storefront, two entry modes:
 //
-//   scaffold → git init → boot UI → run demo_catalog → tests fail
-//   → park for repair → fix the app IN THE RUN'S WORKING COPY → signal a rerun
-//   → tests pass → diff captured → pull request attempted → Changes tab
-//
-// The repair step is played by this script with a canned patch instead of an
-// agent, on purpose: a smoke test that needs an LLM is not a smoke test. What
-// it exercises is the machinery around the repair — worktree isolation, the
-// signal loop, the capture at teardown, the PR attempt and its recorded
-// reason — which is exactly the part that can silently break.
-//
-// The throwaway project is deliberately NOT a GitHub repo, so the pull-request
-// step lands on its "no origin" path. That is the safe outcome to exercise
-// automatically: a smoke test must never push a branch anywhere.
-//
-//   node tools/smoke-demo.mjs [--no-build] [--keep-open] [--port <n>]
+// - `npm run demo` provisions a fresh persistent workspace, prints a link to
+//   the real new-Flight dialog, and gives control to the tester. It never
+//   starts a run.
+// - `npm run smoke:demo` installs an internal feature around the SAME app and
+//   drives its three repairs deterministically. The smoke remains an LLM-free
+//   contributor gate; it is not the product tour.
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const argv = process.argv.slice(2)
+const interactive = argv.includes('--interactive')
 const noBuild = argv.includes('--no-build')
-const keepOpen = argv.includes('--keep-open')
+const keepOpen = interactive || argv.includes('--keep-open')
 const portArg = argv.indexOf('--port')
-const FEATURE = 'demo_catalog'
+const agentArg = argv.indexOf('--agent')
+const requestedAgent = agentArg >= 0 ? argv[agentArg + 1] : 'auto'
+const featureName = 'storefront_journey'
+const demoIntent = 'Test only the single ordered happy-path purchase: create Espresso Beans at 1800 cents and require SKU espresso-beans in catalog, reserve two units and require available stock to drop by two in inventory, then apply WELCOME10 in checkout and require a placed order totaling 3240 cents. Each assertion must pass before calling the next service; unrelated validation routes are outside this feature.'
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-demo-'))
 const projectDir = path.join(tempRoot, 'demo-project')
+const appDir = path.join(projectDir, 'demo-app')
 const cacheDir = path.join(os.tmpdir(), 'canary-lab-npm-cache')
 
 const childEnv = {
   ...process.env,
   npm_config_cache: cacheDir,
-  // Keep the registry + active-server records inside the throwaway dir so this
-  // never disturbs a real `canary-lab ui` the developer has running.
+  // Demo state must never disturb another Canary Lab workspace or rewrite the
+  // developer's real MCP client registrations.
   CANARY_LAB_HOME: tempRoot,
   CANARY_LAB_AGENT_HOME: tempRoot,
   CANARY_LAB_SKIP_CLIENT_MCP: '1',
 }
 
 let step = 0
+let uiChild = null
+
 function say(message) {
   step += 1
   console.log(`\n[${step}] ${message}`)
 }
 
 function run(command, args, cwd, opts = {}) {
-  const result = spawnSync(command, args, { cwd, stdio: opts.quiet ? 'pipe' : 'inherit', env: childEnv })
+  const result = spawnSync(command, args, {
+    cwd,
+    stdio: opts.quiet ? 'pipe' : 'inherit',
+    env: childEnv,
+  })
   if (result.status !== 0 && !opts.allowFailure) {
     console.error(result.stderr?.toString() ?? '')
     throw new Error(`${command} ${args.join(' ')} failed (${result.status})`)
@@ -60,15 +60,32 @@ function run(command, args, cwd, opts = {}) {
   return result
 }
 
-/** Ask the OS for a free port. `listen(0)` is async — reading `.address()`
- *  before the listening callback returns null, so this has to await it. */
+function resolveAgent() {
+  if (!['auto', 'claude', 'codex'].includes(requestedAgent)) {
+    throw new Error('--agent must be one of: auto, claude, codex')
+  }
+  const candidates = requestedAgent === 'auto' ? ['claude', 'codex'] : [requestedAgent]
+  const selected = candidates.find((agent) => spawnSync(agent, ['--version'], {
+    env: childEnv,
+    stdio: 'ignore',
+  }).status === 0)
+  if (!selected) {
+    throw new Error(`npm run demo needs ${requestedAgent === 'auto' ? 'claude or codex' : requestedAgent} on PATH`)
+  }
+  return selected
+}
+
 function freePort() {
   return new Promise((resolve, reject) => {
     const server = net.createServer()
     server.once('error', reject)
     server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address()
-      server.close(() => resolve(port))
+      const address = server.address()
+      if (typeof address === 'string' || address === null) {
+        server.close(() => reject(new Error('the OS did not allocate a TCP port')))
+        return
+      }
+      server.close(() => resolve(address.port))
     })
   })
 }
@@ -76,94 +93,134 @@ function freePort() {
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function api(port, method, route, body) {
-  const res = await fetch(`http://127.0.0.1:${port}${route}`, {
+  const response = await fetch(`http://127.0.0.1:${port}${route}`, {
     method,
-    ...(body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+    ...(body === undefined ? {} : {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
   })
-  const text = await res.text()
-  const json = text ? JSON.parse(text) : null
-  if (res.status >= 400) throw new Error(`${method} ${route} → ${res.status}: ${text}`)
-  return json
+  const raw = await response.text()
+  const parsed = raw ? JSON.parse(raw) : null
+  if (!response.ok) throw new Error(`${method} ${route} → ${response.status}: ${raw}`)
+  return parsed
 }
 
-/** Poll `check` until it returns a value, or give up with a readable error. */
 async function until(label, timeoutMs, check) {
   const deadline = Date.now() + timeoutMs
-  let last
   while (Date.now() < deadline) {
-    last = await check()
-    if (last) return last
+    const value = await check()
+    if (value) return value
     await delay(1000)
   }
   throw new Error(`timed out waiting for ${label} after ${Math.round(timeoutMs / 1000)}s`)
 }
 
-// The three planted bugs in the sample's server, and the repair an agent would
-// make: honour `price` on PATCH, actually remove the product on DELETE, and
-// hand out ids from a counter rather than from the catalog's size — the third
-// only starts failing once the second is fixed, which is what makes a real
-// repair take more than one pass. Kept as literal replacements so a drift in
-// the sample fails loudly here rather than silently "repairing" nothing.
-const REPAIRS = [
+function replaceOnce(filePath, find, replacement) {
+  const source = fs.readFileSync(filePath, 'utf-8')
+  if (!source.includes(find)) {
+    throw new Error(`scripted repair no longer matches ${filePath} — the canonical demo drifted`)
+  }
+  fs.writeFileSync(filePath, source.replace(find, replacement))
+}
+
+const repairSteps = [
   {
-    find: `      if (patch.name !== undefined) product.name = patch.name\n      res.end(JSON.stringify(product))`,
-    replace: `      if (patch.name !== undefined) product.name = patch.name\n      if (typeof patch.price === 'number') product.price = patch.price\n      res.end(JSON.stringify(product))`,
+    service: 'catalog-service',
+    expectedFailure: 'espresso_beans',
+    hypothesis: 'Catalog emits an underscore SKU, so inventory cannot consume the product identity contract.',
+    fixDescription: 'Normalize whitespace in catalog SKUs to hyphens.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'catalog-service', 'server.ts'),
+      ".replace(/\\s+/g, '_')",
+      ".replace(/\\s+/g, '-')",
+    ),
   },
   {
-    find: `      res.writeHead(405)\n      res.end(JSON.stringify({ error: 'delete is not supported' }))\n      return`,
-    replace: `      const [, , id] = url.pathname.split('/')\n      const index = products.findIndex((entry) => entry.id === id)\n      if (index < 0) {\n        res.writeHead(404)\n        res.end(JSON.stringify({ error: 'not found' }))\n        return\n      }\n      products.splice(index, 1)\n      res.writeHead(204)\n      res.end()\n      return`,
+    service: 'inventory-service',
+    expectedFailure: 'Received: 42',
+    hypothesis: 'Inventory adds reservations to available stock instead of subtracting them.',
+    fixDescription: 'Calculate available stock as on-hand minus reserved.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'inventory-service', 'server.ts'),
+      'item.onHand + item.reserved',
+      'item.onHand - item.reserved',
+    ),
   },
   {
-    find: `const nextProductId = () => String(products.length + 1)`,
-    replace: `let issuedIds = 0\nconst nextProductId = () => String(++issuedIds)`,
+    service: 'checkout-service',
+    expectedFailure: 'Received: 3600',
+    hypothesis: 'Checkout records the discount but still returns the undiscounted subtotal.',
+    fixDescription: 'Apply discountPercent when calculating the cart total.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'checkout-service', 'server.ts'),
+      'const total = (cart: Cart): number => subtotal(cart)',
+      'const total = (cart: Cart): number => Math.round(subtotal(cart) * (100 - cart.discountPercent) / 100)',
+    ),
   },
 ]
 
-function repairServer(serverPath) {
-  let source = fs.readFileSync(serverPath, 'utf-8')
-  for (const [i, repair] of REPAIRS.entries()) {
-    if (!source.includes(repair.find)) {
-      throw new Error(`repair ${i + 1} no longer matches ${serverPath} — the sample drifted, update tools/smoke-demo.mjs`)
-    }
-    source = source.replace(repair.find, repair.replace)
-  }
-  fs.writeFileSync(serverPath, source)
+function scaffoldInternalSmokeFeature() {
+  const source = path.join(repoRoot, 'tools', 'fixtures', 'demo-storefront-feature')
+  const target = path.join(projectDir, 'features', featureName)
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.cpSync(source, target, { recursive: true })
 }
 
-let uiChild = null
+function commitProductRepo() {
+  if (!fs.existsSync(path.join(appDir, '.git'))) run('git', ['init', '-q'], appDir)
+  run('git', ['add', '-A'], appDir)
+  run('git', [
+    '-c', 'user.email=demo@canary-lab.local',
+    '-c', 'user.name=Canary Demo',
+    'commit', '-qm', 'storefront baseline',
+  ], appDir)
+}
 
-async function main() {
-  say(`Scaffolding a throwaway workspace in ${projectDir}`)
+async function provision() {
+  say(`Scaffolding a fresh workspace in ${projectDir}`)
   let tarballPath
   if (noBuild) {
     const existing = fs.readdirSync(repoRoot).find((entry) => entry.endsWith('.tgz'))
-    if (!existing) throw new Error('--no-build needs a packed .tgz in the repo root')
+    if (!existing) throw new Error('--no-build needs a packed .tgz in the repository root')
     tarballPath = path.join(repoRoot, existing)
   } else {
-    run('npm', ['run', 'build'], repoRoot)
+    // `npm pack` runs the package's prepack hook, which already performs the
+    // full build. Running build separately doubles demo startup time.
     run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)
-    tarballPath = path.join(tempRoot, fs.readdirSync(tempRoot).find((entry) => entry.endsWith('.tgz')))
+    const tarball = fs.readdirSync(tempRoot).find((entry) => entry.endsWith('.tgz'))
+    if (!tarball) throw new Error('npm pack did not produce a tarball')
+    tarballPath = path.join(tempRoot, tarball)
   }
+
   run('npm', ['init', '-y'], tempRoot, { quiet: true })
   run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], tempRoot)
   run('npx', ['canary-lab', 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], tempRoot)
   run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'], projectDir)
 
-  // Worktree isolation needs a git repo with a commit to cut from — without one
-  // every run falls back to running in place and nothing is captured. `init`
-  // already runs `git init`, so this only has to make the baseline commit.
-  say('Committing a git baseline — worktree isolation (and the captured diff) needs one')
-  if (!fs.existsSync(path.join(projectDir, '.git'))) run('git', ['init', '-q'], projectDir)
-  run('git', ['add', '-A'], projectDir)
-  run('git', ['-c', 'user.email=smoke@canary-lab.local', '-c', 'user.name=Canary Smoke', 'commit', '-qm', 'demo baseline'], projectDir)
+  say('Creating the bare storefront product repository')
+  commitProductRepo()
+  if (!interactive) scaffoldInternalSmokeFeature()
+}
 
+async function bootUi(agent) {
   const port = portArg >= 0 ? Number(argv[portArg + 1]) : await freePort()
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error('--port must be an integer from 1 to 65535')
   const configPath = path.join(projectDir, 'canary-lab.config.json')
   const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf-8')) : {}
-  fs.writeFileSync(configPath, JSON.stringify({ ...config, port, healAgent: 'external' }, null, 2) + '\n')
+  fs.writeFileSync(configPath, `${JSON.stringify({
+    ...config,
+    port,
+    healAgent: agent,
+    autoProposePr: false,
+  }, null, 2)}\n`)
 
-  say(`Booting the UI on http://127.0.0.1:${port}`)
-  uiChild = spawn('npx', ['canary-lab', 'ui', '--no-open'], { cwd: projectDir, env: childEnv, stdio: 'inherit' })
+  say(`Starting Canary Lab on http://127.0.0.1:${port}`)
+  uiChild = spawn('npx', ['canary-lab', 'ui', '--no-open'], {
+    cwd: projectDir,
+    env: childEnv,
+    stdio: 'inherit',
+  })
   await until('the server to answer', 90_000, async () => {
     try {
       const health = await api(port, 'GET', '/mcp/health')
@@ -172,118 +229,127 @@ async function main() {
       return null
     }
   })
+  return port
+}
 
-  say(`Starting a run of ${FEATURE} — its API ignores the price on PATCH and refuses DELETE, so tests must fail`)
-  const started = await api(port, 'POST', '/api/runs', { feature: FEATURE, env: 'local' })
+async function runInteractive(port, agent) {
+  const url = `http://127.0.0.1:${port}/?dialog=flight-new`
+  say('Workspace ready — the tester owns the journey from here')
+  console.log(`    Open:       ${url}`)
+  console.log(`    Repository: ${appDir}`)
+  console.log(`    Intent:     ${demoIntent}`)
+  console.log(`    Agent:      ${agent}`)
+  console.log('\n    In the dialog: paste the intent, choose the repository, then select Plan flight.')
+  console.log('    Nothing has run or healed yet. The UI stays up until Ctrl-C.')
+  console.log(`    Ctrl-C stops the server but retains the workspace at:\n    ${projectDir}`)
+  await new Promise(() => {})
+}
+
+async function waitForRepair(port, runId, stepIndex) {
+  const repair = repairSteps[stepIndex]
+  return until(`repair cycle ${stepIndex + 1} to expose ${repair.service}`, 240_000, async () => {
+    const detail = await api(port, 'GET', `/api/runs/${encodeURIComponent(runId)}`)
+    if (detail.manifest.status === 'failed' || detail.manifest.status === 'aborted') {
+      throw new Error(`run ended ${detail.manifest.status} before ${repair.service} could be repaired`)
+    }
+    const failureText = (detail.summary?.failed ?? [])
+      .map((failure) => failure.error?.message ?? '')
+      .join('\n')
+    return detail.manifest.status === 'healing'
+      && detail.manifest.healCycles === stepIndex + 1
+      && failureText.includes(repair.expectedFailure)
+      ? detail
+      : null
+  })
+}
+
+async function runSmoke(port) {
+  say('Starting the canonical three-service journey')
+  const started = await api(port, 'POST', '/api/runs', { feature: featureName, env: 'local' })
   const runId = started.runId ?? started.run?.runId
   if (!runId) throw new Error(`no runId in start response: ${JSON.stringify(started)}`)
   console.log(`    run ${runId}`)
 
-  const failed = await until('the run to fail and park for repair', 240_000, async () => {
-    const detail = await api(port, 'GET', `/api/runs/${encodeURIComponent(runId)}`)
-    const status = detail.manifest.status
-    const failures = detail.summary?.failed?.length ?? 0
-    if (status === 'healing' && failures > 0) return detail
-    if (status === 'failed' || status === 'aborted') return detail
-    return null
-  })
-  const failedNames = (failed.summary?.failed ?? []).map((f) => f.name)
-  console.log(`    ${failedNames.length} failing: ${failedNames.join(' · ') || '(none reported)'}`)
-  if (failedNames.length === 0) throw new Error('the broken sample passed — it is no longer a repair demo')
+  let worktree
+  for (const [index, repair] of repairSteps.entries()) {
+    const failed = await waitForRepair(port, runId, index)
+    worktree = failed.manifest.worktrees?.storefront
+    if (!worktree) throw new Error('the storefront run did not create its per-run worktree')
+    say(`Repair cycle ${index + 1}: fixing ${repair.service} only`)
+    repair.apply(worktree)
+    await api(port, 'POST', `/api/runs/${encodeURIComponent(runId)}/signal`, {
+      kind: 'restart',
+      body: {
+        hypothesis: repair.hypothesis,
+        fixDescription: repair.fixDescription,
+      },
+    })
+  }
 
-  // `worktrees` is keyed by REPO name, not by feature name — one run can
-  // isolate several repos, and a feature's repo rarely shares its name (this
-  // sample's feature is `demo_catalog`, its repo `catalog_service`). Every
-  // entry belongs to this run, so probe them all.
-  const worktrees = Object.values(failed.manifest.worktrees ?? {})
-  if (worktrees.length === 0) throw new Error('no per-run worktree recorded — the run fell back to running in place')
-  // The worktree is cut from the REPO root — the whole scaffolded project —
-  // and the demo feature points OUTWARD at product code beside `features/`,
-  // so the service sits under demo-app/. The older layout (a self-contained
-  // feature carrying its own scripts/) is kept as a fallback so this still
-  // works against a hand-made feature of that shape.
-  const serverPath = worktrees
-    .flatMap((worktree) => [
-      path.join(worktree, 'demo-app', 'catalog-service', 'server.ts'),
-      path.join(worktree, 'scripts', 'server.ts'),
-      path.join(worktree, 'features', FEATURE, 'scripts', 'server.ts'),
-    ])
-    .find((candidate) => fs.existsSync(candidate))
-  if (!serverPath) throw new Error(`could not find the demo service's server.ts under ${worktrees.join(', ')}`)
-  say(`Playing the repair agent inside the run's own working copy\n    ${serverPath}`)
-  repairServer(serverPath)
-
-  say('Signalling a rerun, exactly as an external agent would')
-  await api(port, 'POST', `/api/runs/${encodeURIComponent(runId)}/signal`, {
-    kind: 'restart',
-    body: {
-      hypothesis: 'PATCH ignored the new price and DELETE refused outright, so a repriced product kept its old price and a discontinued one could never leave the catalog.',
-      fixDescription: 'Apply price on PATCH; splice the product out and answer 204 on DELETE.',
-    },
-  })
-
-  const settled = await until('the rerun to finish', 240_000, async () => {
+  const settled = await until('the third repair rerun to pass', 240_000, async () => {
     const detail = await api(port, 'GET', `/api/runs/${encodeURIComponent(runId)}`)
     return ['passed', 'failed', 'aborted'].includes(detail.manifest.status) ? detail : null
   })
-
-  // Teardown writes the diff, then the pull-request attempt, then the terminal
-  // status — three separate manifest writes. Polling on status alone can win the
-  // race with the last one by a millisecond, so give the attempt a short window
-  // to appear before judging it missing.
-  const m = settled.manifest.status === 'passed'
-    ? await until('the teardown record to settle', 30_000, async () => {
+  const manifest = settled.manifest.status === 'passed'
+    ? await until('the fix capture to settle', 30_000, async () => {
         const detail = await api(port, 'GET', `/api/runs/${encodeURIComponent(runId)}`)
-        return detail.manifest.prAttempt ? detail.manifest : null
+        return detail.manifest.fixCapture ? detail.manifest : null
       }).catch(() => settled.manifest)
     : settled.manifest
-  say(`Verdict: ${m.status.toUpperCase()} — ${m.healCycles} repair cycle(s)`)
-  const capture = m.fixCapture?.repos ?? []
-  console.log(`    captured diff: ${capture.length > 0 ? capture.map((r) => `${r.repoName} (${r.files} files)`).join(', ') : 'NONE'}`)
-  for (const result of m.prAttempt?.results ?? []) {
-    console.log(`    pull request · ${result.repoName}: ${result.ok ? result.url : `none — ${result.reason}`}`)
-  }
 
+  const capture = manifest.fixCapture?.repos ?? []
+  const changedFiles = capture.reduce((total, repo) => total + repo.files, 0)
+  const capturedFileNames = capture.flatMap((repo) => repo.fileNames ?? []).sort()
+  const expectedFileNames = [
+    'catalog-service/server.ts',
+    'checkout-service/server.ts',
+    'inventory-service/server.ts',
+  ]
   const problems = []
-  if (m.status !== 'passed') problems.push(`run ended ${m.status}, expected passed`)
-  if (capture.length === 0) problems.push('no diff was captured from the repair')
-  if (!m.prAttempt) problems.push('no pull-request attempt was recorded')
-
-  // The URL is only worth printing with --keep-open: otherwise teardown removes
-  // the whole workspace as this exits, and a link to a deleted run is worse
-  // than no link.
-  const url = `http://127.0.0.1:${port}/?feature=${encodeURIComponent(FEATURE)}&run=${encodeURIComponent(runId)}`
-  const where = keepOpen ? `\n    Open the Changes tab: ${url}` : '\n    Re-run with --keep-open to browse the result in the UI.'
-  if (problems.length > 0) {
-    console.error(`\n✘ smoke:demo failed\n    - ${problems.join('\n    - ')}${where}`)
-    process.exitCode = 1
-  } else {
-    console.log(`\n✔ smoke:demo passed — repaired, captured, and reported.${where}`)
+  if (manifest.status !== 'passed') problems.push(`run ended ${manifest.status}, expected passed`)
+  if (manifest.healCycles !== 3) problems.push(`recorded ${manifest.healCycles} repair cycles, expected 3`)
+  if (changedFiles !== 3) problems.push(`captured ${changedFiles} changed files, expected exactly 3`)
+  if (JSON.stringify(capturedFileNames) !== JSON.stringify(expectedFileNames)) {
+    problems.push(`captured [${capturedFileNames.join(', ')}], expected one server file from each service`)
   }
+
+  say(`Verdict: ${manifest.status.toUpperCase()} — ${manifest.healCycles} repair cycles, ${changedFiles} changed files`)
+  if (problems.length > 0) throw new Error(problems.join('; '))
+  console.log('\n✔ smoke:demo passed — one dependency chain revealed and repaired catalog, inventory, then checkout.')
 
   if (keepOpen) {
-    console.log('    (--keep-open: the UI stays up; Ctrl-C to stop and clean up)')
+    console.log(`    Open: http://127.0.0.1:${port}/?feature=${featureName}&run=${encodeURIComponent(runId)}`)
+    console.log(`    Ctrl-C stops the server and retains the workspace at:\n    ${projectDir}`)
     await new Promise(() => {})
   }
 }
 
 function cleanup() {
   if (uiChild && !uiChild.killed) uiChild.kill('SIGTERM')
-  // Never let teardown bury the real failure: the temp tree holds git worktrees
-  // and a server that may still be releasing files, so removal can lose a race.
-  if (keepOpen) return
+  if (keepOpen && fs.existsSync(projectDir)) return
   try {
     fs.rmSync(tempRoot, { recursive: true, force: true })
-  } catch (err) {
-    console.warn(`    (could not remove ${tempRoot}: ${err.message})`)
+  } catch (error) {
+    console.warn(`    (could not remove ${tempRoot}: ${error.message})`)
   }
 }
 
-process.on('SIGINT', () => { cleanup(); process.exit(130) })
+async function main() {
+  const agent = interactive ? resolveAgent() : 'external'
+  await provision()
+  const port = await bootUi(agent)
+  if (interactive) await runInteractive(port, agent)
+  else await runSmoke(port)
+}
+
+process.on('SIGINT', () => {
+  cleanup()
+  process.exit(130)
+})
 
 main()
-  .catch((err) => {
-    console.error(`\n✘ smoke:demo failed: ${err.message}`)
+  .catch((error) => {
+    console.error(`\n✘ ${interactive ? 'demo' : 'smoke:demo'} failed: ${error.message}`)
     process.exitCode = 1
   })
   .finally(cleanup)

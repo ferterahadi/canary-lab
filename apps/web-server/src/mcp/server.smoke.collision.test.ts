@@ -96,7 +96,15 @@ describe('MCP HTTP server (smoke)', () => {
   })
 
   it('start_run asks for a collision choice when a run is already using the same app', async () => {
-    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
+    const repoRoot = path.resolve(__dirname, '..', '..', '..', '..')
+    const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-project-')))
+    const projectRoot = path.join(workspace, 'project')
+    fs.cpSync(path.join(repoRoot, 'templates', 'project'), projectRoot, { recursive: true })
+    fs.cpSync(
+      path.join(repoRoot, 'tools', 'fixtures', 'demo-storefront-feature'),
+      path.join(projectRoot, 'features', 'storefront_journey'),
+      { recursive: true },
+    )
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-block-')))
     const { app, runStore } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     let client: Client | null = null
@@ -108,21 +116,20 @@ describe('MCP HTTP server (smoke)', () => {
       )
       await client.connect(new StreamableHTTPClientTransport(new URL('/mcp', address)))
 
-      // A run already occupying the demo_catalog repo (running, not healing,
+      // A run already occupying the storefront repo (running, not healing,
       // so the route's heal-reuse path doesn't short-circuit).
       runStore.bootstrap({
         runId: 'busy-run',
-        feature: 'demo_catalog',
+        feature: 'storefront_journey',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'running',
         healCycles: 0,
         services: [],
-        // The feature's repo, NOT its feature dir — demo_catalog points outward
-        // at the demo storefront's product code. Collision is an exact resolved
-        // path intersection, so a feature-dir path here would silently never
-        // collide and the test would pass for the wrong reason.
-        repoPaths: [path.join(projectRoot, 'demo-app', 'catalog-service')],
+        // The feature's repo, NOT its feature dir. Collision is an exact
+        // resolved path intersection, so a feature-dir path here would silently
+        // never collide and the test would pass for the wrong reason.
+        repoPaths: [path.join(projectRoot, 'demo-app')],
       })
 
       // A fresh same-app start detects the collision and asks how to resolve it
@@ -130,7 +137,7 @@ describe('MCP HTTP server (smoke)', () => {
       const collision = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'demo_catalog',
+          feature: 'storefront_journey',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-block',

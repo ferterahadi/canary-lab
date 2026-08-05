@@ -366,7 +366,11 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
     ctx.appendLog(`[docs] agent attempt (${MODE_LABEL[mode]}) — ${mode === 'collect-repo-docs' ? 'reading the repos' : 'reading the git diff'} guided by the intent…\n`)
     const { text } = await spawnAgent({
       prompt,
-      cwd: m.repoPaths[0],
+      // The collector reads product repos but writes the requirements artifact
+      // under this Canary workspace's features/. Launching inside the first
+      // product repo makes that sibling output path read-only for sandboxed
+      // agents such as Codex.
+      cwd: deps.projectRoot,
       stageDir: path.join(ctx.flightDir, 'docs'),
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,

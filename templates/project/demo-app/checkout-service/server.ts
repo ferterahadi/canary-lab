@@ -1,14 +1,7 @@
 import http, { type IncomingMessage } from 'node:http'
 
-// Checkout service for the demo storefront. Nothing in `features/` points at
-// this service — that is deliberate. Aim a flight at this directory and Canary
-// Lab builds the feature for it from scratch.
-//
-// Two properties here exist to give the pipeline real work:
-//   • the listening port is hardcoded below, so the concurrency-prep stage has
-//     something to change;
-//   • two defects are planted in the handlers, so the run fails and the repair
-//     loop engages.
+// Final service in the storefront journey. It consumes catalog's price and the
+// successful inventory reservation to produce the customer-facing total.
 
 interface CartItem {
   sku: string
@@ -36,6 +29,8 @@ const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> 
 
 const subtotal = (cart: Cart): number =>
   cart.items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+
+const total = (cart: Cart): number => subtotal(cart)
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? '/', `http://${req.headers.host}`)
@@ -67,7 +62,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'GET' && cart && segments.length === 2) {
-      res.end(JSON.stringify({ ...cart, total: subtotal(cart) }))
+      res.end(JSON.stringify({ ...cart, total: total(cart) }))
       return
     }
 
@@ -80,7 +75,7 @@ const server = http.createServer(async (req, res) => {
       }
       cart.items.push({ sku, unitPrice, quantity: quantity ?? 1 })
       res.writeHead(201)
-      res.end(JSON.stringify({ ...cart, total: subtotal(cart) }))
+      res.end(JSON.stringify({ ...cart, total: total(cart) }))
       return
     }
 
@@ -93,18 +88,18 @@ const server = http.createServer(async (req, res) => {
         return
       }
       cart.discountPercent = percent
-      // PLANTED DEFECT 1: the code is accepted and recorded, but the total
-      // reported back is the undiscounted subtotal — the customer is quoted a
-      // discount they never receive.
-      res.end(JSON.stringify({ ...cart, total: subtotal(cart) }))
+      res.end(JSON.stringify({ ...cart, total: total(cart) }))
       return
     }
 
     if (method === 'POST' && cart && segments[2] === 'checkout') {
-      // PLANTED DEFECT 2: an empty cart is allowed through checkout, placing an
-      // order worth nothing instead of rejecting the request.
+      if (cart.items.length === 0) {
+        res.writeHead(409)
+        res.end(JSON.stringify({ error: 'cart is empty' }))
+        return
+      }
       cart.status = 'placed'
-      res.end(JSON.stringify({ ...cart, total: subtotal(cart) }))
+      res.end(JSON.stringify({ ...cart, total: total(cart) }))
       return
     }
 

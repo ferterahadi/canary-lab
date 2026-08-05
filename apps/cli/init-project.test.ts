@@ -161,9 +161,13 @@ describe('main (init-project orchestration)', () => {
     await main(['my-project', '--package-spec', '^9.9.9'])
 
     const target = path.join(workspace, 'my-project')
-    expect(
-      fs.existsSync(path.join(target, 'features', 'demo_inventory', 'feature.config.cjs')),
-    ).toBe(true)
+    expect(fs.existsSync(path.join(target, 'demo-app', 'REQUIREMENTS.md'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'demo-app', 'catalog-service', 'server.ts'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'demo-app', 'inventory-service', 'server.ts'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'demo-app', 'checkout-service', 'server.ts'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'features', 'README.md'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'features', 'demo_catalog'))).toBe(false)
+    expect(fs.existsSync(path.join(target, 'features', 'demo_inventory'))).toBe(false)
 
     const pkg = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf-8'))
     expect(pkg.name).toBe('my-project')
@@ -265,9 +269,9 @@ describe('main (init-project orchestration)', () => {
     const gitignore = fs.readFileSync(path.join(workspace, 'my-project', '.gitignore'), 'utf-8')
     expect(gitignore).toContain('envsets/*/*')
     expect(gitignore).toContain('features/*/envsets/*/*')
-    expect(gitignore).toContain('!features/demo_inventory/envsets/local/*')
     expect(gitignore).not.toContain('!envsets/*/*')
     expect(gitignore).not.toContain('!features/*/envsets/*/*')
+    expect(gitignore).not.toContain('!features/demo_')
   })
 
   it('renames project name from "canary-lab" to "canary-lab-workspace"', async () => {

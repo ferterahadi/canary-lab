@@ -1,17 +1,20 @@
 import http, { type IncomingMessage } from 'node:http'
 
-// Catalog service for the demo storefront: an in-memory product catalog behind
-// a small JSON API. The `demo_catalog` suite runs against it.
+// First service in the storefront journey: product identity and price originate
+// here, and its SKU becomes inventory's input.
 
 interface Product {
   id: string
   name: string
-  price: number
+  sku: string
+  priceCents: number
 }
 
 const products: Product[] = []
 
 const nextProductId = () => String(products.length + 1)
+
+const skuFor = (name: string): string => name.trim().toLowerCase().replace(/\s+/g, '_')
 
 const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
   let body = ''
@@ -38,13 +41,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'POST' && url.pathname === '/products') {
-      const { name, price } = (await readBody(req)) as { name?: string; price?: number }
-      if (!name) {
+      const { name, priceCents } = (await readBody(req)) as { name?: string; priceCents?: number }
+      if (!name || typeof priceCents !== 'number') {
         res.writeHead(400)
-        res.end(JSON.stringify({ error: 'name is required' }))
+        res.end(JSON.stringify({ error: 'name and priceCents are required' }))
         return
       }
-      const product: Product = { id: nextProductId(), name, price: price ?? 0 }
+      const product: Product = { id: nextProductId(), name, sku: skuFor(name), priceCents }
       products.push(product)
       res.writeHead(201)
       res.end(JSON.stringify(product))
@@ -59,15 +62,24 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'not found' }))
         return
       }
-      const patch = (await readBody(req)) as { name?: string; price?: number }
+      const patch = (await readBody(req)) as { name?: string; priceCents?: number }
       if (patch.name !== undefined) product.name = patch.name
+      if (patch.priceCents !== undefined) product.priceCents = patch.priceCents
       res.end(JSON.stringify(product))
       return
     }
 
     if (method === 'DELETE' && url.pathname.startsWith('/products/')) {
-      res.writeHead(405)
-      res.end(JSON.stringify({ error: 'delete is not supported' }))
+      const [, , id] = url.pathname.split('/')
+      const index = products.findIndex((entry) => entry.id === id)
+      if (index === -1) {
+        res.writeHead(404)
+        res.end(JSON.stringify({ error: 'not found' }))
+        return
+      }
+      products.splice(index, 1)
+      res.writeHead(204)
+      res.end()
       return
     }
 

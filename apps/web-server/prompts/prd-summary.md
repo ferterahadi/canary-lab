@@ -113,6 +113,14 @@ For each requirement where it is meaningful, describe BOTH:
 A pure non-functional requirement may have only a happy path (or neither) — omit a
 path that genuinely doesn't apply rather than inventing one.
 
+**A failed assertion is evidence, not an unhappy path.** “The test fails/stops
+when the returned value is wrong” does not describe application error handling
+and MUST NOT add `sad` to `pathTypes`. Add `sad` only when the source requires a
+distinct user- or API-observable response to an invalid, denied, missing,
+conflicting, or failed condition. When the docs explicitly limit a feature to a
+happy-path journey and exclude defensive branches, its value/status assertions
+remain `happy` only.
+
 ## Path types & strictness
 
 Set `pathTypes` to the test paths the requirement implies:

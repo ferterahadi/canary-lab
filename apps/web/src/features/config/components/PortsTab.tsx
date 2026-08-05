@@ -184,8 +184,9 @@ export function PortsTab({
             every side, and the dot + coloured headline already carry the state
             (same call the test card made when it dropped its left accent). */}
         <Section
+          headerPadding="none"
           title={
-            <span className="flex items-center gap-2">
+            <span className="my-[10px] ml-[14px] flex items-center gap-2">
               {/* Dot fill carries the evidence level: solid = machine-verified
                   (double-boot), hollow = declared in config, unproven. */}
               <span
@@ -222,7 +223,7 @@ export function PortsTab({
             </span>
           }
           right={
-            <div className="flex shrink-0 items-center gap-2">
+            <div className="mr-[14px] flex shrink-0 items-center gap-2">
             {/* An active workflow owns the whole action area: one button that
                 opens it in the wizard (follow progress / review & save). The
                 start/remove actions return once it settles. */}
@@ -233,7 +234,7 @@ export function PortsTab({
                 title={activeHere.status === 'ready-to-save'
                   ? 'Open the parked review — inspect the rewrite diff and save the overlay.'
                   : 'Open the running port-ification in the wizard to follow its progress.'}
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[11px] font-medium transition-colors duration-150"
                 style={{
                   color: 'var(--running)',
                   border: '1px solid color-mix(in srgb, var(--running) 45%, var(--border-default))',
@@ -258,7 +259,7 @@ export function PortsTab({
                 onClick={() => { setRemoveError(null); setConfirmRemove(true) }}
                 aria-label="Remove portification"
                 title="Deletes the saved overlay and restores the config; the feature reverts to its fixed ports."
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[11px] font-medium transition-colors duration-150"
                 style={{
                   color: 'var(--danger)',
                   border: '1px solid color-mix(in srgb, var(--danger) 40%, var(--border-default))',
@@ -278,7 +279,7 @@ export function PortsTab({
                 type="button"
                 onClick={() => onStartPortify(feature)}
                 disabled={blockedBy != null}
-                className="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-medium transition-colors duration-150"
+                className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-[11px] font-medium transition-colors duration-150"
                 title={blockedBy
                   ? `Portify runs one workflow at a time — ${blockedBy.feature} is currently portifying.`
                   : bandState === 'declared'

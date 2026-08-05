@@ -68,8 +68,8 @@ entry. The three places that must agree for the web aliases are
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Scaffolded workspace files. `demo-app/` is the demo storefront a new workspace runs and flies — three services, each opening a different door: `inventory-service` is onboarded by `demo_inventory` and **deliberately correct** (a green first Run, and the Benchmark's subject — it sabotages a working app, so a red baseline can never score); `catalog-service` is onboarded by `demo_catalog` and carries three planted defects, staged so the third only fails once the second is fixed (the repair loop, over several cycles); `checkout-service` is deliberately *not* onboarded, so a flight has something to build from scratch. Those two features are the only samples shipped, and they back the integration tests. |
-| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `clean-dist`, `prepare-assets`, `smoke-pack`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions` |
+| `templates/project/` | Scaffolded workspace files. `demo-app/` is the one full-Flight demo: a bare product repo with catalog, inventory, and checkout services plus one ordered requirements document. No feature ships around it, so a tester starts at Repo scan instead of inheriting completed stages. Each service contains one contract defect; the end-to-end journey exposes them in dependency order so a successful Run records three repair cycles and changes in all three service directories. |
+| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions`. `tools/fixtures/demo-storefront-feature/` is contributor-only evidence for the deterministic demo smoke; it is not copied into consumer workspaces. |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
@@ -243,7 +243,11 @@ A `startCommand` declares `ports: [{ name: 'api', env: 'PORT' }]` (env optional)
 orchestrator allocates a free TCP port per slot per run
 (`apps/web-server/src/features/runs/logic/runtime/port-allocator.ts`), injects it as the service's `env`
 var (`PORT`), exposes it to config via the reserved token `${port.api}`, and to the
-Playwright process as `CANARY_PORT_<slot>`.
+Playwright process as `CANARY_PORT_<shell-safe-slot>`. Config tokens keep the slot
+name verbatim, while Playwright's environment key replaces every character outside
+letters, digits, and `_` with `_` (`checkout-service` →
+`CANARY_PORT_checkout_service`) because interactive shells drop invalid environment
+names. Slots that collide after normalization are rejected before Playwright starts.
 
 `${port.<slot>}` resolves in **three places** (the `port` token namespace lives in
 `apps/web-server/src/features/runs/logic/runtime/launcher/interpolate.ts`):
@@ -256,9 +260,9 @@ Playwright process as `CANARY_PORT_<slot>`.
 So inter-service URLs and config-file listen ports (e.g. Spring
 `server.port=${port.api}`, `dev.url=http://localhost:${port.web}`) follow the
 run's allocation. Test helpers resolve the target as
-`CANARY_PORT_api → GATEWAY_URL → hardcoded default` (see any sample
-`e2e/helpers/api.ts`). The CLI `env` switching path passes no resolver, so it stays a
-verbatim copy.
+`CANARY_PORT_api → GATEWAY_URL → hardcoded default` (see
+`tools/fixtures/demo-storefront-feature/e2e/helpers/api.ts`). The CLI `env`
+switching path passes no resolver, so it stays a verbatim copy.
 
 ### Always-worktree runs (R80)
 

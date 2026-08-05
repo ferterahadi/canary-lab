@@ -151,6 +151,22 @@ describe('PortsTab', () => {
     expect(scroller?.firstElementChild?.className).toContain('p-3')
   })
 
+  it("uses the Portified status card's explicit header spacing", async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(docWithPorts())
+    await act(async () => { root.render(<PortsTab feature="cns_exactly_once_fallback" portified />) })
+
+    const portifiedSection = [...container.querySelectorAll('section')]
+      .find((section) => section.textContent?.includes('Portified — boots concurrently'))
+    const header = portifiedSection?.firstElementChild as HTMLElement | undefined
+    const removeButton = container.querySelector<HTMLButtonElement>('[aria-label="Remove portification"]')
+    expect(header?.style.padding).toBe('0px')
+    expect(header?.className).toContain('min-h-[39px]')
+    expect(header?.querySelector('.my-\\[10px\\].ml-\\[14px\\]')).not.toBeNull()
+    expect(header?.querySelector('.mr-\\[14px\\]')).not.toBeNull()
+    expect(removeButton?.className).toContain('py-1')
+    expect(removeButton?.className).toContain('whitespace-nowrap')
+  })
+
   it('none state: Not injectable headline, accent Portify launches directly', async () => {
     vi.mocked(getFeatureConfigDoc).mockResolvedValue(docNoPorts())
     const onStartPortify = vi.fn()

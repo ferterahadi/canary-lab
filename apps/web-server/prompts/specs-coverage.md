@@ -50,7 +50,10 @@ Hard rules:
 - Create or rewrite spec files directly with your Read/Write/Edit tools. Files live directly under {{featureDir}}/e2e/ and end in .spec.ts.
 - Every spec imports: import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
 - Tag each test title with the requirement + path it covers: "@req-<id> @path-<happy|sad|edge>" (and "@variant-<value>" when the requirement spans variants). One test may carry several tags. Example: `test('@req-R2 @path-sad rejects an expired voucher', async ({ request }) => { … })`
-- Resolve each service's base URL as: `process.env.CANARY_PORT_<slot> ? \`http://localhost:${process.env.CANARY_PORT_<slot>}\` : <the config's fallback port>` — `<slot>` is the `ports[].name` declared in the feature config. Never hardcode a port.
+- Resolve each service's base URL as: `process.env.CANARY_PORT_<env-slot> ? \`http://localhost:${process.env.CANARY_PORT_<env-slot>}\` : <the config's literal fallback URL>`.
+  - Normally start from the `ports[].name` declared in the feature config. For the environment key, replace every character outside letters, digits, and `_` with `_`: slot `checkout-service` is exposed as `CANARY_PORT_checkout_service`. This normalization is required because interactive shells drop invalid environment names.
+  - A start command may temporarily have no `ports` because its source still hardcodes a listener. In that case, reserve the start command's `name` as the future slot, apply the same shell-safe normalization for `CANARY_PORT_<env-slot>`, and use its literal health-check URL only as the fallback. Parallel readiness will add the reserved verbatim slot before the test runs.
+  - Never emit a naked literal base URL such as `const baseUrl = 'http://localhost:4300'`; every local service URL must check its shell-safe `CANARY_PORT_<env-slot>` first.
 - Assert real user-observable effects, not merely 200s. No `toHaveURL(/.*/)`, no `waitForTimeout` as an assertion.
 - If a gap cannot be exercised because the app exposes no surface for it, skip it and name it in your one-line summary — do not write a test that fakes the behavior.
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   getAgentSession,
+  getDraftAgentSession,
 } from './agent-sessions'
 import { ok, fail } from './__fixtures__/response'
 
@@ -23,6 +24,16 @@ describe('agent-sessions api', () => {
   it('getAgentSession rethrows non-404 API errors', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(500, { error: 'boom' }))
     await expect(getAgentSession('run-1', { fetchImpl })).rejects.toMatchObject({ status: 500 })
+  })
+
+  it('getDraftAgentSession encodes the draft and stage, and maps 404 to null', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'agent session not found' }))
+
+    await expect(getDraftAgentSession('draft/1', 'planning', { fetchImpl })).resolves.toBeNull()
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/tests/draft/draft%2F1/agent-session?stage=planning',
+      { method: 'GET' },
+    )
   })
 
 })

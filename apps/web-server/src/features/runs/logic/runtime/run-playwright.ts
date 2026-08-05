@@ -50,7 +50,7 @@ export async function runPlaywright(ctx: RunContext, rerun?: readonly string[] |
     env: {
       ...ctx.playwrightEnv,
       // Per-run allocated ports, so tests can target the same dynamic port
-      // the local service bound (CANARY_PORT_<slot>). Empty when no ports
+      // the local service bound (CANARY_PORT_<shell-safe-slot>). Empty when no ports
       // were allocated, preserving the static envset target for remote runs.
       ...testPortEnv(ctx),
       CANARY_LAB_PROJECT_ROOT: ctx.feature.featureDir,

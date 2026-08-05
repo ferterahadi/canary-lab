@@ -25,13 +25,31 @@ export async function ensureServicesRunning(ctx: RunContext): Promise<string[]> 
   return toStart.map((svc) => svc.safeName)
 }
 
-// Per-run allocated ports exposed to the Playwright process as
-// CANARY_PORT_<slot> so tests can resolve the dynamic target. Empty when the
+/** The shell-safe environment key Playwright receives for a declared port
+ *  slot. Config tokens keep the slot verbatim (`${port.checkout-service}`),
+ *  while the process environment replaces punctuation with underscores
+ *  because interactive shells drop names such as
+ *  `CANARY_PORT_checkout-service`. */
+export function testPortEnvKey(slot: string): string {
+  return `CANARY_PORT_${slot.replace(/[^a-z0-9_]/gi, '_')}`
+}
+
+// Per-run allocated ports exposed to the Playwright process under the
+// shell-safe key above so tests can resolve the dynamic target. Empty when the
 // feature declares no port slots (remote runs keep their static envset URL).
 export function testPortEnv(ctx: RunContext): Record<string, string> {
   const out: Record<string, string> = {}
+  const owners = new Map<string, string>()
   if (ctx.portMap) {
-    for (const [slot, port] of ctx.portMap) out[`CANARY_PORT_${slot}`] = String(port)
+    for (const [slot, port] of ctx.portMap) {
+      const key = testPortEnvKey(slot)
+      const owner = owners.get(key)
+      if (owner && owner !== slot) {
+        throw new Error(`Port slots "${owner}" and "${slot}" both normalize to Playwright env key "${key}"; rename one slot`)
+      }
+      owners.set(key, slot)
+      out[key] = String(port)
+    }
   }
   return out
 }

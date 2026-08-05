@@ -332,14 +332,12 @@ describe('MCP HTTP server (smoke)', () => {
       const names = tools.tools.map((t) => t.name).sort()
       expect(names).toEqual(LIFECYCLE_TOOLS)
 
-      // tools/call list_features — returns the templates/project scaffold as a
-      // TOON table; decode it back to rows before asserting.
+      // A new scaffold deliberately starts empty so the full-Flight demo can
+      // begin at Repo scan.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
       const text = toolText(result)
       const features = decode(text) as Array<{ name: string }>
-      const featureNames = features.map((f) => f.name).sort()
-      expect(featureNames).toContain('demo_catalog')
-      expect(featureNames).toContain('demo_inventory')
+      expect(features).toEqual([])
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -362,11 +360,9 @@ describe('MCP HTTP server (smoke)', () => {
         features: Array<{ feature: string; portified: boolean }>
         summary: { total: number; portified: number; notPortified: number }
       }
-      expect(parsed.features.length).toBeGreaterThan(0)
-      expect(parsed.features.map((f) => f.feature)).toContain('demo_inventory')
+      expect(parsed.features).toEqual([])
       for (const f of parsed.features) expect(typeof f.portified).toBe('boolean')
-      expect(parsed.summary.total).toBe(parsed.features.length)
-      expect(parsed.summary.portified + parsed.summary.notPortified).toBe(parsed.summary.total)
+      expect(parsed.summary).toEqual({ total: 0, portified: 0, notPortified: 0 })
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

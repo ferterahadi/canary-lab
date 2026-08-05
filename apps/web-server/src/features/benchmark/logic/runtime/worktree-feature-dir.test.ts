@@ -3,10 +3,8 @@ import { worktreeFeatureDir } from './worktree-feature-dir'
 
 describe('worktreeFeatureDir', () => {
   it('maps a self-contained feature dir (featureDir === repo) into the worktree', () => {
-    // A hand-written feature whose localPath === featureDir === __dirname. No
-    // shipped sample has this shape any more — both demo features point OUTWARD
-    // at demo-app/ — so the fixture is deliberately generic rather than named
-    // after one of them.
+    // A hand-written feature whose localPath === featureDir === __dirname. The
+    // public scaffold starts with no features, so this stays a generic fixture.
     expect(
       worktreeFeatureDir({
         repoLocalPath: '/ws/features/sample_feature',

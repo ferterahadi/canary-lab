@@ -33,4 +33,4 @@ Open the **Coverage** view (the target icon on a feature's row in the features c
 - **Path-incomplete** — some paths are claimed, but a sad/edge path has no test.
 - **Variant-incomplete** — a variant-bearing requirement is tested on only some of its values (e.g. an "all 4 channels" rule covered by an email-only test).
 
-Depth is graded separately: a **strictness** score rates each covering test by the strongest layer its assertions touch — app log (tier 1), internal state (tier 2), app API (tier 3), or a browser confirming the real effect (tier 4) — labels it shallow/basic/solid/strong, and surfaces the stronger check to write. The `demo_catalog` sample ships an annotated PRD demonstrating all of this — its five requirements are shaped to show every gap class at once: covered, path-incomplete (a declared sad path no test claims), and untested.
+Depth is graded separately: a **strictness** score rates each covering test by the strongest layer its assertions touch — app log (tier 1), internal state (tier 2), app API (tier 3), or a browser confirming the real effect (tier 4) — labels it shallow/basic/solid/strong, and surfaces the stronger check to write.

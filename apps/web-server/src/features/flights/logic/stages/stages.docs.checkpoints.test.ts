@@ -193,7 +193,9 @@ describe('docs stage', () => {
   })
 
   it('checkpoint response: collect-repo-docs settles done when the agent writes the doc', async () => {
-    const spawnAgent: FlightStageDeps['spawnAgent'] = async () => {
+    let cwd = ''
+    const spawnAgent: FlightStageDeps['spawnAgent'] = async (opts) => {
+      cwd = opts.cwd
       fs.writeFileSync(path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md'), '# Requirements\n- does the thing')
       return { text: 'collected from README' }
     }
@@ -204,6 +206,7 @@ describe('docs stage', () => {
     setStage('docs', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'collect-repo-docs' })
     expect(outcome).toMatchObject({ kind: 'done', evidence: { source: 'agent-repo-docs', docs: ['checkout-prd.md'] } })
+    expect(cwd).toBe(tmpDir)
   })
 
   it('checkpoint response: an empty-handed collector re-parks with the NOTHING_FOUND reason', async () => {

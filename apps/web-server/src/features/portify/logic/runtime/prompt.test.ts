@@ -32,6 +32,12 @@ describe('buildPortifyPrompt', () => {
     }
   })
 
+  it('preserves the start-command name as the test-facing slot for one listener', () => {
+    const prompt = buildPortifyPrompt(feature, [{ name: 'my-backend', editPath: '/wt/my-backend' }])
+    expect(prompt).toContain("name the slot exactly the same as the start command's `name`")
+    expect(prompt).toContain('slot `checkout-service` becomes `CANARY_PORT_checkout_service`')
+  })
+
   it('falls back to the canonical path when no edit target is given', () => {
     const prompt = buildPortifyPrompt(feature, [])
     expect(prompt).toContain('edit source in: ~/my-backend')

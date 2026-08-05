@@ -14,7 +14,7 @@ vi.mock('./run-manifest-writer', async (importOriginal) => ({
   recordLifecycle: h.recordLifecycle,
 }))
 
-const { pollUntilReady, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
+const { pollUntilReady, testPortEnv, testPortEnvKey, waitForHealth, waitForServiceReady } = await import('./run-service-boot')
 const { makeHealLoopContext } = await import('./__fixtures__/heal-loop-context')
 
 let tmpDir: string
@@ -55,6 +55,25 @@ describe('waitForHealth', () => {
 
     await expect(waitForHealth(ctx)).resolves.toBeUndefined()
     expect(h.recordLifecycle).not.toHaveBeenCalled()
+  })
+})
+
+describe('testPortEnv', () => {
+  it('normalizes a hyphenated slot into a shell-safe Playwright env key', () => {
+    const { ctx } = ctxFor({ portMap: new Map([['checkout-service', 51997]]) })
+
+    expect(testPortEnvKey('checkout-service')).toBe('CANARY_PORT_checkout_service')
+    expect(testPortEnv(ctx)).toEqual({ CANARY_PORT_checkout_service: '51997' })
+  })
+
+  it('normalizes every non-identifier character, not only hyphens', () => {
+    expect(testPortEnvKey('checkout.service/v2')).toBe('CANARY_PORT_checkout_service_v2')
+  })
+
+  it('rejects two slots that collapse onto the same Playwright env key', () => {
+    const { ctx } = ctxFor({ portMap: new Map([['checkout-service', 51997], ['checkout_service', 51996]]) })
+
+    expect(() => testPortEnv(ctx)).toThrow(/both normalize.*CANARY_PORT_checkout_service/)
   })
 })
 

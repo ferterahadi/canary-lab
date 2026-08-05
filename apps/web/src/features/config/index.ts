@@ -16,3 +16,4 @@ export {
   FolderPickerModal,
 } from './components/FolderPicker'
 export { SettingsModal } from './components/SettingsModal'
+export { editorLabel } from './components/settings-options'

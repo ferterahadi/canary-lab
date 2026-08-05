@@ -387,6 +387,8 @@ describe('buildPrdSummaryPrompt', () => {
     expect(prompt).toContain('/tmp/docs/spec.md')
     expect(prompt).not.toContain('UNIQUE_DOC_BODY_TOKEN')
     expect(prompt).toContain('"id": "R1"')
+    expect(prompt).toContain('A failed assertion is evidence, not an unhappy path.')
+    expect(prompt).toContain('MUST NOT add `sad` to `pathTypes`')
   })
 
   it('returns unknown {{key}} placeholders unchanged (return match branch)', () => {
