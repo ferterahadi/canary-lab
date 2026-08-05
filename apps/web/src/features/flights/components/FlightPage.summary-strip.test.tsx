@@ -270,6 +270,35 @@ describe('detail redesign (R53–R68)', () => {
     expect(mocks.deleteFlight).not.toHaveBeenCalled()
   })
 
+  it('removes a pre-scaffold flight record instead of trying to delete a suite that does not exist', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'aborted',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'similarity' ? 'done' as const : key === 'scout' ? 'running' as const : 'pending' as const,
+      })),
+    }))
+    const onSelectFlight = vi.fn()
+    await render('fl_1', { onSelectFlight })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')?.click() })
+    const remove = container.querySelector<HTMLButtonElement>('[data-testid="flight-delete"]')
+    expect(remove?.textContent).toContain('Remove flight')
+    await act(async () => { remove!.click() })
+    const nameInput = container.querySelector<HTMLInputElement>('[data-testid="delete-suite-confirm-name"]')!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(nameInput, 'checkout')
+      nameInput.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    mocks.deleteFlight.mockResolvedValue({ deleted: true })
+    const confirm = [...container.querySelectorAll('button')].find((b) => b.textContent === 'Remove flight')!
+    await act(async () => { confirm.click() })
+    expect(mocks.deleteFlight).toHaveBeenCalledWith('fl_1')
+    expect(mocks.deleteFeature).not.toHaveBeenCalled()
+    expect(onSelectFlight).toHaveBeenCalledWith(null)
+  })
+
   it('R82: a live run flips the settled run row to running; the hero shows the run and lists the previous runs', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',

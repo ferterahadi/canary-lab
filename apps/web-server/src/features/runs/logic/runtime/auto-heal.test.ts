@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { buildAgentSpawnCommand, buildClaudeMcpConfigArg, isAgentCliAvailable, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue, resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './auto-heal'
+import { buildAgentSpawnCommand, buildClaudeMcpConfigArg, isAgentCliAvailable, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue, resolveAgentBinary, type AgentResolveDeps, type HealAgent } from './auto-heal'
 import { HEAL_MODELS } from '../../../agent-sessions/logic/agent-models'
 
 // Deps that find nothing — `which` misses and no candidate path is executable.
@@ -105,12 +105,34 @@ describe('buildAgentSpawnCommand', () => {
   it('codex REPL: never asks for approval, on a fresh spawn and on resume', () => {
     // A sandbox refusal returns to the model as an execution failure it can
     // report; an approval prompt is one it waits on until the watchdog fires.
-    expect(buildAgentSpawnCommand('codex', {})).toContain('-a never')
+    const fresh = buildAgentSpawnCommand('codex', {})
+    expect(fresh).toContain('-a never')
+    expect(fresh).toContain('--sandbox workspace-write')
+    expect(fresh).not.toContain('--disable hooks')
     const resumed = buildAgentSpawnCommand('codex', { sessionId: 'sid', resume: true })
     expect(resumed).toContain('-a never')
+    expect(resumed).toContain('--sandbox workspace-write')
     expect(resumed).toContain('resume "sid"')
     // Approvals off, but the sandbox stays on.
     expect(resumed.includes('--dangerously-bypass-approvals-and-sandbox')).toBe(false)
+  })
+
+  it('codex REPL: trusts only this workspace for the invocation without bypassing the sandbox', () => {
+    const workspace = path.join(os.tmpdir(), "canary $(touch nope) 'demo'", 'repo')
+    const cmd = buildAgentSpawnCommand('codex', { workspaceRoot: workspace })
+    const canonical = path.resolve(workspace)
+    const override = `projects={${JSON.stringify(canonical)}={trust_level="trusted"}}`
+    const shellArg = `'${override.replace(/'/g, `'"'"'`)}'`
+
+    expect(cmd).toContain(`--disable hooks -c ${shellArg}`)
+    expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox')
+  })
+
+  it('claude REPL: ignores the Codex-only invocation trust override', () => {
+    const cmd = buildAgentSpawnCommand('claude', { workspaceRoot: '/workspace/demo' })
+    expect(cmd).not.toContain('trust_level')
+    expect(cmd).not.toContain('projects.')
+    expect(cmd).not.toContain('--disable hooks')
   })
 
   it('launches via the quoted absolute binaryPath when provided (restricted PATH)', () => {
@@ -126,7 +148,7 @@ describe('buildAgentSpawnCommand', () => {
       resume: true,
       sessionId: 'b2160db2-89b8-49ff-a2ba-c0c97a52d63f',
     })
-    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" -a never resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
+    expect(codexResume.startsWith('"/opt/homebrew/bin/codex" -a never --sandbox workspace-write resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f"')).toBe(true)
   })
 
   it('claude REPL: throws when mcpOutputDir is set but mcpConfigFile is not', () => {
@@ -196,7 +218,7 @@ describe('buildAgentSpawnCommand', () => {
     })
     // `-a never` sits before the subcommand, same as `--model` — clap reads it
     // as a global flag there. Verified against the codex CLI's own parser.
-    expect(cmd).toBe('codex -a never resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f" -- "@/tmp/run/heal-prompt.md"')
+    expect(cmd).toBe('codex -a never --sandbox workspace-write resume "b2160db2-89b8-49ff-a2ba-c0c97a52d63f" -- "@/tmp/run/heal-prompt.md"')
     expect(cmd.includes('--session-id')).toBe(false)
     expect(cmd.includes('--resume')).toBe(false)
   })
@@ -259,6 +281,28 @@ describe('buildAgentSpawnCommand', () => {
     } finally {
       HEAL_MODELS.claude = prev
     }
+  })
+})
+
+describe('makeAgentSpawnCommandBuilder', () => {
+  it('forwards orchestrator arguments while binding run-specific defaults', () => {
+    const build = makeAgentSpawnCommandBuilder('codex', {
+      binaryPath: '/opt/bin/codex',
+      mcpConfigFile: '/runs/demo/mcp-config.json',
+    })
+
+    const cmd = build({
+      resume: true,
+      sessionId: 'session-1',
+      promptFile: '/runs/demo/heal-prompt.md',
+      writableDirs: ['/runs/demo/worktrees/api', '/workspace/features/demo'],
+    })
+
+    expect(cmd).toContain('"/opt/bin/codex"')
+    expect(cmd).toContain('--add-dir "/runs/demo/worktrees/api"')
+    expect(cmd).toContain('--add-dir "/workspace/features/demo"')
+    expect(cmd).toContain('resume "session-1"')
+    expect(cmd).toContain('-- "@/runs/demo/heal-prompt.md"')
   })
 })
 

@@ -133,6 +133,16 @@ function ctxFor(state: Partial<RunContext> = {}, opts: Record<string, unknown> =
 // ───────────────────────── manual / external loop ─────────────────────────
 
 describe('runManualExternalHealLoop', () => {
+  it('snapshots effective worktree repo paths before waiting for a manual repair', async () => {
+    const repoPathOverrides = { catalog: '/worktrees/catalog' }
+    const { ctx } = ctxFor({ repoPathOverrides })
+    h.waitForHealSignal.mockResolvedValue({ signal: undefined })
+
+    await runManualExternalHealLoop(ctx, makeLoopHost(), 'failed')
+
+    expect(h.snapshotFeatureRepos).toHaveBeenCalledWith(ctx.feature, repoPathOverrides)
+  })
+
   it('gives up as failed when the 24h wait returns no signal', async () => {
     const { ctx } = ctxFor({ manualHeal: true } as Partial<RunContext>)
     h.waitForHealSignal.mockResolvedValue({ signal: undefined })
@@ -451,6 +461,20 @@ describe('runAutoHealLoop', () => {
   describe('heal cycles', () => {
     beforeEach(() => {
       h.extractFailedSlugs.mockReturnValue(['spec.ts > fails'])
+    })
+
+    it('snapshots effective worktree repo paths before spawning the heal agent', async () => {
+      const repoPathOverrides = { catalog: '/worktrees/catalog' }
+      const { ctx } = ctxFor({ repoPathOverrides }, { autoHeal: AUTO })
+      h.runHealAgent.mockImplementation(async () => {
+        ctx.stopped = true
+        ctx.status = 'aborted'
+        return { signal: undefined, reason: 'pty-died' }
+      })
+
+      await runAutoHealLoop(ctx, makeLoopHost())
+
+      expect(h.snapshotFeatureRepos).toHaveBeenCalledWith(ctx.feature, repoPathOverrides)
     })
 
     it('stops with a max-cycles reason once the cap is reached', async () => {

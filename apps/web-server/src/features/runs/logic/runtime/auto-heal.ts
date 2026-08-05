@@ -15,8 +15,8 @@ import {
 } from '../../../agent-sessions/logic/agent-binary'
 import { directoryExists, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
 
-export { buildAgentSpawnCommand, buildClaudeMcpConfigArg, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue } from './heal-agent-spawn'
-export type { AgentSpawnArgs } from './heal-agent-spawn'
+export { buildAgentSpawnCommand, buildClaudeMcpConfigArg, makeAgentSpawnCommandBuilder, pickAvailableHealAgent, readPriorSessionId, readPriorSessionIdFromValue } from './heal-agent-spawn'
+export type { AgentSpawnArgs, AgentSpawnCommandDefaults } from './heal-agent-spawn'
 export { buildHealPromptMap, renderPlaywrightMcpHint, renderTraceExtractHint } from './heal-prompt-map'
 export type { HealPromptMap, HealPromptMapOptions, HealPromptResourceEntry, HealPromptStartEntry } from './heal-prompt-map'
 

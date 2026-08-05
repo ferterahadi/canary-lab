@@ -96,6 +96,42 @@ export interface AgentSpawnArgs {
    *  that nothing answers under autopilot. Effective (worktree-aware) paths:
    *  pass service `cwd`s, not the feature's declared `localPath`s. */
   writableDirs?: readonly string[]
+  /** Workspace root whose interactive Codex trust gate should be satisfied for
+   *  this invocation. Codex applies trust to the repository root when its cwd
+   *  is a nested run directory; a whole-map `-c projects={...}` override avoids
+   *  the unattended REPL stalling without mutating the user's persistent
+   *  config. Hooks are disabled for this invocation so trusted status cannot
+   *  silently run hooks the user has not reviewed. Ignored by Claude, whose
+   *  trust store has a separate pre-spawn helper. */
+  workspaceRoot?: string
+}
+
+export type AgentSpawnCommandDefaults = Pick<AgentSpawnArgs, 'mcpConfigFile' | 'binaryPath'>
+
+/**
+ * Bind the run-specific spawn defaults once while forwarding every
+ * orchestrator-supplied argument. Keeping this adapter here prevents route,
+ * restart, and benchmark call sites from silently dropping a newly-added
+ * spawn option such as `writableDirs` when they unpack the argument object.
+ */
+export function makeAgentSpawnCommandBuilder(
+  agent: HealAgent,
+  defaults: AgentSpawnCommandDefaults,
+): (args: AgentSpawnArgs) => string {
+  return (args) => buildAgentSpawnCommand(agent, { ...args, ...defaults })
+}
+
+function codexWorkspaceTrustFlag(workspaceRoot: string | undefined): string {
+  if (!workspaceRoot) return ''
+  let root: string
+  try { root = fs.realpathSync(workspaceRoot) } catch { root = path.resolve(workspaceRoot) }
+  // Codex 0.146.0's TUI ignores a dotted projects.<root>.trust_level override,
+  // but honors the complete projects map as an inline TOML table. JSON string
+  // escaping is valid for its key; POSIX single-quote escaping keeps the value
+  // inert as one shell argument, including `$()`/backticks. Trust would open a
+  // second hook-review gate, so hooks are disabled for this unattended spawn.
+  const override = `projects={${JSON.stringify(root)}={trust_level="trusted"}}`
+  return ` --disable hooks -c '${override.replace(/'/g, `'"'"'`)}'`
 }
 
 /**
@@ -203,14 +239,16 @@ export function buildAgentSpawnCommand(agent: HealAgent, args: AgentSpawnArgs = 
   // codex interactive REPL. `-a never` is codex's spelling of the same posture:
   // it never asks for approval, and a command the sandbox refuses comes back to
   // the model as an execution failure it can react to — a failure it can report
-  // rather than a prompt it waits on. Not `--dangerously-bypass-approvals-and-
-  // sandbox`, which drops the sandbox too. `--add-dir` is what makes the repos
-  // writable under that sandbox; without it `-a never` would turn the freeze
-  // into a silent write failure, since escalation-on-approval can no longer
-  // happen. Codex has no `--session-id` analogue, so the first run starts
-  // normally. Once the orchestrator discovers Codex's persisted session id,
-  // Restart Heal can use `codex resume <id>`.
-  const codexAuto = ` -a never${addDirs}`
+  // rather than a prompt it waits on. `--sandbox workspace-write` is explicit
+  // because Codex rejects every `--add-dir` at startup under its default
+  // permissions. Not `--dangerously-bypass-approvals-and-sandbox`, which drops
+  // the sandbox too. `--add-dir` then makes the repos writable under that
+  // sandbox; without it `-a never` would turn the freeze into a silent write
+  // failure, since escalation-on-approval can no longer happen. Codex has no
+  // `--session-id` analogue, so the first run starts normally. Once the
+  // orchestrator discovers Codex's persisted session id, Restart Heal can use
+  // `codex resume <id>`.
+  const codexAuto = ` -a never --sandbox workspace-write${codexWorkspaceTrustFlag(args.workspaceRoot)}${addDirs}`
   if (args.resume && args.sessionId) {
     return `${head}${modelFlag}${codexAuto} resume ${JSON.stringify(args.sessionId)}${promptArg}`
   }

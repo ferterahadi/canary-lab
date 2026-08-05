@@ -35,9 +35,10 @@ function isPathInside(child: string, parent: string): boolean {
 // has the floor. The returned map is the input to `diffFeatureRepos`. Two kinds
 // of entries:
 //
-//   1. **Service repo** (one per `feature.repos[]`): keyed by `localPath`,
-//      diffed in full. `localPath` is assumed to be a git working-tree root, so
-//      paths returned by `git diff --name-only` join directly.
+//   1. **Service repo** (one per `feature.repos[]`): keyed by its effective
+//      path. A run-owned worktree overrides the configured `localPath`; either
+//      path may be a subtree of a monorepo, so the snapshot records the actual
+//      git root and scopes the diff to that service path.
 //
 //   2. **Feature directory** (`feature.featureDir`): keyed by `featureDir`,
 //      diffed via pathspec scoped to the feature subtree of whatever git repo
@@ -51,17 +52,27 @@ function isPathInside(child: string, parent: string): boolean {
 // identical to the behavior when the agent didn't declare files.
 export async function snapshotFeatureRepos(
   feature: FeatureConfig,
+  repoPathOverrides: Readonly<Record<string, string>> = {},
 ): Promise<Map<string, FeatureRepoSnapshot>> {
   const snapshots = new Map<string, FeatureRepoSnapshot>()
-  const serviceRepoRoots: string[] = []
+  const snapshottedServicePaths = new Set<string>()
+  const servicePathsToExclude = new Set<string>()
   for (const repo of feature.repos ?? []) {
     const localPath = repo.localPath
     if (typeof localPath !== 'string') continue
-    const ref = await snapshotWorkingTree(localPath)
+    const effectivePath = repoPathOverrides[repo.name] ?? localPath
+    const repoPath = path.resolve(resolveRepoPath(effectivePath))
+    const gitRoot = await getGitRoot(repoPath)
+    if (gitRoot === null) continue
+    const ref = await snapshotWorkingTree(gitRoot)
     if (ref === null) continue
-    const absRoot = resolveRepoPath(localPath)
-    snapshots.set(localPath, { ref, gitRoot: absRoot })
-    serviceRepoRoots.push(absRoot)
+    const pathspecs: DiffPathspec[] | undefined = isPathInside(repoPath, gitRoot)
+      ? [repoPath]
+      : undefined
+    snapshots.set(effectivePath, { ref, gitRoot, pathspecs })
+    snapshottedServicePaths.add(repoPath)
+    servicePathsToExclude.add(repoPath)
+    servicePathsToExclude.add(path.resolve(resolveRepoPath(localPath)))
   }
 
   // Layer the feature dir on top: it lives inside a workspace-level git repo
@@ -70,14 +81,15 @@ export async function snapshotFeatureRepos(
   // subtree that's nested under it.
   const featureDir = feature.featureDir
   if (typeof featureDir === 'string' && featureDir.length > 0) {
-    const featureDirAbs = resolveRepoPath(featureDir)
+    const featureDirAbs = path.resolve(resolveRepoPath(featureDir))
     const gitRoot = await getGitRoot(featureDirAbs)
     const ref = await snapshotWorkingTree(featureDirAbs)
-    if (gitRoot !== null && ref !== null && !snapshots.has(featureDir)) {
-      const excludes = serviceRepoRoots
-        .filter((root) => isPathInside(root, featureDirAbs))
-        .map((root) => `:(exclude)${root}` satisfies DiffPathspec)
-      const pathspecs: DiffPathspec[] = [featureDirAbs, ...excludes]
+    if (gitRoot !== null && ref !== null && !snapshottedServicePaths.has(featureDirAbs)) {
+      const excludes = [...servicePathsToExclude]
+        .filter((repoPath) => isPathInside(repoPath, featureDirAbs))
+        .map((repoPath) => `:(exclude)${repoPath}` satisfies DiffPathspec)
+      const include = featureDirAbs === gitRoot ? '.' : featureDirAbs
+      const pathspecs: DiffPathspec[] = [include, ...excludes]
       snapshots.set(featureDir, { ref, gitRoot, pathspecs })
     }
   }

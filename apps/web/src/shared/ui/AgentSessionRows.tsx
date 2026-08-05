@@ -414,7 +414,7 @@ export function Timestamp({ value }: { value: string }) {
     }
   } catch { /* fall back to raw */ }
   return (
-    <span title={value} style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{display}</span>
+    <span className="agentts-time" title={value}>{display}</span>
   )
 }
 

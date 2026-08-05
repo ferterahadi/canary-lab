@@ -84,6 +84,7 @@ describe('SystemRow (flight conductor line on the agent rail)', () => {
   it('heads a stamped run with its time, and keeps the message clean', () => {
     render('[docs@2026-07-22T20:35:24.000Z] collecting repo docs…')
     expect(container.querySelector('.agentts-systag')?.textContent).toBe('docs')
+    expect(container.querySelector('.agentts-time')).not.toBeNull()
     // The rendered clock is local-time, so assert the source instant instead.
     expect(container.querySelector('.agentts-rowhead span[title]')?.getAttribute('title'))
       .toBe('2026-07-22T20:35:24.000Z')

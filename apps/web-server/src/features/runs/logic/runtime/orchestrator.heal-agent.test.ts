@@ -144,6 +144,39 @@ describe('RunOrchestrator.runHealAgent', () => {
     expect(await second).toMatchObject({ reason: 'signal', signal: { kind: 'rerun' } })
     await orch.stop('failed')
   })
+
+  it('passes the project root to the Codex spawn builder for scoped trust', async () => {
+    const f = makeFakeFactory()
+    let workspaceRoot: string | undefined
+    const orch = new RunOrchestrator({
+      feature: makeFeature({ healOnFailureThreshold: 1, repos: [] }),
+      projectRoot: tmpDir,
+      runId: RUN_ID,
+      runDir,
+      ptyFactory: f.factory,
+      delay: async () => undefined,
+      healthPollIntervalMs: 1,
+      healSignalPollMs: 1,
+      healAgentTimeoutMs: 200,
+      autoHeal: {
+        agent: 'codex',
+        buildSpawnCommand: (args) => {
+          workspaceRoot = args.workspaceRoot
+          return 'codex'
+        },
+        buildCyclePrompt: () => 'cycle prompt',
+      },
+    })
+    await orch.start()
+
+    const heal = orch.runHealAgent({ cycle: 1, failedSlugs: ['a'] })
+    while (f.spawned.length < 1) await new Promise((resolve) => setTimeout(resolve, 5))
+    expect(workspaceRoot).toBe(tmpDir)
+
+    fs.writeFileSync(orch.paths.rerunSignal, '{}')
+    expect(await heal).toMatchObject({ reason: 'signal', signal: { kind: 'rerun' } })
+    await orch.stop('failed')
+  })
 })
 
 describe('readSummary / extractFailedSlugs / defaultPlaywrightSpawner / defaultSpawnCommand / defaultHealPrompt', () => {

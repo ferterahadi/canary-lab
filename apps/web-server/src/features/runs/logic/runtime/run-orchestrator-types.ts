@@ -216,6 +216,7 @@ export interface AutoHealConfig {
     mcpOutputDir?: string
     promptFile?: string
     writableDirs?: readonly string[]
+    workspaceRoot?: string
   }) => string
   // Returns the prompt text to write to the REPL's stdin for cycle N.
   // Production wires `buildOrchestratorHealPrompt`; tests pass a stub that

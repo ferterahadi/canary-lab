@@ -1,6 +1,6 @@
 import path from 'path'
 import type { FlightIndexEntry, FlightManifest, FlightStageKey } from './types'
-import { isActiveFlightStatus } from './types'
+import { isActiveFlightStatus, isTerminalFlightStatus } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting store for Flight background jobs. A thin
@@ -102,7 +102,25 @@ export class FlightRunStore implements FlightStore {
         }),
       },
     })
+    this.repairLegacyTerminalStages()
     this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, flightId: e.id }))
+  }
+
+  /** Older aborts only settled the flight, leaving the interrupted stage live.
+   *  Repair those persisted records at open so a terminal flight cannot render
+   *  a blue "running" stage or retain an answerable checkpoint. */
+  private repairLegacyTerminalStages(): void {
+    for (const entry of this.store.list()) {
+      const manifest = this.store.get(entry.id)
+      if (!manifest || !isTerminalFlightStatus(manifest.status)) continue
+      let repaired = false
+      const stages = manifest.stages.map((stage) => {
+        if (stage.status !== 'running' && stage.status !== 'waiting-for-approval') return stage
+        repaired = true
+        return { ...stage, status: 'pending' as const, checkpoint: undefined }
+      })
+      if (repaired) this.store.save({ ...manifest, stages })
+    }
   }
 
   list(): FlightIndexEntry[] {

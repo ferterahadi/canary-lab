@@ -41,6 +41,13 @@ describe('classifyHealFailure', () => {
     expect(classifyHealFailure('panic: runtime error: nil pointer dereference')).toBe('crash')
   })
 
+  it('classifies Codex rejecting --add-dir under an incompatible sandbox as a startup crash', () => {
+    const tail =
+      'Error adding directories: Ignoring --add-dir (/tmp/api) because the effective permissions ' +
+      'do not allow additional writable roots. Switch to workspace-write or danger-full-access to allow them.'
+    expect(classifyHealFailure(tail, 'codex')).toBe('crash')
+  })
+
   it('is case-insensitive and tolerates ANSI color codes', () => {
     expect(classifyHealFailure('\x1b[31mUSAGE LIMIT\x1b[0m exceeded')).toBe('usage-limit')
   })
@@ -71,6 +78,22 @@ describe('classifyHealFailure', () => {
     // full of words a looser fingerprint table could misread. Pin the order.
     expect(classifyHealFailure('Is this a project you created or one you trust?')).toBe('trust-prompt')
     expect(classifyHealFailure('❯ 1. Yes, I trust this folder')).toBe('trust-prompt')
+  })
+
+  it('classifies the real Codex directory-trust prompt', () => {
+    const tail =
+      "Note: You're in a subdirectory of a Git project. Trusting will apply to repository root:\n" +
+      '/private/var/folders/T/canary-flight-lab/demo-project\n\n' +
+      'Do you trust the contents of this directory?\n' +
+      '❯ 1. Yes, continue\n  2. No, quit\n'
+    expect(classifyHealFailure(tail, 'codex')).toBe('trust-prompt')
+  })
+
+  it('classifies Codex trust text split by TUI cursor escapes', () => {
+    const tail =
+      '\x1b[2GDo\x1b[5Gyou\x1b[9Gtrust\x1b[15Gthe\x1b[19Gcontents\x1b[28Gof\x1b[31Gthis\x1b[36Gdirectory?\r\n' +
+      '\x1b[2G❯\x1b[4G1.\x1b[7GYes,\x1b[12Gcontinue\r\n'
+    expect(classifyHealFailure(tail, 'codex')).toBe('trust-prompt')
   })
 
   // Captured from a real 2026-08-04 demo_catalog heal run: the agent had made a

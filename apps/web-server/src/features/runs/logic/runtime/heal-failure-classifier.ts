@@ -19,10 +19,10 @@ type HealFailureCause = NonNullable<HealEnd['agentCause']>
 // "limit", but we want usage-limit, not rate-limit).
 const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly string[] }> = [
   {
-    // Claude Code's first-run folder-trust prompt. It is not an error and the
-    // agent is not wedged — it is waiting for a keypress nobody will send.
-    // `ensureHealWorkspaceTrusted` normally settles this before the spawn, so
-    // reaching here means the opt-out is set or the CLI config was unwritable.
+    // First-run folder-trust prompts from Claude Code and Codex. The agent is
+    // not wedged — it is waiting for a keypress nobody will send. Pre-spawn
+    // trust setup normally settles this, so reaching here means the opt-out is
+    // set or the CLI trust setup was unavailable.
     // Listed first: the prompt's own body says "read, edit, and execute", and
     // "execute" must not be mistaken for a crash fingerprint.
     cause: 'trust-prompt',
@@ -30,6 +30,7 @@ const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly s
       'is this a project you created or one you trust',
       'yes, i trust this folder',
       'do you trust the files in this folder',
+      'do you trust the contents of this directory',
     ],
   },
   {
@@ -102,6 +103,7 @@ const FINGERPRINTS: ReadonlyArray<{ cause: HealFailureCause; needles: readonly s
   {
     cause: 'crash',
     needles: [
+      'error adding directories',
       'panic:',
       'segmentation fault',
       'segfault',

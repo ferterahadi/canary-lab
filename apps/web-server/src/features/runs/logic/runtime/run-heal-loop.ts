@@ -51,7 +51,7 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
     // Same snapshot/diff pattern as auto-heal: capture working-tree state
     // before the user starts editing, then diff after the signal arrives
     // so the journal records only what the user changed during this turn.
-    const snapshots = await snapshotFeatureRepos(ctx.feature)
+    const snapshots = await snapshotFeatureRepos(ctx.feature, ctx.repoPathOverrides)
     // Manual heal: no live REPL emits output, so the idle timeout would
     // otherwise fire after 3 min. Set the idle window equal to the hard
     // ceiling so it can't dominate the manual flow.
@@ -250,7 +250,7 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
       // After the signal arrives, the diff against this snapshot is the
       // ground-truth list of files the agent edited during its turn —
       // pre-existing dirty state in the workspace doesn't leak in.
-      const snapshots = await snapshotFeatureRepos(ctx.feature)
+      const snapshots = await snapshotFeatureRepos(ctx.feature, ctx.repoPathOverrides)
 
       const { signal, reason } = await runHealAgent(ctx, { cycle: cycleNum, failedSlugs, userGuidance, consecutiveSameFailures, stuckSlugs, maxSlugStreak })
       userGuidance = undefined

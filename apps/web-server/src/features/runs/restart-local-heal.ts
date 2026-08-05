@@ -11,7 +11,7 @@ import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
-import { buildAgentSpawnCommand, buildOrchestratorHealPrompt } from './logic/runtime/auto-heal'
+import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder } from './logic/runtime/auto-heal'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { RunnerLog } from './logic/runtime/runner-log'
@@ -105,12 +105,8 @@ export function makeRestartLocalHeal(
           runnerLog,
           autoHeal: {
             agent: agentChoice,
-            buildSpawnCommand: ({ sessionId, resume, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
-              sessionId,
-              resume,
-              mcpOutputDir,
+            buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-              promptFile,
             }),
             buildCyclePrompt: buildOrchestratorHealPrompt({
               agent: agentChoice,

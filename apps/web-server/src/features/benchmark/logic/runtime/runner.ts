@@ -9,7 +9,7 @@ import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions
 import { addWorktree, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 import { RunOrchestrator } from '../../../runs/logic/runtime/orchestrator'
 import { defaultPlaywrightSpawner } from '../../../runs/logic/runtime/run-spawn'
-import { buildAgentSpawnCommand, buildOrchestratorHealPrompt, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
+import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { generateRunId } from '../../../runs/logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from '../../../runs/logic/runtime/run-paths'
 import { RunnerLog } from '../../../runs/logic/runtime/runner-log'
@@ -343,14 +343,9 @@ export function createBenchmarkRunner(deps: BenchmarkRunnerDeps) {
         runStateSink: deps.runStore as never,
         autoHeal: {
           agent,
-          buildSpawnCommand: ({ sessionId, resume, mcpOutputDir, promptFile }) =>
-            buildAgentSpawnCommand(agent, {
-              sessionId,
-              resume,
-              mcpOutputDir,
-              mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-              promptFile,
-            }),
+          buildSpawnCommand: makeAgentSpawnCommandBuilder(agent, {
+            mcpConfigFile: path.join(runDir, 'mcp-config.json'),
+          }),
           buildCyclePrompt,
         },
         ...(mode === 'baseline'

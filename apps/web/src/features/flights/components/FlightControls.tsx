@@ -362,18 +362,21 @@ export function FlightMenu({
     fire: () => void
   }
   // R74/R76: Pause is a header button and resume/repeat/start-over collapsed
-  // into the header's Continue menu — the ⋯ menu keeps only the destructive
-  // disposal, and that disposal is the SUITE (folder + flight history, one
-  // deletion concept via the shared type-name confirm). Journal-only
-  // deleteFlight left the GUI; it stays as an API capability.
+  // into the header's Continue menu. The ⋯ menu keeps only destructive disposal:
+  // a suite after setup, or the lone flight record before setup creates one.
   const [deleteOpen, setDeleteOpen] = useState(false)
+  // Before Suite setup the only durable thing is the flight record itself. A
+  // suite delete would 404 because there is no feature directory yet.
+  const removeFlightOnly = flight.stages.find((stage) => stage.key === 'scaffold')?.status === 'pending'
   const items: MenuItem[] = [
     ...(!active
       ? [{
           key: 'delete',
-          label: 'Delete suite…',
+          label: removeFlightOnly ? 'Remove flight…' : 'Delete suite…',
           tone: 'var(--danger)',
-          title: 'Delete this suite — its folder (config, tests, envsets, docs) AND its flight history',
+          title: removeFlightOnly
+            ? 'Remove this flight record — it stopped before a suite was created'
+            : 'Delete this suite — its folder (config, tests, envsets, docs) AND its flight history',
           testId: 'flight-delete',
           fire: () => setDeleteOpen(true),
         }]
@@ -424,6 +427,7 @@ export function FlightMenu({
       )}
       <DeleteSuiteConfirm
         feature={flight.feature}
+        flightId={removeFlightOnly ? flight.flightId : undefined}
         open={deleteOpen}
         onCancel={() => setDeleteOpen(false)}
         onDeleted={() => { setDeleteOpen(false); onDeleted() }}

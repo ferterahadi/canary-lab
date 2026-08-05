@@ -128,6 +128,12 @@ export function emitAgentSystemMessage(ctx: RunContext, message: string): void {
   ctx.emit('agent-output', { chunk: `\n[orchestrator] ${message}\n` })
 }
 
+/** Shared opt-out for Claude's persisted trust and Codex's transient override. */
+export function healWorkspaceTrustRoot(ctx: RunContext): string | undefined {
+  if (process.env.CANARY_LAB_NO_WORKSPACE_TRUST === '1') return undefined
+  return ctx.projectRoot
+}
+
 /**
  * Grant the claude CLI folder trust over the project root so the heal pty
  * opens straight into the REPL. Trust inherits down, so one entry covers every
@@ -142,9 +148,9 @@ export function emitAgentSystemMessage(ctx: RunContext, message: string): void {
  * leave the next stall unexplained.
  */
 export function ensureHealWorkspaceTrusted(ctx: RunContext): void {
-  if (process.env.CANARY_LAB_NO_WORKSPACE_TRUST === '1') return
-  if (!ctx.projectRoot) return
-  const result = ensureClaudeWorkspaceTrusted(ctx.projectRoot)
+  const workspaceRoot = healWorkspaceTrustRoot(ctx)
+  if (!workspaceRoot) return
+  const result = ensureClaudeWorkspaceTrusted(workspaceRoot)
   if (result.outcome === 'granted') {
     emitAgentSystemMessage(
       ctx,
@@ -403,6 +409,7 @@ export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
     else fs.rmSync(ctx.paths.agentSessionIdPath, { force: true })
   } catch { /* sidecar write is informational */ }
 
+  const workspaceRoot = healWorkspaceTrustRoot(ctx)
   let command: string
   try {
     command = (cfg.buildSpawnCommand ?? defaultSpawnCommand)({
@@ -417,6 +424,13 @@ export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
       // worktree-isolated run those differ, and the agent must be granted the
       // tree it will actually edit. The feature dir carries the specs.
       writableDirs: [...ctx.services.map((svc) => svc.cwd), ctx.feature.featureDir],
+      // Codex's interactive TUI stops at a repository-trust menu before it
+      // reads the prompt. The production builder turns this into an
+      // invocation-scoped config override with hooks disabled, leaving
+      // config.toml untouched and avoiding the follow-up hook-review menu.
+      ...(workspaceRoot
+        ? { workspaceRoot }
+        : {}),
     })
   } catch (err) {
     emitAgentSystemMessage(ctx, `Failed to build heal-agent spawn command: ${(err as Error).message}`)

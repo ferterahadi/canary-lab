@@ -137,6 +137,33 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
   })
 })
 
+describe('legacy terminal-stage repair', () => {
+  it('clears a stale live stage from a terminal record when the store reopens', () => {
+    const stale = {
+      flightId: 'fl-legacy',
+      feature: 'checkout',
+      repoPaths: ['/repo/a'],
+      description: 'checkout flow',
+      opts: OPTS,
+      status: 'aborted' as const,
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'similarity' ? 'done' as const : key === 'scout' ? 'running' as const : 'pending' as const,
+      })),
+      createdAt: now(),
+      updatedAt: now(),
+      endedAt: now(),
+    }
+    store.save(stale)
+
+    const reopened = new FlightRunStore(tmpDir)
+    const repaired = reopened.get(stale.flightId)!
+    expect(repaired.stages.find((stage) => stage.key === 'scout')?.status).toBe('pending')
+    expect(reopened.list().find((entry) => entry.flightId === stale.flightId)?.stages.find((stage) => stage.key === 'scout')?.status).toBe('pending')
+  })
+})
+
 describe('FlightRunStore.remove', () => {
   it('removes a flight and emits a removed event', async () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))

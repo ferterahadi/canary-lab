@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { ensureHealWorkspaceTrusted } from './run-heal-agent'
+import { ensureHealWorkspaceTrusted, healWorkspaceTrustRoot } from './run-heal-agent'
 import type { RunContext } from './run-context'
 
 // The heal REPL is the only agent canary spawns on an interactive TTY, so it is
@@ -81,6 +81,7 @@ describe('ensureHealWorkspaceTrusted', () => {
     ensureHealWorkspaceTrusted(ctx)
     expect(readConfig().projects).toEqual({})
     expect(chunks).toEqual([])
+    expect(healWorkspaceTrustRoot(ctx)).toBeUndefined()
   })
 
   it('does nothing when the run has no project root to trust', () => {
@@ -89,5 +90,11 @@ describe('ensureHealWorkspaceTrusted', () => {
     ensureHealWorkspaceTrusted(ctx)
     expect(readConfig().projects).toEqual({})
     expect(chunks).toEqual([])
+    expect(healWorkspaceTrustRoot(ctx)).toBeUndefined()
+  })
+
+  it('returns the project root for an invocation-scoped agent trust override', () => {
+    const { ctx } = mkCtx()
+    expect(healWorkspaceTrustRoot(ctx)).toBe(workspace)
   })
 })

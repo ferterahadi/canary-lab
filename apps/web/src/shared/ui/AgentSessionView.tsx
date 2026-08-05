@@ -242,6 +242,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
   // agent session — a stage with only conductor output still renders its rail.
   const sys = systemRows ?? NO_SYSTEM_ROWS
   const hasSystem = sys.pre.length > 0 || sys.post.length > 0
+  const live = source?.live === true
 
   if (error && !hasSystem) {
     return (
@@ -259,11 +260,19 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
   if ((!state || (!state.sessionId && state.events.length === 0)) && !hasSystem) {
     if (source?.live) {
       return (
-        <EmptyState
-          icon={EmptyGlyph.waiting}
-          title="Waiting for the agent's first output"
-          body="The session is starting. Thinking, tool calls, and results stream in here the moment the agent writes its first line — nothing is buffered until the end."
-        />
+        <div className="relative flex h-full min-h-0 flex-col" style={{ background: 'var(--bg-base)' }}>
+          <style>{TIMELINE_CSS}</style>
+          <div className="flex min-h-0 flex-1 flex-col">
+            <EmptyState
+              icon={EmptyGlyph.waiting}
+              title="Waiting for the agent's first output"
+              body="The session is starting. Thinking, tool calls, and results stream in here the moment the agent writes its first line — nothing is buffered until the end."
+            />
+          </div>
+          <ol className="agentts-rail agentts-waitrail">
+            <LiveTail />
+          </ol>
+        </div>
       )
     }
     return (
@@ -286,9 +295,12 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
       >
         {state?.agent && state.sessionId && (
           <div className="agentts-head">
-            <span className="agentts-statusdot" aria-hidden="true" />
+            <span className="agentts-mode" data-live={live ? 'true' : 'false'} data-testid="agent-session-mode">
+              <span className="agentts-statusdot" aria-hidden="true" />
+              {live ? 'Live' : 'History'}
+            </span>
             <span className="agentts-agent">{state.agent}</span>
-            <span className="agentts-sep">/ session</span>
+            <span className="agentts-sep">session</span>
             <span className="agentts-sid">{shortSession(state.sessionId)}</span>
             {state.model && (
               <>
@@ -316,6 +328,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
           {groupSystemLines(sys.post).map((group, idx) => (
             <SystemRow key={`sys-post-${idx}`} group={group} />
           ))}
+          {live && <LiveTail />}
         </ol>
       </div>
       {showJumpLatest && (
@@ -350,6 +363,24 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
         </button>
       )}
     </div>
+  )
+}
+
+function LiveTail() {
+  return (
+    <li
+      className="agentts-working"
+      role="status"
+      aria-label="Agent is working"
+      data-testid="agent-session-live-tail"
+    >
+      <span className="agentts-worknode" aria-hidden="true" />
+      <span className="agentts-pixels" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </li>
   )
 }
 

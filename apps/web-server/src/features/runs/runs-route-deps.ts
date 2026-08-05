@@ -13,12 +13,12 @@ import type { ServerContext } from '../../server-context'
 import { loadFeatures } from '../../shared/feature-loader'
 import { generateRunId } from './logic/runtime/run-id'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
-import { RunOrchestrator, buildServiceSpecs } from './logic/runtime/orchestrator'
+import { RunOrchestrator, buildServiceSpecs, type AutoHealConfig } from './logic/runtime/orchestrator'
 import { estimateRunCost } from './logic/runtime/admission'
 import { detectRepoCollision, normalizeRepoPaths } from './logic/runtime/repo-collision'
 import { addWorktree, hydrateWorkingTreeDiff, linkNodeModules, type WorktreeHandle } from './logic/runtime/repo-worktree'
 import { overlayExists as portifyOverlayExists } from '../portify/logic/runtime/overlay'
-import { buildAgentSpawnCommand, buildOrchestratorHealPrompt, resolveAgentBinary, type BuildHealCyclePrompt, type HealAgent } from './logic/runtime/auto-heal'
+import { buildOrchestratorHealPrompt, makeAgentSpawnCommandBuilder, resolveAgentBinary } from './logic/runtime/auto-heal'
 import { loadProjectConfig } from './logic/runtime/launcher/project-config'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { RunnerLog } from './logic/runtime/runner-log'
@@ -169,16 +169,7 @@ export function buildRunsRouteDeps(
           cycleCount: 0,
         }
       }
-      let autoHeal: {
-        agent: HealAgent
-        buildSpawnCommand: (args: {
-          sessionId?: string
-          resume?: boolean
-          mcpOutputDir?: string
-          promptFile?: string
-        }) => string
-        buildCyclePrompt: BuildHealCyclePrompt
-      } | undefined
+      let autoHeal: AutoHealConfig | undefined
       const agentChoice = (externalOrigin || isBoot)
         ? null
         : pickConfiguredHealAgent(projectConfig.healAgent)
@@ -204,12 +195,8 @@ export function buildRunsRouteDeps(
         try {
           autoHeal = {
             agent: agentChoice,
-            buildSpawnCommand: ({ sessionId, resume, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
-              sessionId,
-              resume,
-              mcpOutputDir,
+            buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
               mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-              promptFile,
               binaryPath: agentBinary,
             }),
             buildCyclePrompt: buildOrchestratorHealPrompt({
@@ -407,16 +394,7 @@ export function buildRunsRouteDeps(
       const projectConfig = loadProjectConfig(projectRoot)
       const preserveExternal = manifest.healMode === 'external'
       const preserveManual = manifest.healMode === 'manual'
-      let autoHeal: {
-        agent: HealAgent
-        buildSpawnCommand: (args: {
-          sessionId?: string
-          resume?: boolean
-          mcpOutputDir?: string
-          promptFile?: string
-        }) => string
-        buildCyclePrompt: BuildHealCyclePrompt
-      } | undefined
+      let autoHeal: AutoHealConfig | undefined
 
       if (!preserveExternal && !preserveManual) {
         const agentChoice = pickConfiguredHealAgent(projectConfig.healAgent, manifest.healAgent)
@@ -425,12 +403,8 @@ export function buildRunsRouteDeps(
           try {
             autoHeal = {
               agent: agentChoice,
-              buildSpawnCommand: ({ sessionId, resume, mcpOutputDir, promptFile }) => buildAgentSpawnCommand(agentChoice, {
-                sessionId,
-                resume,
-                mcpOutputDir,
+              buildSpawnCommand: makeAgentSpawnCommandBuilder(agentChoice, {
                 mcpConfigFile: path.join(runDir, 'mcp-config.json'),
-                promptFile,
                 binaryPath: agentBinary,
               }),
               buildCyclePrompt: buildOrchestratorHealPrompt({

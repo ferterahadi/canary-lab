@@ -65,6 +65,21 @@ describe('snapshotFeatureRepos', () => {
     expect(snaps.size).toBe(0)
   })
 
+  it('omits a git working tree when its index prevents a snapshot', async () => {
+    const root = tmp()
+    gitInit(root)
+    // A corrupt index is load-bearing: rev-parse can still resolve the git
+    // root, while stash create fails at the separate snapshot boundary.
+    fs.writeFileSync(path.join(root, '.git', 'index'), 'not-a-git-index')
+
+    const snaps = await snapshotFeatureRepos(feature({
+      featureDir: root,
+      repos: [{ name: 'broken', localPath: root }],
+    }))
+
+    expect(snaps).toEqual(new Map())
+  })
+
   it('excludes a service repo nested under the feature dir from its pathspec', async () => {
     const root = tmp()
     gitInit(root)
@@ -102,6 +117,102 @@ describe('diffFeatureRepos', () => {
     const snaps = await snapshotFeatureRepos(feature({ repos: [{ name: 'svc', localPath: repo }] }))
 
     expect(await diffFeatureRepos(snaps)).toEqual([])
+  })
+
+  it('scopes a nested monorepo service to its configured subtree', async () => {
+    const root = tmp()
+    gitInit(root)
+    const serviceDir = path.join(root, 'demo-app', 'catalog-service')
+    const siblingDir = path.join(root, 'demo-app', 'billing-service')
+    fs.mkdirSync(serviceDir, { recursive: true })
+    fs.mkdirSync(siblingDir, { recursive: true })
+    fs.writeFileSync(path.join(serviceDir, 'server.ts'), 'catalog-before\n')
+    fs.writeFileSync(path.join(siblingDir, 'server.ts'), 'billing-before\n')
+    execFileSync('git', ['add', '-A'], { cwd: root, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'add'], { cwd: root, stdio: 'ignore' })
+
+    const snaps = await snapshotFeatureRepos(feature({
+      repos: [{ name: 'catalog', localPath: serviceDir }],
+    }))
+    fs.writeFileSync(path.join(serviceDir, 'server.ts'), 'catalog-after\n')
+    fs.writeFileSync(path.join(siblingDir, 'server.ts'), 'billing-after\n')
+
+    expect(snaps.get(serviceDir)).toMatchObject({
+      gitRoot: root,
+      pathspecs: [serviceDir],
+    })
+    expect(await diffFeatureRepos(snaps)).toEqual([path.join(serviceDir, 'server.ts')])
+    const content = await diffContentForFeatureRepos(snaps)
+    expect(content).toContain('catalog-after')
+    expect(content).not.toContain('billing-after')
+  })
+
+  it('captures an isolated worktree override instead of the source checkout', async () => {
+    const sourceRoot = tmp()
+    gitInit(sourceRoot)
+    const sourceService = path.join(sourceRoot, 'services', 'catalog')
+    fs.mkdirSync(sourceService, { recursive: true })
+    fs.writeFileSync(path.join(sourceService, 'server.ts'), 'before\n')
+    execFileSync('git', ['add', '-A'], { cwd: sourceRoot, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'add'], { cwd: sourceRoot, stdio: 'ignore' })
+
+    const worktreeParent = tmp()
+    const worktreeRoot = path.join(worktreeParent, 'run-worktree')
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', worktreeRoot, 'HEAD'], {
+      cwd: sourceRoot,
+      stdio: 'ignore',
+    })
+    const worktreeService = path.join(worktreeRoot, 'services', 'catalog')
+    const snaps = await snapshotFeatureRepos(
+      feature({ repos: [{ name: 'catalog', localPath: sourceService }] }),
+      { catalog: worktreeService },
+    )
+
+    fs.writeFileSync(path.join(sourceService, 'server.ts'), 'source-after\n')
+    fs.writeFileSync(path.join(worktreeService, 'server.ts'), 'worktree-after\n')
+
+    expect(snaps.has(sourceService)).toBe(false)
+    expect(snaps.get(worktreeService)).toMatchObject({
+      gitRoot: worktreeRoot,
+      pathspecs: [worktreeService],
+    })
+    expect(await diffFeatureRepos(snaps)).toEqual([path.join(worktreeService, 'server.ts')])
+    const content = await diffContentForFeatureRepos(snaps)
+    expect(content).toContain('worktree-after')
+    expect(content).not.toContain('source-after')
+  })
+
+  it('also captures the source feature dir when its service uses a worktree override', async () => {
+    const sourceRoot = tmp()
+    gitInit(sourceRoot)
+    fs.mkdirSync(path.join(sourceRoot, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(sourceRoot, 'server.ts'), 'server-before\n')
+    fs.writeFileSync(path.join(sourceRoot, 'e2e', 'helper.ts'), 'helper-before\n')
+    execFileSync('git', ['add', '-A'], { cwd: sourceRoot, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'add'], { cwd: sourceRoot, stdio: 'ignore' })
+
+    const worktreeParent = tmp()
+    const worktreeRoot = path.join(worktreeParent, 'run-worktree')
+    execFileSync('git', ['worktree', 'add', '-q', '--detach', worktreeRoot, 'HEAD'], {
+      cwd: sourceRoot,
+      stdio: 'ignore',
+    })
+    const snaps = await snapshotFeatureRepos(
+      feature({
+        featureDir: sourceRoot,
+        repos: [{ name: 'catalog', localPath: sourceRoot }],
+      }),
+      { catalog: worktreeRoot },
+    )
+
+    fs.writeFileSync(path.join(worktreeRoot, 'server.ts'), 'server-after\n')
+    fs.writeFileSync(path.join(sourceRoot, 'e2e', 'helper.ts'), 'helper-after\n')
+
+    expect(snaps.size).toBe(2)
+    expect(await diffFeatureRepos(snaps)).toEqual([
+      path.join(worktreeRoot, 'server.ts'),
+      path.join(sourceRoot, 'e2e', 'helper.ts'),
+    ])
   })
 
   it('scopes the feature-dir diff to the feature subtree', async () => {
