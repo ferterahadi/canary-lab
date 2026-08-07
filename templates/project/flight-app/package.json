@@ -1,0 +1,9 @@
+{
+  "name": "canary-lending-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Single-service lending API used by Canary Lab's Flight demo.",
+  "scripts": {
+    "dev:lending": "npx tsx lending-service/server.ts"
+  }
+}

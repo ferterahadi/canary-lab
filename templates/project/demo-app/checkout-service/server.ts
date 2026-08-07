@@ -62,7 +62,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'GET' && cart && segments.length === 2) {
-      res.end(JSON.stringify({ ...cart, total: total(cart) }))
+      res.end(JSON.stringify({ ...cart, total: subtotal(cart) }))
       return
     }
 
@@ -83,11 +83,12 @@ const server = http.createServer(async (req, res) => {
       const { code } = (await readBody(req)) as { code?: string }
       const percent = DISCOUNT_CODES[(code ?? '').toUpperCase()]
       if (percent === undefined) {
+        cart.discountPercent = 0
         res.writeHead(400)
         res.end(JSON.stringify({ error: 'unknown discount code' }))
         return
       }
-      cart.discountPercent = percent
+      cart.discountPercent += percent
       res.end(JSON.stringify({ ...cart, total: total(cart) }))
       return
     }

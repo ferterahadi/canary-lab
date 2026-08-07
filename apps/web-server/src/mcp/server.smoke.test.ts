@@ -332,12 +332,12 @@ describe('MCP HTTP server (smoke)', () => {
       const names = tools.tools.map((t) => t.name).sort()
       expect(names).toEqual(LIFECYCLE_TOOLS)
 
-      // A new scaffold deliberately starts empty so the full-Flight demo can
-      // begin at Repo scan.
+      // A new scaffold ships its own demonstration (R89): the storefront suite
+      // is there from the start so a first-time user can press Run immediately.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
       const text = toolText(result)
       const features = decode(text) as Array<{ name: string }>
-      expect(features).toEqual([])
+      expect(features.map((f) => f.name)).toEqual(['storefront_journey'])
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -360,9 +360,12 @@ describe('MCP HTTP server (smoke)', () => {
         features: Array<{ feature: string; portified: boolean }>
         summary: { total: number; portified: number; notPortified: number }
       }
-      expect(parsed.features).toEqual([])
+      // The shipped storefront suite is deliberately NOT portified: checkout
+      // binds 4300 directly so the parallel-readiness stage has real work.
+      expect(parsed.features.map((f) => f.feature)).toEqual(['storefront_journey'])
+      expect(parsed.features[0]!.portified).toBe(false)
       for (const f of parsed.features) expect(typeof f.portified).toBe('boolean')
-      expect(parsed.summary).toEqual({ total: 0, portified: 0, notPortified: 0 })
+      expect(parsed.summary).toEqual({ total: 1, portified: 0, notPortified: 1 })
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

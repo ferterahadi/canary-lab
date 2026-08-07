@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, servicePrimaryLabel, serviceTabLabelParts, shortLocation } from './RunDetailColumn'
+import { downloadEvaluationReport, evaluationFilename, evaluationHref, canRestartHeal, isEvaluationExportable, repoServiceCount, servicePrimaryLabel, serviceTabLabelParts, shortLocation } from './RunDetailColumn'
 
 describe('canRestartHeal', () => {
   it('is enabled only for terminal runs that can be restarted', () => {
@@ -83,6 +83,36 @@ describe('service labels', () => {
     }
 
     expect(servicePrimaryLabel(service)).toBe('my-backend')
+  })
+
+  it('uses the service name when one repo hosts several services', () => {
+    // Three services out of one `storefront` repo: labelling every card with
+    // the repo name told you nothing about which one you were looking at.
+    const services = ['catalog-service', 'inventory-service', 'checkout-service'].map((name) => ({
+      repoName: 'storefront',
+      name,
+      safeName: name,
+      command: `npm run dev:${name.split('-')[0]}`,
+      cwd: '/tmp/run/worktrees/storefront',
+      logPath: `/tmp/svc-${name}.log`,
+    }))
+
+    expect(services.map((s) => servicePrimaryLabel(s, 'storefront', repoServiceCount(s, services))))
+      .toEqual(['catalog-service', 'inventory-service', 'checkout-service'])
+  })
+
+  it('counts only the siblings sharing a repo', () => {
+    const services = [
+      { repoName: 'storefront', name: 'catalog-service' },
+      { repoName: 'storefront', name: 'inventory-service' },
+      { repoName: 'admin', name: 'admin gateway stack' },
+    ]
+
+    expect(repoServiceCount(services[0]!, services)).toBe(2)
+    expect(repoServiceCount(services[2]!, services)).toBe(1)
+    // The lone `admin` service keeps the repo-name label the single-service
+    // case was designed for.
+    expect(servicePrimaryLabel(services[2]!, null, repoServiceCount(services[2]!, services))).toBe('admin')
   })
 
   it('falls back to the service name for older manifests', () => {

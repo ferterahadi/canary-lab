@@ -80,9 +80,13 @@ test('applying SAVE10 produces a 10% discount on the summary', async ({ request 
 })
 ```
 
-The scaffold ships one bare three-service storefront instead of a pre-authored
-feature. Point a Flight at `demo-app/` to watch Canary Lab discover the repo,
-author the suite, prepare its ports, and repair the complete journey.
+The scaffold ships its own demonstration, so you can see both halves of the
+product before writing anything. `demo-app/` comes with the
+`storefront_journey` suite already written — press **Run** and watch the repair
+loop fix one contract per cycle until it is green. `flight-app/` ships with no
+suite at all: point a Flight at it to watch Canary Lab discover the repo, derive
+the requirements, author the suite, prepare its ports, run, heal, and export.
+Delete both once you have seen them.
 
 ## How the Repair Loop Works
 
@@ -140,9 +144,12 @@ Contributors can launch that exact tour from this source checkout with:
 npm run demo -- --agent codex
 ```
 
-The command provisions a persistent workspace and prints a deep link to **New
-Flight**. It does not start or heal anything; the tester controls all seven
-stages in the UI.
+`npm run demo` adds nothing of its own — it packs the current build, runs the
+real `canary-lab init`, and opens the UI. What a contributor sees is exactly what
+a user sees, which is the point. It prints two deep links and starts neither:
+run the shipped `storefront_journey` suite and watch a real agent repair
+catalog, inventory and checkout one contract per cycle, or start a **New
+Flight** over `flight-app/`, which ships with no suite at all.
 
 `flight` creates the workspace if none exists. To set one up yourself:
 
@@ -152,10 +159,15 @@ cd my-lab
 npx canary-lab ui
 ```
 
-`init` scaffolds a workspace with the bare storefront demo app, installs deps,
-downloads the Playwright browser, and registers your agent's tools — so
+`init` scaffolds a workspace with both sample apps and one worked suite, installs
+deps, downloads the Playwright browser, and registers your agent's tools — so
 `canary-lab ui` opens at `http://localhost:7421` straight away. Add `--no-open`
 to skip the browser.
+
+The samples are a demonstration, not scaffolding you need:
+`demo-app/` + its `storefront_journey` suite show the repair loop (press Run,
+watch it go green); `flight-app/` ships bare so a Flight has something to
+onboard from scratch. Delete both once you have seen them.
 
 CI / offline? Pass `--no-install`, then run the steps manually:
 

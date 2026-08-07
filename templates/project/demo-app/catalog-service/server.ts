@@ -64,7 +64,6 @@ const server = http.createServer(async (req, res) => {
       }
       const patch = (await readBody(req)) as { name?: string; priceCents?: number }
       if (patch.name !== undefined) product.name = patch.name
-      if (patch.priceCents !== undefined) product.priceCents = patch.priceCents
       res.end(JSON.stringify(product))
       return
     }
@@ -77,7 +76,7 @@ const server = http.createServer(async (req, res) => {
         res.end(JSON.stringify({ error: 'not found' }))
         return
       }
-      products.splice(index, 1)
+      products.splice(index + 1, 1)
       res.writeHead(204)
       res.end()
       return

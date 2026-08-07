@@ -18,6 +18,7 @@ import {
 } from './logic/runtime/env-switcher/switch'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ServerContext } from '../../server-context'
+import { settleOrchestratorRun } from './logic/settle-run'
 
 export function makeAttachRunStreams(ctx: ServerContext) {
   const {
@@ -201,16 +202,7 @@ export function makeRestartExternalRun(
   broker.resetPane('agent')
   broker.push('agent', `\n[orchestrator] Restarting external heal${guidance ? `: ${guidance}` : ''}\n`)
   registry.set(runId, orch)
-  orch.restartTerminalRun(guidance)
-    .then(async (status) => {
-      await orch.stop(status).catch(() => {})
-      registry.delete(orch.runId)
-    })
-    .catch(async (err) => {
-      broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
-      await orch.stop('aborted').catch(() => {})
-      registry.delete(orch.runId)
-    })
+  void settleOrchestratorRun(orch.restartTerminalRun(guidance), { orch, registry, broker, runnerLog })
   return orch
 }
 }

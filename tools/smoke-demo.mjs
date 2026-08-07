@@ -4,14 +4,24 @@ import net from 'net'
 import os from 'os'
 import path from 'path'
 
-// One storefront, two entry modes:
+// The developer's `npx canary-lab init`.
 //
-// - `npm run demo` provisions a fresh persistent workspace, prints a link to
-//   the real new-Flight dialog, and gives control to the tester. It never
-//   starts a run.
-// - `npm run smoke:demo` installs an internal feature around the SAME app and
-//   drives its three repairs deterministically. The smoke remains an LLM-free
-//   contributor gate; it is not the product tour.
+// This script adds NOTHING to the workspace that `canary-lab init` does not
+// already ship. It packs the current build, runs the real init, and opens the
+// UI — so what a contributor sees is exactly what a user sees. If a
+// demonstration is missing here, it is missing for users too; that is the
+// signal this script exists to give.
+//
+// - `npm run demo` stops at the open UI and hands the tester both routes: run
+//   the shipped storefront suite and watch a real agent repair three services,
+//   or start a Flight. It never starts either one itself.
+// - `npm run smoke:demo` drives the same shipped suite's ten repairs
+//   deterministically. An LLM-free contributor gate, not the product tour.
+//
+// Deliberately NOT at parity with a user's `init`: workspace registration,
+// `install:browsers`, agent-skill install and MCP client registration are all
+// suppressed below, because they write outside the throwaway workspace. Those
+// keep unit coverage; `smoke:pack` suppresses them for the same reason.
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const argv = process.argv.slice(2)
@@ -22,11 +32,12 @@ const portArg = argv.indexOf('--port')
 const agentArg = argv.indexOf('--agent')
 const requestedAgent = agentArg >= 0 ? argv[agentArg + 1] : 'auto'
 const featureName = 'storefront_journey'
-const demoIntent = 'Test only the single ordered happy-path purchase: create Espresso Beans at 1800 cents and require SKU espresso-beans in catalog, reserve two units and require available stock to drop by two in inventory, then apply WELCOME10 in checkout and require a placed order totaling 3240 cents. Each assertion must pass before calling the next service; unrelated validation routes are outside this feature.'
+const demoIntent = 'Test the library lending contracts: borrowing a book with copies free reduces its available count by exactly one; returning an open loan marks it returned and restores the available count to what it was before; and when every copy is on loan a further request is refused with 409 without taking a copy. A Wizard of Earthsea has a single copy. The 404s for unknown books and loans are fixture support, not requirements.'
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-demo-'))
 const projectDir = path.join(tempRoot, 'demo-project')
 const appDir = path.join(projectDir, 'demo-app')
+const flightAppDir = path.join(projectDir, 'flight-app')
 const cacheDir = path.join(os.tmpdir(), 'canary-lab-npm-cache')
 
 const childEnv = {
@@ -124,6 +135,10 @@ function replaceOnce(filePath, find, replacement) {
   fs.writeFileSync(filePath, source.replace(find, replacement))
 }
 
+// The ten defects, in the order the five journeys expose them. Each entry is
+// the LLM-free stand-in for one heal cycle: wait for the failure it names, patch
+// exactly one application file, signal a rerun. Order is load-bearing — it is
+// the contract order in demo-app/REQUIREMENTS.md.
 const repairSteps = [
   {
     service: 'catalog-service',
@@ -158,23 +173,95 @@ const repairSteps = [
       'const total = (cart: Cart): number => Math.round(subtotal(cart) * (100 - cart.discountPercent) / 100)',
     ),
   },
+  {
+    service: 'checkout-service',
+    expectedFailure: 'Received: 1440',
+    hypothesis: 'A second discount code is added to the first instead of replacing it.',
+    fixDescription: 'Assign the new discount percentage rather than accumulating it.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'checkout-service', 'server.ts'),
+      'cart.discountPercent += percent',
+      'cart.discountPercent = percent',
+    ),
+  },
+  {
+    service: 'inventory-service',
+    expectedFailure: 'Received: 120',
+    hypothesis: 'The oversell refusal reports on-hand stock instead of what is still available.',
+    fixDescription: 'Report the available count in the 409 body.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'inventory-service', 'server.ts'),
+      "res.end(JSON.stringify({ error: 'not enough stock', available: item.onHand }))",
+      "res.end(JSON.stringify({ error: 'not enough stock', available: available(item) }))",
+    ),
+  },
+  {
+    service: 'inventory-service',
+    expectedFailure: 'Received: 400',
+    hypothesis: 'Reserving an unknown SKU is reported as a malformed request instead of a missing resource.',
+    fixDescription: 'Return 404 when the SKU does not exist.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'inventory-service', 'server.ts'),
+      "    if (!item) {\n      res.writeHead(400)\n      res.end(JSON.stringify({ error: 'unknown sku' }))",
+      "    if (!item) {\n      res.writeHead(404)\n      res.end(JSON.stringify({ error: 'unknown sku' }))",
+    ),
+  },
+  {
+    service: 'catalog-service',
+    expectedFailure: 'Received: 1800',
+    hypothesis: 'A catalog price update is accepted but never applied to the product.',
+    fixDescription: 'Persist priceCents on PATCH.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'catalog-service', 'server.ts'),
+      '      if (patch.name !== undefined) product.name = patch.name\n',
+      '      if (patch.name !== undefined) product.name = patch.name\n      if (patch.priceCents !== undefined) product.priceCents = patch.priceCents\n',
+    ),
+  },
+  {
+    service: 'checkout-service',
+    expectedFailure: 'Received: 4000',
+    hypothesis: 'Reading a cart returns the undiscounted subtotal, disagreeing with what checkout charges.',
+    fixDescription: 'Return the discounted total when reading a cart.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'checkout-service', 'server.ts'),
+      'res.end(JSON.stringify({ ...cart, total: subtotal(cart) }))',
+      'res.end(JSON.stringify({ ...cart, total: total(cart) }))',
+    ),
+  },
+  {
+    service: 'catalog-service',
+    expectedFailure: 'Received: true',
+    hypothesis: 'Delete removes the entry after the matched one, so the requested product survives.',
+    fixDescription: 'Splice at the matched index.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'catalog-service', 'server.ts'),
+      'products.splice(index + 1, 1)',
+      'products.splice(index, 1)',
+    ),
+  },
+  {
+    service: 'checkout-service',
+    expectedFailure: 'Received: 2000',
+    hypothesis: 'A rejected discount code wipes the discount already on the cart.',
+    fixDescription: 'Leave the live discount untouched when refusing an unknown code.',
+    apply: (worktree) => replaceOnce(
+      path.join(worktree, 'checkout-service', 'server.ts'),
+      '        cart.discountPercent = 0\n        res.writeHead(400)',
+      '        res.writeHead(400)',
+    ),
+  },
 ]
 
-function scaffoldInternalSmokeFeature() {
-  const source = path.join(repoRoot, 'tools', 'fixtures', 'demo-storefront-feature')
-  const target = path.join(projectDir, 'features', featureName)
-  fs.mkdirSync(path.dirname(target), { recursive: true })
-  fs.cpSync(source, target, { recursive: true })
-}
-
-function commitProductRepo() {
-  if (!fs.existsSync(path.join(appDir, '.git'))) run('git', ['init', '-q'], appDir)
-  run('git', ['add', '-A'], appDir)
+// Each shipped sample app becomes its own product git repository, because that
+// is what Canary Lab points at: a repo, not a subdirectory of the workspace.
+function commitProductRepo(dir, message) {
+  if (!fs.existsSync(path.join(dir, '.git'))) run('git', ['init', '-q'], dir)
+  run('git', ['add', '-A'], dir)
   run('git', [
     '-c', 'user.email=demo@canary-lab.local',
     '-c', 'user.name=Canary Demo',
-    'commit', '-qm', 'storefront baseline',
-  ], appDir)
+    'commit', '-qm', message,
+  ], dir)
 }
 
 async function provision() {
@@ -198,9 +285,12 @@ async function provision() {
   run('npx', ['canary-lab', 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], tempRoot)
   run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'], projectDir)
 
-  say('Creating the bare storefront product repository')
-  commitProductRepo()
-  if (!interactive) scaffoldInternalSmokeFeature()
+  say('Committing the two sample product repositories')
+  commitProductRepo(appDir, 'storefront baseline')
+  commitProductRepo(flightAppDir, 'lending baseline')
+  // Nothing else. The suite ships inside the scaffold `canary-lab init` just
+  // laid down, which is the whole point: what a developer sees here is exactly
+  // what a user sees, because it came from the same command.
 }
 
 async function bootUi(agent) {
@@ -233,34 +323,65 @@ async function bootUi(agent) {
 }
 
 async function runInteractive(port, agent) {
-  const url = `http://127.0.0.1:${port}/?dialog=flight-new`
+  const base = `http://127.0.0.1:${port}`
   say('Workspace ready — the tester owns the journey from here')
-  console.log(`    Open:       ${url}`)
-  console.log(`    Repository: ${appDir}`)
-  console.log(`    Intent:     ${demoIntent}`)
   console.log(`    Agent:      ${agent}`)
-  console.log('\n    In the dialog: paste the intent, choose the repository, then select Plan flight.')
-  console.log('    Nothing has run or healed yet. The UI stays up until Ctrl-C.')
+  console.log('\n    Route A — repair loop (a suite already ships for this app)')
+  console.log(`      Open:  ${base}/?feature=${featureName}`)
+  console.log(`      Repository: ${appDir}`)
+  console.log('      Start a run. Catalog, inventory and checkout boot together. Two')
+  console.log('      journeys are sound and pass immediately; the other five are ordered')
+  console.log('      chains, so the agent sees one broken contract per cycle and each')
+  console.log('      repair reveals the next — ten cycles to green.')
+
+  console.log('\n    Route B — full Flight (no suite exists for this app yet)')
+  console.log(`      Open:  ${base}/?dialog=flight-new`)
+  console.log(`      Repository: ${flightAppDir}`)
+  console.log('      Paste the intent below, choose that repository, then select Plan flight.')
+  console.log('      Watch it scan the repo, derive requirements, author the tests, make the')
+  console.log('      port injectable, run, heal one defect, and export the evaluation report.')
+  console.log(`      Intent: ${demoIntent}`)
+
+  console.log('\n    Nothing has run or healed yet — both routes wait for you.')
   console.log(`    Ctrl-C stops the server but retains the workspace at:\n    ${projectDir}`)
   await new Promise(() => {})
 }
 
 async function waitForRepair(port, runId, stepIndex) {
   const repair = repairSteps[stepIndex]
-  return until(`repair cycle ${stepIndex + 1} to expose ${repair.service}`, 240_000, async () => {
-    const detail = await api(port, 'GET', `/api/runs/${encodeURIComponent(runId)}`)
-    if (detail.manifest.status === 'failed' || detail.manifest.status === 'aborted') {
-      throw new Error(`run ended ${detail.manifest.status} before ${repair.service} could be repaired`)
-    }
-    const failureText = (detail.summary?.failed ?? [])
-      .map((failure) => failure.error?.message ?? '')
-      .join('\n')
-    return detail.manifest.status === 'healing'
-      && detail.manifest.healCycles === stepIndex + 1
-      && failureText.includes(repair.expectedFailure)
-      ? detail
-      : null
-  })
+  // Remember the last thing we actually saw. A timeout here used to say only
+  // "timed out waiting for cycle N", which cannot distinguish "the run never
+  // healed" from "it healed but surfaced a different assertion than this step
+  // expects" — the two have completely different fixes.
+  let lastStatus = 'unknown'
+  let lastCycles = -1
+  let lastFailureText = ''
+  try {
+    return await until(`repair cycle ${stepIndex + 1} to expose ${repair.service}`, 240_000, async () => {
+      const detail = await api(port, 'GET', `/api/runs/${encodeURIComponent(runId)}`)
+      if (detail.manifest.status === 'failed' || detail.manifest.status === 'aborted') {
+        throw new Error(`run ended ${detail.manifest.status} before ${repair.service} could be repaired`)
+      }
+      lastStatus = detail.manifest.status
+      lastCycles = detail.manifest.healCycles ?? -1
+      lastFailureText = (detail.summary?.failed ?? [])
+        .map((failure) => failure.error?.message ?? '')
+        .join('\n')
+      return detail.manifest.status === 'healing'
+        && detail.manifest.healCycles === stepIndex + 1
+        && lastFailureText.includes(repair.expectedFailure)
+        ? detail
+        : null
+    })
+  } catch (error) {
+    if (!/^timed out/.test(error.message)) throw error
+    throw new Error(
+      `${error.message}\n`
+      + `    expected cycle ${stepIndex + 1} with a failure containing ${JSON.stringify(repair.expectedFailure)}\n`
+      + `    last seen: status=${lastStatus} healCycles=${lastCycles}\n`
+      + `    last failure text:\n${lastFailureText.split('\n').map((l) => `      ${l}`).join('\n') || '      (none)'}`,
+    )
+  }
 }
 
 async function runSmoke(port) {
@@ -273,8 +394,23 @@ async function runSmoke(port) {
   let worktree
   for (const [index, repair] of repairSteps.entries()) {
     const failed = await waitForRepair(port, runId, index)
-    worktree = failed.manifest.worktrees?.storefront
-    if (!worktree) throw new Error('the storefront run did not create its per-run worktree')
+    // R91: the demo must not be a wall of red. On the FIRST cycle — every other
+    // contract still broken — a sound journey has to already be passing, or the
+    // suite cannot show that the harness reports what it finds rather than
+    // repairing whatever it touches.
+    if (index === 0) {
+      const passed = failed.summary?.passedNames ?? []
+      if (!passed.some((name) => name.startsWith('test-case-j0'))) {
+        throw new Error(`no sound journey passed on the first cycle; passed: [${passed.join(', ')}]`)
+      }
+      console.log(`    (J0 already green while ${repairSteps.length} contracts are still broken)`)
+    }
+    // Each service is its own repo entry, so each gets its own worktree of the
+    // shared source tree. A repair must land in the worktree the BROKEN service
+    // is actually serving from — patching a sibling's copy would leave the
+    // failing process untouched and the rerun would fail identically.
+    worktree = failed.manifest.worktrees?.[repair.service]
+    if (!worktree) throw new Error(`the run did not create a per-run worktree for "${repair.service}"`)
     say(`Repair cycle ${index + 1}: fixing ${repair.service} only`)
     repair.apply(worktree)
     await api(port, 'POST', `/api/runs/${encodeURIComponent(runId)}/signal`, {
@@ -307,15 +443,29 @@ async function runSmoke(port) {
   ]
   const problems = []
   if (manifest.status !== 'passed') problems.push(`run ended ${manifest.status}, expected passed`)
-  if (manifest.healCycles !== 3) problems.push(`recorded ${manifest.healCycles} repair cycles, expected 3`)
-  if (changedFiles !== 3) problems.push(`captured ${changedFiles} changed files, expected exactly 3`)
+  // Derived from repairSteps, never hardcoded: the count moved 3 -> 10 when the
+  // demo grew to five journeys, and a literal here silently outlived it.
+  if (manifest.healCycles !== repairSteps.length) {
+    problems.push(`recorded ${manifest.healCycles} repair cycles, expected ${repairSteps.length}`)
+  }
+  // Still exactly one server file per service, however many cycles it took.
+  if (changedFiles !== expectedFileNames.length) {
+    problems.push(`captured ${changedFiles} changed files, expected exactly ${expectedFileNames.length}`)
+  }
   if (JSON.stringify(capturedFileNames) !== JSON.stringify(expectedFileNames)) {
     problems.push(`captured [${capturedFileNames.join(', ')}], expected one server file from each service`)
   }
 
+  const finalPassed = settled.summary?.passedNames ?? []
+  for (const sound of ['test-case-j0', 'test-case-j6']) {
+    if (!finalPassed.some((name) => name.startsWith(sound))) {
+      problems.push(`sound journey ${sound} is not green at the end; passed: [${finalPassed.join(', ')}]`)
+    }
+  }
+
   say(`Verdict: ${manifest.status.toUpperCase()} — ${manifest.healCycles} repair cycles, ${changedFiles} changed files`)
   if (problems.length > 0) throw new Error(problems.join('; '))
-  console.log('\n✔ smoke:demo passed — one dependency chain revealed and repaired catalog, inventory, then checkout.')
+  console.log(`\n✔ smoke:demo passed — seven journeys: two sound throughout, five chained, ${repairSteps.length} defects exposed one at a time across catalog, inventory and checkout.`)
 
   if (keepOpen) {
     console.log(`    Open: http://127.0.0.1:${port}/?feature=${featureName}&run=${encodeURIComponent(runId)}`)

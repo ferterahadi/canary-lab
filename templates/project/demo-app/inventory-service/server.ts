@@ -59,7 +59,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && segments[0] === 'stock' && segments[2] === 'reserve') {
     const item = stock.get(segments[1])
     if (!item) {
-      res.writeHead(404)
+      res.writeHead(400)
       res.end(JSON.stringify({ error: 'unknown sku' }))
       return
     }
@@ -72,7 +72,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (wanted > available(item)) {
       res.writeHead(409)
-      res.end(JSON.stringify({ error: 'not enough stock', available: available(item) }))
+      res.end(JSON.stringify({ error: 'not enough stock', available: item.onHand }))
       return
     }
     item.reserved += wanted

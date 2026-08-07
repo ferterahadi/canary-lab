@@ -1,9 +1,13 @@
-# Canary Storefront — the one full-Flight demo
+# Canary Storefront — the repair-loop demo
 
-This is a deliberately small, un-onboarded product repository. There is no
-prebuilt feature under `features/`: the demo begins before Repo scan so a tester
-can watch Canary Lab conduct the complete Flight instead of opening a suite that
-has already skipped half the journey.
+A deliberately small product repository that **ships with its suite already
+written**: `features/storefront_journey/`. Open it, press Run, and watch the
+repair loop work — every journey starts broken, and each repair reveals the next
+defect until the suite is green.
+
+For the other half of the product — Canary Lab authoring a suite from nothing —
+see `flight-app/`, which ships with no suite at all so a Flight has something to
+onboard.
 
 The repository contains one customer flow across three services:
 
@@ -26,24 +30,15 @@ passes, the next layer becomes observable on the following run. A successful
 demo therefore leaves separate Journal entries and application changes under
 all three service directories.
 
-## Start the interactive demo
+## Start the demo
 
-From the Canary Lab source checkout, run:
+From a scaffolded workspace, `npx canary-lab ui`, then open the
+`storefront_journey` suite and press **Run**.
 
-```bash
-npm run demo
-```
-
-The command creates a fresh persistent workspace, initializes this folder as
-its own product git repository, starts Canary Lab, and prints a link to the
-new-Flight dialog. It does not start a Flight or heal anything. Use the
-repository path and intent printed in the terminal, then control every stage
-from the UI.
-
-The full Flight must cover Repo scan, Suite setup, Requirements, Test authoring
-and coverage, Parallel readiness, Test Run and iterative healing, and Evaluation
-Report. Agent timelines, service logs, captured changes, and the Journal remain
-in the workspace after the server stops.
+From the Canary Lab source checkout, `npm run demo` does the same thing the long
+way round: it packs the current build, runs the real `canary-lab init`, and opens
+the UI — so a contributor sees exactly what a user sees. It starts nothing; every
+run and repair is yours to trigger.
 
 ## Service commands
 

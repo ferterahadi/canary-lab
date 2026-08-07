@@ -73,10 +73,11 @@ run(
   tempRoot,
 )
 
-// The demo storefront is deliberately a bare product repository. It has no
-// pre-authored feature because the public demo must begin at Repo scan and let
-// the tester conduct every Flight stage. A missing app contract or service here
-// is a demo that silently did not ship.
+// The scaffold ships its own demonstration (R89): the storefront product repo
+// AND the suite that exercises it, so a first-time user can press Run and watch
+// fail -> repair -> green without authoring anything. `npm run demo` adds
+// nothing on top — it runs this same `init` — so anything missing from this
+// list is missing from the product tour too.
 const scaffoldPaths = [
   'package.json',
   'features/README.md',
@@ -86,6 +87,16 @@ const scaffoldPaths = [
   'demo-app/catalog-service/server.ts',
   'demo-app/inventory-service/server.ts',
   'demo-app/checkout-service/server.ts',
+  'features/storefront_journey/feature.config.cjs',
+  'features/storefront_journey/playwright.config.ts',
+  'features/storefront_journey/e2e/storefront.spec.ts',
+  'features/storefront_journey/e2e/helpers/api.ts',
+  // The Flight demo's target: un-onboarded on purpose, so a Flight has a repo
+  // to conduct from Repo scan through Evaluation. No suite ships for it.
+  'flight-app/package.json',
+  'flight-app/README.md',
+  'flight-app/REQUIREMENTS.md',
+  'flight-app/lending-service/server.ts',
 ]
 
 // One prompt per agent-spawning path that ships, plus a schema sidecar — the
@@ -128,8 +139,9 @@ for (const relPath of [
   'features/broken_todo_api/feature.config.cjs',
   'features/flaky_orders_api/feature.config.cjs',
   'features/tricky_checkout_api/feature.config.cjs',
-  // Earlier 1.6.0 drafts shipped partially onboarded demo suites. They bypassed
-  // the beginning of a Flight, so the canonical scaffold must not retain them.
+  // Earlier 1.6.0 drafts shipped partially onboarded demo suites under these
+  // names. The suite that ships now is `storefront_journey` (asserted above);
+  // any of these reappearing means a stale template shipped.
   'features/demo_catalog/feature.config.cjs',
   'features/demo_inventory/feature.config.cjs',
   'features/demo_storefront/feature.config.cjs',

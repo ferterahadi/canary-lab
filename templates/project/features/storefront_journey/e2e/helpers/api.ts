@@ -43,6 +43,16 @@ export class StorefrontApi {
     body: JSON.stringify({ name, priceCents }),
   })
 
+  listProducts = () => request<Product[]>(`${this.catalog}/products`)
+
+  patchProduct = (id: string, patch: { name?: string; priceCents?: number }) =>
+    request<Product>(`${this.catalog}/products/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    })
+
+  deleteProduct = (id: string) => request<never>(`${this.catalog}/products/${id}`, { method: 'DELETE' })
+
   getStock = (sku: string) => request<StockItem>(`${this.inventory}/stock/${sku}`)
 
   reserve = (sku: string, quantity: number) => request<StockItem>(`${this.inventory}/stock/${sku}/reserve`, {
@@ -51,6 +61,8 @@ export class StorefrontApi {
   })
 
   createCart = () => request<Cart>(`${this.checkoutBase}/carts`, { method: 'POST' })
+
+  getCart = (cartId: string) => request<Cart>(`${this.checkoutBase}/carts/${cartId}`)
 
   addItem = (cartId: string, product: Product, quantity: number) => request<Cart>(`${this.checkoutBase}/carts/${cartId}/items`, {
     method: 'POST',

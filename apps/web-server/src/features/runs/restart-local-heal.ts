@@ -20,6 +20,7 @@ import {
 } from './logic/runtime/env-switcher/switch'
 import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { makeAttachRunStreams } from './run-stream-wiring'
+import { settleOrchestratorRun } from './logic/settle-run'
 
 export function makeRestartLocalHeal(
   ctx: ServerContext,
@@ -135,16 +136,7 @@ export function makeRestartLocalHeal(
       broker.resetPane('agent')
       broker.push('agent', `\n[orchestrator] Restarting heal with ${agentChoice}...\n`)
       registry.set(runId, orch)
-      orch.restartHealFromFailure(text)
-        .then(async (status) => {
-          await orch.stop(status).catch(() => {})
-          registry.delete(orch.runId)
-        })
-        .catch(async (err) => {
-          broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
-          await orch.stop('aborted').catch(() => {})
-          registry.delete(orch.runId)
-        })
+      void settleOrchestratorRun(orch.restartHealFromFailure(text), { orch, registry, broker, runnerLog })
       return { ok: true as const }
   }
 

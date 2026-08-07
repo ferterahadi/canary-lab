@@ -68,8 +68,8 @@ entry. The three places that must agree for the web aliases are
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Scaffolded workspace files. `demo-app/` is the one full-Flight demo: a bare product repo with catalog, inventory, and checkout services plus one ordered requirements document. No feature ships around it, so a tester starts at Repo scan instead of inheriting completed stages. Each service contains one contract defect; the end-to-end journey exposes them in dependency order so a successful Run records three repair cycles and changes in all three service directories. |
-| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions`. `tools/fixtures/demo-storefront-feature/` is contributor-only evidence for the deterministic demo smoke; it is not copied into consumer workspaces. |
+| `templates/project/` | Scaffolded workspace files, including the product's own demonstration. `demo-app/` is a three-service storefront (catalog, inventory, checkout) with an ordered requirements document, and `features/storefront_journey/` is the suite that exercises it — both ship, so a first-time user can press Run and watch fail → repair → green without authoring anything. The services carry ten contract defects between them; the five ordered journeys expose them one at a time, so a successful Run records ten repair cycles and changes in all three service directories. |
+| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions`. `tools/fixtures/` holds contributor-only fixtures; the storefront suite itself now ships in the scaffold at `templates/project/features/storefront_journey/`. |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
@@ -261,7 +261,7 @@ So inter-service URLs and config-file listen ports (e.g. Spring
 `server.port=${port.api}`, `dev.url=http://localhost:${port.web}`) follow the
 run's allocation. Test helpers resolve the target as
 `CANARY_PORT_api → GATEWAY_URL → hardcoded default` (see
-`tools/fixtures/demo-storefront-feature/e2e/helpers/api.ts`). The CLI `env`
+`templates/project/features/storefront_journey/e2e/helpers/api.ts`). The CLI `env`
 switching path passes no resolver, so it stays a verbatim copy.
 
 ### Always-worktree runs (R80)

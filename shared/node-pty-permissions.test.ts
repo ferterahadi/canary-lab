@@ -2,8 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-// @ts-expect-error — sibling .mjs has no .d.ts; runtime import works.
-import { fixSpawnHelperPermissions, resolveNodePtyRoot } from './fix-node-pty-permissions.mjs'
+import { ensureSpawnHelperExecutable, fixSpawnHelperPermissions, resolveNodePtyRoot } from './node-pty-permissions'
 
 let tmp: string
 beforeEach(() => {
@@ -67,17 +66,31 @@ describe('fixSpawnHelperPermissions', () => {
   })
 })
 
+describe('ensureSpawnHelperExecutable', () => {
+  it('fixes the real node-pty install and is idempotent', () => {
+    // The regression this guards: a workspace whose npm blocked install
+    // scripts left spawn-helper at 0o644, every run aborted with
+    // "posix_spawnp failed", and nothing said why.
+    const first = ensureSpawnHelperExecutable()
+    expect(first.length).toBeGreaterThan(0)
+    for (const file of first) {
+      expect(fs.statSync(file).mode & 0o777).toBe(0o755)
+    }
+    expect(ensureSpawnHelperExecutable()).toEqual(first)
+  })
+})
+
 describe('resolveNodePtyRoot', () => {
   it('resolves node-pty when installed', () => {
     // node-pty is a real dependency in this repo, so the real resolver should
     // find it. We don't assert the exact path — just that it ends in `node-pty`.
     const root = resolveNodePtyRoot()
     expect(root).not.toBeNull()
-    expect(path.basename(root)).toBe('node-pty')
+    expect(path.basename(root!)).toBe('node-pty')
   })
 
   it('returns null when require.resolve throws', () => {
-    const fakeRequire = { resolve: () => { throw new Error('not found') } } as unknown as NodeJS.Require
+    const fakeRequire = { resolve: () => { throw new Error('not found') } }
     expect(resolveNodePtyRoot(fakeRequire)).toBeNull()
   })
 })

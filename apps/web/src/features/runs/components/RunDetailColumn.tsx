@@ -12,13 +12,13 @@ import { ChangesTab } from './ChangesTab'
 import { JournalTab } from './JournalTab'
 import { ManualHealBanner } from './ManualHealBanner'
 import { PlaywrightPanel } from './RunDiagnosticsPanels'
-import { RunLogsTab, RunOverviewTab, VerifyOverviewTab } from './RunOverviewTabs'
+import { RunLogsTab, RunOverviewTab, VerifyOverviewTab, repoServiceCount } from './RunOverviewTabs'
 import { RunPane } from './RunPane'
 import type { PlaywrightView } from './RunPlaybackPanels'
 import { ServiceTabButton, TabButton } from './RunServicePanels'
 import { isTerminalRunStatus } from './run-export-links'
 
-export { canRestartHeal, servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
+export { canRestartHeal, repoServiceCount, servicePrimaryLabel, serviceTabLabelParts } from './RunOverviewTabs'
 export { PlaywrightPlayback, shortLocation } from './RunPlaybackPanels'
 export { assertionFilename, assertionHref, downloadEvaluationReport, evaluationFilename, evaluationHref, hasAssertionVideos, isAssertionExportable, isEvaluationExportable, isTerminalRunStatus } from './run-export-links'
 
@@ -234,6 +234,7 @@ export function RunDetailColumn({
                     branch={branchForService(s, repoBranches)}
                     active={i === serviceIdx}
                     onClick={() => setServiceIdx(i)}
+                    siblings={repoServiceCount(s, services)}
                   />
                 ))}
               </>

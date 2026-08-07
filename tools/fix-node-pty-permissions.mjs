@@ -1,60 +1,21 @@
 #!/usr/bin/env node
-// node-pty 1.1.0 ships the unix `spawn-helper` binary without the execute bit
-// in its npm tarball, so every fresh `npm install` leaves it as mode 644 and
-// `pty.spawn()` fails with "posix_spawnp failed". This is a known upstream
-// packaging bug; we fix it on our side via a postinstall hook so canary-lab
-// works after a clean install on every machine.
+// Belt for the node-pty spawn-helper permission bug — see
+// shared/node-pty-permissions.ts for what it is and why.
 //
-// Silent no-op when node-pty isn't installed (e.g. Windows-only consumer
-// who pruned it) or when the prebuild for this platform doesn't exist.
+// This hook is NOT the real fix any more, because npm can refuse to run it
+// (`ignore-scripts`, npm 11's `allowScripts` gate) and a workspace installed
+// that way used to fail every run with an undiagnosable abort. The spawner
+// applies the same fix at the point of use. This just gets it done earlier
+// when npm does let us.
+//
+// Silent no-op when `dist/` isn't built yet — that is the source-repo install,
+// where the build follows and the runtime path covers it regardless.
 
-import fs from 'node:fs'
-import path from 'node:path'
-import { createRequire } from 'node:module'
+const distModule = new URL('../dist/shared/node-pty-permissions.js', import.meta.url)
 
-/**
- * Resolve node-pty's package root, or null if it isn't installed.
- * Exported (not just for postinstall) so tests can stub the resolver.
- */
-export function resolveNodePtyRoot(requireFn = createRequire(import.meta.url)) {
-  try {
-    return path.dirname(requireFn.resolve('node-pty/package.json'))
-  } catch {
-    return null
-  }
-}
-
-/**
- * chmod 0o755 every spawn-helper candidate under the given node-pty root.
- * Returns the list of files that were actually chmodded (existed and were
- * writable). Missing files are silently skipped — different platforms ship
- * different prebuilds.
- */
-export function fixSpawnHelperPermissions(ptyRoot, platform = process.platform, arch = process.arch) {
-  if (platform === 'win32' || ptyRoot == null) return []
-  const candidates = [...new Set([
-    path.join(ptyRoot, 'build', 'Release', 'spawn-helper'),
-    path.join(ptyRoot, 'prebuilds', `${platform}-${arch}`, 'spawn-helper'),
-    path.join(ptyRoot, 'prebuilds', 'darwin-x64', 'spawn-helper'),
-    path.join(ptyRoot, 'prebuilds', 'darwin-arm64', 'spawn-helper'),
-    path.join(ptyRoot, 'prebuilds', 'linux-x64', 'spawn-helper'),
-    path.join(ptyRoot, 'prebuilds', 'linux-arm64', 'spawn-helper'),
-  ])]
-  const fixed = []
-  for (const file of candidates) {
-    try {
-      fs.chmodSync(file, 0o755)
-      fixed.push(file)
-    } catch {
-      // missing prebuild for this triple — skip silently
-    }
-  }
-  return fixed
-}
-
-// Run as CLI when invoked directly (postinstall entry point). Skip when
-// imported by tests.
-const isCli = import.meta.url === `file://${process.argv[1]}`
-if (isCli) {
-  fixSpawnHelperPermissions(resolveNodePtyRoot())
+try {
+  const { ensureSpawnHelperExecutable } = await import(distModule.href)
+  ensureSpawnHelperExecutable()
+} catch {
+  // not built, or node-pty absent — the spawner will handle it
 }

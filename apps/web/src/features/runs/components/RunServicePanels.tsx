@@ -15,13 +15,16 @@ export function ServiceTabButton({
   branch,
   active,
   onClick,
+  siblings = 1,
 }: {
   service: ServiceManifestEntry
   branch: RepoBranchSnapshot | null
   active: boolean
   onClick: () => void
+  /** Services sharing this one's repo, including itself. */
+  siblings?: number
 }) {
-  const labelParts = serviceTabLabelParts(service, branch)
+  const labelParts = serviceTabLabelParts(service, branch, siblings)
   return (
     <button
       type="button"
@@ -66,11 +69,14 @@ export function ServiceTabButton({
 export function ServiceCard({
   service,
   branch,
+  siblings = 1,
 }: {
   service: ServiceManifestEntry
   branch: RepoBranchSnapshot | null
+  /** Services sharing this one's repo, including itself. */
+  siblings?: number
 }) {
-  const primaryLabel = servicePrimaryLabel(service, branch?.name)
+  const primaryLabel = servicePrimaryLabel(service, branch?.name, siblings)
   return (
     <li className="cl-card group/card p-3">
       {/* The title starts on the card's own left edge — flush with the label

@@ -57,6 +57,33 @@ describe('ServiceCard', () => {
     expect(container.querySelector('a[href="http://localhost:51774/actuator/health"]')).toBeTruthy()
   })
 
+  it('titles each card with the service when one repo hosts several', () => {
+    // The demo's shape: catalog, inventory and checkout all out of `storefront`.
+    // Every card used to be titled "storefront", so the stack was unreadable.
+    const demoServices = ['catalog-service', 'inventory-service', 'checkout-service'].map((name) => ({
+      ...service,
+      repoName: 'storefront',
+      name,
+      safeName: name,
+      command: `npm run dev:${name.split('-')[0]}`,
+    })) as ServiceManifestEntry[]
+
+    render(<>{demoServices.map((s) => (
+      <ServiceCard key={s.safeName} service={s} branch={null} siblings={demoServices.length} />
+    ))}</>)
+
+    const titles = [...container.querySelectorAll('li > div > div.truncate')].map((n) => n.textContent)
+    expect(titles).toEqual(['catalog-service', 'inventory-service', 'checkout-service'])
+    expect(titles).not.toContain('storefront')
+  })
+
+  it('keeps the repo name as the title for a lone service in its repo', () => {
+    render(<ServiceCard service={{ ...service, repoName: 'oddle-merchant-pass' } as ServiceManifestEntry} branch={branch} siblings={1} />)
+
+    const title = container.querySelector('li > div > div.truncate')?.textContent
+    expect(title).toBe('oddle-merchant-pass')
+  })
+
   it('holds the ref and url rows open with a placeholder when there is nothing to show', () => {
     render(<ServiceCard service={{ ...service, healthUrl: undefined } as ServiceManifestEntry} branch={null} />)
 

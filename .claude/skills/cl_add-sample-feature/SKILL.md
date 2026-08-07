@@ -5,11 +5,22 @@ description: Use when creating or editing a sample feature under templates/proje
 
 # Authoring Canary Lab Sample Features
 
-The public scaffold intentionally ships **no pre-authored feature**. It ships one
-bare product repository at `templates/project/demo-app/` so `npm run demo` can
-show the complete Flight from Repo scan through Evaluation. Adding any feature
-under `templates/project/features/` changes that product contract and requires
+The public scaffold **ships its own demonstration** (R89, 2026-08-07). It carries
+the storefront product repository at `templates/project/demo-app/` *and* the
+`storefront_journey` suite that exercises it, so a first-time user can press Run
+and watch fail → repair → green without authoring anything.
+
+This reversed an earlier rule that the scaffold ship no pre-authored feature.
+The trade was made deliberately: discoverability for a first-time user beats a
+clean scaffold for an experienced one, and `features/README.md` tells users they
+can delete the samples once they have seen them. Adding a *further* feature under
+`templates/project/features/` still changes the product contract and still needs
 explicit product approval.
+
+`npm run demo` adds **nothing** of its own — it packs the current build, runs the
+real `canary-lab init`, and opens the UI. That is what makes it a developer's
+test of the init experience: anything missing from the scaffold is missing from
+the demo, visibly.
 
 Template files only ship via the build (`templates/project/` →
 `dist/templates/`, copied by `tools/prepare-assets.mjs`). Editing them without
@@ -24,14 +35,38 @@ catalog-service → inventory-service → checkout-service
  product + SKU       reservation        final total
 ```
 
-Each service contains one application defect. The acceptance journey stops at
-the first broken contract, so repairing catalog reveals inventory, and repairing
-inventory reveals checkout. Keep that dependency chain: a repair agent that can
-fix the whole demo in one observed failure has erased the multi-cycle evidence.
+`demo-app/REQUIREMENTS.md` states five journeys as ten ordered contracts, and
+each service carries three or four application defects — ten in all. Every
+journey is ONE Playwright test whose assertions are ordered, and
+`maxFailures: 1` stops the run at the first failing journey, so a repair agent
+sees exactly one broken contract per cycle and each repair reveals the next.
 
-The deterministic contributor gate uses
-`tools/fixtures/demo-storefront-feature/`. That fixture is internal evidence for
-`npm run smoke:demo`; it must never be copied into a scaffolded workspace.
+Keep all of that when editing. Three traps, each of which cost a full gate run:
+
+- **`maxFailures` in `playwright.config.ts` does not decide anything.**
+  `healOnFailureThreshold` in `feature.config.cjs` becomes `--max-failures=N` on
+  the command line and overrides it. The fixture sets it to `1`; at the default
+  `2`, two journeys fail together and the chain stops being a chain.
+- **Defects must be stateless.** The services hold data in memory and are NOT
+  restarted between heal cycles. A defect that leaks state (a reservation that
+  survives its own refusal) drifts every rerun and eventually breaks the setup
+  of the very journey that was meant to catch it.
+- **A defect must sit on a code path no earlier journey exercises**, or it fails
+  the wrong journey first — and repairing it then looks like a no-op.
+
+The suite declares each service as **its own repo entry with exactly one start
+command**, all three pointing at `demo-app/`. The schema does allow one repo
+entry to carry several start commands, but the demo deliberately does not use
+that: one entry per service is the shape a real deployment has, it gives each
+service its own per-run worktree so a repair lands only in the checkout the
+broken service serves from, and it makes the run's Changes tab group repairs by
+service instead of pooling them under one repo name.
+
+The suite lives at `templates/project/features/storefront_journey/` and ships
+with every scaffold. `npm run smoke:demo` repairs it deterministically as an
+LLM-free gate; `npm run demo` leaves it for the tester. `smoke:pack` asserts it
+reaches a scaffolded workspace — a template edit that never reached
+`dist/templates/` fails there.
 
 ## Anatomy
 
@@ -60,13 +95,14 @@ Spec rules:
 - Specs MUST import the fixture:
   `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'`
 - Helpers resolve the target as `CANARY_PORT_<slot>` → `GATEWAY_URL` → hardcoded
-  default (see `tools/fixtures/demo-storefront-feature/e2e/helpers/api.ts`) so
+  default (see `templates/project/features/storefront_journey/e2e/helpers/api.ts`) so
   the same spec runs locally and against a remote env.
 
 ## Checklist
 
 1. Confirm the new feature is meant to ship in every consumer workspace. The
-   canonical demo must remain un-onboarded.
+   scaffold already carries `storefront_journey`; a second shipped feature needs
+   explicit product approval.
 2. Start from `npx canary-lab new feature`; rename consistently (folder,
    `config.name`, `startCommand.name`, envset file names).
 3. Declare ports + `${port.<slot>}` everywhere a port appears — never hardcode.

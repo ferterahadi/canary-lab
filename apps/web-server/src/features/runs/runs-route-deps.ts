@@ -29,6 +29,7 @@ import type { BackupRecord } from './logic/runtime/env-switcher/types'
 import type { ExecutionType } from '../../../../../shared/verification'
 import type { makeAttachRunStreams, makeRestartExternalRun } from './run-stream-wiring'
 import type { buildRunScheduling } from './run-scheduling'
+import { settleOrchestratorRun } from './logic/settle-run'
 
 export interface RunsRouteDepsParts {
   attachRunStreams: ReturnType<typeof makeAttachRunStreams>
@@ -311,16 +312,7 @@ export function buildRunsRouteDeps(
             registry.delete(orch.runId)
           })
       } else {
-        orch.runFullCycle()
-          .then(async (status) => {
-            await orch.stop(status).catch(() => {})
-            registry.delete(orch.runId)
-          })
-          .catch(async (err) => {
-            broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
-            await orch.stop('aborted').catch(() => {})
-            registry.delete(orch.runId)
-          })
+        void settleOrchestratorRun(orch.runFullCycle(), { orch, registry, broker, runnerLog })
       }
         // Register synchronously so the scheduler's next fit() / promotion sees
         // this run as active before any await yields.
@@ -452,16 +444,7 @@ export function buildRunsRouteDeps(
       const broker = brokers.get(runId)!
       broker.push('agent', '\n[orchestrator] Retesting remaining failed, skipped, and pending tests...\n')
       registry.set(runId, orch)
-      orch.restartTerminalRun()
-        .then(async (status) => {
-          await orch.stop(status).catch(() => {})
-          registry.delete(orch.runId)
-        })
-        .catch(async (err) => {
-          broker.push('agent', `\n[orchestrator error] ${String(err)}\n`)
-          await orch.stop('aborted').catch(() => {})
-          registry.delete(orch.runId)
-        })
+      void settleOrchestratorRun(orch.restartTerminalRun(), { orch, registry, broker, runnerLog })
       return { ok: true as const, mode: 'remaining' as const }
     },
     restartHeal: restartLocalHeal,

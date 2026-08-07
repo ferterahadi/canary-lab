@@ -101,7 +101,7 @@ describe('MCP HTTP server (smoke)', () => {
     const projectRoot = path.join(workspace, 'project')
     fs.cpSync(path.join(repoRoot, 'templates', 'project'), projectRoot, { recursive: true })
     fs.cpSync(
-      path.join(repoRoot, 'tools', 'fixtures', 'demo-storefront-feature'),
+      path.join(repoRoot, 'templates', 'project', 'features', 'storefront_journey'),
       path.join(projectRoot, 'features', 'storefront_journey'),
       { recursive: true },
     )

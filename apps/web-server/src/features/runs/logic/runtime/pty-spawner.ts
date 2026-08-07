@@ -3,6 +3,8 @@
 // dependency-injectable so tests can stand in a fake `PtyHandle` without
 // touching real PTYs.
 
+import { ensureSpawnHelperExecutable } from '../../../../../../../shared/node-pty-permissions'
+
 export interface PtySpawnOptions {
   command: string
   cwd: string
@@ -31,8 +33,13 @@ let cachedRealFactory: PtyFactory | null = null
 // don't crash on import.
 function loadRealFactory(): PtyFactory {
   if (cachedRealFactory) return cachedRealFactory
-   
+
   const pty = require('node-pty') as typeof import('node-pty')
+  // node-pty ships `spawn-helper` without the execute bit, and the postinstall
+  // hook that used to fix it is skippable by npm. Do it here too: once per
+  // process, before any spawn, so an install that blocked scripts still works
+  // instead of aborting every run with "posix_spawnp failed".
+  ensureSpawnHelperExecutable()
   cachedRealFactory = (opts: PtySpawnOptions): PtyHandle => {
     // Respect the user's $SHELL so commands run with the same config as
     // their terminal (zsh + .zshrc, bash + .bashrc, etc.). `-i` makes the

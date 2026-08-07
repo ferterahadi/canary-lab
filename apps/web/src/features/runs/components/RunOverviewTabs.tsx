@@ -18,19 +18,38 @@ export function canRestartHeal(status: string): boolean {
   return isRestartableRunStatus(status)
 }
 
+/** How many services in this run come out of the same repo as `service`. One
+ *  repo hosting several services makes its name shared context, not identity. */
+export function repoServiceCount(
+  service: Pick<ServiceManifestEntry, 'repoName'>,
+  services: readonly Pick<ServiceManifestEntry, 'repoName'>[],
+): number {
+  return services.filter((s) => s.repoName === service.repoName).length
+}
+
 export function servicePrimaryLabel(
   service: Pick<ServiceManifestEntry, 'name' | 'repoName'>,
   repoNameFallback?: string | null,
+  /** Siblings sharing this service's repo, including itself. */
+  siblings = 1,
 ): string {
+  // The repo name is the better identity for a one-service repo: service names
+  // there are often the whole stack spelled out ("my-backend gateway stack").
+  // But a repo hosting several services gives every card and tab the SAME
+  // label — three cards all reading "storefront" tell you nothing about which
+  // is catalog and which is checkout. Then the service name is the identity and
+  // the repo is context the cwd and ref rows already carry.
+  if (siblings > 1) return service.name
   return service.repoName?.trim() || repoNameFallback?.trim() || service.name
 }
 
 export function serviceTabLabelParts(
   service: Pick<ServiceManifestEntry, 'name' | 'repoName'>,
   branch: RepoBranchSnapshot | null,
+  siblings = 1,
 ): { primary: string; branch: string | null } {
   return {
-    primary: servicePrimaryLabel(service, branch?.name),
+    primary: servicePrimaryLabel(service, branch?.name, siblings),
     branch: branch ? branchLabel(branch) : null,
   }
 }
@@ -117,7 +136,7 @@ export function RunOverviewTab({
         ) : (
           <ul className="space-y-2">
             {services.map((s) => (
-              <ServiceCard key={s.safeName} service={s} branch={branchForService(s, repoBranches)} />
+              <ServiceCard key={s.safeName} service={s} branch={branchForService(s, repoBranches)} siblings={repoServiceCount(s, services)} />
             ))}
           </ul>
         )}
