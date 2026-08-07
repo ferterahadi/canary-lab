@@ -27,6 +27,11 @@ function run(command, args, cwd, extraEnv = {}) {
       // entry after this throwaway install is removed. Skip client registration
       // so the smoke run never touches the developer's live MCP clients.
       CANARY_LAB_SKIP_CLIENT_MCP: '1',
+      // The scaffold's postinstall now downloads the Playwright browser, which
+      // lands in the developer's shared browser cache — outside the throwaway
+      // workspace, like the MCP registrations above. `canary-lab
+      // install-browsers` honours this even though `playwright install` does not.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
       ...extraEnv,
     },
   })

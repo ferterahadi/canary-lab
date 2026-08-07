@@ -171,10 +171,29 @@ describe("main (upgrade orchestration)", () => {
     expect(fs.existsSync(path.join(root, "AGENTS.md"))).toBe(false)
 
     const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf-8"))
-    expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent")
+    expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent && canary-lab install-browsers")
     // The workspace registry is owned solely by `canary-lab init`; upgrade must
     // not introduce or re-stamp entries.
     expect(readWorkspaceRegistry(home).workspaces).toEqual([])
+  })
+
+  // A workspace scaffolded before the browser step joined the hook keeps
+  // running the old one-command postinstall forever unless upgrade migrates it.
+  it("migrates a pre-consolidation postinstall to include the browser step", async () => {
+    const root = mkProjectRoot()
+    const pkgPath = path.join(root, "package.json")
+    fs.writeFileSync(pkgPath, JSON.stringify({
+      name: "old-workspace",
+      scripts: { postinstall: "canary-lab upgrade --silent", upgrade: "canary-lab upgrade" },
+    }, null, 2) + "\n")
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main([])
+
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"))
+    expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent && canary-lab install-browsers")
+    expect(pkg.scripts.upgrade).toBe("canary-lab upgrade")
   })
 
   it("re-points already-configured MCP clients on upgrade", async () => {

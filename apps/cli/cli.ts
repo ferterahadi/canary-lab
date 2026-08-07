@@ -6,6 +6,7 @@ import { runUi } from './ui-command'
 import { main as runMcp } from './mcp'
 import { main as runAgent } from './agent'
 import { main as runSetup } from './setup'
+import { main as installBrowsers } from './install-browsers'
 import { main as createFeature } from './new-feature'
 import { main as runEnv } from './env'
 import { main as runBoot } from './boot'
@@ -41,6 +42,7 @@ export function printUsage(): void {
   console.log(`  canary-lab boot <feature> ${dim('[env]')}      ${dim('(boot services + hold, no tests; needs `canary-lab ui` running)')}`)
   console.log(`  canary-lab boot stop <runId>`)
   console.log(`  canary-lab upgrade ${dim('[--silent] [--check] [--force-archive]')}`)
+  console.log(`  canary-lab install-browsers      ${dim('(runs from the scaffold\'s postinstall; honours PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD)')}`)
   line()
 }
 
@@ -87,6 +89,9 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<void
       return
     case 'upgrade':
       await upgradeProject(args, { confirm: confirmYn })
+      return
+    case 'install-browsers':
+      await installBrowsers(args)
       return
     // Test execution still lives in the web UI. Feature/env commands above are
     // deterministic wrappers for agents and compatibility.

@@ -176,8 +176,7 @@ CI / offline? Pass `--no-install`, then run the steps manually:
 ```bash
 npx canary-lab init my-lab --no-install
 cd my-lab
-npm install
-npm run install:browsers
+npm install          # postinstall also downloads the Playwright browser
 npx canary-lab ui
 ```
 

@@ -62,9 +62,9 @@ describe('buildPackageJson', () => {
     expect(parsed.private).toBe(true)
     expect(parsed.version).toBe('0.1.0')
     expect(parsed.scripts).toEqual({
-      postinstall: 'canary-lab upgrade --silent',
+      postinstall: 'canary-lab upgrade --silent && canary-lab install-browsers',
       upgrade: 'canary-lab upgrade',
-      'install:browsers': 'playwright install chromium',
+      'install:browsers': 'canary-lab install-browsers',
     })
     expect(parsed.devDependencies).toEqual({
       '@playwright/test': '^1.54.2',
@@ -183,11 +183,11 @@ describe('main (init-project orchestration)', () => {
       ['install'],
       expect.objectContaining({ cwd: target }),
     )
-    expect(execFileSync).toHaveBeenCalledWith(
-      'npm',
-      ['run', 'install:browsers'],
-      expect.objectContaining({ cwd: target }),
-    )
+    // One install: the scaffold's postinstall pulls the browser down, so init
+    // never issues a second command for it.
+    expect(execFileSync.mock.calls.filter((c) => c[0] === 'npm')).toEqual([
+      ['npm', ['install'], expect.objectContaining({ cwd: target })],
+    ])
     // npm `install` was mocked, so node_modules/canary-lab never materialized →
     // setup runs without a cliPath override.
     expect(setupProject).toHaveBeenCalledExactlyOnceWith(
@@ -210,7 +210,7 @@ describe('main (init-project orchestration)', () => {
       {},
     )
     expect(messages.join('\n')).toContain('npm install')
-    expect(messages.join('\n')).toContain('npm run install:browsers')
+    expect(messages.join('\n')).not.toContain('npm run install:browsers')
   })
 
   it('registers MCP with the stable local cli path after a successful install', async () => {

@@ -18,8 +18,8 @@ import path from 'path'
 // - `npm run smoke:demo` drives the same shipped suite's ten repairs
 //   deterministically. An LLM-free contributor gate, not the product tour.
 //
-// Deliberately NOT at parity with a user's `init`: workspace registration,
-// `install:browsers`, agent-skill install and MCP client registration are all
+// Deliberately NOT at parity with a user's `init`: workspace registration, the
+// browser download, agent-skill install and MCP client registration are all
 // suppressed below, because they write outside the throwaway workspace. Those
 // keep unit coverage; `smoke:pack` suppresses them for the same reason.
 
@@ -48,6 +48,11 @@ const childEnv = {
   CANARY_LAB_HOME: tempRoot,
   CANARY_LAB_AGENT_HOME: tempRoot,
   CANARY_LAB_SKIP_CLIENT_MCP: '1',
+  // The scaffold's postinstall downloads the Playwright browser into the
+  // developer's shared cache — outside the throwaway workspace. Suppress it and
+  // use whatever chromium the machine already has, which is what this script
+  // has always done.
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
 }
 
 let step = 0

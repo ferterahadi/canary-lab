@@ -12,6 +12,7 @@ import {
 } from './upgrade-migration'
 import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
 import { refreshCanaryLabMcp, findStaleCanaryLabMcp } from './mcp-refresh'
+import { SCAFFOLD_POSTINSTALL } from './scaffold-scripts'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
 const MARKER_END = '<!-- managed:canary-lab:end -->'
@@ -292,14 +293,15 @@ export async function main(
     updated += 1
   }
 
-  // 5. Ensure postinstall script exists in project package.json
+  // 5. Ensure the postinstall hook exists — and carries the browser step, so a
+  // workspace scaffolded before the two were merged picks it up here.
   const pkgJsonPath = path.join(projectRoot, 'package.json')
   if (fs.existsSync(pkgJsonPath)) {
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
       const scripts = pkg.scripts ?? {}
-      if (scripts.postinstall !== 'canary-lab upgrade --silent') {
-        scripts.postinstall = 'canary-lab upgrade --silent'
+      if (scripts.postinstall !== SCAFFOLD_POSTINSTALL) {
+        scripts.postinstall = SCAFFOLD_POSTINSTALL
         pkg.scripts = scripts
         fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + '\n')
         log('  Updated package.json (added postinstall hook)', opts)

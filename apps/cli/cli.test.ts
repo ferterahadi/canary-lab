@@ -8,6 +8,7 @@ const runAgent = vi.fn(async () => {})
 const runSetup = vi.fn(async () => {})
 const createFeature = vi.fn(async () => {})
 const runEnv = vi.fn(async () => {})
+const installBrowsers = vi.fn(async () => {})
 
 vi.mock('./init-project', () => ({ main: initProject }))
 vi.mock('./upgrade', () => ({ main: upgradeProject }))
@@ -17,6 +18,7 @@ vi.mock('./agent', () => ({ main: runAgent }))
 vi.mock('./setup', () => ({ main: runSetup }))
 vi.mock('./new-feature', () => ({ main: createFeature }))
 vi.mock('./env', () => ({ main: runEnv }))
+vi.mock('./install-browsers', () => ({ main: installBrowsers }))
 
 const { main, printUsage } = await import('./cli')
 
@@ -29,6 +31,7 @@ beforeEach(() => {
   runSetup.mockClear()
   createFeature.mockClear()
   runEnv.mockClear()
+  installBrowsers.mockClear()
 })
 
 describe('printUsage', () => {
@@ -48,6 +51,7 @@ describe('printUsage', () => {
     expect(out).toContain('canary-lab env apply <feature> <set>')
     expect(out).toContain('canary-lab env revert <feature>')
     expect(out).toContain('canary-lab upgrade')
+    expect(out).toContain('canary-lab install-browsers')
     expect(out).not.toContain('canary-lab run')
   })
 })
@@ -96,6 +100,11 @@ describe('main (cli routing)', () => {
       ['--silent'],
       expect.objectContaining({ confirm: expect.any(Function) }),
     )
+  })
+
+  it('routes "install-browsers"', async () => {
+    await main(['install-browsers'])
+    expect(installBrowsers).toHaveBeenCalledExactlyOnceWith([])
   })
 
   it.each([['run']] as const)('"%s" prints a migration hint and exits 1', async (cmd) => {

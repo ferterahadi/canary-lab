@@ -5,6 +5,7 @@ import { ok, section, step, line, path as ansiPath } from '../../shared/cli-ui/u
 import { fail } from '../../shared/cli-ui/ui'
 import { copyDirRecursive } from '../../shared/lib/copy-dir'
 import { runAsScript } from './run-as-script'
+import { SCAFFOLD_SCRIPTS } from './scaffold-scripts'
 import { setup as setupCanaryLab } from './setup'
 import { isValidPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 
@@ -97,11 +98,7 @@ export function buildPackageJson(projectName: string, packageSpec: string): stri
       private: true,
       version: '0.1.0',
       description: 'Canary Lab project scaffold',
-      scripts: {
-        postinstall: 'canary-lab upgrade --silent',
-        upgrade: 'canary-lab upgrade',
-        'install:browsers': 'playwright install chromium',
-      },
+      scripts: SCAFFOLD_SCRIPTS,
       devDependencies: {
         '@playwright/test': '^1.54.2',
         '@types/node': '^22.0.0',
@@ -165,15 +162,15 @@ export async function main(
     }
   }
 
-  // Install deps + the Playwright browser so the workspace is ready to boot in
-  // one step. `--no-install` skips this (CI / offline); the manual commands are
-  // printed in "Next steps" when skipped or on failure.
+  // One install. The scaffold's postinstall syncs the workspace and downloads
+  // the Playwright browser, so there is no second command to forget.
+  // `--no-install` skips this (CI / offline); the manual command is printed in
+  // "Next steps" when skipped or on failure.
   let installed = false
   if (!noInstall) {
     try {
       section('Installing dependencies')
       execFileSync('npm', ['install'], { cwd: targetDir, stdio: 'inherit' })
-      execFileSync('npm', ['run', 'install:browsers'], { cwd: targetDir, stdio: 'inherit' })
       installed = true
     } catch (err) {
       console.log(`Dependency install skipped: ${(err as Error).message}`)
@@ -207,7 +204,6 @@ export async function main(
   step(stepNum++, `cd ${folder}`)
   if (!installed) {
     step(stepNum++, 'npm install')
-    step(stepNum++, 'npm run install:browsers')
   }
   step(stepNum++, 'npx canary-lab ui')
   if (!setupOk) {
