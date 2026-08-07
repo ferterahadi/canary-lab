@@ -91,6 +91,13 @@ const scaffoldPaths = [
   'features/storefront_journey/playwright.config.ts',
   'features/storefront_journey/e2e/storefront.spec.ts',
   'features/storefront_journey/e2e/helpers/api.ts',
+  // Requirements + coverage ship with the suite: the collected source doc and
+  // the generated summary its `@req-*` tags map onto. Without these two the
+  // Requirements and Test-authoring stages read as never started on a fresh
+  // scaffold, and the coverage ledger has nothing to score against.
+  'features/storefront_journey/docs/storefront_journey-prd.md',
+  'features/storefront_journey/docs/_prd-summary.json',
+  'features/storefront_journey/docs/_prd-summary.md',
   // The Flight demo's target: un-onboarded on purpose, so a Flight has a repo
   // to conduct from Repo scan through Evaluation. No suite ships for it.
   'flight-app/package.json',

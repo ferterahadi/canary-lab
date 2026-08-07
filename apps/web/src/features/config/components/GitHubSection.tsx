@@ -32,14 +32,16 @@ export function GitHubSection() {
           className="inline-block h-2 w-2 rounded-full"
           style={{ background: status?.authenticated ? 'var(--success)' : 'var(--text-muted)' }}
         />
-        <span className="text-sm" style={{ color: 'var(--text-primary)' }}>
+        {/* The option-row label voice this modal's other rows use, not 14px —
+            that's the dialog TITLE's size. */}
+        <span className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>
           {loading
             ? 'Checking…'
             : status?.authenticated
               ? `Connected${status.account ? ` as ${status.account}` : ''}${status.host && status.host !== 'github.com' ? ` (${status.host})` : ''}`
               : status?.installed ? 'Not signed in' : 'GitHub CLI not installed'}
         </span>
-        <button type="button" data-testid="settings-github-refresh" onClick={load} className="cl-button ml-auto px-2 py-0.5 text-[11px]">
+        <button type="button" data-testid="settings-github-refresh" onClick={load} className="cl-button ml-auto px-2 py-0.5 text-xs">
           Refresh
         </button>
       </div>
@@ -51,7 +53,9 @@ export function GitHubSection() {
           </code>
         </div>
       )}
-      <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+      {/* Same size as the modal's other option descriptions — this line plays
+          exactly that role for the row above it. */}
+      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
         Canary only reads this — it never signs in for you or handles your token.
       </div>
     </div>

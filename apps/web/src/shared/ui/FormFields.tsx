@@ -34,7 +34,9 @@ export function FieldRow({
   if (layout === 'inline') {
     return (
       <label htmlFor={htmlFor} className="flex items-center gap-3 py-1.5">
-        <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider" style={{ color: 'var(--text-muted)', minWidth: labelWidth }}>
+        {/* Same 10px caps as the stacked variant below — one field-label size,
+            whichever way the row is laid out. */}
+        <span className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)', minWidth: labelWidth }}>
           {label}
           {hint && <HintIcon hint={hint} />}
         </span>

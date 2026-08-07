@@ -16,11 +16,15 @@ import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 
 type NewFlightPhase = 'form' | 'planning' | 'proposal'
 
-export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTaskId, onOpenFlight, onClose }: {
+export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTaskId, newFlightPrefill, onOpenFlight, onClose }: {
   feature: string | null
   intent: FlightLauncherIntent
   fromStage: FlightStageKey | null
   resumePlanTaskId?: string | null
+  /** Seed for new-flight mode (the first-run guide's one-click sample repo).
+   *  Applied to the INITIAL state only, so it never fights the user's edits or
+   *  a resumed pre-flight task's own values. */
+  newFlightPrefill?: { repoPaths: string[]; description: string } | null
   onOpenFlight: (flightId: string) => void
   onClose: () => void
 }) {
@@ -30,8 +34,11 @@ export function useFlightStartDialog({ feature, intent, fromStage, resumePlanTas
   const [resolvedFeature, setResolvedFeature] = useState<string | null>(feature)
   const [entry, setEntry] = useState<FlightEntryOptions | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [description, setDescription] = useState('')
-  const [repoPaths, setRepoPaths] = useState<string[]>([])
+  // A prefill only applies to new-flight mode; the feature-scoped path loads its
+  // own values from the flight's entry options a few effects down.
+  const seed = feature === null && !resumePlanTaskId ? newFlightPrefill : null
+  const [description, setDescription] = useState(seed?.description ?? '')
+  const [repoPaths, setRepoPaths] = useState<string[]>(seed?.repoPaths ?? [])
   // Fresh mode never asks where to re-enter — a changed intent/repo set is only
   // valid from the beginning — so it opens pre-picked there and stays put.
   const [picked, setPicked] = useState<FlightStageKey | 'continue' | null>(

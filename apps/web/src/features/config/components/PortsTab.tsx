@@ -12,6 +12,7 @@ import {
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import { useCachedDoc } from './config-doc-cache'
 import { patchFileName } from '@shared/portify-overlay'
+import { portInjectability, startCommandPortSlotCounts, type PortInjectability } from '@shared/launcher/port-injectability'
 import {
   deriveRepoName,
   parseRepo,
@@ -138,15 +139,8 @@ export function PortsTab({
   //   declared  — every start command carries a slot, no overlay
   //   partial   — some commands have slots, others would still clash
   //   none      — no slots anywhere; Portify (or hand-declaring) is the way in
-  const commands = repos.flatMap((r) => r.startCommands)
-  const slotted = commands.filter((c) => (c.ports?.length ?? 0) > 0)
-  const bandState: 'verified' | 'declared' | 'partial' | 'none' = portified
-    ? 'verified'
-    : slotted.length === 0
-    ? 'none'
-    : slotted.length === commands.length
-    ? 'declared'
-    : 'partial'
+  const counts = startCommandPortSlotCounts(repos)
+  const bandState: 'verified' | PortInjectability = portified ? 'verified' : portInjectability(repos)
   // Which services the saved overlay actually patched — used to fold the
   // "stored in" patch path into each repo card header (verified state only),
   // so the service list isn't enumerated a second time by SavedOverlayPanel.
@@ -217,7 +211,7 @@ export function PortsTab({
                   ? (activeHere.status === 'ready-to-save' ? 'Portify — ready to save' : 'Portify in progress')
                   : bandState === 'verified' ? 'Portified — boots concurrently'
                   : bandState === 'declared' ? 'Injectable — declared in config'
-                  : bandState === 'partial' ? `Partially injectable — ${slotted.length} of ${commands.length} start commands have slots`
+                  : bandState === 'partial' ? `Partially injectable — ${counts.slotted} of ${counts.total} start commands have slots`
                   : 'Not injectable — no port slots declared'}
               </span>
             </span>
@@ -373,7 +367,9 @@ export function PortsTab({
                 className="flex items-center justify-between gap-2 px-3 py-2"
                 style={{ borderBottom: '1px solid var(--border-default)' }}
               >
-                <span className="truncate text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+                {/* Same row-label size as the Service tab's repo card — a repo
+                    name inside the dialog is not a dialog title. */}
+                <span className="truncate text-[12.5px] font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
                   {repoName}
                 </span>
                 {patchFile && (

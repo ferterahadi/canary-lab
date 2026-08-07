@@ -151,7 +151,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                   value={portInput}
                   onChange={(e) => setPortInput(e.target.value)}
                   disabled={portBusy || restarting}
-                  className="cl-input w-28 px-2 py-1 text-sm"
+                  className="cl-input w-28 px-2 py-1 text-xs"
                   style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
                 />
                 <button
@@ -224,7 +224,10 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                       className="mt-1"
                     />
                     <div className="flex-1">
-                      <div className="text-sm" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
+                      {/* Option rows across the app are 12.5/medium over a 12px
+                          muted description — `text-sm` here matched the dialog
+                          title and left label and description a hair apart. */}
+                      <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
                       <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{opt.description}</div>
                     </div>
                   </label>
@@ -251,7 +254,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                       className="mt-1"
                     />
                     <div className="flex-1">
-                      <div className="text-sm" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
+                      <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
                       <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{opt.description}</div>
                     </div>
                   </label>
@@ -272,7 +275,7 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <div className="text-sm" style={{ color: 'var(--text-primary)' }}>Open a draft PR when a run heals green</div>
+                  <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>Open a draft PR when a run heals green</div>
                   <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                     One pull request per feature, force-pushed to the same branch each time so it always carries the newest fix. Nothing is pushed for a run that failed or gave up.
                   </div>

@@ -264,7 +264,71 @@ describe('stage summary + drill-through (R6)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="failing-open-test-case-req-r5-path-happy-clean-number"]')?.click()
     })
-    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', 'test-case-req-r5-path-happy-clean-number')
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', { test: 'test-case-req-r5-path-happy-clean-number' })
+  })
+
+  it('reports the repair fixes as one link into that run’s Changes tab', async () => {
+    // The stage used to render a whole second card here (a RepairedRepoCard per
+    // repo, each with Open-in-editor + Propose-PR). Those actions live on the run
+    // detail's Changes tab, which owns them along with the per-repo branch and PR
+    // state — so the stage reports the fact and hands over.
+    const onOpenRun = vi.fn()
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: {
+        runId: 'run-9',
+        status: 'passed',
+        healCycles: 7,
+        fixCapture: {
+          capturedAt: '2026-01-01T00:00:00Z',
+          repos: [
+            { repoName: 'catalog-service', patchPath: '/p/catalog.patch', patchFile: 'catalog.patch', repoRoot: '/repos/catalog', files: 1 },
+            { repoName: 'checkout-service', patchPath: '/p/checkout.patch', patchFile: 'checkout.patch', repoRoot: '/repos/checkout', files: 2 },
+          ],
+        },
+      },
+      summary: { complete: true, total: 7, passed: 7, failed: [] },
+    })
+    await renderWithDrill(manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'run' ? { evidence: { runId: 'run-9', status: 'passed', healCycles: 7 } } : {}),
+      })),
+    }), { onOpenRun })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    // No card, no per-repo buttons — one segment on the run's stats line.
+    expect(container.querySelector('[data-testid="fixes-captured"]')).toBeNull()
+    const link = container.querySelector<HTMLButtonElement>('[data-testid="run-hero-fixes"]')
+    expect(link?.textContent).toContain('2 repos')
+    // Which repo and how much of it survives as the segment's tooltip.
+    expect(link?.closest('[title]')?.getAttribute('title')).toBe('catalog-service · 1 file\ncheckout-service · 2 files')
+    await act(async () => { link?.click() })
+    expect(onOpenRun).toHaveBeenCalledWith('checkout', 'run-9', { tab: 'changes' })
+  })
+
+  it('omits the fixes link when the run captured no repair', async () => {
+    const onOpenRun = vi.fn()
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-9',
+      manifest: { runId: 'run-9', status: 'passed', healCycles: 0 },
+      summary: { complete: true, total: 7, passed: 7, failed: [] },
+    })
+    await renderWithDrill(manifest({
+      status: 'done',
+      currentStage: null,
+      links: { runId: 'run-9' },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }), { onOpenRun })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-run"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="run-hero-fixes"]')).toBeNull()
   })
 
   it('R80: a run repaired by an external client shows an honest external-heal note in the hero', async () => {

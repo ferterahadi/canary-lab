@@ -231,10 +231,16 @@ export interface JournalAppendInput {
   journalPath?: string
 }
 
-export type JournalOutcome = 'all_passed' | 'partial' | 'no_change' | 'regression'
+export type JournalOutcome = 'all_passed' | 'advanced' | 'partial' | 'no_change' | 'regression'
 
 export interface SummaryForJournalOutcome {
   failed?: Array<{ name?: unknown }>
+  // `unknown` mirrors SummaryShape in run-verdict.ts: this is parsed JSON off
+  // disk, so the field's type is a claim until checked. Kept as a local
+  // structural type rather than importing SummaryShape — heal-journal is loaded
+  // inside the Playwright reporter process, and run-verdict's neighbours pull in
+  // the AST extractor and feature loader.
+  passedNames?: unknown
 }
 
 export function failedNamesFromSummary(summary: SummaryForJournalOutcome): string[] {
@@ -245,6 +251,30 @@ export function failedNamesFromSummary(summary: SummaryForJournalOutcome): strin
     : []
 }
 
+// The passing set recorded by a summary, or null when the summary has no
+// `passedNames` field at all. The null case is load-bearing: it is the only
+// thing separating "nothing had passed yet" from "this summary predates the
+// field", and those two demand opposite regression rules.
+function passedNameSetFromSummary(summary: SummaryForJournalOutcome): Set<string> | null {
+  if (!Array.isArray(summary.passedNames)) return null
+  return new Set(summary.passedNames.filter((n): n is string => typeof n === 'string' && n.length > 0))
+}
+
+// Classify a heal cycle by comparing the failing set before the fix with the
+// one after the verification rerun.
+//
+// `regression` means one thing only: a test that was GREEN before this fix is
+// red now. It deliberately does not mean "a failing name we hadn't seen".
+// Under `--max-failures=1` the suite aborts at the first failure, so a cycle
+// that actually works surfaces the next test as the blocker — a name that was
+// in neither the before-failures nor the before-passes because it had never
+// executed. Reading that as a regression is how run 2026-08-07T0709-33ng got
+// four consecutive `regression` labels for four successful cycles, each one
+// telling the next cycle (via OUTCOME_STEER) to revert a fix that had worked.
+// That case is `advanced`: the blocker cleared and the suite went deeper.
+//
+// Order matters. `regression` outranks `advanced` so a cycle that fixes one
+// test and breaks a green one still steers a revert.
 export function classifyJournalOutcome(
   before: SummaryForJournalOutcome,
   after: SummaryForJournalOutcome,
@@ -257,13 +287,28 @@ export function classifyJournalOutcome(
   for (const name of beforeNames) {
     if (!afterNames.has(name)) fixed += 1
   }
-  let introduced = 0
+  const introduced: string[] = []
   for (const name of afterNames) {
-    if (!beforeNames.has(name)) introduced += 1
+    if (!beforeNames.has(name)) introduced.push(name)
   }
 
-  if (introduced > 0 || afterNames.size > beforeNames.size) return 'regression'
+  const beforePassed = passedNameSetFromSummary(before)
+  if (!beforePassed) {
+    // Legacy summaries carry no passing set, so a broken-green test and a
+    // never-run one are indistinguishable here. Keep the old any-new-failure
+    // reading: a spurious `regression` costs one revert cycle, while the other
+    // direction would let a real regression through wearing a progress badge.
+    if (introduced.length > 0 || afterNames.size > beforeNames.size) return 'regression'
+    return fixed > 0 ? 'partial' : 'no_change'
+  }
+
+  if (introduced.some((name) => beforePassed.has(name))) return 'regression'
+  if (fixed > 0 && introduced.length > 0) return 'advanced'
   if (fixed > 0) return 'partial'
+  // Nothing cleared. This also absorbs the rare "blocker unchanged but the run
+  // surfaced a never-run failure" case: the actionable fact for the next cycle
+  // is still that the fix did not move the blocker, which is what `no_change`
+  // steers on.
   return 'no_change'
 }
 

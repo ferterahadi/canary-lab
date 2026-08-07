@@ -315,6 +315,16 @@ export interface ProjectConfig {
   port?: number
 }
 
+/** Mirrors the server's `OnboardingSamples` (config/routes/onboarding.ts). */
+export interface OnboardingSamples {
+  /** The shipped worked suite, or null once it (or its product repo) is gone. */
+  sampleSuite: string | null
+  /** Absolute path to the bare repo a Flight can onboard, or null once deleted. */
+  sampleFlightRepo: string | null
+  /** Prefill for that Flight's "what should it test?" field. */
+  sampleFlightDescription: string | null
+}
+
 export interface PortChangeResult {
   restarting: boolean
   port?: number
@@ -327,6 +337,14 @@ export interface PortChangeResult {
 export function getProjectConfig(opts?: ClientOptions): Promise<ProjectConfig> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   return request<ProjectConfig>(`${baseUrl}/api/project-config`, { method: 'GET' }, fetchImpl)
+}
+
+/** What `init`'s own demonstration still looks like on disk — the first-run
+ *  guide's only server input. Derived per call; the samples are disposable, so
+ *  deleting one retires its guide step on the next read. */
+export function getOnboardingSamples(opts?: ClientOptions): Promise<OnboardingSamples> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<OnboardingSamples>(`${baseUrl}/api/onboarding`, { method: 'GET' }, fetchImpl)
 }
 
 export function putProjectConfig(

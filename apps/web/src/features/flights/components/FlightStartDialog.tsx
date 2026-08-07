@@ -107,6 +107,7 @@ export function FlightStartDialog({
   intent = 'refly',
   fromStage = null,
   resumePlanTaskId,
+  newFlightPrefill,
   onClose,
   onOpenFlight,
 }: {
@@ -127,6 +128,11 @@ export function FlightStartDialog({
    *  Flights-pill pre-flight row routes this. New-flight mode only; the dialog
    *  fetches the task and drops straight into the planning/proposal view. */
   resumePlanTaskId?: string | null
+  /** Open new-flight mode with the repo and intent already filled in — the
+   *  first-run guide's one-click path onto the bundled sample repo. Seeds the
+   *  fields the user would otherwise have to find; both stay editable. Ignored
+   *  in feature-scoped mode, whose prefill comes from the flight's own record. */
+  newFlightPrefill?: { repoPaths: string[]; description: string } | null
   /** Accepted for call-site compatibility (App still passes the flattened
    *  workspace repos); the picker now navigates the filesystem via the shared
    *  FolderPickerModal, so no seed list is needed. */
@@ -170,7 +176,7 @@ export function FlightStartDialog({
     launchProposal,
     stopAndStartFresh,
     start,
-  } = useFlightStartDialog({ feature, intent, fromStage, resumePlanTaskId, onOpenFlight, onClose })
+  } = useFlightStartDialog({ feature, intent, fromStage, resumePlanTaskId, newFlightPrefill, onOpenFlight, onClose })
 
   // The number of automated steps behind a full flight (every pickable stage
   // except the "from the beginning" entry itself) — drives the preview count.

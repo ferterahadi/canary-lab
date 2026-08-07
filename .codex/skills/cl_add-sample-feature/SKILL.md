@@ -38,8 +38,9 @@ catalog-service → inventory-service → checkout-service
  product + SKU       reservation        final total
 ```
 
-`demo-app/REQUIREMENTS.md` states five journeys as ten ordered contracts, and
-each service carries three or four application defects — ten in all. Every
+`demo-app/REQUIREMENTS.md` states seven journeys as twelve contracts — five
+ordered pairs plus two sound ones (J0, J6) that pass from the first run — and the
+services carry ten application defects between them. Every
 journey is ONE Playwright test whose assertions are ordered, and
 `maxFailures: 1` stops the run at the first failing journey, so a repair agent
 sees exactly one broken contract per cycle and each repair reveals the next.

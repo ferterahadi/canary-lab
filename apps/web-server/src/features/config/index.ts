@@ -3,6 +3,7 @@ import { isActiveRunStatus } from '../../../../../shared/run-state'
 import { featuresRoutes } from './routes/features'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
+import { onboardingRoutes } from './routes/onboarding'
 import { runsRoutes, type ExternalHealAgentRequest } from '../runs/routes/runs'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from '../wizard/routes/tests-draft'
 import { externalHealRoutes, makeExternalHealAuditLogger } from '../runs/routes/external-heal'
@@ -69,7 +70,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     workspaceEvents,
   } = ctx
 
-  await app.register(featuresRoutes, { featuresDir, dirtySpecStore })
+  await app.register(featuresRoutes, { featuresDir, logsDir, dirtySpecStore })
   // A suite's `name` IS its identity — renaming it must carry every record that
   // stamped the old name along, or the history orphans behind a name nothing
   // resolves (a flight row and its suite showing up as two separate things).
@@ -106,4 +107,5 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     countActiveRuns: () => runStore.list().filter((run) => isActiveRunStatus(run.status)).length,
     onPortChange: opts.onPortChange,
   })
+  await app.register(onboardingRoutes, { projectRoot, featuresDir })
 }

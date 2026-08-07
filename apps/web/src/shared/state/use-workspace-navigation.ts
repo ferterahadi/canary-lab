@@ -5,6 +5,7 @@ import {
   readPersistedView,
   type ConfigTab,
   type RouteDialog,
+  type RunOpenTarget,
   type WorkspaceView,
 } from '../lib/workspace-view-state'
 import {
@@ -78,11 +79,12 @@ export interface WorkspaceNavigation {
   /** Open a flight's detail (null = the flights landing list). */
   openFlight: (flightId: string | null) => void
   /** Select a run in the workspace (clears any pending selection guard).
-   *  `focusTest` (R82) is a run-summary failed-entry name: the run detail opens on
-   *  its Playwright tab, scrolled to that test. `fromFlight` (R83) is the flight
-   *  that drilled here — omit it and any previous origin is cleared, so only a
-   *  real drill-through leaves a way back. */
-  navigateToRun: (feature: string, runId: string, focusTest?: string, fromFlight?: string | null) => void
+   *  `target` says what to land on: `test` (R82) is a run-summary failed-entry
+   *  name — the Playwright tab, scrolled to that test; `tab` names a tab outright
+   *  (the flight's Test Run stage sends its captured fixes to Changes).
+   *  `fromFlight` (R83) is the flight that drilled here — omit it and any previous
+   *  origin is cleared, so only a real drill-through leaves a way back. */
+  navigateToRun: (feature: string, runId: string, target?: RunOpenTarget, fromFlight?: string | null) => void
   /** Open a feature's coverage ledger. `fromFlight` (R83) follows the same rule
    *  as navigateToRun's: set by the flight's drill-through, cleared otherwise. */
   navigateToCoverage: (feature: string, fromFlight?: string | null) => void
@@ -92,6 +94,9 @@ export interface WorkspaceNavigation {
   /** R82: which failing test the open run detail should land on, or null. Paired
    *  with its run so a stale focus can never apply to a different one. */
   focusTest: { runId: string; test: string } | null
+  /** Which tab the open run detail should land on, or null. Paired with its run
+   *  under the same rule as `focusTest`. */
+  runTab: NavState['runTab']
   /** Select a freshly-started run into the detail pane (seeds the pending ref). */
   selectStartedRun: (runId: string) => void
   /** Mirror refs read synchronously by the WS handler / refreshFeatures so those
@@ -132,6 +137,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
   const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
+  const [runTab, setRunTab] = useState<NavState['runTab']>(SEED.runTab)
   const [returnFlight, setReturnFlight] = useState<string | null>(SEED.returnFlight)
 
   const pendingRunSelectionRef = useRef<string | null>(PERSISTED.run)
@@ -160,6 +166,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     resumePlanTaskId,
     portifyTarget,
     focusTest,
+    runTab,
     returnFlight,
   }
   const dialog = routedDialog(state)
@@ -177,8 +184,9 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
      
     // focusTest is listed for the same reason as draftFor/configTab: the run
     // stays the same while the focused test changes, so keying on selectedRunId
-    // alone would leave the URL's `test` param stale.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, draftFor, configTab, focusTest, returnFlight])
+    // alone would leave the URL's `test` param stale. runTab is the same case —
+    // re-opening the SAME run on a different tab must rewrite `runtab`.
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, draftFor, configTab, focusTest, runTab, returnFlight])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -199,13 +207,16 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setReturnFlight(null)
   }, [])
 
-  const navigateToRun = useCallback((feature: string, runId: string, focus?: string, fromFlight: string | null = null) => {
+  const navigateToRun = useCallback((feature: string, runId: string, target?: RunOpenTarget, fromFlight: string | null = null) => {
     pendingRunSelectionRef.current = null
     setSelectedFeature(feature)
     setSelectedRunId(runId)
-    // Always written, so navigating to a run WITHOUT a focus clears a previous
-    // one instead of inheriting it.
-    setFocusTest(focus ? { runId, test: focus } : null)
+    // Both arrival intents are always written, so navigating to a run WITHOUT one
+    // clears the previous instead of inheriting it. A named test wins: it already
+    // implies the Playwright tab, so honouring a `tab` beside it would fight over
+    // the same destination.
+    setFocusTest(target?.test ? { runId, test: target.test } : null)
+    setRunTab(!target?.test && target?.tab ? { runId, tab: target.tab } : null)
     // Same rule for the origin: an arrival that names no flight clears one a
     // previous drill-through left behind.
     setReturnFlight(fromFlight)
@@ -241,6 +252,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     resumePlanTaskId,
     portifyTarget,
     focusTest,
+    runTab,
     routedDialog: dialog,
     setView,
     setSelectedFeature,

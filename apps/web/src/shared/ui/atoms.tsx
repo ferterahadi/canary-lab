@@ -102,7 +102,10 @@ export function Section({
           padding: headerPadding === 'none' ? 0 : undefined,
         }}
       >
-        <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>{title}</span>
+        {/* `.cl-frame-heading` (12.5/600) — the named voice for a heading inside
+            a framed section. The old ad-hoc 12px/500 was the app's ROW-label
+            register, so a section title read smaller than the rows under it. */}
+        <span className="cl-frame-heading">{title}</span>
         {right != null && <span className="ml-auto flex items-center">{right}</span>}
       </div>
       <div className={bodyClassName}>{children}</div>

@@ -25,6 +25,7 @@ const base: NavState = {
   resumePlanTaskId: null,
   portifyTarget: null,
   focusTest: null,
+  runTab: null,
   returnFlight: null,
 }
 
@@ -38,6 +39,7 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   draft: null,
   configTab: null,
   focusTest: null,
+  runTab: null,
   returnFlight: null,
   ...over,
 })
@@ -124,6 +126,27 @@ describe('focused test (R82)', () => {
   })
 })
 
+// The arrival tab follows the focused test's pairing rule exactly — it is the
+// same kind of fact (where in THIS run to land), so it can't be allowed to leak
+// onto the next run the user opens.
+describe('run arrival tab', () => {
+  it('pairs the persisted tab with the persisted run', () => {
+    const s = initialNavState(persisted({ feature: 'checkout', run: 'run-1', runTab: 'changes' }))
+    expect(s.runTab).toEqual({ runId: 'run-1', tab: 'changes' })
+  })
+
+  it('drops a tab that arrived without a run', () => {
+    expect(initialNavState(persisted({ feature: 'checkout', runTab: 'changes' })).runTab).toBeNull()
+  })
+
+  it('serializes only a tab belonging to the CURRENT run', () => {
+    const mine: NavState = { ...base, run: 'run-1', runTab: { runId: 'run-1', tab: 'changes' } }
+    expect(navToPersistedView(mine).runTab).toBe('changes')
+    const stale: NavState = { ...base, run: 'run-2', runTab: { runId: 'run-1', tab: 'changes' } }
+    expect(navToPersistedView(stale).runTab).toBeNull()
+  })
+})
+
 describe('routedDialog precedence (z-order)', () => {
   it('is null with nothing open', () => {
     expect(routedDialog(base)).toBeNull()
@@ -159,21 +182,29 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, draft: null, configTab: 'ports', focusTest: null, returnFlight: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, draft: null, configTab: 'ports', focusTest: null, runTab: null, returnFlight: null })
   })
 
   it('projects the open draft id + dialog=draft', () => {
     const s: NavState = { ...base, draftFor: 'dr_9' }
-    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, flightStage: null, draft: 'dr_9', configTab: null, focusTest: null, returnFlight: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, flightStage: null, draft: 'dr_9', configTab: null, focusTest: null, runTab: null, returnFlight: null })
   })
 })
 
 describe('resolveActivityTarget', () => {
   const flights = [{ flightId: 'fl_1', feature: 'checkout' }] as unknown as FlightIndexEntry[]
 
-  it('running → open that run in the workspace', () => {
+  it('running → the feature flight, pinned to its Test Run stage', () => {
     expect(resolveActivityTarget('checkout', { kind: 'running', runId: 'run-9' }, flights))
-      .toEqual({ kind: 'run', feature: 'checkout', runId: 'run-9' })
+      .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'run' })
+  })
+
+  it('running on a never-flown feature → the DERIVED flight, still pinned to the run', () => {
+    // The bug this replaced: the same feature routed to the flight view when
+    // idle and to the bare run detail while a run was live, so the destination
+    // was decided by timing rather than by what the user clicked.
+    expect(resolveActivityTarget('other', { kind: 'running', runId: 'run-9' }, flights))
+      .toEqual({ kind: 'flight', flightId: 'feature:other', stage: 'run' })
   })
 
   it('running with no runId → no target', () => {

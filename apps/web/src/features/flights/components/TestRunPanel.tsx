@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { HealEnd, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { PanelCard } from '@/shared/ui/PanelCard'
-import { FixesCapturedPanel, RunRow } from '@/features/runs'
+import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
+import { RunRow } from '@/features/runs'
 import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
 import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
@@ -63,9 +64,10 @@ export function TestRunPanel({
   /** A run for this feature is active right now — drives the poll cadence. */
   live: boolean
   evidence: RunStageEvidence
-  /** Open a run on the run detail. `focusTest` is a failed entry's `name` — the
-   *  detail lands on the Playwright tab, scrolled to that test (R82). */
-  onOpenRun?: (feature: string, runId: string, focusTest?: string) => void
+  /** Open a run on the run detail. `target.test` is a failed entry's `name` — the
+   *  detail lands on the Playwright tab, scrolled to that test (R82);
+   *  `target.tab` names a pane (the captured fixes go to Changes). */
+  onOpenRun?: (feature: string, runId: string, target?: RunOpenTarget) => void
   onError?: (msg: string) => void
   /** R83: the run stage hasn't settled. Regions with nothing in them yet hold
    *  their place as placeholders instead of collapsing the pane. */
@@ -73,9 +75,6 @@ export function TestRunPanel({
 }) {
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [runs, setRuns] = useState<RunIndexEntry[]>([])
-  // Bumped after a PR is opened so the poll re-runs and picks up proposedPrs
-  // even on a settled (non-polling) run.
-  const [reloadKey, setReloadKey] = useState(0)
 
   // One poller for the whole run stage — the run detail and the feature's run
   // list on a single interval. Gentle 5s cadence while anything is live; a
@@ -90,7 +89,7 @@ export function TestRunPanel({
     if (!live) return () => { alive = false }
     const id = setInterval(load, 5000)
     return () => { alive = false; clearInterval(id) }
-  }, [runId, feature, live, reloadKey])
+  }, [runId, feature, live])
 
   const manifest = detail?.manifest
   const summary = detail?.summary
@@ -122,7 +121,14 @@ export function TestRunPanel({
     executionType: manifest?.executionType ?? 'run',
   }
 
-  const stats = runStats({ summary, healCycles, healEnd, services: manifest?.services })
+  const stats = runStats({
+    summary,
+    healCycles,
+    healEnd,
+    services: manifest?.services,
+    fixCapture: manifest?.fixCapture,
+    ...(runId && onOpenRun ? { onOpenFixes: () => onOpenRun(feature, runId, { tab: 'changes' }) } : {}),
+  })
   const failing = summary?.failed ?? []
   const active = live && (status === 'running' || status === 'healing')
   const runRef = runId ? shortRunRef(runId) : null
@@ -167,7 +173,7 @@ export function TestRunPanel({
         <FailingTests
           failing={failing}
           knownTests={summary?.knownTests}
-          {...(onOpenRun ? { onOpenTest: (name: string) => onOpenRun(feature, runId, name) } : {})}
+          {...(onOpenRun ? { onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }) } : {})}
         />
 
         <RunControls runId={runId} status={status} active={active} onError={report} />
@@ -183,18 +189,6 @@ export function TestRunPanel({
           </>
         )}
       </PanelCard>
-
-      {/* Never dead-end: when the worktree run left a fix, the patch is always
-          reachable here (copy path · open · apply locally). Phase D layers the
-          Propose-PR control in via prSlot. */}
-      {manifest?.fixCapture && manifest.fixCapture.repos.length > 0 && (
-        <FixesCapturedPanel
-          fixCapture={manifest.fixCapture}
-          runId={runId}
-          proposedPrs={manifest.proposedPrs}
-          onProposed={() => setReloadKey((k) => k + 1)}
-        />
-      )}
 
       {/* The runs before this one (R82). Same rubric + dashed-rule + count-chip
           header the Failing tests band uses, so the two lists on this stage read
@@ -314,6 +308,11 @@ interface RunStat {
   title?: string
   /** Danger hue. The only tone this line carries — see `RunStatsLine`. */
   bad?: boolean
+  /** Makes this segment the line's one link — an accent-hued button with a
+   *  trailing arrow. Only the captured fixes use it (see `runStats`). */
+  onClick?: () => void
+  /** Test hook for the linked segment. */
+  testId?: string
 }
 
 /** The latest run's numbers, in the identity row's own register: 11px, muted
@@ -397,9 +396,28 @@ function RunStatsLine({ stats }: { stats: RunStat[] }) {
       {stats.map((s, i) => (
         <span key={s.label} className="flex items-center gap-1.5" {...(s.title ? { title: s.title } : {})}>
           {i > 0 && <span aria-hidden="true" className="select-none text-muted opacity-50">·</span>}
-          <span className="text-muted">{s.label}</span>
-          <span className={`tabular-nums ${s.bad ? 'text-danger' : 'text-secondary'}`}>{s.value}</span>
-          {s.note ? <span className="text-muted">({s.note})</span> : null}
+          {s.onClick ? (
+            // The line's one interactive segment. It stays in the line's register
+            // (11px, muted label) and takes the accent only on the value + arrow —
+            // accent MEANS "click me" here, which is exactly what this is, and the
+            // neutral numbers beside it stay reference data.
+            <button
+              type="button"
+              onClick={s.onClick}
+              {...(s.testId ? { 'data-testid': s.testId } : {})}
+              className="flex items-center gap-1.5 rounded text-[11px] hover:underline"
+            >
+              <span className="text-muted">{s.label}</span>
+              <span className="tabular-nums text-accent">{s.value}</span>
+              <span aria-hidden="true" className="text-accent">→</span>
+            </button>
+          ) : (
+            <>
+              <span className="text-muted">{s.label}</span>
+              <span className={`tabular-nums ${s.bad ? 'text-danger' : 'text-secondary'}`}>{s.value}</span>
+              {s.note ? <span className="text-muted">({s.note})</span> : null}
+            </>
+          )}
         </span>
       ))}
     </div>
@@ -407,18 +425,27 @@ function RunStatsLine({ stats }: { stats: RunStat[] }) {
 }
 
 /** What the stats line reports: Tests (passed/total), Repairs (cycle of the cap
- *  + the give-up short form), Services ("N/M booted", per-service tooltip). Boot
- *  health is a different axis than the test verdict, so it stays its own fact. */
+ *  + the give-up short form), Services ("N/M booted", per-service tooltip), and
+ *  the captured fixes as a link. Boot health is a different axis than the test
+ *  verdict, so it stays its own fact. */
 function runStats({
   summary,
   healCycles,
   healEnd,
   services,
+  fixCapture,
+  onOpenFixes,
 }: {
   summary: RunDetail['summary'] | undefined
   healCycles: number
   healEnd: HealEnd | undefined
   services: RunDetail['manifest']['services'] | undefined
+  /** The repair's captured diff, when the run left one. */
+  fixCapture: RunDetail['manifest']['fixCapture'] | undefined
+  /** Opens the run detail's Changes tab. Omitted when there is nowhere to go
+   *  (no drill-through wired), and the fixes then aren't reported here at all —
+   *  a count the user can't act on is worse than silence. */
+  onOpenFixes?: () => void
 }): RunStat[] {
   const stats: RunStat[] = []
   if (summary && summary.total > 0) {
@@ -448,6 +475,25 @@ function runStats({
       value: `${booted}/${svc.length} booted`,
       title: tooltip,
       ...(booted < svc.length ? { bad: true } : {}),
+    })
+  }
+  // The repair's edits, as a link rather than a surface. This used to be a whole
+  // second card under the hero — three boxed repo cards, six buttons, three
+  // accent-filled ones — restating what the run detail's Changes tab already owns
+  // (the same RepairedRepoCard, plus the per-repo branch and PR state the stage
+  // never had room for). The stage is the run's SUMMARY (R82), so it reports THAT
+  // a fix was captured and where to review it; the actions live at the
+  // destination.
+  const fixRepos = fixCapture?.repos ?? []
+  if (fixRepos.length > 0 && onOpenFixes) {
+    stats.push({
+      label: 'Fixes captured',
+      value: plural(fixRepos.length, 'repo'),
+      // Which repo, and how much of it — the one thing the old cards said that a
+      // count can't. Same roll-up-gets-a-tooltip rule the Services segment uses.
+      title: fixRepos.map((r) => `${r.repoName} · ${plural(r.files, 'file')}`).join('\n'),
+      onClick: onOpenFixes,
+      testId: 'run-hero-fixes',
     })
   }
   return stats

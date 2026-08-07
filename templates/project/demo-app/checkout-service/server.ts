@@ -112,9 +112,9 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-// Hardcoded on purpose: two runs of this service at once would collide on the
-// same port. Making it configurable is the concurrency-prep stage's job.
-const PORT = 4300
-server.listen(PORT, () => {
-  console.log(`Checkout service listening on http://localhost:${PORT}`)
+// Canary Lab allocates a free port per run and injects it as PORT, so two runs
+// of this service never clash. 4300 is only the standalone fallback.
+const port = Number.parseInt(process.env.PORT ?? '4300', 10)
+server.listen(port, () => {
+  console.log(`Checkout service listening on http://localhost:${port}`)
 })

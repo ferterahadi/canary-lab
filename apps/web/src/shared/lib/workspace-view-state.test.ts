@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, draft: null, configTab: null, focusTest: null, returnFlight: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, draft: null, configTab: null, focusTest: null, runTab: null, returnFlight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -50,6 +50,25 @@ describe('workspace-view-state (R12)', () => {
   it('ignores a stray test param on a URL with no run', () => {
     window.history.replaceState(null, '', '/?feature=checkout&test=test-case-orphan')
     expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  // `runtab` names WHICH pane a drill-through wanted (the flight run stage's
+  // captured-fixes link → Changes). Same qualifier rules as `test`.
+  it('round-trips the arrival tab alongside its run', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', runTab: 'changes' }))
+    expect(window.location.search).toContain('runtab=changes')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: '7cvh', runTab: 'changes' }))
+  })
+
+  it('drops the arrival tab when no run is selected', () => {
+    persistView(view({ feature: 'checkout', runTab: 'changes' }))
+    expect(window.location.search).not.toContain('runtab=')
+    expect(readPersistedView().runTab).toBeNull()
+  })
+
+  it('ignores an unknown runtab value rather than opening a pane that has none', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&run=7cvh&runtab=nonsense')
+    expect(readPersistedView().runTab).toBeNull()
   })
 
   // R83: `from` names the flight a stage drill-through left, so the destination

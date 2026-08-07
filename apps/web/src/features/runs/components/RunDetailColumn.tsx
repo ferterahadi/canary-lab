@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RunStatus } from '@/shared/api/types'
+import type { RunArrivalTab } from '@/shared/lib/workspace-view-state'
 import { branchForService } from '../utils/run-detail-playback'
 import { useRun } from '../state/RunsContext'
 import { useInvalidationKey } from '@/shared/state/invalidation'
@@ -54,6 +55,7 @@ export function RunDetailColumn({
   onOpenPlaywrightSettings,
   totalTests,
   focusTest,
+  arriveTab,
 }: {
   runId: string | null
   onOpenPlaywrightSettings?: (feature: string) => void
@@ -63,13 +65,18 @@ export function RunDetailColumn({
    *  that test's card into view. Routed as `?run=…&test=…`, so a refresh or a
    *  pasted link lands in the same place. */
   focusTest?: string
+  /** Which tab to open on, when the view that linked here named one instead of a
+   *  failing test — the flight's Test Run stage sends its captured fixes to
+   *  `changes`. Routed as `?run=…&runtab=…`, so a refresh lands the same way. */
+  arriveTab?: RunArrivalTab
 }) {
   // The journal refetches on `journal-changed` for THIS run (scoped so a bump
   // for another run doesn't reload it).
   const journalRefreshKey = useInvalidationKey('journal', runId ?? undefined)
   // Arriving with a focused failure means the Playwright tab IS the destination —
-  // opening on Overview would hide the thing that was clicked.
-  const [tab, setTab] = useState<Tab>(focusTest ? 'playwright' : 'overview')
+  // opening on Overview would hide the thing that was clicked. A named arrival
+  // tab is the same contract for a link that points at a pane rather than a test.
+  const [tab, setTab] = useState<Tab>(focusTest ? 'playwright' : arriveTab ?? 'overview')
   const [serviceIdx, setServiceIdx] = useState(0)
   const [playwrightView, setPlaywrightView] = useState<PlaywrightView>('playback')
   const [agentPaneRestartKey, setAgentPaneRestartKey] = useState(0)
@@ -123,6 +130,11 @@ export function RunDetailColumn({
   useEffect(() => {
     if (focusTest) setTab('playwright')
   }, [focusTest, runId])
+  // Same for a later arrival at a named tab (clicking the run's captured fixes
+  // while that run is already open) — otherwise the click looks ignored.
+  useEffect(() => {
+    if (arriveTab) setTab(arriveTab)
+  }, [arriveTab, runId])
   useEffect(() => {
     if (isVerifyRun && tab !== 'overview' && tab !== 'playwright') setTab('overview')
     // A boot-only session has no Playwright / heal / journal — keep the user on
@@ -191,15 +203,11 @@ export function RunDetailColumn({
           {!isVerify && <TabButton active={tab === 'services'} onClick={() => setTab('services')} disabled={services.length === 0}>Services</TabButton>}
           {!isBootRun && <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>}
           {!isVerify && !isBootRun && <TabButton active={tab === 'agent'} onClick={() => setTab('agent')}>Heal agent</TabButton>}
-          {/* What the repair actually changed. Disabled rather than hidden when
-              a run changed nothing, so its absence reads as "no edits" instead
-              of a tab that moved. */}
+          {/* What the repair actually changed. Always openable, like Journal: a
+              run that changed nothing is a fact worth reading, and the tab's
+              own empty state says which kind of nothing it was. */}
           {!isVerify && !isBootRun && (
-            <TabButton
-              active={tab === 'changes'}
-              onClick={() => setTab('changes')}
-              disabled={!m.fixCapture || m.fixCapture.repos.length === 0}
-            >
+            <TabButton active={tab === 'changes'} onClick={() => setTab('changes')}>
               Changes
             </TabButton>
           )}
@@ -318,6 +326,7 @@ export function RunDetailColumn({
           // made this the one pane with two nested scrollers.
           <ChangesTab
             runId={m.runId}
+            healCycles={m.healCycles}
             fixCapture={m.fixCapture}
             proposedPrs={m.proposedPrs}
             prAttempt={m.prAttempt}

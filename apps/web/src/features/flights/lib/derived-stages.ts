@@ -34,16 +34,21 @@ export function deriveFeatureStages(
   if (!ev) return null
   const runStatus: FlightStageStatus =
     latestRun?.status === 'passed' ? 'done' : latestRun?.status === 'failed' ? 'failed' : 'pending'
+  const suiteSetUp = ev.envCapture || ev.booted === true
   const statusFor: Record<FlightStageKey, FlightStageStatus> = {
     // The feature exists in the workspace at all → it was (implicitly or
     // explicitly) scouted. similarity is plumbing — stageRailRows hides it
     // unless parked/failed, which evidence can never be.
     'similarity': 'done',
     'scout': 'done',
-    // Suite setup = config + captured env (boot-proof) — both halves carry the
-    // pair outcome so the merged cell can't overclaim a scaffold-only feature.
-    'scaffold': ev.envCapture ? 'done' : 'pending',
-    'env-capture': ev.envCapture ? 'done' : 'pending',
+    // Suite setup = the config was proven to work, which is what the conducted
+    // env-capture stage settles on: a dry-run BOOT. A captured envset is one
+    // way to get there and `captured: 0` is another — an app with no env files
+    // has nothing to capture, and reading the envset as mandatory left every
+    // such suite dark forever, green runs and all. Both halves carry the pair
+    // outcome so the merged cell can't overclaim a scaffold-only feature.
+    'scaffold': suiteSetUp ? 'done' : 'pending',
+    'env-capture': suiteSetUp ? 'done' : 'pending',
     // Requirements = the distilled summary exists (covers description-only
     // summaries where docs/ holds no source docs).
     'docs': ev.prdSummary ? 'done' : 'pending',
@@ -56,7 +61,12 @@ export function deriveFeatureStages(
     // this stage below target via accept-partial, so "done" means mapped, not
     // fully covered.
     'specs-coverage': ev.specs && ev.prdSummary ? 'done' : 'pending',
-    'portify': feature.portified ? 'done' : 'pending',
+    // Parallel readiness asks whether the feature can boot beside a second copy
+    // of itself, and a saved overlay is one route there, not the definition. A
+    // config whose every start command already declares a port slot is
+    // concurrency-ready with nothing for Portify to rewrite — reporting that as
+    // "not started" would tell the user to redo work the config already does.
+    'portify': feature.portified || ev.portInjectability === 'declared' ? 'done' : 'pending',
     'run': runStatus,
     'heal': runStatus,
     'evaluation-export': hasExport ? 'done' : 'pending',

@@ -200,9 +200,17 @@ describe('ChangesTab', () => {
 
   it('says plainly that nothing changed rather than rendering an empty tab', async () => {
     await render(<ChangesTab runId="r1" />)
-    expect(text('changes-empty')).toContain('Nothing was changed in your code')
+    expect(text('changes-empty')).toContain('Nothing needed changing')
     // And it asks nothing of the server when there is nothing to apply.
     expect(mocks.getRunApplyPreflight).not.toHaveBeenCalled()
+  })
+
+  it('separates "the agent changed nothing" from "nothing needed changing"', async () => {
+    // A healed run with no capture is not the same fact as a first-time pass,
+    // and the green "all good" reading would be wrong for it.
+    await render(<ChangesTab runId="r1" healCycles={2} />)
+    expect(text('changes-empty')).toContain('Nothing was changed in your code')
+    expect(text('changes-empty')).toContain('Heal agent tab')
   })
 
   it('lands the repair in the repo BEFORE opening it', async () => {

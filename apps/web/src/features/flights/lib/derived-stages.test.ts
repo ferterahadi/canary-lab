@@ -46,6 +46,41 @@ describe('deriveFeatureStages', () => {
     expect(statusOf(stages, 'specs-coverage')).toBe('pending')
   })
 
+  // The shipped healing suite has no env files to capture, so an envset-only
+  // predicate left Suite setup dark however many times it booted.
+  it('a proven boot lights suite setup with no envset at all', () => {
+    const stages = deriveFeatureStages({ evidence: { envCapture: false, booted: true, prdSummary: false, specs: false } })!
+    expect(statusOf(stages, 'scaffold')).toBe('done')
+    expect(statusOf(stages, 'env-capture')).toBe('done')
+  })
+
+  // Parallel readiness is a property of the config. A feature whose every start
+  // command declares a slot boots concurrently already; telling the user to run
+  // Portify would be telling them to redo what the config does.
+  it('a fully slotted config lights parallel readiness with no overlay', () => {
+    const stages = deriveFeatureStages({
+      evidence: { envCapture: false, booted: true, prdSummary: false, specs: false, portInjectability: 'declared' },
+      portified: false,
+    })!
+    expect(statusOf(stages, 'portify')).toBe('done')
+  })
+
+  it('a partly slotted config leaves parallel readiness open', () => {
+    for (const portInjectability of ['partial', 'none'] as const) {
+      const stages = deriveFeatureStages({
+        evidence: { envCapture: false, booted: true, prdSummary: false, specs: false, portInjectability },
+        portified: false,
+      })!
+      expect(statusOf(stages, 'portify')).toBe('pending')
+    }
+  })
+
+  it('suite setup stays dark for a feature that has neither captured nor booted', () => {
+    const stages = deriveFeatureStages({ evidence: { envCapture: false, booted: false, prdSummary: false, specs: false } })!
+    expect(statusOf(stages, 'scaffold')).toBe('pending')
+    expect(statusOf(stages, 'env-capture')).toBe('pending')
+  })
+
   it('latest run drives the run/heal cells: passed → done, failed → failed, none → pending', () => {
     const ev = { evidence: { envCapture: true, prdSummary: false, specs: true } }
     const passed = deriveFeatureStages(ev, run({ status: 'passed' }))!

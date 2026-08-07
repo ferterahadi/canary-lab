@@ -357,15 +357,17 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({ name: 'list_portify_status', arguments: {} })
       const text = toolText(result)
       const parsed = JSON.parse(text) as {
-        features: Array<{ feature: string; portified: boolean }>
-        summary: { total: number; portified: number; notPortified: number }
+        features: Array<{ feature: string; portified: boolean; injectability: string }>
+        summary: { total: number; portified: number; notPortified: number; concurrencyReady: number; needsPortify: number }
       }
-      // The shipped storefront suite is deliberately NOT portified: checkout
-      // binds 4300 directly so the parallel-readiness stage has real work.
+      // The shipped storefront suite carries no overlay and needs none: all
+      // three of its services read PORT, so the config declares every slot and
+      // the feature boots concurrently as shipped.
       expect(parsed.features.map((f) => f.feature)).toEqual(['storefront_journey'])
       expect(parsed.features[0]!.portified).toBe(false)
+      expect(parsed.features[0]!.injectability).toBe('declared')
       for (const f of parsed.features) expect(typeof f.portified).toBe('boolean')
-      expect(parsed.summary).toEqual({ total: 1, portified: 0, notPortified: 1 })
+      expect(parsed.summary).toEqual({ total: 1, portified: 0, notPortified: 1, concurrencyReady: 1, needsPortify: 0 })
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

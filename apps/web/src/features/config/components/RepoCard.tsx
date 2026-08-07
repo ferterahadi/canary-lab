@@ -180,7 +180,10 @@ export function RepoCard({
           onClick={() => setOpen((v) => !v)}
           className="min-w-0 flex-1 text-left"
         >
-          <span className="block truncate text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
+          {/* The app's row-label size, not `text-sm` — 14px is the DIALOG title's
+              voice, and a repo two levels inside that dialog outsized the
+              section heading that holds it. */}
+          <span className="block truncate text-[12.5px] font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
             {repo.name || derivedName || '(unnamed repo)'}
           </span>
           {!open && (

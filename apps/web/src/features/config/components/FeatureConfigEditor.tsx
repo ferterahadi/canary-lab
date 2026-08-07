@@ -64,7 +64,10 @@ export function FeatureConfigEditor({ feature, portified = false, onClose, onDel
         }
         subheader={
           <>
-            <nav className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs">
+            {/* No size utility: `.cl-tab` is unlayered CSS and outranks a
+                Tailwind utility, so a `text-xs` here would read as 12px and
+                render as the tab voice's 12.5px. */}
+            <nav className="cl-panel-header flex gap-1 px-3 py-1.5">
               <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
               <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
               <TabButton active={tab === 'ports'} onClick={() => setTab('ports')}>Ports</TabButton>

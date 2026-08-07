@@ -43,7 +43,7 @@ export interface RunPaths {
   healAgentTailPath: string
   // Directory holding the heal fix patches captured at teardown — one
   // `<repoName>.patch` per changed repo plus a `fixes.json` index. The
-  // FixesCapturedPanel and the PR pipeline read from here.
+  // run detail's Changes tab and the PR pipeline read from here.
   fixesDir: string
   failedDir: string
   signalsDir: string

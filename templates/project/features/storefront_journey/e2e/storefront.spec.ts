@@ -19,10 +19,16 @@ import { StorefrontApi } from './helpers/api'
 // rounded into proof of a downstream one. Keep contracts stateless too — these
 // services keep data in memory and are NOT restarted between heal cycles, so a
 // contract that leaves residue behind drifts on every rerun.
+//
+// The `@req-*` tags map each contract to a requirement in
+// `docs/_prd-summary.json`, which is what makes the coverage ledger read 100%
+// on a fresh scaffold. `@path-*` says which side of the requirement the journey
+// exercises. Adding a contract means adding its requirement too — otherwise the
+// ledger reports an orphan test, not a bigger suite.
 
 const api = new StorefrontApi()
 
-test('J0 — the catalog serves the products it was given', async () => {
+test('J0 — the catalog serves the products it was given', { tag: ['@req-R1', '@path-happy'] }, async () => {
   // Sound on purpose: this journey passes on the first run and every run after.
   const created = await api.createProduct('Chemex Filters', 900)
   expect(created.status).toBe(201)
@@ -33,7 +39,7 @@ test('J0 — the catalog serves the products it was given', async () => {
   expect(listed.body?.some((p) => p.id === created.body!.id)).toBe(true)
 })
 
-test('J1 — a customer buys two in-stock catalog items with a welcome discount', async () => {
+test('J1 — a customer buys two in-stock catalog items with a welcome discount', { tag: ['@req-R2', '@req-R3', '@path-happy'] }, async () => {
   const product = await api.createProduct('Espresso Beans', 1800)
   expect(product.status).toBe(201)
   // Contract 1 — catalog: the SKU is the identity inventory consumes.
@@ -47,7 +53,7 @@ test('J1 — a customer buys two in-stock catalog items with a welcome discount'
   expect(reservation.body?.available).toBe((before.body?.available ?? 0) - 2)
 })
 
-test('J2 — discount codes replace each other and change what the customer pays', async () => {
+test('J2 — discount codes replace each other and change what the customer pays', { tag: ['@req-R4', '@req-R5', '@path-happy'] }, async () => {
   const product = await api.createProduct('Cold Brew Kit', 1800)
   const cart = await api.createCart()
   await api.addItem(cart.body!.id, product.body!, 2)
@@ -63,7 +69,7 @@ test('J2 — discount codes replace each other and change what the customer pays
   expect(halfOff.body?.total).toBe(1800)
 })
 
-test('J3 — reservations are refused honestly', async () => {
+test('J3 — reservations are refused honestly', { tag: ['@req-R6', '@req-R7', '@path-sad'] }, async () => {
   const held = await api.reserve('filter-papers', 2)
   expect(held.status).toBe(200)
   const remaining = held.body!.available
@@ -79,7 +85,7 @@ test('J3 — reservations are refused honestly', async () => {
   expect(unknown.status).toBe(404)
 })
 
-test('J4 — a repriced product is charged at its new price', async () => {
+test('J4 — a repriced product is charged at its new price', { tag: ['@req-R8', '@req-R9', '@path-happy'] }, async () => {
   const product = await api.createProduct('Pour Over Set', 1800)
   const repriced = await api.patchProduct(product.body!.id, { priceCents: 2000 })
   expect(repriced.status).toBe(200)
@@ -95,7 +101,7 @@ test('J4 — a repriced product is charged at its new price', async () => {
   expect(read.body?.total).toBe(3600)
 })
 
-test('J5 — removing a product and refusing a bad code leave no debris', async () => {
+test('J5 — removing a product and refusing a bad code leave no debris', { tag: ['@req-R10', '@req-R11', '@path-happy', '@path-sad'] }, async () => {
   const doomed = await api.createProduct('Discontinued Grinder', 4500)
   const removed = await api.deleteProduct(doomed.body!.id)
   expect(removed.status).toBe(204)
@@ -118,7 +124,7 @@ test('J5 — removing a product and refusing a bad code leave no debris', async 
   expect(read.body?.total).toBe(1800)
 })
 
-test('J6 — an empty cart cannot be placed', async () => {
+test('J6 — an empty cart cannot be placed', { tag: ['@req-R12', '@path-sad'] }, async () => {
   // Also sound on purpose. Guards a real rule: checkout refuses an empty cart
   // with 409 and leaves it open.
   const cart = await api.createCart()

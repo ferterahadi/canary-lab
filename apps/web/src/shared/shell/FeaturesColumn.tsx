@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
@@ -22,6 +22,9 @@ interface Props {
   activeRunExecutionType?: ExecutionType | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
+  /** First-run guide, step 2 (the Flight offer). App owns which step a
+   *  workspace is on — see shared/state/first-run-guide.ts. */
+  guide?: ReactNode
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
   /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
@@ -125,6 +128,7 @@ export function FeaturesColumn({
   versionStatus,
   onStartPortify,
   onOpenPortify,
+  guide,
 }: Props) {
   const { gatePromo } = useMcpPromo()
   // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
@@ -220,6 +224,9 @@ export function FeaturesColumn({
             ))}
           </div>
         )}
+        {/* First-run guide, step 2 — under the suite list, because the suite it
+            is offering to build is what would appear there next. */}
+        {guide}
       </div>
       <div className="cl-panel-footer flex items-center justify-between p-2">
         <ThemeToggle />

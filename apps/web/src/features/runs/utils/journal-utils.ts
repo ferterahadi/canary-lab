@@ -87,12 +87,13 @@ export function presentJournalFields(fields: readonly ParsedField[]): ParsedFiel
   return out
 }
 
-export type OutcomeBadge = 'pending' | 'all_passed' | 'partial' | 'no_change' | 'regression' | 'unknown'
+export type OutcomeBadge = 'pending' | 'all_passed' | 'advanced' | 'partial' | 'no_change' | 'regression' | 'unknown'
 
 export function classifyOutcome(outcome: string | null | undefined): OutcomeBadge {
   switch (outcome) {
     case 'pending':
     case 'all_passed':
+    case 'advanced':
     case 'partial':
     case 'no_change':
     case 'regression':
@@ -106,6 +107,12 @@ export function outcomeBadgeClass(outcome: OutcomeBadge): string {
   switch (outcome) {
     case 'all_passed':
       return 'border-success/40 text-success bg-success/10'
+    // Its own hue rather than a second success or warning shade: `advanced` is
+    // the label most likely to be misread, and it sits in journals right next
+    // to both. Five labels, five hues — the eye separates them before the word
+    // is read.
+    case 'advanced':
+      return 'border-accent/40 text-accent bg-accent/10'
     case 'partial':
       return 'border-warning/50 text-warning bg-warning/10'
     case 'no_change':

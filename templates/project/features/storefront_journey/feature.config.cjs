@@ -47,12 +47,10 @@ const config = {
       localPath: appDir,
       startCommands: [
         {
-          // No port slot on purpose: this service hardcodes 4300, so two runs
-          // of it at once collide. Making it injectable is the concurrency-prep
-          // stage's job, and the demo leaves that work for it to do.
           name: 'checkout-service',
           command: 'npm run dev:checkout',
-          healthCheck: { http: { url: 'http://localhost:4300/' } },
+          ports: [{ name: 'checkout', env: 'PORT' }],
+          healthCheck: { http: { url: 'http://localhost:${port.checkout}/' } },
         },
       ],
     },

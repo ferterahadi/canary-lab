@@ -240,6 +240,65 @@ describe('classifyJournalOutcome', () => {
 
   it('distinguishes partial, no_change, and regression outcomes', () => {
     expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }, { name: 'b' }], passedNames: [] },
+      { failed: [{ name: 'b' }] },
+    )).toBe('partial')
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }], passedNames: [] },
+      { failed: [{ name: 'a' }] },
+    )).toBe('no_change')
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }], passedNames: ['b'] },
+      { failed: [{ name: 'a' }, { name: 'b' }] },
+    )).toBe('regression')
+  })
+
+  it('calls it advanced, not regression, when the fix cleared the blocker and the suite reached a test that had never run', () => {
+    // The shape of run 2026-08-07T0709-33ng, which ran with --max-failures=1:
+    // j0 had passed, j1 was the blocker, j2..j6 had never executed. The fix
+    // cleared j1 and the suite then stopped at j2 — a name absent from BOTH
+    // the before-failures and the before-passes, so it was never green and
+    // cannot have regressed. Classifying this as `regression` steered the next
+    // cycle to revert a fix that had just worked.
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'j1' }], passedNames: ['j0'] },
+      { failed: [{ name: 'j2' }] },
+    )).toBe('advanced')
+  })
+
+  it('still reports regression when a fix clears one test and breaks a green one', () => {
+    // Progress does not excuse damage: `regression` outranks `advanced` so the
+    // revert-first steer survives a cycle that also fixed something.
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'j1' }], passedNames: ['j0'] },
+      { failed: [{ name: 'j0' }] },
+    )).toBe('regression')
+  })
+
+  it('reports partial, not advanced, when every remaining failure was already known', () => {
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }, { name: 'b' }], passedNames: ['c'] },
+      { failed: [{ name: 'b' }] },
+    )).toBe('partial')
+  })
+
+  it('reports no_change when nothing was cleared, even if the run surfaced a never-run failure', () => {
+    // The blocker did not move, which is the fact the next cycle must act on.
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'a' }], passedNames: ['c'] },
+      { failed: [{ name: 'a' }, { name: 'never-ran' }] },
+    )).toBe('no_change')
+  })
+
+  it('falls back to the legacy any-new-failure regression rule when the before summary predates passedNames', () => {
+    // Without `passedNames` there is no way to tell a broken-green test from
+    // one that had never run. Erring toward `regression` costs a revert cycle;
+    // the other direction would hide a real regression.
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'j1' }] },
+      { failed: [{ name: 'j2' }] },
+    )).toBe('regression')
+    expect(classifyJournalOutcome(
       { failed: [{ name: 'a' }, { name: 'b' }] },
       { failed: [{ name: 'b' }] },
     )).toBe('partial')
@@ -247,10 +306,20 @@ describe('classifyJournalOutcome', () => {
       { failed: [{ name: 'a' }] },
       { failed: [{ name: 'a' }] },
     )).toBe('no_change')
+  })
+
+  it('ignores a non-array or non-string-laden passedNames rather than trusting it', () => {
+    // A malformed summary must not silently disable the regression check: a
+    // `passedNames` that is not an array reads as "field absent" (legacy rule),
+    // and non-string entries inside a real array are dropped.
     expect(classifyJournalOutcome(
-      { failed: [{ name: 'a' }] },
-      { failed: [{ name: 'a' }, { name: 'b' }] },
+      { failed: [{ name: 'j1' }], passedNames: 'j0' },
+      { failed: [{ name: 'j2' }] },
     )).toBe('regression')
+    expect(classifyJournalOutcome(
+      { failed: [{ name: 'j1' }], passedNames: [null, 42, 'j0'] },
+      { failed: [{ name: 'j2' }] },
+    )).toBe('advanced')
   })
 
   it('treats a summary object with no `failed` field as zero failures', () => {

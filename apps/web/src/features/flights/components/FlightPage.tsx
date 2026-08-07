@@ -2,7 +2,7 @@ import type { FlightStageKey } from '@/shared/api/client'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import type { FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
-import type { ConfigTab } from '@/shared/lib/workspace-view-state'
+import type { ConfigTab, RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { type DerivedStage } from '../lib/derived-stages'
 import { FlightDetail } from './FlightDetail'
 
@@ -14,7 +14,9 @@ export { configDigestFacts } from './FlightSummaryStrip'
  *  drills through `onOpenConfig` to the Ports tab, so FlightPage never opens
  *  the portify wizard itself. */
 export interface FlightDrillThroughs {
-  onOpenRun?: (feature: string, runId: string, focusTest?: string) => void
+  /** `target` says where in the run detail to land — a failing test (Playwright)
+   *  or a named tab (the run's captured fixes go to Changes). */
+  onOpenRun?: (feature: string, runId: string, target?: RunOpenTarget) => void
   onOpenCoverage?: (feature: string) => void
 }
 

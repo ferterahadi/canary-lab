@@ -172,7 +172,15 @@ export function Modal({
               </span>
             )}
             <div className="min-w-0 flex-1">
-              {eyebrow && <div className="cl-kicker mb-1">{eyebrow}</div>}
+              {/* The app's micro-label voice (sans 10px caps muted), not
+                  `.cl-kicker` — that one is a 13px/600 primary SECTION heading,
+                  which put a second heading one pixel under the title and
+                  flattened the pair into two competing lines. */}
+              {eyebrow && (
+                <div className="mb-1 text-[10px] uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+                  {eyebrow}
+                </div>
+              )}
               {title && (
                 <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
                   {title}

@@ -109,7 +109,8 @@ export interface RunManifest {
    *  hero's "why heal stopped" line. Absent unless the run entered heal. */
   healEnd?: HealEnd
   /** The heal agent's edits captured from the per-run worktree at teardown —
-   *  what the FixesCapturedPanel surfaces (patch path, apply-locally, PR). */
+   *  what the run detail's Changes tab surfaces (patch path, apply-locally, PR).
+   *  A flight's Test Run stage only reports that it exists, and links here. */
   fixCapture?: RunFixCapture
   /** PRs opened from this run's captured fix, per repo — automatically when the
    *  run healed green, or on demand from the Changes tab. */

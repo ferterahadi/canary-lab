@@ -9,6 +9,7 @@ import { readOverlay } from '../../portify/logic/runtime/overlay'
 import { PortifyRunStore } from '../../portify/logic/runtime/store'
 import { readRunSummary, runCounts } from '../../runs/logic/run-detail'
 import { listRuns } from '../../runs/logic/run-store'
+import { findBootProof } from './stage-evidence'
 import { readManifest } from '../../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 
@@ -38,7 +39,7 @@ export type EvidenceBlock = Record<string, unknown>
 /** The number of files in the captured envset — `env` when named, otherwise the
  *  first non-empty envset directory (the derived rail asks "was the environment
  *  ever captured", not "for this specific env"). */
-function envCaptureEvidence(featureDir: string, env?: string): EvidenceBlock | undefined {
+function capturedEnvsetCount(featureDir: string, env?: string): number | undefined {
   const envsetsDir = path.join(featureDir, 'envsets')
   const count = (dir: string): number => {
     try {
@@ -49,7 +50,7 @@ function envCaptureEvidence(featureDir: string, env?: string): EvidenceBlock | u
   }
   if (env !== undefined) {
     const captured = count(path.join(envsetsDir, env))
-    return captured > 0 ? { captured } : undefined
+    return captured > 0 ? captured : undefined
   }
   let dirs: fs.Dirent[]
   try {
@@ -60,9 +61,23 @@ function envCaptureEvidence(featureDir: string, env?: string): EvidenceBlock | u
   for (const d of dirs) {
     if (!d.isDirectory()) continue
     const captured = count(path.join(envsetsDir, d.name))
-    if (captured > 0) return { captured }
+    if (captured > 0) return captured
   }
   return undefined
+}
+
+/** Suite setup, shaped exactly like the conducted env-capture stage's own
+ *  evidence: what was captured, and the boot that proved it. Either half alone
+ *  is a real answer — an app with no env files reports the boot and nothing
+ *  captured, which is the whole reason this stage stopped being envset-gated. */
+function envCaptureEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDir: string, env?: string): EvidenceBlock | undefined {
+  const captured = capturedEnvsetCount(featureDir, env)
+  const proof = findBootProof(deps.logsDir, feature)
+  if (captured === undefined && !proof) return undefined
+  return {
+    ...(captured !== undefined ? { captured } : {}),
+    ...(proof ? { boot: { runId: proof.runId, services: proof.services } } : {}),
+  }
 }
 
 /** Source requirement docs — the same collection the coverage ledger reads, so
@@ -171,7 +186,7 @@ function evaluationExportEvidence(deps: WorkspaceEvidenceDeps, feature: string):
  *  the repo held), and no artifact on disk records that. Inventing a zero there
  *  would turn "never measured" into "measured none". */
 const PROBES: Partial<Record<FlightStageKey, (deps: WorkspaceEvidenceDeps, feature: string, featureDir: string, env?: string) => EvidenceBlock | undefined>> = {
-  'env-capture': (_d, _f, featureDir, env) => envCaptureEvidence(featureDir, env),
+  'env-capture': (deps, feature, featureDir, env) => envCaptureEvidence(deps, feature, featureDir, env),
   'docs': (_d, _f, featureDir) => docsEvidence(featureDir),
   'prd-summary': (_d, _f, featureDir) => prdSummaryEvidence(featureDir),
   'specs-coverage': (deps, feature) => specsCoverageEvidence(deps, feature),

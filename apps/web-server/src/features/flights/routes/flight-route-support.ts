@@ -6,7 +6,7 @@ import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDe
 import { STAGE_DEPENDS_ON, type FlightOptions, type FlightStageKey } from '../logic/types'
 import { type PlannedFeature } from '../../../../../../shared/flights/types'
 import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
-import { hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
+import { findBootProof, hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
 import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
@@ -58,8 +58,12 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
         startFrom: 'scout/scaffold',
       },
       'env-capture': {
-        present: () => hasCapturedEnvset(featureDir, env),
-        missing: `no captured envset at envsets/${env}/ (env-capture prerequisite)`,
+        // What this stage actually produces is a PROVEN BOOT; the envset is the
+        // input it captures on the way, and an app with no env files leaves
+        // none. Requiring the envset alone made a jump past this stage
+        // impossible for such a feature even after it had booted many times.
+        present: () => hasCapturedEnvset(featureDir, env) || (logsDir !== undefined && findBootProof(logsDir, feature) !== null),
+        missing: `feature "${feature}" has never booted and has no captured envset at envsets/${env}/ (env-capture prerequisite)`,
         startFrom: 'env-capture',
       },
       'prd-summary': {

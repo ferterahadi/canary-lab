@@ -99,10 +99,18 @@ export interface FeaturePending {
 export interface FeatureStageEvidence {
   /** A captured envset exists (env-capture stage artifact). */
   envCapture: boolean
+  /** The feature's services have been proven to boot. Optional: absent in
+   *  older payloads, where a captured envset was the only Suite setup signal. */
+  booted?: boolean
   /** docs/_prd-summary.json exists (prd-summary stage artifact). */
   prdSummary: boolean
   /** At least one authored spec under e2e/ (specs-coverage stage artifact). */
   specs: boolean
+  /** How far the config alone gets this feature toward booting concurrently.
+   *  `'declared'` means every start command carries a port slot, so Parallel
+   *  readiness has nothing left to do — no overlay required. Optional: absent
+   *  in older payloads. */
+  portInjectability?: 'declared' | 'partial' | 'none'
 }
 
 export interface Feature {

@@ -123,6 +123,36 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
     await flush()
   }
 
+  // The first-run guide's one-click path onto the bundled sample repo: the
+  // dialog opens already filled in, so the tour is "press the button", not "now
+  // go find flight-app on disk".
+  it('opens prefilled from the first-run guide, ready to submit', async () => {
+    await render({
+      feature: null,
+      newFlightPrefill: { repoPaths: ['/w/flight-app'], description: 'the library lending flow' },
+    })
+    expect(byTestId('repo-row-flight-app')).toBeTruthy()
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('the library lending flow')
+    expect(byTestId('flight-start-submit')!.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('leaves the plain "+ New" launcher empty', async () => {
+    await render({ feature: null })
+    expect(byTestId('repo-row-flight-app')).toBeNull()
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('')
+  })
+
+  // A prefill is a NEW-flight convenience; a feature-scoped launch must keep
+  // loading the repos and intent off the flight's own record.
+  it('ignores a prefill in feature-scoped mode', async () => {
+    mocks.getFlightEntryOptions.mockResolvedValue(entry())
+    await render({
+      feature: 'checkout',
+      newFlightPrefill: { repoPaths: ['/w/flight-app'], description: 'the library lending flow' },
+    })
+    expect(byTestId('repo-row-flight-app')).toBeNull()
+  })
+
   it('asks exactly two things — intent + repos — and never calls the entry endpoint', async () => {
     await render({ feature: null, knownRepos: [{ label: 'shop', path: '/repo/shop' }] })
     expect(mocks.getFlightEntryOptions).not.toHaveBeenCalled()

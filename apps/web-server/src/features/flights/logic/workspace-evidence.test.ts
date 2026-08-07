@@ -33,6 +33,28 @@ function writeOverlay(repos: Array<Record<string, unknown>>): void {
   )
 }
 
+/** A run whose services all reached ready — the boot half of Suite setup. */
+function writeBootedRun(runId: string, services: Array<{ name: string; readyAt: string }>): void {
+  fs.mkdirSync(path.join(logsDir, 'runs'), { recursive: true })
+  fs.writeFileSync(
+    path.join(logsDir, 'runs', 'index.json'),
+    JSON.stringify([{ runId, feature: FEATURE, startedAt: '2026-08-07T10:00:00Z', status: 'passed' }]),
+  )
+  const runDir = path.join(logsDir, 'runs', runId)
+  fs.mkdirSync(runDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(runDir, 'manifest.json'),
+    JSON.stringify({
+      runId,
+      feature: FEATURE,
+      startedAt: '2026-08-07T10:00:00Z',
+      status: 'passed',
+      healCycles: 0,
+      services: services.map((s) => ({ name: s.name, safeName: s.name, command: 'npm run dev', cwd: '/tmp', logPath: '/tmp/x.log', status: 'stopped', readyAt: s.readyAt })),
+    }),
+  )
+}
+
 function writePortifyIndex(rows: Array<Record<string, unknown>>): void {
   const dir = path.join(logsDir, 'portify')
   fs.mkdirSync(dir, { recursive: true })
@@ -122,6 +144,23 @@ describe('workspaceStageEvidence probes', () => {
     fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
     const ev = workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['env-capture'], 'local')
     expect(ev['env-capture']).toBeUndefined()
+  })
+
+  // Suite setup's other half. An app with no env files captures nothing, so the
+  // boot is the only evidence it can ever produce — and it is the same evidence
+  // the conducted stage reports.
+  it('reports the boot that proved the config, with no envset captured', () => {
+    writeBootedRun('r_boot', [{ name: 'catalog-service', readyAt: '2026-08-07T10:00:05Z' }])
+    const ev = workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['env-capture'], 'local')
+    expect(ev['env-capture']).toEqual({ boot: { runId: 'r_boot', services: [{ name: 'catalog-service', status: 'ready' }] } })
+  })
+
+  it('reports both halves when the feature captured an envset and booted', () => {
+    fs.mkdirSync(path.join(featureDir, 'envsets', 'local'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'envsets', 'local', 'app.env'), 'A=1\n')
+    writeBootedRun('r_boot', [{ name: 'api', readyAt: '2026-08-07T10:00:05Z' }])
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['env-capture'], 'local')['env-capture'])
+      .toEqual({ captured: 1, boot: { runId: 'r_boot', services: [{ name: 'api', status: 'ready' }] } })
   })
 
   it('lists source requirement docs and excludes the generated summary', () => {

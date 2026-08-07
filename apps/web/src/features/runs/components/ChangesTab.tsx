@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { RepoBranchSnapshot, RunFixCapture, RunPrAttempt, RunProposedPr } from '@/shared/api/types'
+import { EmptyGlyph, EmptyState } from '@/shared/ui/EmptyState'
 import { RunPane } from './RunPane'
 import { RepairedRepoCard, useRepoOpener } from './RepairedRepoCard'
 import { ProposePrDialog } from './ProposePrDialog'
@@ -22,6 +23,7 @@ export function ChangesTab({
   proposedPrs,
   prAttempt,
   repoBranches,
+  healCycles = 0,
 }: {
   runId: string
   fixCapture?: RunFixCapture
@@ -33,6 +35,10 @@ export function ChangesTab({
    *  come from. Absent on runs recorded before it was captured; the tab then
    *  falls back to showing only what changed. */
   repoBranches?: RepoBranchSnapshot[]
+  /** Repair cycles this run went through. Zero means nothing changed because
+   *  nothing needed repairing — a different fact from "the agent ran and
+   *  changed nothing", and the empty state says which. */
+  healCycles?: number
 }) {
   const [prOpen, setPrOpen] = useState(false)
   const repos = fixCapture?.repos ?? []
@@ -46,10 +52,17 @@ export function ChangesTab({
   if (repos.length === 0) {
     return (
       <RunPane padded>
-        <div className="text-xs" style={{ color: 'var(--text-muted)' }} data-testid="changes-empty">
-          Nothing was changed in your code on this run. A run only records changes when a repair
-          agent edited something — a run that passed first time never started one.
-        </div>
+        <EmptyState
+          testId="changes-empty"
+          icon={healCycles > 0 ? EmptyGlyph.agent : EmptyGlyph.check}
+          tone={healCycles > 0 ? 'neutral' : 'good'}
+          title={healCycles > 0 ? 'Nothing was changed in your code' : 'Nothing needed changing'}
+          body={
+            healCycles > 0
+              ? 'The repair agent ran on this run but captured no edits. What it was thinking is still in the Heal agent tab.'
+              : 'This tab lists the files a repair agent edited, per repo. This run passed without one, so there is nothing to review.'
+          }
+        />
       </RunPane>
     )
   }

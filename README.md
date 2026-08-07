@@ -82,11 +82,13 @@ test('applying SAVE10 produces a 10% discount on the summary', async ({ request 
 
 The scaffold ships its own demonstration, so you can see both halves of the
 product before writing anything. `demo-app/` comes with the
-`storefront_journey` suite already written — press **Run** and watch the repair
-loop fix one contract per cycle until it is green. `flight-app/` ships with no
-suite at all: point a Flight at it to watch Canary Lab discover the repo, derive
-the requirements, author the suite, prepare its ports, run, heal, and export.
-Delete both once you have seen them.
+`storefront_journey` suite fully onboarded — services with injectable ports,
+distilled requirements, and tagged tests at 100% coverage — so the only thing
+left is the run: press **Run** and watch the repair loop fix one contract per
+cycle until it is green. `flight-app/` is the opposite, shipping with no suite
+at all: point a Flight at it to watch Canary Lab discover the repo, derive the
+requirements, author the suite, prepare its ports, run, heal, and export. Delete
+both once you have seen them.
 
 ## How the Repair Loop Works
 

@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
+import { FirstRunGuide } from './shared/shell/FirstRunGuide'
+import { useFirstRunGuide } from './shared/state/first-run-guide'
 import { RunDetailColumn } from './features/runs/components/RunDetailColumn'
 import { FeatureConfigEditor } from './features/config/components/FeatureConfigEditor'
 import { ResizablePanels } from './shared/ui/ResizablePanels'
@@ -48,7 +50,7 @@ export function App() {
     draftFor, setDraftFor,
     resumePlanTaskId, setResumePlanTaskId,
     portifyTarget, setPortifyTarget,
-    focusTest,
+    focusTest, runTab,
     openFlight, navigateToRun, navigateToCoverage, returnFlight, selectStartedRun,
     flightStage, setFlightStage,
     pendingRunSelectionRef, selectedFeatureRef, selectedRunIdRef,
@@ -91,6 +93,15 @@ export function App() {
   // Evidence-derived stage rails for flightless picker rows — one instance,
   // same ownership rule as featureActivity (the pill stays presentational).
   const derivedStages = useDerivedFeatureStages(features)
+  // First-run guide — the workspace's tour of the two samples `init` shipped.
+  // One owner for both steps (see shared/state/first-run-guide.ts); the two
+  // columns below only render the step they host.
+  const guide = useFirstRunGuide(allRuns, flights)
+  // Set only when the new-flight dialog is opened FROM the guide, so the plain
+  // "+ New" button still opens an empty form. Deliberately not routed: a cold
+  // load of `?dialog=flight-new` has no guide behind it, and an empty form is
+  // the honest thing to land on.
+  const [guideFlightPrefill, setGuideFlightPrefill] = useState<{ repoPaths: string[]; description: string } | null>(null)
   // The Features column's per-row flight shortcut — one jump from a suite to its
   // flight instead of the pill → picker → find-the-row detour. Same inputs the
   // picker rows resolve from, so the two agree on where a suite's flight lives
@@ -126,10 +137,14 @@ export function App() {
     const target = resolveActivityTarget(feature, activity, flightsRef.current)
     if (!target) return
     if (target.kind === 'run') navigateToRun(target.feature, target.runId)
-    else if (target.kind === 'flight') openFlight(target.flightId)
+    else if (target.kind === 'flight') {
+      openFlight(target.flightId)
+      // openFlight clears the stage when the flight changes, so pin it after.
+      if (target.stage) setFlightStage(target.stage)
+    }
     else if (target.kind === 'draft') setDraftFor(target.draftId)
     else setPortifyTarget({ kind: 'revisit', workflowId: target.workflowId })
-  }, [navigateToRun, openFlight, setPortifyTarget, setDraftFor, flightsRef])
+  }, [navigateToRun, openFlight, setFlightStage, setPortifyTarget, setDraftFor, flightsRef])
 
   // Column 3 lists runs scoped to the currently-selected feature. Boot-only
   // sessions are excluded — they're not test runs and live in the global
@@ -278,6 +293,13 @@ export function App() {
           versionStatus={versionStatus}
           onOpenCoverage={openCoverageFor}
           onStartNewFlight={() => setFlightStartNew(true)}
+          guide={guide.step === 'start-flight' ? (
+            <FirstRunGuide
+              step="start-flight"
+              onDismiss={() => guide.dismiss('start-flight')}
+              onAction={() => { setGuideFlightPrefill(guide.flightPrefill); setFlightStartNew(true) }}
+            />
+          ) : undefined}
           onOpenFlight={openFlight}
           flightAction={flightAction}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
@@ -325,6 +347,12 @@ export function App() {
               runDisabled={false}
               verifyOpen={verifyOpen}
               onVerifyOpenChange={setVerifyOpen}
+              /* Only over the suite the guide is talking about — the cue rings
+                 the Run button, so it must not appear while a different suite
+                 is selected. */
+              guide={guide.step === 'run-suite' && selectedFeature === guide.suite ? (
+                <FirstRunGuide step="run-suite" onDismiss={() => guide.dismiss('run-suite')} />
+              ) : undefined}
             />
           )}
           bottom={(
@@ -335,6 +363,8 @@ export function App() {
               /* Honoured only when the focus belongs to the run being shown, so a
                  stale pair from a previous selection can't scroll this one. */
               {...(focusTest && focusTest.runId === selectedRunId ? { focusTest: focusTest.test } : {})}
+              /* Same pairing rule for the arrival tab a drill-through named. */
+              {...(runTab && runTab.runId === selectedRunId ? { arriveTab: runTab.tab } : {})}
             />
           )}
         />
@@ -399,14 +429,14 @@ export function App() {
               onOpenConfig={(feature, tab) => { setSelectedFeature(feature); setConfigFor(feature, tab ?? null) }}
               onSelectFlight={setSelectedFlightId}
               onClose={() => { setSelectedFlightId(null); setView('workspace') }}
-              /* R82: `focusTest` is a run-summary failed-entry name — the flight's
-                 Test Run stage passes the failure the user clicked, and the run
-                 detail lands on it. navigateToRun does exactly what this handler
-                 used to inline, plus the focus pairing. R83: both drill-throughs
-                 pin THIS flight as the origin, so the destination knows where
-                 back is — the run detail has no close of its own, so it gets a
-                 return chip in the top bar instead. */
-              onOpenRun={(feature, runId, focusTest) => navigateToRun(feature, runId, focusTest, selectedFlightId)}
+              /* R82: `target` is where in the run detail to land — a failed
+                 entry's name (the Playwright tab, at that failure) or a named tab
+                 (the stage's captured-fixes link → Changes). navigateToRun does
+                 exactly what this handler used to inline, plus the run pairing.
+                 R83: both drill-throughs pin THIS flight as the origin, so the
+                 destination knows where back is — the run detail has no close of
+                 its own, so it gets a return chip in the top bar instead. */
+              onOpenRun={(feature, runId, target) => navigateToRun(feature, runId, target, selectedFlightId)}
               onOpenCoverage={(feature) => navigateToCoverage(feature, selectedFlightId)}
               /* The stage pick is routed (?stage=…) rather than local to the
                  detail: a drill-through replaces this whole view, so without an
@@ -425,12 +455,14 @@ export function App() {
           intent={flightStartFresh ? 'fresh' : 'refly'}
           fromStage={flightStartNew ? null : flightStartStage}
           resumePlanTaskId={flightStartNew ? resumePlanTaskId : null}
+          newFlightPrefill={flightStartNew ? guideFlightPrefill : null}
           knownRepos={knownRepos}
-          onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null) }}
+          onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null); setGuideFlightPrefill(null) }}
           onOpenFlight={(flightId) => {
             setFlightStartFor(null)
             setFlightStartNew(false)
             setResumePlanTaskId(null)
+            setGuideFlightPrefill(null)
             setSelectedFlightId(flightId)
             setView('flights')
             refreshFlights()

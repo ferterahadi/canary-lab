@@ -68,6 +68,50 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true })
 })
 
+describe('buildStageEntryValidator — env-capture accepts a proven boot', () => {
+  // `portify` is the cheapest entry point that depends on env-capture and
+  // nothing later (STAGE_DEPENDS_ON: scaffold + env-capture).
+  const entry = (validator: ReturnType<typeof buildStageEntryValidator>) =>
+    validator({ feature: FEATURE, fromStage: 'portify', env: 'local' })
+
+  /** A run whose services all reached ready, on disk where findBootProof reads. */
+  function seedBootedRun(runId: string): void {
+    useRealIndex([runRow({ runId, status: 'failed' })])
+    const runDir = path.join(logsDir, 'runs', runId)
+    fs.mkdirSync(runDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(runDir, 'manifest.json'),
+      JSON.stringify({
+        runId,
+        feature: FEATURE,
+        startedAt: '2026-07-01T00:00:00.000Z',
+        status: 'failed',
+        healCycles: 0,
+        services: [{ name: 'api', safeName: 'api', command: 'npm run dev', cwd: '/tmp', logPath: '/tmp/x.log', status: 'stopped', readyAt: '2026-07-01T00:00:05.000Z' }],
+      }),
+    )
+  }
+
+  it('accepts the jump when the envset is present, as it always did', () => {
+    useRealIndex([])
+    expect(entry(buildStageEntryValidator(featuresDir, logsDir))).toBeNull()
+  })
+
+  // An app with no env files captures nothing, so requiring the envset made the
+  // jump impossible however many times the suite had booted.
+  it('accepts the jump for an env-less feature that has booted', () => {
+    fs.rmSync(path.join(featuresDir, FEATURE, 'envsets'), { recursive: true, force: true })
+    seedBootedRun('r_boot')
+    expect(entry(buildStageEntryValidator(featuresDir, logsDir))).toBeNull()
+  })
+
+  it('refuses when the feature has neither captured nor booted', () => {
+    fs.rmSync(path.join(featuresDir, FEATURE, 'envsets'), { recursive: true, force: true })
+    useRealIndex([])
+    expect(entry(buildStageEntryValidator(featuresDir, logsDir))).toMatch(/has never booted and has no captured envset/)
+  })
+})
+
 describe('buildStageEntryValidator — the standalone-run fallback', () => {
   const entry = (validator: ReturnType<typeof buildStageEntryValidator>) =>
     validator({ feature: FEATURE, fromStage: 'evaluation-export', env: 'local' })

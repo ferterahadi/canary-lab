@@ -8,6 +8,7 @@ import { loadFeatures } from '../../shared/feature-loader'
 import { computePortPreflight } from '../../features/runs/logic/runtime/port-preflight'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { overlayExists as portifyOverlayExists } from '../../features/portify/logic/runtime/overlay'
+import { portInjectability } from '../../../../../shared/launcher/port-injectability'
 import { type ToolGroupContext, asJsonResult, ensureExternalClaimForMcpCall, errorResult, summarizeUnifiedDiff } from '../tool-support'
 
 export function registerPortifyTools(ctx: ToolGroupContext): void {
@@ -116,17 +117,29 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('list_portify_status', {
-    description: "List every feature with whether it is PORTIFIED — i.e. has a saved port overlay (features/<feature>/portify/) so it can boot concurrently (benchmark arms / parallel runs) without an EADDRINUSE clash. `portified` is the source of truth: a VERIFIED overlay exists (proven by the double-boot at save time). `declaredSlots` lists the port slots each service/command declares (informational). Use it to see which features still need start_portify.",
+    description: "List every feature with whether it can boot concurrently (benchmark arms / parallel runs) without an EADDRINUSE clash. TWO ways to get there, and both count: `portified` — a VERIFIED saved overlay exists under features/<feature>/portify/ (proven by the double-boot at save time); or `injectability: 'declared'` — every start command already declares a port slot in feature.config.cjs, because its service natively reads the port from its env. A 'declared' feature needs NO overlay; do not run start_portify on it. Only `injectability: 'partial'` or `'none'` (and not portified) still need start_portify. `declaredSlots` lists the slots per service/command.",
     inputSchema: {},
   }, async () => {
     const features = loadFeatures(deps.featuresDir).map((f) => {
       const pf = computePortPreflight(f)
-      return { feature: f.name, portified: portifyOverlayExists(f.featureDir), declaredSlots: pf.repos }
+      return {
+        feature: f.name,
+        portified: portifyOverlayExists(f.featureDir),
+        injectability: portInjectability(f.repos),
+        declaredSlots: pf.repos,
+      }
     })
     const portified = features.filter((f) => f.portified).length
+    const concurrencyReady = features.filter((f) => f.portified || f.injectability === 'declared').length
     return asJsonResult({
       features,
-      summary: { total: features.length, portified, notPortified: features.length - portified },
+      summary: {
+        total: features.length,
+        portified,
+        notPortified: features.length - portified,
+        concurrencyReady,
+        needsPortify: features.length - concurrencyReady,
+      },
     })
   })
 

@@ -7,7 +7,6 @@
 export { DirtyReviewDialog } from './components/DirtyReviewDialog'
 export { DirtyTestsPill } from './components/DirtyTestsPill'
 export { ExternalDraftAgentPanel } from './components/ExternalDraftAgentPanel'
-export { FixesCapturedPanel } from './components/FixesCapturedPanel'
 export { RunDetailColumn } from './components/RunDetailColumn'
 export { RunRow } from './components/RunRow'
 export { ServicesDialog } from './components/ServicesDialog'

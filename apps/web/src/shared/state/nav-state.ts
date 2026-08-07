@@ -1,5 +1,5 @@
-import type { ConfigTab, PersistedView, RouteDialog, WorkspaceView } from '../lib/workspace-view-state'
-import { type FeatureActivity } from '@/features/flights'
+import type { ConfigTab, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
+import { derivedFlightToken, type FeatureActivity } from '@/features/flights'
 import type { FlightIndexEntry, FlightStageKey } from '../api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 
@@ -66,6 +66,11 @@ export interface NavState {
    *  inert automatically — no clearing effect to keep in sync, and the run detail
    *  only honours a focus whose `runId` is the run it is showing. */
   focusTest: { runId: string; test: string } | null
+  /** Which run-detail tab a drill-through asked for, paired with its run for the
+   *  same reason `focusTest` is: a tab intent that outlived the run it was meant
+   *  for would silently reroute the next run the user opens. The flight's Test
+   *  Run stage sets it when the run's captured fixes are clicked. */
+  runTab: { runId: string; tab: RunArrivalTab } | null
   /** R83: the flight this view was drilled into FROM, or null when the user got
    *  here on their own. Set only by the flight's stage drill-throughs (coverage
    *  ledger, run detail), which switch the top-level view and would otherwise
@@ -101,6 +106,9 @@ export function initialNavState(persisted: PersistedView): NavState {
     focusTest: persisted.run && persisted.focusTest
       ? { runId: persisted.run, test: persisted.focusTest }
       : null,
+    runTab: persisted.run && persisted.runTab
+      ? { runId: persisted.run, tab: persisted.runTab }
+      : null,
     returnFlight: persisted.returnFlight,
   }
 }
@@ -131,6 +139,7 @@ export function navToPersistedView(state: NavState): PersistedView {
     // Only the CURRENT run's focus reaches the URL — a stale pair from a
     // previously-selected run is dropped rather than pinned.
     focusTest: state.focusTest?.runId === state.run ? state.focusTest.test : null,
+    runTab: state.runTab?.runId === state.run ? state.runTab.tab : null,
     returnFlight: state.returnFlight,
   }
 }
@@ -141,7 +150,7 @@ export function navToPersistedView(state: NavState): PersistedView {
  *  for the export case. */
 export type ActivityTarget =
   | { kind: 'run'; feature: string; runId: string }
-  | { kind: 'flight'; flightId: string | null }
+  | { kind: 'flight'; flightId: string | null; stage?: FlightStageKey }
   | { kind: 'portify'; workflowId: string }
   | { kind: 'draft'; draftId: string }
 
@@ -151,7 +160,14 @@ export function resolveActivityTarget(
   flights: readonly FlightIndexEntry[],
 ): ActivityTarget | null {
   if (activity.kind === 'running' && activity.runId) {
-    return { kind: 'run', feature, runId: activity.runId }
+    // The flight view, pinned to its Test Run stage — NOT the bare run detail.
+    // A feature used to route two different ways depending on whether a run
+    // happened to be live: idle rows opened the (derived) flight page, running
+    // rows opened the run. Same row, same feature, destination decided by
+    // timing. The flight view is the superset — it shows setup and every other
+    // stage, and `stage: 'run'` lands on the run with one click to its output.
+    const flight = flights.find((f) => f.feature === feature)
+    return { kind: 'flight', flightId: flight ? flight.flightId : derivedFlightToken(feature), stage: 'run' }
   }
   if (activity.kind === 'exporting') {
     // R29/R38: a flightless export is watched from the flights view (run detail

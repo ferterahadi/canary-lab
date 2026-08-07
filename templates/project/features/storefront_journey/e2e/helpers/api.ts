@@ -34,9 +34,12 @@ const request = async <T>(url: string, init: RequestInit = {}): Promise<{ status
 }
 
 export class StorefrontApi {
+  // Canary Lab exports every port slot it allocated as CANARY_PORT_<slot>, so
+  // the suite addresses whichever ports this run got. The literals are only the
+  // fallback for running the specs by hand against the standalone services.
   private readonly catalog = `http://localhost:${process.env.CANARY_PORT_catalog ?? '4200'}`
   private readonly inventory = `http://localhost:${process.env.CANARY_PORT_inventory ?? '4400'}`
-  private readonly checkoutBase = process.env.CHECKOUT_URL ?? 'http://localhost:4300'
+  private readonly checkoutBase = `http://localhost:${process.env.CANARY_PORT_checkout ?? '4300'}`
 
   createProduct = (name: string, priceCents: number) => request<Product>(`${this.catalog}/products`, {
     method: 'POST',

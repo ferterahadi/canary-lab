@@ -133,17 +133,49 @@ describe('GET /api/features', () => {
     fs.writeFileSync(path.join(dir, 'docs', '_prd-summary.json'), '{}')
     const app = await build()
     const res = await app.inject({ method: 'GET', url: '/api/features' })
-    const body = res.json() as Array<{ name: string; evidence: Record<string, boolean> }>
+    const body = res.json() as Array<{ name: string; evidence: Record<string, unknown> }>
+    // `booted` is false for both: this route's deps carry no logs dir in these
+    // tests, so no run history exists to prove a boot with.
     expect(body.find((f) => f.name === 'evidenced')?.evidence).toEqual({
       envCapture: true,
+      booted: false,
       prdSummary: true,
       specs: true,
+      portInjectability: 'none',
     })
     expect(body.find((f) => f.name === 'bare')?.evidence).toEqual({
       envCapture: false,
+      booted: false,
       prdSummary: false,
       specs: false,
+      portInjectability: 'none',
     })
+  })
+
+  // Parallel readiness is a config property, so the row must report it even
+  // with no portify overlay anywhere — that is what lets the shipped
+  // storefront suite read "ready" on a fresh scaffold.
+  it('reports declared port injectability off the config alone', async () => {
+    const dir = path.join(featuresDir, 'slotted')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: {
+        name: 'slotted',
+        description: 'd',
+        envs: ['local'],
+        featureDir: __dirname,
+        repos: [{ name: 'a', localPath: __dirname, startCommands: [
+          { command: 'npm run dev:api', ports: [{ name: 'api', env: 'PORT' }] },
+        ] }],
+      } }`,
+    )
+    const app = await build()
+    const res = await app.inject({ method: 'GET', url: '/api/features' })
+    const body = res.json() as Array<{ name: string; portified: boolean; evidence: Record<string, unknown> }>
+    const row = body.find((f) => f.name === 'slotted')!
+    expect(row.portified).toBe(false)
+    expect(row.evidence.portInjectability).toBe('declared')
   })
 
   it('substitutes empty arrays when a feature has no repos / envs declared', async () => {
