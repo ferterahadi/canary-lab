@@ -262,9 +262,11 @@ export function setFlightAutopilot(
 /** User-initiated pause of an active flight. Parks FIRST (so the drive loop's
  *  re-read sees `paused` before the abort lands — the pause-race rule), then
  *  cancels the in-flight stage work via the drive's AbortController and the
- *  stage's best-effort interrupt hook. The open stage flips back to `pending`
- *  so resume re-runs it from its own postcondition check; a checkpoint that
- *  was parked is cleared the same way (re-running the stage re-issues it). */
+ *  stage's best-effort interrupt hook — which for the run stage aborts the run,
+ *  so pause stops everything the user can see happening. The open stage flips
+ *  back to `pending` so resume re-runs it from its own postcondition check; a
+ *  checkpoint that was parked is cleared the same way (re-running the stage
+ *  re-issues it). */
 export function pauseFlight(flightId: string, deps: FlightConductorDeps): FlightManifest {
   const { store } = deps
   const now = deps.now ?? (() => new Date().toISOString())

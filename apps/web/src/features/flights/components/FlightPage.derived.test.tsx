@@ -223,9 +223,36 @@ describe('derived flights (R81)', () => {
   it('offers exactly one primary and no record-scoped controls', async () => {
     await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]) })
     expect(container.querySelector('[data-testid="derived-conduct"]')).toBeTruthy()
-    for (const testId of ['flight-pause', 'flight-primary-download', 'flight-continue', 'flight-menu']) {
+    for (const testId of ['flight-pause', 'flight-primary-download', 'flight-continue']) {
       expect(container.querySelector(`[data-testid="${testId}"]`)).toBeNull()
     }
+  })
+
+  // The ⋯ menu's one action deletes the SUITE through the feature-scoped API,
+  // and a derived flight only exists because that folder does. It was hidden
+  // with the record-scoped controls, which denied a valid action on every suite
+  // set up outside the conductor.
+  it('keeps the ⋯ menu — deleting the suite needs no flight record', async () => {
+    await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]) })
+    const menu = container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')
+    expect(menu).toBeTruthy()
+    act(() => { menu!.click() })
+    expect(container.querySelector('[data-testid="flight-delete"]')?.textContent).toContain('Delete suite')
+  })
+
+  it('never offers the record-removal variant, even with Suite setup still open', async () => {
+    // A recorded flight parked before scaffold has only its record to drop; a
+    // derived one has no record at all, so it must still target the suite.
+    await render('feature:half-built', {
+      derivedStages: new Map([['half-built', FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: (key === 'similarity' || key === 'scout' ? 'done' : 'pending') as 'done' | 'pending',
+      }))]]),
+    })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flight-menu"]')!.click() })
+    const label = container.querySelector('[data-testid="flight-delete"]')?.textContent ?? ''
+    expect(label).toContain('Delete suite')
+    expect(label).not.toContain('Remove flight')
   })
 
   it('continues from the first stage with no evidence, handing that stage to the launcher', async () => {

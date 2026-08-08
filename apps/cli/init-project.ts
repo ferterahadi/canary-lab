@@ -8,6 +8,18 @@ import { runAsScript } from './run-as-script'
 import { SCAFFOLD_SCRIPTS } from './scaffold-scripts'
 import { setup as setupCanaryLab } from './setup'
 import { isValidPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
+import { pickAvailableHealAgent } from '../web-server/src/features/runs/logic/runtime/heal-agent-spawn'
+
+/** The repair agent this machine can actually spawn — `claude`, then `codex`,
+ *  else nothing. Never throws: a probe failure is the same answer as "no CLI
+ *  here", and scaffolding must not die over it. */
+export function resolveLocalHealAgent(): 'claude' | 'codex' | null {
+  try {
+    return pickAvailableHealAgent()
+  } catch {
+    return null
+  }
+}
 
 export function resolveFirstExisting(pathsToTry: string[]): string {
   const match = pathsToTry.find((candidate) => fs.existsSync(candidate))
@@ -31,6 +43,66 @@ function getTemplateRoot(): string {
     path.resolve(__dirname, '../../templates/project'),
     path.resolve(__dirname, '../../../templates/project'),
   ])
+}
+
+/** The shipped storefront suite's recorded history, seeded into the new
+ *  workspace's `logs/`: one dry-run boot, and one saved port-ification.
+ *
+ *  Both stages report on an EVENT rather than a file, so on a brand-new scaffold
+ *  they had nothing to read — Suite setup showed empty "Services booted" and
+ *  "Boot time" tiles, and Parallel readiness showed the config's declaration
+ *  with no side-by-side proof and no port changes under it. Seeding the records
+ *  fills them, and — because it happens here — `npm run demo` and a user's own
+ *  `npx canary-lab init` land in exactly the same state, which is what makes the
+ *  demo testable.
+ *
+ *  It lives OUTSIDE `templates/project/` on purpose. The build skips
+ *  `project/logs` (the smoke tests boot against the template tree and leave
+ *  runtime records there), so a fixture kept inside it would be dropped from the
+ *  tarball — or overwritten by a test run. */
+function getBootRecordRoot(): string | null {
+  const candidates = [
+    path.resolve(__dirname, '../../templates/demo-boot'),
+    path.resolve(__dirname, '../../../templates/demo-boot'),
+  ]
+  return candidates.find((c) => fs.existsSync(c)) ?? null
+}
+
+/** Re-home the seeded portify record's paths onto this workspace.
+ *
+ *  The record names the feature directory and each service's repo, and both are
+ *  absolute at runtime — a machine-specific path nobody can ship. The template
+ *  stores them workspace-relative and this resolves them once, at the only
+ *  moment the target directory is known. A record left relative would point the
+ *  Ports tab and the config drill-through at directories that don't exist. */
+export function seedDemoRecordPaths(targetDir: string): void {
+  const portifyRoot = path.join(targetDir, 'logs', 'portify')
+  let ids: string[]
+  try {
+    ids = fs.readdirSync(portifyRoot)
+  } catch {
+    return
+  }
+  const absolute = (p: unknown): unknown =>
+    typeof p === 'string' && !path.isAbsolute(p) ? path.join(targetDir, p) : p
+  for (const id of ids) {
+    const file = path.join(portifyRoot, id, 'portify.json')
+    let record: { featureDir?: unknown; repos?: unknown }
+    try {
+      record = JSON.parse(fs.readFileSync(file, 'utf-8'))
+    } catch {
+      continue
+    }
+    record.featureDir = absolute(record.featureDir)
+    if (Array.isArray(record.repos)) {
+      record.repos = record.repos.map((repo) =>
+        repo && typeof repo === 'object'
+          ? { ...(repo as Record<string, unknown>), path: absolute((repo as { path?: unknown }).path) }
+          : repo,
+      )
+    }
+    fs.writeFileSync(file, JSON.stringify(record, null, 2) + '\n')
+  }
 }
 
 // npm pack strips `.gitignore` from published tarballs (a long-standing npm
@@ -135,6 +207,12 @@ export async function main(
 
   copyDir(getTemplateRoot(), targetDir)
 
+  const bootRecord = getBootRecordRoot()
+  if (bootRecord) {
+    copyDir(bootRecord, path.join(targetDir, 'logs'))
+    seedDemoRecordPaths(targetDir)
+  }
+
   let projectName = path.basename(targetDir)
   if (projectName === 'canary-lab') {
     projectName = 'canary-lab-workspace'
@@ -144,11 +222,28 @@ export async function main(
     buildPackageJson(projectName, packageSpec),
   )
 
-  // Pin the chosen port so `canary-lab ui` and the MCP bridge use it.
-  if (port !== undefined) {
+  // Pin the chosen port so `canary-lab ui` and the MCP bridge use it, and pin
+  // the repair agent to whichever CLI this machine actually has.
+  //
+  // `healAgent` defaults to `external` — "wait for a Claude/Codex client to
+  // claim the run over MCP" — which is right for an MCP-driven workspace and
+  // wrong for the very first thing a new user does. The scaffold's own tour says
+  // "Press Run to watch a repair"; with no agent configured that run reaches
+  // HEALING and waits forever for a client nobody told them to connect. Only
+  // `npm run demo` worked, because its harness writes this same key before
+  // booting — which is exactly the divergence between `demo` and `init` that
+  // must not exist.
+  //
+  // Resolved rather than hardcoded, so Settings shows the agent that is really
+  // going to run. No CLI installed → left unset, and the default stands.
+  const healAgent = resolveLocalHealAgent()
+  if (port !== undefined || healAgent) {
     fs.writeFileSync(
       path.join(targetDir, 'canary-lab.config.json'),
-      JSON.stringify({ port }, null, 2) + '\n',
+      JSON.stringify({
+        ...(port === undefined ? {} : { port }),
+        ...(healAgent ? { healAgent } : {}),
+      }, null, 2) + '\n',
     )
   }
 

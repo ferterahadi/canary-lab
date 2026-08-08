@@ -2,6 +2,7 @@ import type { FlightManifest, FlightStageStatus } from '@/shared/api/client'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '@/shared/ui/PanelCard'
 import { StepList, StepRow, type StepState } from '@/shared/ui/StepList'
 import { STAGE_COLUMN } from './stage-meta'
+import { distinctRepoPaths } from './stage-metrics'
 
 // Stage-specific panels for the flight detail view (R57/R58/R59) — each one a
 // lens onto the SAME data its full surface owns (feature.config.cjs via the
@@ -46,6 +47,9 @@ export function RepoScanPanel({
    *  a full restart, and the launcher is its one home. */
   onChangeInputs?: () => void
 }) {
+  // One card per repository, not per configured entry — several services can
+  // share a source tree (see distinctRepoPaths).
+  const repos = distinctRepoPaths(flight.repoPaths)
   // Attribute each scanned env file to the repo that contains it.
   const envsFor = (repo: string): string[] =>
     envFiles
@@ -97,10 +101,10 @@ export function RepoScanPanel({
         style={PANEL_CARD_STYLE}
       >
         <div className={PANEL_KICKER_CLASS}>
-          {flight.repoPaths.length === 1 ? 'Repo · scanned' : `Repos · ${flight.repoPaths.length} scanned`}
+          {repos.length === 1 ? 'Repo · scanned' : `Repos · ${repos.length} scanned`}
         </div>
         <StepList>
-          {flight.repoPaths.map((p) => {
+          {repos.map((p) => {
             const envs = envsFor(p)
             return (
               <StepRow

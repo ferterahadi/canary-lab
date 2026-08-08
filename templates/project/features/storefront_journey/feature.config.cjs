@@ -9,7 +9,17 @@ const appDir = path.join(__dirname, '..', '..', 'demo-app')
 
 const config = {
   name: 'storefront_journey',
-  description: 'A customer buys two in-stock catalog items with a welcome discount.',
+  // The suite's intent, and what the flight's "Intent · what to test" card reads
+  // when no flight has recorded one of its own. It states the CONTRACT BETWEEN
+  // the services, because that is what seven journeys over three services are
+  // actually checking — a per-service sentence would describe none of them.
+  description:
+    'Prove the three storefront services agree on one order. The SKU the catalog '
+    + 'publishes is the identity inventory reserves against; reserving stock lowers '
+    + 'what is still available and an oversell is refused with the available count, '
+    + 'not the shelf count; and the total a cart reports is the total checkout '
+    + 'charges, discount applied once, a rejected code leaving the live discount '
+    + 'alone. Catalog edits and deletes must land on the product that was asked for.',
   envs: ['local'],
   // One failure per cycle, so a repair agent sees exactly one broken contract
   // and each repair reveals the next. This is the knob that decides it: it

@@ -682,6 +682,24 @@ describe('R83 — every stage pane wears the settled layout, with placeholders f
     })
   }
 
+  // Several services can share one source tree (the shipped storefront demo
+  // declares three repos over one `demo-app/`), so counting entries claimed
+  // three repositories and listed the same directory three times.
+  it('counts and lists a shared source tree ONCE', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      repoPaths: ['/repo/demo-app', '/repo/demo-app', '/repo/demo-app'],
+      currentStage: 'scout',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: key === 'scout' ? ('done' as const) : ('pending' as const) })),
+    }))
+    await openScout()
+    const facts = container.querySelector('[data-testid="stage-facts"]')!
+    const tile = [...facts.querySelectorAll('[data-testid^="fact-"]')]
+      .find((e) => e.textContent?.includes('Repos scanned'))
+    expect(tile?.textContent).toContain('1')
+    expect(container.querySelectorAll('[data-testid="repo-card-demo-app"]')).toHaveLength(1)
+    expect(container.querySelector('[data-testid="repo-scan-card"]')?.textContent).toContain('Repo · scanned')
+  })
+
   it('a pending stage still shows its band: the input-derived count is real, the unmeasured ones are placeholders', async () => {
     mocks.getFlight.mockResolvedValue(scoutFlight('pending'))
     await openScout()

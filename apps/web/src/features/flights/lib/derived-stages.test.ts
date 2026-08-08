@@ -139,6 +139,15 @@ describe('derived flight tokens (R81)', () => {
     expect(m.opts.env).toBe('staging')
   })
 
+  // The entry prefill falls through to the feature config's own description, so
+  // the Repo scan panel's "Intent · what to test" reads the suite's purpose
+  // instead of rendering its heading over an empty line.
+  it('carries the prefilled intent onto the pseudo-manifest', () => {
+    const done = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+    const m = buildDerivedManifest('go-smoke', done, { description: 'Prove the services agree on one order.' })
+    expect(m.description).toBe('Prove the services agree on one order.')
+  })
+
   it('attaches workspace-probed evidence whatever the stage status, flagging the source', () => {
     const stages = FLIGHT_STAGE_KEYS.map((key) => ({
       key,

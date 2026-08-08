@@ -104,6 +104,21 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     return featureDir
   }
 
+  // A never-flown feature has no recorded intent, but its config carries the
+  // sentence the suite was authored against. Without this fall-through the
+  // derived flight's "Intent · what to test" card renders over a blank line.
+  it("falls the prefill's intent through to the feature config's own description", async () => {
+    const featureDir = path.join(tmpDir, 'features', 'described')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports.config = { name: 'described', description: 'Prove the two services agree on one order.', repos: [{ name: 'app', localPath: '${repoDir}' }] }\n`,
+    )
+    app = await buildApp(allDone())
+    const { body } = await entryFor('described')
+    expect(body.prefill.description).toBe('Prove the two services agree on one order.')
+  })
+
   it('400s without a feature and 404s a feature with no record and no config', async () => {
     app = await buildApp(allDone())
     expect((await app.inject({ method: 'GET', url: '/api/flights/entry' })).statusCode).toBe(400)
@@ -121,6 +136,25 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     app = await buildApp(allDone())
     const { body } = await entryFor('homey')
     expect(body.prefill.repoPaths).toEqual([path.join(os.homedir(), 'some/repo')])
+  })
+
+  // A suite may declare one repo per service over a SHARED source tree so each
+  // gets its own per-run worktree. One prefill entry each put the same directory
+  // in the launcher's repo list three times — identical rows the user cannot
+  // tell apart — and made every downstream count claim three repositories.
+  it('collapses repos that share one source tree', async () => {
+    const featureDir = path.join(tmpDir, 'features', 'trio')
+    fs.mkdirSync(featureDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports.config = { name: 'trio', repos: [`
+      + `{ name: 'a', localPath: '${repoDir}' },`
+      + `{ name: 'b', localPath: '${repoDir}/' },`
+      + `{ name: 'c', localPath: '${repoDir}' }] }\n`,
+    )
+    app = await buildApp(allDone())
+    const { body } = await entryFor('trio')
+    expect(body.prefill.repoPaths).toEqual([repoDir])
   })
 
   // R81 (replaces the R41 blanket lock): a stage is gated by EVIDENCE, not by

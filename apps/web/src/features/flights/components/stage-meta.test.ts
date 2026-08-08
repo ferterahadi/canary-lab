@@ -444,6 +444,30 @@ describe('stageStateLine — skipped copy', () => {
   })
 })
 
+describe('portify facts — natively injectable suites (no overlay, no workflow)', () => {
+  // A suite whose start commands already declare a port slot per service never
+  // needs portify, so it has no workflow to read. The tiles come from the config
+  // instead; without them the stage rendered ticked and completely blank.
+  it('reports the declared slots WITHOUT claiming they were proven', () => {
+    const stage = { key: 'portify', status: 'done', evidence: { declaredInjectable: 3, serviceCount: 3 } } as FlightStage
+    const facts = stageFacts(stage, flight({ stages: [stage] }))
+    const injectable = facts.find((f) => f.label === 'Services injectable')
+    expect(injectable).toMatchObject({ value: '3/3', sub: 'declared in the config' })
+    // The verified hue is reserved for a real double boot. A declaration that
+    // borrowed it would report config as proof.
+    expect(injectable?.tone).toBeUndefined()
+    // Proof is a concurrent double boot, which nothing here performed — the
+    // empty tile has to say so rather than be omitted.
+    expect(facts.find((f) => f.label === 'Instances proven')).toMatchObject({ value: '—' })
+    expect(facts.find((f) => f.label === 'Files edited')).toBeUndefined()
+  })
+
+  it('still renders nothing when neither a workflow nor declared slots exist', () => {
+    const stage = { key: 'portify', status: 'done', evidence: { edits: 0 } } as FlightStage
+    expect(stageFacts(stage, flight({ stages: [stage] })).length).toBe(0)
+  })
+})
+
 describe('portify live progress (workflow id + phase mirror)', () => {
   const running = (progress?: unknown): FlightStage =>
     ({ key: 'portify', status: 'running', ...(progress !== undefined ? { progress } : {}) }) as FlightStage

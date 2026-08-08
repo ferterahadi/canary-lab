@@ -69,10 +69,24 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
 
       // Configs may declare repos as `~/...` — expand so the prefill posts
       // paths the start route's realpath check accepts.
+      //
+      // Deduplicated: several services legitimately share one source tree (a
+      // suite declaring one repo per service over a single checkout, so each
+      // gets its own per-run worktree). One entry each put the same directory in
+      // the launcher's repo list three times over — three identical rows the
+      // user cannot tell apart, and a repoPaths list that then made the flight
+      // claim three repositories everywhere it was counted.
+      const seen = new Set<string>()
       const configRepoPaths = (config?.repos ?? [])
         .map((r) => r.localPath)
         .filter((p): p is string => typeof p === 'string' && p.length > 0)
         .map((p) => (p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p))
+        .filter((p) => {
+          const key = p.replace(/[\\/]+$/, '')
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
       const options: FlightEntryOptions = {
         feature,
         flight: manifest
@@ -86,7 +100,12 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
         canContinue: manifest?.status === 'paused',
         prefill: {
           repoPaths: manifest?.repoPaths ?? configRepoPaths,
-          description: manifest?.description ?? '',
+          // A feature that never flew has no recorded intent, but its config
+          // already carries one — the sentence the suite was authored against.
+          // Falling through to it means the derived flight's "Intent · what to
+          // test" card reads the suite's own purpose instead of a blank line,
+          // and the launcher opens prefilled rather than empty.
+          description: manifest?.description ?? config?.description ?? '',
           env: manifest?.opts.env ?? env,
           coverageTarget: manifest?.opts.coverageTarget ?? 100,
         },

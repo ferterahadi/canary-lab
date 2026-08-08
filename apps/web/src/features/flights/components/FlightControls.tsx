@@ -326,10 +326,15 @@ export function RedoFlightDialog({
  *  closing disarms). Errors route to the header's inline error line. */
 export function FlightMenu({
   flight,
+  derived = false,
   onAction,
   onDeleted,
 }: {
   flight: FlightManifest
+  /** R81: a pseudo-manifest for a feature with no flight record. The menu's one
+   *  action deletes the SUITE, which exists on disk either way — so this only
+   *  rules out the record-removal variant below. */
+  derived?: boolean
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
   onDeleted: () => void
 }) {
@@ -366,8 +371,12 @@ export function FlightMenu({
   // a suite after setup, or the lone flight record before setup creates one.
   const [deleteOpen, setDeleteOpen] = useState(false)
   // Before Suite setup the only durable thing is the flight record itself. A
-  // suite delete would 404 because there is no feature directory yet.
-  const removeFlightOnly = flight.stages.find((stage) => stage.key === 'scaffold')?.status === 'pending'
+  // suite delete would 404 because there is no feature directory yet. Never on a
+  // derived flight: it has no record to remove, and it only exists BECAUSE the
+  // feature directory does — so the suite is always the thing to delete, even
+  // with Suite setup still open.
+  const removeFlightOnly = !derived
+    && flight.stages.find((stage) => stage.key === 'scaffold')?.status === 'pending'
   const items: MenuItem[] = [
     ...(!active
       ? [{

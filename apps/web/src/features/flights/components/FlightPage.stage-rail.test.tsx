@@ -519,3 +519,37 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBe('evaluation')
   })
 })
+
+// A flight resumed mid-pipeline marks every earlier stage `skipped`. The shipped
+// demo showed five ✓ steps until the user pressed Continue from Test Run, and
+// the moment they made progress those five decayed to ↷ — the evidence had not
+// changed, only who was credited for it.
+describe('a skipped stage that HAS evidence keeps its settled mark', () => {
+  it('renders the resumed flight\'s earlier steps as done, not skipped', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'run',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'run' ? ('running' as const)
+          : key === 'heal' || key === 'evaluation-export' ? ('pending' as const)
+          : ('skipped' as const),
+        // What the read-time probe fills in for a stage completed outside this
+        // flight. `scout`/`similarity` carry none — nothing on disk records a scan.
+        ...(key === 'scaffold' || key === 'env-capture' || key === 'docs'
+          || key === 'prd-summary' || key === 'specs-coverage' || key === 'portify'
+          ? { evidence: { captured: 1 }, evidenceSource: 'workspace' as const }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    const row = (key: string) =>
+      container.querySelector(`[data-testid="stage-rail-${key}"]`)?.textContent ?? ''
+    for (const key of ['scaffold', 'docs', 'specs-coverage', 'portify']) {
+      expect(row(key)).toContain('✓')
+      expect(row(key)).not.toContain('↷')
+    }
+    // A skip with nothing to show still reads as one.
+    expect(row('scout')).toContain('↷')
+  })
+})

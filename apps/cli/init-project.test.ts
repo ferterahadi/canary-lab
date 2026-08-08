@@ -153,6 +153,26 @@ describe('copyDir', () => {
 })
 
 describe('main (init-project orchestration)', () => {
+  // The scaffold's own tour says "Press Run to watch a repair". `healAgent`
+  // defaults to `external` — wait for an MCP client to claim the run — so that
+  // run reached HEALING and waited forever for a client nobody mentioned. Only
+  // `npm run demo` worked, because its harness wrote this key itself.
+  it('pins the repair agent to a CLI this machine has, alongside the port', async () => {
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    await main(['agented', '--package-spec', '^9.9.9', '--port', '7401'])
+    const config = JSON.parse(
+      fs.readFileSync(path.join(workspace, 'agented', 'canary-lab.config.json'), 'utf-8'),
+    )
+    expect(config.port).toBe(7401)
+    // Resolved, not hardcoded: whatever this machine has, or absent when it has
+    // neither — in which case the server's own default stands.
+    if (config.healAgent !== undefined) {
+      expect(['claude', 'codex']).toContain(config.healAgent)
+    }
+  })
+
   it('scaffolds into empty target: copies templates, writes package.json, runs git init', async () => {
     const workspace = mkTmp()
     process.chdir(workspace)
@@ -166,6 +186,35 @@ describe('main (init-project orchestration)', () => {
     expect(fs.existsSync(path.join(target, 'demo-app', 'inventory-service', 'server.ts'))).toBe(true)
     expect(fs.existsSync(path.join(target, 'demo-app', 'checkout-service', 'server.ts'))).toBe(true)
     expect(fs.existsSync(path.join(target, 'features', 'README.md'))).toBe(true)
+    // Suite setup's figures come from a run, and a fresh scaffold has none — so
+    // init seeds the recorded boot. This is also what keeps `npm run demo` and a
+    // user's own init in the same state.
+    expect(fs.existsSync(path.join(target, 'logs', 'runs', 'index.json'))).toBe(true)
+    const seeded = JSON.parse(fs.readFileSync(path.join(target, 'logs', 'runs', 'index.json'), 'utf-8'))
+    expect(seeded[0]).toMatchObject({ feature: 'storefront_journey', executionType: 'boot' })
+    const seededManifest = JSON.parse(
+      fs.readFileSync(path.join(target, 'logs', 'runs', seeded[0].runId, 'manifest.json'), 'utf-8'),
+    )
+    expect(seededManifest.services).toHaveLength(3)
+    expect(seededManifest.services.every((s: { readyAt?: string }) => Boolean(s.readyAt))).toBe(true)
+    // Parallel readiness reads the same way: its double-boot proof and its diff
+    // live in a saved portify record, not in a file the scaffold could carry.
+    const portifyIds = fs.readdirSync(path.join(target, 'logs', 'portify'))
+      .filter((name) => name !== 'index.json')
+    expect(portifyIds).toHaveLength(1)
+    const portify = JSON.parse(
+      fs.readFileSync(path.join(target, 'logs', 'portify', portifyIds[0], 'portify.json'), 'utf-8'),
+    )
+    expect(portify).toMatchObject({ feature: 'storefront_journey', status: 'saved' })
+    expect(portify.verification.instances).toHaveLength(2)
+    expect(portify.verification.instances.every((i: { ok: boolean }) => i.ok)).toBe(true)
+    // The record ships workspace-RELATIVE paths (a published tarball can carry
+    // no machine path); init resolves them onto this workspace, or the Ports tab
+    // and the config drill-through point at directories that don't exist.
+    for (const p of [portify.featureDir, ...portify.repos.map((r: { path: string }) => r.path)]) {
+      expect(path.isAbsolute(p)).toBe(true)
+      expect(fs.existsSync(p)).toBe(true)
+    }
     expect(fs.existsSync(path.join(target, 'features', 'demo_catalog'))).toBe(false)
     expect(fs.existsSync(path.join(target, 'features', 'demo_inventory'))).toBe(false)
 
@@ -249,14 +298,22 @@ describe('main (init-project orchestration)', () => {
     expect(config.port).toBe(8200)
   })
 
-  it('does not write canary-lab.config.json when no --port is given', async () => {
+  it('omits the port key entirely when no --port is given', async () => {
     const workspace = mkTmp()
     process.chdir(workspace)
     vi.spyOn(console, 'log').mockImplementation(() => {})
 
     await main(['my-project', '--package-spec', '^9.9.9'])
 
-    expect(fs.existsSync(path.join(workspace, 'my-project', 'canary-lab.config.json'))).toBe(false)
+    // The file is written only when it has something to say. Without a port that
+    // is the repair agent alone — and on a machine with neither CLI, nothing at
+    // all, leaving the server's defaults untouched exactly as before.
+    const configPath = path.join(workspace, 'my-project', 'canary-lab.config.json')
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+      expect(config.port).toBeUndefined()
+      expect(Object.keys(config)).toEqual(['healAgent'])
+    }
   })
 
   it('scaffolds gitignore rules that keep feature envset values out of git', async () => {

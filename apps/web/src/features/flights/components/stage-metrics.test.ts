@@ -3,12 +3,14 @@ import type { CoverageLedger, RunIndexEntry, RunLifecycleEvent } from '@/shared/
 import {
   CONFIG_GROUP,
   bootDurationMs,
+  distinctRepoPaths,
   estimateTokens,
   groupOverlayFiles,
   ledgerEvidence,
   overlayDiffStat,
   runHistoryStats,
   serviceReadyMs,
+  settledStageStatus,
   splitFilePath,
 } from './stage-metrics'
 
@@ -343,5 +345,49 @@ describe('ledgerEvidence', () => {
   it('returns null when there is no ledger', () => {
     expect(ledgerEvidence(null)).toBeNull()
     expect(ledgerEvidence(undefined)).toBeNull()
+  })
+})
+
+describe('distinctRepoPaths', () => {
+  // Several services legitimately share one source tree — the demo storefront
+  // declares three repos over one `demo-app/` so each gets its own per-run
+  // worktree. Counting entries claimed three repositories and listed the same
+  // directory three times (with duplicate React keys to match).
+  it('collapses repeated source trees, keeping first-seen order', () => {
+    expect(distinctRepoPaths(['/w/demo-app', '/w/demo-app', '/w/demo-app']))
+      .toEqual(['/w/demo-app'])
+    expect(distinctRepoPaths(['/w/a', '/w/b', '/w/a', '/w/c']))
+      .toEqual(['/w/a', '/w/b', '/w/c'])
+  })
+
+  it('treats a trailing separator as cosmetic', () => {
+    expect(distinctRepoPaths(['/w/app/', '/w/app'])).toEqual(['/w/app/'])
+  })
+
+  it('leaves genuinely distinct repos alone', () => {
+    const repos = ['/w/merchant-pass', '/w/fnb']
+    expect(distinctRepoPaths(repos)).toEqual(repos)
+  })
+})
+
+describe('settledStageStatus', () => {
+  // Resuming mid-pipeline marks every earlier stage skipped — true of the
+  // flight, false of the feature. The demo showed five settled steps until the
+  // user pressed Continue, then those same five decayed to "skipped" with the
+  // evidence unchanged. cl_flight-progress-model forbids that demotion.
+  it('reads a skipped stage that has evidence as done', () => {
+    expect(settledStageStatus({ status: 'skipped', evidence: { captured: 1 } })).toBe('done')
+  })
+
+  it('leaves a genuinely empty skip alone', () => {
+    expect(settledStageStatus({ status: 'skipped' })).toBe('skipped')
+    expect(settledStageStatus({ status: 'skipped', evidence: {} })).toBe('skipped')
+    expect(settledStageStatus({ status: 'skipped', evidence: null })).toBe('skipped')
+  })
+
+  it('never touches any other status', () => {
+    for (const status of ['pending', 'running', 'done', 'failed', 'waiting-for-approval'] as const) {
+      expect(settledStageStatus({ status, evidence: { a: 1 } })).toBe(status)
+    }
   })
 })

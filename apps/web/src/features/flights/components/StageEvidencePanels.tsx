@@ -386,17 +386,22 @@ export function AllReportsPanel({
               <div className="min-w-0 flex-1">
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate text-[12px] font-medium">Run {task.runId}</span>
-                  <span className="cl-count-chip shrink-0">{task.mode === 'localized' ? 'agent-written' : 'from the run'}</span>
+                  {/* The flight's own row is marked, not decorated: the status dot
+                      is this row's only colour, so the marker stays a quiet label. */}
                   {task.taskId === pinnedTaskId && (
-                    <span className="shrink-0 text-[10px] text-accent">this flight</span>
+                    <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-muted">this flight</span>
                   )}
                 </div>
+                {/* How the report was built is metadata, not a badge — it reads on
+                    the same muted line as size and age. */}
                 <div className="mt-0.5 truncate text-[10.5px] text-muted">
                   {task.status === 'failed'
                     /* A failed export has no archive; saying so beats a dead
                        button, and the reason is the only useful thing left. */
                     ? (task.error ?? 'export failed')
-                    : [archiveContents(task), timeAgo(task.updatedAt)].filter(Boolean).join(' · ')}
+                    : [task.mode === 'localized' ? 'agent-written' : 'from the run', archiveContents(task), timeAgo(task.updatedAt)]
+                        .filter(Boolean)
+                        .join(' · ')}
                 </div>
               </div>
               {task.downloadReady

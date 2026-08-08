@@ -1,5 +1,6 @@
 import type { FlightStageKey, FlightStageStatus, PrdSourceCheckpointData } from '@/shared/api/client'
 import { STAGE_LABEL, stageLabel } from './stage-meta'
+import { settledStageStatus } from './stage-metrics'
 
 // ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────
 // The rail is a lens for the USER, not a dump of the conductor's internals:
@@ -67,7 +68,14 @@ export function mergedPairStatus(
   // claimed a step was finished that the conductor will still re-enter. The
   // unsettled half wins, so the row reads exactly as far as it actually got.
   const settled = (s: FlightStageStatus) => s === 'done' || s === 'skipped'
-  return settled(p) && !settled(c) ? c : p
+  if (settled(p) && !settled(c)) return c
+  // Both settled but disagreeing: the half that DID something speaks. Resuming
+  // mid-pipeline skips `scaffold` while `env-capture` still reads its boot proof
+  // off the workspace, and taking the primary alone marked Suite setup ↷ over a
+  // pane full of booted services. A step where one half had nothing to do is a
+  // step that happened.
+  if (settled(p) && settled(c)) return p === 'done' || c === 'done' ? 'done' : p
+  return p
 }
 
 /** "empty" when this stage is parked on a collector attempt that found
@@ -80,10 +88,11 @@ export function stageRailNote(stage: { key: string; checkpoint?: { data?: unknow
 }
 
 export function stageRailRows(
-  stages: Array<{ key: string; status: FlightStageStatus; checkpoint?: { data?: unknown } }>,
+  stages: Array<{ key: string; status: FlightStageStatus; evidence?: unknown; checkpoint?: { data?: unknown } }>,
 ): StageRailRow[] {
   const rows: StageRailRow[] = []
-  for (const s of stages) {
+  for (const raw of stages) {
+    const s = { ...raw, status: settledStageStatus(raw) }
     const key = s.key as FlightStageKey
     if (key === 'similarity') {
       if (s.status !== 'waiting-for-approval' && s.status !== 'failed') continue
@@ -93,7 +102,8 @@ export function stageRailRows(
     if (FOLDED_KEYS.has(key)) continue // folded into its pair row
     const companionKey = STAGE_COMPANION[key]
     if (companionKey) {
-      const companion = stages.find((x) => x.key === companionKey)
+      const companionRaw = stages.find((x) => x.key === companionKey)
+      const companion = companionRaw ? { ...companionRaw, status: settledStageStatus(companionRaw) } : undefined
       // `docs` reaches the rail through here, not the plain branch below — it
       // is the primary of the docs+prd-summary pair ("Requirements").
       rows.push({

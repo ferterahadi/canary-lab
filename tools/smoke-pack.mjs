@@ -100,6 +100,21 @@ const scaffoldPaths = [
   // the generated summary its `@req-*` tags map onto. Without these two the
   // Requirements and Test-authoring stages read as never started on a fresh
   // scaffold, and the coverage ledger has nothing to score against.
+  // The envset the suite declares in `envs: ['local']`. npm strips `.gitignore`
+  // from a tarball but not `.env`, so this is the one place that proves it.
+  'features/storefront_journey/envsets/envsets.config.json',
+  'features/storefront_journey/envsets/local/storefront_journey.env',
+  // The recorded boot the scaffold ships so Suite setup reports figures before
+  // the user runs anything. Under a `logs/` path, so it needs both the repo's
+  // .gitignore exception and this assertion to prove it survives the tarball.
+  'logs/runs/index.json',
+  'logs/runs/2026-08-07T0900-s7bk/manifest.json',
+  'logs/runs/2026-08-07T0900-s7bk/lifecycle-events.jsonl',
+  // The saved port-ification behind Parallel readiness — its double-boot proof
+  // and its diff. Seeded the same way, and its paths are rewritten to this
+  // workspace by init, which the assertion below checks.
+  'logs/portify/index.json',
+  'logs/portify/portify-2026-08-07T0910-q2mx/portify.json',
   'features/storefront_journey/docs/storefront_journey-prd.md',
   'features/storefront_journey/docs/_prd-summary.json',
   'features/storefront_journey/docs/_prd-summary.md',
@@ -160,6 +175,22 @@ for (const relPath of [
 ]) {
   if (fs.existsSync(path.join(projectDir, relPath))) {
     throw new Error(`Smoke test failed: deprecated path still present: ${relPath}`)
+  }
+}
+
+// The seeded portify record ships workspace-RELATIVE paths (no machine path can
+// be published); init resolves them against the new project. A record left
+// relative points the Ports tab and the config drill-through at directories
+// that don't exist, and nothing else in the scaffold would catch it.
+{
+  const record = JSON.parse(
+    fs.readFileSync(path.join(projectDir, 'logs/portify/portify-2026-08-07T0910-q2mx/portify.json'), 'utf8'),
+  )
+  const paths = [record.featureDir, ...record.repos.map((r) => r.path)]
+  for (const p of paths) {
+    if (!path.isAbsolute(p) || !fs.existsSync(p)) {
+      throw new Error(`Smoke test failed: seeded portify path not re-homed onto the workspace: ${p}`)
+    }
   }
 }
 

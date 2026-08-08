@@ -1,3 +1,4 @@
+import type { FlightStageStatus } from '@/shared/api/client'
 import type {
   CoverageLedger,
   RunIndexEntry,
@@ -89,6 +90,54 @@ export function serviceReadyMs(service: Pick<ServiceManifestEntry, 'startingAt' 
 export function estimateTokens(bytes: number): number {
   if (!Number.isFinite(bytes) || bytes <= 0) return 0
   return Math.round(bytes / 4)
+}
+
+/** The DISTINCT repositories a flight scanned, in first-seen order.
+ *
+ *  `repoPaths` carries one entry per configured repo, and several services may
+ *  legitimately share one source tree — a suite that starts three processes out
+ *  of a single checkout declares three repos so each gets its own per-run
+ *  worktree. Counting the entries then claimed three repositories where there is
+ *  one, and the Repo scan panel listed the same directory three times over (with
+ *  duplicate React keys to match). Services are counted separately, off the
+ *  start commands, so nothing is lost by collapsing these. */
+export function distinctRepoPaths(paths: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const p of paths) {
+    // Trailing separators are cosmetic — `/srv/app` and `/srv/app/` are one repo.
+    const key = p.replace(/[\\/]+$/, '')
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(p)
+  }
+  return out
+}
+
+/** A stage the conductor stepped over, but whose artifact is on disk, is DONE —
+ *  the work happened, just not on this flight's watch.
+ *
+ *  Resuming mid-pipeline marks every earlier stage `skipped`, which is true of
+ *  the flight and false of the feature. The visible effect was backwards: the
+ *  shipped demo showed five settled steps until the user pressed Continue, and
+ *  the moment they made progress those same five decayed to "skipped" — the
+ *  evidence had not changed, only who was credited for it. The
+ *  cl_flight-progress-model rule forbids exactly that demotion: evidence-derived
+ *  progress and conductor-driven progress are the same fact.
+ *
+ *  Evidence is the discriminator, so a genuinely empty skip still reads as one —
+ *  Parallel readiness stepped over with nothing to show keeps its skip mark and
+ *  its "already checked" sentence. */
+export function stageHasEvidence(evidence: unknown): boolean {
+  return evidence !== null
+    && typeof evidence === 'object'
+    && Object.keys(evidence as object).length > 0
+}
+
+export function settledStageStatus(
+  stage: { status: FlightStageStatus; evidence?: unknown },
+): FlightStageStatus {
+  return stage.status === 'skipped' && stageHasEvidence(stage.evidence) ? 'done' : stage.status
 }
 
 export interface OverlayDiffStat {

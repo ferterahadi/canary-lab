@@ -8,6 +8,8 @@ import { listEvaluationExportTasks } from '../../evaluation/logic/evaluation-exp
 import { readOverlay } from '../../portify/logic/runtime/overlay'
 import { PortifyRunStore } from '../../portify/logic/runtime/store'
 import { readRunSummary, runCounts } from '../../runs/logic/run-detail'
+import { loadFeatures } from '../../../shared/feature-loader'
+import { startCommandPortSlotCounts } from '../../../../../../shared/launcher/port-injectability'
 import { listRuns } from '../../runs/logic/run-store'
 import { findBootProof } from './stage-evidence'
 import { readManifest } from '../../runs/logic/runtime/manifest'
@@ -118,18 +120,38 @@ function specsCoverageEvidence(deps: WorkspaceEvidenceDeps, feature: string): Ev
  *  (a hand-written overlay), which the facts row already tolerates.
  *  `PortifyRunStore.list()` is a pure index read — reconciliation only happens
  *  through the explicit `reconcileInterrupted`, so probing writes nothing. */
-function portifyEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDir: string): EvidenceBlock | undefined {
-  const overlay = readOverlay(featureDir)
-  if (!overlay) return undefined
-  const edits = overlay.meta.repos.reduce((n, r) => n + (r.touchedFiles?.length ?? 0), 0)
-  const saved = new PortifyRunStore(deps.logsDir)
+function savedPortifyWorkflowId(logsDir: string, feature: string): string | undefined {
+  return new PortifyRunStore(logsDir)
     .list()
     .filter((w) => w.feature === feature && w.status === 'saved')
     // By start, not end: portify is single-flight per feature, so the
     // later-started workflow is the later-saved one, and `startedAt` is the field
     // every row is guaranteed to carry.
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-  const workflowId = saved[0]?.workflowId
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]?.workflowId
+}
+
+function portifyEvidence(deps: WorkspaceEvidenceDeps, feature: string, featureDir: string): EvidenceBlock | undefined {
+  const workflowId = savedPortifyWorkflowId(deps.logsDir, feature)
+  const overlay = readOverlay(featureDir)
+  if (!overlay) {
+    // A saved workflow OUTRANKS the config here, because the two answer
+    // different questions. The workflow holds the double boot and the diff —
+    // the proof; the config holds a declaration nothing has tested. The overlay
+    // holds neither, so gating the workflow lookup on it (as this did) hid the
+    // proof whenever the patch was absent: a no-op port-ification, an overlay
+    // the user removed, or edits that landed upstream in the product repo.
+    if (workflowId) return { workflowId }
+    // No workflow either is still NOT "no evidence". A suite whose start
+    // commands already declare a port slot per service is concurrency-ready by
+    // construction — portify has nothing to rewrite, so it correctly never ran
+    // and correctly leaves no artifact. Reading that as absent left the stage
+    // ticked and its panel completely blank. The config is the evidence in that
+    // case: how many services take their port from the run.
+    const config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
+    const { total, slotted } = startCommandPortSlotCounts(config?.repos)
+    return total > 0 && slotted === total ? { declaredInjectable: slotted, serviceCount: total } : undefined
+  }
+  const edits = overlay.meta.repos.reduce((n, r) => n + (r.touchedFiles?.length ?? 0), 0)
   return workflowId ? { edits, workflowId } : { edits }
 }
 
@@ -181,11 +203,31 @@ function evaluationExportEvidence(deps: WorkspaceEvidenceDeps, feature: string):
   return task ? { taskId: task.taskId, runId: task.runId, mode: task.mode } : undefined
 }
 
-/** Per-stage probe. `similarity` and `scout` are deliberately absent: both report
- *  what a scan OBSERVED at the time (which suites were compared, which env files
- *  the repo held), and no artifact on disk records that. Inventing a zero there
- *  would turn "never measured" into "measured none". */
+/** The repositories the suite is configured against — the one thing about a repo
+ *  scan that IS on disk.
+ *
+ *  Deliberately not `envFiles`: that is what a scan OBSERVED at the time, and no
+ *  artifact records it, so reporting zero would turn "never measured" into
+ *  "measured none". The repo list is different — it is a config read, the same
+ *  one the Repo scan panel's own tiles already perform. Without it a flight
+ *  resumed past this step marked the row ↷ over a fully populated pane.
+ *  Deduplicated for the reason `distinctRepoPaths` exists: services sharing one
+ *  source tree are one repository. */
+function scoutEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
+  const config = loadFeatures(deps.featuresDir).find((c) => c.name === feature)
+  const paths = new Set(
+    (config?.repos ?? [])
+      .map((r) => r.localPath)
+      .filter((p): p is string => typeof p === 'string' && p.length > 0)
+      .map((p) => p.replace(/[\\/]+$/, '')),
+  )
+  return paths.size > 0 ? { repos: paths.size } : undefined
+}
+
+/** Per-stage probe. `similarity` is deliberately absent: it reports which suites
+ *  a scan compared, and no artifact on disk records that. */
 const PROBES: Partial<Record<FlightStageKey, (deps: WorkspaceEvidenceDeps, feature: string, featureDir: string, env?: string) => EvidenceBlock | undefined>> = {
+  'scout': (deps, feature) => scoutEvidence(deps, feature),
   'env-capture': (deps, feature, featureDir, env) => envCaptureEvidence(deps, feature, featureDir, env),
   'docs': (_d, _f, featureDir) => docsEvidence(featureDir),
   'prd-summary': (_d, _f, featureDir) => prdSummaryEvidence(featureDir),

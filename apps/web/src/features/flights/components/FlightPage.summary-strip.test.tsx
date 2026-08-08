@@ -91,8 +91,8 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
-    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
+  AgentSessionView: ({ source, systemRows, empty }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] }; empty?: { title: string } }) => (
+    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage} data-empty-title={empty?.title}>
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>
@@ -365,6 +365,47 @@ describe('detail redesign (R53–R68)', () => {
     expect(strip).toContain('ready')
   })
 
+  // Coverage used to come only from the authoring LOOP's pass records, which
+  // only a flight that conducted specs-coverage itself has. A derived flight —
+  // or any flight resumed past that step — carries the stage done with no
+  // passes, so the strip printed no coverage while the stage one click away
+  // reported it off the ledger.
+  it('reads coverage off settled stage evidence when no authoring loop ran', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'specs-coverage' ? { evidence: { coveragePct: 100, covered: 12, total: 12 } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    const item = container.querySelector('[data-testid="strip-specs-coverage"]')
+    expect(item?.textContent).toContain('100%')
+  })
+
+  it('keeps the live loop as the source when it HAS passes — its gap count is the finer signal', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'specs-coverage'
+          ? {
+              progress: { pass: 1, phase: 'mapping', passes: [{ pass: 1, coveragePct: 94, gapsOpen: 1 }] },
+              evidence: { coveragePct: 62 },
+            }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    const item = container.querySelector('[data-testid="strip-specs-coverage"]')
+    expect(item?.textContent).toContain('94%')
+    expect(item?.textContent).not.toContain('62%')
+  })
+
   it('R66: a settled agent stage folds its activity behind one toggle — system lines ride the agent timeline, split around its slot', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',
@@ -399,6 +440,33 @@ describe('detail redesign (R53–R68)', () => {
     expect(post).toContain('config drafted')
     // The untagged agent chatter never renders as a system row — the timeline owns it.
     expect(activitySection.textContent).not.toContain('raw agent chatter')
+  })
+
+  // Parallel readiness keeps its proof in the workflow record and its transcript
+  // wherever the agent CLI wrote it — routinely nowhere this workspace can read
+  // (an external-producer workflow, a cleaned history). The generic "nothing ran
+  // here" would then contradict the double-boot and port-changes panels sitting
+  // directly above the rail.
+  it('the portify rail explains a missing transcript instead of claiming nothing ran', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'portify' ? { evidence: { workflowId: 'portify-demo' } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
+    })
+    const asv = container.querySelector('[data-testid="stage-activity"] [data-testid="agent-session-view"]')
+    expect(asv?.getAttribute('data-kind')).toBe('portify')
+    expect(asv?.getAttribute('data-empty-title')).toBe('No transcript on record')
   })
 
   it('R66: a live agent stage renders the activity expanded, collapsible via the always-present toggle', async () => {

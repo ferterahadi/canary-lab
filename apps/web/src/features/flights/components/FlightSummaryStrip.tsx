@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
-import { formatDuration, specsCoverageProgress, stageStatusTone, type StageFact } from './stage-meta'
+import { formatDuration, num, specsCoverageProgress, stageStatusTone, type StageFact } from './stage-meta'
 import { asRecord } from './StageDetail'
 
 /** The header's summary strip (R61, R71/W5): the flight's headline numbers —
@@ -46,14 +46,24 @@ export function FlightSummaryStrip({
   // fabrication — the agent is picked in the launcher if it's ever conducted.
   if (!derived) items.push({ label: 'Agent', value: flight.opts.agent ?? 'claude' })
 
+  // Coverage came only from the authoring LOOP's pass records, which just one
+  // population ever has: a flight that conducted specs-coverage itself. A
+  // derived flight, and any flight resumed past that step, carries the stage as
+  // done with no passes — so the strip printed no coverage at all while the
+  // stage one click away reported it off the ledger. The stage's own evidence
+  // holds the same percentage (the conducted adapter and the read-time probe
+  // both write `coveragePct`), so it stands in when there is no loop to read.
   const specs = flight.stages.find((s) => s.key === 'specs-coverage')
-  const progress = specsCoverageProgress(specs)
-  const lastMapped = progress?.passes.filter((p) => p.note == null).at(-1)
-  if (lastMapped) {
+  const lastMapped = specsCoverageProgress(specs)?.passes.filter((p) => p.note == null).at(-1)
+  const settledPct = num(asRecord(specs?.evidence) ?? {}, 'coveragePct')
+  const coveragePct = lastMapped?.coveragePct ?? settledPct
+  if (coveragePct != null) {
     items.push({
       label: 'Coverage',
-      value: `${lastMapped.coveragePct}%`,
-      tone: lastMapped.gapsOpen === 0 ? 'var(--success)' : 'var(--warning)',
+      value: `${coveragePct}%`,
+      // Gaps open is what the loop reports; without it, a full 100% is the same
+      // statement — every requirement claimed by some spec.
+      tone: (lastMapped ? lastMapped.gapsOpen === 0 : coveragePct >= 100) ? 'var(--success)' : 'var(--warning)',
       stage: 'specs-coverage',
     })
   }

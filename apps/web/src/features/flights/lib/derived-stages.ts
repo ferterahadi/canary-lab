@@ -108,14 +108,17 @@ export function derivedFlightFeature(flightId: string): string | null {
 export function buildDerivedManifest(
   feature: string,
   stages: DerivedStage[],
-  prefill?: { repoPaths?: string[]; env?: string; evidence?: Partial<Record<FlightStageKey, Record<string, unknown>>> },
+  prefill?: { repoPaths?: string[]; description?: string; env?: string; evidence?: Partial<Record<FlightStageKey, Record<string, unknown>>> },
 ): FlightManifest {
   const allDone = stages.every((s) => s.status === 'done')
   return {
     flightId: derivedFlightToken(feature),
     feature,
     repoPaths: prefill?.repoPaths ?? [],
-    description: '',
+    // The feature config's own description — the entry prefill falls through to
+    // it when no flight ever recorded an intent. Without it the Repo scan panel
+    // renders its "Intent · what to test" heading over an empty line.
+    description: prefill?.description ?? '',
     opts: { env: prefill?.env ?? 'local', coverageTarget: 100, yolo: false },
     status: allDone ? 'done' : 'paused',
     currentStage: null,

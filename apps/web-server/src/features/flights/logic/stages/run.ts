@@ -78,10 +78,16 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     const m = ctx.manifest()
 
     // Resume after a pause/restart: the run this flight started may still be
-    // going (or already terminal) — re-attach instead of double-starting.
+    // going (or have reached a verdict while we weren't watching) — re-attach
+    // instead of double-starting, so a run that passed mid-pause still counts.
+    //
+    // `aborted` is the exception, and it is the pause path's own doing: pausing
+    // the flight now kills its run (see `interrupt`), so re-attaching would
+    // replay that abort as this stage's verdict and park the user on the
+    // run-failed checkpoint — when Continue promised to re-run the step.
     if (!opts?.forceNew && m.links?.runId) {
       const existing = await readManifest(deps, m.links.runId)
-      if (existing) {
+      if (existing && existing.status !== 'aborted') {
         ctx.appendLog(`[run] re-attaching to ${m.links.runId} (${existing.status})\n`)
         return waitForVerdict(ctx, m.links.runId)
       }
@@ -127,11 +133,17 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
       const stage = ctx.manifest().stages.find((s) => s.key === 'run')
       return { kind: 'checkpoint', checkpoint: stage!.checkpoint! }
     },
-    // Aborting the flight aborts its run; a PAUSE deliberately does not — the
-    // run keeps its own lifecycle (controls live on the Test Run stage / run
-    // detail), and resume re-attaches to it via links.runId.
-    async interrupt(ctx, kind) {
-      if (kind !== 'abort') return
+    // Pausing the flight ends its run, exactly as aborting does — so `kind` is
+    // not read. "Pause" is read as "stop what is happening", and while the run
+    // is HEALING what is happening is an agent editing the user's repo; a pause
+    // that left it writing was a broken promise the UI could not explain.
+    // Stopping only the run stays available on the Test Run stage (Stop run /
+    // Cancel repair), which is where a run-scoped intent belongs.
+    //
+    // The cost is deliberate: repair cycles in progress are lost and Continue
+    // starts a fresh run (see startAndWait's `aborted` note). Losing a heal
+    // cycle beats an agent that keeps writing after you asked it to stop.
+    async interrupt(ctx) {
       const runId = ctx.manifest().links?.runId
       if (!runId) return
       const existing = await readManifest(deps, runId)

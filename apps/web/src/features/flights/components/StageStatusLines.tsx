@@ -5,6 +5,7 @@ import type { HealEnd } from '@/shared/api/types'
 import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from './StageFacts'
 import { stageLabel } from './stage-meta'
+import { settledStageStatus } from './stage-metrics'
 import { MERGED_LABEL, stageRowKey } from './StageRail'
 import { PORTIFY_PHASE_LINE, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
 
@@ -160,7 +161,10 @@ export function agentAnswerTail(stage: FlightStage, max = 120): string | null {
 
 export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
-  const { key, status } = stage
+  const { key } = stage
+  // Skipped-with-evidence narrates as settled — same rule the rail draws, so
+  // the row's ✓ and this sentence can't contradict each other.
+  const status = settledStageStatus(stage)
 
   // The companion is the half that needs narrating right now.
   if (companion && (companion.status === 'running' || companion.status === 'waiting-for-approval' || companion.status === 'failed')) {

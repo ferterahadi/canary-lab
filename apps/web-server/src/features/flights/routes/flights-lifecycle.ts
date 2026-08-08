@@ -43,8 +43,8 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   })
 
   // User-initiated pause: parks the flight resumable and cancels the in-flight
-  // stage work (agent SIGTERM / poll abort). The run stage's run keeps its own
-  // lifecycle — see the run adapter's interrupt note.
+  // stage work (agent SIGTERM / poll abort), including the run stage's run —
+  // see the run adapter's interrupt note for why pause stops it too.
   app.post<{ Params: { id: string } }>('/api/flights/:id/pause', async (req, reply) => {
     try {
       return pauseFlight(req.params.id, conductorDeps)

@@ -85,6 +85,8 @@ const server = http.createServer(async (req, res) => {
   res.end(JSON.stringify({ error: 'not found' }))
 })
 
+// Canary Lab allocates a free port per run and injects it as PORT, so two runs
+// of this service never clash. 4400 is only the standalone fallback.
 const port = Number.parseInt(process.env.PORT ?? '4400', 10)
 server.listen(port, () => {
   console.log(`Inventory service listening on http://localhost:${port}`)

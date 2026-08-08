@@ -1,0 +1,50 @@
+{
+  "runId": "2026-08-07T0900-s7bk",
+  "executionType": "boot",
+  "feature": "storefront_journey",
+  "env": "local",
+  "startedAt": "2026-08-07T09:00:00.000Z",
+  "endedAt": "2026-08-07T09:00:09.417Z",
+  "status": "aborted",
+  "services": [
+    {
+      "repoName": "catalog-service",
+      "name": "catalog-service",
+      "safeName": "catalog-service",
+      "command": "npm run dev:catalog",
+      "cwd": "demo-app",
+      "logPath": "services/catalog-service.log",
+      "healthUrl": "http://localhost:64200/",
+      "status": "stopped",
+      "allocatedPorts": { "catalog": 64200 },
+      "startingAt": "2026-08-07T09:00:01.104Z",
+      "readyAt": "2026-08-07T09:00:03.288Z"
+    },
+    {
+      "repoName": "inventory-service",
+      "name": "inventory-service",
+      "safeName": "inventory-service",
+      "command": "npm run dev:inventory",
+      "cwd": "demo-app",
+      "logPath": "services/inventory-service.log",
+      "healthUrl": "http://localhost:64201/",
+      "status": "stopped",
+      "allocatedPorts": { "inventory": 64201 },
+      "startingAt": "2026-08-07T09:00:01.106Z",
+      "readyAt": "2026-08-07T09:00:03.601Z"
+    },
+    {
+      "repoName": "checkout-service",
+      "name": "checkout-service",
+      "safeName": "checkout-service",
+      "command": "npm run dev:checkout",
+      "cwd": "demo-app",
+      "logPath": "services/checkout-service.log",
+      "healthUrl": "http://localhost:64202/",
+      "status": "stopped",
+      "allocatedPorts": { "checkout": 64202 },
+      "startingAt": "2026-08-07T09:00:01.108Z",
+      "readyAt": "2026-08-07T09:00:03.912Z"
+    }
+  ]
+}

@@ -502,6 +502,11 @@ function runStats({
 /** The run's LIVE controls, on the stage: Stop, and Cancel repair while healing.
  *  Same endpoints the run detail drives; all state flows back over the runs WS.
  *
+ *  These two are RUN-scoped and the header's Pause is FLIGHT-scoped — and since
+ *  pause now ends the run too, the only thing separating them is how much they
+ *  stop. Each title says which, because three buttons that all read as "stop"
+ *  is exactly how a user learns to trust none of them.
+ *
  *  R82: no `Restart run` here. A settled non-green run parks the flight on the
  *  run-failed checkpoint, whose first option ("Start a new run") IS the restart —
  *  two differently-shaped buttons for one intent, a hand's width apart, made the
@@ -527,6 +532,7 @@ function RunControls({
           data-testid="run-stage-cancel-heal"
           onClick={() => { api.cancelHealRun(runId).catch(onError) }}
           className="cl-button px-2 py-0.5 text-[11px]"
+          title="Stops the repair and keeps the failing result. The flight will ask what to do next."
         >
           Cancel repair
         </button>
@@ -537,6 +543,7 @@ function RunControls({
           data-testid="run-stage-stop"
           onClick={() => { api.stopRun(runId).catch(onError) }}
           className="cl-button px-2 py-0.5 text-[11px] text-danger"
+          title="Ends this run only — the flight keeps going and asks what to do next. Pause stops everything."
         >
           ⏹ Stop run
         </button>

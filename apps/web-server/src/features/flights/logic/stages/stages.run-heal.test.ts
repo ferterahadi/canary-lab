@@ -336,14 +336,41 @@ describe('run + heal stages', () => {
     expect(current().links?.runId).toBe('run-new')
   })
 
+  // The other half of "pause kills the run": Continue must then RE-RUN the
+  // step. Re-attaching to the run our own pause aborted would replay that abort
+  // as the verdict and park the user on the run-failed checkpoint instead.
+  it('run() starts fresh when the linked run was ABORTED (Continue after a pause)', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-paused') {
+        return { statusCode: 200, body: { manifest: { status: 'aborted', healCycles: 2, services: [] } } }
+      }
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-new' } }
+      if (call.method === 'GET' && call.url === '/api/runs/run-new') {
+        return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0, services: [] } } }
+      }
+      return undefined
+    })
+    const { ctx, current } = ctxFor(manifest({ links: { runId: 'run-paused' } }))
+    const outcome = await runStage(deps({ inject })).run(ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-new', status: 'passed' } })
+    expect(current().links?.runId).toBe('run-new')
+  })
+
   describe('interrupt (abort hook)', () => {
-    it('does nothing on a non-abort interrupt (pause keeps the run alive)', async () => {
+    // Pause stops the run just as abort does: while a run is healing an agent
+    // is editing the user's repo, and a pause that left it writing was the one
+    // promise the UI could not keep.
+    it('aborts the linked run on a PAUSE, not only on an abort', async () => {
       const calls: InjectCall[] = []
-      const inject = makeInject(() => undefined, calls)
+      const inject = makeInject((call) => {
+        if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'healing', services: [] } } }
+        if (call.url.endsWith('/abort')) return { statusCode: 204, body: {} }
+        return undefined
+      }, calls)
       const adapter = runStage(deps({ inject }))
       const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
       await adapter.interrupt!(ctx, 'pause')
-      expect(calls).toHaveLength(0)
+      expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs/run-1/abort')).toBe(true)
     })
 
     it('does nothing on abort when the flight never linked a run', async () => {

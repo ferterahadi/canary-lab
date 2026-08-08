@@ -61,6 +61,22 @@ function writePortifyIndex(rows: Array<Record<string, unknown>>): void {
   fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify(rows.map((r) => ({ id: r.workflowId, createdAt: r.startedAt, ...r }))))
 }
 
+
+/** Rewrite the fixture config's repos — Parallel readiness reads its port slots
+ *  when no portify overlay exists. */
+function writeRepos(repos: string): void {
+  fs.writeFileSync(
+    path.join(featureDir, 'feature.config.cjs'),
+    `module.exports = { config: {
+       name: '${FEATURE}',
+       description: 'fixture',
+       envs: ['local'],
+       featureDir: __dirname,
+       repos: ${repos},
+     } }`,
+  )
+}
+
 beforeEach(() => {
   tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-wsev-')))
   featuresDir = path.join(tmp, 'features')
@@ -179,6 +195,80 @@ describe('workspaceStageEvidence probes', () => {
     )
     const ev = workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['prd-summary'])
     expect(ev['prd-summary']).toEqual({ requirementCount: 3 })
+  })
+
+  // Repo scan reports what a scan OBSERVED, and no artifact records that — but
+  // the repo LIST is a config read, the same one the panel's own tiles perform.
+  // Without it a flight resumed past this step marked the row skipped over a
+  // fully populated pane.
+  it('reports the configured repositories for Repo scan, counting a shared tree once', () => {
+    writeRepos(`[
+      { name: 'a', localPath: __dirname, startCommands: [{ name: 'a', command: 'x' }] },
+      { name: 'b', localPath: __dirname + '/', startCommands: [{ name: 'b', command: 'y' }] },
+    ]`)
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'])['scout'])
+      .toEqual({ repos: 1 })
+  })
+
+  // What a scan saw is still never invented — only `similarity` has nothing on
+  // disk to read at all, so it stays out of the probe table entirely.
+  it('never probes similarity — nothing records which suites were compared', () => {
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['similarity'])['similarity'])
+      .toBeUndefined()
+  })
+
+  // A suite whose start commands already declare a port slot per service is
+  // concurrency-ready by construction, so portify correctly never ran and left
+  // no overlay. Reading that as "no evidence" ticked the stage and rendered its
+  // whole panel blank.
+  it('reports a natively injectable suite from its config when no overlay exists', () => {
+    writeRepos(`[
+      { name: 'a', localPath: __dirname, startCommands: [{ name: 'a', command: 'x', ports: [{ name: 'a', env: 'PORT' }] }] },
+      { name: 'b', localPath: __dirname, startCommands: [{ name: 'b', command: 'y', ports: [{ name: 'b', env: 'PORT' }] }] },
+    ]`)
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['portify'])['portify'])
+      .toEqual({ declaredInjectable: 2, serviceCount: 2 })
+  })
+
+  // The workflow record is where the PROOF lives (the double boot, the diff);
+  // the config only holds a declaration nothing has tested. Gating the lookup on
+  // an overlay hid the proof whenever the patch was absent — a no-op
+  // port-ification, one the user removed, or edits landed upstream.
+  it('prefers a saved workflow over the config declaration when no overlay exists', () => {
+    writeRepos(`[
+      { name: 'a', localPath: __dirname, startCommands: [{ name: 'a', command: 'x', ports: [{ name: 'a', env: 'PORT' }] }] },
+    ]`)
+    writePortifyIndex([
+      { workflowId: 'portify-proof', feature: FEATURE, status: 'saved', startedAt: '2026-06-25T09:50:54.369Z', endedAt: '2026-06-25T09:54:03.420Z' },
+    ])
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['portify'])['portify'])
+      .toEqual({ workflowId: 'portify-proof' })
+  })
+
+  it('falls through to the config when the only workflow on record never saved', () => {
+    writeRepos(`[
+      { name: 'a', localPath: __dirname, startCommands: [{ name: 'a', command: 'x', ports: [{ name: 'a', env: 'PORT' }] }] },
+    ]`)
+    writePortifyIndex([
+      { workflowId: 'portify-abandoned', feature: FEATURE, status: 'aborted', startedAt: '2026-06-25T09:50:54.369Z' },
+    ])
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['portify'])['portify'])
+      .toEqual({ declaredInjectable: 1, serviceCount: 1 })
+  })
+
+  it('reports nothing for a suite that is only PARTLY slotted — that one still needs portify', () => {
+    writeRepos(`[
+      { name: 'a', localPath: __dirname, startCommands: [{ name: 'a', command: 'x', ports: [{ name: 'a', env: 'PORT' }] }] },
+      { name: 'b', localPath: __dirname, startCommands: [{ name: 'b', command: 'y' }] },
+    ]`)
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['portify'])['portify']).toBeUndefined()
+  })
+
+  it('prefers a real overlay over the config fallback', () => {
+    writeRepos(`[{ name: 'a', localPath: __dirname, startCommands: [{ name: 'a', command: 'x', ports: [{ name: 'a', env: 'PORT' }] }] }]`)
+    writeOverlay([{ name: 'a', baseSha: 'abc', patch: 'a.patch', touchedFiles: ['build.gradle'] }])
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['portify'])['portify'])
+      .toEqual({ edits: 1 })
   })
 
   it('reports a saved no-op overlay as 0 edits, not as no overlay', () => {

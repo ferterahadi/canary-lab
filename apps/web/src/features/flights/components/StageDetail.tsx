@@ -34,6 +34,18 @@ export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate }
 //      tagged lines, the agent timeline (AgentSessionView) embedded where the
 //      agent worked, the wrap-up lines after. Expanded while the stage works;
 //      one "▸ View activity" disclosure once it settles.
+
+/** Parallel readiness keeps its evidence (the double boot, the port changes) in
+ *  the workflow record, and its transcript wherever the agent CLI wrote it. The
+ *  two come apart routinely — an external-producer workflow leaves the
+ *  transcript in the user's own client, and a cleaned agent history leaves none
+ *  at all — so the generic "nothing ran here" would contradict the proof panels
+ *  directly above the rail. */
+const PORTIFY_NO_TRANSCRIPT = {
+  title: 'No transcript on record',
+  body: 'The port work is kept as evidence, not as a replay — the side-by-side boot and the port changes above are what it produced.',
+}
+
 export function StageDetail({
   flightId,
   flight,
@@ -414,6 +426,7 @@ export function StageDetail({
           live={live}
           settled={settled}
           log={combinedLog}
+          {...(stage.key === 'portify' ? { empty: PORTIFY_NO_TRANSCRIPT } : {})}
         />
       )}
     </div>

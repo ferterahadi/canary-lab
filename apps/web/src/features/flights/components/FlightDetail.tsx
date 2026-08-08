@@ -85,7 +85,7 @@ export function FlightDetail({
   // below renders from a client-only pseudo-manifest, unchanged.
   const derivedFeature = derivedFlightFeature(flightId)
   const derivedRail = derivedFeature ? derivedStages?.get(derivedFeature) : undefined
-  const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; env: string; evidence?: FlightEntryOptions['evidence'] } | null>(null)
+  const [derivedPrefill, setDerivedPrefill] = useState<{ repoPaths: string[]; description: string; env: string; evidence?: FlightEntryOptions['evidence'] } | null>(null)
   const [fetched, setFlight] = useState<FlightManifest | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [ownStage, setOwnStage] = useState<FlightStageKey | null>(null)
@@ -105,7 +105,7 @@ export function FlightDetail({
       api.getFlightEntryOptions(derivedFeature)
         .then((o) => {
           setError(null)
-          setDerivedPrefill({ repoPaths: o.prefill.repoPaths, env: o.prefill.env, evidence: o.evidence })
+          setDerivedPrefill({ repoPaths: o.prefill.repoPaths, description: o.prefill.description, env: o.prefill.env, evidence: o.evidence })
           if (o.flight) onNavigateFlight?.(o.flight.flightId)
         })
         .catch(() => { /* prefill is best-effort — the rail stands on its own */ })
@@ -290,29 +290,37 @@ export function FlightDetail({
             data-testid="flight-pause"
             onClick={() => act(() => api.pauseFlight(flightId))}
             className="cl-button px-2.5 py-1 text-xs"
-            title="Stops the running agent and test run immediately; Continue re-runs the interrupted step"
+            title="Stops everything — the agent, the test run, and any repair. Continue starts this step again."
           >
             ⏸ Pause
           </button>
         )}
-        {/* R81 — a derived flight has no record, so every record-scoped control
-            (resume / redo / abort / delete / download) would call an id that
-            doesn't exist. It gets exactly one primary instead: conduct the rest
-            from the first step without evidence, or — with every step already
-            done — fly it again from the top. Both hand off to the launcher,
-            which mints the record. */}
+        {/* R81 — a derived flight has no record, so every RECORD-scoped control
+            (resume / redo / abort / download) would call an id that doesn't
+            exist. It gets one primary instead: conduct the rest from the first
+            step without evidence, or — with every step already done — fly it
+            again from the top. Both hand off to the launcher, which mints the
+            record.
+            The ⋯ menu is NOT record-scoped and stays: its one action deletes the
+            SUITE (folder + history) through the feature-scoped API, and a
+            derived flight only exists because that folder does. Hiding it with
+            the rest denied a perfectly valid action on every suite that was set
+            up outside the conductor. */}
         {derivedFeature ? (
-          <button
-            type="button"
-            data-testid="derived-conduct"
-            onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
-            className="cl-button-primary px-2.5 py-1 text-xs"
-            title={derivedEntry
-              ? `Conduct this suite from ${stageLabel(derivedEntry)} — the steps already done are kept`
-              : 'Every step is done — start a fresh flight to fly it again'}
-          >
-            {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
-          </button>
+          <>
+            <button
+              type="button"
+              data-testid="derived-conduct"
+              onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
+              className="cl-button-primary px-2.5 py-1 text-xs"
+              title={derivedEntry
+                ? `Conduct this suite from ${stageLabel(derivedEntry)} — the steps already done are kept`
+                : 'Every step is done — start a fresh flight to fly it again'}
+            >
+              {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
+            </button>
+            <FlightMenu flight={flight} derived onAction={act} onDeleted={onBackToList} />
+          </>
         ) : (
           <>
             {flight.status === 'done' && evalStage && (

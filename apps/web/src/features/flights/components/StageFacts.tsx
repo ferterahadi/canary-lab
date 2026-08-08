@@ -6,7 +6,7 @@ import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { PORTIFY_PHASE_LABEL, STAGE_COLUMN, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
-import { bootDurationMs, estimateTokens, ledgerEvidence, overlayDiffStat, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
+import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, stageHasEvidence, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
 // One uniform template for every stage: the 2–4 things the user cares about at
@@ -299,7 +299,7 @@ function measuredStageFacts(
       // this band would just be that number, a stage early and without the
       // outcome attached. The declared list still reads in the state line.
       return [
-        { label: 'Repos scanned', value: String(flight.repoPaths.length), big: true },
+        { label: 'Repos scanned', value: String(distinctRepoPaths(flight.repoPaths).length), big: true },
         ...(band.config ? [{ label: 'Services found', value: String(band.config.services), big: true as const }] : []),
         ...(band.config ? [{ label: 'Port slots drafted', value: String(band.config.portSlots), big: true as const }] : []),
       ]
@@ -502,7 +502,15 @@ function measuredStageFacts(
     }
     case 'portify': {
       // R35: verdict → proof → what changed, in that order.
-      if (stage.status === 'skipped') return [{ label: 'Parallel', value: 'Already checked — safe to run two at once', tone: 'good' }]
+      // Skipped with nothing to show is the whole statement. Skipped with
+      // evidence is not: resuming a flight mid-pipeline marks every earlier
+      // stage skipped, so this sentence replaced a fully-populated band —
+      // injectable count, double-boot proof, port changes — the moment the user
+      // continued from a later step. Evidence outranks the skip; the rail draws
+      // the same distinction (see railStatus).
+      if (stage.status === 'skipped' && !stageHasEvidence(stage.evidence)) {
+        return [{ label: 'Parallel', value: 'Already checked — safe to run two at once', tone: 'good' }]
+      }
       if (stage.status === 'running') {
         // Live phase mirror from the workflow (attempt stepper + phase verb) —
         // the embedded agent timeline below carries the detail.
@@ -515,6 +523,26 @@ function measuredStageFacts(
             ? [{ label: 'Attempt', value: String(attempt), big: true as const, stepper: [attempt, maxAttempts] as [number, number] }]
             : []),
           ...(phase ? [{ label: 'Phase', value: PORTIFY_PHASE_LABEL[phase] ?? phase }] : []),
+        ]
+      }
+      // Natively concurrency-ready: every start command already declares a port
+      // slot, so portify had nothing to rewrite and left no workflow to read.
+      // That is a real, reportable outcome — without it the stage rendered
+      // ticked and completely empty, which reads as a broken panel rather than
+      // as "nothing needed doing".
+      const declared = num(ev, 'declaredInjectable')
+      const declaredOf = num(ev, 'serviceCount')
+      if (declared != null && declaredOf != null && declaredOf > 0) {
+        // A port slot in the config is a DECLARATION, not proof. Portify proves
+        // concurrency by booting the whole suite twice at once on two disjoint
+        // port maps and requiring both to come up — that is what "Instances
+        // proven" counts, and nothing here has done it. So no `tone: 'good'`
+        // (the verified hue) and no borrowed "Files edited: 0": both would read
+        // as a verdict this evidence cannot support. The empty proof tile is the
+        // point — it says which half is missing instead of hiding it.
+        return [
+          { label: 'Services injectable', value: `${declared}/${declaredOf}`, big: true, bar: declared / declaredOf, sub: 'declared in the config' },
+          { label: 'Instances proven', value: '—', sub: 'no double boot on record' },
         ]
       }
       if (typeof ev.workflowId !== 'string') return []

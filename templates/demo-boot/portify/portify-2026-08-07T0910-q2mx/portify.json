@@ -1,0 +1,49 @@
+{
+  "workflowId": "portify-2026-08-07T0910-q2mx",
+  "feature": "storefront_journey",
+  "featureDir": "features/storefront_journey",
+  "repos": [
+    {
+      "name": "catalog-service",
+      "path": "demo-app"
+    },
+    {
+      "name": "inventory-service",
+      "path": "demo-app"
+    },
+    {
+      "name": "checkout-service",
+      "path": "demo-app"
+    }
+  ],
+  "env": "local",
+  "agent": "claude",
+  "branch": "canary/portify-storefront-journey",
+  "status": "saved",
+  "attempt": 1,
+  "maxAttempts": 3,
+  "startedAt": "2026-08-07T09:10:00.000Z",
+  "endedAt": "2026-08-07T09:13:48.612Z",
+  "diff": "# repo: catalog-service, inventory-service, checkout-service\ndiff --git a/catalog-service/server.ts b/catalog-service/server.ts\n--- a/catalog-service/server.ts\n+++ b/catalog-service/server.ts\n@@ -89,7 +89,9 @@\n })\n\n-const port = 4200\n+// Canary Lab allocates a free port per run and injects it as PORT, so two runs\n+// of this service never clash. 4200 is only the standalone fallback.\n+const port = Number.parseInt(process.env.PORT ?? '4200', 10)\n server.listen(port, () => {\n   console.log(`Catalog service listening on http://localhost:${port}`)\n })\n\ndiff --git a/inventory-service/server.ts b/inventory-service/server.ts\n--- a/inventory-service/server.ts\n+++ b/inventory-service/server.ts\n@@ -89,7 +89,9 @@\n })\n\n-const port = 4400\n+// Canary Lab allocates a free port per run and injects it as PORT, so two runs\n+// of this service never clash. 4400 is only the standalone fallback.\n+const port = Number.parseInt(process.env.PORT ?? '4400', 10)\n server.listen(port, () => {\n   console.log(`Inventory service listening on http://localhost:${port}`)\n })\n\ndiff --git a/checkout-service/server.ts b/checkout-service/server.ts\n--- a/checkout-service/server.ts\n+++ b/checkout-service/server.ts\n@@ -89,7 +89,9 @@\n })\n\n-const port = 4300\n+// Canary Lab allocates a free port per run and injects it as PORT, so two runs\n+// of this service never clash. 4300 is only the standalone fallback.\n+const port = Number.parseInt(process.env.PORT ?? '4300', 10)\n server.listen(port, () => {\n   console.log(`Checkout service listening on http://localhost:${port}`)\n })\n\n# feature config: features/storefront_journey\ndiff --git a/feature.config.cjs b/feature.config.cjs\n--- a/feature.config.cjs\n+++ b/feature.config.cjs\n@@\n           command: 'npm run dev:catalog',\n-          healthCheck: { http: { url: 'http://localhost:4200/' } },\n+          ports: [{ name: 'catalog', env: 'PORT' }],\n+          healthCheck: { http: { url: 'http://localhost:${port.catalog}/' } },\n         },\n\n@@\n           command: 'npm run dev:inventory',\n-          healthCheck: { http: { url: 'http://localhost:4400/' } },\n+          ports: [{ name: 'inventory', env: 'PORT' }],\n+          healthCheck: { http: { url: 'http://localhost:${port.inventory}/' } },\n         },\n\n@@\n           command: 'npm run dev:checkout',\n-          healthCheck: { http: { url: 'http://localhost:4300/' } },\n+          ports: [{ name: 'checkout', env: 'PORT' }],\n+          healthCheck: { http: { url: 'http://localhost:${port.checkout}/' } },\n         },\n",
+  "verification": {
+    "ok": true,
+    "instances": [
+      {
+        "ports": {
+          "catalog": 63410,
+          "inventory": 63411,
+          "checkout": 63412
+        },
+        "ok": true
+      },
+      {
+        "ports": {
+          "catalog": 63420,
+          "inventory": 63421,
+          "checkout": 63422
+        },
+        "ok": true
+      }
+    ]
+  }
+}

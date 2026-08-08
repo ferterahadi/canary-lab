@@ -26,6 +26,7 @@ export function StageActivity({
   settled,
   log,
   leadingSystemRows = [],
+  empty,
 }: {
   /** The stage's one agent session, if it spawned one (flight agent, or the
    *  Evaluation Report's export task). Omitted for agentless stages — the rail
@@ -41,6 +42,12 @@ export function StageActivity({
    *  conductor's log — e.g. the `[external]` row when the run is being repaired
    *  by an external MCP client (no Canary session to tail). */
   leadingSystemRows?: string[]
+  /** Why this stage has no transcript, when the stage knows better than the
+   *  generic "nothing ran here" fallback. A settled stage can hold real evidence
+   *  and still have no session to replay — the agent ran in the user's own
+   *  client, or its log was cleaned — and saying nothing ran contradicts the
+   *  panels above it. */
+  empty?: { title: string; body?: string }
 }) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const lines = log.split('\n').filter((l) => l.trim() !== '')
@@ -119,7 +126,12 @@ export function StageActivity({
               stage's agent timeline (flight agent, or the export task) share it;
               an agentless stage (no `source`) renders system rows alone. */}
           <AgentBlock>
-            <AgentSessionView key={sourceKey} source={source} systemRows={{ pre: [...leadingSystemRows, ...pre], post }} />
+            <AgentSessionView
+              key={sourceKey}
+              source={source}
+              systemRows={{ pre: [...leadingSystemRows, ...pre], post }}
+              {...(empty ? { empty } : {})}
+            />
           </AgentBlock>
         </div>
       )}
