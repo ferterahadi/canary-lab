@@ -130,8 +130,8 @@ describe('run launch controls', () => {
     act(() => {
       root.render(
         <RunsColumn
-          feature="storefront_journey"
-          sampleSuite="storefront_journey"
+          feature="storefront-journey"
+          sampleSuite="storefront-journey"
           envs={[]}
           runs={[]}
           selectedRunId={null}
@@ -158,7 +158,7 @@ describe('run launch controls', () => {
       root.render(
         <RunsColumn
           feature="alpha"
-          sampleSuite="storefront_journey"
+          sampleSuite="storefront-journey"
           envs={[]}
           runs={[]}
           selectedRunId={null}

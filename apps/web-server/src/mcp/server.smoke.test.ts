@@ -337,7 +337,7 @@ describe('MCP HTTP server (smoke)', () => {
       const result = await client.callTool({ name: 'list_features', arguments: {} })
       const text = toolText(result)
       const features = decode(text) as Array<{ name: string }>
-      expect(features.map((f) => f.name)).toEqual(['storefront_journey'])
+      expect(features.map((f) => f.name)).toEqual(['storefront-journey'])
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -363,7 +363,7 @@ describe('MCP HTTP server (smoke)', () => {
       // The shipped storefront suite carries no overlay and needs none: all
       // three of its services read PORT, so the config declares every slot and
       // the feature boots concurrently as shipped.
-      expect(parsed.features.map((f) => f.feature)).toEqual(['storefront_journey'])
+      expect(parsed.features.map((f) => f.feature)).toEqual(['storefront-journey'])
       expect(parsed.features[0]!.portified).toBe(false)
       expect(parsed.features[0]!.injectability).toBe('declared')
       for (const f of parsed.features) expect(typeof f.portified).toBe('boolean')

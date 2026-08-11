@@ -3,7 +3,7 @@
 This workspace ships one worked example so you can see what Canary Lab does
 before pointing it at your own code:
 
-- **`storefront_journey`** — a suite over the bundled `demo-app/` three-service
+- **`storefront-journey`** — a suite over the bundled `demo-app/` three-service
   storefront. Press **Run** and watch the repair loop work through the broken
   service contracts, a batch at a time, until the suite is green.
 
@@ -13,7 +13,7 @@ It ships **finished**, so you can read what a fully onboarded suite looks like:
 |---|---|
 | Services + injectable ports | `feature.config.cjs` — three services, a port slot each, so two copies run side by side |
 | Captured environment | `envsets/local/` — the `local` envset the config declares, applied on every run |
-| Requirements | `docs/storefront_journey-prd.md` (collected from `demo-app/REQUIREMENTS.md`) distilled into `docs/_prd-summary.*` |
+| Requirements | `docs/storefront-journey-prd.md` (collected from `demo-app/REQUIREMENTS.md`) distilled into `docs/_prd-summary.*` |
 | Tests + coverage | `e2e/storefront.spec.ts` — seven journeys whose `@req-*` tags map all twelve requirements, so the ledger reads 100% |
 | What's left | the run itself. Ten of the twelve contracts start broken on purpose |
 

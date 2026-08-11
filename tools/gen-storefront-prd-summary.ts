@@ -6,7 +6,7 @@ import { readDocsCollection } from '../apps/web-server/src/features/coverage/log
 import { withFingerprints } from '../apps/web-server/src/features/coverage/logic/coverage/fingerprints'
 import { writePrdSummary } from '../apps/web-server/src/features/coverage/logic/coverage/prd-summary-render'
 
-// Regenerate the shipped storefront_journey PRD summary.
+// Regenerate the shipped storefront-journey PRD summary.
 //
 // The scaffold ships this suite with its Requirements stage already satisfied,
 // so `docs/_prd-summary.json` has to exist as a committed template file. Hand-
@@ -20,14 +20,14 @@ import { writePrdSummary } from '../apps/web-server/src/features/coverage/logic/
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const TEMPLATES = path.join(HERE, '..', 'templates', 'project')
-const FEATURE = 'storefront_journey'
+const FEATURE = 'storefront-journey'
 const FEATURE_DIR = path.join(TEMPLATES, 'features', FEATURE)
 
 /** The product repo's own requirements doc — what a Flight's docs stage would
  *  collect. Copied rather than referenced: the feature directory has to be
  *  self-contained once the scaffold lands it in someone's workspace. */
 export const SOURCE_DOC = path.join(TEMPLATES, 'demo-app', 'REQUIREMENTS.md')
-export const COLLECTED_DOC_NAME = 'storefront_journey-prd.md'
+export const COLLECTED_DOC_NAME = 'storefront-journey-prd.md'
 
 /** Pinned so regenerating produces a byte-identical file — this artifact is
  *  committed, and a wall-clock stamp would churn the diff on every run. */

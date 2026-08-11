@@ -1,7 +1,7 @@
 {
   "runId": "2026-08-07T0900-s7bk",
   "executionType": "boot",
-  "feature": "storefront_journey",
+  "feature": "storefront-journey",
   "env": "local",
   "startedAt": "2026-08-07T09:00:00.000Z",
   "endedAt": "2026-08-07T09:00:09.417Z",

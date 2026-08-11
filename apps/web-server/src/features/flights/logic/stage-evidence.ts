@@ -63,7 +63,7 @@ export interface SuiteBootProof {
  *  quite happily — an app with no env files has nothing to capture. So a
  *  captured envset is SUFFICIENT evidence of Suite setup, never necessary, and
  *  reading it as necessary left every env-less suite (the shipped
- *  `storefront_journey` among them) permanently dark no matter how many green
+ *  `storefront-journey` among them) permanently dark no matter how many green
  *  runs it produced.
  *
  *  `readyAt` is the durable signal, not `status`: teardown rewrites every

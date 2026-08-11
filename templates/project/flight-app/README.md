@@ -23,7 +23,7 @@ Each stage has real work to do here:
 - **Evaluation Report** exports the archive.
 
 For the repair loop on its own — a suite that already exists, failing on the
-first Run — see `demo-app/` and its `storefront_journey` suite instead.
+first Run — see `demo-app/` and its `storefront-journey` suite instead.
 
 ## Service command
 

@@ -191,7 +191,7 @@ describe('main (init-project orchestration)', () => {
     // user's own init in the same state.
     expect(fs.existsSync(path.join(target, 'logs', 'runs', 'index.json'))).toBe(true)
     const seeded = JSON.parse(fs.readFileSync(path.join(target, 'logs', 'runs', 'index.json'), 'utf-8'))
-    expect(seeded[0]).toMatchObject({ feature: 'storefront_journey', executionType: 'boot' })
+    expect(seeded[0]).toMatchObject({ feature: 'storefront-journey', executionType: 'boot' })
     const seededManifest = JSON.parse(
       fs.readFileSync(path.join(target, 'logs', 'runs', seeded[0].runId, 'manifest.json'), 'utf-8'),
     )
@@ -205,7 +205,7 @@ describe('main (init-project orchestration)', () => {
     const portify = JSON.parse(
       fs.readFileSync(path.join(target, 'logs', 'portify', portifyIds[0], 'portify.json'), 'utf-8'),
     )
-    expect(portify).toMatchObject({ feature: 'storefront_journey', status: 'saved' })
+    expect(portify).toMatchObject({ feature: 'storefront-journey', status: 'saved' })
     expect(portify.verification.instances).toHaveLength(2)
     expect(portify.verification.instances.every((i: { ok: boolean }) => i.ok)).toBe(true)
     // The record ships workspace-RELATIVE paths (a published tarball can carry

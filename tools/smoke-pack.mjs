@@ -92,18 +92,18 @@ const scaffoldPaths = [
   'demo-app/catalog-service/server.ts',
   'demo-app/inventory-service/server.ts',
   'demo-app/checkout-service/server.ts',
-  'features/storefront_journey/feature.config.cjs',
-  'features/storefront_journey/playwright.config.ts',
-  'features/storefront_journey/e2e/storefront.spec.ts',
-  'features/storefront_journey/e2e/helpers/api.ts',
+  'features/storefront-journey/feature.config.cjs',
+  'features/storefront-journey/playwright.config.ts',
+  'features/storefront-journey/e2e/storefront.spec.ts',
+  'features/storefront-journey/e2e/helpers/api.ts',
   // Requirements + coverage ship with the suite: the collected source doc and
   // the generated summary its `@req-*` tags map onto. Without these two the
   // Requirements and Test-authoring stages read as never started on a fresh
   // scaffold, and the coverage ledger has nothing to score against.
   // The envset the suite declares in `envs: ['local']`. npm strips `.gitignore`
   // from a tarball but not `.env`, so this is the one place that proves it.
-  'features/storefront_journey/envsets/envsets.config.json',
-  'features/storefront_journey/envsets/local/storefront_journey.env',
+  'features/storefront-journey/envsets/envsets.config.json',
+  'features/storefront-journey/envsets/local/storefront-journey.env',
   // The recorded boot the scaffold ships so Suite setup reports figures before
   // the user runs anything. Under a `logs/` path, so it needs both the repo's
   // .gitignore exception and this assertion to prove it survives the tarball.
@@ -115,9 +115,9 @@ const scaffoldPaths = [
   // workspace by init, which the assertion below checks.
   'logs/portify/index.json',
   'logs/portify/portify-2026-08-07T0910-q2mx/portify.json',
-  'features/storefront_journey/docs/storefront_journey-prd.md',
-  'features/storefront_journey/docs/_prd-summary.json',
-  'features/storefront_journey/docs/_prd-summary.md',
+  'features/storefront-journey/docs/storefront-journey-prd.md',
+  'features/storefront-journey/docs/_prd-summary.json',
+  'features/storefront-journey/docs/_prd-summary.md',
   // The Flight demo's target: un-onboarded on purpose, so a Flight has a repo
   // to conduct from Repo scan through Evaluation. No suite ships for it.
   'flight-app/package.json',
@@ -167,7 +167,7 @@ for (const relPath of [
   'features/flaky_orders_api/feature.config.cjs',
   'features/tricky_checkout_api/feature.config.cjs',
   // Earlier 1.6.0 drafts shipped partially onboarded demo suites under these
-  // names. The suite that ships now is `storefront_journey` (asserted above);
+  // names. The suite that ships now is `storefront-journey` (asserted above);
   // any of these reappearing means a stale template shipped.
   'features/demo_catalog/feature.config.cjs',
   'features/demo_inventory/feature.config.cjs',

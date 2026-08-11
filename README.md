@@ -82,7 +82,7 @@ test('applying SAVE10 produces a 10% discount on the summary', async ({ request 
 
 The scaffold ships its own demonstration, so you can see both halves of the
 product before writing anything. `demo-app/` comes with the
-`storefront_journey` suite fully onboarded — services with injectable ports,
+`storefront-journey` suite fully onboarded — services with injectable ports,
 distilled requirements, and tagged tests at 100% coverage — so the only thing
 left is the run: press **Run** and watch the repair loop fix one contract per
 cycle until it is green. `flight-app/` is the opposite, shipping with no suite
@@ -149,7 +149,7 @@ npm run demo -- --agent codex
 `npm run demo` adds nothing of its own — it packs the current build, runs the
 real `canary-lab init`, and opens the UI. What a contributor sees is exactly what
 a user sees, which is the point. It prints two deep links and starts neither:
-run the shipped `storefront_journey` suite and watch a real agent repair
+run the shipped `storefront-journey` suite and watch a real agent repair
 catalog, inventory and checkout a batch of contracts per cycle, or start a **New
 Flight** over `flight-app/`, which ships with no suite at all.
 
@@ -167,7 +167,7 @@ deps, downloads the Playwright browser, and registers your agent's tools — so
 to skip the browser.
 
 The samples are a demonstration, not scaffolding you need:
-`demo-app/` + its `storefront_journey` suite show the repair loop (press Run,
+`demo-app/` + its `storefront-journey` suite show the repair loop (press Run,
 watch it go green); `flight-app/` ships bare so a Flight has something to
 onboard from scratch. Delete both once you have seen them.
 

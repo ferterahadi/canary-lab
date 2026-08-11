@@ -38,7 +38,7 @@ function render(over: Overrides = {}): void {
       <DemoDialog
         open={over.open ?? true}
         onClose={over.onClose ?? (() => {})}
-        suite={over.suite === undefined ? 'storefront_journey' : over.suite}
+        suite={over.suite === undefined ? 'storefront-journey' : over.suite}
         flightRepoAvailable={over.flightRepoAvailable ?? true}
         showDemo={over.showDemo === undefined ? true : over.showDemo}
         onRunSuite={over.onRunSuite ?? (() => {})}
@@ -88,8 +88,8 @@ describe('DemoDialog', () => {
   })
 
   it('names the suite to watch, so a first-timer knows which row to follow', () => {
-    render({ suite: 'storefront_journey' })
-    expect(q('demo-option-repair')?.textContent).toContain('storefront_journey')
+    render({ suite: 'storefront-journey' })
+    expect(q('demo-option-repair')?.textContent).toContain('storefront-journey')
   })
 
   it('names the REPO for the flight, never a suite name it cannot promise', () => {

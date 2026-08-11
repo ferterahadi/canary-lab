@@ -2,7 +2,7 @@
 
 A deliberately small product repository that **ships with its suite already
 written, its requirements distilled and its coverage at 100%**:
-`features/storefront_journey/`. Everything an onboarded feature has is already
+`features/storefront-journey/`. Everything an onboarded feature has is already
 there — the only thing left undone is the run. Open it, press Run, and watch the
 repair loop work: each repair reveals the next defect until the suite is green.
 
@@ -34,7 +34,7 @@ entries and application changes under all three service directories.
 ## Start the demo
 
 From a scaffolded workspace, `npx canary-lab ui`, then open the
-`storefront_journey` suite and press **Run**.
+`storefront-journey` suite and press **Run**.
 
 From the Canary Lab source checkout, `npm run demo` does the same thing the long
 way round: it packs the current build, runs the real `canary-lab init`, and opens

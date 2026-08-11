@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import {
+  LEGACY_SAMPLE_SUITES,
   readOnboardingSamples,
   SAMPLE_FLIGHT_DESCRIPTION,
   SAMPLE_FLIGHT_REPO_DIR,
@@ -76,6 +77,25 @@ describe('readOnboardingSamples', () => {
     fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
     writeSuite('my_own_suite')
     expect(readOnboardingSamples(projectRoot, featuresDir).sampleSuite).toBeNull()
+  })
+
+  // `upgrade` never rewrites a consumer's `features/`, so a workspace scaffolded
+  // before the 1.6.0 rename still has the underscored suite. Matching only the
+  // new name would report the sample as deleted for every existing user.
+  it('still recognises the pre-rename suite name', () => {
+    fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
+    fs.mkdirSync(path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR))
+    writeSuite(LEGACY_SAMPLE_SUITES[0])
+    // Reported under the name ON DISK, because the UI prints it for the user to
+    // match against the Suites column.
+    expect(readOnboardingSamples(projectRoot, featuresDir).sampleSuite).toBe(LEGACY_SAMPLE_SUITES[0])
+  })
+
+  it('prefers the current name when a workspace somehow carries both', () => {
+    fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
+    writeSuite(LEGACY_SAMPLE_SUITES[0])
+    writeSuite(SAMPLE_SUITE)
+    expect(readOnboardingSamples(projectRoot, featuresDir).sampleSuite).toBe(SAMPLE_SUITE)
   })
 
   it('does not mistake a file for the sample repo directory', () => {

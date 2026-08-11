@@ -46,6 +46,11 @@ Each entry is tagged with the area it touches:
   - Port-ified features keep their worktree at the end (it holds the repair) — the Cleanup page's **Worktrees** tab lists and removes them.
   - Boot-only and verification sessions are unchanged: they never heal, so there is nothing to capture.
 
+- **[General]** **Onboarding is one demo chooser instead of two sequential cards.** A `Getting started` pill in the top bar opens a dialog offering both shipped demos at once — repair the broken sample suite (~4 min, recommended), or fly the bare `flight-app` from nothing (~25 min) — each naming what it acts on so you know which row to watch. It opens itself once on a workspace that has never run anything, then lives behind the pill with a dot until opened. Previously the flight half stayed hidden until you had sat through a full repair, and dismissing a card lost onboarding permanently.
+  - New workspace setting `showDemo` in `canary-lab.config.json` (default **on**) hides the pill; toggle it from the chooser's footer or **Settings → Onboarding**. Writing project config now broadcasts a `project-config-changed` event, so the change lands in every open tab without a refresh.
+  - A running flight's status chip now names the stage it is on — `scanning`, `setting up`, `distilling`, `authoring`, … — instead of a flat "running" for ten of the eleven stages.
+  - The shipped sample suite is renamed `storefront_journey` → **`storefront-journey`**, matching the kebab-case names a flight's plan agent produces. Existing workspaces are unaffected: `upgrade` never rewrites your `features/`, and the old name is still recognised as the sample, so the demo keeps working under whichever name is on disk.
+
 ### Breaking changes
 
 - **[General]** **Minimum Node version raised to 22.12.** Node 20 reached end-of-life in April 2026. The old `>=20.19.0` floor was also quietly wrong: semver-wise it accepted Node 22.0–22.11, which lack the unflagged `require(esm)` support Canary Lab depends on — those versions installed cleanly and then failed at runtime. One honest floor now. Upgrade to Node 22.12 or newer before running `npx canary-lab`.

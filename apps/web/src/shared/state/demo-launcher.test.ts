@@ -5,14 +5,14 @@ import type { FlightIndexEntry } from '@shared/flights/types'
 import { deriveDemoAvailability, readDemoSeen, writeDemoSeen, type DemoInput } from './demo-launcher'
 
 const SAMPLES: OnboardingSamples = {
-  sampleSuite: 'storefront_journey',
+  sampleSuite: 'storefront-journey',
   sampleFlightRepo: '/w/flight-app',
   sampleFlightDescription: 'the ordering flow',
 }
 
 const run = (over: Partial<RunIndexEntry> = {}): RunIndexEntry => ({
   runId: 'r1',
-  feature: 'storefront_journey',
+  feature: 'storefront-journey',
   status: 'failed',
   startedAt: '2026-08-11T00:00:00.000Z',
   ...over,

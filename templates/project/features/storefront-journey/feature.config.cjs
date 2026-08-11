@@ -8,7 +8,7 @@ const path = require('node:path')
 const appDir = path.join(__dirname, '..', '..', 'demo-app')
 
 const config = {
-  name: 'storefront_journey',
+  name: 'storefront-journey',
   // The suite's intent, and what the flight's "Intent · what to test" card reads
   // when no flight has recorded one of its own. It states the CONTRACT BETWEEN
   // the services, because that is what seven journeys over three services are

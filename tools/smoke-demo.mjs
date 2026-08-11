@@ -31,7 +31,7 @@ const keepOpen = interactive || argv.includes('--keep-open')
 const portArg = argv.indexOf('--port')
 const agentArg = argv.indexOf('--agent')
 const requestedAgent = agentArg >= 0 ? argv[agentArg + 1] : 'auto'
-const featureName = 'storefront_journey'
+const featureName = 'storefront-journey'
 const demoIntent = 'Test the library lending contracts: borrowing a book with copies free reduces its available count by exactly one; returning an open loan marks it returned and restores the available count to what it was before; and when every copy is on loan a further request is refused with 409 without taking a copy. A Wizard of Earthsea has a single copy. The 404s for unknown books and loans are fixture support, not requirements.'
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-demo-'))

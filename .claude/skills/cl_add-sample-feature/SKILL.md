@@ -7,7 +7,7 @@ description: Use when creating or editing a sample feature under templates/proje
 
 The public scaffold **ships its own demonstration** (R89, 2026-08-07). It carries
 the storefront product repository at `templates/project/demo-app/` *and* the
-`storefront_journey` suite that exercises it, so a first-time user can press Run
+`storefront-journey` suite that exercises it, so a first-time user can press Run
 and watch fail → repair → green without authoring anything.
 
 This reversed an earlier rule that the scaffold ship no pre-authored feature.
@@ -63,7 +63,7 @@ service its own per-run worktree so a repair lands only in the checkout the
 broken service serves from, and it makes the run's Changes tab group repairs by
 service instead of pooling them under one repo name.
 
-The suite lives at `templates/project/features/storefront_journey/` and ships
+The suite lives at `templates/project/features/storefront-journey/` and ships
 with every scaffold. `npm run smoke:demo` repairs it deterministically as an
 LLM-free gate; `npm run demo` leaves it for the tester. `smoke:pack` asserts it
 reaches a scaffolded workspace — a template edit that never reached
@@ -96,13 +96,13 @@ Spec rules:
 - Specs MUST import the fixture:
   `import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'`
 - Helpers resolve the target as `CANARY_PORT_<slot>` → `GATEWAY_URL` → hardcoded
-  default (see `templates/project/features/storefront_journey/e2e/helpers/api.ts`) so
+  default (see `templates/project/features/storefront-journey/e2e/helpers/api.ts`) so
   the same spec runs locally and against a remote env.
 
 ## Checklist
 
 1. Confirm the new feature is meant to ship in every consumer workspace. The
-   scaffold already carries `storefront_journey`; a second shipped feature needs
+   scaffold already carries `storefront-journey`; a second shipped feature needs
    explicit product approval.
 2. Start from `npx canary-lab new feature`; rename consistently (folder,
    `config.name`, `startCommand.name`, envset file names).

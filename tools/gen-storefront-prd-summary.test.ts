@@ -7,16 +7,16 @@ import { readDocsCollection } from '../apps/web-server/src/features/coverage/log
 import { readPrdSummary } from '../apps/web-server/src/features/coverage/logic/coverage/prd-summary-render'
 import { COLLECTED_DOC_NAME, REQUIREMENTS, SOURCE_DOC } from './gen-storefront-prd-summary'
 
-// The shipped storefront_journey suite claims a satisfied Requirements stage and
+// The shipped storefront-journey suite claims a satisfied Requirements stage and
 // full requirement coverage the moment `init` lands it. Both claims are made by
 // COMMITTED artifacts, so nothing at runtime would catch them going stale —
 // these are the checks that do. A failure here means: run `npm run gen:demo-prd`.
 
 const FEATURES_DIR = path.join(__dirname, '..', 'templates', 'project', 'features')
-const FEATURE = 'storefront_journey'
+const FEATURE = 'storefront-journey'
 const FEATURE_DIR = path.join(FEATURES_DIR, FEATURE)
 
-describe('shipped storefront_journey PRD summary', () => {
+describe('shipped storefront-journey PRD summary', () => {
   it('collected the product repo\'s requirements doc verbatim', () => {
     expect(fs.readFileSync(path.join(FEATURE_DIR, 'docs', COLLECTED_DOC_NAME), 'utf-8'))
       .toBe(fs.readFileSync(SOURCE_DOC, 'utf-8'))

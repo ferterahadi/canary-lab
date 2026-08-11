@@ -68,8 +68,8 @@ entry. The three places that must agree for the web aliases are
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Scaffolded workspace files, including the product's own demonstration. `demo-app/` is a three-service storefront (catalog, inventory, checkout) with an ordered requirements document, and `features/storefront_journey/` is the suite that exercises it. The suite ships **fully onboarded** — a port slot per service, the collected requirements doc plus its generated `docs/_prd-summary.*`, and `@req-*`-tagged journeys the coverage ledger scores at 100% — so the only thing left undone is the run. The services carry ten contract defects between them; the seven journeys (five ordered pairs, two sound) expose them a batch at a time — `healOnFailureThreshold: 4` stops a run once four journeys have failed — so a successful Run records repair cycles and changes in all three service directories. `flight-app/` is the opposite sample: one service that hardcodes its port, shipped with no suite at all, so a Flight has real work at every stage. |
-| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `gen-storefront-prd-summary`, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions`. `tools/fixtures/` holds contributor-only fixtures; the storefront suite itself now ships in the scaffold at `templates/project/features/storefront_journey/`. |
+| `templates/project/` | Scaffolded workspace files, including the product's own demonstration. `demo-app/` is a three-service storefront (catalog, inventory, checkout) with an ordered requirements document, and `features/storefront-journey/` is the suite that exercises it. The suite ships **fully onboarded** — a port slot per service, the collected requirements doc plus its generated `docs/_prd-summary.*`, and `@req-*`-tagged journeys the coverage ledger scores at 100% — so the only thing left undone is the run. The services carry ten contract defects between them; the seven journeys (five ordered pairs, two sound) expose them a batch at a time — `healOnFailureThreshold: 4` stops a run once four journeys have failed — so a successful Run records repair cycles and changes in all three service directories. `flight-app/` is the opposite sample: one service that hardcodes its port, shipped with no suite at all, so a Flight has real work at every stage. |
+| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `gen-storefront-prd-summary`, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions`. `tools/fixtures/` holds contributor-only fixtures; the storefront suite itself now ships in the scaffold at `templates/project/features/storefront-journey/`. |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
@@ -261,7 +261,7 @@ So inter-service URLs and config-file listen ports (e.g. Spring
 `server.port=${port.api}`, `dev.url=http://localhost:${port.web}`) follow the
 run's allocation. Test helpers resolve the target as
 `CANARY_PORT_api → GATEWAY_URL → hardcoded default` (see
-`templates/project/features/storefront_journey/e2e/helpers/api.ts`). The CLI `env`
+`templates/project/features/storefront-journey/e2e/helpers/api.ts`). The CLI `env`
 switching path passes no resolver, so it stays a verbatim copy.
 
 ### Always-worktree runs (R80)

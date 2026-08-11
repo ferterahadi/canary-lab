@@ -35,7 +35,7 @@ describe('createServer smoke (templates/project)', () => {
       const body = (await res.json()) as Array<{ name: string }>
       // The scaffold ships its own demonstration (R89) — the storefront suite
       // is there from the first boot, not an empty list.
-      expect(body.map((f) => f.name)).toEqual(['storefront_journey'])
+      expect(body.map((f) => f.name)).toEqual(['storefront-journey'])
     } finally {
       await app.close()
     }
@@ -51,7 +51,7 @@ describe('createServer smoke (templates/project)', () => {
       const features = await app.inject({ method: 'GET', url: '/api/features' })
       expect(features.statusCode).toBe(200)
       const featuresJson = features.json() as Array<{ name: string }>
-      expect(featuresJson.map((f) => f.name)).toEqual(['storefront_journey'])
+      expect(featuresJson.map((f) => f.name)).toEqual(['storefront-journey'])
 
       const runs = await app.inject({ method: 'GET', url: '/api/runs' })
       expect(runs.statusCode).toBe(200)

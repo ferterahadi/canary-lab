@@ -101,8 +101,8 @@ describe('MCP HTTP server (smoke)', () => {
     const projectRoot = path.join(workspace, 'project')
     fs.cpSync(path.join(repoRoot, 'templates', 'project'), projectRoot, { recursive: true })
     fs.cpSync(
-      path.join(repoRoot, 'templates', 'project', 'features', 'storefront_journey'),
-      path.join(projectRoot, 'features', 'storefront_journey'),
+      path.join(repoRoot, 'templates', 'project', 'features', 'storefront-journey'),
+      path.join(projectRoot, 'features', 'storefront-journey'),
       { recursive: true },
     )
     const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-block-')))
@@ -120,7 +120,7 @@ describe('MCP HTTP server (smoke)', () => {
       // so the route's heal-reuse path doesn't short-circuit).
       runStore.bootstrap({
         runId: 'busy-run',
-        feature: 'storefront_journey',
+        feature: 'storefront-journey',
         env: 'local',
         startedAt: '2026-05-08T00:00:00.000Z',
         status: 'running',
@@ -137,7 +137,7 @@ describe('MCP HTTP server (smoke)', () => {
       const collision = await client.callTool({
         name: 'start_run',
         arguments: {
-          feature: 'storefront_journey',
+          feature: 'storefront-journey',
           env: 'local',
           claim_heal: true,
           session_id: 'sess-block',

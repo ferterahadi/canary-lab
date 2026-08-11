@@ -14,7 +14,16 @@ import { loadFeatures } from '../../../shared/feature-loader'
 
 /** Names the scaffold uses. A renamed or deleted sample simply stops matching —
  *  the guide narrows rather than pointing somewhere that no longer exists. */
-export const SAMPLE_SUITE = 'storefront_journey'
+export const SAMPLE_SUITE = 'storefront-journey'
+
+/** The name this suite shipped under before 1.6.0 renamed it for consistency with
+ *  the kebab-case names a flight's plan agent produces.
+ *
+ *  `upgrade` deliberately never rewrites a consumer's `features/`, so a workspace
+ *  scaffolded earlier still has the underscored directory. Recognising it keeps
+ *  the demo working there instead of reporting the sample as deleted — which is
+ *  what matching only the new name would do, silently, to every existing user. */
+export const LEGACY_SAMPLE_SUITES = ['storefront_journey'] as const
 export const SAMPLE_SUITE_REPO_DIR = 'demo-app'
 export const SAMPLE_FLIGHT_REPO_DIR = 'flight-app'
 
@@ -44,13 +53,16 @@ function isDir(p: string): boolean {
 }
 
 export function readOnboardingSamples(projectRoot: string, featuresDir: string): OnboardingSamples {
-  const suitePresent =
-    isDir(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR)) &&
-    loadFeatures(featuresDir).some((f) => f.name === SAMPLE_SUITE)
+  // Report the name that is actually on disk, not the constant: the UI prints it
+  // so a first-time user can match it against the Suites column, and naming a row
+  // that isn't there would be worse than naming none.
+  const names = new Set(loadFeatures(featuresDir).map((f) => f.name))
+  const presentSuite = [SAMPLE_SUITE, ...LEGACY_SAMPLE_SUITES].find((n) => names.has(n)) ?? null
+  const suitePresent = isDir(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR)) && presentSuite !== null
   const flightRepo = path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR)
   const flightRepoPresent = isDir(flightRepo)
   return {
-    sampleSuite: suitePresent ? SAMPLE_SUITE : null,
+    sampleSuite: suitePresent ? presentSuite : null,
     sampleFlightRepo: flightRepoPresent ? flightRepo : null,
     sampleFlightDescription: flightRepoPresent ? SAMPLE_FLIGHT_DESCRIPTION : null,
   }
