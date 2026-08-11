@@ -4,21 +4,24 @@ import { StorefrontApi } from './helpers/api'
 // Seven journeys. J0 and J6 are sound and pass from the very first run — a
 // suite where everything is broken cannot show that the harness reports what it
 // finds rather than repairing whatever it touches. The other five are ORDERED
-// chains of two contracts each. The second assertion in
-// a journey is unreachable until the first passes, and the run stops at the
-// first failing journey — so a repair agent only ever sees one broken contract
-// at a time, and each repair reveals the next.
+// chains of two contracts each. The second assertion in a journey is
+// unreachable until the first passes, so within one journey a repair agent
+// still only ever sees the earliest broken contract, and fixing it reveals the
+// next.
 //
-// What actually caps failures is `healOnFailureThreshold: 1` in
-// feature.config.cjs: it becomes `--max-failures=1` on the command line, which
+// What caps failures ACROSS journeys is `healOnFailureThreshold: 4` in
+// feature.config.cjs: it becomes `--max-failures=4` on the command line, which
 // OVERRIDES `maxFailures` in playwright.config.ts. Changing it here alone does
-// nothing.
+// nothing. At 4, a cycle reports up to four failing journeys together and the
+// rest never execute.
 //
-// Declaration order is the execution order (`workers: 1`). Keep it, and keep
-// each journey's assertions ordered: a failed upstream contract must never be
-// rounded into proof of a downstream one. Keep contracts stateless too — these
-// services keep data in memory and are NOT restarted between heal cycles, so a
-// contract that leaves residue behind drifts on every rerun.
+// Declaration order is the execution order: `workers: 4` in
+// playwright.config.ts does not change that, because baseConfig leaves
+// `fullyParallel: false` and this is the suite's only spec file. Keep the order,
+// and keep each journey's assertions ordered: a failed upstream contract must
+// never be rounded into proof of a downstream one. Keep contracts stateless too
+// — these services keep data in memory and are NOT restarted between heal
+// cycles, so a contract that leaves residue behind drifts on every rerun.
 //
 // The `@req-*` tags map each contract to a requirement in
 // `docs/_prd-summary.json`, which is what makes the coverage ledger read 100%

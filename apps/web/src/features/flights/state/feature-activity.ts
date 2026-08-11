@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import type { DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
-import type { PortifyIndexEntry } from '@/shared/api/client'
+import type { FlightStageKey, PortifyIndexEntry } from '@/shared/api/client'
 import { useEvaluationExports } from '@/features/evaluation'
 import { isActivePortify, usePortify } from '@/features/portify'
 import { useActiveRuns } from '@/features/runs'
@@ -26,6 +26,17 @@ export interface FeatureActivity {
   workflowId?: string
   draftId?: string
   taskId?: string
+}
+
+/** Which flight stage a standalone activity kind maps onto — so an
+ *  activity-only row (no flight record) can still show WHERE in the pipeline
+ *  the live job sits (R56), and so clicking it can open the flight view pinned
+ *  to that stage. */
+export const ACTIVITY_STAGE: Record<FeatureActivityKind, FlightStageKey> = {
+  'authoring': 'specs-coverage',
+  'exporting': 'evaluation-export',
+  'portifying': 'portify',
+  'running': 'run',
 }
 
 /**

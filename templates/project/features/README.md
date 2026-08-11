@@ -4,8 +4,8 @@ This workspace ships one worked example so you can see what Canary Lab does
 before pointing it at your own code:
 
 - **`storefront_journey`** — a suite over the bundled `demo-app/` three-service
-  storefront. Press **Run** and watch the repair loop fix one service contract
-  per cycle until the suite is green.
+  storefront. Press **Run** and watch the repair loop work through the broken
+  service contracts, a batch at a time, until the suite is green.
 
 It ships **finished**, so you can read what a fully onboarded suite looks like:
 

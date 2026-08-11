@@ -306,7 +306,10 @@ describe('resume replays the in-flight answer (R78: resume is seamless, never a 
       },
     }
     const d = deps(adapters)
-    const first = startFlight(args(), d)
+    // autopilot off so the fork parks for this test to answer: what's under
+    // test is the REPLAY of an answer, not who supplied it (autopilot answers
+    // a docs-less prd-source with `collect-repo-docs` itself).
+    const first = startFlight({ ...args(), opts: { ...OPTS, autopilot: false } }, d)
     await first.completion
     const flightId = first.manifest.flightId
     expect(store.get(flightId)!.status).toBe('waiting-for-approval')

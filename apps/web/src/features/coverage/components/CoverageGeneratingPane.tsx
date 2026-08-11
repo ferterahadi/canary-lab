@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { CoverageJobManifest } from '@/shared/api/types'
+import { formatElapsedSeconds } from '@/shared/lib/format'
 import { AgentSessionView } from '@/shared/ui/AgentSessionView'
 import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
@@ -55,7 +56,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--running)' }}>
             Generating
           </span>
-          <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {elapsed}s</span>
+          <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {formatElapsedSeconds(elapsed)}</span>
         </div>
         <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: '6px 0 4px' }}>
           {job.kind === 'summary' ? 'Summarizing & mapping coverage' : 'Mapping coverage'}

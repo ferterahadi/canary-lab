@@ -37,6 +37,21 @@ export function formatDuration(ms: number): string {
   return `${minutes}m ${seconds}s`
 }
 
+// A still-running clock, in whole seconds. Distinct from `formatDuration`: that
+// one reports a *measured* duration and prints a tenth, which a once-a-second
+// tick doesn't have — so a live clock through it would always read a false
+// ".0". Rolls up past a minute so a long wait stays readable ("1200s" -> "20m
+// 00s"). Examples: 0 -> "0s", 12 -> "12s", 74 -> "1m 14s", 3700 -> "1h 02m".
+export function formatElapsedSeconds(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0s'
+  const secs = Math.floor(seconds)
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  const pad = (n: number): string => n.toString().padStart(2, '0')
+  if (mins < 60) return `${mins}m ${pad(secs % 60)}s`
+  return `${Math.floor(mins / 60)}h ${pad(mins % 60)}m`
+}
+
 // Compute duration from ISO start + (optional) end. If end is missing, treats
 // the run as ongoing and returns null.
 export function durationBetween(startedAt: string, endedAt?: string): number | null {

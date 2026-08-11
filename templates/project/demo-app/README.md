@@ -25,10 +25,11 @@ show that the harness reports what it finds rather than repairing whatever it
 touches.
 
 Ten of the twelve contracts start broken, spread across all three services. The
-defects are not labelled in source; the current failure is the only evidence a
-repair agent should act on, and the run stops at the first one, so each repair
-reveals the next. A successful demo takes ten cycles and leaves Journal entries
-and application changes under all three service directories.
+defects are not labelled in source; the current failures are the only evidence a
+repair agent should act on. A run stops once four journeys have failed and hands
+that batch over, and because each journey is an ordered pair, repairing what a
+cycle reports uncovers the contract behind it. A successful demo leaves Journal
+entries and application changes under all three service directories.
 
 ## Start the demo
 

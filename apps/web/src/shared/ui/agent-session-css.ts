@@ -79,14 +79,37 @@ export const TIMELINE_CSS = `
 .agentts-md th{background:color-mix(in srgb,var(--bg-elevated) 60%,transparent);font-weight:600;color:var(--text-primary)}
 .agentts-md img{max-width:100%}
 .agentts-waitrail{flex:none;padding-top:0}
-.agentts-working{position:relative;display:flex;align-items:center;gap:7px;min-height:18px;padding:1px 0 0 25px;color:var(--running);list-style:none}
-.agentts-worknode{position:absolute;left:2px;top:3px;width:11px;height:11px;border:1px solid color-mix(in srgb,var(--running) 58%,var(--border-default));border-radius:50%;background:color-mix(in srgb,var(--running) 8%,var(--bg-base))}
-.agentts-pixels{display:inline-flex;align-items:center;gap:4px}
-.agentts-pixels span{width:3px;height:3px;background:var(--running);animation:agentts-pixels 1.2s steps(2,end) infinite}
-.agentts-pixels span:nth-child(2){opacity:.55;animation-delay:.16s}
-.agentts-pixels span:nth-child(3){opacity:.25;animation-delay:.32s}
+.agentts-working{position:relative;display:flex;align-items:center;gap:7px;min-height:19px;padding:2px 0 0 25px;color:var(--running);list-style:none}
+/* The settled rail's connector fades to 25% at its bottom edge, so without a
+   stub of its own the live tip reads as a stray dot BELOW the timeline rather
+   than its next step. This picks the line back up and warms it to the running
+   hue — the tip of the rail is the part still moving. */
+.agentts-working::before{content:'';position:absolute;left:7px;top:-15px;width:1.5px;height:19px;border-radius:2px;background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--running) 60%,transparent))}
+.agentts-waitrail .agentts-working::before{display:none}
+/* Same 15px geometry as a settled .agentts-node: the pending step is the next
+   row of the same rail, not a different species of marker. */
+.agentts-worknode{position:absolute;left:0;top:2px;box-sizing:border-box;width:15px;height:15px;border:1.5px solid color-mix(in srgb,var(--running) 40%,var(--border-default));border-radius:50%;background:var(--bg-base);box-shadow:0 0 0 3px color-mix(in srgb,var(--running) 7%,transparent);z-index:1}
+.agentts-worknode::after{content:'';position:absolute;inset:-1.5px;border-radius:50%;background:conic-gradient(from 0deg,transparent 38%,var(--running) 97%,transparent);-webkit-mask:radial-gradient(closest-side,transparent 71%,#000 73%);mask:radial-gradient(closest-side,transparent 71%,#000 73%);animation:agentts-sweep 1.5s linear infinite}
+/* A long tool name ("Running mcp__canary_lab__get_flight") truncates rather
+   than pushing the clock out of the row — the elapsed figure is the part that
+   must stay readable. */
+.agentts-worklabel{min-width:0;overflow:hidden;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--running);white-space:nowrap;text-overflow:ellipsis}
+.agentts-worktime{flex:none;font-family:var(--font-mono);font-size:8.5px;line-height:1;color:var(--text-muted);font-variant-numeric:tabular-nums;letter-spacing:.01em;white-space:nowrap}
+.agentts-pixels{flex:none;display:inline-flex;align-items:center;gap:3.5px;margin-left:-1px}
+.agentts-pixels span{width:3.5px;height:3.5px;border-radius:50%;background:var(--running);animation:agentts-pixels 1.4s cubic-bezier(.4,0,.6,1) infinite}
+.agentts-pixels span:nth-child(2){animation-delay:.18s}
+.agentts-pixels span:nth-child(3){animation-delay:.36s}
 @keyframes agentts-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 @keyframes agentts-pulse{0%,100%{opacity:.65}50%{opacity:1}}
-@keyframes agentts-pixels{0%,100%{opacity:.2}50%{opacity:1}}
-@media (prefers-reduced-motion:reduce){.agentts-row,.agentts-sysrow,.agentts-mode[data-live="true"] .agentts-statusdot,.agentts-pixels span{animation:none}}
+@keyframes agentts-pixels{0%,100%{opacity:.22;transform:translateY(.5px)}50%{opacity:1;transform:translateY(-.5px)}}
+@keyframes agentts-sweep{to{transform:rotate(1turn)}}
+@media (prefers-reduced-motion:reduce){
+.agentts-row,.agentts-sysrow,.agentts-mode[data-live="true"] .agentts-statusdot,.agentts-pixels span,.agentts-worknode::after{animation:none}
+/* Motion can't carry "still working" here, so the shapes state it while still:
+   a filled core in the node and three dots at legible opacity. The elapsed
+   clock keeps ticking either way — that's the signal that never freezes. */
+.agentts-worknode::after{inset:3.5px;background:var(--running);-webkit-mask:none;mask:none}
+.agentts-pixels span{opacity:.42}
+.agentts-pixels span:first-child{opacity:.8}
+}
 `

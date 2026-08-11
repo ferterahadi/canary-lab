@@ -938,6 +938,40 @@ body {
   background: var(--bg-selected);
 }
 
+/* In-flight suite row: a flight is moving through this suite, but nothing is
+   executing *in the workspace* right now. Deliberately the quietest state in the
+   column — a bare wash at roughly a third of a running row's weight, no edge
+   ring and no animation, because the row's status chip carries the actual
+   meaning ("Authoring" / "To approve"). Declared BEFORE the run/heal/boot/dirty
+   rules so any of those wins at equal specificity: a live test run is the louder
+   event and must not be muffled by the pipeline that started it.
+   The attention variant (a flight parked on a checkpoint) sits a little heavier —
+   that suite is blocked on the human, not merely busy — but still earns no
+   border, so it never competes with the dirty row's integrity warning. */
+.cl-list-row-inflight {
+  background: color-mix(in srgb, var(--running) 6%, transparent);
+}
+.cl-list-row-inflight:hover {
+  background: color-mix(in srgb, var(--running) 12%, transparent);
+}
+.cl-list-row-inflight-attention {
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+.cl-list-row-inflight-attention:hover {
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+
+/* The at-rest flight chip yields to the hover action cluster that floats over
+   the same right edge. It keeps its box in flow while fading, so the row never
+   reflows — the actions simply take over the space the chip was occupying. */
+.feature-row__flight-chip {
+  transition: opacity 150ms ease;
+}
+.feature-row:hover .feature-row__flight-chip,
+.feature-row:focus-within .feature-row__flight-chip {
+  opacity: 0;
+}
+
 /* Active-run highlight on the whole row — blue while running, yellow while
    healing. Declared after the selected/hover rules so an in-flight run wins
    over the grey selected background at equal specificity. The interior tint is

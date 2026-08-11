@@ -3,7 +3,7 @@ import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor, SettingsModal } from '@/features/config'
-import { FlightStatusChip, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
+import { FeatureChipBadge, FlightStatusChip, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
@@ -314,6 +314,12 @@ function FeatureRow({
   // without a destination handler. Resolved once so the reserved width below
   // can't disagree with what actually renders.
   const flight = onOpenFlight ? flightAction?.(f.name) ?? null : null
+  // A flight moving through this suite gets the column's quietest treatment: a
+  // bare wash plus its status chip at rest, no ring and no motion (the hover-only
+  // paper-plane icon was the ONLY cue before, so a suite mid-flight read as idle).
+  // A resting/finished flight gets nothing — every flown suite carrying a
+  // permanent tint would make the column noise again.
+  const inFlight = Boolean(flight?.live || flight?.attention)
   // The action cluster FLOATS over the row's right edge instead of sitting in
   // flow, so three icons cost the suite name zero width at rest — in a column
   // of long `cns_*` names that width is the column's actual content. The name
@@ -321,15 +327,25 @@ function FeatureRow({
   // nothing ever moves: the ellipsis just lands earlier. Width is computed from
   // the visible count so a 1-action row doesn't reserve space for three.
   const actionCount = 1 + (onOpenCoverage ? 1 : 0) + (flight ? 1 : 0)
+  // The at-rest flight chip already sits in flow at that same right edge, so it
+  // has ALREADY cost the name its width — reserving the full cluster on top of it
+  // left an in-flight row with ~18px of readable name on hover (204px row − 72px
+  // chip − 100px reservation). Subtract what the chip yields; the cluster floats
+  // over the chip's box as it fades, so the icons still land clear of the text.
+  const chipWidth = inFlight ? 72 + 6 : 0
+  const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
-      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
       style={{
-        color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+        // An in-flight suite reads at full text contrast like a selected one: at 6%
+        // the wash alone is nearly invisible on the dark theme, so the brighter
+        // name does as much of the work as the tint.
+        color: isSelected || inFlight ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontWeight: isSelected ? 500 : 400,
-        ['--feature-row-actions' as string]: `${actionCount * 28 + (actionCount - 1) * 2 + 12}px`,
+        ['--feature-row-actions' as string]: `${actionsWidth}px`,
       }}
-      title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
+      title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
       {isDirty && (
         <Tooltip label="Test files modified — review in the status bar">
@@ -374,6 +390,13 @@ function FeatureRow({
       </button>
       {runState && (
         <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
+      )}
+      {inFlight && flight && (
+        /* In flow, not floating — it keeps its box while fading under the hover
+           action cluster, so the row can't reflow as the pointer arrives. */
+        <span className="feature-row__flight-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>
+          <FeatureChipBadge chip={flight} />
+        </span>
       )}
       <span className="feature-row__actions">
         {flight && (

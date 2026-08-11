@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
+import { formatElapsedSeconds } from '@/shared/lib/format'
 import { EventRow, SystemRow, groupSystemLines, shortSession } from './AgentSessionRows'
 import { EmptyGlyph, EmptyState, type EmptyStateTone } from './EmptyState'
 import { TIMELINE_CSS } from './agent-session-css'
@@ -270,7 +271,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
             />
           </div>
           <ol className="agentts-rail agentts-waitrail">
-            <LiveTail />
+            <LiveTail label="Starting" />
           </ol>
         </div>
       )
@@ -328,7 +329,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
           {groupSystemLines(sys.post).map((group, idx) => (
             <SystemRow key={`sys-post-${idx}`} group={group} />
           ))}
-          {live && <LiveTail />}
+          {live && <LiveTail {...pendingWork(state?.events ?? [])} />}
         </ol>
       </div>
       {showJumpLatest && (
@@ -366,20 +367,64 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
   )
 }
 
-function LiveTail() {
+/** What the rail's live tip should say, read off the transcript rather than
+ *  guessed. A `tool-call` with no matching `tool-result` is the one pending
+ *  state the events actually prove — that tool is still running. Anything else
+ *  only tells us the last block CLOSED (a thinking row lands when the thinking
+ *  ends), so the label stays neutral instead of inventing a phase. */
+export function pendingWork(events: AgentSessionEvent[]): { label: string; since?: string } {
+  const last = events[events.length - 1]
+  if (!last) return { label: 'Working' }
+  const since = last.timestamp
+  if (last.kind === 'tool-call') {
+    const settled = events.some((e) => e.kind === 'tool-result' && e.toolId === last.toolId)
+    if (!settled) return { label: `Running ${last.name}`, since }
+  }
+  return { label: 'Working', since }
+}
+
+/** Seconds since `iso`, re-rendered once a second. The elapsed clock is the one
+ *  liveness signal that survives reduced motion (where the node's sweep and the
+ *  dot wave both hold still), and it's what separates a 3-second gap from a
+ *  stall — the question a user actually has when they see a pending row. */
+function useElapsed(iso: string | undefined): string | null {
+  const startedAt = useMemo(() => {
+    if (!iso) return null
+    const t = Date.parse(iso)
+    return Number.isFinite(t) ? t : null
+  }, [iso])
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (startedAt === null) return
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [startedAt])
+  if (startedAt === null) return null
+  const ms = now - startedAt
+  // A negative or absurd delta means the transcript's clock disagrees with the
+  // browser's — no figure beats a wrong one.
+  if (ms < 0 || ms > 86_400_000) return null
+  return formatElapsedSeconds(ms / 1000)
+}
+
+function LiveTail({ label, since }: { label: string; since?: string }) {
+  const elapsed = useElapsed(since)
   return (
     <li
       className="agentts-working"
       role="status"
-      aria-label="Agent is working"
+      aria-label={elapsed ? `${label}, ${elapsed} elapsed` : label}
       data-testid="agent-session-live-tail"
     >
       <span className="agentts-worknode" aria-hidden="true" />
+      <span className="agentts-worklabel">{label}</span>
       <span className="agentts-pixels" aria-hidden="true">
         <span />
         <span />
         <span />
       </span>
+      {elapsed && <span className="agentts-worktime" data-testid="agent-session-live-elapsed">{elapsed}</span>}
     </li>
   )
 }

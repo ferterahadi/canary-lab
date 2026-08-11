@@ -150,7 +150,7 @@ npm run demo -- --agent codex
 real `canary-lab init`, and opens the UI. What a contributor sees is exactly what
 a user sees, which is the point. It prints two deep links and starts neither:
 run the shipped `storefront_journey` suite and watch a real agent repair
-catalog, inventory and checkout one contract per cycle, or start a **New
+catalog, inventory and checkout a batch of contracts per cycle, or start a **New
 Flight** over `flight-app/`, which ships with no suite at all.
 
 `flight` creates the workspace if none exists. To set one up yourself:

@@ -1,6 +1,6 @@
 import type { FlightIndexEntry, FlightStageKey, FlightStageStatus, FlightStatus, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
-import type { FeatureActivity, FeatureActivityKind } from '../state/feature-activity'
+import { ACTIVITY_STAGE, type FeatureActivity, type FeatureActivityKind } from '../state/feature-activity'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
@@ -71,16 +71,6 @@ export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: 
  *  "authoring"). Unmapped stages keep the generic "running". */
 export const RUNNING_STAGE_CHIP: Partial<Record<FlightStageKey, string>> = {
   'specs-coverage': 'authoring',
-}
-
-/** Which flight stage a standalone activity kind maps onto — so an
- *  activity-only row (no flight record) can still show WHERE in the pipeline
- *  the live job sits (R56). */
-export const ACTIVITY_STAGE: Record<FeatureActivityKind, FlightStageKey> = {
-  'authoring': 'specs-coverage',
-  'exporting': 'evaluation-export',
-  'portifying': 'portify',
-  'running': 'run',
 }
 
 /** Synthesize a per-stage array for an activity-only row: the mapped stage is
@@ -204,6 +194,14 @@ export interface FeatureFlightAction {
   label: string
   /** The fuller story behind the label (chip tooltip copy). */
   title: string
+  /** Something is happening on this suite right now (running flight or a live
+   *  standalone job). Drives the suites column's quiet in-flight row wash — a
+   *  resting or finished flight gets no cue at all, so a column of flown suites
+   *  stays calm. */
+  live: boolean
+  /** The flight is parked on a checkpoint: blocked on the human rather than
+   *  merely busy, so the row wash sits a step heavier (amber, not sky). */
+  attention: boolean
 }
 
 /** Resolve the shortcut for one suite, or null when there is no flight to open.
@@ -231,6 +229,10 @@ export function resolveFeatureFlightAction(
     tone: chip.tone,
     label: chip.label,
     title: chip.title,
+    live: chip.live,
+    // Read off the flight record rather than the chip's rank, so the "blocked on
+    // the human" wash tracks the same condition featureChipState branches on.
+    attention: flight?.status === 'waiting-for-approval',
   }
 }
 
@@ -248,7 +250,14 @@ export function FlightStatusChip({
   activity?: FeatureActivity
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
 }) {
-  const chip = featureChipState(flight, activity, derived)
+  return <FeatureChipBadge chip={featureChipState(flight, activity, derived)} />
+}
+
+/** The chip's rendering, split from the state resolution above so a caller that
+ *  already holds a resolved state (the suites column, which gets one from
+ *  `resolveFeatureFlightAction`) renders the IDENTICAL chip instead of a
+ *  look-alike — one home for the width, tone and tooltip rules. */
+export function FeatureChipBadge({ chip }: { chip: Pick<FeatureChipState, 'label' | 'tone' | 'title'> }) {
   return (
     <Chip testId="flight-status-chip" chrome="fill" tone={chip.tone} fontSize={10} label={capitalizeFirst(chip.label)} width={72} title={chip.title} />
   )

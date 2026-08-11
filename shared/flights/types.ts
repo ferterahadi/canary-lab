@@ -254,8 +254,9 @@ export interface FlightOptions {
   /** Skip every checkpoint except missing-env. */
   yolo: boolean
   /** R71/W4 autopilot: checkpoints with a safe default answer themselves
-   *  (config-approval→approve, prd-source→continue when docs exist,
-   *  coverage-stuck→accept-partial, portify-apply→apply,
+   *  (config-approval→approve, prd-source→continue when docs exist and
+   *  collect-repo-docs when they don't, coverage-stuck→accept-partial,
+   *  portify-gate→run, portify-apply→apply,
    *  run-failed→export-as-is, export-mode→raw); similarity-choice and
    *  missing-env always park. Absent = ON (default for new flights); set
    *  `false` to be asked at every checkpoint. Milder than yolo: every

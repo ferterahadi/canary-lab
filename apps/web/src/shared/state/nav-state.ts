@@ -1,5 +1,5 @@
 import type { ConfigTab, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
-import { derivedFlightToken, type FeatureActivity } from '@/features/flights'
+import { ACTIVITY_STAGE, derivedFlightToken, type FeatureActivity } from '@/features/flights'
 import type { FlightIndexEntry, FlightStageKey } from '../api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 
@@ -145,12 +145,13 @@ export function navToPersistedView(state: NavState): PersistedView {
 }
 
 /** Where clicking a live activity row should land — the pure decision behind
- *  openActivity. Returns null for an activity that has no surface to open (e.g.
- *  a running verb with no runId). `flights` resolves a feature's flight record
- *  for the export case. */
+ *  openActivity. Always resolves to a surface: the flight detail is the
+ *  universal fallback, so no state can make a row unclickable. `flights`
+ *  resolves the feature's flight record; features without one open their
+ *  DERIVED flight (the `feature:` token). */
 export type ActivityTarget =
   | { kind: 'run'; feature: string; runId: string }
-  | { kind: 'flight'; flightId: string | null; stage?: FlightStageKey }
+  | { kind: 'flight'; flightId: string; stage?: FlightStageKey }
   | { kind: 'portify'; workflowId: string }
   | { kind: 'draft'; draftId: string }
 
@@ -158,22 +159,22 @@ export function resolveActivityTarget(
   feature: string,
   activity: FeatureActivity,
   flights: readonly FlightIndexEntry[],
-): ActivityTarget | null {
-  if (activity.kind === 'running' && activity.runId) {
-    // The flight view, pinned to its Test Run stage — NOT the bare run detail.
-    // A feature used to route two different ways depending on whether a run
-    // happened to be live: idle rows opened the (derived) flight page, running
-    // rows opened the run. Same row, same feature, destination decided by
-    // timing. The flight view is the superset — it shows setup and every other
-    // stage, and `stage: 'run'` lands on the run with one click to its output.
+): ActivityTarget {
+  // The flight view, pinned to the stage the live job belongs to — NOT the bare
+  // run/export detail. A feature used to route two different ways depending on
+  // whether a run happened to be live: idle rows opened the (derived) flight
+  // page, running rows opened the run. Same row, same feature, destination
+  // decided by timing. The flight view is the superset — it shows setup and
+  // every other stage, and the pinned stage lands on the live one directly.
+  //
+  // A feature with no flight record still gets a flight: its `feature:` derived
+  // token (R81). Before this, an `exporting` row on a flightless feature routed
+  // to `flightId: null` — the flights LANDING list — so the one row the user
+  // clicked to watch an export in progress was the one row that couldn't reach
+  // the flight page at all.
+  const flightTarget = (stage: FlightStageKey): ActivityTarget => {
     const flight = flights.find((f) => f.feature === feature)
-    return { kind: 'flight', flightId: flight ? flight.flightId : derivedFlightToken(feature), stage: 'run' }
-  }
-  if (activity.kind === 'exporting') {
-    // R29/R38: a flightless export is watched from the flights view (run detail
-    // no longer hosts an inline panel); a feature with a flight opens that flight.
-    const flight = flights.find((f) => f.feature === feature)
-    return { kind: 'flight', flightId: flight ? flight.flightId : null }
+    return { kind: 'flight', flightId: flight ? flight.flightId : derivedFlightToken(feature), stage }
   }
   if (activity.kind === 'portifying' && activity.workflowId) {
     return { kind: 'portify', workflowId: activity.workflowId }
@@ -185,5 +186,8 @@ export function resolveActivityTarget(
     // the picker, and there was no draft surface mounted at all.
     return { kind: 'draft', draftId: activity.draftId }
   }
-  return null
+  // Every remaining case — an export, or a verb whose own id is missing (an
+  // older server, or a job caught mid-write) — opens the flight at the stage
+  // that verb belongs to. Monitoring is always one click away.
+  return flightTarget(ACTIVITY_STAGE[activity.kind])
 }

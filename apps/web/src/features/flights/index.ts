@@ -5,6 +5,7 @@
 // this feature's contract, so add one deliberately.
 
 export {
+  FeatureChipBadge,
   FlightStatusChip,
   FlightsPill,
   resolveFeatureFlightAction,
@@ -20,4 +21,5 @@ export {
   readGroupOpen,
   writeGroupOpen,
 } from './lib/group-open-state'
+export { ACTIVITY_STAGE } from './state/feature-activity'
 export type { FeatureActivity } from './state/feature-activity'

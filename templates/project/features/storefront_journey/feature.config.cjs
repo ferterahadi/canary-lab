@@ -21,12 +21,18 @@ const config = {
     + 'charges, discount applied once, a rejected code leaving the live discount '
     + 'alone. Catalog edits and deletes must land on the product that was asked for.',
   envs: ['local'],
-  // One failure per cycle, so a repair agent sees exactly one broken contract
-  // and each repair reveals the next. This is the knob that decides it: it
-  // becomes `--max-failures=1` on the Playwright command line, which OVERRIDES
-  // `maxFailures` in playwright.config.ts. Left at the default 2, two journeys
-  // fail together and the chain stops being a chain.
-  healOnFailureThreshold: 1,
+  // Stop and hand over to a repair agent once four journeys have failed, so a
+  // cycle carries a batch of broken contracts rather than a single one. This is
+  // the knob that decides it: it becomes `--max-failures=4` on the Playwright
+  // command line, which OVERRIDES `maxFailures` in playwright.config.ts.
+  //
+  // The journeys are still ordered chains internally — the second contract in a
+  // journey stays unreachable until the first passes — so what a batch widens is
+  // how many journeys report at once, not how deep into any one of them the run
+  // gets. At 1 the suite was a strict one-contract-per-cycle chain; at 4 an agent
+  // sees several independent contracts and can repair more than one service per
+  // cycle.
+  healOnFailureThreshold: 4,
   repos: [
     {
       name: 'catalog-service',

@@ -428,7 +428,29 @@ describe('resolveFeatureFlightAction — the Features column row shortcut', () =
       tone: 'var(--warning)',
       label: 'to approve',
       title: 'needs approval',
+      // Parked on a checkpoint: nothing is executing, but the row still earns the
+      // heavier "blocked on you" wash in the suites column.
+      live: false,
+      attention: true,
     })
+  })
+
+  it('reports a running flight as live but not attention-seeking', () => {
+    const action = resolveFeatureFlightAction(
+      'checkout',
+      [flight({ flightId: 'fl_9', feature: 'checkout', status: 'running' })],
+    )
+    expect(action?.live).toBe(true)
+    expect(action?.attention).toBe(false)
+  })
+
+  it('leaves a settled flight uncued — no wash for a suite that already flew', () => {
+    const action = resolveFeatureFlightAction(
+      'checkout',
+      [flight({ flightId: 'fl_9', feature: 'checkout', status: 'done' })],
+    )
+    expect(action?.live).toBe(false)
+    expect(action?.attention).toBe(false)
   })
 
   it('keeps the first record when a feature has several flights (same rule as the picker rows)', () => {

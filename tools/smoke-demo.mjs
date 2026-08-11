@@ -141,9 +141,14 @@ function replaceOnce(filePath, find, replacement) {
 }
 
 // The ten defects, in the order the five journeys expose them. Each entry is
-// the LLM-free stand-in for one heal cycle: wait for the failure it names, patch
-// exactly one application file, signal a rerun. Order is load-bearing — it is
-// the contract order in demo-app/REQUIREMENTS.md.
+// the LLM-free stand-in for one heal cycle: wait for a cycle whose failures
+// INCLUDE the one it names, patch exactly one application file, signal a rerun.
+// Order is load-bearing — it is the contract order in demo-app/REQUIREMENTS.md.
+//
+// Deliberately one repair per cycle even though `healOnFailureThreshold: 4` now
+// reports up to four failing journeys at once. A real agent may fix several per
+// cycle; this gate fixes one so a failure here names a single defect instead of
+// a batch, which is what keeps a timeout diagnosable.
 const repairSteps = [
   {
     service: 'catalog-service',
@@ -336,8 +341,8 @@ async function runInteractive(port, agent) {
   console.log(`      Repository: ${appDir}`)
   console.log('      Start a run. Catalog, inventory and checkout boot together. Two')
   console.log('      journeys are sound and pass immediately; the other five are ordered')
-  console.log('      chains, so the agent sees one broken contract per cycle and each')
-  console.log('      repair reveals the next — ten cycles to green.')
+  console.log('      chains, and the run stops once four have failed — so the agent gets a')
+  console.log('      batch of broken contracts per cycle and repairing them uncovers the next.')
 
   console.log('\n    Route B — full Flight (no suite exists for this app yet)')
   console.log(`      Open:  ${base}/?dialog=flight-new`)
@@ -470,7 +475,7 @@ async function runSmoke(port) {
 
   say(`Verdict: ${manifest.status.toUpperCase()} — ${manifest.healCycles} repair cycles, ${changedFiles} changed files`)
   if (problems.length > 0) throw new Error(problems.join('; '))
-  console.log(`\n✔ smoke:demo passed — seven journeys: two sound throughout, five chained, ${repairSteps.length} defects exposed one at a time across catalog, inventory and checkout.`)
+  console.log(`\n✔ smoke:demo passed — seven journeys: two sound throughout, five chained, ${repairSteps.length} defects repaired one per cycle across catalog, inventory and checkout.`)
 
   if (keepOpen) {
     console.log(`    Open: http://127.0.0.1:${port}/?feature=${featureName}&run=${encodeURIComponent(runId)}`)

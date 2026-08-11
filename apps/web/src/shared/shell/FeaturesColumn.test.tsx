@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { FeaturesColumn } from './FeaturesColumn'
+import type { FeatureFlightAction } from '@/features/flights'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -343,7 +344,8 @@ function clickButton(label: string): void {
 
 describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', () => {
   const feature = (name: string) => ({ name, repos: [], envs: [] })
-  const action = { flightId: 'fl_7', tone: 'var(--success)', label: 'done', title: 'flight done' }
+  // A settled flight: shortcut present, but nothing live — so no row cue.
+  const action = { flightId: 'fl_7', tone: 'var(--success)', label: 'done', title: 'flight done', live: false, attention: false }
 
   it('opens the resolved flight and aligns the workspace selection with it', () => {
     const onOpenFlight = vi.fn()
@@ -433,6 +435,92 @@ describe('FeaturesColumn flight shortcut (open the suite\'s existing flight)', (
       )
     })
     expect(container.querySelector('[data-testid="flight-shortcut-beta"]')).toBeTruthy()
+  })
+})
+
+describe('FeaturesColumn in-flight row cue', () => {
+  const feature = (name: string) => ({ name, repos: [], envs: [] })
+  const renderRow = (action: FeatureFlightAction | null) => {
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+          onOpenFlight={() => {}}
+          flightAction={() => action}
+        />,
+      )
+    })
+    return container.querySelector<HTMLElement>('li.feature-row')
+  }
+  const flight = (over: Partial<FeatureFlightAction>): FeatureFlightAction => ({
+    flightId: 'fl_1', tone: 'var(--running)', label: 'authoring', title: 'Specs + coverage', live: false, attention: false, ...over,
+  })
+
+  it('washes the row and brightens the name while a flight is live', () => {
+    const row = renderRow(flight({ live: true }))
+    expect(row?.className).toContain('cl-list-row-inflight')
+    expect(row?.className).not.toContain('cl-list-row-inflight-attention')
+    expect(row?.style.color).toBe('var(--text-primary)')
+    // The chip is the load-bearing half of the cue — the wash alone is faint.
+    expect(container.querySelector('[data-testid="flight-chip-alpha"]')).toBeTruthy()
+  })
+
+  it('takes the heavier attention wash when the flight is parked on a checkpoint', () => {
+    const row = renderRow(flight({ attention: true, tone: 'var(--warning)', label: 'to approve' }))
+    expect(row?.className).toContain('cl-list-row-inflight-attention')
+  })
+
+  it('leaves a settled flight uncued, so a column of flown suites stays calm', () => {
+    const row = renderRow(flight({ label: 'done', tone: 'var(--success)' }))
+    expect(row?.className).not.toContain('cl-list-row-inflight')
+    expect(row?.style.color).toBe('var(--text-secondary)')
+    expect(container.querySelector('[data-testid="flight-chip-alpha"]')).toBeNull()
+  })
+
+  it('does not reserve the action width twice when the chip already holds that space', () => {
+    // Regression: the chip sits in flow at the same right edge the cluster floats
+    // over. Reserving the full 100px on top of the 72px chip left a 204px row with
+    // ~18px of readable suite name on hover.
+    const width = (action: FeatureFlightAction) => {
+      act(() => {
+        root.render(
+          <FeaturesColumn
+            features={[feature('alpha')]}
+            selectedFeature={null}
+            onSelectFeature={() => {}}
+            onOpenFlight={() => {}}
+            onOpenCoverage={() => {}}
+            flightAction={() => action}
+          />,
+        )
+      })
+      return container.querySelector<HTMLElement>('li.feature-row')?.style.getPropertyValue('--feature-row-actions')
+    }
+    expect(width(flight({ live: false }))).toBe('100px')
+    expect(width(flight({ live: true }))).toBe('22px')
+  })
+
+  it('lets a live test run outrank the in-flight wash on the same row', () => {
+    // Both classes land; styles.css declares inflight FIRST so the running fill
+    // wins at equal specificity. Asserting order here keeps that contract honest.
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[feature('alpha')]}
+          selectedFeature={null}
+          activeRunFeature="alpha"
+          activeRunStatus="running"
+          onSelectFeature={() => {}}
+          onOpenFlight={() => {}}
+          flightAction={() => flight({ live: true })}
+        />,
+      )
+    })
+    const row = container.querySelector<HTMLElement>('li.feature-row')
+    expect(row?.className).toContain('cl-list-row-inflight')
+    expect(row?.className).toContain('cl-list-row-running')
   })
 })
 

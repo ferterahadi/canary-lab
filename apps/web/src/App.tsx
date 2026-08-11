@@ -135,7 +135,6 @@ export function App() {
   // decision is the pure `resolveActivityTarget`; App maps the target to nav.
   const openActivity = useCallback((feature: string, activity: FeatureActivity) => {
     const target = resolveActivityTarget(feature, activity, flightsRef.current)
-    if (!target) return
     if (target.kind === 'run') navigateToRun(target.feature, target.runId)
     else if (target.kind === 'flight') {
       openFlight(target.flightId)
@@ -353,6 +352,11 @@ export function App() {
               guide={guide.step === 'run-suite' && selectedFeature === guide.suite ? (
                 <FirstRunGuide step="run-suite" onDismiss={() => guide.dismiss('run-suite')} />
               ) : undefined}
+              /* Same owner as the guide, and read straight from the server's
+                 onboarding samples rather than a literal suite name — so it stays
+                 correct if the shipped demo is ever renamed, and goes quiet once
+                 the user deletes it. */
+              sampleSuite={guide.suite}
             />
           )}
           bottom={(

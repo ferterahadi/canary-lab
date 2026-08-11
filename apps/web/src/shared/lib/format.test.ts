@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   formatCount,
   formatDuration,
+  formatElapsedSeconds,
   durationBetween,
   shortTime,
   formatBytes,
@@ -36,6 +37,27 @@ describe('formatDuration', () => {
   it('returns em-dash for negative or non-finite input', () => {
     expect(formatDuration(-1)).toBe('—')
     expect(formatDuration(Number.NaN)).toBe('—')
+  })
+})
+
+describe('formatElapsedSeconds', () => {
+  it('prints whole seconds under a minute — a once-a-second clock has no tenth', () => {
+    expect(formatElapsedSeconds(0)).toBe('0s')
+    expect(formatElapsedSeconds(12.7)).toBe('12s')
+    expect(formatElapsedSeconds(59)).toBe('59s')
+  })
+  it('rolls up past a minute with a zero-padded second', () => {
+    expect(formatElapsedSeconds(60)).toBe('1m 00s')
+    expect(formatElapsedSeconds(74)).toBe('1m 14s')
+    expect(formatElapsedSeconds(3599)).toBe('59m 59s')
+  })
+  it('rolls up past an hour with a zero-padded minute', () => {
+    expect(formatElapsedSeconds(3600)).toBe('1h 00m')
+    expect(formatElapsedSeconds(3720)).toBe('1h 02m')
+  })
+  it('floors to zero rather than printing a negative or non-finite clock', () => {
+    expect(formatElapsedSeconds(-5)).toBe('0s')
+    expect(formatElapsedSeconds(Number.NaN)).toBe('0s')
   })
 })
 

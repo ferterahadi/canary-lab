@@ -127,21 +127,51 @@ describe('autopilot (R71/W4)', () => {
     }
   })
 
-  it('prd-source parks when "continue" is not offered (the no-docs case)', async () => {
+  it('prd-source with NO docs falls through to "collect-repo-docs" — the fork is not a stop under autopilot', async () => {
+    const responses: unknown[] = []
+    const adapters = allDone()
+    adapters.docs = parkThenDone('prd-source', ['collect-repo-docs', 'infer-from-diff'], responses)
+    const { manifest, completion } = startFlight(args('/repo/no-docs'), deps(adapters))
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('done')
+    expect(responses).toEqual([{ choice: 'collect-repo-docs' }])
+  })
+
+  it('prd-source parks when no mapped choice is offered at all', async () => {
+    const adapters = allDone()
+    adapters.docs = {
+      run: async () => ({
+        kind: 'checkpoint',
+        checkpoint: { kind: 'prd-source', message: 'no docs yet', options: ['infer-from-diff', 'retry'] },
+      }),
+    }
+    const { manifest, completion } = startFlight(args('/repo/no-mapped'), deps(adapters))
+    await completion
+    expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+  })
+
+  it('a checkpoint carrying a failed prior attempt parks — autopilot never re-runs the collector that came back empty', async () => {
+    const responses: unknown[] = []
     const adapters = allDone()
     adapters.docs = {
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: {
           kind: 'prd-source',
-          message: 'no docs yet',
-          options: ['use-repo-docs', 'infer-from-diff', 'description-only', 'retry'],
+          message: 'nothing found',
+          options: ['collect-repo-docs', 'infer-from-diff'],
+          data: { docs: [], linked: [], intent: 'x', lastAttempt: { mode: 'collect-repo-docs', outcome: 'empty' } },
         },
       }),
+      onCheckpointResponse: async (_ctx, response) => {
+        responses.push(response)
+        return { kind: 'done' }
+      },
     }
-    const { manifest, completion } = startFlight(args('/repo/no-docs'), deps(adapters))
+    const { manifest, completion } = startFlight(args('/repo/re-park'), deps(adapters))
     await completion
     expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
+    expect(responses).toEqual([])
   })
 
   it('opts.autopilot === false parks every checkpoint (opt-out)', async () => {

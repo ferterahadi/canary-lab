@@ -4,25 +4,39 @@ import { FlightConductorDeps, abortFlight, drainQueuedFlights, pauseFlight, resu
 import { stampSystemLine } from './flight-errors'
 import { StageContext, StageOutcome, driveControllers, firstOpenStageIndex } from './flight-stages'
 
-/** R71/W4: checkpoint kind → its safe default. A kind is auto-answered only
- *  when the mapped choice is actually among the checkpoint's options — the
- *  docs stage omits `continue` when no docs exist, so prd-source parks exactly
- *  then. similarity-choice and missing-env have no entry: no safe default
- *  exists (a wrong guess re-points the flight / invents secrets). */
-export const AUTOPILOT_CHOICE: Record<string, string> = {
-  'config-approval': 'approve',
-  'prd-source': 'continue',
-  'coverage-stuck': 'accept-partial',
-  'portify-gate': 'run',
-  'portify-apply': 'apply',
-  'run-failed': 'export-as-is',
-  'export-mode': 'raw',
+/** R71/W4: checkpoint kind → its safe defaults, best first. The first entry
+ *  that is actually among the checkpoint's options wins, so a kind whose option
+ *  set changes with the flight's state still has an answer for each shape:
+ *  prd-source drops `continue` when no docs exist yet, and there the collector
+ *  agent — the same path the UI recommends — is the safe default, because it
+ *  produces evidence rather than guessing (an empty-handed collector re-parks
+ *  with its reason, and that re-park always reaches a human).
+ *  similarity-choice and missing-env have no entry: no safe default exists
+ *  (a wrong guess re-points the flight / invents secrets). */
+export const AUTOPILOT_CHOICE: Record<string, string[]> = {
+  'config-approval': ['approve'],
+  'prd-source': ['continue', 'collect-repo-docs'],
+  'coverage-stuck': ['accept-partial'],
+  'portify-gate': ['run'],
+  'portify-apply': ['apply'],
+  'run-failed': ['export-as-is'],
+  'export-mode': ['raw'],
+}
+
+/** A checkpoint that carries the verdict of a failed prior attempt is a
+ *  RE-park, and a re-park is a human moment — the in-drive `autoAnswered`
+ *  guard can't see it because the human's own response started a new drive.
+ *  Auto-answering here would re-run the collector that just came back empty. */
+function afterFailedAttempt(checkpoint: FlightCheckpoint): boolean {
+  const data = checkpoint.data as { lastAttempt?: unknown } | undefined
+  return data?.lastAttempt !== undefined
 }
 
 export function autopilotChoice(opts: FlightOptions, checkpoint: FlightCheckpoint): string | null {
   if (opts.autopilot === false || opts.yolo) return null // yolo has its own per-adapter skips
-  const choice = AUTOPILOT_CHOICE[checkpoint.kind]
-  return choice !== undefined && (checkpoint.options ?? []).includes(choice) ? choice : null
+  if (afterFailedAttempt(checkpoint)) return null
+  const options = checkpoint.options ?? []
+  return AUTOPILOT_CHOICE[checkpoint.kind]?.find((choice) => options.includes(choice)) ?? null
 }
 
 export interface DriveOpts {

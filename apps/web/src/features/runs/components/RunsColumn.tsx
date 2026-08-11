@@ -33,11 +33,18 @@ interface Props {
   // for both steps — see shared/state/first-run-guide.ts); this column only
   // renders it and reports the dismissal.
   guide?: ReactNode
+  // The shipped demo suite, when this workspace still has it. Pressing Run on it
+  // skips the MCP promo: that click IS the product's demonstration — fail →
+  // repair → green — and a video about driving Canary from an agent interrupts
+  // exactly the moment it is meant to sell. Every other suite still sees the
+  // promo once, and the demo suite's other promos (export, new flight) are
+  // untouched.
+  sampleSuite?: string | null
 }
 
 // stop fitting on a single line, so we collapse them into a kebab menu that
 // pops over with the same options.
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason, verifyOpen, onVerifyOpenChange, guide }: Props) {  const {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason, verifyOpen, onVerifyOpenChange, guide, sampleSuite }: Props) {  const {
     verificationRefreshKey,
     pendingPause,
     setPendingPause,
@@ -94,10 +101,12 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
             disabledReason={runDisabledReason}
             onVerify={() => { setVerifyDialogOpen(true); setRunPopoverOpen(false) }}
             onStartEnv={(env, mode) => {
-              gatePromo('run-test', () => {
+              const start = () => {
                 onStartRun(env || undefined, mode)
                 setRunPopoverOpen(false)
-              })
+              }
+              if (sampleSuite && feature === sampleSuite) start()
+              else gatePromo('run-test', start)
             }}
           />
         </div>

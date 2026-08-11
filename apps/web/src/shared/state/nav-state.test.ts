@@ -207,18 +207,22 @@ describe('resolveActivityTarget', () => {
       .toEqual({ kind: 'flight', flightId: 'feature:other', stage: 'run' })
   })
 
-  it('running with no runId → no target', () => {
-    expect(resolveActivityTarget('checkout', { kind: 'running' }, flights)).toBeNull()
+  it('running with no runId → still the flight, pinned to the run stage', () => {
+    expect(resolveActivityTarget('checkout', { kind: 'running' }, flights))
+      .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'run' })
   })
 
-  it('exporting → the feature flight when one exists', () => {
+  it('exporting → the feature flight when one exists, pinned to the export stage', () => {
     expect(resolveActivityTarget('checkout', { kind: 'exporting', runId: 'run-9' }, flights))
-      .toEqual({ kind: 'flight', flightId: 'fl_1' })
+      .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'evaluation-export' })
   })
 
-  it('exporting with no flight → the flights landing (null flight)', () => {
+  it('exporting with no flight → the DERIVED flight, never the landing list', () => {
+    // The bug this replaced: an export on a flightless feature resolved to
+    // `flightId: null`, so the row the user clicked to watch the export land
+    // reopened the flights list instead of the flight page.
     expect(resolveActivityTarget('other', { kind: 'exporting' }, flights))
-      .toEqual({ kind: 'flight', flightId: null })
+      .toEqual({ kind: 'flight', flightId: 'feature:other', stage: 'evaluation-export' })
   })
 
   it('portifying → the portify workflow', () => {
@@ -231,7 +235,13 @@ describe('resolveActivityTarget', () => {
       .toEqual({ kind: 'draft', draftId: 'dr_9' })
   })
 
-  it('authoring with no draftId → no target', () => {
-    expect(resolveActivityTarget('checkout', { kind: 'authoring' }, flights)).toBeNull()
+  it('authoring with no draftId → the flight at its specs stage', () => {
+    expect(resolveActivityTarget('checkout', { kind: 'authoring' }, flights))
+      .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'specs-coverage' })
+  })
+
+  it('portifying with no workflowId → the flight at its portify stage', () => {
+    expect(resolveActivityTarget('other', { kind: 'portifying' }, flights))
+      .toEqual({ kind: 'flight', flightId: 'feature:other', stage: 'portify' })
   })
 })

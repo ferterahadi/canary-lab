@@ -26,10 +26,10 @@ import { agentProgressSink } from './agent-progress'
 // → description) — no human moment to fork on.
 // Non-yolo flights ALWAYS EMIT the checkpoint — even when docs exist — so the
 // fork is never silently skipped. Whether a HUMAN sees it is autopilot's call,
-// not this stage's: `continue` is only offered once docs exist, and autopilot
-// (on by default) auto-answers it there. So the park reaches a person when
-// there are no docs yet, when autopilot is off, or on a re-park. See
-// AUTOPILOT_CHOICE in ../flight-drive.ts.
+// not this stage's: autopilot (on by default) answers `continue` when docs
+// exist and `collect-repo-docs` when they don't. So the park reaches a person
+// when autopilot is off, or on a re-park — including the re-park a collector
+// that came back empty produces. See AUTOPILOT_CHOICE in ../flight-drive.ts.
 
 const MAX_REPO_DOCS = 10
 const MAX_DOC_BYTES = 200 * 1024

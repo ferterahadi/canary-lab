@@ -77,6 +77,21 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+/** Open the Run menu and take the env-less "Run tests" action. */
+function startEnvlessRun(container: HTMLDivElement): void {
+  const runButton = [...container.querySelectorAll('button')]
+    .find((button) => button.textContent?.trim() === 'Run')
+  act(() => {
+    runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+  const runTests = [...document.body.querySelectorAll('[role="menuitem"]')]
+    .find((b) => b.textContent?.includes('Run tests'))
+  expect(runTests).toBeTruthy()
+  act(() => {
+    runTests?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  })
+}
+
 describe('run launch controls', () => {
   it('gates a run through the MCP promo before starting (env-less feature)', () => {
     const onStartRun = vi.fn()
@@ -96,18 +111,7 @@ describe('run launch controls', () => {
       )
     })
 
-    // Open the Run menu, then use the env-less "Run tests" action.
-    const runButton = [...container.querySelectorAll('button')]
-      .find((button) => button.textContent?.trim() === 'Run')
-    act(() => {
-      runButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
-    const runTests = [...document.body.querySelectorAll('[role="menuitem"]')]
-      .find((b) => b.textContent?.includes('Run tests'))
-    expect(runTests).toBeTruthy()
-    act(() => {
-      runTests?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    })
+    startEnvlessRun(container)
 
     expect(gatePromo).toHaveBeenCalledWith('run-test', expect.any(Function))
     expect(onStartRun).not.toHaveBeenCalled()
@@ -118,6 +122,57 @@ describe('run launch controls', () => {
     })
 
     expect(onStartRun).toHaveBeenCalledExactlyOnceWith(undefined, 'test')
+  })
+
+  it('starts the shipped demo suite with no MCP promo in the way', () => {
+    const onStartRun = vi.fn()
+
+    act(() => {
+      root.render(
+        <RunsColumn
+          feature="storefront_journey"
+          sampleSuite="storefront_journey"
+          envs={[]}
+          runs={[]}
+          selectedRunId={null}
+          onSelectRun={() => {}}
+          onStartRun={onStartRun}
+          onStartVerification={async () => {}}
+        />,
+      )
+    })
+
+    startEnvlessRun(container)
+
+    // The demo's whole point is what happens after this click, so it goes
+    // straight through — the promo never even gets asked.
+    expect(gatePromo).not.toHaveBeenCalled()
+    expect(onStartRun).toHaveBeenCalledExactlyOnceWith(undefined, 'test')
+  })
+
+  it('still promos on a suite that is not the shipped demo', () => {
+    const onStartRun = vi.fn()
+    gatePromo.mockImplementationOnce(() => {})
+
+    act(() => {
+      root.render(
+        <RunsColumn
+          feature="alpha"
+          sampleSuite="storefront_journey"
+          envs={[]}
+          runs={[]}
+          selectedRunId={null}
+          onSelectRun={() => {}}
+          onStartRun={onStartRun}
+          onStartVerification={async () => {}}
+        />,
+      )
+    })
+
+    startEnvlessRun(container)
+
+    expect(gatePromo).toHaveBeenCalledWith('run-test', expect.any(Function))
+    expect(onStartRun).not.toHaveBeenCalled()
   })
 
   it('opens the Verify config dialog from the Run menu Verify tab', () => {

@@ -88,7 +88,7 @@ A flight has nine checkpoints, but **autopilot is on by default** and answers se
 |---|---|---|
 | `similarity-choice` | This repo already has a feature — rerun / enhance / new? | ❌ always asks |
 | `config-approval` | Approve the scaffolded, on-disk `feature.config.cjs` (edit it on the Suite setup stage or in Advanced setup; `redraft` re-runs the repo scan) | `approve` |
-| `prd-source` | Supply requirement docs, or have an agent gather them (`collect-repo-docs` / `infer-from-diff`) | `continue` — **but parks when no docs exist yet** |
+| `prd-source` | Supply requirement docs, or have an agent gather them (`collect-repo-docs` / `infer-from-diff`) | `continue` when docs exist — **`collect-repo-docs` when none do**, so the fork is not a stop |
 | `coverage-stuck` | The authoring loop can't reach the target | `accept-partial` |
 | `portify-gate` | Run the parallel-readiness workflow at all, before any agent cost? | `run` |
 | `portify-apply` | Review the verified diff — `apply` / `revise` (needs feedback) / `cancel` | `apply` |
@@ -96,7 +96,7 @@ A flight has nine checkpoints, but **autopilot is on by default** and answers se
 | `export-mode` | `raw` (fast) vs `localized` (agent-rewritten reasoning) | `raw` |
 | `missing-env` | Secrets the env capture couldn't find | ❌ never skipped, not even with `--yolo` |
 
-Two overrides on top of that. A checkpoint that **re-parks** (a config parse error after an auto-approve, an unrecognized choice) always reaches you — autopilot never answers the same one twice. And a stage you deliberately **re-enter** via redo or jump-to-stage always parks its first checkpoint, because choosing to re-run a step is the intent to answer it differently.
+Two overrides on top of that. A checkpoint that **re-parks** (a config parse error after an auto-approve, an unrecognized choice, a requirements collector that came back empty-handed) always reaches you — autopilot never answers the same one twice. And a stage you deliberately **re-enter** via redo or jump-to-stage always parks its first checkpoint, because choosing to re-run a step is the intent to answer it differently.
 
 Turn autopilot off to be asked at every checkpoint: the flight header's facts strip carries an **Autopilot on/off** toggle you can flip at any time (it takes effect at the next checkpoint), and MCP clients pass `autopilot: false` to `start_flight` — worth doing when you plan to distill the conversation into requirement docs at the `prd-source` stop.
 
