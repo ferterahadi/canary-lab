@@ -21,17 +21,17 @@ afterEach(() => {
 })
 
 const service: ServiceManifestEntry = {
-  name: 'oddle-merchant-pass',
-  safeName: 'oddle-merchant-pass',
-  command: './gradlew :oddle-service:bootRun',
-  cwd: '/repos/oddle-merchant-pass',
-  logPath: '/logs/runs/abc/svc-oddle-merchant-pass.log',
+  name: 'merchant-pass',
+  safeName: 'merchant-pass',
+  command: './gradlew :merchant-service:bootRun',
+  cwd: '/repos/merchant-pass',
+  logPath: '/logs/runs/abc/svc-merchant-pass.log',
   healthUrl: 'http://localhost:51774/actuator/health',
   status: 'stopped',
 } as ServiceManifestEntry
 
 const branch: RepoBranchSnapshot = {
-  name: 'oddle-merchant-pass',
+  name: 'merchant-pass',
   branch: 'release/2.9.0',
   dirty: false,
   detached: false,
@@ -49,10 +49,10 @@ describe('ServiceCard', () => {
   it('always shows the same five facts, in order', () => {
     render(<ServiceCard service={service} branch={branch} />)
 
-    expect(container.textContent).toContain('oddle-merchant-pass')
+    expect(container.textContent).toContain('merchant-pass')
     expect(labels()).toEqual(['cmd', 'cwd', 'ref', 'url'])
-    expect(container.textContent).toContain('./gradlew :oddle-service:bootRun')
-    expect(container.textContent).toContain('/repos/oddle-merchant-pass')
+    expect(container.textContent).toContain('./gradlew :merchant-service:bootRun')
+    expect(container.textContent).toContain('/repos/merchant-pass')
     expect(container.textContent).toContain('release/2.9.0')
     expect(container.querySelector('a[href="http://localhost:51774/actuator/health"]')).toBeTruthy()
   })
@@ -78,10 +78,10 @@ describe('ServiceCard', () => {
   })
 
   it('keeps the repo name as the title for a lone service in its repo', () => {
-    render(<ServiceCard service={{ ...service, repoName: 'oddle-merchant-pass' } as ServiceManifestEntry} branch={branch} siblings={1} />)
+    render(<ServiceCard service={{ ...service, repoName: 'merchant-pass' } as ServiceManifestEntry} branch={branch} siblings={1} />)
 
     const title = container.querySelector('li > div > div.truncate')?.textContent
-    expect(title).toBe('oddle-merchant-pass')
+    expect(title).toBe('merchant-pass')
   })
 
   it('holds the ref and url rows open with a placeholder when there is nothing to show', () => {
@@ -97,13 +97,13 @@ describe('ServiceCard', () => {
     render(<ServiceCard service={service} branch={branch} />)
 
     const header = container.querySelector('.cl-card')?.firstElementChild
-    expect(header?.firstElementChild?.textContent).toBe('oddle-merchant-pass')
+    expect(header?.firstElementChild?.textContent).toBe('merchant-pass')
   })
 
   it('never shows the log path — the Services tab streams that log live', () => {
     render(<ServiceCard service={service} branch={branch} />)
 
-    expect(container.textContent).not.toContain('svc-oddle-merchant-pass.log')
+    expect(container.textContent).not.toContain('svc-merchant-pass.log')
     expect(labels()).not.toContain('log')
   })
 })
