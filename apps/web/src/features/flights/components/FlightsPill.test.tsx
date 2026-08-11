@@ -7,6 +7,7 @@ import type { FlightIndexEntry, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction } from './FlightsPill'
+import { ACTIVITY_CHIP, RUNNING_STAGE_CHIP } from './FlightChipState'
 
 const preFlight = (over: Partial<PlanFeaturesTask>): PlanFeaturesTask => ({
   taskId: 'fp_1',
@@ -348,10 +349,34 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     expect(featureChipState(null, undefined, FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))).label).toBe('done')
   })
 
-  it('a running flight on specs-coverage says "authoring", other stages stay "running"', () => {
-    expect(featureChipState({ status: 'running', currentStage: 'specs-coverage', pauseReason: null }).label).toBe('authoring')
-    expect(featureChipState({ status: 'running', currentStage: 'run', pauseReason: null }).label).toBe('running')
-    expect(featureChipState({ status: 'running', currentStage: null, pauseReason: null }).label).toBe('running')
+  it('a running flight names the stage it is on, not a flat "running"', () => {
+    // The early stages matter most: a flight spends its first minutes here, and
+    // these were the ones that used to report nothing.
+    expect(featureChipState({ status: 'running', currentStage: 'scout', pauseReason: undefined }).label).toBe('scanning')
+    expect(featureChipState({ status: 'running', currentStage: 'scaffold', pauseReason: undefined }).label).toBe('setting up')
+    expect(featureChipState({ status: 'running', currentStage: 'prd-summary', pauseReason: undefined }).label).toBe('distilling')
+    expect(featureChipState({ status: 'running', currentStage: 'specs-coverage', pauseReason: undefined }).label).toBe('authoring')
+    expect(featureChipState({ status: 'running', currentStage: 'run', pauseReason: undefined }).label).toBe('running')
+    // The only bare "running" left: launched, no stage recorded yet.
+    expect(featureChipState({ status: 'running', currentStage: null, pauseReason: undefined }).label).toBe('running')
+  })
+
+  it('reuses the standalone activity verb for the stages that overlap it', () => {
+    // A portify started by a flight stage and one started on its own must read
+    // the same — the colour and the word both mean the same thing everywhere.
+    for (const stage of ['portify', 'heal', 'evaluation-export'] as const) {
+      const viaStage = featureChipState({ status: 'running', currentStage: stage, pauseReason: undefined }).label
+      const viaActivity = ACTIVITY_CHIP[stage === 'portify' ? 'portifying' : stage === 'heal' ? 'healing' : 'exporting'].label
+      expect(viaStage).toBe(viaActivity)
+    }
+  })
+
+  it('keeps every stage verb inside the chip\'s fixed width', () => {
+    // The chip is pinned at 72px; "portifying" / "to approve" (10 chars) are the
+    // widest labels it is designed around, so no verb may exceed that.
+    for (const verb of Object.values(RUNNING_STAGE_CHIP)) {
+      expect(verb.length).toBeLessThanOrEqual(10)
+    }
   })
 
   it('an activity-only row keeps its evidence squares lit under the running overlay', () => {

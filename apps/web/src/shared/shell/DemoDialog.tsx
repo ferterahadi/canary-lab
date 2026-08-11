@@ -1,3 +1,4 @@
+import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Modal } from '@/shared/ui/Overlays'
 
 // The demo chooser — which of the two shipped samples to try.
@@ -24,40 +25,62 @@ interface DemoOption {
   /** Rough wall-clock, so the choice is honest about what it costs. */
   duration: string
   body: string
-  action: string
+  /** Where to watch — the row this demo acts on, named so a first-time user
+   *  knows which line in the Suites column to keep an eye on. Mono, because it
+   *  is an identifier they will match against the column by eye. */
+  target: { label: string; value: string }
   onStart: () => void
-  /** The marked option — carries the view's single accent. */
+  /** The marked option — carries the view's single accent (the wash + badge,
+   *  never a filled button on top of them). */
   recommended?: boolean
   testId: string
 }
 
-function OptionBlock({ option }: { option: DemoOption }) {
+// The whole card is the action, copying the run-start branch-mismatch dialog's
+// `.cl-branch-option` — the app's existing "pick one of these, this one is
+// recommended" surface. Reusing it fixes two things a card-with-a-button-inside
+// had: the secondary option's full-width outlined button read as disabled, and
+// the recommended option stacked three accents (border + label + filled button)
+// against the one-accent rule.
+function OptionCard({ option }: { option: DemoOption }) {
   return (
-    <section
+    <button
+      type="button"
       data-testid={option.testId}
-      className="rounded-md border p-3"
-      style={{ borderColor: option.recommended ? 'var(--accent)' : 'var(--border-default)' }}
+      onClick={option.onStart}
+      className={`cl-branch-option ${option.recommended ? 'cl-branch-option-rec' : ''} flex w-full items-start gap-3 rounded px-3 py-2.5 text-left`}
     >
-      <div className="flex items-baseline gap-2">
-        <h3 className="text-xs font-medium" style={{ color: 'var(--text-primary)' }}>{option.title}</h3>
-        {option.recommended && (
-          <span className="text-[11px]" style={{ color: 'var(--accent)' }}>recommended</span>
-        )}
-        <span className="ml-auto shrink-0 text-[11px]" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-          {option.duration}
-        </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>
+            {option.title}
+          </span>
+          {option.recommended && <span className="cl-badge-accent">Recommended</span>}
+          {/* Mono, right-aligned: the cost is the fact the choice turns on, so it
+              reads as data rather than as more prose. */}
+          <span
+            className="ml-auto shrink-0 text-[11px]"
+            style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
+          >
+            {option.duration}
+          </span>
+        </div>
+        {/* Both bodies are `--text-secondary`: this is supporting copy, and
+            `--text-muted` is for metadata. The recommendation is carried by the
+            accent wash and the badge — fading the other option's prose would
+            make a real choice look half-disabled. */}
+        <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+          {option.body}
+        </p>
+        <div className="mt-2 flex items-baseline gap-1.5 text-[11px]">
+          <span style={{ color: 'var(--text-muted)' }}>{option.target.label}</span>
+          <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+            {option.target.value}
+          </span>
+        </div>
       </div>
-      <p className="mt-1.5 text-[11px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-        {option.body}
-      </p>
-      <button
-        type="button"
-        onClick={option.onStart}
-        className={`${option.recommended ? 'cl-button-primary' : 'cl-button'} mt-2.5 w-full justify-center`}
-      >
-        {option.action}
-      </button>
-    </section>
+      <ChevronRightIcon />
+    </button>
   )
 }
 
@@ -90,7 +113,8 @@ export function DemoDialog({
       title: 'Repair a broken suite',
       duration: '~4 min',
       body: 'Ten of twelve contracts are broken on purpose. The agent will report each one fixed — watch the harness rerun the tests and disagree.',
-      action: 'Run the suite',
+      // The suite name is a known constant (SAMPLE_SUITE), so it can be stated.
+      target: { label: 'Watch', value: suite },
       onStart: onRunSuite,
       recommended: true,
       testId: 'demo-option-repair',
@@ -100,8 +124,11 @@ export function DemoDialog({
     options.push({
       title: 'Onboard a repo from nothing',
       duration: '~25 min',
-      body: 'A bare repo — no config, no requirements, no tests. Seven stages author the suite for it. Run this one when you want to see it against your own code.',
-      action: 'Start a flight',
+      body: 'A bare repo — no config, no requirements, no tests. Seven stages author a suite for it and name it themselves, so watch for a new row appearing. Run this one when you want to see it against your own code.',
+      // The REPO, not a suite name: the flight's plan agent names the suite it
+      // authors, so no fixed name can be promised here. Stating one would make
+      // the dialog claim something that is only sometimes true.
+      target: { label: 'Onboards', value: 'flight-app' },
       onStart: onStartFlight,
       // Recommended only when it is the only option left: the marker means "spend
       // your time here", and on a lone option there is no comparison to draw.
@@ -120,24 +147,30 @@ export function DemoDialog({
       testId="demo-dialog"
       footer={(
         /* In the footer rather than the body: it is a setting about this dialog,
-           not a third thing to choose between. Unticking it takes the pill out of
-           the status bar — the setting is mirrored in Settings → General, so
-           turning the demos off is never a one-way door. */
-        <label className="flex cursor-pointer items-center gap-2">
+           not a third thing to choose between. Muted so it reads as housekeeping —
+           the accent belongs to the recommended card, and a second accented
+           control down here would compete with it. `mr-auto` because Modal's
+           footer is `justify-end`, which is right for action buttons but wrong for
+           a standing setting.
+           Unticking takes the pill out of the status bar; the setting is mirrored
+           in Settings → Onboarding, so it is never a one-way door. */
+        <label className="mr-auto flex cursor-pointer items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
           <input
             type="checkbox"
             data-testid="demo-show-toggle"
             checked={showDemo !== false}
             onChange={(e) => onShowDemoChange(e.target.checked)}
           />
-          <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>
-            Show demos in the status bar
-          </span>
+          Show demos in the status bar
         </label>
       )}
     >
-      <div className="flex flex-col gap-2">
-        {options.map((option) => <OptionBlock key={option.testId} option={option} />)}
+      {/* Modal's body wrapper is a bare scroller — every caller supplies its own
+          padding. `px-4 py-3` matches `.cl-dialog-header` and the footer, so the
+          cards line up with the title above and the checkbox below instead of
+          running into the dialog's edges. */}
+      <div className="flex flex-col gap-2 px-4 py-3">
+        {options.map((option) => <OptionCard key={option.testId} option={option} />)}
       </div>
     </Modal>
   )

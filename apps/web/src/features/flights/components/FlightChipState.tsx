@@ -75,13 +75,36 @@ export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: 
   'authoring': { label: 'authoring', title: 'Authoring test specs', tone: FLIGHT_STATUS_TONE['running'] },
 }
 
-/** Short chip verb for a RUNNING flight, keyed by the stage the conductor is
- *  on — the chip narrates WHAT is happening rather than a flat "running" (and
- *  reads the same as the standalone ACTIVITY_CHIP verb for the absorbed
- *  surface: a flight authoring specs and a standalone authoring draft both say
- *  "authoring"). Unmapped stages keep the generic "running". */
-export const RUNNING_STAGE_CHIP: Partial<Record<FlightStageKey, string>> = {
+/** Short chip verb for a RUNNING flight, keyed by the stage the conductor is on
+ *  — the chip narrates WHAT is happening rather than a flat "running".
+ *
+ *  EVERY stage declares one. Only `specs-coverage` used to, so ten of eleven
+ *  stages fell through to a generic "running": a flight spent most of its
+ *  ~25 minutes reporting nothing about where it was, and the stages a first-time
+ *  viewer most wants named (repo scan, suite setup, requirements) were exactly
+ *  the silent ones. A full Record rather than a Partial so a new stage cannot be
+ *  added without deciding what its chip says.
+ *
+ *  Verbs, not the stage titles, because that is this vocabulary's grammar
+ *  (running / healing / portifying); the full title reaches the tooltip via
+ *  `stageLabel`. The four that overlap ACTIVITY_CHIP reuse ITS verb, so a job
+ *  reads identically whether a flight stage or a standalone action started it.
+ *
+ *  Kept short deliberately: the chip is fixed at 72px (see FeatureChipBadge), so
+ *  nothing here may exceed the width of the pinned widest labels — "to approve"
+ *  and "portifying", both 10 characters. */
+export const RUNNING_STAGE_CHIP: Record<FlightStageKey, string> = {
+  'similarity': 'checking',
+  'scout': 'scanning',
+  'scaffold': 'setting up',
+  'env-capture': 'capturing',
+  'docs': 'reading',
+  'prd-summary': 'distilling',
   'specs-coverage': 'authoring',
+  'portify': 'portifying',
+  'run': 'running',
+  'heal': 'healing',
+  'evaluation-export': 'exporting',
 }
 
 /** Synthesize a per-stage array for an activity-only row: the mapped stage is
@@ -122,8 +145,9 @@ export interface FeatureChipState {
  *      "authoring" (narrates the absorbed surfaces (runs / portify / wizard
  *      drafts) whether the job was started by a flight stage or standalone;
  *      sky, except the amber "healing" — see ACTIVITY_CHIP)
- *   3. flight conductor active       → the stage verb (sky — "authoring" on
- *      specs-coverage, else the generic "running" between/on other stages)
+ *   3. flight conductor active       → the stage verb (sky — "scanning",
+ *      "setting up", "distilling", … one per stage; see RUNNING_STAGE_CHIP.
+ *      Only a flight with no stage recorded yet says a bare "running")
  *   4. flight paused                 → "paused"      (amber)
  *   5. nothing happening             → the LAST state: "done" / "failed" / "aborted"
  *
@@ -175,7 +199,9 @@ export function featureChipState(
   }
   if (flight.status === 'running') {
     return {
-      label: (flight.currentStage && RUNNING_STAGE_CHIP[flight.currentStage]) ?? 'running',
+      // The one remaining fallback is a flight with no stage recorded yet (just
+      // launched) — every KNOWN stage now has its own verb.
+      label: flight.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] : 'running',
       tone: FLIGHT_STATUS_TONE['running'],
       live: true,
       rank: 1,

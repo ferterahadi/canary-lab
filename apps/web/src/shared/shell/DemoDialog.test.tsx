@@ -72,11 +72,31 @@ describe('DemoDialog', () => {
     render()
     const repair = q('demo-option-repair')
     const flight = q('demo-option-flight')
-    expect(repair?.textContent).toContain('recommended')
-    expect(flight?.textContent).not.toContain('recommended')
-    // One accent per view: only the recommended route's button is primary.
-    expect(repair?.querySelector('button')?.className).toContain('cl-button-primary')
-    expect(flight?.querySelector('button')?.className).not.toContain('cl-button-primary')
+    expect(repair?.textContent).toContain('Recommended')
+    expect(flight?.textContent).not.toContain('Recommended')
+    // One accent per view: the recommended card carries the accent wash, and
+    // nothing else in the dialog is accented on top of it.
+    expect(repair?.className).toContain('cl-branch-option-rec')
+    expect(flight?.className).not.toContain('cl-branch-option-rec')
+    expect(document.querySelectorAll('.cl-button-primary')).toHaveLength(0)
+  })
+
+  it('makes the whole option the action — no button nested inside a card', () => {
+    render()
+    expect(q('demo-option-repair')?.tagName).toBe('BUTTON')
+    expect(q('demo-option-flight')?.querySelector('button')).toBeNull()
+  })
+
+  it('names the suite to watch, so a first-timer knows which row to follow', () => {
+    render({ suite: 'storefront_journey' })
+    expect(q('demo-option-repair')?.textContent).toContain('storefront_journey')
+  })
+
+  it('names the REPO for the flight, never a suite name it cannot promise', () => {
+    // The flight's plan agent names the suite it authors, so the card points at
+    // the repo it onboards instead of asserting a name that varies per run.
+    render()
+    expect(q('demo-option-flight')?.textContent).toContain('flight-app')
   })
 
   it('says what to watch for — the harness disagreeing is the whole point', () => {
@@ -105,14 +125,14 @@ describe('DemoDialog', () => {
   it('starts the suite run', () => {
     const onRunSuite = vi.fn()
     render({ onRunSuite })
-    click(q('demo-option-repair')?.querySelector('button') ?? null)
+    click(q('demo-option-repair'))
     expect(onRunSuite).toHaveBeenCalledOnce()
   })
 
   it('starts the flight', () => {
     const onStartFlight = vi.fn()
     render({ onStartFlight })
-    click(q('demo-option-flight')?.querySelector('button') ?? null)
+    click(q('demo-option-flight'))
     expect(onStartFlight).toHaveBeenCalledOnce()
   })
 
