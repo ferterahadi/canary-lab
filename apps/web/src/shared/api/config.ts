@@ -312,6 +312,16 @@ export interface ProjectConfig {
   healAgent: HealAgentChoice
   editor: EditorChoice
   personalWikiPath: string | null
+  /** Open a draft PR automatically when a run heals green. Declared here because
+   *  SettingsModal has always read and written it — the field was live on the
+   *  server and in the UI but missing from this mirror, which `apps/web` never
+   *  caught (the build tsconfig covers `shared`/`cli`/runtime only). */
+  autoProposePr?: boolean
+  /** Offer the shipped demos from the status bar. Toggled from the demo chooser;
+   *  workspace-level, so turning it off settles it for the project rather than
+   *  for one browser. Optional for the same reason `autoProposePr` is: an older
+   *  server omits it, and every reader tests `!== false` so absent means on. */
+  showDemo?: boolean
   port?: number
 }
 

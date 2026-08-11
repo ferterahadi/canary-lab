@@ -15,7 +15,7 @@ import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
 // WS-fed stores; no new channel (cl_live-state-sync): each store already rides
 // its own reliable stream, so this is pure derivation.
 
-export type FeatureActivityKind = 'running' | 'exporting' | 'portifying' | 'authoring'
+export type FeatureActivityKind = 'healing' | 'running' | 'exporting' | 'portifying' | 'authoring'
 
 export interface FeatureActivity {
   kind: FeatureActivityKind
@@ -37,17 +37,26 @@ export const ACTIVITY_STAGE: Record<FeatureActivityKind, FlightStageKey> = {
   'exporting': 'evaluation-export',
   'portifying': 'portify',
   'running': 'run',
+  // A repair is a later phase of the SAME job, so it belongs to the run stage —
+  // clicking a healing row lands where the failures and the heal agent are.
+  'healing': 'run',
 }
 
 /**
  * Derive the per-feature activity map. One verb per feature; when several
- * jobs overlap the LOUDEST wins: running > exporting > portifying > authoring —
- * a live test run is the most downstream signal (it's what the user is waiting
- * on), the export narrates the terminal deliverable, portify boots real
- * services, authoring only drafts specs. During a flight this naturally
+ * jobs overlap the LOUDEST wins: running/healing > exporting > portifying >
+ * authoring — a live test run is the most downstream signal (it's what the user
+ * is waiting on), the export narrates the terminal deliverable, portify boots
+ * real services, authoring only drafts specs. During a flight this naturally
  * narrates the current stage's underlying job (the specs stage shows
  * "authoring", the portify stage "portifying", the run stage "running", the
  * export stage "exporting"); standalone jobs surface the same way.
+ *
+ * The run's own `status` picks between the two run verbs, because the chip is
+ * the ONLY place a heal surfaces outside the run detail header: collapsing a
+ * healing run to "running" left the suites column and the flights picker
+ * claiming tests were executing while a repair agent was actually editing the
+ * app.
  */
 /** How long an EXTERNAL draft may sit silent before it stops counting as live
  *  "authoring". A server-spawned agent dies with the process (boot reconcile
@@ -89,7 +98,7 @@ export function deriveFeatureActivity(input: {
     // the benchmark window, and deployed-env verifications have the Deploy
     // check pill (R27) — none is feature activity here.
     if (r.executionType === 'boot' || r.executionType === 'benchmark' || r.executionType === 'verify') continue
-    map.set(r.feature, { kind: 'running', runId: r.runId })
+    map.set(r.feature, { kind: r.status === 'healing' ? 'healing' : 'running', runId: r.runId })
   }
   return map
 }

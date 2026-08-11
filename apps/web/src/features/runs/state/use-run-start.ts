@@ -46,7 +46,10 @@ export interface UseRunStart {
   setCollisionPrompt: (p: CollisionPrompt | null) => void
   startError: StartError | null
   setStartError: (e: StartError | null) => void
-  handleStartRun: (env?: string, mode?: 'test' | 'boot') => Promise<void>
+  /** `forFeature` overrides the current selection — the demo chooser starts the
+   *  sample suite's run without waiting for `setSelectedFeature` to land, which
+   *  a same-tick call would otherwise miss (this hook closes over the selection). */
+  handleStartRun: (env?: string, mode?: 'test' | 'boot', forFeature?: string | null) => Promise<void>
   resolveCollision: (isolation: 'worktree' | 'queue') => Promise<void>
   switchBranchesAndRun: () => Promise<void>
   pinCurrentAndRun: () => Promise<void>
@@ -61,14 +64,19 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
   const [collisionPrompt, setCollisionPrompt] = useState<CollisionPrompt | null>(null)
   const [startError, setStartError] = useState<StartError | null>(null)
 
-  const handleStartRun = useCallback(async (env?: string, mode: 'test' | 'boot' = 'test'): Promise<void> => {
-    if (!selectedFeature) return
+  const handleStartRun = useCallback(async (
+    env?: string,
+    mode: 'test' | 'boot' = 'test',
+    forFeature?: string | null,
+  ): Promise<void> => {
+    const feature = forFeature ?? selectedFeature
+    if (!feature) return
     // Concurrent runs are allowed: different apps run in parallel on distinct
     // allocated ports; the backend admits or queues as resources allow. A
     // same-repo collision comes back as a 409 — prompt to isolate or queue, then
     // re-issue with the choice (preserving the boot/test mode).
     try {
-      const runId = await startRun(selectedFeature, env, undefined, mode)
+      const runId = await startRun(feature, env, undefined, mode)
       // Boot sessions are managed in the global Services overlay, never column 3.
       if (mode !== 'boot') onRunStarted(runId)
     } catch (err) {
@@ -77,11 +85,11 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
         // The one case where hardcoded ports actually clash — check whether ports
         // are injectable so the dialog can offer the durable fix. Best-effort.
         let portsConfigured: boolean | undefined
-        try { portsConfigured = (await api.benchmarkPreflight(selectedFeature, env)).portsConfigured } catch { /* ignore */ }
-        setCollisionPrompt({ feature: selectedFeature, env, mode, info: collision, portsConfigured })
+        try { portsConfigured = (await api.benchmarkPreflight(feature, env)).portsConfigured } catch { /* ignore */ }
+        setCollisionPrompt({ feature, env, mode, info: collision, portsConfigured })
         return
       }
-      setStartError({ feature: selectedFeature, env, mode, error: err })
+      setStartError({ feature, env, mode, error: err })
     }
   }, [selectedFeature, startRun, onRunStarted])
 

@@ -23,6 +23,7 @@ export type InvalidationTopic =
   | 'tests'
   | 'flights'
   | 'journal'
+  | 'project-config'
 
 /** The version map: slot key → monotonically-increasing version. A slot is a
  *  topic, optionally qualified by a scope (`journal:<runId>`). */

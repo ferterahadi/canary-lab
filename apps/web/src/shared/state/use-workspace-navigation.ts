@@ -47,6 +47,8 @@ export interface WorkspaceNavigation {
   flightStartFresh: boolean
   flightStartNew: boolean
   draftFor: string | null
+  /** Whether the demo chooser is open (routed ?dialog=demo). */
+  demoOpen: boolean
   resumePlanTaskId: string | null
   portifyTarget: PortifyTarget | null
   routedDialog: RouteDialog | null
@@ -74,6 +76,8 @@ export interface WorkspaceNavigation {
   setFlightStartNew: (open: boolean) => void
   /** Open (id) / close (null) the external authoring-draft dialog. */
   setDraftFor: (id: string | null) => void
+  /** Open / close the demo chooser. */
+  setDemoOpen: (open: boolean) => void
   setResumePlanTaskId: (id: string | null) => void
   setPortifyTarget: (t: PortifyTarget | null) => void
   /** Open a flight's detail (null = the flights landing list). */
@@ -134,6 +138,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setFlightStartStage(f !== null ? fromStage : null)
   }, [])
   const [draftFor, setDraftFor] = useState<string | null>(SEED.draftFor)
+  const [demoOpen, setDemoOpen] = useState<boolean>(SEED.demoOpen)
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
   const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
@@ -163,6 +168,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartFresh,
     flightStartNew,
     draftFor,
+    demoOpen,
     resumePlanTaskId,
     portifyTarget,
     focusTest,
@@ -249,6 +255,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartStage,
     flightStartNew,
     draftFor,
+    demoOpen,
     resumePlanTaskId,
     portifyTarget,
     focusTest,
@@ -264,6 +271,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setFlightStartFor,
     setFlightStartNew,
     setDraftFor,
+    setDemoOpen,
     setResumePlanTaskId,
     setPortifyTarget,
     openFlight,

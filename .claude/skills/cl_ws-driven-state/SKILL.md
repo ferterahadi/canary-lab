@@ -47,6 +47,7 @@ Nothing in this chain polls. Nothing auto-retries. If you don't call
 | `evaluation-export-*` | Eval export task lifecycle | export task context |
 | `version-changed` | Registry `latest` moved, or an update job finished | `refreshVersion()` |
 | `flights-changed` | A flight's state changed (stage advance, checkpoint, completion) | `refreshFlights()` + bump `flightsRefreshKey` |
+| `project-config-changed` | `canary-lab.config.json` was written (PUT /api/project-config) | `invalidate('project-config')` — the demo launcher refetches `showDemo` |
 
 Pick the narrowest type that fits. `features-changed` is a catch-all for the feature
 list; `coverage-changed` is scoped to coverage headlines. Prefer scoped events — they

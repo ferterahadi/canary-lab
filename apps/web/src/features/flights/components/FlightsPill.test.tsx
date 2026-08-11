@@ -156,6 +156,19 @@ describe('FlightsPill', () => {
     expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Authoring')
   })
 
+  it('a healing run reads "Healing" in amber, not the flight\'s generic "running"', () => {
+    const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'healing', runId: 'r1' }]])
+    act(() => { root.render(<FlightsPill flights={[flight({ status: 'running', currentStage: 'run' })]} activity={activity} onOpenFlight={vi.fn()} />) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    const chip = document.body.querySelector<HTMLElement>('[data-testid="flight-status-chip"]')
+    expect(chip?.textContent).toBe('Healing')
+    // Amber, matching the run detail header and the suites column's healing wash —
+    // the same state must not read sky here and amber there.
+    expect(chip?.style.color).toContain('var(--warning)')
+    // Live, so it can't be mistaken for the at-rest amber states ("to approve").
+    expect(featureChipState(flight({ status: 'running' }), { kind: 'healing', runId: 'r1' }).live).toBe(true)
+  })
+
   it('with no activity the chip shows the LAST state (done / failed / aborted)', () => {
     act(() => { root.render(<FlightsPill flights={[flight({ status: 'failed' })]} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
@@ -476,6 +489,19 @@ describe('resolveFeatureFlightAction — the Features column row shortcut', () =
     )
     expect(action?.flightId).toBe('feature:checkout')
     expect(action?.tone).toBe('var(--running)')
+  })
+
+  it('carries the healing verb and its amber tone into the suites-column shortcut', () => {
+    const action = resolveFeatureFlightAction(
+      'checkout',
+      [flight({ flightId: 'fl_9', feature: 'checkout', status: 'running', currentStage: 'run' })],
+      { kind: 'healing', runId: 'r1' },
+    )
+    expect(action?.label).toBe('healing')
+    expect(action?.tone).toBe('var(--warning)')
+    // Busy, not blocked: the row keeps the live wash and no attention treatment.
+    expect(action?.live).toBe(true)
+    expect(action?.attention).toBe(false)
   })
 
   it('offers nothing for a suite with no flight and no evidence — starting stays with "+ New" (R40)', () => {

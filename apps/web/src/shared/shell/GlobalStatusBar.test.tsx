@@ -301,4 +301,45 @@ describe('GlobalStatusBar', () => {
     expect(api.getMcpHealth).toHaveBeenLastCalledWith('author')
     expect(document.body.querySelector('[data-mcp-health-menu]')?.textContent).toContain('write_feature_doc')
   })
+
+  describe('the Getting started pill', () => {
+    const demoPill = (): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll('button')]
+        .find((b): b is HTMLButtonElement => b.textContent?.includes('Getting started') ?? false)
+
+    const renderBar = async (props: Record<string, unknown>): Promise<void> => {
+      await act(async () => {
+        root.render(<GlobalStatusBar activeRunDetail={null} {...props} />)
+      })
+    }
+
+    it('is absent when the workspace has nothing to demo — never a dead button', async () => {
+      await renderBar({ demoAvailable: false })
+      expect(demoPill()).toBeUndefined()
+    })
+
+    it('appears once the demos are available', async () => {
+      await renderBar({ demoAvailable: true })
+      expect(demoPill()).toBeDefined()
+    })
+
+    it('carries an attention dot until the chooser has been opened', async () => {
+      await renderBar({ demoAvailable: true, demoUnseen: true })
+      expect(demoPill()?.querySelector('span[aria-hidden="true"].absolute')).not.toBeNull()
+    })
+
+    it('drops the dot once the chooser has been opened', async () => {
+      await renderBar({ demoAvailable: true, demoUnseen: false })
+      expect(demoPill()?.querySelector('span[aria-hidden="true"].absolute')).toBeNull()
+    })
+
+    it('opens the chooser — the only way back after it is closed', async () => {
+      const onOpenDemo = vi.fn()
+      await renderBar({ demoAvailable: true, onOpenDemo })
+      await act(async () => {
+        demoPill()?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      expect(onOpenDemo).toHaveBeenCalledOnce()
+    })
+  })
 })

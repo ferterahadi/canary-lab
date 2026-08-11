@@ -57,6 +57,10 @@ export interface NavState {
   /** The external authoring draft whose dialog is open (routed ?dialog=draft),
    *  by draft id. */
   draftFor: string | null
+  /** The demo chooser (routed ?dialog=demo) — which shipped sample to try. Opens
+   *  itself once on a workspace that has never run anything; afterwards it is
+   *  reached from the status bar's Getting-started pill. */
+  demoOpen: boolean
   /** The pre-flight a pill row reopened the new-flight dialog onto. */
   resumePlanTaskId: string | null
   /** The embedded portify workflow, if open. */
@@ -101,6 +105,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     flightStartFresh: persisted.dialog === 'flight-fresh',
     flightStartNew: persisted.dialog === 'flight-new',
     draftFor: persisted.dialog === 'draft' ? persisted.draft : null,
+    demoOpen: persisted.dialog === 'demo',
     resumePlanTaskId: null,
     portifyTarget: null,
     focusTest: persisted.run && persisted.focusTest
@@ -114,13 +119,18 @@ export function initialNavState(persisted: PersistedView): NavState {
 }
 
 /** Which routed dialog owns the URL. Precedence follows z-order: the full-screen
- *  overlays (config > draft > flight-start > flight-new) sit above the in-column
- *  verify dialog, so the topmost open one wins. */
+ *  overlays (config > draft > flight-start > flight-new > demo) sit above the
+ *  in-column verify dialog, so the topmost open one wins.
+ *
+ *  `demo` ranks BELOW flight-new deliberately: its own "Start a flight" action
+ *  opens that launcher, and for the moment both are open the URL must name the
+ *  launcher — the thing the user is actually looking at. */
 export function routedDialog(state: NavState): RouteDialog | null {
   if (state.configFor) return 'config'
   if (state.draftFor) return 'draft'
   if (state.flightStartFor) return state.flightStartFresh ? 'flight-fresh' : 'flight-start'
   if (state.flightStartNew) return 'flight-new'
+  if (state.demoOpen) return 'demo'
   if (state.verifyOpen) return 'verification'
   return null
 }

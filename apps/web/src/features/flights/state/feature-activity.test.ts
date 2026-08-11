@@ -61,6 +61,21 @@ describe('deriveFeatureActivity', () => {
     expect(map.get('c')).toEqual({ kind: 'authoring', draftId: 'd-c' })
   })
 
+  it('splits the two run verbs on the run STATUS — a healing run is not "running"', () => {
+    const map = deriveFeatureActivity({
+      activeRuns: [
+        run({ feature: 'repairing', runId: 'r-heal', status: 'healing' }),
+        run({ feature: 'testing', runId: 'r-run', status: 'running' }),
+      ],
+      portifyWorkflows: [],
+      drafts: [],
+    })
+    // The chip fed by this map is the only place a heal shows outside the run
+    // detail header, so the status has to survive the collapse to one verb.
+    expect(map.get('repairing')).toEqual({ kind: 'healing', runId: 'r-heal' })
+    expect(map.get('testing')).toEqual({ kind: 'running', runId: 'r-run' })
+  })
+
   it('marks a feature with a running evaluation export as exporting', () => {
     const map = deriveFeatureActivity({
       activeRuns: [],

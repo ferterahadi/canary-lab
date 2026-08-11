@@ -185,6 +185,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           if (event.type === 'version-changed') refreshVersion()
           if (event.type === 'flights-changed') { refreshFlights(); invalidate('flights') }
           if (event.type === 'pre-flight-changed') refreshPreFlights()
+          // canary-lab.config.json changed — in this tab or another client.
+          // The demo launcher reads `showDemo` from it, so the status-bar pill
+          // appears/disappears live instead of on the next reload.
+          if (event.type === 'project-config-changed') invalidate('project-config')
         },
         onReconnect: () => {
           refreshFeatures(selectedFeatureRef.current)
@@ -198,6 +202,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           refreshFlights()
           invalidate('flights')
           refreshPreFlights()
+          invalidate('project-config')
         },
       })
     } catch {

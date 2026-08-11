@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { RunIndexEntry } from '@/shared/api/types'
 import { formatDuration, durationBetween, shortTime } from '@/shared/lib/format'
@@ -28,11 +27,6 @@ interface Props {
   // column falls back to its own internal open-state.
   verifyOpen?: boolean
   onVerifyOpenChange?: (open: boolean) => void
-  // First-run guide, step 1: rings the Run button and explains what it does in
-  // place of the "no runs yet" empty state. App owns the derivation (one owner
-  // for both steps — see shared/state/first-run-guide.ts); this column only
-  // renders it and reports the dismissal.
-  guide?: ReactNode
   // The shipped demo suite, when this workspace still has it. Pressing Run on it
   // skips the MCP promo: that click IS the product's demonstration — fail →
   // repair → green — and a video about driving Canary from an agent interrupts
@@ -44,7 +38,7 @@ interface Props {
 
 // stop fitting on a single line, so we collapse them into a kebab menu that
 // pops over with the same options.
-export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason, verifyOpen, onVerifyOpenChange, guide, sampleSuite }: Props) {  const {
+export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRun, onStartRun, onStartVerification, runDisabled, runDisabledReason, verifyOpen, onVerifyOpenChange, sampleSuite }: Props) {  const {
     verificationRefreshKey,
     pendingPause,
     setPendingPause,
@@ -93,7 +87,6 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
             feature={feature}
             envs={envs}
             compact={compact}
-            cued={Boolean(guide)}
             open={runPopoverOpen}
             onToggle={() => setRunPopoverOpen((v) => !v)}
             onClose={() => setRunPopoverOpen(false)}
@@ -112,14 +105,10 @@ export function RunsColumn({ feature, envs = [], runs, selectedRunId, onSelectRu
         </div>
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {/* The guide REPLACES the empty state rather than stacking on it: "no
-            runs yet" and "here is what Run does" are the same moment, and
-            showing both would say it twice. */}
-        {guide}
         {!feature ? (
           <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>Select a feature.</div>
         ) : runs.length === 0 ? (
-          guide ? null : <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>No runs yet for this feature.</div>
+          <div className="px-4 py-6 text-xs" style={{ color: 'var(--text-muted)' }}>No runs yet for this feature.</div>
         ) : (
           <ul className="flex flex-col gap-1 px-2 py-2">
             {runs.map((r) => {

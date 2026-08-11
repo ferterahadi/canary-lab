@@ -38,7 +38,11 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // `flight-start`, but scoped to the one job of changing intent/repos — it needs
 // its own route value so a refresh restores that intent instead of dropping the
 // user back into the re-entry picker.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'draft'
+// `demo` is the demo chooser — which of the two shipped samples to try. Cold-load
+// coherent: it needs only GET /api/onboarding (what `init`'s samples still look
+// like on disk), so a fresh tab rebuilds it. Routed because it is the workspace's
+// first screen and a refresh mid-decision should not lose it.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'draft' | 'demo'
 
 /** The Feature-config dialog's tabs — the `tab` qualifier for `dialog=config`.
  *  Routed because entry points land on different tabs (the run detail opens
@@ -116,7 +120,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'draft']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'draft', 'demo']
 const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
 const RUN_ARRIVAL_TABS: RunArrivalTab[] = ['changes']
 

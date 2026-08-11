@@ -62,7 +62,6 @@ export function RunLaunchControl({
   feature,
   envs,
   compact = false,
-  cued = false,
   open,
   onToggle,
   onClose,
@@ -74,9 +73,6 @@ export function RunLaunchControl({
   feature: string | null
   envs: string[]
   compact?: boolean
-  /** The first-run guide is pointing at this button. Draws a static accent ring
-   *  (see `.cl-cue-ring`) — the guide card beside it says why. */
-  cued?: boolean
   open: boolean
   onToggle: () => void
   onClose: () => void
@@ -110,8 +106,7 @@ export function RunLaunchControl({
         aria-expanded={open}
         aria-label={compact ? 'Run' : undefined}
         data-run-launch-menu
-        data-cued={cued || undefined}
-        className={['cl-button-primary', 'cl-run-menu-button', compact && 'cl-run-menu-button-compact', cued && 'cl-cue-ring'].filter(Boolean).join(' ')}
+        className={['cl-button-primary', 'cl-run-menu-button', compact && 'cl-run-menu-button-compact'].filter(Boolean).join(' ')}
       >
         <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <path d="M5 3.2v9.6a.6.6 0 0 0 .92.508l7.2-4.8a.6.6 0 0 0 0-1.016l-7.2-4.8A.6.6 0 0 0 5 3.2z" />

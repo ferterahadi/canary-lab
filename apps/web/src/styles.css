@@ -1343,25 +1343,6 @@ body {
   .cl-pulse { animation: none; }
 }
 
-/* "Look here" ring for the first-run guide's Run button. The ring itself is
-   STATIC — a permanent accent halo — and the breathing shadow is decoration on
-   top. Reduced-motion (and the headless preview, which forces it) keeps the
-   ring, so the cue never depends on animation to be readable. Opacity is not
-   used: a fading primary button reads as disabled. */
-.cl-cue-ring {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-sm);
-  animation: cl-cue-halo 1.8s ease-in-out infinite;
-}
-@keyframes cl-cue-halo {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
-  50%      { box-shadow: 0 0 0 5px var(--accent-glow); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .cl-cue-ring { animation: none; box-shadow: 0 0 0 4px var(--accent-glow); }
-}
-
 /* Dialog header. */
 .cl-dialog-header {
   display: flex;

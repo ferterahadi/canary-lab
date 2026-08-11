@@ -14,6 +14,12 @@ export interface ProjectConfig {
    *  off for a workspace whose repos shouldn't receive machine-pushed
    *  branches. */
   autoProposePr: boolean
+  /** Offer the shipped demos from the status bar. On by default so a new
+   *  workspace can find them; turned off from the demo chooser itself once
+   *  somebody has seen what they wanted. Workspace-level rather than
+   *  per-browser: "I'm done with the demos" is a fact about this project, not
+   *  about the machine that happened to dismiss them. */
+  showDemo: boolean
   /** Localhost port for the UI + MCP HTTP server. Absent → DEFAULT_PORT. */
   port?: number
 }
@@ -21,7 +27,7 @@ export interface ProjectConfig {
 // Default to `external` — the modern Claude/Codex via MCP flow. `auto` is
 // still accepted by the validator for backwards compatibility with older
 // configs, but new installs and the settings UI prefer external.
-const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true }
+const DEFAULT: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true }
 const FILENAME = 'canary-lab.config.json'
 
 // The historical fixed port. Used whenever a project does not pin its own.
@@ -91,6 +97,7 @@ export function loadProjectConfig(projectRoot: string): ProjectConfig {
       editor: isEditorChoice(json?.editor) ? json.editor : DEFAULT.editor,
       personalWikiPath: normalizePersonalWikiPath(json?.personalWikiPath),
       autoProposePr: json?.autoProposePr !== false,
+      showDemo: json?.showDemo !== false,
       ...(port === undefined ? {} : { port }),
     }
   } catch {
@@ -105,6 +112,7 @@ export function saveProjectConfig(projectRoot: string, config: ProjectConfig): v
     editor: isEditorChoice(config.editor) ? config.editor : DEFAULT.editor,
     personalWikiPath: normalizePersonalWikiPath(config.personalWikiPath),
     autoProposePr: config.autoProposePr !== false,
+    showDemo: config.showDemo !== false,
     ...(port === undefined ? {} : { port }),
   }
   fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify(next, null, 2) + '\n')

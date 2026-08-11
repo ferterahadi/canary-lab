@@ -106,6 +106,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     projectRoot: projectRoot,
     countActiveRuns: () => runStore.list().filter((run) => isActiveRunStatus(run.status)).length,
     onPortChange: opts.onPortChange,
+    workspaceEvents,
   })
   await app.register(onboardingRoutes, { projectRoot, featuresDir })
 }

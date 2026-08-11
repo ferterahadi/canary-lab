@@ -37,6 +37,12 @@ interface Props {
    *  App owns the one useDerivedFeatureStages instance (same ownership rule
    *  as `activity`). */
   derivedStages?: Map<string, DerivedStage[]>
+  /** Whether to offer the demo chooser at all — App derives it from the shipped
+   *  samples still being on disk AND the workspace's `showDemo` setting. */
+  demoAvailable?: boolean
+  /** Attention dot on that pill: the chooser has never been opened. */
+  demoUnseen?: boolean
+  onOpenDemo?: () => void
   /** Open the routed flight detail view (null = the flights picker). */
   onOpenFlight?: (flightId: string | null) => void
   /** Picker open-state, driven off the route (`view=flights` + no flight) so it's
@@ -78,7 +84,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -261,6 +267,21 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}
             onOpenPreFlight={(taskId) => onOpenPreFlight?.(taskId)}
           />
+          {/* Onboarding's permanent home. The chooser opens itself once on a
+              workspace that has never run anything; after that this is the only
+              way back to it, which is why it carries an attention dot until it
+              has actually been opened. Hidden entirely once the samples are gone
+              or the workspace turns `showDemo` off — never a dead button. */}
+          {demoAvailable && (
+            <StatusPill
+              dotState="idle"
+              name="Getting started"
+              overlayDot={demoUnseen}
+              onClick={() => onOpenDemo?.()}
+              title="See how this works — run the sample suite, or fly the bare repo"
+              ariaLabel="Open the demo chooser"
+            />
+          )}
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button

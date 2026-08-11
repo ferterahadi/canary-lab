@@ -32,6 +32,11 @@ export type WorkspaceEvent =
   // proposal, auto-launched, or failed. The client refetches the pre-flight
   // list so the Flights pill's pre-flight rows update live.
   | { type: 'pre-flight-changed' }
+  // canary-lab.config.json was written (PUT /api/project-config). The client
+  // refetches it, so a workspace-level setting changed in one place lands
+  // everywhere it is read without a refresh — the demo launcher's `showDemo`
+  // being the first such setting to render outside the settings dialog itself.
+  | { type: 'project-config-changed' }
 
 export interface WorkspaceEventPublisher {
   publish(event: WorkspaceEvent): void

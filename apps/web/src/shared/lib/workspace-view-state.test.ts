@@ -269,6 +269,15 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('flight-new')
   })
 
+  it('round-trips the demo chooser, URL-only like every other dialog', () => {
+    persistView(view({ dialog: 'demo' }))
+    expect(window.location.search).toContain('dialog=demo')
+    expect(readPersistedView()).toEqual(view({ dialog: 'demo' }))
+    // Never mirrored to localStorage: a chooser open in one tab must not pop
+    // open in another.
+    expect(localStorage.getItem(KEY)).not.toContain('demo')
+  })
+
   it('R50: ignores the retired add-test / portify dialogs in stale deep links', () => {
     window.history.replaceState(null, '', '/?dialog=add-test')
     expect(readPersistedView()).toEqual(view({}))

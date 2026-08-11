@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
-import { FirstRunGuide } from './shared/shell/FirstRunGuide'
-import { useFirstRunGuide } from './shared/state/first-run-guide'
+import { DemoDialog } from './shared/shell/DemoDialog'
+import { useDemoLauncher } from './shared/state/demo-launcher'
 import { RunDetailColumn } from './features/runs/components/RunDetailColumn'
 import { FeatureConfigEditor } from './features/config/components/FeatureConfigEditor'
 import { ResizablePanels } from './shared/ui/ResizablePanels'
@@ -48,6 +48,7 @@ export function App() {
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
     draftFor, setDraftFor,
+    demoOpen, setDemoOpen,
     resumePlanTaskId, setResumePlanTaskId,
     portifyTarget, setPortifyTarget,
     focusTest, runTab,
@@ -93,15 +94,24 @@ export function App() {
   // Evidence-derived stage rails for flightless picker rows — one instance,
   // same ownership rule as featureActivity (the pill stays presentational).
   const derivedStages = useDerivedFeatureStages(features)
-  // First-run guide — the workspace's tour of the two samples `init` shipped.
-  // One owner for both steps (see shared/state/first-run-guide.ts); the two
-  // columns below only render the step they host.
-  const guide = useFirstRunGuide(allRuns, flights)
-  // Set only when the new-flight dialog is opened FROM the guide, so the plain
-  // "+ New" button still opens an empty form. Deliberately not routed: a cold
-  // load of `?dialog=flight-new` has no guide behind it, and an empty form is
-  // the honest thing to land on.
-  const [guideFlightPrefill, setGuideFlightPrefill] = useState<{ repoPaths: string[]; description: string } | null>(null)
+  // The demo launcher — what the workspace can offer of the two samples `init`
+  // shipped, and whether to offer it at all (see shared/state/demo-launcher.ts).
+  const demo = useDemoLauncher(allRuns, flights)
+  // Set only when the new-flight dialog is opened FROM the demo chooser, so the
+  // plain "+ New" button still opens an empty form. Deliberately not routed: a
+  // cold load of `?dialog=flight-new` has no chooser behind it, and an empty
+  // form is the honest thing to land on.
+  const [demoFlightPrefill, setDemoFlightPrefill] = useState<{ repoPaths: string[]; description: string } | null>(null)
+  // Push once: a workspace that still has its samples and has never produced a
+  // run verdict or a flight opens the chooser itself, so nobody has to discover
+  // a pill they have never seen. Opening it is what retires the prompt —
+  // `markSeen` flips `autoOpen` false, so this fires at most once per browser
+  // and never reopens over a user who closed it.
+  useEffect(() => {
+    if (!demo.autoOpen) return
+    demo.markSeen()
+    setDemoOpen(true)
+  }, [demo.autoOpen, demo.markSeen, setDemoOpen])
   // The Features column's per-row flight shortcut — one jump from a suite to its
   // flight instead of the pill → picker → find-the-row detour. Same inputs the
   // picker rows resolve from, so the two agree on where a suite's flight lives
@@ -292,13 +302,6 @@ export function App() {
           versionStatus={versionStatus}
           onOpenCoverage={openCoverageFor}
           onStartNewFlight={() => setFlightStartNew(true)}
-          guide={guide.step === 'start-flight' ? (
-            <FirstRunGuide
-              step="start-flight"
-              onDismiss={() => guide.dismiss('start-flight')}
-              onAction={() => { setGuideFlightPrefill(guide.flightPrefill); setFlightStartNew(true) }}
-            />
-          ) : undefined}
           onOpenFlight={openFlight}
           flightAction={flightAction}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
@@ -346,17 +349,10 @@ export function App() {
               runDisabled={false}
               verifyOpen={verifyOpen}
               onVerifyOpenChange={setVerifyOpen}
-              /* Only over the suite the guide is talking about — the cue rings
-                 the Run button, so it must not appear while a different suite
-                 is selected. */
-              guide={guide.step === 'run-suite' && selectedFeature === guide.suite ? (
-                <FirstRunGuide step="run-suite" onDismiss={() => guide.dismiss('run-suite')} />
-              ) : undefined}
-              /* Same owner as the guide, and read straight from the server's
-                 onboarding samples rather than a literal suite name — so it stays
-                 correct if the shipped demo is ever renamed, and goes quiet once
-                 the user deletes it. */
-              sampleSuite={guide.suite}
+              /* Read straight from the server's onboarding samples rather than a
+                 literal suite name — so it stays correct if the shipped demo is
+                 ever renamed, and goes quiet once the user deletes it. */
+              sampleSuite={demo.suite}
             />
           )}
           bottom={(
@@ -387,6 +383,9 @@ export function App() {
         onOpenPreFlight={(taskId) => { setResumePlanTaskId(taskId); setFlightStartNew(true) }}
         activity={featureActivity}
         derivedStages={derivedStages}
+        demoAvailable={demo.available}
+        demoUnseen={demo.unseen}
+        onOpenDemo={() => { demo.markSeen(); setDemoOpen(true) }}
         onOpenFlight={openFlight}
         flightsPickerOpen={view === 'flights' && !selectedFlightId}
         onFlightsPickerOpenChange={(open) => {
@@ -453,20 +452,45 @@ export function App() {
           : <ResizablePanels panels={panels} />}
       </div>
       <ToastHost toasts={toasts} onDismiss={dismissToast} />
+      <DemoDialog
+        /* Guarded on the samples, not on `showDemo` — see demo-launcher.ts.
+           A deep link to `?dialog=demo` on a workspace whose samples are gone
+           must not open a chooser with nothing to choose. */
+        open={demoOpen && demo.hasSamples}
+        onClose={() => setDemoOpen(false)}
+        suite={demo.suite}
+        flightRepoAvailable={demo.flightPrefill !== null}
+        showDemo={demo.showDemo}
+        onShowDemoChange={demo.setShowDemo}
+        onRunSuite={() => {
+          if (!demo.suite) return
+          setDemoOpen(false)
+          // Select the suite so the columns follow the run the user is about to
+          // watch, and pass it explicitly — `handleStartRun` closes over the
+          // selection, which this same tick has not applied yet.
+          setSelectedFeature(demo.suite)
+          void handleStartRun(undefined, 'test', demo.suite)
+        }}
+        onStartFlight={() => {
+          setDemoOpen(false)
+          setDemoFlightPrefill(demo.flightPrefill)
+          setFlightStartNew(true)
+        }}
+      />
       {(flightStartFor !== null || flightStartNew) && (
         <FlightStartDialog
           feature={flightStartNew ? null : flightStartFor}
           intent={flightStartFresh ? 'fresh' : 'refly'}
           fromStage={flightStartNew ? null : flightStartStage}
           resumePlanTaskId={flightStartNew ? resumePlanTaskId : null}
-          newFlightPrefill={flightStartNew ? guideFlightPrefill : null}
+          newFlightPrefill={flightStartNew ? demoFlightPrefill : null}
           knownRepos={knownRepos}
-          onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null); setGuideFlightPrefill(null) }}
+          onClose={() => { setFlightStartFor(null); setFlightStartNew(false); setResumePlanTaskId(null); setDemoFlightPrefill(null) }}
           onOpenFlight={(flightId) => {
             setFlightStartFor(null)
             setFlightStartNew(false)
             setResumePlanTaskId(null)
-            setGuideFlightPrefill(null)
+            setDemoFlightPrefill(null)
             setSelectedFlightId(flightId)
             setView('flights')
             refreshFlights()

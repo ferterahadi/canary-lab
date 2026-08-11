@@ -25,10 +25,12 @@ const { projectConfigRoutes } = await import('./project-config')
 
 let projectRoot: string
 
-async function makeApp(): Promise<FastifyInstance> {
+async function makeApp(
+  extra: Partial<Parameters<typeof projectConfigRoutes>[1]> = {},
+): Promise<FastifyInstance> {
   const app = Fastify()
   await app.register(async (a) => {
-    await projectConfigRoutes(a, { projectRoot })
+    await projectConfigRoutes(a, { projectRoot, ...extra })
   })
   await app.ready()
   return app
@@ -52,7 +54,7 @@ describe('GET /api/project-config', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null , autoProposePr: true})
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -66,7 +68,7 @@ describe('GET /api/project-config', () => {
     const app = await makeApp()
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
-      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null , autoProposePr: true})
+      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -86,7 +88,7 @@ describe('PUT /api/project-config', () => {
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null , autoProposePr: true})
+      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -105,7 +107,7 @@ describe('PUT /api/project-config', () => {
         payload: {},
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null , autoProposePr: true})
+      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -162,11 +164,11 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'cursor' },
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true})
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true, showDemo: true})
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true})
+      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -206,6 +208,49 @@ describe('PUT /api/project-config', () => {
     }
   })
 
+  it('writes the show-demo preference and rejects a non-boolean', async () => {
+    const app = await makeApp()
+    try {
+      const off = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: false } })
+      expect(off.statusCode).toBe(200)
+      expect(off.json().showDemo).toBe(false)
+
+      // Omitting it preserves the stored choice — saving an unrelated setting
+      // must not put the demos back in a status bar the user cleared.
+      const other = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { editor: 'vscode' } })
+      expect(other.json().showDemo).toBe(false)
+
+      const bad = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: 'no' } })
+      expect(bad.statusCode).toBe(400)
+      expect(bad.json()).toEqual({ error: 'showDemo must be a boolean' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('announces a persisted write so every open client refetches', async () => {
+    const publish = vi.fn()
+    const app = await makeApp({ workspaceEvents: { publish } })
+    try {
+      await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: false } })
+      expect(publish).toHaveBeenCalledWith({ type: 'project-config-changed' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('stays silent when the write is rejected — a 400 changed nothing', async () => {
+    const publish = vi.fn()
+    const app = await makeApp({ workspaceEvents: { publish } })
+    try {
+      const bad = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: 'no' } })
+      expect(bad.statusCode).toBe(400)
+      expect(publish).not.toHaveBeenCalled()
+    } finally {
+      await app.close()
+    }
+  })
+
   it('writes a normalized personal wiki directory path', async () => {
     const wiki = path.join(projectRoot, 'wiki')
     fs.mkdirSync(wiki)
@@ -222,6 +267,7 @@ describe('PUT /api/project-config', () => {
         editor: 'auto',
         personalWikiPath: fs.realpathSync(wiki),
         autoProposePr: true,
+        showDemo: true,
       })
     } finally {
       await app.close()

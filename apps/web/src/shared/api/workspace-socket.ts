@@ -22,6 +22,7 @@ export type WorkspaceEvent =
   | { type: 'version-changed' }
   | { type: 'flights-changed' }
   | { type: 'pre-flight-changed' }
+  | { type: 'project-config-changed' }
 
 export interface ConnectWorkspaceEventsOptions {
   wsBase?: string

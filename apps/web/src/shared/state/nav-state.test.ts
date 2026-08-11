@@ -22,6 +22,7 @@ const base: NavState = {
   flightStartFresh: false,
   flightStartNew: false,
   draftFor: null,
+  demoOpen: false,
   resumePlanTaskId: null,
   portifyTarget: null,
   focusTest: null,
@@ -103,6 +104,11 @@ describe('initialNavState', () => {
   it('opens the draft dialog on the persisted draft id', () => {
     expect(initialNavState(persisted({ dialog: 'draft', draft: 'dr_9' })).draftFor).toBe('dr_9')
   })
+
+  it('reopens the demo chooser from a cold load, and only from its own param', () => {
+    expect(initialNavState(persisted({ dialog: 'demo' })).demoOpen).toBe(true)
+    expect(initialNavState(persisted({ dialog: 'config' })).demoOpen).toBe(false)
+  })
 })
 
 // R82: the focused test is stored as a PAIR with its run, so a focus can never
@@ -172,6 +178,20 @@ describe('routedDialog precedence (z-order)', () => {
 
   it('flight-new outranks verify', () => {
     expect(routedDialog({ ...base, flightStartNew: true, verifyOpen: true })).toBe('flight-new')
+  })
+
+  it('routes the demo chooser', () => {
+    expect(routedDialog({ ...base, demoOpen: true })).toBe('demo')
+  })
+
+  it('lets the flight launcher the chooser opened outrank the chooser itself', () => {
+    // "Start a flight" leaves both open for a tick; the URL must name the
+    // launcher, which is what the user is actually looking at.
+    expect(routedDialog({ ...base, demoOpen: true, flightStartNew: true })).toBe('flight-new')
+  })
+
+  it('demo outranks verify', () => {
+    expect(routedDialog({ ...base, demoOpen: true, verifyOpen: true })).toBe('demo')
   })
 
   it('verify wins when it is the only one open', () => {

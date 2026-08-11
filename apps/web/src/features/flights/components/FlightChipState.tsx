@@ -55,13 +55,24 @@ export function preFlightChipState(
   }
 }
 
-/** Chip verb + tooltip per live activity kind (sky = in progress, same hue as
- *  a running flight — the colour means the same thing everywhere). */
-export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: string }> = {
-  'running': { label: 'running', title: 'Test run in progress' },
-  'exporting': { label: 'exporting', title: 'Evaluation export in progress' },
-  'portifying': { label: 'portifying', title: 'Port-ification in progress' },
-  'authoring': { label: 'authoring', title: 'Authoring test specs' },
+/** Chip verb + tooltip + tone per live activity kind (sky = in progress, same
+ *  hue as a running flight — the colour means the same thing everywhere).
+ *
+ *  `healing` is the one amber verb: it borrows the run detail header's own hue
+ *  (`RunStatusIndicator` paints healing amber and running sky) so the same state
+ *  reads the same everywhere, and it matches the amber wash the suites column
+ *  already puts on a healing row. Amber elsewhere in this vocabulary means "the
+ *  human is the blocker", but those states are all at rest — a healing chip is
+ *  `live`, and the suites row it sits on is pulsing.
+ *
+ *  Every kind states its tone rather than defaulting: an optional field with one
+ *  exception is a fallback arm nothing exercises. */
+export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: string; tone: string }> = {
+  'healing': { label: 'healing', title: 'Repair agent working on the failing tests', tone: 'var(--warning)' },
+  'running': { label: 'running', title: 'Test run in progress', tone: FLIGHT_STATUS_TONE['running'] },
+  'exporting': { label: 'exporting', title: 'Evaluation export in progress', tone: FLIGHT_STATUS_TONE['running'] },
+  'portifying': { label: 'portifying', title: 'Port-ification in progress', tone: FLIGHT_STATUS_TONE['running'] },
+  'authoring': { label: 'authoring', title: 'Authoring test specs', tone: FLIGHT_STATUS_TONE['running'] },
 }
 
 /** Short chip verb for a RUNNING flight, keyed by the stage the conductor is
@@ -107,9 +118,10 @@ export interface FeatureChipState {
  *
  *   1. flight parked on a checkpoint → "to approve"  (amber — the human is the
  *      blocker; outranks live activity because nothing moves until they act)
- *   2. live activity on the feature  → "running" / "portifying" / "authoring"
- *      (sky — narrates the absorbed surfaces (runs / portify / wizard drafts)
- *      whether the job was started by a flight stage or standalone)
+ *   2. live activity on the feature  → "running" / "healing" / "portifying" /
+ *      "authoring" (narrates the absorbed surfaces (runs / portify / wizard
+ *      drafts) whether the job was started by a flight stage or standalone;
+ *      sky, except the amber "healing" — see ACTIVITY_CHIP)
  *   3. flight conductor active       → the stage verb (sky — "authoring" on
  *      specs-coverage, else the generic "running" between/on other stages)
  *   4. flight paused                 → "paused"      (amber)
@@ -146,7 +158,7 @@ export function featureChipState(
   }
   if (activity) {
     const chip = ACTIVITY_CHIP[activity.kind]
-    return { label: chip.label, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: chip.title }
+    return { label: chip.label, tone: chip.tone, live: true, rank: 1, title: chip.title }
   }
   if (!flight) {
     // R49/R81: one row per workspace feature. A derived row opens the flight
