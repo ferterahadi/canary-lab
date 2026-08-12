@@ -102,6 +102,7 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     const created = createFeatureSkeleton({
       projectRoot: deps.projectRoot,
       featuresDir: deps.featuresDir,
+      workspaceEvents: deps.workspaceEvents,
       feature,
       description: m.description,
       envs: [m.opts.env],
@@ -118,7 +119,6 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     }
 
     writeMarker(feature)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-created', feature })
     return { ok: true, featureDir: created.featureDir, written: created.written }
   }
 
@@ -192,13 +192,10 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
         /* no marker — not ours to delete */
       }
       if (marker && marker === ctx.manifest().feature) {
-        const deleted = deleteFeature(
-          { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        deleteFeature(
+          { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents },
           { feature: marker, confirmName: marker },
         )
-        if (deleted.ok) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature: marker })
-        }
       }
       fs.rmSync(markerPath, { force: true })
     },

@@ -102,9 +102,18 @@ describe('DELETE /api/features/:name with flight history', () => {
     }
   })
 
-  it('announces flights-changed only when records actually moved', async () => {
+  it('deletes the flight records but leaves their announcement to the store', async () => {
+    // The route asks for the removal; the flight store broadcasts it, because
+    // the store is what knows whether anything was actually written (see
+    // shared/store-event-bridge.ts + the emitter tests in flight-queue.test.ts).
+    // Announcing here as well would fan out twice for one deletion — and worse,
+    // would fan out even when the removal found nothing.
+    const removals: string[] = []
     const events: WorkspaceEvent[] = []
-    const app = await makeApp({ events, removeFlightRecordsFor: () => ({ removed: 2 }) })
+    const app = await makeApp({
+      events,
+      removeFlightRecordsFor: (feature) => { removals.push(feature); return { removed: 2 } },
+    })
     try {
       buildFeature('had-flights')
       const r = await app.inject({
@@ -113,27 +122,8 @@ describe('DELETE /api/features/:name with flight history', () => {
         payload: { confirmName: 'had-flights' },
       })
       expect(r.statusCode).toBe(204)
+      expect(removals).toEqual(['had-flights'])
       expect(events).toContainEqual({ type: 'feature-deleted', feature: 'had-flights' })
-      expect(events).toContainEqual({ type: 'flights-changed' })
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('stays silent about flights when the suite never flew', async () => {
-    // A flights-changed nudge with nothing behind it makes every client refetch
-    // the flights index for no reason.
-    const events: WorkspaceEvent[] = []
-    const app = await makeApp({ events, removeFlightRecordsFor: () => ({ removed: 0 }) })
-    try {
-      buildFeature('never-flew')
-      const r = await app.inject({
-        method: 'DELETE',
-        url: '/api/features/never-flew',
-        payload: { confirmName: 'never-flew' },
-      })
-      expect(r.statusCode).toBe(204)
-      expect(events).toContainEqual({ type: 'feature-deleted', feature: 'never-flew' })
       expect(events).not.toContainEqual({ type: 'flights-changed' })
     } finally {
       await app.close()

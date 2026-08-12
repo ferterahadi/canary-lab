@@ -11,6 +11,7 @@ import type {
 } from '../../../../../../shared/verification'
 import type { PlaywrightArtifactGroup, RunDetail, RunSummaryFailedEntry } from '../../runs/logic/run-store'
 import { normalizeStartCommand, resolveHealthProbe } from '../../../shared/launcher-startup'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]
@@ -54,6 +55,7 @@ export function getVerificationConfig(feature: FeatureConfig, id: string): Verif
 export function createVerificationConfig(
   feature: FeatureConfig,
   input: SaveVerificationConfigInput,
+  events?: WorkspaceEventPublisher,
 ): VerificationConfig {
   const now = new Date().toISOString()
   const config: VerificationConfig = {
@@ -67,7 +69,7 @@ export function createVerificationConfig(
   }
   const file = readConfigFile(feature)
   file.configs.push(config)
-  writeConfigFile(feature, file)
+  writeConfigFile(feature, file, events)
   return config
 }
 
@@ -75,6 +77,7 @@ export function updateVerificationConfig(
   feature: FeatureConfig,
   id: string,
   input: SaveVerificationConfigInput,
+  events?: WorkspaceEventPublisher,
 ): VerificationConfig | null {
   const file = readConfigFile(feature)
   const idx = file.configs.findIndex((config) => config.id === id)
@@ -88,7 +91,7 @@ export function updateVerificationConfig(
     updatedAt: new Date().toISOString(),
   }
   file.configs[idx] = next
-  writeConfigFile(feature, file)
+  writeConfigFile(feature, file, events)
   return next
 }
 
@@ -260,12 +263,21 @@ function readConfigFile(feature: FeatureConfig): VerificationConfigFile {
   }
 }
 
-function writeConfigFile(feature: FeatureConfig, file: VerificationConfigFile): void {
+/** The one write path for `verification.configs.json`, so it is also the one
+ *  place that announces the change — an open Verify dialog on another client
+ *  refreshes without a reopen. Both writers (REST and the MCP tools) come
+ *  through here; publishing at their call sites instead is how the two drift. */
+function writeConfigFile(
+  feature: FeatureConfig,
+  file: VerificationConfigFile,
+  events?: WorkspaceEventPublisher,
+): void {
   const target = verificationConfigPath(feature)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   const tmp = `${target}.tmp`
   fs.writeFileSync(tmp, JSON.stringify({ configs: file.configs }, null, 2) + '\n')
   fs.renameSync(tmp, target)
+  publishWorkspaceEvent(events, { type: 'verification-config-changed', feature: feature.name })
 }
 
 function isVerificationConfig(value: unknown): value is VerificationConfig {

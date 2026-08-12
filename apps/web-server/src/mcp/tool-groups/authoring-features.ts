@@ -11,7 +11,7 @@ import {
   listFeatureDocs,
 } from '../../features/coverage/logic/coverage/service'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
-import { type ToolGroupContext, asJsonResult, coverageBlockedNext, errorResult } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, authoringCtx, coverageBlockedNext, errorResult } from '../tool-support'
 
 export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -46,6 +46,7 @@ export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
       const created = createFeatureSkeleton({
         projectRoot: deps.projectRoot,
         featuresDir: deps.featuresDir,
+        workspaceEvents: deps.workspaceEvents,
         feature,
         description,
         envs,
@@ -53,11 +54,9 @@ export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
       })
       if (!created.ok) return errorResult(created.error)
       const captured = envSources?.length
-        ? captureFeatureEnvFiles({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, sources: envSources as EnvFileSource[] })
+        ? captureFeatureEnvFiles(authoringCtx(deps), { feature, sources: envSources as EnvFileSource[] })
         : null
       if (captured && !captured.ok) return errorResult(captured.error)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-created', feature })
-      if (captured?.ok) publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
       return asJsonResult({
         ...created,
         ...(captured?.ok ? { captured: captured.captured, envsets: captured.summary } : {}),
@@ -82,21 +81,18 @@ export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
     }
     if (link_path !== undefined) {
       const result = linkFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        authoringCtx(deps),
         { feature, targetPath: link_path, ...(relPath ? { relPath } : {}) },
       )
       if (!result.ok) return errorResult(result.error)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
       return asJsonResult({ written: true, linked: result.linked, path: result.writtenPath, relativePath: result.relativePath })
     }
     if (!relPath) return errorResult('relPath is required with content')
     const result = writeFeatureDoc(
-      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      authoringCtx(deps),
       { feature, relPath, content: content! },
     )
     if (!result.ok) return errorResult(result.error)
-    // Docs feed the PRD summary; refresh the Docs rail + coverage headline live.
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
     return asJsonResult({ written: true, path: result.writtenPath, relativePath: result.relativePath })
   })
 
@@ -109,11 +105,10 @@ export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
     },
   }, async ({ feature, relPath }) => {
     const result = deleteFeatureDoc(
-      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      authoringCtx(deps),
       { feature, relPath },
     )
     if (!result.ok) return errorResult(result.error)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature })
     return asJsonResult({ deleted: true, relativePath: result.relativePath })
   })
 

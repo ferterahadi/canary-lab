@@ -99,7 +99,6 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
         // Flight rows are keyed by feature name — refresh them too, so the
         // renamed suite and its flight stop looking like two separate things.
         if (moved > 0) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
         }
       }
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
@@ -282,7 +281,6 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
       fs.rmSync(featureDir, { recursive: true, force: true })
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature: feature.name })
       if ((flights?.removed ?? 0) > 0) {
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
       }
       reply.code(204)
       return null

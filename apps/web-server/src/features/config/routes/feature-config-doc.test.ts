@@ -394,8 +394,12 @@ describe('feature.config endpoints', () => {
       const onDisk = fs.readFileSync(path.join(featuresDir, 'old_name', 'feature.config.cjs'), 'utf-8')
       expect(onDisk).toContain("name: 'new_name'")
       expect(events).toContainEqual({ type: 'feature-renamed', from: 'old_name', to: 'new_name' })
-      expect(events).toContainEqual({ type: 'flights-changed' })
       expect(events).toContainEqual({ type: 'features-changed' })
+      // `flights-changed` is NOT this route's to announce: the rename re-homes
+      // records through the flight store, and the store broadcasts its own
+      // writes (shared/store-event-bridge.ts, pinned in flight-queue.test.ts).
+      // Publishing here too would double the fan-out for one rename.
+      expect(events).not.toContainEqual({ type: 'flights-changed' })
     } finally {
       await app.close()
     }

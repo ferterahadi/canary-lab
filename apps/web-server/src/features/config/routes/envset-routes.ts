@@ -12,6 +12,18 @@ import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { EnvsetsConfigJson, buildAppRoots, isValidSlotName, isWithin, listEnvFolders, readEnvsetsConfig, shortenHome, syncEnvsInConfig, writeEnvsetsConfig } from './feature-config-support'
 
 export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureConfigRouteDeps): Promise<void> {
+  // Every envset mutation in this file writes files under
+  // `<featureDir>/envsets/` with plain `fs` calls — there is no store and no
+  // shared writer to hang the event off, so THIS is the seam: each handler
+  // finishes through `announceEnvsets`, which owns what an envset write tells
+  // the workspace. `structure` also refreshes the feature list, because adding
+  // or removing an env changes what `/api/features` reports about the suite;
+  // editing a slot's contents does not.
+  const announceEnvsets = (feature: string, scope: 'slots' | 'structure' = 'slots'): void => {
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
+    if (scope === 'structure') publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+  }
+
   // ─── envsets ──────────────────────────────────────────────────────────
   // Layout (per workspace convention):
   //   <featureDir>/envsets/envsets.config.json
@@ -103,8 +115,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
         fs.writeFileSync(path.join(envDir, 'feature.env'), '')
       }
       syncEnvsInConfig(feature.featureDir)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+      announceEnvsets(feature.name, 'structure')
       reply.code(201)
       return { env: envName }
     },
@@ -127,8 +138,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       }
       fs.rmSync(envDir, { recursive: true, force: true })
       syncEnvsInConfig(feature.featureDir)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
+      announceEnvsets(feature.name, 'structure')
       reply.code(204)
       return null
     },
@@ -183,7 +193,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       const next = writeDotenv(source, req.body.entries)
       fs.writeFileSync(slotPath, next)
       const parsed = parseDotenv(next)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
+      announceEnvsets(feature.name)
       return { path: slotPath, content: next, ...parsed }
     },
   )
@@ -261,7 +271,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
       },
     }
     writeEnvsetsConfig(envsetsDir, nextCfg)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
+    announceEnvsets(feature.name)
     reply.code(201)
     return { slot: slotName }
   })
@@ -294,7 +304,7 @@ export async function registerEnvsetRoutes(app: FastifyInstance, deps: FeatureCo
         cfg.feature.slots = cfg.feature.slots.filter((s) => s !== slotName)
       }
       if (fs.existsSync(envsetsDir)) writeEnvsetsConfig(envsetsDir, cfg)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
+      announceEnvsets(feature.name)
       reply.code(204)
       return null
     },

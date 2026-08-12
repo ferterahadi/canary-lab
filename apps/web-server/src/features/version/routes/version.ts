@@ -7,6 +7,7 @@ import {
 } from '../logic/update-job'
 import type { VersionState } from '../logic/version-state'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
 
 export interface VersionRouteDeps {
   projectRoot: string
@@ -18,6 +19,14 @@ export interface VersionRouteDeps {
 }
 
 export async function versionRoutes(app: FastifyInstance, deps: VersionRouteDeps): Promise<void> {
+  // The install job's own record announces the job (the store-owns-its-events
+  // rule — see shared/store-event-bridge.ts). Gated on the job having settled
+  // because the runner also saves on every chunk of npm output: broadcasting
+  // those would make every client refetch /api/version dozens of times per
+  // install to learn nothing it renders.
+  bridgeStoreEvents(deps.updateStore, deps.workspaceEvents, () =>
+    deps.updateStore.current()?.status === 'running' ? null : { type: 'version-changed' })
+
   // Current vs latest + the self-update job state. Polled on cold load and
   // refetched whenever a `version-changed` event arrives.
   //

@@ -153,7 +153,13 @@ function diffVsBase(repo: string, base: string): string | null {
 }
 
 export function docsStage(deps: FlightStageDeps): StageAdapter {
-  const ctxAuthoring = { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }
+  // Carries the bus: the doc writers announce their own writes, so the stage
+  // does not chase them with a publish (see FeatureAuthoringContext).
+  const ctxAuthoring = {
+    projectRoot: deps.projectRoot,
+    featuresDir: deps.featuresDir,
+    workspaceEvents: deps.workspaceEvents,
+  }
 
   const write = (feature: string, relPath: string, content: string): string | null => {
     const result = writeFeatureDoc(ctxAuthoring, { feature, relPath, content })
@@ -201,7 +207,6 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       resolved = 'description-only'
     }
 
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     ctx.appendLog(`[docs] ${written.length} doc(s) from ${resolved}\n`)
     const docs = userDocs(featureDir)
     if (docs.length === 0) return { kind: 'failed', error: 'no docs landed in features/<f>/docs/' }
@@ -220,9 +225,6 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       } else {
         ctx.appendLog(`[docs] could not link ${target}: ${result.error}\n`)
       }
-    }
-    if (linked.length > 0) {
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     }
     return linked
   }
@@ -281,6 +283,9 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       ctx.appendLog(attemptLogLine(attempt))
       return park(ctx, [], attempt)
     }
+    // Written by the producer's own file tools rather than through
+    // writeFeatureDoc, so this one still announces by hand — there is no writer
+    // between the agent and the disk to carry it.
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
     // Symmetric with attemptLogLine: the accepted attempt says so, so the band
     // reads as a sequence of verdicts rather than undifferentiated noise.

@@ -28,6 +28,8 @@ import {
 } from './conductor'
 
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from './types'
+import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
+import type { WorkspaceEvent } from '../../../shared/workspace-events'
 
 let tmpDir: string
 
@@ -265,5 +267,59 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
     expect(store.get(first.flightId)!.status).toBe('paused')
     expect(store.get(first.flightId)!.pauseReason).toBe('queued')
     expect(store.get(second.flightId)!.status).toBe('done')
+  })
+})
+
+describe('the store is the emitter (store-event-bridge)', () => {
+  // Every flight write used to be followed by a hand-placed
+  // `publishWorkspaceEvent({type:'flights-changed'})` — 15 of them, each one a
+  // place a new path could forget. The bridge makes the emission structural:
+  // these tests pin that a write of ANY shape broadcasts, and that a no-op
+  // stays silent, without a single publish call in the flight logic.
+  const bridged = (): { events: WorkspaceEvent[]; flush: () => void } => {
+    const events: WorkspaceEvent[] = []
+    const flushes: (() => void)[] = []
+    bridgeStoreEvents(store, { publish: (e) => events.push(e) }, () => ({ type: 'flights-changed' }), {
+      coalesceMs: 100,
+      setTimer: (fn) => { flushes.push(fn) },
+    })
+    return { events, flush: () => { for (const fn of flushes.splice(0)) fn() } }
+  }
+
+  it('broadcasts once for a flight start, with no publish call in the conductor', async () => {
+    const { events, flush } = bridged()
+    const { completion } = startFlight(args(), deps(allDone()))
+    await completion
+    flush()
+    // The start + every stage transition collapse into one client refetch.
+    expect(events).toEqual([{ type: 'flights-changed' }])
+  })
+
+  it('broadcasts a deletion — the removal itself is the signal', async () => {
+    const { completion, manifest } = startFlight(args(), deps(allDone()))
+    await completion
+    const { events, flush } = bridged()
+    deleteFlight(manifest.flightId, deps(allDone()))
+    flush()
+    expect(events).toEqual([{ type: 'flights-changed' }])
+  })
+
+  it('stays silent when a feature never flew — nothing was written', () => {
+    const { events, flush } = bridged()
+    expect(removeFlightRecordsForFeature(store, 'never-flew')).toEqual({ removed: 0 })
+    flush()
+    // A nudge with nothing behind it makes every client refetch for no reason.
+    // Under the bridge that is impossible by construction, not by a caller's
+    // `removed > 0` test.
+    expect(events).toEqual([])
+  })
+
+  it('broadcasts when a feature deletion does take records with it', async () => {
+    const { completion } = startFlight(args(), deps(allDone()))
+    await completion
+    const { events, flush } = bridged()
+    expect(removeFlightRecordsForFeature(store, 'checkout')).toEqual({ removed: 1 })
+    flush()
+    expect(events).toEqual([{ type: 'flights-changed' }])
   })
 })

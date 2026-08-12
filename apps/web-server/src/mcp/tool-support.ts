@@ -16,6 +16,7 @@ import { isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
 import type { McpClientFacts } from './client-surface'
 import type { CanaryLabMcpDeps } from './tool-schemas'
+import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
 
 export { BOOT_SESSION_MESSAGE, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_WINDOW_MS, bootSessionValue, classifyWaitForHealTask, dirtyTestsWarning, healWaitNext, isActiveBootRun, stillWaitingValue, waitForHealTask } from './heal-task-wait'
 export type { DirtyTestsWarning, WaitForHealTaskResult, WaitForHealTaskValue } from './heal-task-wait'
@@ -23,6 +24,18 @@ export { AUTHOR_TOOLS, CANARY_LAB_MCP_PROFILES, COVERAGE_TOOLS, DEFAULT_CANARY_L
 export type { CanaryLabMcpProfile, CanaryLabMcpToolName, CanaryLabMcpToolOptions } from './tool-profiles'
 export { coverageMappingInput, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, summaryRequirementInput, variantDimensionInput } from './tool-schemas'
 export type { CanaryLabMcpDeps, McpStartRunOutcome } from './tool-schemas'
+
+/** The feature-authoring context an MCP tool passes to a shared writer. Built
+ *  in one place because it carries `workspaceEvents` — the writers announce
+ *  their own writes (see FeatureAuthoringContext), and a tool that assembled
+ *  the context by hand would silently write without notifying any client. */
+export function authoringCtx(deps: CanaryLabMcpDeps): FeatureAuthoringContext {
+  return {
+    projectRoot: deps.projectRoot,
+    featuresDir: deps.featuresDir,
+    workspaceEvents: deps.workspaceEvents,
+  }
+}
 
 export const CLIENT_KIND = z.enum(['claude', 'codex', 'claude-pty', 'codex-pty', 'other'])
 

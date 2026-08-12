@@ -1,4 +1,4 @@
-import type { FlightStageKey } from '@/shared/api/client'
+import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
 import { useInvalidationKey } from '@/shared/state/invalidation'
 import type { FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
@@ -22,6 +22,7 @@ export interface FlightDrillThroughs {
 
 export function FlightPage({
   flightId,
+  liveFlight,
   onSelectFlight,
   onClose,
   activity,
@@ -38,6 +39,10 @@ export function FlightPage({
   /** Back to the flights picker (null clears the selected flight). */
   onSelectFlight: (flightId: string | null) => void
   onClose: () => void
+  /** The manifest the flights channel pushed for this flight, if any. Present
+   *  for an ACTIVE flight (the server snapshots those and pushes every write),
+   *  absent for a settled one — which reads its record once and never changes. */
+  liveFlight?: FlightManifest | null
   /** Per-feature live activity (runs / portify / authoring) — App owns it. */
   activity?: Map<string, FeatureActivity>
   /** R81: evidence-derived rails per feature — App owns the one instance (same
@@ -62,7 +67,7 @@ export function FlightPage({
   const docsRefreshKey = useInvalidationKey('coverage')
   return (
     <div className="flex h-full w-full flex-col bg-canvas text-primary">
-      <FlightDetail flightId={flightId} refreshKey={refreshKey} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
+      <FlightDetail flightId={flightId} refreshKey={refreshKey} liveFlight={liveFlight} onClose={onClose} onBackToList={() => onSelectFlight(null)} onNavigateFlight={onSelectFlight} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} activity={activity} derivedStages={derivedStages} drill={{ onOpenRun, onOpenCoverage }} stage={stage} onSelectStage={onSelectStage} />
     </div>
   )
 }

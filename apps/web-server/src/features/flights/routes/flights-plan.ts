@@ -183,7 +183,6 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
       }
     }
     planStore.save({ ...task, status: 'launched', launchedFlightIds: outcome.flightIds, updatedAt: new Date().toISOString() })
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'pre-flight-changed' })
     reply.code(201)
     return { flightIds: outcome.flightIds }
   })

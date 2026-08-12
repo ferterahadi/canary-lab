@@ -166,8 +166,9 @@ export function startUpdateJob(args: StartUpdateJobArgs, deps: UpdateJobRunnerDe
     manifest = code === 0
       ? { ...manifest, status: 'done', endedAt: now() }
       : { ...manifest, status: 'failed', endedAt: now(), error: `npm install exited with code ${code}` }
+    // No publish here: the settle IS the event (store-event-bridge, wired in
+    // routes/version.ts).
     store.save(manifest)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'version-changed' })
   })()
 
   return { manifest, completion }

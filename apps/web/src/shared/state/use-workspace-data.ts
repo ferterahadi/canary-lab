@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react'
 import * as api from '../api/client'
 import type { Feature, RunIndexEntry, VersionStatus } from '../api/types'
-import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
+import type { FlightIndexEntry, FlightManifest, PlanFeaturesTask } from '../api/client'
 import { connectWorkspaceEvents } from '@/shared/api/workspace-socket'
+import { useFlightsStream } from '@/features/flights'
 import type { InvalidationTopic } from './invalidation-bus'
 
 // Owns the workspace's server-sourced data — the features list, the flights +
@@ -39,6 +40,9 @@ export interface WorkspaceDataDeps {
 export interface WorkspaceData {
   features: Feature[]
   flights: FlightIndexEntry[]
+  /** Full manifests the flights channel pushed, by flight id. The open flight
+   *  detail reads its own from here instead of polling for it. */
+  flightDetails: Record<string, FlightManifest>
   flightsRef: MutableRefObject<FlightIndexEntry[]>
   preFlights: PlanFeaturesTask[]
   versionStatus: VersionStatus | null
@@ -62,7 +66,14 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
   useEffect(() => { onFeatureRenamedRef.current = onFeatureRenamed }, [onFeatureRenamed])
 
   const [features, setFeatures] = useState<Feature[]>([])
-  const [flights, setFlights] = useState<FlightIndexEntry[]>([])
+  // REST-loaded list, used until `/ws/flights` sends its first snapshot (and as
+  // the fallback where no WebSocket exists at all — a component unit test).
+  const [restFlights, setRestFlights] = useState<FlightIndexEntry[]>([])
+  // The push channel is the live source: the server sends the full manifest on
+  // every flight write, so the list advances without a refetch and without the
+  // 5s poll that used to cover a dropped `flights-changed`.
+  const flightsStream = useFlightsStream()
+  const flights = flightsStream.hydrated ? flightsStream.flights : restFlights
   const [preFlights, setPreFlights] = useState<PlanFeaturesTask[]>([])
   const [versionStatus, setVersionStatus] = useState<VersionStatus | null>(null)
 
@@ -99,7 +110,7 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     api.getVersionStatus().then(setVersionStatus).catch(() => {})
   }, [])
   const refreshFlights = useCallback((): void => {
-    api.listFlights().then(setFlights).catch(() => {})
+    api.listFlights().then(setRestFlights).catch(() => {})
   }, [])
   const refreshPreFlights = useCallback((): void => {
     api.listPlanFeatures().then((r) => setPreFlights(r.tasks)).catch(() => {})
@@ -131,15 +142,6 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     const id = setInterval(refreshPreFlights, 2500)
     return () => clearInterval(id)
   }, [anyPreFlightRunning, refreshPreFlights])
-
-  // While any flight is active, back the best-effort `flights-changed` broadcast
-  // with a gentle poll so artifact surfaces see the generating state live.
-  const anyFlightActive = flights.some((f) => f.status === 'running' || f.status === 'waiting-for-approval')
-  useEffect(() => {
-    if (!anyFlightActive) return
-    const id = setInterval(refreshFlights, 5000)
-    return () => clearInterval(id)
-  }, [anyFlightActive, refreshFlights])
 
   // /ws/workspace events → refetch the feature-derived surfaces + publish topic
   // invalidations for the fetch-owning leaves. On reconnect (e.g. across a server
@@ -183,7 +185,10 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
           if (event.type === 'verification-config-changed' && selectedFeatureRef.current === event.feature) invalidate('verification')
           if (event.type === 'journal-changed') invalidate('journal', event.runId)
           if (event.type === 'version-changed') refreshVersion()
-          if (event.type === 'flights-changed') { refreshFlights(); invalidate('flights') }
+          // The list itself rides `/ws/flights`; this nudge stays for the
+          // surfaces keyed to flights that are NOT the list (a stage's artifact
+          // reads), which is what the `flights` topic invalidates.
+          if (event.type === 'flights-changed') invalidate('flights')
           if (event.type === 'pre-flight-changed') refreshPreFlights()
           // canary-lab.config.json changed — in this tab or another client.
           // The demo launcher reads `showDemo` from it, so the status-bar pill
@@ -211,5 +216,5 @@ export function useWorkspaceData(deps: WorkspaceDataDeps): WorkspaceData {
     return () => conn?.close()
   }, [refreshFeatures, refreshVersion, refreshFlights, refreshPreFlights, invalidate, selectedFeatureRef, selectedRunIdRef])
 
-  return { features, flights, flightsRef, preFlights, versionStatus, refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion }
+  return { features, flights, flightDetails: flightsStream.details, flightsRef, preFlights, versionStatus, refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion }
 }

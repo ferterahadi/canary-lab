@@ -10,6 +10,7 @@ vi.mock('child_process', async (importOriginal) => {
   return { ...actual, spawn: spawnMock }
 })
 
+import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
 import {
   UpdateJobStore,
   startUpdateJob,
@@ -39,9 +40,13 @@ const collectEvents = () => {
 }
 
 describe('startUpdateJob', () => {
-  it('marks the job done on a zero exit code and emits version-changed', async () => {
+  it('marks the job done on a zero exit code and emits version-changed once it settles', async () => {
     const store = new UpdateJobStore(logsDir)
     const bus = collectEvents()
+    // The job record is the emitter (shared/store-event-bridge.ts, wired in
+    // routes/version.ts) — bridged here the same way, so this proves the chain
+    // the server actually runs rather than a publish call inside the runner.
+    bridgeStoreEvents(store, bus, () => store.current()?.status === 'running' ? null : { type: 'version-changed' })
     const run: InstallRunner = async ({ onOutput }) => {
       onOutput('added 1 package\n')
       return 0
@@ -57,6 +62,9 @@ describe('startUpdateJob', () => {
     expect(final?.status).toBe('done')
     expect(final?.log).toContain('added 1 package')
     expect(final?.endedAt).toBeTruthy()
+    // Exactly one: the start and every chunk of npm output also write the
+    // record, and broadcasting those would make every client refetch
+    // /api/version dozens of times per install.
     expect(bus.events).toEqual([{ type: 'version-changed' }])
   })
 

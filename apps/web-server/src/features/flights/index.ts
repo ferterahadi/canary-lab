@@ -6,6 +6,7 @@ import { externalHealRoutes, makeExternalHealAuditLogger } from '../runs/routes/
 import { createRegistry, RunStore, type OrchestratorRegistry, type OrchestratorLike, type StartRunOutcome } from '../runs/logic/run-store'
 import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../benchmark/logic/runtime/skills'
 import { flightsRoutes } from './routes/flights'
+import { flightsStreamRoutes } from './ws/flights-stream'
 import { buildFlightStageAdapters } from './logic/stages/index'
 import {
   buildAgentSessionResponse,
@@ -77,4 +78,10 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
       },
     }),
   })
+
+  // The push channel for the same store the routes above write. Registered
+  // after them so the store is already bridged to the workspace bus — the two
+  // are complements, not alternatives: the bus tells every surface "flights
+  // moved", this one carries the manifest to whoever is watching.
+  await app.register(flightsStreamRoutes, { store: flightStore })
 }

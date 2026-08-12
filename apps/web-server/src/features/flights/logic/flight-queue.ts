@@ -33,7 +33,6 @@ export function enqueueFlight(
     updatedAt: now(),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   return manifest
 }
 
@@ -72,14 +71,15 @@ export function deleteFlight(flightId: string, deps: FlightConductorDeps): void 
     throw new Error(`flight ${flightId} is ${current.status} — stop it before deleting`)
   }
   store.remove(flightId)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
 }
 
 /** R76: deleting a FEATURE deletes its flight history with it — one deletion
  *  concept, no orphaned journal pointing at a suite that no longer exists.
  *  Refuses while a flight is active (same guard as deleteFlight); removes
  *  every record for the feature (legacy indexes may hold more than one).
- *  Callers publish `flights-changed` when `removed > 0`. */
+ *  `flights-changed` rides the store's own removals (see
+ *  shared/store-event-bridge.ts), so a feature that never flew stays silent
+ *  without the caller having to test `removed > 0`. */
 export function removeFlightRecordsForFeature(
   store: FlightStore,
   feature: string,
@@ -118,7 +118,6 @@ export function abortFlight(flightId: string, deps: FlightConductorDeps): Flight
     ),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   driveControllers.get(flightId)?.abort()
   if (openStage) void interruptStage(flightId, openStage.key, 'abort', deps)
   drainQueuedFlights(deps)

@@ -117,12 +117,11 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
   const capture = (ctx: StageContext, feature: string, env: string, files: string[]): StageOutcome | null => {
     if (files.length === 0) return null
     const result = captureFeatureEnvFiles(
-      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+      { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents },
       { feature, sources: files.map((sourcePath) => ({ sourcePath, env, confirmOverwrite: true })) },
     )
     if (!result.ok) return { kind: 'failed', error: result.error }
     ctx.appendLog(`[env] captured ${result.captured.length} file(s) into envsets/${env}/\n`)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
     return null
   }
 

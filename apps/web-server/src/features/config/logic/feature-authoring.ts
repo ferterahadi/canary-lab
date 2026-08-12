@@ -11,12 +11,26 @@ import type { FeatureConfig } from '../../../../../../shared/launcher/types'
 import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
 import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
 export interface FeatureAuthoringContext {
   projectRoot: string
   featuresDir: string
+  /** The workspace bus, so a write announces ITSELF.
+   *
+   *  These writers are the one home for feature-directory state — the flight
+   *  stages, the config/coverage routes and the MCP authoring tools all land
+   *  here — but each caller used to publish the matching event afterwards, and
+   *  the three surfaces drifted (a doc written by a tool refreshed the Docs
+   *  rail; the same doc written by a stage sometimes didn't). The event belongs
+   *  to the write, not to whoever asked for it. File state has no store to hang
+   *  this off (the stores get shared/store-event-bridge.ts instead), so the
+   *  writer function IS the seam.
+   *
+   *  Optional: a caller with no bus (a pure unit test) still writes. */
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 export interface EnvFileSource {
@@ -107,6 +121,7 @@ export function createFeatureSkeleton(input: FeatureAuthoringContext & {
   for (const env of sanitizeEnvNames(input.envs)) {
     fs.mkdirSync(path.join(featureDir, 'envsets', env), { recursive: true })
   }
+  publishWorkspaceEvent(input.workspaceEvents, { type: 'feature-created', feature: input.feature })
   return {
     ok: true,
     feature: input.feature,
@@ -205,6 +220,7 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   writeEnvsetsConfig(envsetsDir, cfg)
   syncFeatureEnvs(feature.featureDir, Array.from(envs).sort())
   const summary = getFeatureEnvsetSummary(ctx, input.feature)
+  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
   return { ok: true, captured, summary: summary! }
 }
 
@@ -262,6 +278,7 @@ export function deleteFeature(ctx: FeatureAuthoringContext, input: {
     return { ok: false, error: 'feature directory is outside the features root', featureDir }
   }
   fs.rmSync(featureDir, { recursive: true, force: true })
+  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'feature-deleted', feature: input.feature })
   return { ok: true, featureDir }
 }
 

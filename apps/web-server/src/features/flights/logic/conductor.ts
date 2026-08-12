@@ -153,7 +153,6 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
           : undefined,
     }
     store.save(manifest)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
     // R78: an explicit restart wipes the entry stage's artifacts and every
     // later stage's — BEFORE the drive re-runs anything, so no adapter can
     // mistake a discarded attempt's leftovers for prior state. `existing` is
@@ -189,7 +188,6 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     updatedAt: now(),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
 
   const completion = drive(flightId, deps)
   return { manifest, completion }
@@ -223,7 +221,6 @@ export function resumeFlight(flightId: string, deps: FlightConductorDeps): Start
     ),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   // Seamless resume: a stage paused (or crash-reconciled) MID-EXECUTION of a
   // checkpoint answer still carries that answer — replay it so the stage picks
   // up the user's choice instead of re-parking the question. pauseFlight
@@ -255,7 +252,6 @@ export function setFlightAutopilot(
     updatedAt: now(),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   return manifest
 }
 
@@ -299,7 +295,6 @@ export function pauseFlight(flightId: string, deps: FlightConductorDeps): Flight
     ),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   driveControllers.get(flightId)?.abort()
   if (openStage) void interruptStage(flightId, openStage.key, 'pause', deps)
   return manifest
@@ -370,7 +365,6 @@ export function reopenStages(
     ),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   return manifest
 }
 
@@ -403,6 +397,5 @@ export function respondToFlightCheckpoint(
     ),
   }
   store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   return { manifest, completion: drive(flightId, deps, { checkpointResponse: response }) }
 }

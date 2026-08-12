@@ -75,9 +75,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         return { error: parsed.error }
       }
       try {
-        const created = createVerificationConfig(feature, parsed)
-        // Refresh an open Verify dialog on other clients without a reopen.
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: feature.name })
+        const created = createVerificationConfig(feature, parsed, deps.workspaceEvents)
         reply.code(201)
         return created
       } catch (err) {
@@ -101,12 +99,11 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         return { error: parsed.error }
       }
       try {
-        const config = updateVerificationConfig(feature, req.params.id, parsed)
+        const config = updateVerificationConfig(feature, req.params.id, parsed, deps.workspaceEvents)
         if (!config) {
           reply.code(404)
           return { error: 'verification config not found' }
         }
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: feature.name })
         return config
       } catch (err) {
         reply.code(statusCodeOf(err))

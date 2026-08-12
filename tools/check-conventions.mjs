@@ -160,6 +160,18 @@ for (const rel of sources) {
     check('no-console', rel, 'writes to console outside the CLI trees', 'take an injected `log?: (msg: string, err?: unknown) => void` — server output has to be capturable')
   }
 
+  // ── a store write announces itself ───────────────────────────────────────
+  // The server's rule is that the OWNER of the state emits: feature stores are
+  // bridged to the workspace bus once (shared/store-event-bridge.ts), so a
+  // `store.save(...)` followed by a hand-written publish is either a duplicate
+  // fan-out or a second, drifting definition of what that write means. This
+  // catches the shape that used to be everywhere — 15 copies for flights alone.
+  if (!isTest && rel.startsWith('apps/web-server/')) {
+    for (const m of code.matchAll(/\.(save|remove)\([^\n]*\)\n(?:[^\n]*\n){0,2}?[^\n]*publishWorkspaceEvent/g)) {
+      check('store-emits', `${rel}:${lineOf(m.index)}`, 'publishes a workspace event right after a store write', 'the store is the emitter — bridge it once with bridgeStoreEvents (shared/store-event-bridge.ts) and delete the publish. A store whose event needs a payload the record does not carry is the one case to baseline, with the reason')
+    }
+  }
+
   // ── aliases are bundler-only ─────────────────────────────────────────────
   if (!rel.startsWith('apps/web/') && /from '@(\/|shared\/)/.test(code)) {
     check('alias-scope', rel, "uses a '@/…' or '@shared/…' alias outside apps/web", 'only Vite rewrites these; tsc emits the specifier verbatim, so it ships to dist/ and breaks the installed package. Use a relative path')

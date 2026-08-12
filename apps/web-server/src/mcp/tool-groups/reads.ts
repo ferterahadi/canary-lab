@@ -144,9 +144,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     try {
-      const created = createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId })
-      // Refresh an open Verify dialog on other clients without a reopen.
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: featureId })
+      const created = createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId }, deps.workspaceEvents)
       return asJsonResult(created)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))
@@ -166,9 +164,8 @@ export function registerReadTools(ctx: ToolGroupContext): void {
     const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
     if (!feature) return errorResult(`feature not found: ${featureId}`)
     try {
-      const config = updateVerificationConfig(feature, configId, { name, targetUrls, playwrightEnvsetId })
+      const config = updateVerificationConfig(feature, configId, { name, targetUrls, playwrightEnvsetId }, deps.workspaceEvents)
       if (!config) return errorResult(`verification config not found: ${configId}`)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: featureId })
       return asJsonResult(config)
     } catch (err) {
       return errorResult(err instanceof Error ? err.message : String(err))

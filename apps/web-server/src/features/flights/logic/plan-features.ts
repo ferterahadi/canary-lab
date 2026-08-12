@@ -3,6 +3,7 @@ import path from 'path'
 import {
   FileBackedTaskStore,
   type TaskIndexEntry,
+  type TaskStoreEvent,
 } from '../../../../../../shared/lib/file-backed-task-store'
 import {
   deriveFeatureSlug,
@@ -95,6 +96,17 @@ export class PlanFeaturesStore {
   reconcileInterrupted(now: () => string): void {
     this.store.reconcileInterrupted(now)
   }
+
+  /** Forwarded so the store can be bridged to the workspace bus — a plan task
+   *  written anywhere broadcasts `pre-flight-changed` without the writer
+   *  remembering to (see shared/store-event-bridge.ts). */
+  onEvent(fn: (event: TaskStoreEvent) => void): void {
+    this.store.onEvent(fn)
+  }
+
+  offEvent(fn: (event: TaskStoreEvent) => void): void {
+    this.store.offEvent(fn)
+  }
 }
 
 function sameRepoSet(a: string[], b: string[]): boolean {
@@ -155,7 +167,6 @@ export function startPlanFeatures(
     updatedAt: now(),
   }
   store.save(task)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'pre-flight-changed' })
   void runPlanAgent(task, store, deps)
   return task
 }
@@ -167,14 +178,12 @@ async function runPlanAgent(
 ): Promise<void> {
   const now = deps.now ?? (() => new Date().toISOString())
   const spawn = deps.spawnAgent ?? defaultSpawnAgent
-  const emit = () => publishWorkspaceEvent(deps.workspaceEvents, { type: 'pre-flight-changed' })
   const settle = (patch: Partial<PlanFeaturesTask>): PlanFeaturesTask | null => {
     const cur = store.get(task.taskId)
     // Reconcile may have failed the task while the agent ran — don't resurrect.
     if (!cur || cur.status !== 'running') return null
     const next = { ...cur, ...patch, updatedAt: now() }
     store.save(next)
-    emit()
     return next
   }
   try {
@@ -203,7 +212,6 @@ async function runPlanAgent(
         // reopens on the proposal card so the user can rename and launch.
         store.save({ ...cur, conflicts: outcome.conflicts, updatedAt: now() })
       }
-      emit()
     }
   } catch (err) {
     settle({ status: 'failed', error: err instanceof Error ? err.message : String(err) })

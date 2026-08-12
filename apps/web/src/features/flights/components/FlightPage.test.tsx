@@ -480,3 +480,60 @@ describe('FlightPage', () => {
     expect(mocks.openEditor).toHaveBeenCalledWith({ file: '/ws/logs/runs/2026-01-01T0000-x/svc-oms.log' })
   })
 })
+
+describe('the open flight rides the push channel', () => {
+  const runningManifest = {
+    flightId: 'fl_1',
+    feature: 'checkout',
+    repoPaths: ['/repo/shop'],
+    description: 'checkout flow',
+    opts: { env: 'local', coverageTarget: 100, yolo: false },
+    status: 'running' as const,
+    currentStage: 'scout' as const,
+    stages: FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: key === 'scout' ? ('running' as const) : ('pending' as const),
+    })),
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  }
+
+  it('renders the pushed manifest without fetching the flight', async () => {
+    // `/ws/flights` snapshots every ACTIVE flight, so the detail view already
+    // holds the record before it could ask for one.
+    mocks.getFlight.mockRejectedValue(new Error('should not be called'))
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <FlightPage flightId="fl_1" liveFlight={runningManifest} onSelectFlight={vi.fn()} onClose={vi.fn()} />
+        </InvalidationProvider>,
+      )
+    })
+    expect(container.querySelector('[data-testid="stage-rail-scout"]')).not.toBeNull()
+    expect(container.textContent).toContain('checkout')
+  })
+
+  it('a later push advances the view — no refetch, no poll', async () => {
+    const render = async (flight: typeof runningManifest) => {
+      await act(async () => {
+        root.render(
+          <InvalidationProvider>
+            <FlightPage key="live" flightId="fl_1" liveFlight={flight} onSelectFlight={vi.fn()} onClose={vi.fn()} />
+          </InvalidationProvider>,
+        )
+      })
+    }
+    await render(runningManifest)
+    mocks.getFlight.mockClear()
+    await render({
+      ...runningManifest,
+      currentStage: 'scaffold',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scout' ? ('done' as const) : key === 'scaffold' ? ('running' as const) : ('pending' as const),
+      })),
+    })
+    expect(container.querySelector('[data-testid="stage-rail-scaffold"]')).not.toBeNull()
+    expect(mocks.getFlight).not.toHaveBeenCalled()
+  })
+})

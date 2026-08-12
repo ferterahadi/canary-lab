@@ -36,6 +36,7 @@ import type { WorkspaceEvent } from '../../../shared/workspace-events'
 
 import type { CoverageLedger, PrdSummary } from '../../../../../../shared/coverage/types'
 
+import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
 import { FlightRunStore } from '../../flights/logic/store'
 
 import { FLIGHT_STAGE_KEYS } from '../../flights/logic/types'
@@ -260,6 +261,11 @@ describe('coverage-redo backflow into the flight record', () => {
   it('clearing the PRD summary reopens the non-active flight docs/prd-summary/specs-coverage stages', async () => {
     writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\ncart' })
     const flightStore = new FlightRunStore(logsDir)
+    // The backflow's live signal now rides the store's own writes rather than a
+    // publish inside `reopenStages`, so bridge this store the way the server
+    // bridges its shared one (shared/store-event-bridge.ts). Uncoalesced here
+    // so the assertion below reads the event synchronously.
+    bridgeStoreEvents(flightStore, { publish: (e) => events.push(e) }, () => ({ type: 'flights-changed' }))
     const doneStages = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
     flightStore.save({
       flightId: 'fl-backflow',

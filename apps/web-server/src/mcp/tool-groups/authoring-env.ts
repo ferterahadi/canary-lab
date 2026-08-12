@@ -5,7 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, deleteFeature, getFeatureEnvsetSummary, getFeatureRepoStatus, type EnvFileSource } from '../../features/config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
-import { type ToolGroupContext, asJsonResult, errorResult, isToolErrorPayload } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, authoringCtx, errorResult, isToolErrorPayload } from '../tool-support'
 
 export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -34,9 +34,8 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     },
   }, async ({ feature, sources }) => {
     try {
-      const result = captureFeatureEnvFiles({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, sources: sources as EnvFileSource[] })
+      const result = captureFeatureEnvFiles(authoringCtx(deps), { feature, sources: sources as EnvFileSource[] })
       if (!result.ok) return errorResult(result.error)
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult(result)
     } catch (err) {
@@ -79,10 +78,8 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
     // is removed.
     const flights = deps.removeFlightRecordsFor?.(feature)
     if (flights?.error) return errorResult(flights.error)
-    const result = deleteFeature({ projectRoot: deps.projectRoot, featuresDir: deps.featuresDir }, { feature, confirmName })
+    const result = deleteFeature(authoringCtx(deps), { feature, confirmName })
     if (!result.ok) return errorResult(result.error)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-deleted', feature })
-    if ((flights?.removed ?? 0) > 0) publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
     return asJsonResult({ deleted: true, feature, featureDir: result.featureDir, flightRecordsRemoved: flights?.removed ?? 0 })
   })
 

@@ -167,6 +167,5 @@ export function executePlannedLaunch(
     }
     flightIds.push(enqueueFlight(launchArgs, deps.conductorDeps).flightId)
   }
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   return { launched: true, flightIds }
 }

@@ -11,7 +11,7 @@ import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
 import { CoverageJobRunStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
 import type { CoverageJobKind } from '../logic/coverage/jobs/types'
-import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc } from '../../config/logic/feature-authoring'
+import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc, type FeatureAuthoringContext } from '../../config/logic/feature-authoring'
 import { reopenStages } from '../../flights/logic/conductor'
 import type { FlightStore } from '../../flights/logic/store'
 import { extractPrdDocument } from '../logic/prd-document-extractor'
@@ -41,6 +41,17 @@ export interface CoverageRouteDeps {
 // The Requirement Coverage Ledger REST surface — the single computation layer the
 // UI and the MCP tools both consume (dual-surface parity). Pure reads except the
 // regenerate action, which re-summarizes the source docs (preserving ids).
+
+/** The docs writers announce their own writes, so they need the bus in their
+ *  context (see FeatureAuthoringContext) — built here once so no handler can
+ *  assemble a bus-less context and write a doc no client hears about. */
+function docsCtx(deps: CoverageRouteDeps): FeatureAuthoringContext {
+  return {
+    projectRoot: deps.projectRoot,
+    featuresDir: deps.featuresDir,
+    workspaceEvents: deps.workspaceEvents,
+  }
+}
 
 export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDeps): Promise<void> {
   const jobStore = deps.coverageJobStore ?? new CoverageJobRunStore(deps.logsDir)
@@ -85,16 +96,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         return { error: 'relPath and content are required' }
       }
       const result = writeFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         { feature: req.params.name, relPath, content },
       )
       if (!result.ok) {
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      // Docs feed the PRD summary (drift flag) + the Docs rail listing; tell every
-      // client so the rail + coverage headline refresh without a manual reload.
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath }
     },
   )
@@ -122,14 +130,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       // Store under a sanitized .md slug (the pipeline is markdown-only).
       const base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'doc'
       const result = writeFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         { feature: req.params.name, relPath: `${base}.md`, content: text },
       )
       if (!result.ok) {
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath }
     },
   )
@@ -147,7 +154,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         return { error: 'path is required' }
       }
       const result = linkFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         {
           feature: req.params.name,
           targetPath: targetPath.trim(),
@@ -158,7 +165,6 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath, linked: result.linked }
     },
   )
@@ -167,14 +173,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     '/api/features/:name/docs/:relPath',
     async (req, reply) => {
       const result = deleteFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         { feature: req.params.name, relPath: decodeURIComponent(req.params.relPath) },
       )
       if (!result.ok) {
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { deleted: true, relativePath: result.relativePath }
     },
   )

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import * as api from '@/shared/api/client'
-import { useInvalidationKey } from '@/shared/state/invalidation'
+import { useLiveResource } from '@/shared/state/use-live-resource'
 import { usePortify, usePortifyWorkflow } from '@/features/portify'
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
@@ -26,17 +26,7 @@ export function useStageBandData(
   /** The export task the Evaluation Report stage pinned, resolved by the caller
    *  from the live export store (which already holds every task). */
   evalTask: EvaluationExportTask | null,
-  /** Bumped on features-changed so a config edit re-reads the digest. */
-  configRefreshKey?: number,
 ): StageBandData {
-  const [ledger, setLedger] = useState<CoverageLedger | null>(null)
-  const [boot, setBoot] = useState<RunDetail | null>(null)
-  const [config, setConfig] = useState<StageBandData['config']>(null)
-  const [docBytes, setDocBytes] = useState<number | null>(null)
-  const [summaryBytes, setSummaryBytes] = useState<number | null>(null)
-  // Read locally rather than threaded down as a prop (the pattern CoverageLedgerPage
-  // and FeaturesColumn already use) — the ledger is this hook's own source.
-  const coverageRefreshKey = useInvalidationKey('coverage')
 
   const feature = flight.feature
   const stageKey = stage.key
@@ -51,44 +41,36 @@ export function useStageBandData(
   const needsBoot = stageKey === 'scaffold' || stageKey === 'env-capture'
   const needsDocs = stageKey === 'docs'
 
-  useEffect(() => {
-    if (!needsLedger) { setLedger(null); return }
-    let alive = true
-    api.getFeatureCoverage(feature)
-      .then((l) => { if (alive) setLedger(l) })
-      // A feature with no PRD summary has no ledger; the tiles that read it
-      // simply don't render, which is the honest outcome.
-      .catch(() => { if (alive) setLedger(null) })
-    return () => { alive = false }
-    // coverageRefreshKey: the specs↔coverage loop publishes `coverage-changed`
-    // the moment each pass's mapping lands, and the stage stays MOUNTED across
-    // the whole loop. Without it this fetch ran once — so the composition card
-    // kept the pre-mapping snapshot and a settled stage showed "100% covered"
-    // beside "Untested 18", one card apart, from the same ledger.
-  }, [feature, needsLedger, coverageRefreshKey])
+  // `coverage` is the live trigger: the specs↔coverage loop publishes
+  // `coverage-changed` the moment each pass's mapping lands, and the stage stays
+  // MOUNTED across the whole loop. Fetched once, the composition card kept the
+  // pre-mapping snapshot and a settled stage showed "100% covered" beside
+  // "Untested 18" — one card apart, from the same ledger. A feature with no PRD
+  // summary has no ledger at all; the tiles that read it simply don't render.
+  const { value: ledger } = useLiveResource<CoverageLedger>(
+    'coverage',
+    needsLedger ? feature : null,
+    (f) => api.getFeatureCoverage(f),
+  )
 
-  useEffect(() => {
-    if (!needsBoot) { setBoot(null); return }
-    let alive = true
-    void (async () => {
-      try {
-        // Recorded evidence is a CACHE; the workspace is truth. A stage whose
-        // evidence was probed at read time carries `{captured: N}` and no boot
-        // at all — the probe can only see the envset on disk, never a dry-run
-        // that happened days ago. So when no run id is recorded, find the
-        // feature's most recent boot run and read the proof off that. Without
-        // this the whole boot half of the stage is blank on every probed
-        // flight, which is most older records.
-        const runId = bootRunId ?? await latestBootRunId(feature)
-        if (!runId) { if (alive) setBoot(null); return }
-        const detail = await api.getRunDetail(runId)
-        if (alive) setBoot(detail)
-      } catch {
-        if (alive) setBoot(null)
-      }
-    })()
-    return () => { alive = false }
-  }, [bootRunId, feature, needsBoot])
+  // Keyed on the run id when the stage recorded one, else on the feature (the
+  // probe path below). `repos` is the live trigger: a re-boot writes a new run,
+  // and the same features refresh that carries it re-reads this proof.
+  const { value: boot } = useLiveResource<RunDetail>(
+    'repos',
+    needsBoot ? (bootRunId ?? feature) : null,
+    async () => {
+      // Recorded evidence is a CACHE; the workspace is truth. A stage whose
+      // evidence was probed at read time carries `{captured: N}` and no boot at
+      // all — the probe can only see the envset on disk, never a dry-run that
+      // happened days ago. So when no run id is recorded, find the feature's
+      // most recent boot run and read the proof off that. Without this the whole
+      // boot half of the stage is blank on every probed flight, which is most
+      // older records.
+      const runId = bootRunId ?? await latestBootRunId(feature)
+      return runId ? await api.getRunDetail(runId) : null
+    },
+  )
 
   // The workflow id is pinned at stage START (the stage's first setProgress), so
   // a one-shot fetch here resolved a manifest that had no verification and no
@@ -105,43 +87,51 @@ export function useStageBandData(
     if (portifyId && !livePortify) void loadPortify(portifyId)
   }, [portifyId, livePortify, loadPortify])
 
-  useEffect(() => {
-    if (!needsConfig) { setConfig(null); return }
-    let alive = true
-    api.getFeatureConfigDoc(feature)
-      .then((doc) => { if (alive) setConfig(configCounts(doc.parsed.value)) })
-      .catch(() => { if (alive) setConfig(null) })
-    return () => { alive = false }
-  }, [feature, needsConfig, configRefreshKey])
+  // `repos` is bumped on `features-changed`, which is what a config edit
+  // publishes — so the digest re-reads itself instead of waiting for a remount.
+  const { value: config } = useLiveResource<StageBandData['config']>(
+    'repos',
+    needsConfig ? feature : null,
+    async (f) => configCounts((await api.getFeatureConfigDoc(f)).parsed.value),
+  )
 
-  useEffect(() => {
-    if (!needsDocs) { setDocBytes(null); setSummaryBytes(null); return }
-    let alive = true
-    api.listFeatureDocs(feature)
-      .then((listing) => {
-        // Split source from generated: the `_prd-summary` artifacts are this
-        // stage's OUTPUT, so counting them as "tokens read" would inflate the
-        // input with what the input produced. Their size is the denominator of
-        // the distillation ratio instead.
-        const sum = (generated: boolean): number => listing.docs
-          .filter((d) => d.generated === generated)
-          .reduce((total, d) => total + d.sizeBytes, 0)
-        const source = sum(false)
-        const summary = sum(true)
-        if (!alive) return
-        setDocBytes(source > 0 ? source : null)
-        setSummaryBytes(summary > 0 ? summary : null)
-      })
-      .catch(() => { if (alive) { setDocBytes(null); setSummaryBytes(null) } })
-    return () => { alive = false }
-    // coverageRefreshKey: the `_prd-summary` artifacts are written by the SECOND
-    // half of this merged row, while the pane is already mounted and showing the
-    // first half's tiles. Their write publishes `coverage-changed`. Without the
-    // refetch this listing stayed at the pre-distillation snapshot, so "Distilled
-    // to" was missing until the user reloaded the page.
-  }, [feature, needsDocs, coverageRefreshKey])
+  // `coverage` is the live trigger: the `_prd-summary` artifacts are written by
+  // the SECOND half of this merged row, while the pane is already mounted and
+  // showing the first half's tiles, and their write publishes `coverage-changed`.
+  // Fetched once, this listing stayed at the pre-distillation snapshot and
+  // "Distilled to" was missing until the user reloaded.
+  const { value: docSizes } = useLiveResource<DocSizes>(
+    'coverage',
+    needsDocs ? feature : null,
+    async (f) => {
+      // Split source from generated: the `_prd-summary` artifacts are this
+      // stage's OUTPUT, so counting them as "tokens read" would inflate the
+      // input with what the input produced. Their size is the denominator of
+      // the distillation ratio instead.
+      const listing = await api.listFeatureDocs(f)
+      const sum = (generated: boolean): number => listing.docs
+        .filter((d) => d.generated === generated)
+        .reduce((total, d) => total + d.sizeBytes, 0)
+      return { source: sum(false), summary: sum(true) }
+    },
+  )
 
-  return { evalTask, ledger, boot, portify: livePortify ?? null, config, docBytes, summaryBytes }
+  return {
+    evalTask,
+    ledger,
+    boot,
+    portify: livePortify ?? null,
+    config,
+    // A zero total means "no docs", which drops the tile rather than showing 0.
+    docBytes: docSizes && docSizes.source > 0 ? docSizes.source : null,
+    summaryBytes: docSizes && docSizes.summary > 0 ? docSizes.summary : null,
+  }
+}
+
+/** Source vs generated doc bytes — the two ends of the distillation ratio. */
+interface DocSizes {
+  source: number
+  summary: number
 }
 
 /** The feature's most recent dry-run boot. `aborted` is the NORMAL terminal

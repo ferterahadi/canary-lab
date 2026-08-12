@@ -50,7 +50,6 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
 
   const save = (m: FlightManifest) => {
     store.save(m)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'flights-changed' })
   }
 
   const read = (): FlightManifest => {

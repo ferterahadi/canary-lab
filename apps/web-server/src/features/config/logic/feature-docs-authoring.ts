@@ -2,6 +2,16 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { FeatureAuthoringContext, findFeature, isWithin } from './feature-authoring'
+import { publishWorkspaceEvent } from '../../../shared/workspace-events'
+
+// Docs feed the PRD summary, so every successful docs write announces
+// `coverage-changed` — the Docs rail and the coverage headline both re-read on
+// it. Emitted HERE rather than at the call sites (three surfaces write docs:
+// the flight's docs stage, the coverage routes, the MCP authoring tools) so no
+// path can land a doc silently. See FeatureAuthoringContext.workspaceEvents.
+function announceDocsChanged(ctx: FeatureAuthoringContext, feature: string): void {
+  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'coverage-changed', feature })
+}
 
 // Write a prose doc (distilled session, plan, notes) into a feature's `docs/`
 // directory. The one home for feature-scoped documentation — the scaffold
@@ -32,6 +42,7 @@ export function writeFeatureDoc(ctx: FeatureAuthoringContext, input: {
     /* absent — plain create */
   }
   fs.writeFileSync(dest, input.content, 'utf8')
+  announceDocsChanged(ctx, feature.name)
   return { ok: true, writtenPath: dest, relativePath: path.relative(feature.featureDir, dest) }
 }
 
@@ -84,6 +95,7 @@ export function linkFeatureDoc(ctx: FeatureAuthoringContext, input: {
     fs.copyFileSync(real, dest)
     linked = false
   }
+  announceDocsChanged(ctx, feature.name)
   return { ok: true, writtenPath: dest, relativePath: path.relative(feature.featureDir, dest), linked }
 }
 
@@ -112,6 +124,7 @@ export function deleteFeatureDoc(ctx: FeatureAuthoringContext, input: {
     return { ok: false, error: 'doc not found' }
   }
   fs.rmSync(dest)
+  announceDocsChanged(ctx, feature.name)
   return { ok: true, relativePath: path.relative(feature.featureDir, dest) }
 }
 

@@ -112,7 +112,6 @@ export function StageDetail({
     stage,
     companion,
     evalTaskId ? taskById(evalTaskId) : null,
-    configRefreshKey,
   )
   const facts = stageFacts(stage, flight, companion ?? undefined, band)
   const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)

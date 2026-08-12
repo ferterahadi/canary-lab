@@ -46,6 +46,7 @@ export const AGENT_STAGE_DIRS: Partial<Record<FlightStageKey, string>> = {
 export function FlightDetail({
   flightId,
   refreshKey,
+  liveFlight,
   onBackToList,
   onNavigateFlight,
   onClose,
@@ -61,6 +62,10 @@ export function FlightDetail({
 }: {
   flightId: string
   refreshKey: number
+  /** The manifest `/ws/flights` pushed for this flight. When present it IS the
+   *  record — the fetch below is only how a settled flight (which the server
+   *  does not snapshot, because it will never change again) gets read. */
+  liveFlight?: FlightManifest | null
   onBackToList: () => void
   /** Select a different flight — used by the derived→real redirect (R81). */
   onNavigateFlight?: (flightId: string | null) => void
@@ -95,7 +100,16 @@ export function FlightDetail({
   // failure lands here instead of a silent `.catch(() => {})`.
   const [actionError, setActionError] = useState<string | null>(null)
 
+  // Read through a ref so `refetch` keeps a stable identity across pushes (it
+  // is an effect dep and a control-call callback; churning it would re-run both
+  // on every frame).
+  const hasLiveRef = useRef(liveFlight != null)
+  hasLiveRef.current = liveFlight != null
+
   const refetch = useCallback((): void => {
+    // The push channel is already carrying this flight — asking REST for what
+    // the server just sent is the round trip this channel exists to remove.
+    if (hasLiveRef.current) return
     if (derivedFeature) {
       // No record to load. One entry call supplies the repo/env prefill the
       // panels show — and answers "has a record appeared since?", which is how
@@ -120,7 +134,7 @@ export function FlightDetail({
     () => (derivedFeature && derivedRail ? buildDerivedManifest(derivedFeature, derivedRail, derivedPrefill ?? undefined) : null),
     [derivedFeature, derivedRail, derivedPrefill],
   )
-  const flight = derivedManifest ?? (derivedFeature ? null : fetched)
+  const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched))
   /** The stage a "Continue" would enter at — first one without evidence. */
   const derivedEntry = derivedRail ? derivedEntryStage(derivedRail) : null
 
@@ -160,15 +174,20 @@ export function FlightDetail({
     setSelectedStage(null)
   }, [flightId, setSelectedStage])
 
-  // WS `flights-changed` bumps refreshKey; the poll is the reconnect-safe
-  // backstop while the flight is active (the bus has no replay).
+  // WS `flights-changed` bumps refreshKey — still worth a re-read for a flight
+  // the push channel is not carrying (a settled one that an MCP tool just
+  // rewrote). The 2s poll that used to sit here is gone: an ACTIVE flight is
+  // exactly what `/ws/flights` snapshots and pushes on every write, so polling
+  // for it was asking a question the server had already answered.
   useEffect(() => { refetch() }, [refetch, refreshKey])
   const active = flight?.status === 'running' || flight?.status === 'waiting-for-approval'
   useEffect(() => {
-    if (!active) return
+    // Only when the push channel is NOT carrying this flight: no socket (a
+    // component test), or a server too old to serve the channel.
+    if (!active || liveFlight) return
     const id = setInterval(refetch, 2000)
     return () => clearInterval(id)
-  }, [active, refetch])
+  }, [active, liveFlight, refetch])
 
   // The rail hides conductor plumbing (R21) and merges run+heal into one user
   // step (R22) — selection and auto-pick both work on these visible rows.
@@ -203,7 +222,10 @@ export function FlightDetail({
   const companionKey = stageKey ? STAGE_COMPANION[stageKey] : undefined
   const companionStage = (companionKey ? flight?.stages.find((s) => s.key === companionKey) : null) ?? null
 
-  if (error) {
+  // A read failure only blanks the view when there is nothing else to show.
+  // With a pushed manifest in hand the record is NOT missing, and a transient
+  // GET failure must not replace a live flight with "could not be loaded".
+  if (error && !flight) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-muted">
         <div>Flight {flightId} could not be loaded: {error}</div>

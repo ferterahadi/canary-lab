@@ -69,7 +69,7 @@ export function App() {
   // selection it must touch comes in as setters + refs; the render-coupled
   // run-selection reconciliation stays below where `featureRuns` is derived.
   const {
-    features, flights, flightsRef, preFlights, versionStatus,
+    features, flights, flightDetails, flightsRef, preFlights, versionStatus,
     refreshFeatures, refreshFlights, refreshPreFlights, refreshVersion,
   } = useWorkspaceData({
     invalidate,
@@ -423,6 +423,10 @@ export function App() {
           : view === 'flights' && selectedFlightId
           ? <FlightPage
               flightId={selectedFlightId}
+              // The manifest `/ws/flights` pushed for this flight, when it has
+              // one — an active flight then advances from the push instead of
+              // the detail view polling for it.
+              liveFlight={flightDetails[selectedFlightId] ?? null}
               activity={featureActivity}
               derivedStages={derivedStages}
               // Select the feature too: the config dialog is qualified by the

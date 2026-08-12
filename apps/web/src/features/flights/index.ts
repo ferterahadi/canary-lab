@@ -21,5 +21,7 @@ export {
   readGroupOpen,
   writeGroupOpen,
 } from './lib/group-open-state'
+export { useFlightsStream } from './state/use-flights-stream'
+export type { FlightsStreamState } from './state/flights-stream-state'
 export { ACTIVITY_STAGE } from './state/feature-activity'
 export type { FeatureActivity } from './state/feature-activity'
