@@ -4,6 +4,7 @@ import { captureFeatureEnvFiles } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
 import type { FlightStageErrorDetail } from '../types'
+import type { EnvCaptureStageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
@@ -56,6 +57,12 @@ async function bootVerify(
     return { ok: false, error: `boot request rejected (${resp.statusCode}): ${String(body.error ?? 'unknown')}` }
   }
   const runId = String(body.runId)
+  // Pin the id as live progress BEFORE the poll. Until now it lived only in this
+  // local, so the boot run was reachable exactly as long as this function was on
+  // the stack: the `finally` below stopped it on the normal paths, and nothing
+  // could stop it otherwise. Published here rather than after the poll so every
+  // failure arm inherits it too.
+  ctx.setProgress({ runId } satisfies EnvCaptureStageProgress)
   ctx.appendLog(`[boot-verify] boot run ${runId} started\n`)
 
   try {
@@ -110,6 +117,12 @@ async function bootVerify(
     ctx.appendLog(`[boot-verify] all services ready\n`)
     return { ok: true, evidence }
   } finally {
+    // The boot proved what it needed to; nothing should keep its services up.
+    // This is the NORMAL-completion path (verdict reached, or the poll timed out)
+    // — not the stop authority. A pause unwinds `pollUntil` through here too, so
+    // it doubles as a backstop, but the stage's own teardown owns stopping the
+    // boot deliberately, from the progress pin above. Both are best-effort and
+    // idempotent: aborting an already-terminal run is a no-op.
     await deps.inject({ method: 'POST', url: `/api/runs/${encodeURIComponent(runId)}/abort`, payload: {} }).catch(() => {})
   }
 }

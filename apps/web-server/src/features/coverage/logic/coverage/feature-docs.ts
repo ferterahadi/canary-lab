@@ -196,6 +196,10 @@ export interface RegeneratePrdSummaryArgs {
    *  was the one link in the chain that dropped the signal — `summarizePrd`
    *  already stops the child on abort. */
   signal?: AbortSignal
+  /** Stop scope for the spawned distiller, forwarded to the shared runner. The
+   *  signal above asks the child to go; the scope is how a paused stage can WAIT
+   *  until it is actually gone. Same forward-only rule as `signal`. */
+  spawnScope?: string
   onOutput?: (chunk: string) => void
   onAgentSession?: (session: CoverageAgentSession) => void
 }
@@ -235,6 +239,7 @@ export async function regeneratePrdSummary(
     cwd: args.cwd,
     now: args.now,
     signal: args.signal,
+    spawnScope: args.spawnScope,
     onOutput: args.onOutput,
     onSession: args.onAgentSession,
   })

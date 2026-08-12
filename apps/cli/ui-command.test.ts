@@ -91,6 +91,7 @@ describe('runUi signal cleanup', () => {
     const revertAllEnvsets = vi.fn(() => { events.push('revert') })
     const exit = vi.fn((code: number) => { events.push(`exit-${code}`) })
     const clearActiveServer = vi.fn()
+    const stopAgents = vi.fn(async () => { events.push('stop-agents') })
 
     mocks.createServer.mockResolvedValue({
       app,
@@ -107,6 +108,7 @@ describe('runUi signal cleanup', () => {
       exit,
       recordActiveServer: () => {},
       clearActiveServer,
+      stopAgents,
       confirmShutdown: async () => {
         events.push('confirm')
         return true
@@ -121,11 +123,17 @@ describe('runUi signal cleanup', () => {
     expect(clearActiveServer).toHaveBeenCalledOnce()
     expect(runStore.abortAllActiveOrStale).toHaveBeenCalledOnce()
     expect(revertAllEnvsets).toHaveBeenCalledOnce()
+    expect(stopAgents).toHaveBeenCalledOnce()
     expect(app.close).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledExactlyOnceWith(130)
+    // The order is the contract, not an accident. Envsets revert first because it
+    // is synchronous and safety-critical (a forced exit must not strand `.env` on
+    // prod); agents die next, because an agent mid-edit is more invasive than a
+    // run; runs last.
     expect(events).toEqual([
       'confirm',
       'revert',
+      'stop-agents',
       'abort-all',
       'close',
       'exit-130',

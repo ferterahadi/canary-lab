@@ -113,6 +113,11 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
     cwd: opts.cwd,
     stdin: agent === 'codex' ? opts.prompt : undefined,
     captureStdout: true,
+    // The stage sidecar dir doubles as the stop scope: it is already unique per
+    // flight+stage, and it is what a paused stage's teardown looks the child up
+    // by (see stopAgentProcesses). Aborting `signal` below asks the child to go;
+    // the scope is how the pause can WAIT for it to be gone.
+    spawnScope: opts.stageDir,
     onChunk: (text, stream) => {
       if (stream === 'stderr') opts.onChunk?.(text)
     },

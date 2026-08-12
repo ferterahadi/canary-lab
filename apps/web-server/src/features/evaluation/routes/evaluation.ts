@@ -271,6 +271,35 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     return reply.send(zip)
   })
 
+  // Stop a running export WITHOUT erasing it. The DELETE below aborts and then
+  // deletes, which is the wrong verb for a pause: a flight that parks mid-export
+  // must leave the record and its log behind for the user to read. Unlike DELETE,
+  // this hands the settling to the task's own catch — the record survives, so the
+  // runner's `readEvaluationExportTask` guard still passes and it writes the
+  // `failed` status, the log line, the broker exit and its own map cleanup.
+  app.post<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/abort', async (req, reply) => {
+    recoverStaleEvaluationExports()
+    const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
+    if (!task) {
+      reply.code(404)
+      return { error: 'evaluation export task not found' }
+    }
+    const active = activeEvaluationExports.get(task.taskId)
+    if (task.status !== 'running' || !active) {
+      // Idempotent no-op, never a 409: the caller is a best-effort teardown, and
+      // "already finished" is a success for it. A still-`running` record with no
+      // in-memory task is an EXTERNAL producer's export — this process does not
+      // own its work and has nothing to signal.
+      return { aborted: false, status: task.status }
+    }
+    const line = '[evaluation] task aborted\n'
+    appendEvaluationExportLog(deps.store.logsDir, task.taskId, line)
+    active.broker.push('export', line)
+    active.abortController.abort()
+    reply.code(202)
+    return { aborted: true, taskId: task.taskId }
+  })
+
   app.delete<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
     const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     if (!task) {

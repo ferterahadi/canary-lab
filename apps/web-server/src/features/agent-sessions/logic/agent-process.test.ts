@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
-import { buildClaudeAgenticArgs, runAgentProcess } from './agent-process'
+import { buildClaudeAgenticArgs, runAgentProcess, stopAgentProcesses, stopAllAgentProcesses } from './agent-process'
 
 // hoisted so the factory can reference mockNodeSpawn before imports resolve
 const { mockNodeSpawn } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn() }))
@@ -294,5 +294,126 @@ describe('runAgentProcess', () => {
     child.close(0)
     expect(resolveBinary).not.toHaveBeenCalled()
     expect(spawn.calls[0].command).toBe('/usr/local/bin/claude')
+  })
+})
+
+// A child that dies when signalled, so a stop can be awaited to completion. Set
+// `ignoreSigterm` to model the wedged CLI the SIGKILL escalation exists for.
+class SignalableChild extends FakeChild {
+  ignoreSigterm = false
+  override kill(signal?: NodeJS.Signals): boolean {
+    super.kill(signal)
+    const sig = signal ?? 'SIGTERM'
+    if (sig === 'SIGKILL' || !this.ignoreSigterm) this.close(null, sig)
+    return true
+  }
+}
+
+function spawnScoped(child: FakeChild, scope?: string) {
+  return runAgentProcess({
+    command: 'claude', args: [], idleMs: 60_000,
+    spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    ...(scope === undefined ? {} : { spawnScope: scope }),
+  })
+}
+
+describe('stopAgentProcesses / stopAllAgentProcesses', () => {
+  it('stops only the children spawned under the given scope', async () => {
+    const mine = new SignalableChild()
+    const theirs = new SignalableChild()
+    const mineHandle = spawnScoped(mine, '/flights/fl_1/scout')
+    spawnScoped(theirs, '/flights/fl_2/scout')
+
+    await stopAgentProcesses('/flights/fl_1/scout')
+
+    expect(mine.signals).toContain('SIGTERM')
+    expect(theirs.signals).toEqual([])
+    // Resolving means the child is GONE, not merely signalled — that guarantee is
+    // the whole reason a pause awaits this.
+    await expect(mineHandle.done).resolves.toMatchObject({ signal: 'SIGTERM' })
+    theirs.close(0)
+  })
+
+  it('resolves without killing anything when the scope has no live child', async () => {
+    const other = new SignalableChild()
+    spawnScoped(other, '/flights/fl_1/scout')
+    // The normal no-op: a stage whose spawn already finished, or one parked on an
+    // external hand-off that never spawned at all.
+    await expect(stopAgentProcesses('/flights/fl_1/docs')).resolves.toBeUndefined()
+    expect(other.signals).toEqual([])
+    other.close(0)
+  })
+
+  it('is a no-op once the child has exited on its own', async () => {
+    const child = new SignalableChild()
+    const h = spawnScoped(child, '/flights/fl_1/scout')
+    child.close(0)
+    await h.done
+    await stopAgentProcesses('/flights/fl_1/scout')
+    // Closing removed it from the registry, so the stop never re-signals a
+    // finished process.
+    expect(child.signals).toEqual([])
+  })
+
+  it('escalates to SIGKILL when the child ignores SIGTERM', async () => {
+    vi.useFakeTimers()
+    const wedged = new SignalableChild()
+    wedged.ignoreSigterm = true
+    const h = spawnScoped(wedged, '/flights/fl_1/specs-coverage')
+
+    const stopped = stopAgentProcesses('/flights/fl_1/specs-coverage', { graceMs: 100 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wedged.signals).toEqual(['SIGTERM'])
+
+    await vi.advanceTimersByTimeAsync(100)
+    await stopped
+    expect(wedged.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await expect(h.done).resolves.toMatchObject({ signal: 'SIGKILL' })
+  })
+
+  it('sweeps every live child on shutdown, scoped or not', async () => {
+    const scoped = new SignalableChild()
+    const unscoped = new SignalableChild()
+    spawnScoped(scoped, '/flights/fl_1/scout')
+    spawnScoped(unscoped)
+
+    // Deliberately not awaited: the registry is module state, so this sweep also
+    // picks up children left live by every other test in this file — fakes that
+    // never emit 'close', so awaiting it would hang on them rather than on
+    // anything this test is about. `terminate` signals synchronously before it
+    // waits, so one microtask is enough to observe the claim under test. The real
+    // shutdown path does await, and is bounded by ui-command's watchdog.
+    void stopAllAgentProcesses()
+    await Promise.resolve()
+
+    // The unscoped ones are portify/benchmark/commit-message spawns: they opt out
+    // of scoped stop but must never outlive the server.
+    expect(scoped.signals).toContain('SIGTERM')
+    expect(unscoped.signals).toContain('SIGTERM')
+  })
+
+  it('does not hang when the child fails to launch while being stopped', async () => {
+    const child = new FakeChild()
+    const h = spawnScoped(child, '/flights/fl_1/docs')
+    h.done.catch(() => { /* asserted below */ })
+    const stopped = stopAgentProcesses('/flights/fl_1/docs')
+    child.emit('error', new Error('ENOENT'))
+    // `done` rejects rather than resolving; the stop still settles, because there
+    // is no process left to wait for.
+    await expect(stopped).resolves.toBeUndefined()
+    await expect(h.done).rejects.toThrow('ENOENT')
+  })
+
+  it('forwards the scope to the registry only when the caller asked for one', async () => {
+    const scoped = new SignalableChild()
+    const unscoped = new SignalableChild()
+    spawnScoped(scoped, '/flights/fl_1/prd-summary')
+    spawnScoped(unscoped)
+
+    await stopAgentProcesses('/flights/fl_1/prd-summary')
+
+    expect(scoped.signals).toContain('SIGTERM')
+    expect(unscoped.signals).toEqual([])
+    unscoped.close(0)
   })
 })

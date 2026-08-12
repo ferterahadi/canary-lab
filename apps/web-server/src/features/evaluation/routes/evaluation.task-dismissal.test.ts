@@ -5,7 +5,7 @@ import path from 'path'
 import Fastify from 'fastify'
 import { evaluationRoutes } from './evaluation'
 import { createRegistry, RunStore } from '../../runs/logic/run-store'
-import { bridgeEvaluationExportEvents, createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
+import { bridgeEvaluationExportEvents, createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportLog, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
 import { writeManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
@@ -463,5 +463,112 @@ describe('GET /api/evaluation-exports/:taskId/agent-session', () => {
     const res = await app.inject({ method: 'GET', url: '/api/evaluation-exports/eval-task-nolog/agent-session' })
     expect(res.statusCode).toBe(404)
     expect(res.json().reason).toBe('no-session-ref')
+  })
+})
+
+// The abort route exists because DELETE is the wrong verb for a pause: a flight
+// parked mid-export must leave the record and its log readable. These four cases
+// are the whole contract — stop it, and be a harmless no-op in every other state,
+// because the caller is a best-effort teardown that must never see a 409.
+describe('POST /api/evaluation-exports/:taskId/abort', () => {
+  it('aborts a running task and leaves the record and its log behind', async () => {
+    writeManifestForRun('r-task-abort', 'checkout', 'passed')
+    let aborted = false
+    const generateEvaluationRewrite = vi.fn((_detail, _adapter, _projectRoot, options) => new Promise<null>((resolve) => {
+      options?.signal?.addEventListener('abort', () => {
+        aborted = true
+        resolve(null)
+      }, { once: true })
+    }))
+    const { app } = await build({ projectRoot: tmpDir, generateEvaluationRewrite })
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-task-abort/evaluation-export',
+      payload: { mode: 'localized' },
+    })
+    const taskId = started.json().taskId
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/api/evaluation-exports/${encodeURIComponent(taskId)}/abort`,
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const fetched = await app.inject({
+      method: 'GET',
+      url: `/api/evaluation-exports/${encodeURIComponent(taskId)}`,
+    })
+
+    expect(res.statusCode).toBe(202)
+    expect(res.json()).toEqual({ aborted: true, taskId })
+    expect(aborted).toBe(true)
+    // The difference from DELETE, and the reason this route exists: still there,
+    // and the task's own catch settled it rather than the route guessing.
+    expect(fetched.statusCode).toBe(200)
+    expect(fetched.json()).toMatchObject({ status: 'failed', downloadReady: false })
+    expect(readEvaluationExportTask(logsDir, taskId)).not.toBeNull()
+    // Keeping the record is only half of it — the log has to say WHY it stopped,
+    // in its own words. "aborted" is a user pressing stop; DELETE's "cancelled"
+    // and the runner's own failure lines are different events.
+    expect(readEvaluationExportLog(logsDir, taskId)).toContain('[evaluation] task aborted')
+  })
+
+  it('is a harmless no-op on a finished task, archive intact', async () => {
+    const { app } = await build()
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-abort-done',
+      runId: 'r-abort-done',
+      feature: 'checkout',
+      mode: 'raw',
+      status: 'completed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: true,
+      archiveBase: 'canary-lab-evaluation-checkout-r-abort-done',
+    })
+    writeEvaluationExportZip(logsDir, 'eval-abort-done', Buffer.from('zip-bytes'))
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/evaluation-exports/eval-abort-done/abort',
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ aborted: false, status: 'completed' })
+    expect(fs.existsSync(path.join(evaluationExportsDir(logsDir), 'eval-abort-done', 'export.zip'))).toBe(true)
+  })
+
+  it('reports no-op for a running export this process does not own', async () => {
+    // An EXTERNAL producer's export: the record says running and stays running
+    // (stale recovery deliberately spares external tasks), but there is no
+    // in-memory task here to signal.
+    createEvaluationExportTask(logsDir, {
+      taskId: 'eval-abort-external',
+      runId: 'r-abort-external',
+      feature: 'checkout',
+      mode: 'localized',
+      producer: 'external',
+      status: 'running',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      downloadReady: false,
+      archiveBase: 'canary-lab-evaluation-checkout-r-abort-external',
+    })
+    const { app } = await build()
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/evaluation-exports/eval-abort-external/abort',
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ aborted: false, status: 'running' })
+  })
+
+  it('404s for an unknown task', async () => {
+    const { app } = await build()
+    const res = await app.inject({ method: 'POST', url: '/api/evaluation-exports/missing/abort' })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ error: 'evaluation export task not found' })
   })
 })

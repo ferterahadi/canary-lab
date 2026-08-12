@@ -11,6 +11,7 @@ import { openBrowser } from '../web-server/src/shared/open-browser'
 import { loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { registerActiveServer, unregisterActiveServer } from '../../shared/runtime/active-servers'
 import { hydrateAgentConfigEnvFromShell } from '../web-server/src/features/agent-sessions/logic/agent-config-env'
+import { stopAllAgentProcesses } from '../web-server/src/features/agent-sessions/logic/agent-process'
 import { refreshAgentIntegrationsQuietly } from './agent'
 import { refreshClaudeDesktopMcpQuietly } from './mcp-refresh'
 import type { DesktopRegistrationResult } from './desktop-registration'
@@ -45,6 +46,9 @@ export interface UiCommandOptions {
   relaunch?: (projectRoot: string) => void
   // Defers the relaunch+shutdown so the HTTP response can flush first.
   schedule?: (fn: () => void) => void
+  // Kills every live agent CLI child on shutdown. Injected as a spy in tests so
+  // they never signal real processes.
+  stopAgents?: () => Promise<void>
 }
 
 export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promise<void> {
@@ -90,6 +94,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     ?? ((root: string, p: number) => { registerActiveServer({ projectRoot: root, port: p, pid: process.pid }) })
   const clearActiveServer = opts.clearActiveServer
     ?? (() => { unregisterActiveServer({ pid: process.pid }) })
+  const stopAgents = opts.stopAgents ?? (() => stopAllAgentProcesses())
   // Keep the installed agent skill (~/.claude, ~/.codex) in lockstep with this
   // package version. An `npm` bump that skips the postinstall `upgrade` hook
   // would otherwise leave a stale skill pinning old behavior; this is the one
@@ -139,6 +144,15 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     // `.env` on prod.
     revertAllEnvsets()
     traceShutdown('cleanup:reverted-envsets')
+    // Then the agent CLIs. They are spawned by flight stages, portify, coverage
+    // and the eval rewrite, and they were the one class of child nothing here
+    // tracked: on SIGTERM they were re-parented and kept running, so a claude
+    // agent went on editing the user's repo after the app it belonged to was
+    // gone. Next-boot reconcile repaired the flight/portify RECORDS and could
+    // never repair that. Before runs, because an agent mid-edit is the more
+    // invasive of the two.
+    await stopAgents()
+    traceShutdown('cleanup:stopped-agents')
     await runStore.abortAllActiveOrStale()
     traceShutdown('cleanup:aborted-runs')
   }

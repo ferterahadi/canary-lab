@@ -56,6 +56,9 @@ export interface ProposeMappingsArgs {
   featureDir?: string
   cwd?: string
   signal?: AbortSignal
+  /** Stop scope for the spawned mapper, forwarded to the shared runner so an owner
+   *  can stop it without holding its handle. Forwarded, never invented here. */
+  spawnScope?: string
   onOutput?: (chunk: string) => void
   /** Fired when an agent spawns with a pinned session — lets the job persist a
    *  ref the Generating screen streams via AgentSessionView (R17). */
@@ -70,6 +73,7 @@ export interface ProposeMappingsDeps {
 interface RunAgentOpts {
   cwd?: string
   signal?: AbortSignal
+  spawnScope?: string
   onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
 }
@@ -291,6 +295,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
     activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
     onIdle: () => { idled = true },
+    spawnScope: opts.spawnScope,
   })
 
   const onAbort = (): void => handle.stop()
@@ -384,6 +389,7 @@ export async function proposeCoverageMappings(
         const output = await runAgent(agent, prompt, {
           cwd: args.cwd,
           signal: args.signal,
+          spawnScope: args.spawnScope,
           onOutput: args.onOutput,
           onSession: args.onSession,
         })

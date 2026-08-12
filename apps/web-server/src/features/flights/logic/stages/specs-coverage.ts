@@ -272,6 +272,11 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       // the authoring half below. Without it a pause landing in `mapping` left
       // the coverage mapper running until its idle watchdog fired.
       signal: ctx.signal,
+      // This stage is the one with TWO spawns, under two sidecar dirs — the
+      // authoring half scopes itself to `specs-coverage` via defaultSpawnAgent,
+      // and the mapper gets `coverage-map` here. stageSidecarDirs() enumerates
+      // both, so a teardown stops whichever half is live.
+      spawnScope: path.join(ctx.flightDir, 'coverage-map'),
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
         writeWorkflowAgentRef(path.join(ctx.flightDir, 'coverage-map'), {

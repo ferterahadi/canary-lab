@@ -52,6 +52,10 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
         // Pause/abort must actually stop the distiller, not just stop waiting
         // for it — see the same hand-off in every other agent-spawning stage.
         signal: ctx.signal,
+        // …and the scope is how a pause can WAIT for it to be gone rather than
+        // merely having asked. Same dir the agent-session ref is parked in, so
+        // one value identifies this stage's spawn everywhere.
+        spawnScope: stageDir,
         onOutput: agentProgressSink(ctx),
         onAgentSession: (session) => {
           writeWorkflowAgentRef(stageDir, {

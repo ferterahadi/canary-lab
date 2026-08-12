@@ -8,6 +8,7 @@ import { computeDocsHash } from './docs-collection'
 import type { DocsCollection } from './docs-collection'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
+import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
 import { TEST_COLLECTION, VALID_STDOUT, collection, makeFakeChild } from './__fixtures__/prd-summary.spawn-fixtures'
 
 // summarizePrd is LLM-only: it never fabricates requirements from headings, so
@@ -454,5 +455,55 @@ describe('defaultRunAgent — settled guard: finish called twice (line 376 true 
       },
       { resolveAgents: () => ['claude'] },
     )).rejects.toThrow(/PRD summary failed: prd summary agent idle for/)
+  })
+})
+
+describe('spawnScope', () => {
+  it('threads the stop scope down to the shared runner so an owner can kill the distiller', async () => {
+    // The regression test for a whole class of bug: this engine sits between a
+    // flight stage and the spawn, and the last time it dropped one of these
+    // hand-offs (`signal`) a paused flight left its distiller running to
+    // completion. Asserting the OBSERVABLE end of the chain — the child dies when
+    // an owner stops the scope — is what makes a silently-dropped forward fail.
+    const scope = '/flights/fl_scope/prd-summary'
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter
+      stderr: EventEmitter
+      stdin: { end: ReturnType<typeof vi.fn> }
+      kill: ReturnType<typeof vi.fn>
+    }
+    child.stdout = new EventEmitter()
+    child.stderr = new EventEmitter()
+    child.stdin = { end: vi.fn() }
+    // Unlike the shared fixture's inert kill, this child actually dies — a stop
+    // that resolves has to mean the process is gone.
+    child.kill = vi.fn((signal?: NodeJS.Signals) => {
+      child.emit('close', null, signal ?? 'SIGTERM')
+      return true
+    })
+    mockSpawn.mockReturnValue(child)
+
+    const pending = summarizePrd(
+      { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z', spawnScope: scope },
+      { resolveAgents: () => ['claude'] },
+    )
+    // Let the spawn happen before reaching for it by scope.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await stopAgentProcesses(scope)
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    await expect(pending).rejects.toThrow(/PRD summary failed: prd summary agent failed with SIGTERM/)
+  })
+
+  it('registers nothing stoppable by scope when the caller passes none', async () => {
+    // The standalone coverage job's path: it owns its own record and cancellation,
+    // so it must not be reachable through another owner's scope.
+    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
+    await summarizePrd(
+      { collection: TEST_COLLECTION, now: '2026-01-01T00:00:00.000Z' },
+      { resolveAgents: () => ['claude'] },
+    )
+    await expect(stopAgentProcesses('/flights/fl_scope/prd-summary')).resolves.toBeUndefined()
   })
 })

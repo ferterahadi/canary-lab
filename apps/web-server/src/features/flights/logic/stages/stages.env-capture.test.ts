@@ -151,6 +151,33 @@ describe('env-capture stage', () => {
     expect(calls.some((c) => c.url === '/api/runs/boot-1/abort')).toBe(true)
   })
 
+  it('pins the boot runId as live progress the moment the run exists', async () => {
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+    const harness = ctxFor(withScout(manifest(), []))
+    await envCaptureStage(deps({ inject: bootInject() })).run(harness.ctx)
+    // Reachable by id from outside this stage — which is the point. Until it was
+    // pinned, the boot run lived only in a local, so the only thing that could
+    // ever stop it was this function's own `finally`.
+    expect(harness.progressLog).toContainEqual({ runId: 'boot-1' })
+  })
+
+  it('pins the runId before the poll, so a boot that FAILS still leaves it reachable', async () => {
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'boot-1' } }
+      if (call.method === 'GET') {
+        return { statusCode: 200, body: { manifest: { status: 'failed', services: [{ name: 'app', status: 'timeout' }] } } }
+      }
+      return { statusCode: 204, body: {} }
+    })
+    const harness = ctxFor(withScout(manifest(), []))
+    const outcome = await envCaptureStage(deps({ inject })).run(harness.ctx)
+    // Ordering is the contract: published on the way in, not on the way out, so
+    // every failure arm inherits it.
+    expect(outcome).toMatchObject({ kind: 'failed' })
+    expect(harness.progressLog).toContainEqual({ runId: 'boot-1' })
+  })
+
   it('parks on missing-env when a detected env file does not exist (yolo does NOT skip this)', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     const missing = path.join(repoDir, '.env')

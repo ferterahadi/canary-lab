@@ -33,6 +33,7 @@ import { proposeCoverageMappings } from './annotate-engine'
 import type { Requirement } from '../../../../../../../shared/coverage/types'
 
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
+import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
 
 const REQS: Requirement[] = [
   { id: 'R1', title: 'Create todo', text: 'A user can create a todo item', pathTypes: ['happy'] },
@@ -475,5 +476,35 @@ describe('defaultRunAgent — non-Error thrown in catch (line 377 String(err) br
 
     // onOutput received the String(err) message before the throw
     expect(outputChunks.some((c) => c.includes('non-error string'))).toBe(true)
+  })
+})
+
+describe('spawnScope', () => {
+  it('threads the stop scope down to the shared runner so an owner can kill the mapper', async () => {
+    // The mapping half of the flight's Test authoring stage spawns through here,
+    // three forwards deep (runCoverageEngine → proposeCoverageMappings →
+    // defaultRunAgent → runAgentProcess). Each of those is a place a hand-off can
+    // be silently dropped, so the assertion is the observable end: stopping the
+    // scope kills the child.
+    const scope = '/flights/fl_scope/coverage-map'
+    const child = makeFakeChild({ delayMs: 60_000 })
+    child.kill = vi.fn((signal?: NodeJS.Signals) => {
+      child.emit('close', null, signal ?? 'SIGTERM')
+      return true
+    })
+    mockSpawn.mockReturnValue(child)
+
+    const pending = proposeCoverageMappings(
+      { requirements: REQS, tests: [{ name: 'creates a todo' }], spawnScope: scope },
+      { resolveAgents: () => ['claude'] },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await stopAgentProcesses(scope)
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    // A killed mapper is a FAILED mapper, not an empty answer: silence must never
+    // reach the ledger as "nothing covers these requirements".
+    await expect(pending).rejects.toThrow(/coverage annotate agent failed with SIGTERM/)
   })
 })

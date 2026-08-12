@@ -39,6 +39,11 @@ export interface SummarizePrdArgs {
   adapter?: SummarizeAdapter
   cwd?: string
   signal?: AbortSignal
+  /** Stop scope for the spawned distiller — forwarded to the shared runner so an
+   *  owner (a flight stage's teardown) can stop this agent without holding its
+   *  handle. Forwarded, never invented here: this engine has two caller classes,
+   *  and the standalone coverage job deliberately passes none. */
+  spawnScope?: string
   onOutput?: (chunk: string) => void
   /** Fired when an agent spawns with a pinned session (R17 — see annotate-engine). */
   onSession?: (session: CoverageAgentSession) => void
@@ -54,6 +59,7 @@ export interface SummarizePrdDeps {
 interface RunAgentOpts {
   cwd?: string
   signal?: AbortSignal
+  spawnScope?: string
   onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
 }
@@ -152,6 +158,7 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     idleMs: PRD_SUMMARY_IDLE_TIMEOUT_MS,
     activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
     onIdle: () => { idled = true },
+    spawnScope: opts.spawnScope,
   })
 
   const onAbort = (): void => handle.stop()
@@ -221,6 +228,7 @@ export async function summarizePrd(
         const output = await runAgent(agent, prompt, {
           cwd: args.cwd,
           signal: args.signal,
+          spawnScope: args.spawnScope,
           onOutput: args.onOutput,
           onSession: args.onSession,
         })

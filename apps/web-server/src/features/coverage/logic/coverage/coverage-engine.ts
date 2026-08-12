@@ -39,6 +39,11 @@ export interface RunCoverageEngineArgs {
   cwd?: string
   now?: string
   signal?: AbortSignal
+  /** Stop scope for the mapping agent this engine spawns, forwarded to the shared
+   *  runner. Flights pass their `coverage-map` sidecar dir; the standalone
+   *  coverage job passes none — its own job manifest is the record and its own
+   *  cancellation path is separate. */
+  spawnScope?: string
   onOutput?: (chunk: string) => void
   onAgentSession?: (session: CoverageAgentSession) => void
 }
@@ -159,7 +164,7 @@ export async function runCoverageEngine(
   }
 
   const proposals = await propose(
-    { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, onOutput: args.onOutput, onSession: args.onAgentSession },
+    { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, spawnScope: args.spawnScope, onOutput: args.onOutput, onSession: args.onAgentSession },
   )
 
   // No review gate (R16): every inferred mapping's `covers` tag is written now.

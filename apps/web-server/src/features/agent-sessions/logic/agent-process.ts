@@ -117,6 +117,75 @@ export interface RunAgentProcessOpts {
   spawnImpl?: typeof nodeSpawn
   /** Override agent-kind → path resolution (tests). Defaults to resolveAgentBinary. */
   resolveBinary?: (agent: HealAgent) => string | null
+  /**
+   * Opt-in label that makes this child findable again after the fact, so an
+   * owner can stop it without having kept the handle. A flight passes its stage
+   * sidecar dir, which is why a paused stage can kill the agent it started
+   * several call layers down (the spawn happens inside `defaultSpawnAgent`, the
+   * PRD distiller, or the coverage annotator — none of which hand the handle
+   * back). Callers with no such need omit it and are unaffected, except that
+   * `stopAllAgentProcesses` sweeps them too on shutdown.
+   */
+  spawnScope?: string
+}
+
+/** How long a stopped child gets to exit on SIGTERM before it is SIGKILLed. An
+ *  agent CLI flushing its session JSONL needs a moment; one that has wedged must
+ *  not hold a pause (or a server shutdown) open forever. */
+const AGENT_STOP_GRACE_MS = 8_000
+
+interface LiveAgentProcess {
+  child: ChildProcess
+  scope: string | undefined
+  done: Promise<AgentProcessResult>
+}
+
+/** Every agent child currently running, keyed by the child itself so removal
+ *  needs nothing but the `child` already in scope at settle time.
+ *
+ *  This exists because "stop" used to mean "stop waiting". A flight pause could
+ *  abort its own poll while the CLI it spawned kept editing the user's repo, and
+ *  quitting the server orphaned those children entirely — nothing tracked them,
+ *  so `cleanup()` had nothing to kill. */
+const liveAgentProcesses = new Map<ChildProcess, LiveAgentProcess>()
+
+async function terminate(entry: LiveAgentProcess, graceMs: number): Promise<void> {
+  try { entry.child.kill('SIGTERM') } catch { /* already dead */ }
+  const escalate = setTimeout(() => {
+    try { entry.child.kill('SIGKILL') } catch { /* already dead */ }
+  }, graceMs)
+  try {
+    // Awaiting `done` is the whole point: the caller promised the work stopped,
+    // so it must not return while the child is still exiting.
+    await entry.done
+  } catch {
+    // `done` rejects only on a spawn 'error' — the process never ran, so there
+    // is nothing left to wait for.
+  } finally {
+    clearTimeout(escalate)
+  }
+}
+
+/** Stop every live child spawned under `scope`, resolving once they have all
+ *  exited. Unknown scope → resolves immediately; a stage whose spawn already
+ *  finished (or which never spawned, e.g. one parked on an external hand-off)
+ *  is the normal no-op case, not an error. */
+export async function stopAgentProcesses(
+  scope: string,
+  opts: { graceMs?: number } = {},
+): Promise<void> {
+  const matches = [...liveAgentProcesses.values()].filter((entry) => entry.scope === scope)
+  await Promise.all(matches.map((entry) => terminate(entry, opts.graceMs ?? AGENT_STOP_GRACE_MS)))
+}
+
+/** Stop EVERY live agent child, scoped or not — the server-shutdown sweep.
+ *  Without it a SIGTERM to the server left its agents re-parented and running:
+ *  next-boot reconcile repaired the flight/portify RECORDS, but the processes
+ *  kept going, and a claude agent kept editing the user's repo after the app it
+ *  belonged to was gone. */
+export async function stopAllAgentProcesses(): Promise<void> {
+  const entries = [...liveAgentProcesses.values()]
+  await Promise.all(entries.map((entry) => terminate(entry, AGENT_STOP_GRACE_MS)))
 }
 
 // Every CLI spawned through here is a runner-spawned agent (benchmark sabotage,
@@ -160,6 +229,7 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
       if (settled) return
       settled = true
       idleTimer?.stop()
+      liveAgentProcesses.delete(child)
       if (err) reject(err)
       else resolve({ code, signal, stdout, stderr })
     }
@@ -190,6 +260,12 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
       onIdle: () => { opts.onIdle?.(); try { child.kill('SIGTERM') } catch { /* already dead */ } },
     })
   })
+
+  // Registered unconditionally: nothing above can have settled yet. The only
+  // paths to `finish` are the child's own 'close'/'error' events and the idle
+  // timer, and the timer is a setInterval — so the earliest any of them can fire
+  // is a later tick, by which point this entry exists for `finish` to delete.
+  liveAgentProcesses.set(child, { child, scope: opts.spawnScope, done })
 
   try { child.stdin?.end(useStdin ? opts.stdin : undefined) } catch { /* ignore */ }
 

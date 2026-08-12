@@ -456,6 +456,15 @@ export interface PortifyStageProgress {
   editedFiles?: number
 }
 
+/** Live shape of the env-capture stage. The dry-run boot is a real run started
+ *  through the runs route, so the same reasoning as portify's pin applies: the
+ *  id has to outlive the function that started it, or a pause landing mid-boot
+ *  has nothing to reach for. Published the moment the run exists — before the
+ *  poll — so it survives every later failure arm too. */
+export interface EnvCaptureStageProgress {
+  runId: string
+}
+
 /** One row of the stage-entry menu: can a flight start AT this stage right
  *  now, and if not, which prerequisite is missing (the validator's message). */
 export interface FlightStageEntryOption {
