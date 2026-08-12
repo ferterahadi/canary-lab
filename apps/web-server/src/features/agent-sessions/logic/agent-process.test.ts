@@ -1,7 +1,11 @@
 import { EventEmitter } from 'events'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
 import { buildClaudeAgenticArgs, runAgentProcess, stopAgentProcesses, stopAllAgentProcesses } from './agent-process'
+import { agentJobStore } from './agent-jobs/store'
 
 // hoisted so the factory can reference mockNodeSpawn before imports resolve
 const { mockNodeSpawn } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn() }))
@@ -415,5 +419,108 @@ describe('stopAgentProcesses / stopAllAgentProcesses', () => {
     expect(scoped.signals).toContain('SIGTERM')
     expect(unscoped.signals).toEqual([])
     unscoped.close(0)
+  })
+})
+
+describe('durable records — how a spawn ends, in the record', () => {
+  // The runner owns this lifecycle so there is exactly one implementation of
+  // "started / done / failed / stopped". The distinctions matter to a reader who
+  // has only the row: an exit code cannot tell you whether someone asked the agent
+  // to stop or it fell over on its own.
+  let logsDir: string
+
+  beforeEach(() => {
+    logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agentrec-')))
+  })
+
+  afterEach(() => fs.rmSync(logsDir, { recursive: true, force: true }))
+
+  const ref = { jobId: 'fl-1:scout', flightId: 'fl-1', feature: 'checkout', stage: 'scout', agent: 'claude' as const }
+
+  function spawnWithRecord(child: FakeChild, scope = '/flights/fl-1/scout') {
+    return runAgentProcess({
+      command: 'claude', args: [], idleMs: 60_000, spawnScope: scope,
+      record: ref, agentJobLogsDir: logsDir,
+      spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    })
+  }
+
+  it('writes the record `running` at spawn, before anything has happened', () => {
+    const child = new SignalableChild()
+    spawnWithRecord(child)
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({
+      status: 'running', flightId: 'fl-1', stage: 'scout', scope: '/flights/fl-1/scout',
+    })
+    child.close(0)
+  })
+
+  it('settles `done` on a clean exit', async () => {
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    child.close(0)
+    await h.done
+    const rec = agentJobStore(logsDir).get('fl-1:scout')!
+    expect(rec.status).toBe('done')
+    expect(rec.endedAt).toBeTruthy()
+  })
+
+  it('settles `failed` with the exit code on a non-zero exit', async () => {
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    child.close(3)
+    await h.done
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({ status: 'failed', exitCode: 3 })
+  })
+
+  it('settles `stopped`, not `failed`, when someone asked it to stop', async () => {
+    // Same underlying exit as a crash — a signal and no code. Only the record's
+    // knowledge of the REQUEST separates "we stopped it" from "it died".
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    await stopAgentProcesses('/flights/fl-1/scout', { by: 'user' })
+    await h.done.catch(() => {})
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({ status: 'stopped', stoppedBy: 'user' })
+  })
+
+  it('attributes a flight-driven teardown to the flight, not the user', async () => {
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    await stopAgentProcesses('/flights/fl-1/scout')
+    await h.done.catch(() => {})
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({ status: 'stopped', stoppedBy: 'flight' })
+  })
+
+  it('settles `failed` when the CLI could not be launched at all', async () => {
+    const child = new FakeChild()
+    const h = spawnWithRecord(child)
+    child.emit('error', new Error('ENOENT'))
+    await expect(h.done).rejects.toThrow('ENOENT')
+    const rec = agentJobStore(logsDir).get('fl-1:scout')!
+    expect(rec.status).toBe('failed')
+    expect(rec.note).toContain('could not be launched')
+  })
+
+  it('writes nothing when the caller passes no descriptor', async () => {
+    // The standalone coverage job's path: its own manifest is already the durable,
+    // reconciled, surfaced record, so a second per-spawn row would be a duplicate.
+    const child = new SignalableChild()
+    const h = runAgentProcess({
+      command: 'claude', args: [], idleMs: 60_000,
+      spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    })
+    child.close(0)
+    await h.done
+    expect(agentJobStore(logsDir).list()).toEqual([])
+  })
+
+  it('writes nothing when a descriptor arrives with no logs dir to write to', async () => {
+    const child = new SignalableChild()
+    const h = runAgentProcess({
+      command: 'claude', args: [], idleMs: 60_000, record: ref,
+      spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    })
+    child.close(0)
+    await h.done
+    expect(agentJobStore(logsDir).list()).toEqual([])
   })
 })

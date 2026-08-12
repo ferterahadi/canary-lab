@@ -7,6 +7,7 @@ import { PRD_SUMMARY_MODELS, modelArgs } from '../../../agent-sessions/logic/age
 import type { CoverageAgentSession } from './annotate-engine'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
+import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import type { PrdSummary, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { type DocsCollection } from './docs-collection'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
@@ -44,6 +45,9 @@ export interface SummarizePrdArgs {
    *  handle. Forwarded, never invented here: this engine has two caller classes,
    *  and the standalone coverage job deliberately passes none. */
   spawnScope?: string
+  /** Durable-record descriptor + where records live, forwarded to the shared
+   *  runner. Same forward-only rule as `signal` and `spawnScope`. */
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   /** Fired when an agent spawns with a pinned session (R17 — see annotate-engine). */
   onSession?: (session: CoverageAgentSession) => void
@@ -60,6 +64,7 @@ interface RunAgentOpts {
   cwd?: string
   signal?: AbortSignal
   spawnScope?: string
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
 }
@@ -159,6 +164,9 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
     onIdle: () => { idled = true },
     spawnScope: opts.spawnScope,
+    ...(opts.agentJob
+      ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
+      : {}),
   })
 
   const onAbort = (): void => handle.stop()
@@ -229,6 +237,7 @@ export async function summarizePrd(
           cwd: args.cwd,
           signal: args.signal,
           spawnScope: args.spawnScope,
+          agentJob: args.agentJob,
           onOutput: args.onOutput,
           onSession: args.onSession,
         })

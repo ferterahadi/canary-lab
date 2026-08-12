@@ -3,6 +3,8 @@ import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { EventEmitter } from 'events'
 
 import fs from 'fs'
+import os from 'os'
+import path from 'path'
 
 const { mockSpawn } = vi.hoisted(() => ({ mockSpawn: vi.fn() }))
 
@@ -34,6 +36,7 @@ import type { Requirement } from '../../../../../../../shared/coverage/types'
 
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
 import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
+import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
 
 const REQS: Requirement[] = [
   { id: 'R1', title: 'Create todo', text: 'A user can create a todo item', pathTypes: ['happy'] },
@@ -506,5 +509,39 @@ describe('spawnScope', () => {
     // A killed mapper is a FAILED mapper, not an empty answer: silence must never
     // reach the ledger as "nothing covers these requirements".
     await expect(pending).rejects.toThrow(/coverage annotate agent failed with SIGTERM/)
+  })
+})
+
+describe('agentJob descriptor', () => {
+  it('forwards a record descriptor so the coverage mapper is logged too', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-annotate-rec-'))
+    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
+    await proposeCoverageMappings(
+      {
+        requirements: REQS,
+        tests: [{ name: 'creates a todo' }],
+        agentJob: { record: { jobId: 'fl-1:coverage-map', flightId: 'fl-1', feature: 'checkout', stage: 'coverage-map', agent: 'claude' }, logsDir },
+      },
+      { resolveAgents: () => ['claude'] },
+    )
+    expect(agentJobStore(logsDir).get('fl-1:coverage-map')).toMatchObject({ stage: 'coverage-map', status: 'done' })
+    fs.rmSync(logsDir, { recursive: true, force: true })
+  })
+
+  it('records a codex mapper, which pins no session', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-annotate-rec-codex-'))
+    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
+    await proposeCoverageMappings(
+      {
+        requirements: REQS,
+        tests: [{ name: 'creates a todo' }],
+        agentJob: { record: { jobId: 'fl-1:coverage-map', flightId: 'fl-1', feature: 'checkout', stage: 'coverage-map', agent: 'codex' }, logsDir },
+      },
+      { resolveAgents: () => ['codex'] },
+    )
+    const rec = agentJobStore(logsDir).get('fl-1:coverage-map')!
+    expect(rec.agent).toBe('codex')
+    expect(rec.sessionId).toBeUndefined()
+    fs.rmSync(logsDir, { recursive: true, force: true })
   })
 })

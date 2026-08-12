@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import type { CoverageLedger, ProposedMapping, Requirement } from '../../../../../../../shared/coverage/types'
+import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import { hasNegativeAssertion } from './strength'
 import {
   buildAnnotatePrompt,
@@ -44,6 +45,8 @@ export interface RunCoverageEngineArgs {
    *  coverage job passes none — its own job manifest is the record and its own
    *  cancellation path is separate. */
   spawnScope?: string
+  /** Durable-record descriptor, forwarded to the shared runner. */
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onAgentSession?: (session: CoverageAgentSession) => void
 }
@@ -164,7 +167,7 @@ export async function runCoverageEngine(
   }
 
   const proposals = await propose(
-    { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, spawnScope: args.spawnScope, onOutput: args.onOutput, onSession: args.onAgentSession },
+    { requirements: candidateRequirements, variantDimension: summary?.variantDimension, tests: engineInputs, adapter: args.adapter, featureDir, cwd: args.cwd, signal: args.signal, spawnScope: args.spawnScope, agentJob: args.agentJob, onOutput: args.onOutput, onSession: args.onAgentSession },
   )
 
   // No review gate (R16): every inferred mapping's `covers` tag is written now.

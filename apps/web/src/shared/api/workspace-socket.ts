@@ -21,6 +21,10 @@ export type WorkspaceEvent =
   | { type: 'evaluation-export-deleted'; taskId: string }
   | { type: 'version-changed' }
   | { type: 'flights-changed' }
+  // A spawned-agent record changed — started, ended, stopped, or reconciled to
+  // `orphaned` on boot. Bumps the `agent-jobs` slot so a stage band's stop control
+  // appears and disappears with the agent instead of on a poll.
+  | { type: 'agent-jobs-changed'; jobId: string }
   | { type: 'pre-flight-changed' }
   | { type: 'project-config-changed' }
 

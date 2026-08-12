@@ -52,6 +52,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -71,13 +72,32 @@ function args(repo = '/repo/a') {
 }
 
 describe('abortFlight', () => {
-  it('refuses to abort an unknown flight id', () => {
-    expect(() => abortFlight('nope', deps(allDone()))).toThrow(/flight not found: nope/)
+  it('refuses to abort an unknown flight id', async () => {
+    await expect(abortFlight('nope', deps(allDone()))).rejects.toThrow(/flight not found: nope/)
+  })
+
+  it('still returns a record when the flight is deleted during its teardown', async () => {
+    // Abort re-reads after the teardown so the response carries the teardown's own
+    // log line. If the record went away in between (deleted out-of-band), the
+    // pre-teardown snapshot is the only truthful thing left to hand back — an
+    // abort must not throw on the way out.
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: () => new Promise(() => {}), // hangs until aborted
+      teardown: () => ({ id: 'vanishing', stop: async () => { store.remove('fl-1') } }),
+    }
+    const { manifest } = startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+    const aborted = await abortFlight(manifest.flightId, d)
+    expect(aborted).toMatchObject({ flightId: 'fl-1', status: 'aborted' })
+    expect(store.get('fl-1')).toBeNull()
   })
 
   it('settles a parked checkpoint like pause does — a terminal record keeps no answerable ask', async () => {
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'prd-source', message: 'docs?', options: ['collect-repo-docs'] },
@@ -87,7 +107,7 @@ describe('abortFlight', () => {
     const { manifest, completion } = startFlight(args(), d)
     await completion // parks on the docs checkpoint
     expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
-    abortFlight(manifest.flightId, d)
+    await abortFlight(manifest.flightId, d)
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('aborted')
     const docsStage = final.stages.find((s) => s.key === 'docs')!
@@ -104,8 +124,9 @@ describe('abort', () => {
     const adapters = allDone(calls)
     const d = deps(adapters)
     adapters.scout = {
+      teardown: () => null,
       run: async () => {
-        abortFlight('fl-1', d)
+        void abortFlight('fl-1', d)
         await gate
         return { kind: 'done' } satisfies StageOutcome
       },
@@ -227,7 +248,7 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
     await new Promise((r) => setTimeout(r, 10))
     const drained = deps(allDone())
     enqueueFlight({ ...args(), feature: 'next-up' }, drained)
-    abortFlight(manifest.flightId, drained)
+    await abortFlight(manifest.flightId, drained)
     await new Promise((r) => setTimeout(r, 30))
     expect(store.latestForFeature('next-up')!.status).toBe('done')
   })

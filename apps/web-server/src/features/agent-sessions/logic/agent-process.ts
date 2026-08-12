@@ -3,6 +3,8 @@ import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
 import { modelArgs } from './agent-models'
 import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
 import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
+import { agentJobStore } from './agent-jobs/store'
+import type { AgentJobRecordRef, AgentJobStatus } from './agent-jobs/types'
 
 // One home for spawning an agent CLI (the Portify model): pipe stdout/stderr,
 // reset the idle clock on every chunk (the liveness signal), kill on a genuine
@@ -127,6 +129,21 @@ export interface RunAgentProcessOpts {
    * `stopAllAgentProcesses` sweeps them too on shutdown.
    */
   spawnScope?: string
+  /**
+   * Write a durable record for this spawn: `running` now, terminal on close. The
+   * RUNNER owns that lifecycle rather than each caller, so there is exactly one
+   * implementation of "started / done / failed / stopped" and a new agent feature
+   * inherits it by passing a descriptor.
+   *
+   * Optional because there are two genuine caller classes: work a flight owns
+   * (which has no record of its own), and jobs that already ARE records — the
+   * standalone coverage job's manifest is durable, reconciled and surfaced
+   * already, so a second per-spawn record would be the duplicate this repo's
+   * reuse rule exists to prevent.
+   */
+  record?: AgentJobRecordRef
+  /** Where records go. Required alongside `record`; absent → nothing is written. */
+  agentJobLogsDir?: string
 }
 
 /** How long a stopped child gets to exit on SIGTERM before it is SIGKILLed. An
@@ -138,6 +155,10 @@ interface LiveAgentProcess {
   child: ChildProcess
   scope: string | undefined
   done: Promise<AgentProcessResult>
+  /** Set when a stop was requested, so the record settles `stopped` rather than
+   *  `failed` — "someone asked it to stop" and "it fell over" are different
+   *  endings, and a reader of the row cannot tell them apart from an exit code. */
+  stopRequestedBy?: 'user' | 'flight'
 }
 
 /** Every agent child currently running, keyed by the child itself so removal
@@ -149,7 +170,8 @@ interface LiveAgentProcess {
  *  so `cleanup()` had nothing to kill. */
 const liveAgentProcesses = new Map<ChildProcess, LiveAgentProcess>()
 
-async function terminate(entry: LiveAgentProcess, graceMs: number): Promise<void> {
+async function terminate(entry: LiveAgentProcess, graceMs: number, by: 'user' | 'flight' = 'flight'): Promise<void> {
+  entry.stopRequestedBy = by
   try { entry.child.kill('SIGTERM') } catch { /* already dead */ }
   const escalate = setTimeout(() => {
     try { entry.child.kill('SIGKILL') } catch { /* already dead */ }
@@ -172,10 +194,10 @@ async function terminate(entry: LiveAgentProcess, graceMs: number): Promise<void
  *  is the normal no-op case, not an error. */
 export async function stopAgentProcesses(
   scope: string,
-  opts: { graceMs?: number } = {},
+  opts: { graceMs?: number; by?: 'user' | 'flight' } = {},
 ): Promise<void> {
   const matches = [...liveAgentProcesses.values()].filter((entry) => entry.scope === scope)
-  await Promise.all(matches.map((entry) => terminate(entry, opts.graceMs ?? AGENT_STOP_GRACE_MS)))
+  await Promise.all(matches.map((entry) => terminate(entry, opts.graceMs ?? AGENT_STOP_GRACE_MS, opts.by ?? 'flight')))
 }
 
 /** Stop EVERY live agent child, scoped or not — the server-shutdown sweep.
@@ -223,15 +245,49 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   let stderr = ''
   let idleTimer: IdleTimer | undefined
 
+  // Best-effort throughout: a record is bookkeeping, and losing it must never take
+  // the spawn down with it.
+  const jobs = opts.record && opts.agentJobLogsDir ? agentJobStore(opts.agentJobLogsDir) : null
+  if (jobs && opts.record) {
+    try {
+      jobs.save({
+        ...opts.record,
+        scope: opts.spawnScope,
+        startedAt: new Date().toISOString(),
+        status: 'running',
+      })
+    } catch { /* bookkeeping only */ }
+  }
+  const settleRecord = (
+    status: AgentJobStatus,
+    patch: Partial<{ exitCode: number; note: string; stoppedBy: 'user' | 'flight' }> = {},
+  ): void => {
+    if (!jobs || !opts.record) return
+    try {
+      jobs.patch(opts.record.jobId, { status, endedAt: new Date().toISOString(), ...patch })
+    } catch { /* bookkeeping only */ }
+  }
+
   const done = new Promise<AgentProcessResult>((resolve, reject) => {
     let settled = false
     const finish = (err: Error | null, code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return
       settled = true
       idleTimer?.stop()
+      // Read the stop intent BEFORE dropping the registry entry — it is where the
+      // "someone asked" flag lives, and it is what separates a `stopped` ending
+      // from a `failed` one for a reader who has only the row.
+      const stoppedBy = liveAgentProcesses.get(child)?.stopRequestedBy
       liveAgentProcesses.delete(child)
-      if (err) reject(err)
-      else resolve({ code, signal, stdout, stderr })
+      if (err) {
+        settleRecord('failed', { note: `The agent could not be launched: ${err.message}` })
+        reject(err)
+        return
+      }
+      if (stoppedBy) settleRecord('stopped', { stoppedBy, note: 'Stopped on request; it did not finish its work.' })
+      else if (code === 0) settleRecord('done')
+      else settleRecord('failed', { ...(code === null ? {} : { exitCode: code }), note: `The agent exited ${signal ? `on ${signal}` : `with code ${code}`}.` })
+      resolve({ code, signal, stdout, stderr })
     }
     // Register the lifecycle listeners BEFORE starting the idle timer: a mocked
     // (or pathologically fast) timer could fire onIdle → kill → 'close'

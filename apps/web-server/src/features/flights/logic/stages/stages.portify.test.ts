@@ -148,6 +148,23 @@ describe('portify stage', () => {
     return adapter.onCheckpointResponse!(ctxObj.ctx, { choice: 'run' })
   }
 
+  it('teardown cancels the workflow named by the progress pin', async () => {
+    // The pin is written at START precisely so a pause landing during the long
+    // editing phase can still reach the workflow.
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/w-9') return { statusCode: 200, body: { status: 'editing' } }
+      return { statusCode: 200, body: {} }
+    }, calls)
+    const m = manifest({
+      stages: FLIGHT_STAGE_KEYS.map((key) => (key === 'portify'
+        ? { key, status: 'running' as const, progress: { workflowId: 'w-9' } }
+        : { key, status: 'pending' as const })),
+    })
+    await portifyStage(deps({ inject })).teardown(ctxFor(m).ctx)!.stop('pause')
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify/w-9/cancel')).toBe(true)
+  })
+
   it('skips only when the portified mark already exists', async () => {
     markPortified()
     const outcome = await portifyStage(deps()).run(ctxFor(manifest()).ctx)

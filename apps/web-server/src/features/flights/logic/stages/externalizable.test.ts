@@ -198,24 +198,157 @@ describe('externalizable — releasing the checkpoint', () => {
 })
 
 describe('externalizable — pass-through of teardown hooks', () => {
-  it('forwards interrupt and reset to the inner adapter', async () => {
+  it('forwards teardown and reset to the inner adapter', async () => {
     const calls: string[] = []
     const inner: StageAdapter = {
       run: async () => ({ kind: 'done' }),
-      interrupt: async (_ctx, kind) => { calls.push(`interrupt:${kind}`) },
+      teardown: () => ({ id: 'inner-job', stop: async (reason) => { calls.push(`stop:${reason}`) } }),
       reset: async () => { calls.push('reset') },
     }
     const { ctx } = ctxFor(manifest())
     const adapter = externalizable('scout', inner, spec)
-    await adapter.interrupt!(ctx, 'pause')
+    await adapter.teardown(ctx)!.stop('pause')
     await adapter.reset!(ctx)
-    expect(calls).toEqual(['interrupt:pause', 'reset'])
+    expect(calls).toEqual(['stop:pause', 'reset'])
   })
 
-  it('leaves both hooks absent when the inner adapter has neither', () => {
+  it('forwards the inner adapter\'s null when it owns nothing', () => {
+    // A wrapped stage parked on its external hand-off owns no local work — but the
+    // ANSWER still has to come from the inner adapter, not from the wrapper
+    // assuming one. Whoever executes the step, the artifacts are the same.
+    const inner: StageAdapter = { run: async () => ({ kind: 'done' }), teardown: () => null }
+    const { ctx } = ctxFor(manifest())
+    expect(externalizable('scout', inner, spec).teardown(ctx)).toBeNull()
+  })
+
+  it('leaves reset absent when the inner adapter has none, but never teardown', () => {
     const { inner } = innerAdapter()
     const adapter = externalizable('scout', inner, spec)
-    expect('interrupt' in adapter).toBe(false)
+    // teardown is REQUIRED, so the wrapper always carries it — forgetting to
+    // forward it is now a compile error rather than a stage that silently stops
+    // stopping the moment it is wrapped.
+    expect(typeof adapter.teardown).toBe('function')
     expect('reset' in adapter).toBe(false)
+  })
+})
+
+describe('rejectStaleSubmit — a submit must answer the hand-off it was given', () => {
+  /** A manifest parked on a real external-work hand-off, id and all. */
+  function handedOff(id: string, extra: Record<string, unknown> = {}): FlightManifest {
+    const base = manifest()
+    return {
+      ...base,
+      status: 'waiting-for-approval',
+      stages: base.stages.map((s) => (s.key === 'scout'
+        ? {
+            ...s,
+            status: 'waiting-for-approval' as const,
+            checkpoint: {
+              kind: 'external-work' as const,
+              message: 'do the scout step',
+              options: [...EXTERNAL_WORK_OPTIONS],
+              data: { stage: 'scout', prompt: 'do the scout step', handOffId: id, ...extra },
+            },
+          }
+        : s)),
+    }
+  }
+
+  it('mints an id on every hand-off so a submit can be matched to its ask', async () => {
+    const { inner } = innerAdapter()
+    const { ctx } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    const first = await externalizable('scout', inner, spec).run(ctx) as { checkpoint: { data: { handOffId: string } } }
+    const second = await externalizable('scout', inner, spec).run(ctx) as { checkpoint: { data: { handOffId: string } } }
+    expect(first.checkpoint.data.handOffId).toMatch(/^[0-9a-f]{8}$/)
+    // Distinct per ask — otherwise a resumed step could not tell the two apart.
+    expect(second.checkpoint.data.handOffId).not.toBe(first.checkpoint.data.handOffId)
+  })
+
+  it('consumes a submit carrying the matching id', async () => {
+    const { inner } = innerAdapter()
+    const { ctx } = ctxFor(handedOff('aaaaaaaa'))
+    const outcome = await externalizable('scout', inner, spec).onCheckpointResponse!(ctx, {
+      choice: 'submit', data: { configSource: 'x' }, token: 'aaaaaaaa',
+    })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: 'x' } })
+  })
+
+  it('DISCARDS a submit answering a superseded hand-off, and re-parks the current ask', async () => {
+    const { inner } = innerAdapter()
+    const { ctx, logs } = ctxFor(handedOff('bbbbbbbb'))
+    const outcome = await externalizable('scout', inner, spec).onCheckpointResponse!(ctx, {
+      choice: 'submit', data: { configSource: 'stale work' }, token: 'aaaaaaaa',
+    }) as { kind: string; checkpoint: { data: Record<string, unknown> } }
+
+    expect(outcome.kind).toBe('checkpoint')
+    // The stale result never reaches consume — that is the whole guarantee. Canary
+    // validates files on disk, so a stale-but-valid submit would otherwise settle
+    // the stage against an ask the user had already changed.
+    expect(outcome.checkpoint.data).toMatchObject({ lastRejection: 'stale_submission' })
+    // The id is NOT rotated: whoever holds this hand-off now must keep the token
+    // they were given.
+    expect(outcome.checkpoint.data.handOffId).toBe('bbbbbbbb')
+    expect(logs.join('')).toContain('discarded a submit answering a superseded hand-off')
+  })
+
+  it('does not stack a second rejection marker when a stale submit repeats', async () => {
+    const { inner } = innerAdapter()
+    const { ctx } = ctxFor(handedOff('bbbbbbbb', { lastRejection: 'stale_submission' }))
+    const outcome = await externalizable('scout', inner, spec).onCheckpointResponse!(ctx, {
+      choice: 'submit', token: 'wrong',
+    }) as { checkpoint: { data: Record<string, unknown>; message: string } }
+    expect(outcome.checkpoint.data.lastRejection).toBe('stale_submission')
+    // The ask itself is untouched — the marker lives on data, not spliced into the
+    // message, so it cannot accumulate prefixes.
+    expect(outcome.checkpoint.message).toBe('do the scout step')
+  })
+
+  it('accepts a submit for a hand-off parked BEFORE this gate existed', async () => {
+    // Compatibility window: a checkpoint already on disk carries no id. Refusing it
+    // would strand a flight mid-hand-off across the upgrade — an unanswerable step
+    // is worse than the race this closes.
+    const { inner } = innerAdapter()
+    const base = manifest()
+    const legacy: FlightManifest = {
+      ...base,
+      stages: base.stages.map((s) => (s.key === 'scout'
+        ? {
+            ...s,
+            checkpoint: {
+              kind: 'external-work' as const,
+              message: 'legacy',
+              options: [...EXTERNAL_WORK_OPTIONS],
+              data: { stage: 'scout', prompt: 'legacy' },
+            },
+          }
+        : s)),
+    }
+    const { ctx } = ctxFor(legacy)
+    const outcome = await externalizable('scout', inner, spec).onCheckpointResponse!(ctx, {
+      choice: 'submit', data: 'from before the upgrade',
+    })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: 'from before the upgrade' })
+  })
+
+  it('ignores the token on any answer that is not a submit', async () => {
+    // Only a submit carries a result that could settle the stage, so only a submit
+    // needs matching. Gating other answers would break checkpoints that happen to
+    // be parked on a stage which ALSO hands off.
+    const { inner } = innerAdapter()
+    const { ctx } = ctxFor(handedOff('bbbbbbbb'))
+    const outcome = await externalizable('scout', inner, spec).onCheckpointResponse!(ctx, {
+      choice: 'approve', data: 'not a submit',
+    })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: 'not a submit' })
+  })
+
+  it('never gates run-internally — a client must always be able to hand the step back', async () => {
+    // Even a superseded client: "I cannot do this" stays valid whenever it arrives.
+    const { inner, calls } = innerAdapter()
+    const { ctx } = ctxFor(handedOff('bbbbbbbb'))
+    await externalizable('scout', inner, spec).onCheckpointResponse!(ctx, {
+      choice: 'run-internally', token: 'stale-or-absent',
+    })
+    expect(calls).toEqual(['run'])
   })
 })

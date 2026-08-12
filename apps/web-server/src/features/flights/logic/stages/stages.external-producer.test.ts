@@ -196,6 +196,25 @@ describe('docs — external producer', () => {
     expect(String(cp.data.prompt)).toContain('Fan out the search when there is more than one repo')
   })
 
+  it('discards a docs submit answering a superseded hand-off', async () => {
+    // Same guarantee as scout's, but docs parks the hand-off from its OWN responder
+    // rather than through the wrapper — so it needs its own gate, and its own proof
+    // that the gate is wired.
+    const { ctx, setStage } = ctxFor(docsManifest())
+    setStage('docs', {
+      checkpoint: {
+        kind: 'external-work',
+        message: 'x',
+        data: { mode: 'collect-repo-docs', outPath: '/tmp/nope.md', outName: 'nope.md', handOffId: 'live-id' },
+      },
+    })
+    const outcome = await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'stale-id' })
+    expect(outcome).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { data: { lastRejection: 'stale_submission', handOffId: 'live-id' } },
+    })
+  })
+
   it('settles from the doc the CLIENT wrote — not from what it claims', async () => {
     const { ctx, setStage } = ctxFor(docsManifest())
     const outPath = path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md')
@@ -313,6 +332,25 @@ describe('specs-coverage — external producer', () => {
     const d = specsDeps({ coverage: { compute: (() => ledger(100)) as unknown as never, runEngine: (async () => ({})) as unknown as never } })
     const out = await specsCoverageStage(d).onCheckpointResponse!(ctx, { choice: 'submit', data: 'wrote 3 specs' })
     expect(out).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
+  })
+
+  it('discards a specs submit answering a superseded hand-off', async () => {
+    // The third stage that parks this kind, and the one where a stale submit is
+    // most costly: it would settle an authoring pass off a ledger recomputed for a
+    // different ask.
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', {
+      checkpoint: {
+        kind: 'external-work',
+        message: 'x',
+        data: { pass: { iteration: 1, validationErrors: '', passes: [] }, handOffId: 'live-id' },
+      },
+    })
+    const out = await specsCoverageStage(specsDeps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'stale-id' })
+    expect(out).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { data: { lastRejection: 'stale_submission', handOffId: 'live-id' } },
+    })
   })
 
   it('hands the pass back to the local agent on run-internally, keeping the pass number', async () => {

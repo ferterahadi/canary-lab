@@ -142,6 +142,32 @@ describe('flights routes', () => {
     expect(again.statusCode).toBe(409)
   })
 
+  it('a respond against a USER-paused flight returns the typed stand-down body', async () => {
+    // The reply an external client gets when the user stopped the flight while it
+    // was doing the work. A bare message reads as "retry"; `type` + `pauseReason`
+    // are what let it discard instead, and there is no other channel to tell it —
+    // nothing can interrupt that client mid-turn.
+    const adapters = allDone()
+    adapters.scout = {
+      teardown: () => null,
+      run: async () => ({ kind: 'checkpoint', checkpoint: { kind: 'config-approval', message: 'approve?' } }),
+      onCheckpointResponse: async () => ({ kind: 'done' as const }),
+    }
+    app = await buildApp(adapters)
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['waiting-for-approval'])
+
+    expect((await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })).statusCode).toBe(200)
+    const late = await app.inject({
+      method: 'POST',
+      url: `/api/flights/${flightId}/respond`,
+      body: { response: { choice: 'approve' } },
+    })
+    expect(late.statusCode).toBe(409)
+    expect(late.json()).toMatchObject({ type: 'flight_not_parked', status: 'paused', pauseReason: 'user' })
+  })
+
   it('R78: POST /autopilot flips the preference on a settled flight; a non-boolean body is a 400', async () => {
     app = await buildApp(allDone())
     const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })

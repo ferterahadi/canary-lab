@@ -39,6 +39,10 @@ export interface FlightStore {
   renameFeature(from: string, to: string): number
   /** Per-flight sidecar dir (agent-session refs, stage artifacts). */
   flightDir(flightId: string): string
+  /** The workspace logs root this store writes under. Exposed because sibling
+   *  stores are addressed from it — the restart wipe drops a stage's agent-job
+   *  rows alongside its sidecar dir, and both live under this root. */
+  readonly logsDir: string
   reconcileInterrupted(now: () => string): void
   onEvent(fn: (event: FlightStoreEvent) => void): void
   offEvent(fn: (event: FlightStoreEvent) => void): void
@@ -78,7 +82,7 @@ export class FlightRunStore implements FlightStore {
   private readonly listeners = new Set<(event: FlightStoreEvent) => void>()
   private readonly store: FileBackedTaskStore<FlightManifest>
 
-  constructor(logsDir: string) {
+  constructor(public readonly logsDir: string) {
     this.store = new FileBackedTaskStore<FlightManifest>({
       logsDir,
       dirName: 'flights',

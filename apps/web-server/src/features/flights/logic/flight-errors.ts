@@ -55,6 +55,28 @@ export class FlightExistsError extends Error {
   }
 }
 
+/** A checkpoint answer arrived for a flight that is no longer parked on one —
+ *  overwhelmingly because the user STOPPED it while the step was in an external
+ *  client's hands.
+ *
+ *  Typed rather than a bare Error because the answer to it is not "retry": the
+ *  agent holding that work has to discard it and stand down, and it cannot be
+ *  told so mid-turn (no server→client push exists). Its next tool call is the
+ *  only channel, so that call has to carry a machine-readable reason and the
+ *  live status — enough for the client to know whether the flight was paused for
+ *  it to resume, or aborted for good. */
+export class FlightNotParkedError extends Error {
+  readonly statusCode = 409
+  constructor(
+    public readonly flightId: string,
+    public readonly status: FlightManifest['status'],
+    public readonly pauseReason?: string,
+  ) {
+    super(`flight ${flightId} is ${status}, not waiting for approval`)
+    this.name = 'FlightNotParkedError'
+  }
+}
+
 /** A `--from-stage` entry whose prerequisites are not satisfied. The message
  *  names the missing prerequisite so the caller can fix it, not guess. */
 export class FlightStageEntryError extends Error {

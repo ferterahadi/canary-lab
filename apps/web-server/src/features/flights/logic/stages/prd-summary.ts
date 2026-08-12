@@ -5,6 +5,7 @@ import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
 import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter } from '../conductor'
+import { agentSpawnJob } from './stage-jobs'
 import { featureDirFor, type FlightStageDeps } from './context'
 import { agentProgressSink } from './agent-progress'
 
@@ -31,6 +32,10 @@ function newestDocMtime(featureDir: string): number {
 
 export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
   return {
+    // The PRD distiller. It spawns through the coverage engine rather than
+    // defaultSpawnAgent, but it carries the same scope, so it is reached the
+    // same way.
+    teardown: (ctx) => agentSpawnJob(ctx, 'prd-summary'),
     async run(ctx) {
       const m = ctx.manifest()
       const featureDir = featureDirFor(deps, m.feature)
@@ -56,6 +61,7 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
         // merely having asked. Same dir the agent-session ref is parked in, so
         // one value identifies this stage's spawn everywhere.
         spawnScope: stageDir,
+        agentJob: { record: { jobId: `${m.flightId}:prd-summary`, flightId: m.flightId, feature: m.feature, stage: 'prd-summary', agent: m.opts.agent ?? 'claude' }, logsDir: deps.logsDir },
         onOutput: agentProgressSink(ctx),
         onAgentSession: (session) => {
           writeWorkflowAgentRef(stageDir, {

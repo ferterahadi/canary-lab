@@ -124,6 +124,9 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
   }
 
   return {
+    // Owns nothing: synchronous file writes (the skeleton + the drafted config).
+    // Its `reset` below is what undoes them on a restart.
+    teardown: () => null,
     async run(ctx) {
       const scaffolded = ensureScaffolded(ctx)
       if (!scaffolded.ok) return scaffolded.outcome

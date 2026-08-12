@@ -129,6 +129,16 @@ describe('evaluation-export stage', () => {
   const yoloRun = (links?: { runId?: string; evaluationZip?: string }) =>
     manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true }, ...(links ? { links } : {}) })
 
+  it('teardown aborts the linked export task without erasing it', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject(() => ({ statusCode: 202, body: { aborted: true } }), calls)
+    const m = manifest({ links: { runId: 'run-1', evaluationTaskId: 'task-9' } })
+    await evaluationExportStage(deps({ inject })).teardown(ctxFor(m).ctx)!.stop('pause')
+    // The abort route, not the DELETE: a paused flight must leave the record and
+    // its log there to read.
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/evaluation-exports/task-9/abort')).toBe(true)
+  })
+
   it('parks on export-mode (raw vs localized) before starting, non-yolo', async () => {
     const outcome = await evaluationExportStage(deps()).run(ctxFor(manifest({ links: { runId: 'run-1' } })).ctx)
     expect(outcome).toMatchObject({

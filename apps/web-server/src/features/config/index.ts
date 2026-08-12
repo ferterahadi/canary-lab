@@ -12,6 +12,7 @@ import { loadBundledSabotageSkills, sabotageSkillsForFeature } from '../benchmar
 import { removeFlightRecordsForFeature } from '../flights/logic/conductor'
 import { isActiveFlightStatus } from '../../../../../shared/flights/types'
 import { renameFeatureRecords } from './logic/feature-rename'
+import { agentJobStore as sharedAgentJobStore } from '../agent-sessions/logic/agent-jobs/store'
 import {
   buildAgentSessionResponse,
   resolveWorkflowAgentRef,
@@ -97,7 +98,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
       blockedBy: featureRenameBlockedBy,
       apply: (from, to) => renameFeatureRecords(from, to, {
         logsDir,
-        stores: [flightStore, coverageJobStore, portifyStore, benchmarkStore, dirtySpecStore],
+        stores: [flightStore, coverageJobStore, portifyStore, benchmarkStore, dirtySpecStore, sharedAgentJobStore(logsDir)],
         activeWork: featureRenameBlockedBy,
       }).moved,
     },

@@ -2,14 +2,14 @@ import type { FlightStore } from './store'
 import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStageKey } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
-import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError } from './flight-errors'
+import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError } from './flight-errors'
 import { FlightEntryMode, StageAdapters, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
 
 export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
 
-export { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, stampSystemLine } from './flight-errors'
+export { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, stampSystemLine } from './flight-errors'
 
-export type { FlightEntryMode, StageAdapter, StageAdapters, StageContext, StageOutcome } from './flight-stages'
+export type { FlightEntryMode, StageAdapter, StageAdapters, StageContext, StageJob, StageOutcome } from './flight-stages'
 
 export interface StartFlightArgs {
   feature: string
@@ -257,13 +257,14 @@ export function setFlightAutopilot(
 
 /** User-initiated pause of an active flight. Parks FIRST (so the drive loop's
  *  re-read sees `paused` before the abort lands — the pause-race rule), then
- *  cancels the in-flight stage work via the drive's AbortController and the
- *  stage's best-effort interrupt hook — which for the run stage aborts the run,
- *  so pause stops everything the user can see happening. The open stage flips
- *  back to `pending` so resume re-runs it from its own postcondition check; a
- *  checkpoint that was parked is cleared the same way (re-running the stage
- *  re-issues it). */
-export function pauseFlight(flightId: string, deps: FlightConductorDeps): FlightManifest {
+ *  cancels the in-flight stage work via the drive's AbortController and AWAITS
+ *  the open stage's teardown, so everything the user can see happening — a
+ *  spawned agent, a run, a portify workflow, an export — is stopped before this
+ *  resolves. The route replies off the back of it, and "we sent a signal" is not
+ *  a promise worth making. The open stage flips back to `pending` so resume
+ *  re-runs it from its own postcondition check; a checkpoint that was parked is
+ *  cleared the same way (re-running the stage re-issues it). */
+export async function pauseFlight(flightId: string, deps: FlightConductorDeps): Promise<FlightManifest> {
   const { store } = deps
   const now = deps.now ?? (() => new Date().toISOString())
   const current = store.get(flightId)
@@ -296,8 +297,15 @@ export function pauseFlight(flightId: string, deps: FlightConductorDeps): Flight
   }
   store.save(manifest)
   driveControllers.get(flightId)?.abort()
-  if (openStage) void interruptStage(flightId, openStage.key, 'pause', deps)
-  return manifest
+  // Awaited, not fired and forgotten. The park above already happened, so the
+  // drive cannot advance while we wait, and the pause-race rule still holds.
+  if (openStage) await interruptStage(flightId, openStage.key, 'pause', deps)
+  // Re-read: the teardown writes its own log line through the store, so the
+  // snapshot built above is already one write stale. Callers render this
+  // response — a client shown a record with no teardown line would have to wait
+  // for the broadcast to learn what stopped. Falls back to the snapshot only if
+  // the record was deleted out from under us mid-teardown.
+  return store.get(flightId) ?? manifest
 }
 
 /** "Start over" — restart this record from stage 1 with its own stored
@@ -381,7 +389,7 @@ export function respondToFlightCheckpoint(
   const current = store.get(flightId)
   if (!current) throw new Error(`flight not found: ${flightId}`)
   if (current.status !== 'waiting-for-approval') {
-    throw new Error(`flight ${flightId} is ${current.status}, not waiting for approval`)
+    throw new FlightNotParkedError(flightId, current.status, current.pauseReason)
   }
   const stage = current.stages.find((s) => s.status === 'waiting-for-approval')
   if (!stage) throw new Error(`flight ${flightId} has no stage waiting for approval`)

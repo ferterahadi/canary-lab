@@ -30,6 +30,7 @@ vi.mock('child_process', async (importOriginal) => {
 })
 
 import { defaultSpawnAgent, extractJson, pollUntil, PollTimeoutError } from './context'
+import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
 
 let tmpDir: string
 
@@ -66,6 +67,36 @@ describe('context helpers', () => {
   })
 
   describe('defaultSpawnAgent', () => {
+    it('writes a durable record for a claude spawn, joined to its pinned session', async () => {
+      process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript('echo \'{"type":"result","result":"ok"}\'')
+      const stageDir = path.join(tmpDir, 'stage-rec')
+      fs.mkdirSync(stageDir, { recursive: true })
+      await defaultSpawnAgent({
+        prompt: 'p', cwd: tmpDir, stageDir,
+        job: { flightId: 'fl-1', feature: 'checkout', stage: 'scout', logsDir },
+      })
+      const rec = agentJobStore(logsDir).get('fl-1:scout')!
+      expect(rec).toMatchObject({ status: 'done', flightId: 'fl-1', stage: 'scout', agent: 'claude' })
+      // The pinned session id is the join to the transcript — same id the
+      // agent-session ref carries, so a row and its timeline agree.
+      const ref = JSON.parse(fs.readFileSync(path.join(stageDir, 'agent-session.json'), 'utf-8'))
+      expect(rec.sessionId).toBe(ref.sessions.claude.sessionId)
+    })
+
+    it('records a codex spawn, which pins no session id', async () => {
+      process.env.CANARY_LAB_CODEX_BIN = fakeAgentScript('echo "codex answer"')
+      const stageDir = path.join(tmpDir, 'stage-rec-codex')
+      fs.mkdirSync(stageDir, { recursive: true })
+      await defaultSpawnAgent({
+        prompt: 'p', cwd: tmpDir, stageDir, agent: 'codex',
+        job: { flightId: 'fl-1', feature: 'checkout', stage: 'docs', logsDir },
+      })
+      const rec = agentJobStore(logsDir).get('fl-1:docs')!
+      expect(rec).toMatchObject({ status: 'done', agent: 'codex' })
+      expect(rec.sessionId).toBeUndefined()
+      delete process.env.CANARY_LAB_CODEX_BIN
+    })
+
     it('recovers the final text on a clean exit and writes the agent-session ref', async () => {
       process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript('echo \'{"type":"result","result":"hello from claude"}\'')
       const stageDir = path.join(tmpDir, 'stage-ok')

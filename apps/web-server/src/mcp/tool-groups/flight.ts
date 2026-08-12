@@ -28,13 +28,17 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       // so "review it in the web UI" is not an action the client can take. Keep
       // the structural fields and point at the prompt file the stage wrote, so an
       // oversized task degrades to a Read instead of becoming undoable.
-      const d = checkpoint.data as { stage?: string; promptPath?: string; context?: unknown }
+      const d = checkpoint.data as { stage?: string; promptPath?: string; context?: unknown; handOffId?: string; lastRejection?: string }
       checkpoint = checkpoint.kind === 'external-work' && d.promptPath
         ? {
             ...checkpoint,
             data: {
               stage: d.stage,
               promptPath: d.promptPath,
+              // Structural, not payload: without the id the client cannot submit
+              // at all, so it must survive the same trim that drops the prompt.
+              ...(d.handOffId ? { handOffId: d.handOffId } : {}),
+              ...(d.lastRejection ? { lastRejection: d.lastRejection } : {}),
               promptOmitted: true,
               reason: 'the task prompt is over the inline budget — Read promptPath for the full task instead of expecting it inline',
               ...(d.context !== undefined && JSON.stringify(d.context).length <= FLIGHT_DATA_INLINE_BUDGET ? { context: d.context } : {}),
@@ -89,14 +93,26 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       // rather than the profile instructions because the CLI truncates a server's
       // `instructions` at 2048 chars and the flight profile is already past it.
       if (cp?.kind === 'external-work') {
-        const data = cp.data as { stage?: string; prompt?: string; promptPath?: string; context?: unknown } | undefined
+        const data = cp.data as { stage?: string; prompt?: string; promptPath?: string; context?: unknown; handOffId?: string; lastRejection?: string } | undefined
         const where = data?.promptPath && !data.prompt
           ? `Read checkpoint.data.promptPath (${data.promptPath}) for the task — it was too large to inline`
           : 'checkpoint.data.prompt is the task'
+        // A submit was already refused here. Lead with that: an agent that reads
+        // the task first and the rejection second tries the same thing again.
+        const rejected = data?.lastRejection === 'stale_submission'
+          ? 'A previous submit for this step was DISCARDED because it answered an EARLIER hand-off — most likely the user stopped and resumed the flight while that work was in progress. Anything that client produced is void. '
+          : ''
+        // The token rule, and the cheap check that makes it rare: an external step
+        // can run for many minutes, and nothing can interrupt a client mid-turn, so
+        // re-reading state right before submitting is the only way it finds out
+        // early rather than at the rejection.
+        const tokenRule = data?.handOffId
+          ? `Pass token:"${data.handOffId}" on your submit — it identifies THIS hand-off. Re-call get_flight immediately before submitting (and between fan-out rounds, or roughly every 10 minutes of work): if the status is no longer waiting-for-approval, or the handOffId has changed, the user stopped or re-asked this step — discard your result and tell them instead of submitting. `
+          : ''
         // Advice matched to what THIS client can do, rather than one line that
         // tells a subagent-less chat client to fan out and then reads its
         // serial behaviour as disobedience.
-        return `This flight hands its ${String(data?.stage ?? 'stage')} step to YOU (stage_producer:"external"). ${where}, rendered exactly as Canary's own agent would receive it. ${fanOutAdviceFor(ctx.clientFacts())} Do the work with your tools now (write the files the prompt names, on the real paths it gives), then release with respond_flight_checkpoint(flightId, choice:"submit", data:<the result shape the prompt asks for>). Canary re-validates independently — the config must parse, the doc must exist on disk, the specs must compile and raise the computed ledger — so a claim of success that did not land on disk re-parks or fails the stage rather than passing. If you cannot do this step (no file tools, permission refused, wrong machine), answer choice:"run-internally" and Canary's local agent takes just that step; the flight continues either way.`
+        return `${rejected}This flight hands its ${String(data?.stage ?? 'stage')} step to YOU (stage_producer:"external"). ${where}, rendered exactly as Canary's own agent would receive it. ${tokenRule} ${fanOutAdviceFor(ctx.clientFacts())} Do the work with your tools now (write the files the prompt names, on the real paths it gives), then release with respond_flight_checkpoint(flightId, choice:"submit", data:<the result shape the prompt asks for>). Canary re-validates independently — the config must parse, the doc must exist on disk, the specs must compile and raise the computed ledger — so a claim of success that did not land on disk re-parks or fails the stage rather than passing. If you cannot do this step (no file tools, permission refused, wrong machine), answer choice:"run-internally" and Canary's local agent takes just that step; the flight continues either way.`
       }
       if (cp?.kind === 'config-approval') {
         return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
@@ -114,7 +130,14 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     }
     if (view.status === 'running') return 'Flight is running — re-call get_flight to follow it; it parks on checkpoints and settles to done/paused/failed.'
     if (view.status === 'paused' && view.pauseReason === 'queued') return 'Flight is queued — it is waiting its turn behind another flight on the same repo(s) and starts automatically when that repo frees. No action needed; tell the user it is queued, not stuck. Only if they want it started early, re-call start_flight (it resumes a queued flight now).'
-    if (view.status === 'paused') return 'Flight is paused (a stage failed, the server restarted, or the user paused it). Fix the cause if needed, then start_flight on the same repos resumes it from the first open stage — its repos and intent are frozen, so re-call without new repoPaths/description (they are reused).'
+    // A user pause is a DECISION, not a fault to recover from. Telling an agent to
+    // resume here was the single most wrong sentence in this surface once pause
+    // started meaning "stop": the user presses stop and their assistant restarts it.
+    if (view.status === 'paused' && view.pauseReason === 'user') {
+      return 'The USER paused this flight — its stage work (spawned agents, run, portify workflow, export) was stopped. Do not resume it unless they ask. If you were doing an external-work step for it, discard that result and do not submit it. When they do want it continued, start_flight on the same repos resumes from the first open stage (repos and intent are frozen — re-call without new repoPaths/description).'
+    }
+    if (view.status === 'paused') return 'Flight is paused (a stage failed, or the server restarted). Fix the cause if needed, then start_flight on the same repos resumes it from the first open stage — its repos and intent are frozen, so re-call without new repoPaths/description (they are reused).'
+    if (view.status === 'aborted') return 'Flight was ABORTED — terminal, and it will not continue. Discard any work in progress for it. Only start_flight with redo:true begins a new attempt, and only if the user asks for one.'
     if (view.status === 'done') return 'Flight is done — links.evaluationZip is the deliverable archive. Point the user at reviewing it now: unzip and open evaluation.html (per-test reasoning + verdicts; video playback where the tests drive a browser). Reviewing the evaluation IS the core loop, not an optional extra.'
     return ''
   }
@@ -208,6 +231,24 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     return asJsonResult({ ...view, next: flightNext(view) })
   })
 
+  // The current stage's agent record, when there is one. Two fields, so it is
+  // inline-budget safe — enough for a client to know an agent is live and that
+  // stop_flight_agent could reach it, without shipping the whole row.
+  const agentJobOf = async (flightId: string): Promise<{ jobId: string; status: string; stage?: string } | null> => {
+    if (!deps.flightsRequest) return null
+    try {
+      const resp = await deps.flightsRequest({ method: 'GET', url: `/api/agent-jobs?flight=${encodeURIComponent(flightId)}` })
+      if (resp.statusCode !== 200) return null
+      const jobs = (resp.body as { jobs?: Array<{ jobId: string; status: string; stage?: string }> }).jobs ?? []
+      // Prefer a live one; otherwise the newest row, so a tombstone after a crash
+      // is visible rather than the flight looking like it never ran an agent.
+      return jobs.find((j) => j.status === 'running') ?? jobs[0] ?? null
+    } catch {
+      // Never let bookkeeping sink the flight read.
+      return null
+    }
+  }
+
   registerTool('get_flight', {
     description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming.',
     inputSchema: {
@@ -236,7 +277,91 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         : `The failed ${remedy.stage} stage is blocked by uncommitted changes in ${remedy.repos.map((r) => `"${r.name}" (${r.modified} files, ${r.path})`).join(', ')}. Help the user clean each repo — \`git stash push -u\` (undoable) or commit — then start_flight(feature) to resume; the stage retries automatically.`
       return asJsonResult({ ...view, remedy, next: `${flightNext(view)} ${fix}`.trim() })
     }
+    const agentJob = await agentJobOf(flightId)
+    return asJsonResult({ ...view, ...(agentJob ? { agentJob } : {}), next: flightNext(view) })
+  })
+
+  // Two tools rather than one with a mode argument: pause is safe and resumable,
+  // abort is terminal and by this repo's convention gates on `confirm` (pattern:
+  // abort_run). A single mode-arg tool cannot express "confirm required only for
+  // abort" in its schema, so it would either nag on the safe path or leave the
+  // terminal one unguarded.
+  registerTool('pause_flight', {
+    description:
+      'Stop a running flight, resumably. Everything the flight had in progress is stopped before this returns — the stage\'s spawned agent, its test run (including a repair in progress), a portify workflow, an evaluation export — so a success here means the work is stopped, not merely signalled. A verified portify review awaiting an answer is deliberately preserved. The record and its stage evidence are kept: start_flight on the same repos resumes from the first open stage (OMIT repoPaths/description — they are frozen and reused). Use this when the user says to stop, pause, or hold a flight. If you are executing an external-work step for this flight, stop that work and discard the result rather than submitting it.',
+    inputSchema: {
+      flightId: z.string(),
+    },
+  }, async ({ flightId }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const resp = await deps.flightsRequest({
+      method: 'POST',
+      url: `/api/flights/${encodeURIComponent(flightId)}/pause`,
+    })
+    if (resp.statusCode !== 200) {
+      return errorResult(`pause failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
+    }
+    const view = flightView(resp.body)
     return asJsonResult({ ...view, next: flightNext(view) })
+  })
+
+  registerTool('abort_flight', {
+    description:
+      'End a flight for good. Requires `confirm: true`: this is terminal, unlike pause_flight. It stops the same live work a pause does, then settles the record `aborted` — no resume. A queued sibling flight waiting on the same repo(s) may start as soon as this one releases them. Only start_flight with redo:true begins a new attempt afterwards, and a redo WIPES the record\'s artifacts. Prefer pause_flight unless the user wants the flight abandoned.',
+    inputSchema: {
+      flightId: z.string(),
+      confirm: z.literal(true).describe('Must be true. Aborting is terminal — pause_flight is the resumable stop.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ flightId }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const resp = await deps.flightsRequest({
+      method: 'POST',
+      url: `/api/flights/${encodeURIComponent(flightId)}/abort`,
+    })
+    if (resp.statusCode !== 200) {
+      return errorResult(`abort failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
+    }
+    const view = flightView(resp.body)
+    return asJsonResult({ ...view, next: flightNext(view) })
+  })
+
+  registerTool('stop_flight_agent', {
+    description:
+      "Stop just the agent a flight's CURRENT stage is running, instead of pausing the whole flight. Requires `confirm: true`. Be clear about what this does: the flight is waiting on that stage, so killing its agent FAILS the stage attempt and the flight parks with pauseReason \"stage-failed\" — it does not carry on. What you get over pause_flight is narrower and better recorded: the test run and the evaluation export are left alone, the stage keeps the error rather than being reset to not-started, and queued sibling flights on the same repo(s) are released. Resuming re-runs the stage. Use pause_flight when the user wants the whole flight held; use this when one agent is misbehaving and everything else should stay up.",
+    inputSchema: {
+      flightId: z.string(),
+      confirm: z.literal(true).describe('Must be true. This fails the running stage.'),
+    },
+    annotations: { destructiveHint: true, idempotentHint: false },
+  }, async ({ flightId }) => {
+    if (!deps.flightsRequest) return flightsUnavailable()
+    const listed = await deps.flightsRequest({ method: 'GET', url: `/api/agent-jobs?flight=${encodeURIComponent(flightId)}` })
+    if (listed.statusCode !== 200) {
+      return errorResult(`could not read this flight's agent jobs (${listed.statusCode})`)
+    }
+    const live = ((listed.body as { jobs?: Array<{ jobId: string; status: string; stage?: string }> }).jobs ?? [])
+      .filter((j) => j.status === 'running')
+    if (live.length === 0) {
+      // Not an error: the honest answer is that there is nothing to stop, and the
+      // reason matters — a flight parked on a checkpoint has no live agent, and one
+      // whose stage delegated its work has a run or workflow instead.
+      return asJsonResult({
+        stopped: [],
+        next: 'This flight has no live agent right now — it may be parked on a checkpoint, running a delegated job (a test run, a portify workflow, an export), or between stages. Call get_flight to see where it is; pause_flight stops a flight whatever it is doing.',
+      })
+    }
+    const stopped: Array<{ jobId: string; stage?: string }> = []
+    for (const job of live) {
+      const resp = await deps.flightsRequest({ method: 'POST', url: `/api/agent-jobs/${encodeURIComponent(job.jobId)}/stop` })
+      if (resp.statusCode === 202) stopped.push({ jobId: job.jobId, ...(job.stage ? { stage: job.stage } : {}) })
+    }
+    return asJsonResult({
+      stopped,
+      next: stopped.length
+        ? 'Stopped. The stage that agent belonged to will fail and the flight parks stage-failed (resumable) — its run/export were left alone, and a queued sibling flight on the same repos may now start. Call get_flight to confirm, and start_flight on the same repos to re-run the stage when the user wants it.'
+        : 'Nothing was stopped — the agents finished on their own between the read and the stop. Call get_flight for the flight\'s current state.',
+    })
   })
 
   registerTool('respond_flight_checkpoint', {
@@ -247,16 +372,34 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       values: z.record(z.string(), z.string()).optional().describe('missing-env only: KEY→value map, written to the missing env file then captured.'),
       data: z.unknown().optional().describe('config-approval only: { configSource } with the hand-edited config — written through to the feature\'s on-disk feature.config.cjs before validation.'),
       feedback: z.string().optional().describe('prd-source agent choices and portify-apply "revise" only: for prd-source, what went wrong last time (added to the collector agent\'s prompt); for portify-apply revise (where it is REQUIRED), what the agent should change before the double-boot re-verify.'),
+      token: z.string().optional().describe('external-work submit only: the `handOffId` from the checkpoint data you are answering. Identifies WHICH hand-off your result belongs to — without it, a result you started before the user paused and resumed the flight could settle a step against an ask that has since changed. Pass it back verbatim; a submit carrying a superseded id is discarded and the step re-parks.'),
     },
-  }, async ({ flightId, choice, values, data, feedback }) => {
+  }, async ({ flightId, choice, values, data, feedback, token }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
     const resp = await deps.flightsRequest({
       method: 'POST',
       url: `/api/flights/${encodeURIComponent(flightId)}/respond`,
-      payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}), ...(feedback ? { feedback } : {}) } },
+      payload: { response: { ...(choice ? { choice } : {}), ...(values ? { values } : {}), ...(data !== undefined ? { data } : {}), ...(feedback ? { feedback } : {}), ...(token ? { token } : {}) } },
     })
     if (resp.statusCode !== 200) {
-      return errorResult(`respond failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
+      const body = resp.body as { error?: string; type?: string; status?: string; pauseReason?: string }
+      // The one rejection whose recipient may have just spent minutes on work
+      // nobody wants any more. A bare error string reads as "retry" — which is the
+      // opposite of what has to happen, and there is no other channel to say so:
+      // an external client cannot be interrupted mid-turn, so this reply IS the
+      // stop signal.
+      if (body.type === 'flight_not_parked') {
+        return asJsonResult({
+          type: 'flight_stopped',
+          flightId,
+          status: body.status,
+          ...(body.pauseReason ? { pauseReason: body.pauseReason } : {}),
+          next: body.status === 'aborted'
+            ? 'This flight was ABORTED — it will not continue. Discard the work you were doing for it and do not resubmit. Tell the user it was stopped; only start_flight with redo:true begins a new attempt, and only if they ask.'
+            : 'The flight is no longer waiting on you — the user stopped it, or it moved on. DISCARD the result you were about to submit and stop working on this step. Do not resubmit and do not resume the flight yourself; tell the user it was stopped. Files you already wrote stay on disk, and if they resume, a fresh hand-off re-parks with a new handOffId.',
+        })
+      }
+      return errorResult(`respond failed (${resp.statusCode}): ${String(body.error ?? '')}`)
     }
     const view = flightView(resp.body)
     return asJsonResult({ ...view, next: flightNext(view) })

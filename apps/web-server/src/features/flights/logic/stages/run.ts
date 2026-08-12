@@ -4,6 +4,7 @@ import type { RunSummary } from '../../../runs/logic/run-store'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
+import { runJob } from './stage-jobs'
 import { CHECKPOINT_OPTIONS } from '../types'
 
 // Start the real run through the runs route — auto-heal per the workspace's
@@ -134,8 +135,8 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
       const stage = ctx.manifest().stages.find((s) => s.key === 'run')
       return { kind: 'checkpoint', checkpoint: stage!.checkpoint! }
     },
-    // Pausing the flight ends its run, exactly as aborting does — so `kind` is
-    // not read. "Pause" is read as "stop what is happening", and while the run
+    // Pausing the flight ends its run, exactly as aborting does — so the reason
+    // is not read. "Pause" is read as "stop what is happening", and while the run
     // is HEALING what is happening is an agent editing the user's repo; a pause
     // that left it writing was a broken promise the UI could not explain.
     // Stopping only the run stays available on the Test Run stage (Stop run /
@@ -144,12 +145,9 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     // The cost is deliberate: repair cycles in progress are lost and Continue
     // starts a fresh run (see startAndWait's `aborted` note). Losing a heal
     // cycle beats an agent that keeps writing after you asked it to stop.
-    async interrupt(ctx) {
+    teardown(ctx) {
       const runId = ctx.manifest().links?.runId
-      if (!runId) return
-      const existing = await readManifest(deps, runId)
-      if (!existing || isTerminalRunStatus(existing.status)) return
-      await deps.inject({ method: 'POST', url: `/api/runs/${encodeURIComponent(runId)}/abort` })
+      return runId ? runJob(deps, runId) : null
     },
     // R78 restart wipe: the run record (logs/runs/<runId>/) is this stage's
     // artifact — delete it through the runs route so the store's own guards
@@ -175,6 +173,10 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
 
 export function healStage(deps: FlightStageDeps): StageAdapter {
   return {
+    // Owns nothing: this stage only mirrors the run's own heal counters into the
+    // flight record. The repair it reports about belongs to the run stage, whose
+    // teardown stops it.
+    teardown: () => null,
     async run(ctx) {
       const runId = ctx.manifest().links?.runId
       if (!runId) return { kind: 'skipped', reason: 'no run to mirror' }

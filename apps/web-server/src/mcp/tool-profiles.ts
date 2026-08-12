@@ -53,6 +53,9 @@ export type CanaryLabMcpToolName =
   | 'start_flight'
   | 'get_flight'
   | 'respond_flight_checkpoint'
+  | 'pause_flight'
+  | 'abort_flight'
+  | 'stop_flight_agent'
   | 'get_heal_context'
   | 'get_failure_detail'
   | 'start_run'
@@ -164,6 +167,14 @@ export const FLIGHT_TOOLS = [
   'start_flight',
   'get_flight',
   'respond_flight_checkpoint',
+  // Stopping is part of driving. Without these, an MCP client could start a
+  // flight and answer its checkpoints but never stop one — the promise lived
+  // only in the web UI's Pause button, so an agent's only way out was to stop
+  // polling and leave the pipeline running.
+  'pause_flight',
+  'abort_flight',
+  // Narrower than abort: stops the stage's agent and leaves the run/export up.
+  'stop_flight_agent',
   'write_feature_doc',
 ] as const satisfies readonly CanaryLabMcpToolName[]
 

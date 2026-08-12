@@ -4,6 +4,7 @@ import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightExistsError } from './flight-errors'
 import { defaultFlightId, driveControllers, freshStages, interruptStage } from './flight-stages'
+import { agentJobStore } from '../../agent-sessions/logic/agent-jobs/store'
 import { FlightConductorDeps, StartFlightArgs, resumeFlight } from './conductor'
 
 /** Create a flight record WITHOUT driving it — parked `paused`/`queued` for
@@ -71,6 +72,10 @@ export function deleteFlight(flightId: string, deps: FlightConductorDeps): void 
     throw new Error(`flight ${flightId} is ${current.status} — stop it before deleting`)
   }
   store.remove(flightId)
+  // The flight's agent history goes with it: the transcripts those rows point at
+  // live in the flight dir the store just removed, so keeping them would leave
+  // rows referring to nothing.
+  try { agentJobStore(store.logsDir).removeForFlight(flightId) } catch { /* best-effort */ }
 }
 
 /** R76: deleting a FEATURE deletes its flight history with it — one deletion
@@ -93,10 +98,11 @@ export function removeFlightRecordsForFeature(
   return { removed: records.length }
 }
 
-/** Mark a flight aborted. The drive loop notices after the in-flight stage
- *  settles and stops advancing; already-spawned stage work is responsible for
- *  its own teardown (run abort, portify cancel) via the existing subsystems. */
-export function abortFlight(flightId: string, deps: FlightConductorDeps): FlightManifest {
+/** Mark a flight aborted, stopping the open stage's work before resolving —
+ *  the same awaited teardown as pause, because "stop" means the same thing on a
+ *  terminal end as on a resumable one. The drive loop notices after the in-flight
+ *  stage settles and stops advancing. */
+export async function abortFlight(flightId: string, deps: FlightConductorDeps): Promise<FlightManifest> {
   const store = deps.store
   const now = deps.now ?? (() => new Date().toISOString())
   const current = store.get(flightId)
@@ -119,7 +125,11 @@ export function abortFlight(flightId: string, deps: FlightConductorDeps): Flight
   }
   store.save(manifest)
   driveControllers.get(flightId)?.abort()
-  if (openStage) void interruptStage(flightId, openStage.key, 'abort', deps)
+  // Before the drain: a queued sibling waiting on these repos must not boot while
+  // this flight's run or workflow is still being torn down.
+  if (openStage) await interruptStage(flightId, openStage.key, 'abort', deps)
+  // Same re-read as pause: the teardown's log line lands after the snapshot above.
+  const settled = store.get(flightId) ?? manifest
   drainQueuedFlights(deps)
-  return manifest
+  return settled
 }

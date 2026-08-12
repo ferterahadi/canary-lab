@@ -1,6 +1,7 @@
+import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import type { FlightStageKey } from '../types'
+import type { FlightCheckpointResponse, FlightStageKey } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { CHECKPOINT_OPTIONS } from '../types'
 
@@ -99,10 +100,56 @@ export function externalWorkCheckpoint(
       data: {
         stage: stageKey,
         prompt,
+        // Identifies THIS hand-off, so a submit can be matched to the ask it
+        // answers — see rejectStaleSubmit for the race that closes. A re-park
+        // reuses the checkpoint wholesale and so keeps its id; only a genuinely
+        // new ask mints one.
+        handOffId: crypto.randomBytes(4).toString('hex'),
         ...(promptPath ? { promptPath } : {}),
         ...(opts.context === undefined ? {} : { context: opts.context }),
       },
     },
+  }
+}
+
+/** Refuse a `submit` that answers a hand-off this stage has already moved past,
+ *  and re-park the CURRENT ask so whoever holds it now can still answer.
+ *  Returns null when the submit is legitimate (or is not a submit at all).
+ *
+ *  The race this closes is not the obvious one. A pause CLEARS the checkpoint, so
+ *  a submit arriving while the flight is parked is already refused by the status
+ *  guard. But a RESUME re-parks a fresh hand-off and the flight is
+ *  waiting-for-approval again — from then on the previous client's late submit was
+ *  accepted, and because Canary validates files-on-disk, stale-but-valid work
+ *  could settle the stage against an ask the user had since changed.
+ *
+ *  Shared rather than inlined: three stages park this kind (scout via the wrapper,
+ *  docs and specs-coverage from their own responders), and a gate that only two of
+ *  them applied would be the same partial fix this whole change exists to stop. */
+export function rejectStaleSubmit(
+  ctx: StageContext,
+  stageKey: FlightStageKey,
+  response: FlightCheckpointResponse,
+): StageOutcome | null {
+  if (response.choice !== 'submit') return null
+  const checkpoint = ctx.manifest().stages.find((s) => s.key === stageKey)?.checkpoint
+  const data = checkpoint?.data as { handOffId?: unknown } | undefined
+  const parkedId = typeof data?.handOffId === 'string' ? data.handOffId : undefined
+  // No id to match means the hand-off predates this gate — an in-flight one must
+  // stay answerable across the upgrade rather than becoming unanswerable.
+  if (parkedId === undefined || response.token === parkedId) return null
+  ctx.appendLog(`[${stageKey}] discarded a submit answering a superseded hand-off\n`)
+  // Re-park the SAME checkpoint: it is already the right ask, its `handOffId` is
+  // the one the current holder was given (rotating it would invalidate them), and
+  // re-deriving the prompt could produce a different one. `lastRejection` is what
+  // the agent-facing surfaces read to lead with "discard, do not resubmit" — set
+  // on the data rather than spliced into the message so a second stale submit
+  // does not stack a second prefix.
+  // Both non-null by here: a `parkedId` only exists because `checkpoint.data`
+  // carried a string `handOffId`.
+  return {
+    kind: 'checkpoint',
+    checkpoint: { ...checkpoint!, data: { ...data!, lastRejection: 'stale_submission' } },
   }
 }
 
@@ -131,16 +178,25 @@ export function externalizable(
         // Documented StageAdapter default when a stage has no responder.
         return inner.run(ctx)
       }
+      // Handing the step BACK is always legitimate, whoever asks and whenever —
+      // a client that cannot do the work must be able to say so even if its
+      // hand-off has been superseded. Only a `submit` carries a result that could
+      // settle the stage, so only a submit is gated.
       if (response.choice === 'run-internally') {
         ctx.appendLog(`[${stageKey}] client handed the step back — running it here\n`)
         return inner.run(ctx)
       }
+      const stale = rejectStaleSubmit(ctx, stageKey, response)
+      if (stale) return stale
       return spec.consume(ctx, response.data)
     },
 
     // R78's restart wipe and the pause teardown must behave identically whoever
-    // executed the stage — the artifacts on disk are the same either way.
-    ...(inner.interrupt ? { interrupt: inner.interrupt.bind(inner) } : {}),
+    // executed the stage — the artifacts on disk are the same either way. The
+    // teardown forward is UNCONDITIONAL now that it is a required method, so a
+    // wrapper that forgot it is a compile error rather than a stage that silently
+    // stops stopping the moment it is wrapped.
+    teardown: (ctx) => inner.teardown(ctx),
     ...(inner.reset ? { reset: inner.reset.bind(inner) } : {}),
   }
 }

@@ -42,6 +42,7 @@ import { getInstalledPackageName, getInstalledPackageVersion } from '../../../sh
 import { PaneBroker } from './features/runs/logic/pane-broker'
 import { loadFeatures } from './shared/feature-loader'
 import { bridgeDraftEvents, reconcileInterruptedDrafts } from './features/wizard/logic/draft-store'
+import { agentJobStore as sharedAgentJobStore, bridgeAgentJobEvents } from './features/agent-sessions/logic/agent-jobs/store'
 import { bridgeEvaluationExportEvents } from './features/evaluation/logic/evaluation-export-store'
 import { bridgeCoverageJobEvents } from './features/coverage/logic/coverage/jobs/store'
 import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
@@ -133,6 +134,13 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // single-flight lock nor shows as live forever.
   const flightStore = new FlightRunStore(logsDir)
   flightStore.reconcileInterrupted(() => new Date().toISOString())
+  // Spawned-agent records: a record left 'running' belongs to a child that died
+  // with the server. Unlike every store above, this one is NOT resumable — the
+  // process handle is gone — so the record becomes an honest tombstone
+  // ('orphaned', with a note saying so) rather than something to recover. It
+  // keeps its sessionId, so the transcript of what the agent did stays readable.
+  const agentJobs = sharedAgentJobStore(logsDir)
+  agentJobs.reconcileInterrupted(() => new Date().toISOString())
   // Plan-features agent tasks: a task left 'running' belongs to a dead
   // process — flip it to 'failed' so the dialog offers "plan again" instead of
   // polling a corpse. (Queued flights the launch parked are drained by the
@@ -157,6 +165,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   bridgeDraftEvents(logsDir, workspaceEvents)
   bridgeEvaluationExportEvents(logsDir, workspaceEvents)
   bridgeCoverageJobEvents(coverageJobStore, workspaceEvents)
+  bridgeAgentJobEvents(agentJobs, workspaceEvents)
   const dirtySpecStore = new DirtySpecStore(logsDir)
   dirtySpecStore.onEvent((e) => {
     if (e.featureId) workspaceEvents.publish({ type: 'tests-dirty-changed', feature: e.featureId })

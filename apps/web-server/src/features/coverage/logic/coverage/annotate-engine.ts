@@ -6,6 +6,7 @@ import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runt
 import { ANNOTATE_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
 import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
+import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
@@ -59,6 +60,8 @@ export interface ProposeMappingsArgs {
   /** Stop scope for the spawned mapper, forwarded to the shared runner so an owner
    *  can stop it without holding its handle. Forwarded, never invented here. */
   spawnScope?: string
+  /** Durable-record descriptor, forwarded to the shared runner. */
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   /** Fired when an agent spawns with a pinned session — lets the job persist a
    *  ref the Generating screen streams via AgentSessionView (R17). */
@@ -74,6 +77,7 @@ interface RunAgentOpts {
   cwd?: string
   signal?: AbortSignal
   spawnScope?: string
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
 }
@@ -296,6 +300,9 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
     onIdle: () => { idled = true },
     spawnScope: opts.spawnScope,
+    ...(opts.agentJob
+      ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
+      : {}),
   })
 
   const onAbort = (): void => handle.stop()
@@ -390,6 +397,7 @@ export async function proposeCoverageMappings(
           cwd: args.cwd,
           signal: args.signal,
           spawnScope: args.spawnScope,
+          agentJob: args.agentJob,
           onOutput: args.onOutput,
           onSession: args.onSession,
         })

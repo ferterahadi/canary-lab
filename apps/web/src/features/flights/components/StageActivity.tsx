@@ -27,6 +27,7 @@ export function StageActivity({
   log,
   leadingSystemRows = [],
   empty,
+  agentStop,
 }: {
   /** The stage's one agent session, if it spawned one (flight agent, or the
    *  Evaluation Report's export task). Omitted for agentless stages — the rail
@@ -48,6 +49,10 @@ export function StageActivity({
    *  client, or its log was cleaned — and saying nothing ran contradicts the
    *  panels above it. */
   empty?: { title: string; body?: string }
+  /** The live agent this band is showing, when one can be stopped on its own.
+   *  Rides the Activity bar rather than the stage header: it acts on THIS
+   *  transcript, and the header's Pause already stops the whole flight. */
+  agentStop?: { label: string; onStop: () => void; busy?: boolean }
 }) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const lines = log.split('\n').filter((l) => l.trim() !== '')
@@ -119,6 +124,20 @@ export function StageActivity({
             {open ? '▾ Hide' : '▸ Show'}
           </span>
         </button>
+        {agentStop && (
+          // Outside the toggle button — nesting it would make every click on the
+          // stop also collapse the rail the user is watching.
+          <button
+            type="button"
+            data-testid="stage-agent-stop"
+            disabled={agentStop.busy}
+            onClick={agentStop.onStop}
+            title="Stop this agent. The step it is running will fail and the flight parks — its test run and export are left alone."
+            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+          >
+            {agentStop.busy ? 'Stopping…' : agentStop.label}
+          </button>
+        )}
       </div>
       {open && (
         <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">

@@ -6,6 +6,7 @@ import type { PortifyStageProgress } from '../../../../../../../shared/flights/t
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
+import { portifyJob } from './stage-jobs'
 import { CHECKPOINT_OPTIONS } from '../types'
 
 // Port-ification runs by default — every flight attempts to leave the feature
@@ -225,6 +226,15 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
   const SKIP_REASON = 'parallel readiness skipped — the feature stays serial (runs go one at a time). A later flight or the Features-page portify can retry.'
 
   return {
+    // The background workflow, from the id the stage pins as progress the moment
+    // it exists — which is why that pin is written at start rather than at
+    // settle. portifyJob decides what stopping MEANS per phase: a verified
+    // ready-to-save review survives a pause.
+    teardown: (ctx) => {
+      const stage = ctx.manifest().stages.find((s) => s.key === 'portify')
+      const workflowId = (stage?.progress as PortifyStageProgress | undefined)?.workflowId
+      return workflowId ? portifyJob(deps, workflowId) : null
+    },
     async run(ctx) {
       const m = ctx.manifest()
       if (overlayExists(featureDirFor(deps, m.feature))) {

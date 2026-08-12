@@ -6,7 +6,7 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
-import { FlightStageEntryError, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
+import { FlightNotParkedError, FlightStageEntryError, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
 import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
 
 export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
@@ -24,6 +24,19 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
         const { manifest } = respondToFlightCheckpoint(req.params.id, response, conductorDeps)
         return manifest
       } catch (err) {
+        // A typed body, not just a message: this is the one rejection whose
+        // recipient may be an agent that has just spent minutes on work nobody
+        // wants any more. `type` lets it branch without parsing prose, and
+        // `status`/`pauseReason` tell it whether the flight is resumable or done.
+        if (err instanceof FlightNotParkedError) {
+          reply.code(409)
+          return {
+            error: err.message,
+            type: 'flight_not_parked',
+            status: err.status,
+            ...(err.pauseReason ? { pauseReason: err.pauseReason } : {}),
+          }
+        }
         const message = err instanceof Error ? err.message : String(err)
         reply.code(message.includes('not found') ? 404 : 409)
         return { error: message }
@@ -42,12 +55,14 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
     }
   })
 
-  // User-initiated pause: parks the flight resumable and cancels the in-flight
-  // stage work (agent SIGTERM / poll abort), including the run stage's run —
-  // see the run adapter's interrupt note for why pause stops it too.
+  // User-initiated pause: parks the flight resumable and stops the in-flight
+  // stage work — a spawned agent, a run, a portify workflow, an export. The
+  // response is deliberately held until that teardown finishes, so a 200 here
+  // means the work is stopped rather than merely signalled. See the run adapter's
+  // teardown note for why pause ends its run too.
   app.post<{ Params: { id: string } }>('/api/flights/:id/pause', async (req, reply) => {
     try {
-      return pauseFlight(req.params.id, conductorDeps)
+      return await pauseFlight(req.params.id, conductorDeps)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       reply.code(message.includes('not found') ? 404 : 409)

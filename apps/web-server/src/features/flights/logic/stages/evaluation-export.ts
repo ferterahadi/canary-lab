@@ -3,6 +3,7 @@ import path from 'path'
 import { readEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
+import { evaluationExportJob } from './stage-jobs'
 import { CHECKPOINT_OPTIONS } from '../types'
 
 // Terminal stage: a flight isn't done at green — it ends by producing the
@@ -87,6 +88,12 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
   }
 
   return {
+    // The export task, from the link pinned at START (not completion) — the same
+    // pointer the re-attach path reads.
+    teardown: (ctx) => {
+      const taskId = ctx.manifest().links?.evaluationTaskId
+      return taskId ? evaluationExportJob(deps, taskId) : null
+    },
     async run(ctx) {
       const m = ctx.manifest()
       // Resume: the archive already exists → done.

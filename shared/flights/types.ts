@@ -172,6 +172,13 @@ export interface FlightCheckpointResponse {
   /** The user's "what went wrong last time" note — appended to the prompt of
    *  the agent the responded choice spawns (R74: feedback-on-redo channel). */
   feedback?: string
+  /** Which hand-off this answer is answering — the `handOffId` from an
+   *  `external-work` checkpoint's data. Read ONLY for a `submit` on that kind,
+   *  where it stops a superseded client's late result from settling the stage
+   *  after a resume re-asked the question. Every other checkpoint ignores it, and
+   *  a hand-off parked by a pre-upgrade server carries no id to match, so an
+   *  in-flight one stays answerable across the upgrade. */
+  token?: string
 }
 
 /** Structured evidence behind a stage `error` when a boot-verify service

@@ -60,6 +60,9 @@ function applyChoice(ctx: StageContext, match: Match, choice: string): StageOutc
 
 export function similarityStage(deps: FlightStageDeps): StageAdapter {
   return {
+    // Owns nothing: a deterministic scan of the features dir, over before a
+    // pause could land on it.
+    teardown: () => null,
     async run(ctx) {
       const m = ctx.manifest()
       const { match, scanned } = findMatch(deps, m.repoPaths)

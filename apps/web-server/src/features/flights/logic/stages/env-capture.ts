@@ -7,6 +7,7 @@ import type { FlightStageErrorDetail } from '../types'
 import type { EnvCaptureStageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
+import { runJob } from './stage-jobs'
 import type { ScoutDraft } from './scout'
 import { CHECKPOINT_OPTIONS } from '../types'
 
@@ -155,6 +156,13 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
   }
 
   return {
+    // The dry-run boot, read from the progress pin the stage published when it
+    // started the run. A boot run IS a run, so it reuses runJob.
+    teardown: (ctx) => {
+      const stage = ctx.manifest().stages.find((s) => s.key === 'env-capture')
+      const runId = (stage?.progress as EnvCaptureStageProgress | undefined)?.runId
+      return runId ? runJob(deps, runId) : null
+    },
     async run(ctx) {
       const files = detectedFiles(ctx)
       const missing = files.filter((f) => !fs.existsSync(f))

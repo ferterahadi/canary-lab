@@ -4,7 +4,8 @@ import path from 'path'
 import { FLIGHT_STAGE_KEYS, type AgentActivity, type FlightCheckpoint, type FlightCheckpointResponse, type FlightManifest, type FlightStage, type FlightStageErrorDetail, type FlightStageKey } from './types'
 import { FlightConductorDeps, StartFlightArgs, redoFlight, startFlight } from './conductor'
 import { drive } from './flight-drive'
-import { FlightStageEntryError } from './flight-errors'
+import { FlightStageEntryError, stampSystemLine } from './flight-errors'
+import { agentJobStore } from '../../agent-sessions/logic/agent-jobs/store'
 
 export type StageOutcome =
   | { kind: 'done'; evidence?: unknown }
@@ -47,16 +48,45 @@ export interface StageContext {
   patchFlight(patch: Partial<Pick<FlightManifest, 'links' | 'runVerdict' | 'feature'>>): void
 }
 
+/** One handle over whatever long-running work a stage currently owns, whoever
+ *  actually runs it — a spawned agent this process parented, a background
+ *  workflow in another subsystem, a run. The point is that every stage's
+ *  teardown call site reads identically (`await job.stop(reason)`), so the
+ *  difference in MECHANISM lives inside the subsystem that owns the work rather
+ *  than leaking into eleven adapters.
+ *
+ *  There is no `status()`: nothing would call it — every `stop()` already reads
+ *  whatever state it needs through its own subsystem — and an exported method
+ *  with no consumer is an arm no test can honestly reach. Add it with its first
+ *  caller. */
+export interface StageJob {
+  /** Diagnostic only, for the teardown log line. Never persisted, never
+   *  dereferenced: a runId, a workflowId, a taskId, or `agent:<stage>`. */
+  id: string
+  /** Stop the work. State-aware and idempotent INSIDE the implementation: work
+   *  that already finished, or that must survive a stop (a portify review the
+   *  user still has to answer), is a no-op rather than an error. Never rejects —
+   *  the caller is a pause, and a failed teardown must not fail the pause. */
+  stop(reason: 'pause' | 'abort'): Promise<void>
+}
+
 export interface StageAdapter {
   run(ctx: StageContext): Promise<StageOutcome>
   /** Consume the response that releases this stage's checkpoint. Absent →
    *  any response re-runs the stage from scratch. */
   onCheckpointResponse?(ctx: StageContext, response: FlightCheckpointResponse): Promise<StageOutcome>
-  /** Best-effort teardown of work this stage delegated to another subsystem
-   *  (the run stage aborts its run) when the user pauses/aborts the flight.
-   *  In-process work is cancelled via ctx.signal instead. Errors are logged
-   *  and swallowed — interrupt must never block the pause itself. */
-  interrupt?(ctx: StageContext, kind: 'pause' | 'abort'): Promise<void>
+  /** The work this stage owns right now, or null when it owns none (a stage that
+   *  never spawned, whose spawn already exited, or that is parked on an external
+   *  hand-off some other client is executing).
+   *
+   *  REQUIRED, and that is the whole point. This replaced an optional
+   *  `interrupt?` hook that was silently skipped when absent, so doing the right
+   *  thing was opt-in — and ten of eleven adapters opted out with no compile
+   *  error and no failing test. A pause could stop the flight's *waiting* while
+   *  the portify agent kept editing the user's repo. The same defect was then
+   *  found and patched one stage at a time, three separate times. Now a new
+   *  stage cannot compile without answering the question. */
+  teardown(ctx: StageContext): StageJob | null
   /** R78 restart wipe: delete everything this stage produced on disk, as if it
    *  never ran — including user-supplied inputs the stage collected (explicit
    *  user ruling: a restart rewinds the step to zero). Invoked ONLY on the
@@ -64,7 +94,7 @@ export interface StageAdapter {
    *  the entry stage and every later stage, in order — never on resume.
    *  ctx.manifest() returns the PRIOR record (the one being discarded), so old
    *  deliverable links (runId, evaluationTaskId) are still readable. Same
-   *  error posture as interrupt: best-effort, never blocks the restart. */
+   *  error posture as `teardown`: best-effort, never blocks the restart. */
   reset?(ctx: StageContext): Promise<void>
 }
 
@@ -82,8 +112,64 @@ export function defaultFlightId(): string {
  *  cancel (store reconcile already parked the flight). */
 export const driveControllers = new Map<string, AbortController>()
 
-/** Best-effort interrupt of the open stage's delegated work (run abort etc.).
- *  Never throws — a broken interrupt must not block the pause/abort itself. */
+/** The StageContext the drive hands an adapter, and the one `interruptStage`
+ *  hands a teardown. Extracted so the two cannot drift: a teardown that could
+ *  not write to the stage log was the reason a cancelled portify workflow
+ *  vanished from the record with no explanation.
+ *
+ *  `signal` is supplied by the caller because the two callers need opposite
+ *  things: the drive passes its own controller so a pause cancels the stage's
+ *  work, while a teardown must get a FRESH, never-aborted signal — its own HTTP
+ *  injects and polls ride that signal, and handing it the already-aborted drive
+ *  signal would cancel the very stop calls it exists to make. */
+export function buildStageContext(
+  flightId: string,
+  stageKey: FlightStageKey,
+  signal: AbortSignal,
+  deps: FlightConductorDeps,
+): StageContext {
+  const { store } = deps
+  const now = deps.now ?? (() => new Date().toISOString())
+  const read = (): FlightManifest => {
+    const m = store.get(flightId)
+    if (!m) throw new Error(`flight not found: ${flightId}`)
+    return m
+  }
+  const patchStage = (patch: Partial<FlightStage>): void => {
+    const m = read()
+    store.save({
+      ...m,
+      updatedAt: now(),
+      stages: m.stages.map((s) => (s.key === stageKey ? { ...s, ...patch } : s)),
+    })
+  }
+  return {
+    manifest: read,
+    flightDir: store.flightDir(flightId),
+    signal,
+    appendLog: (chunk) => {
+      const cur = read().stages.find((s) => s.key === stageKey)
+      patchStage({ log: (cur?.log ?? '') + stampSystemLine(chunk, now()) })
+    },
+    setProgress: (progress) => { patchStage({ progress }) },
+    setAgentActivity: (agentActivity) => { patchStage({ agentActivity }) },
+    patchFlight: (patch) => {
+      const cur = read()
+      store.save({
+        ...cur,
+        ...patch,
+        links: patch.links ? { ...cur.links, ...patch.links } : cur.links,
+        updatedAt: now(),
+      })
+    },
+  }
+}
+
+/** Stop the open stage's work on a user pause/abort, and resolve only once it is
+ *  actually stopped — the caller replies to the user off the back of this, so
+ *  "signalled" is not good enough.
+ *
+ *  Never throws: a broken teardown must not fail the pause. */
 export async function interruptStage(
   flightId: string,
   stageKey: FlightStageKey,
@@ -91,23 +177,13 @@ export async function interruptStage(
   deps: FlightConductorDeps,
 ): Promise<void> {
   const adapter = deps.adapters[stageKey]
-  if (!adapter?.interrupt) return
-  const { store } = deps
-  const ctx: StageContext = {
-    manifest: () => {
-      const m = store.get(flightId)
-      if (!m) throw new Error(`flight not found: ${flightId}`)
-      return m
-    },
-    flightDir: store.flightDir(flightId),
-    signal: new AbortController().signal,
-    appendLog: () => {},
-    setProgress: () => {},
-    setAgentActivity: () => {},
-    patchFlight: () => {},
-  }
+  if (!adapter) return
+  const ctx = buildStageContext(flightId, stageKey, new AbortController().signal, deps)
   try {
-    await adapter.interrupt(ctx, kind)
+    const job = adapter.teardown(ctx)
+    if (!job) return
+    ctx.appendLog(`[teardown] stopping ${job.id} (${kind})\n`)
+    await job.stop(kind)
   } catch {
     /* best-effort */
   }
@@ -156,6 +232,15 @@ export async function resetStagesForRestart(
     for (const dir of stageSidecarDirs(key)) {
       try {
         fs.rmSync(path.join(flightDir, dir), { recursive: true, force: true })
+      } catch {
+        /* best-effort */
+      }
+      // The agent-job row for this stage goes with its sidecar dir, for the same
+      // reason: a restart rewinds the step to zero, and a surviving record of an
+      // attempt whose transcript has just been deleted is a row pointing at
+      // nothing. `agent-jobs` ids are `<flightId>:<sidecar dir>` (see stageJobRef).
+      try {
+        agentJobStore(deps.store.logsDir).remove(`${prior.flightId}:${dir}`)
       } catch {
         /* best-effort */
       }

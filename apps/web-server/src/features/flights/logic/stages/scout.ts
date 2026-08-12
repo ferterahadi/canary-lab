@@ -2,7 +2,8 @@ import path from 'path'
 import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent } from './context'
+import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent, stageJobRef } from './context'
+import { agentSpawnJob } from './stage-jobs'
 import { externalizable, externalWorkCheckpoint } from './externalizable'
 import { agentProgressSink } from './agent-progress'
 
@@ -83,6 +84,7 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       prompt: scoutPromptFor(m),
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'scout'),
+      job: stageJobRef(deps, m, 'scout'),
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
@@ -91,6 +93,9 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
   }
 
   const internal: StageAdapter = {
+    // The spawned surveyor, when one is live. Reached by scope, so this is null
+    // only when the stage owns no local spawn at all.
+    teardown: (ctx) => agentSpawnJob(ctx, 'scout'),
     run: draftAndValidate,
     // LEGACY release path (remove after one release): manifests that parked on
     // scout's config-approval BEFORE the checkpoint moved to scaffold still

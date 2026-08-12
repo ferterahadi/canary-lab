@@ -2,7 +2,7 @@ import { FLIGHT_STAGE_KEYS, type FlightCheckpoint, type FlightCheckpointResponse
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { FlightConductorDeps, abortFlight, drainQueuedFlights, pauseFlight, resumeFlight } from './conductor'
 import { stampSystemLine } from './flight-errors'
-import { StageContext, StageOutcome, driveControllers, firstOpenStageIndex } from './flight-stages'
+import { StageContext, StageOutcome, buildStageContext, driveControllers, firstOpenStageIndex } from './flight-stages'
 
 /** R71/W4: checkpoint kind → its safe defaults, best first. The first entry
  *  that is actually among the checkpoint's options wins, so a kind whose option
@@ -109,30 +109,9 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
       }
       save(m)
 
-      const ctx: StageContext = {
-        manifest: read,
-        flightDir: store.flightDir(flightId),
-        signal: controller.signal,
-        appendLog: (chunk) => {
-          const cur = read().stages.find((s) => s.key === stage.key)
-          patchStage(stage.key, { log: (cur?.log ?? '') + stampSystemLine(chunk, now()) })
-        },
-        setProgress: (progress) => {
-          patchStage(stage.key, { progress })
-        },
-        setAgentActivity: (agentActivity) => {
-          patchStage(stage.key, { agentActivity })
-        },
-        patchFlight: (patch) => {
-          const cur = read()
-          save({
-            ...cur,
-            ...patch,
-            links: patch.links ? { ...cur.links, ...patch.links } : cur.links,
-            updatedAt: now(),
-          })
-        },
-      }
+      // The same builder `interruptStage` uses, so a teardown writes to the stage
+      // log exactly the way the stage itself does.
+      const ctx: StageContext = buildStageContext(flightId, stage.key, controller.signal, deps)
 
       let outcome: StageOutcome
       if (!adapter) {

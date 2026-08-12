@@ -50,6 +50,7 @@ const now = () => '2026-01-01T00:00:00Z'
 const OPTS: FlightOptions = { env: 'local', coverageTarget: 100, yolo: false }
 
 const doneAdapter = (calls?: FlightStageKey[]): StageAdapter => ({
+  teardown: () => null,
   run: async (ctx) => {
     calls?.push(ctx.manifest().currentStage as FlightStageKey)
     return { kind: 'done' }
@@ -75,8 +76,9 @@ describe('pauseFlight', () => {
     const adapters = allDone()
     const d = deps(adapters)
     adapters.scout = {
+      teardown: () => null,
       run: async () => {
-        const parked = pauseFlight('fl-1', d)
+        const parked = await pauseFlight('fl-1', d)
         expect(parked.status).toBe('paused')
         release()
         return { kind: 'failed', error: 'SIGTERM' } satisfies StageOutcome
@@ -99,9 +101,10 @@ describe('pauseFlight', () => {
     const adapters = allDone(calls)
     const d = deps(adapters)
     adapters.scout = {
+      teardown: () => null,
       run: async (ctx) => {
         calls.push(ctx.manifest().currentStage as FlightStageKey)
-        pauseFlight('fl-1', d)
+        await pauseFlight('fl-1', d)
         return { kind: 'done', evidence: { finished: true } } satisfies StageOutcome
       },
     }
@@ -120,9 +123,10 @@ describe('pauseFlight', () => {
     const adapters = allDone(calls)
     const d = deps(adapters)
     adapters.docs = {
+      teardown: () => null,
       run: async (ctx) => {
         calls.push(ctx.manifest().currentStage as FlightStageKey)
-        pauseFlight('fl-1', d)
+        await pauseFlight('fl-1', d)
         return { kind: 'skipped', reason: 'no docs needed' } satisfies StageOutcome
       },
     }
@@ -155,7 +159,7 @@ describe('pauseFlight', () => {
       const m = store.get('fl-1')
       if (m?.status === 'running' && m.stages.find((s) => s.key === 'similarity')?.status === 'done') {
         pausedOnce = true
-        pauseFlight('fl-1', d)
+        void pauseFlight('fl-1', d)
       }
     }
     store.onEvent(listener)
@@ -185,7 +189,7 @@ describe('pauseFlight', () => {
       const m = store.get('fl-1')
       if (m?.status === 'running' && m.stages.find((s) => s.key === 'similarity')?.status === 'done') {
         abortedOnce = true
-        abortFlight('fl-1', d)
+        void abortFlight('fl-1', d)
       }
     }
     store.onEvent(listener)
@@ -206,13 +210,14 @@ describe('pauseFlight', () => {
     const adapters = allDone()
     const d = deps(adapters)
     adapters.scout = {
+      teardown: () => null,
       run: (ctx) =>
         new Promise((resolve) => {
           ctx.signal.addEventListener('abort', () => {
             sawAbort = true
             resolve({ kind: 'failed', error: 'cancelled' })
           })
-          pauseFlight('fl-1', d)
+          void pauseFlight('fl-1', d)
         }),
     }
     const { completion } = startFlight(args(), d)
@@ -223,6 +228,7 @@ describe('pauseFlight', () => {
   it('pausing a parked checkpoint clears it back to pending; resume re-issues it', async () => {
     const adapters = allDone()
     adapters.docs = {
+      teardown: () => null,
       run: async () => ({
         kind: 'checkpoint',
         checkpoint: { kind: 'prd-source', message: 'docs?', options: ['continue'] },
@@ -233,7 +239,7 @@ describe('pauseFlight', () => {
     await completion
     expect(store.get(manifest.flightId)!.status).toBe('waiting-for-approval')
 
-    const paused = pauseFlight(manifest.flightId, d)
+    const paused = await pauseFlight(manifest.flightId, d)
     expect(paused.status).toBe('paused')
     expect(paused.stages.find((s) => s.key === 'docs')!).toMatchObject({ status: 'pending' })
     expect(paused.stages.find((s) => s.key === 'docs')!.checkpoint).toBeUndefined()
@@ -245,71 +251,154 @@ describe('pauseFlight', () => {
     expect(final.stages.find((s) => s.key === 'docs')!.checkpoint?.kind).toBe('prd-source')
   })
 
-  it('calls the open stage adapter interrupt hook with "pause" (best-effort)', async () => {
-    const interrupts: string[] = []
+  it('stops the open stage job with "pause" and records it in the stage log', async () => {
+    const reasons: string[] = []
     let seenFlightId: string | undefined
     const adapters = allDone()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}), // hangs
-      interrupt: async (ctx, kind) => {
-        interrupts.push(kind)
-        // ctx.manifest() re-reads the record fresh from the store — confirm
-        // it resolves to the live (still-present) flight, not a stale value.
-        seenFlightId = ctx.manifest().flightId
-        // interruptStage's ctx wires appendLog/setProgress/setAgentActivity/
-        // patchFlight as deliberate no-ops (interrupt is teardown, not stage
-        // work) — calling them must be harmless rather than throwing or
-        // erroring. setAgentActivity is in that list because an adapter whose
-        // interrupt drains a live agent stream reports through it like any
-        // other stage step.
-        ctx.appendLog('interrupt log line')
-        ctx.setProgress({ note: 'interrupting' })
-        ctx.setAgentActivity({ phase: 'writing', thinkingTokens: 0, chars: 4, tail: 'bye.' })
-        ctx.patchFlight({ feature: 'should-not-apply' })
-      },
+      teardown: (ctx) => ({
+        id: 'job-under-test',
+        stop: async (reason) => {
+          reasons.push(reason)
+          // ctx.manifest() re-reads the record fresh from the store — confirm
+          // it resolves to the live (still-present) flight, not a stale value.
+          seenFlightId = ctx.manifest().flightId
+          ctx.appendLog('winding down\n')
+        },
+      }),
     }
     startFlight(args(), d)
     await new Promise((r) => setTimeout(r, 10))
-    pauseFlight('fl-1', d)
-    await new Promise((r) => setTimeout(r, 10))
-    expect(interrupts).toEqual(['pause'])
+    const paused = await pauseFlight('fl-1', d)
+    expect(reasons).toEqual(['pause'])
     expect(seenFlightId).toBe('fl-1')
-    // Confirmed no-ops: the patchFlight call during interrupt left the
-    // manifest's feature field untouched.
-    expect(store.get('fl-1')!.feature).toBe('checkout')
+    // The teardown ctx is LIVE, not the inert stub it used to be. That matters:
+    // a cancelled portify workflow that left no trace in the record was
+    // indistinguishable from one that vanished on its own. `interruptStage`
+    // writes the header line; whatever the job says lands under it.
+    const scout = store.get('fl-1')!.stages.find((s) => s.key === 'scout')!
+    // Stamped like every other system line the stage writes (`[teardown@<ts>]`).
+    expect(scout.log).toMatch(/\[teardown@[^\]]+\] stopping job-under-test \(pause\)/)
+    expect(scout.log).toContain('winding down')
+    // …and the RETURNED record carries it too. The snapshot pauseFlight builds is
+    // taken before the teardown runs, so returning it unchanged would hand the
+    // caller a record that does not mention what was stopped.
+    const returned = paused.stages.find((s) => s.key === 'scout')!
+    expect(returned.log).toContain('winding down')
   })
 
-  it('interrupt ctx.manifest() throws if the flight record is gone by the time the hook reads it (best-effort, swallowed)', async () => {
+  it('resolves only after the job has actually stopped', async () => {
+    // The reason pause is awaited at all: the route replies off the back of it,
+    // so "we signalled it" is not a promise worth making. No sleeps — the order
+    // is asserted from the job's own completion.
+    const order: string[] = []
+    let releaseStop: () => void = () => {}
+    const stopped = new Promise<void>((r) => (releaseStop = r))
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: () => new Promise(() => {}),
+      teardown: () => ({
+        id: 'slow-job',
+        stop: async () => {
+          await stopped
+          order.push('job-stopped')
+        },
+      }),
+    }
+    startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+
+    const pausing = pauseFlight('fl-1', d).then(() => { order.push('pause-returned') })
+    releaseStop()
+    await pausing
+    expect(order).toEqual(['job-stopped', 'pause-returned'])
+  })
+
+  it('swallows a teardown that throws — a broken stop must not fail the pause', async () => {
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: () => new Promise(() => {}), // hangs, interrupted by pause
+      teardown: () => ({
+        id: 'exploding-job',
+        stop: async () => { throw new Error('subsystem unreachable') },
+      }),
+    }
+    const { manifest } = startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+    // The flight still parks: the user asked to stop, and a teardown that cannot
+    // reach its subsystem does not change that answer.
+    const paused = await pauseFlight(manifest.flightId, d)
+    expect(paused.status).toBe('paused')
+    expect(paused.pauseReason).toBe('user')
+  })
+
+  it('swallows a teardown whose ctx.manifest() read fails (record deleted out-of-band)', async () => {
     let caught: unknown
     const adapters = allDone()
     const d = deps(adapters)
     adapters.scout = {
       run: () => new Promise(() => {}), // hangs, interrupted by pause
-      interrupt: async (ctx) => {
-        // The record disappears (e.g. deleted out-of-band) between pause
-        // kicking off the interrupt and the adapter reading it back.
-        store.remove('fl-1')
-        try {
-          ctx.manifest()
-        } catch (e) {
-          caught = e
-        }
-      },
+      teardown: (ctx) => ({
+        id: 'vanishing-job',
+        stop: async () => {
+          // The record disappears between the pause kicking off the teardown and
+          // the job reading it back.
+          store.remove('fl-1')
+          try {
+            ctx.manifest()
+          } catch (e) {
+            caught = e
+          }
+        },
+      }),
     }
     const { manifest } = startFlight(args(), d)
     await new Promise((r) => setTimeout(r, 10))
-    // pauseFlight itself must not throw even though the interrupt hook's
-    // manifest() read fails — interrupt is best-effort.
-    expect(() => pauseFlight(manifest.flightId, d)).not.toThrow()
+    await expect(pauseFlight(manifest.flightId, d)).resolves.toMatchObject({ status: 'paused' })
     expect(caught).toBeInstanceOf(Error)
     expect((caught as Error).message).toBe(`flight not found: ${manifest.flightId}`)
+  })
+
+  it('pauses cleanly when the open stage has no adapter registered at all', async () => {
+    // A configuration hole rather than a stage decision — the drive itself fails
+    // such a stage with "no adapter for stage x". The teardown path must not
+    // throw on the way past it, or a pause would 500 on a flight that is already
+    // broken.
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = { teardown: () => null, run: () => new Promise(() => {}) }
+    startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+    delete adapters.scout
+    await expect(pauseFlight('fl-1', d)).resolves.toMatchObject({ status: 'paused' })
+  })
+
+  it('stops nothing when the open stage owns no job', async () => {
+    // The null case: a stage that never spawned, whose spawn already exited, or
+    // that is parked on an external hand-off someone else is executing.
+    let asked = 0
+    const adapters = allDone()
+    const d = deps(adapters)
+    adapters.scout = {
+      run: () => new Promise(() => {}),
+      teardown: () => { asked += 1; return null },
+    }
+    startFlight(args(), d)
+    await new Promise((r) => setTimeout(r, 10))
+    await pauseFlight('fl-1', d)
+    expect(asked).toBe(1)
+    // No teardown header written for a stage with nothing to stop.
+    expect(store.get('fl-1')!.stages.find((s) => s.key === 'scout')!.log ?? '').not.toContain('[teardown]')
   })
 
   it('refuses to pause a non-active flight', async () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))
     await completion
-    expect(() => pauseFlight(manifest.flightId, deps(allDone()))).toThrow(/not active/)
+    await expect(pauseFlight(manifest.flightId, deps(allDone()))).rejects.toThrow(/not active/)
   })
 
   it('resume clears pauseReason', async () => {

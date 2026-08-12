@@ -8,8 +8,9 @@ import { renderPrompt } from '../../../../shared/prompts'
 import { detectBaseBranch } from '../../../../shared/git-repo'
 import type { PrdSourceAttempt } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps } from './context'
-import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork } from './externalizable'
+import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps, stageJobRef } from './context'
+import { agentSpawnJob } from './stage-jobs'
+import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
 import { CHECKPOINT_OPTIONS } from '../types'
 
@@ -379,6 +380,7 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       // agents such as Codex.
       cwd: deps.projectRoot,
       stageDir: path.join(ctx.flightDir, 'docs'),
+      job: stageJobRef(deps, m, 'docs'),
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
@@ -387,6 +389,10 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
   }
 
   return {
+    // The collector agent, when one is live (this stage also parks on prd-source
+    // and on an external hand-off, where it owns no local spawn — the scope lookup
+    // no-ops for both).
+    teardown: (ctx) => agentSpawnJob(ctx, 'docs'),
     async run(ctx) {
       const m = ctx.manifest()
       const linked = linkIntentDocs(ctx)
@@ -417,6 +423,8 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
           ctx.appendLog('[docs] client handed the step back — collecting here\n')
           return collect(ctx, mode, response.feedback, true)
         }
+        const stale = rejectStaleSubmit(ctx, 'docs', response)
+        if (stale) return stale
         if (!handOff?.outPath || !handOff.outName) {
           return { kind: 'failed', error: 'external docs hand-off lost its output path' }
         }

@@ -355,7 +355,7 @@ describe('run + heal stages', () => {
     expect(current().links?.runId).toBe('run-new')
   })
 
-  describe('interrupt (abort hook)', () => {
+  describe('teardown (stop the linked run)', () => {
     // Pause stops the run just as abort does: while a run is healing an agent
     // is editing the user's repo, and a pause that left it writing was the one
     // promise the UI could not keep.
@@ -368,16 +368,17 @@ describe('run + heal stages', () => {
       }, calls)
       const adapter = runStage(deps({ inject }))
       const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
-      await adapter.interrupt!(ctx, 'pause')
+      await adapter.teardown(ctx)!.stop('pause')
       expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs/run-1/abort')).toBe(true)
     })
 
-    it('does nothing on abort when the flight never linked a run', async () => {
+    it('owns no job at all when the flight never linked a run', async () => {
       const calls: InjectCall[] = []
       const inject = makeInject(() => undefined, calls)
       const adapter = runStage(deps({ inject }))
       const { ctx } = ctxFor(manifest())
-      await adapter.interrupt!(ctx, 'abort')
+      // Null, not a job that no-ops: there is nothing to name in the teardown log.
+      expect(adapter.teardown(ctx)).toBeNull()
       expect(calls).toHaveLength(0)
     })
 
@@ -389,7 +390,7 @@ describe('run + heal stages', () => {
       }, calls)
       const adapter = runStage(deps({ inject }))
       const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
-      await adapter.interrupt!(ctx, 'abort')
+      await adapter.teardown(ctx)!.stop('abort')
       expect(calls.some((c) => c.url.endsWith('/abort'))).toBe(false)
     })
 
@@ -401,7 +402,7 @@ describe('run + heal stages', () => {
       }, calls)
       const adapter = runStage(deps({ inject }))
       const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
-      await adapter.interrupt!(ctx, 'abort')
+      await adapter.teardown(ctx)!.stop('abort')
       expect(calls.some((c) => c.url.endsWith('/abort'))).toBe(false)
     })
 
@@ -414,7 +415,7 @@ describe('run + heal stages', () => {
       }, calls)
       const adapter = runStage(deps({ inject }))
       const { ctx } = ctxFor(manifest({ links: { runId: 'run-1' } }))
-      await adapter.interrupt!(ctx, 'abort')
+      await adapter.teardown(ctx)!.stop('abort')
       expect(calls.some((c) => c.method === 'POST' && c.url === '/api/runs/run-1/abort')).toBe(true)
     })
   })

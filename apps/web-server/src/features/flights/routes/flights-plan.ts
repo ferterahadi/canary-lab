@@ -210,7 +210,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
 
   app.post<{ Params: { id: string } }>('/api/flights/:id/abort', async (req, reply) => {
     try {
-      return abortFlight(req.params.id, conductorDeps)
+      return await abortFlight(req.params.id, conductorDeps)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       reply.code(message.includes('not found') ? 404 : 409)

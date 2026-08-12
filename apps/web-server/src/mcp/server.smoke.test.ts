@@ -103,9 +103,12 @@ const EXPORT_TOOLS = uniqueSorted([
 ])
 
 const FLIGHT_TOOLS = uniqueSorted([
+  'abort_flight',
   'get_flight',
+  'pause_flight',
   'respond_flight_checkpoint',
   'start_flight',
+  'stop_flight_agent',
   'write_feature_doc',
 ])
 

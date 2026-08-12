@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { loadFeatures, listSpecFiles } from '../../../../shared/feature-loader'
+import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import type { PrdSummary, VariantDimension } from '../../../../../../../shared/coverage/types'
 import { type CoverageAgentSession } from './annotate-engine'
 import { stripCoverageTags } from './tag-writer'
@@ -200,6 +201,8 @@ export interface RegeneratePrdSummaryArgs {
    *  signal above asks the child to go; the scope is how a paused stage can WAIT
    *  until it is actually gone. Same forward-only rule as `signal`. */
   spawnScope?: string
+  /** Durable-record descriptor, forwarded to the shared runner. */
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onAgentSession?: (session: CoverageAgentSession) => void
 }
@@ -240,6 +243,7 @@ export async function regeneratePrdSummary(
     now: args.now,
     signal: args.signal,
     spawnScope: args.spawnScope,
+    agentJob: args.agentJob,
     onOutput: args.onOutput,
     onSession: args.onAgentSession,
   })

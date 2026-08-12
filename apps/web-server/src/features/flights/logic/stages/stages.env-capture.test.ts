@@ -178,6 +178,23 @@ describe('env-capture stage', () => {
     expect(harness.progressLog).toContainEqual({ runId: 'boot-1' })
   })
 
+  it('teardown stops the boot run named by the pin', async () => {
+    // The payoff of the pin: a pause landing mid-boot reaches the run through the
+    // record, not through a stack frame that is already unwinding.
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET') return { statusCode: 200, body: { manifest: { status: 'running' } } }
+      return { statusCode: 204, body: {} }
+    }, calls)
+    const m = manifest({
+      stages: FLIGHT_STAGE_KEYS.map((key) => (key === 'env-capture'
+        ? { key, status: 'running' as const, progress: { runId: 'boot-7' } }
+        : { key, status: 'pending' as const })),
+    })
+    await envCaptureStage(deps({ inject })).teardown(ctxFor(m).ctx)!.stop('pause')
+    expect(calls).toContainEqual(expect.objectContaining({ method: 'POST', url: '/api/runs/boot-7/abort' }))
+  })
+
   it('parks on missing-env when a detected env file does not exist (yolo does NOT skip this)', async () => {
     createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
     const missing = path.join(repoDir, '.env')

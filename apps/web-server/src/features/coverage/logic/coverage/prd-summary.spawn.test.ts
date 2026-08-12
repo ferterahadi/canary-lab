@@ -9,6 +9,7 @@ import type { DocsCollection } from './docs-collection'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
 import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
+import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
 import { TEST_COLLECTION, VALID_STDOUT, collection, makeFakeChild } from './__fixtures__/prd-summary.spawn-fixtures'
 
 // summarizePrd is LLM-only: it never fabricates requirements from headings, so
@@ -505,5 +506,43 @@ describe('spawnScope', () => {
       { resolveAgents: () => ['claude'] },
     )
     await expect(stopAgentProcesses('/flights/fl_scope/prd-summary')).resolves.toBeUndefined()
+  })
+})
+
+describe('agentJob descriptor', () => {
+  it('forwards a record descriptor so the runner can log the distiller (claude pins its session)', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prd-rec-'))
+    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
+    await summarizePrd(
+      {
+        collection: TEST_COLLECTION,
+        now: '2026-01-01T00:00:00.000Z',
+        agentJob: { record: { jobId: 'fl-1:prd-summary', flightId: 'fl-1', feature: 'checkout', stage: 'prd-summary', agent: 'claude' }, logsDir },
+      },
+      { resolveAgents: () => ['claude'] },
+    )
+    const rec = agentJobStore(logsDir).get('fl-1:prd-summary')!
+    expect(rec).toMatchObject({ stage: 'prd-summary', status: 'done' })
+    // The pinned session id is what joins the row to the transcript — the runner
+    // gets it from the spawn, not from the caller.
+    expect(rec.sessionId).toBeTruthy()
+    fs.rmSync(logsDir, { recursive: true, force: true })
+  })
+
+  it('records a codex distiller too, which pins no session', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-prd-rec-codex-'))
+    mockSpawn.mockImplementation(() => makeFakeChild({ stdout: '' }))
+    await summarizePrd(
+      {
+        collection: TEST_COLLECTION,
+        now: '2026-01-01T00:00:00.000Z',
+        agentJob: { record: { jobId: 'fl-1:prd-summary', flightId: 'fl-1', feature: 'checkout', stage: 'prd-summary', agent: 'codex' }, logsDir },
+      },
+      { resolveAgents: () => ['codex'] },
+    ).catch(() => { /* the fake writes no answer; the RECORD is what is under test */ })
+    const rec = agentJobStore(logsDir).get('fl-1:prd-summary')!
+    expect(rec.agent).toBe('codex')
+    expect(rec.sessionId).toBeUndefined()
+    fs.rmSync(logsDir, { recursive: true, force: true })
   })
 })

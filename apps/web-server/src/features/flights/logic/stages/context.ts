@@ -46,6 +46,10 @@ export interface FlightAgentSpawnOpts {
   signal?: AbortSignal
   /** R79: which CLI to spawn (the flight's sticky opts.agent). Absent → claude. */
   agent?: 'claude' | 'codex'
+  /** Identifies the flight + stage this spawn belongs to, so the runner can write
+   *  it a durable record. Absent → no record (the same forward-only rule as
+   *  `signal` and `spawnScope`). */
+  job?: { flightId: string; feature: string; stage: string; logsDir: string }
 }
 
 /** Thrown when in-flight stage work was cancelled by a user pause/abort — the
@@ -106,6 +110,23 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
   })
   const handle = runAgentProcess({
     command: agent,
+    ...(opts.job
+      ? {
+          agentJobLogsDir: opts.job.logsDir,
+          record: {
+            // The stage owns at most one live spawn at a time, and its sidecar dir
+            // is already the unique name for it — so the scope doubles as the job
+            // id and a re-spawn overwrites rather than piling up rows per attempt.
+            jobId: `${opts.job.flightId}:${opts.job.stage}`,
+            flightId: opts.job.flightId,
+            feature: opts.job.feature,
+            stage: opts.job.stage,
+            agent,
+            ...(sessionId ? { sessionId } : {}),
+            cwd: opts.cwd,
+          },
+        }
+      : {}),
     args:
       agent === 'claude'
         ? buildClaudeAgenticArgs(opts.prompt, { sessionId })
@@ -210,6 +231,17 @@ export async function pollUntil<T>(
       opts.signal?.addEventListener('abort', onAbort, { once: true })
     })
   }
+}
+
+/** The record descriptor for a stage's spawn. One builder so every stage names its
+ *  job the same way, and a reader of the agent-jobs index can always tell which
+ *  flight+stage a row belongs to. */
+export function stageJobRef(
+  deps: FlightStageDeps,
+  m: { flightId: string; feature: string },
+  stage: string,
+): { flightId: string; feature: string; stage: string; logsDir: string } {
+  return { flightId: m.flightId, feature: m.feature, stage, logsDir: deps.logsDir }
 }
 
 export function featureDirFor(deps: FlightStageDeps, feature: string): string {

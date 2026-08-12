@@ -22,6 +22,7 @@ export type InvalidationTopic =
   | 'verification'
   | 'tests'
   | 'flights'
+  | 'agent-jobs'
   | 'journal'
   | 'project-config'
 

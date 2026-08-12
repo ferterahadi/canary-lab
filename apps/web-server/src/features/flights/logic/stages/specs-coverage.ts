@@ -12,8 +12,9 @@ import { renderPrompt } from '../../../../shared/prompts'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { SpecsCoveragePass, SpecsCoverageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps } from './context'
-import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork } from './externalizable'
+import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps, stageJobRef } from './context'
+import { agentSpawnJob } from './stage-jobs'
+import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
 import { CHECKPOINT_OPTIONS } from '../types'
 
@@ -277,6 +278,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       // and the mapper gets `coverage-map` here. stageSidecarDirs() enumerates
       // both, so a teardown stops whichever half is live.
       spawnScope: path.join(ctx.flightDir, 'coverage-map'),
+      agentJob: { record: { jobId: `${m.flightId}:coverage-map`, flightId: m.flightId, feature: m.feature, stage: 'coverage-map', agent: m.opts.agent ?? 'claude' }, logsDir: deps.logsDir },
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
         writeWorkflowAgentRef(path.join(ctx.flightDir, 'coverage-map'), {
@@ -350,6 +352,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       // One stable sidecar dir per stage — each iteration re-pins the ref so
       // the flight view's AgentSessionView follows the newest spawn.
       stageDir: path.join(ctx.flightDir, 'specs-coverage'),
+      job: stageJobRef(deps, m, 'specs-coverage'),
       onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
       agent: m.opts.agent,
@@ -364,6 +367,9 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
   const loop = (ctx: StageContext): Promise<StageOutcome> => runPass(ctx, FIRST_PASS, compute(ctx.manifest().feature))
 
   return {
+    // BOTH of this stage's agents — the spec author and the coverage mapper —
+    // under their two sidecar dirs. Whichever half is live gets stopped.
+    teardown: (ctx) => agentSpawnJob(ctx, 'specs-coverage'),
     run: loop,
     async onCheckpointResponse(ctx, response) {
       // Releasing an authoring hand-off, not the coverage-stuck park. Resume the
@@ -384,6 +390,8 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
           ctx.appendLog(`[specs] client handed pass ${state.iteration} back — authoring here\n`)
           return runPass(ctx, state, resumed, true)
         }
+        const stale = rejectStaleSubmit(ctx, 'specs-coverage', response)
+        if (stale) return stale
         // No branch on response.data: whether the pass advanced coverage is
         // decided by re-reading the specs off disk and recomputing the ledger.
         const done = await afterAuthoring(ctx, prep, state, resumed)
