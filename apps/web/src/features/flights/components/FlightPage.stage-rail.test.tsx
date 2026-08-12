@@ -491,12 +491,12 @@ describe('trailer model (R14–R18)', () => {
     // the same names the Requirement docs card lists below — with their sizes —
     // so it was a worse copy of that card. It now reports the shape of the work.
     const docsFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(docsFacts).toContain('Requirements distilled')
+    expect(docsFacts).toContain('Requirements inferred')
     expect(docsFacts).toContain('7')
     expect(docsFacts).toContain('Source docs')
     // Input before output: the tiles read in the order the work happened, so
-    // "Source docs" sits left of "Requirements distilled".
-    expect(docsFacts.indexOf('Source docs')).toBeLessThan(docsFacts.indexOf('Requirements distilled'))
+    // "Source docs" sits left of "Requirements inferred".
+    expect(docsFacts.indexOf('Source docs')).toBeLessThan(docsFacts.indexOf('Requirements inferred'))
     expect(docsFacts).not.toContain('shop-readme.md')
     expect(docsFacts).not.toContain('api-spec.md')
   })

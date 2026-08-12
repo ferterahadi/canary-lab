@@ -392,8 +392,12 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(distilled?.textContent).toContain('Writing the answer — 27,627 characters so far')
     // The old copy promised progress somewhere it wasn't; it must not survive.
     expect(distilled?.textContent).not.toContain('progress in Activity below')
-    expect(distilled?.querySelector('[data-testid="docs-summary-tail"]')?.textContent)
-      .toContain('Cassandra shows FAILED rows')
+    // The climbing count IS the sign of life. The raw answer tail is NOT shown
+    // here: a slice of half-written JSON cut mid-token is unreadable as content
+    // and reads as a defect rather than as progress. AgentSessionView below
+    // still owns the full output.
+    expect(distilled?.querySelector('[data-testid="docs-summary-tail"]')).toBeNull()
+    expect(distilled?.textContent).not.toContain('Cassandra shows FAILED rows')
   })
 
   it('an unmapped kind/option degrades to its raw key, never blank', async () => {

@@ -222,7 +222,10 @@ describe('trailer model (R14–R18)', () => {
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-rail-specs-coverage"]')?.textContent).toContain('Test authoring & coverage')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Pass 2 of 5 — writing tests to close 3 gaps…')
-    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('2 of 5')
+    // "Pass 2 of 5" is the state line's and the passes card's subject. It is
+    // deliberately NOT a band tile: the band shows the settled tile set in every
+    // state, and 5 is a ceiling the loop usually never reaches.
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).not.toContain('2 of 5')
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('40% covered · 3 gaps open')
     expect(container.querySelector('[data-testid="specs-pass-live"]')?.textContent).toContain('authoring tests')
     // R77: the passes still ahead show as quiet future rows (3 of 5 → 3, 4, 5).

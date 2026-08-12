@@ -484,11 +484,13 @@ describe('stage summary + drill-through (R6)', () => {
     })
     const asv = container.querySelector('[data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-kind')).toBe('portify')
-    // The live phase mirror surfaces as facts + a phase-aware state line.
+    // The live phase mirror surfaces on the state line and the embedded timeline
+    // — NOT as band tiles. The band is the stage's settled tile set in every
+    // state, so a transient attempt/phase pair never displaces a placeholder.
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('Editing the services')
     const facts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
-    expect(facts).toContain('Attempt')
-    expect(facts).toContain('Agent editing services')
+    expect(facts).toContain('Services injectable')
+    expect(facts).not.toContain('Attempt')
   })
 
   it('renders no drill-through when no handler is wired (lens is optional)', async () => {

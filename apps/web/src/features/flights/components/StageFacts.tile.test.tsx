@@ -39,7 +39,7 @@ function render(fact: StageFact) {
 
 describe('FactPlaceholder — a bar is a promise, a dash is not (R86)', () => {
   const slot = (tile: HTMLElement) => tile.querySelector<HTMLElement>('[data-testid="fact-awaiting"]')!
-  const fact: StageFact = { label: 'Requirements distilled', value: '', awaiting: true }
+  const fact: StageFact = { label: 'Requirements inferred', value: '', awaiting: true }
 
   it('gives only a live tile a bar', () => {
     expect(slot(renderWith(fact, 'live')).querySelector('[data-testid="skeleton-bar"]')).not.toBeNull()

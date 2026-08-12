@@ -191,6 +191,11 @@ export interface RegeneratePrdSummaryArgs {
   adapter?: SummarizeAdapter
   cwd?: string
   now?: string
+  /** Cancels the summarizing agent's process. Without it a flight paused during
+   *  the Requirements step left its agent running to completion, because this
+   *  was the one link in the chain that dropped the signal — `summarizePrd`
+   *  already stops the child on abort. */
+  signal?: AbortSignal
   onOutput?: (chunk: string) => void
   onAgentSession?: (session: CoverageAgentSession) => void
 }
@@ -229,6 +234,7 @@ export async function regeneratePrdSummary(
     adapter: args.adapter,
     cwd: args.cwd,
     now: args.now,
+    signal: args.signal,
     onOutput: args.onOutput,
     onSession: args.onAgentSession,
   })

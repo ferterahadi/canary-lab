@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
+import { useInvalidationKey } from '@/shared/state/invalidation'
 import type { FlightManifest, FlightStage, PortifyManifest } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
 import { asRecord } from './FeatureSetupPanel'
@@ -31,6 +32,9 @@ export function useStageBandData(
   const [config, setConfig] = useState<StageBandData['config']>(null)
   const [docBytes, setDocBytes] = useState<number | null>(null)
   const [summaryBytes, setSummaryBytes] = useState<number | null>(null)
+  // Read locally rather than threaded down as a prop (the pattern CoverageLedgerPage
+  // and FeaturesColumn already use) — the ledger is this hook's own source.
+  const coverageRefreshKey = useInvalidationKey('coverage')
 
   const feature = flight.feature
   const stageKey = stage.key
@@ -54,7 +58,12 @@ export function useStageBandData(
       // simply don't render, which is the honest outcome.
       .catch(() => { if (alive) setLedger(null) })
     return () => { alive = false }
-  }, [feature, needsLedger])
+    // coverageRefreshKey: the specs↔coverage loop publishes `coverage-changed`
+    // the moment each pass's mapping lands, and the stage stays MOUNTED across
+    // the whole loop. Without it this fetch ran once — so the composition card
+    // kept the pre-mapping snapshot and a settled stage showed "100% covered"
+    // beside "Untested 18", one card apart, from the same ledger.
+  }, [feature, needsLedger, coverageRefreshKey])
 
   useEffect(() => {
     if (!needsBoot) { setBoot(null); return }
@@ -117,7 +126,12 @@ export function useStageBandData(
       })
       .catch(() => { if (alive) { setDocBytes(null); setSummaryBytes(null) } })
     return () => { alive = false }
-  }, [feature, needsDocs])
+    // coverageRefreshKey: the `_prd-summary` artifacts are written by the SECOND
+    // half of this merged row, while the pane is already mounted and showing the
+    // first half's tiles. Their write publishes `coverage-changed`. Without the
+    // refetch this listing stayed at the pre-distillation snapshot, so "Distilled
+    // to" was missing until the user reloaded the page.
+  }, [feature, needsDocs, coverageRefreshKey])
 
   return { evalTask, ledger, boot, portify, config, docBytes, summaryBytes }
 }

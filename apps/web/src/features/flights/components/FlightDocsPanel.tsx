@@ -6,7 +6,7 @@ import { DocPill, readAsBase64 } from '@/features/coverage/components/CoverageDo
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
 import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
-import { agentActivityLine, agentAnswerTail } from './StageStatusLines'
+import { agentActivityLine } from './StageStatusLines'
 import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
 
 // ─── Requirements (R74): the two-path fork + the resting docs panel ──────────
@@ -107,7 +107,6 @@ export function FlightDocsPanel({
 }) {
   const docs = useFlightDocs(feature, refreshKey)
   const liveLine = summaryStage ? agentActivityLine(summaryStage) : null
-  const liveTail = summaryStage ? agentAnswerTail(summaryStage) : null
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
     <section data-testid="flight-docs-panel" className={`flex flex-col gap-2.5 ${STAGE_COLUMN}`}>
@@ -210,14 +209,11 @@ export function FlightDocsPanel({
                     ? 'Distillation failed before writing a summary — see Activity below.'
                     : 'No summary artifact on disk.'}
               </div>
-              {/* The answer arriving, in the machine face because it is raw agent
-                  output rather than our copy. One line: it is a sign of life,
-                  not a transcript — AgentSessionView still owns the history. */}
-              {liveTail && (
-                <div data-testid="docs-summary-tail" className="truncate font-mono text-[10.5px] text-muted">
-                  {liveTail}
-                </div>
-              )}
+              {/* No raw answer tail. The character count above is already the
+                  sign of life this card needs, and it is OUR copy; the tail was
+                  a slice of half-written JSON mid-token — unreadable as content,
+                  and read as a defect rather than as progress. The full output
+                  still has a home: AgentSessionView owns the history below. */}
             </div>
           )}
         </div>

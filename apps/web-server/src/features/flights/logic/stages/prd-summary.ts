@@ -49,6 +49,9 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
         feature: m.feature,
         adapter: m.opts.agent,
         cwd: deps.projectRoot,
+        // Pause/abort must actually stop the distiller, not just stop waiting
+        // for it — see the same hand-off in every other agent-spawning stage.
+        signal: ctx.signal,
         onOutput: agentProgressSink(ctx),
         onAgentSession: (session) => {
           writeWorkflowAgentRef(stageDir, {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
-import { agentActivityLine, agentAnswerTail } from './StageStatusLines'
-import { agentActivityFacts } from './StageFacts'
+import { agentActivityLine } from './StageStatusLines'
+
 import type { EvaluationExportTask, FlightManifest, FlightStage } from '@/shared/api/client'
 import type { CoverageLedger, HealEnd } from '@/shared/api/types'
 
@@ -75,52 +75,18 @@ describe('live agent activity — the running stage reports what the agent is do
       agentActivity: { phase: 'writing', thinkingTokens: 10, chars: 500, tail: 'tail' },
     } as FlightStage
     expect(agentActivityLine(settled)).toBeNull()
-    expect(agentAnswerTail(settled)).toBeNull()
-    expect(agentActivityFacts(settled)).toEqual([])
   })
 
-  it('shows the newest words of the answer, sliced from the END', () => {
-    const long = running({ phase: 'writing', thinkingTokens: 0, chars: 400, tail: `${'a'.repeat(200)}THE NEWEST WORDS` })
-    const tail = agentAnswerTail(long)
-    // A CSS truncate would have hidden exactly this — the part still arriving.
-    expect(tail?.endsWith('THE NEWEST WORDS')).toBe(true)
-    expect(tail?.startsWith('…')).toBe(true)
-    expect(tail).toHaveLength(121)
-  })
-
-  it('flattens the answer to one line and drops a whitespace-only tail', () => {
-    expect(agentAnswerTail(running({ phase: 'writing', thinkingTokens: 0, chars: 9, tail: '{\n  "a": 1' }))).toBe('{ "a": 1')
-    expect(agentAnswerTail(running({ phase: 'writing', thinkingTokens: 0, chars: 2, tail: ' \n ' }))).toBeNull()
-    // Only the writing phase has an answer to show.
-    expect(agentAnswerTail(running({ phase: 'thinking', thinkingTokens: 5, chars: 0, tail: '' }))).toBeNull()
-  })
-
-  it('leads the band with the live tile, ahead of the placeholders it explains', () => {
+  it('never reaches the band — the live phase belongs to the state line, not a tile', () => {
+    // The band is the stage's settled tile set in every state. A live-agent tile
+    // would be a tile that exists only while the stage works, displacing a
+    // placeholder for a figure the user is actually waiting on.
     const stage = running({ phase: 'thinking', thinkingTokens: 1250, chars: 0, tail: '' })
-    expect(agentActivityFacts(stage)).toEqual([
-      { label: 'Thinking', value: '1,250', big: true, sub: 'tokens of reasoning so far' },
-    ])
     const facts = stageFacts(stage, flight({ stages: [stage] }))
-    expect(facts[0].label).toBe('Thinking')
-    // The awaited placeholders still follow, so the band keeps its settled shape.
-    expect(facts.length).toBeGreaterThan(1)
-  })
-
-  it('picks the running half of a merged row, whichever half owns the agent', () => {
-    const docsDone = { key: 'docs', status: 'done', evidence: {} } as FlightStage
-    const summaryRunning = running({ phase: 'writing', thinkingTokens: 0, chars: 40, tail: 'x' })
-    expect(agentActivityFacts(docsDone, summaryRunning)).toEqual([
-      { label: 'Writing', value: '40', big: true, sub: 'characters of the answer so far' },
-    ])
-  })
-
-  it('renders the tool and waiting phases as band tiles too', () => {
-    expect(agentActivityFacts(running({ phase: 'tool', thinkingTokens: 0, chars: 0, tail: '', tool: 'Grep' }))).toEqual([
-      { label: 'Agent', value: 'Grep', mono: true, sub: 'running a tool' },
-    ])
-    expect(agentActivityFacts(running({ phase: 'requesting', thinkingTokens: 0, chars: 0, tail: '' }))).toEqual([
-      { label: 'Agent', value: 'Waiting', sub: 'the model has not replied yet' },
-    ])
+    expect(facts.map((f) => f.label)).toEqual(['Requirements'])
+    expect(facts.every((f) => f.awaiting)).toBe(true)
+    // The fact itself is not lost — it is the state line's subject.
+    expect(agentActivityLine(stage)).toBe('Thinking — 1,250 tokens of reasoning so far…')
   })
 })
 
@@ -235,20 +201,44 @@ describe('healEndLine / healEndShort (R80)', () => {
 })
 
 describe('stageFacts — specs-coverage metric tiles (R77)', () => {
-  it('a running loop emits Pass as a big value with a stepper, coverage with a bar, gaps with a breakdown sub', () => {
+  it('a running loop shows the settled labels only — a measured coverage figure, no pass tile', () => {
     const stage = {
       key: 'specs-coverage',
       status: 'running',
-      progress: { pass: 2, maxPasses: 5, phase: 'authoring', coveragePct: 40, target: 100, gapsOpen: 3, passes: [] },
+      progress: { pass: 2, maxPasses: 5, phase: 'authoring', coveragePct: 40, target: 100, gapsOpen: 3, passes: [{ pass: 1, coveragePct: 40 }] },
       evidence: { gaps: [{ gap: 'untested' }, { gap: 'untested' }, { gap: 'path-incomplete' }] },
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
-    expect(facts.find((f) => f.label === 'Authoring pass')).toMatchObject({ value: '2', big: true, stepper: [2, 5] })
     const cov = facts.find((f) => f.label === 'Requirements covered')
     expect(cov).toMatchObject({ value: '40%', big: true, tone: 'warn' })
     expect(cov?.bar).toBeCloseTo(0.4)
-    const gaps = facts.find((f) => f.label === 'Coverage gaps')
-    expect(gaps).toMatchObject({ value: '3', big: true, tone: 'warn', sub: '2 untested · 1 path-incomplete' })
+    // The band is the settled label set in every state: the loop's position is
+    // the passes card's subject, and the gap count is not a settled tile.
+    expect(facts.map((f) => f.label)).toEqual(['Requirements covered', 'Requirements', 'Tests written'])
+  })
+
+  it('a zero no mapping has produced is not a measurement — the tile waits instead of reporting 0%', () => {
+    // The mapper runs at the END of a pass, so through the whole authoring half
+    // `coveragePct` is still the ledger the pass started from. Printing that 0
+    // reads as a suite covering nothing, for the minutes authoring takes.
+    const authoring = {
+      key: 'specs-coverage',
+      status: 'running',
+      progress: { pass: 1, maxPasses: 5, phase: 'authoring', coveragePct: 0, target: 100, gapsOpen: 18, passes: [] },
+      evidence: {},
+    } as unknown as FlightStage
+    expect(stageFacts(authoring, flight()).find((f) => f.label === 'Requirements covered'))
+      .toEqual({ label: 'Requirements covered', value: '', awaiting: true })
+
+    // A 0% a pass actually MEASURED is a real verdict and still reports.
+    const measuredZero = {
+      key: 'specs-coverage',
+      status: 'running',
+      progress: { pass: 2, maxPasses: 5, phase: 'authoring', coveragePct: 0, target: 100, gapsOpen: 18, passes: [{ pass: 1, coveragePct: 0 }] },
+      evidence: {},
+    } as unknown as FlightStage
+    expect(stageFacts(measuredZero, flight()).find((f) => f.label === 'Requirements covered'))
+      .toMatchObject({ value: '0%', big: true, tone: 'warn' })
   })
 
   it('full coverage with no gaps reads good — bar full, gaps 0 with no sub, both pass tiles dropped once settled', () => {
@@ -304,7 +294,9 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     // so the total lands where the reader was already looking once the ledger
     // exists. What it must NOT do is carry a figure.
     expect(facts.find((f) => f.label === 'Requirements')).toEqual({ label: 'Requirements', value: '', awaiting: true })
-    expect(facts.find((f) => f.label === 'Coverage gaps')).toMatchObject({ value: '2', big: true })
+    // And the gap count is not smuggled into the running band in its place: it
+    // is not one of the labels this stage settles with.
+    expect(facts.find((f) => f.label === 'Coverage gaps')).toBeUndefined()
   })
 
   it('the band is exactly three counts — coverage, requirements, specs — and no distribution', () => {
@@ -479,11 +471,14 @@ describe('portify live progress (workflow id + phase mirror)', () => {
     expect(portifyWorkflowId({ key: 'scout', evidence: { workflowId: 'wf-x' } })).toBeNull()
   })
 
-  it('running facts: attempt stepper + phase verb from the live mirror', () => {
+  it('running facts: the live mirror drives the state line, never a band tile of its own', () => {
+    // Attempt and phase are transient — neither survives into a settled band. The
+    // band holds the three awaited placeholders so the figures land where the
+    // reader was already looking; the mirror speaks on the state line and in the
+    // embedded portify timeline instead.
     const facts = stageFacts(running({ workflowId: 'wf1', status: 'editing', attempt: 2, maxAttempts: 3 }), flight())
-    const attempt = facts.find((f) => f.label === 'Attempt')
-    expect(attempt).toMatchObject({ value: '2', big: true, stepper: [2, 3] })
-    expect(facts.find((f) => f.label === 'Phase')?.value).toBe('Agent editing services')
+    expect(facts.map((f) => f.label)).toEqual(['Services injectable', 'Files edited', 'Instances proven'])
+    expect(facts.every((f) => f.awaiting)).toBe(true)
   })
 
   it('running facts: older flights without the mirror render placeholders, never a half-empty tile', () => {

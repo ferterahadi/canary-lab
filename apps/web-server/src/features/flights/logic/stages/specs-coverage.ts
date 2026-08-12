@@ -267,6 +267,10 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       feature: m.feature,
       adapter: m.opts.agent,
       cwd: deps.projectRoot,
+      // The mapping half spawns its OWN agent, so it needs the signal as much as
+      // the authoring half below. Without it a pause landing in `mapping` left
+      // the coverage mapper running until its idle watchdog fired.
+      signal: ctx.signal,
       onOutput: agentProgressSink(ctx),
       onAgentSession: (session) => {
         writeWorkflowAgentRef(path.join(ctx.flightDir, 'coverage-map'), {

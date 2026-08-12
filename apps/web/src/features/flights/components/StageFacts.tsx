@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react'
 import type { FlightManifest, FlightStage, FlightStageKey, PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
-import { evaluationArchiveFilename, formatBytes, formatCount, formatDuration } from '@/shared/lib/format'
+import { evaluationArchiveFilename, formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
-import { PORTIFY_PHASE_LABEL, STAGE_COLUMN, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
+import { STAGE_COLUMN, evidenceOf, num, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, stageHasEvidence, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
 
 // ─── Stage facts (R20) ──────────────────────────────────────────────────────
@@ -170,7 +170,7 @@ const AWAITED_FACT_LABELS: Partial<Record<FlightStageKey, readonly string[]>> = 
   'scout': ['Repos scanned', 'Services found', 'Port slots drafted'],
   'scaffold': ['Services booted', 'Boot time', 'Env files'],
   'env-capture': ['Env files', 'Boot check'],
-  'docs': ['Source docs', 'Requirements distilled', 'Distilled to'],
+  'docs': ['Source docs', 'Requirements inferred', 'Distilled to'],
   'prd-summary': ['Requirements'],
   'specs-coverage': ['Requirements covered', 'Requirements', 'Tests written'],
   'portify': ['Services injectable', 'Files edited', 'Instances proven'],
@@ -197,9 +197,18 @@ export function awaitingFact(label: string): StageFact {
  *
  *  A settled stage is returned untouched: `done` and `skipped` have produced
  *  everything they ever will, so a placeholder there would claim a value is
- *  still coming. Real facts outside the awaited list (portify's live attempt and
- *  phase, the authoring pass) lead — they are the news while the stage works —
- *  and the awaited list follows in its fixed order. */
+ *  still coming.
+ *
+ *  The awaited list is the WHOLE band, not a floor under it: a stage that
+ *  declares one shows those tiles in that order in every state, and a fact
+ *  outside the list is DROPPED while the stage works rather than led with. A
+ *  running band used to carry extra tiles nothing settled ever shows — the live
+ *  agent phase, the authoring pass, portify's attempt and phase — so the band
+ *  the user learned to read at rest was a different band from the one in front
+ *  of them mid-flight, and the figure they were waiting for kept moving as the
+ *  transient tiles came and went. Those live facts all have a home of their own
+ *  further down the pane (the passes card, the state line, the Activity panel);
+ *  the band's job is the settled shape, with placeholders where figures land. */
 export function withAwaitingTiles(stage: FlightStage, companion: FlightStage | undefined, known: StageFact[]): StageFact[] {
   // A merged row settles when BOTH halves do. Reading the primary alone told the
   // Suite setup row it was finished while its env capture had not started — the
@@ -209,44 +218,14 @@ export function withAwaitingTiles(stage: FlightStage, companion: FlightStage | u
   const awaited = AWAITED_FACT_LABELS[stage.key]
   if (!awaited) return known
   const byLabel = new Map(known.map((f) => [f.label, f]))
-  return [
-    ...known.filter((f) => !awaited.includes(f.label)),
-    ...awaited.map((label) => byLabel.get(label) ?? awaitingFact(label)),
-  ]
+  return awaited.map((label) => byLabel.get(label) ?? awaitingFact(label))
 }
 
-/** The live agent tile: what the spawned agent is doing THIS second, from the
- *  partial-message stream (see agent-stream-progress.ts server-side).
- *
- *  It leads the band, the slot portify's live phase already uses, because while
- *  an agent works every other tile is a sweeping placeholder — and a sweeping
- *  placeholder says "waiting", not "working". That gap is not theoretical: a
- *  user watched a requirements agent think for two minutes, read the frozen
- *  band and the empty Activity panel as a hang, and shut the machine down
- *  three minutes into a step that was about to finish.
- *
- *  Gated on `running`: a settled stage's last snapshot would read as live work.
- *  Either half of a merged row may be the one with an agent in flight. */
-export function agentActivityFacts(stage: FlightStage, companion?: FlightStage): StageFact[] {
-  const active = [stage, companion].find((s) => s?.status === 'running' && s.agentActivity)
-  const activity = active?.agentActivity
-  if (!activity) return []
-  switch (activity.phase) {
-    // The count IS the news — a number that climbs between two refetches is the
-    // whole proof of life, so it takes the tile's big metric slot.
-    case 'thinking':
-      return [{ label: 'Thinking', value: formatCount(activity.thinkingTokens), big: true, sub: 'tokens of reasoning so far' }]
-    case 'writing':
-      return [{ label: 'Writing', value: formatCount(activity.chars), big: true, sub: 'characters of the answer so far' }]
-    case 'tool':
-      return [{ label: 'Agent', value: activity.tool, mono: true, sub: 'running a tool' }]
-    // No number to show yet — but naming the wait still beats a bare skeleton,
-    // because it distinguishes "the model has not answered" from "nothing runs".
-    case 'requesting':
-      return [{ label: 'Agent', value: 'Waiting', sub: 'the model has not replied yet' }]
-  }
-}
-
+/** The band is the stage's SETTLED tile set in every state — see
+ *  `withAwaitingTiles`. The live agent's phase (thinking / writing / a tool
+ *  call) is not part of it: it belongs to the state line under the stage title
+ *  (`StageStatusLines`) and to the Activity panel, both of which show it with
+ *  more detail and without displacing a figure the user is waiting on. */
 export function stageFacts(
   stage: FlightStage,
   flight: FlightManifest,
@@ -255,10 +234,7 @@ export function stageFacts(
    *  their tile — the band never pads itself to a fixed width. */
   band: StageBandData = {},
 ): StageFact[] {
-  return [
-    ...agentActivityFacts(stage, companion),
-    ...withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band)),
-  ]
+  return withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band))
 }
 
 /** What the stage has actually measured — evidence, live progress and the band's
@@ -382,7 +358,7 @@ function measuredStageFacts(
                 : {}),
             }]
           : []),
-        ...(count != null ? [{ label: 'Requirements distilled', value: String(count), big: true as const }] : []),
+        ...(count != null ? [{ label: 'Requirements inferred', value: String(count), big: true as const }] : []),
         ...(summaryTokens != null && band.summaryBytes != null
           ? [{
               label: 'Distilled to',
@@ -422,7 +398,18 @@ function measuredStageFacts(
       const p = specsCoverageProgress(stage)
       // Evidence lands when the stage settles; while the loop runs the same
       // facts come from the live progress shape.
-      const pct = num(ev, 'coveragePct') ?? p?.coveragePct ?? null
+      const evPct = num(ev, 'coveragePct')
+      const pct = evPct ?? p?.coveragePct ?? null
+      // The mapper runs at the END of a pass, so while the authoring agent works
+      // `progress.coveragePct` is still the ledger the pass STARTED from. On a
+      // first flight that start is 0 — and rendering it as an amber "0%" for the
+      // several minutes authoring takes states a measurement nobody made: it
+      // reads as a suite that covers nothing, when the truth is nothing has been
+      // measured yet. Suppressed ONLY for a zero no mapping has produced (the
+      // awaited-tile placeholder takes the slot, R83); a measured 0% still shows,
+      // and any non-zero came from a real ledger.
+      const everMapped = p?.passes.some((entry) => typeof entry.coveragePct === 'number') ?? false
+      const unmeasured = stage.status === 'running' && evPct == null && pct === 0 && !everMapped
       const gapRows = Array.isArray(ev.gaps) ? (ev.gaps as Array<{ gap?: string }>) : null
       const gaps = gapRows ? gapRows.length : p?.gapsOpen ?? null
       // R35: name the gap kinds, not just the count ("2 untested, 1 path-incomplete").
@@ -442,18 +429,12 @@ function measuredStageFacts(
         // is there were no documents to ask.
         return [{ label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' }]
       }
+      // No "Authoring pass N of M" tile: the loop's position is the PASSES card's
+      // whole subject, one card below, where each pass carries its own verdict —
+      // and M is a ceiling the loop rarely reaches, so a stepper in the band read
+      // as four more rounds scheduled rather than four allowed.
       return [
-        // Pass N of M — the big number carries the stepper so "3 passes still to
-        // go" reads at a glance instead of being inferred from "2 of 5".
-        ...(stage.status === 'running' && p
-          ? [{
-              label: 'Authoring pass',
-              value: String(p.pass),
-              big: true as const,
-              ...(Number.isFinite(p.maxPasses) ? { stepper: [p.pass, p.maxPasses] as [number, number] } : {}),
-            }]
-          : []),
-        ...(pct != null
+        ...(pct != null && !unmeasured
           ? [{
               label: 'Requirements covered',
               value: `${pct}%`,
@@ -511,20 +492,10 @@ function measuredStageFacts(
       if (stage.status === 'skipped' && !stageHasEvidence(stage.evidence)) {
         return [{ label: 'Parallel', value: 'Already checked — safe to run two at once', tone: 'good' }]
       }
-      if (stage.status === 'running') {
-        // Live phase mirror from the workflow (attempt stepper + phase verb) —
-        // the embedded agent timeline below carries the detail.
-        const prog = portifyProgress(stage)
-        const attempt = num(prog, 'attempt')
-        const maxAttempts = num(prog, 'maxAttempts')
-        const phase = str(prog, 'status')
-        return [
-          ...(attempt != null && maxAttempts != null
-            ? [{ label: 'Attempt', value: String(attempt), big: true as const, stepper: [attempt, maxAttempts] as [number, number] }]
-            : []),
-          ...(phase ? [{ label: 'Phase', value: PORTIFY_PHASE_LABEL[phase] ?? phase }] : []),
-        ]
-      }
+      // No live attempt/phase tiles while running: neither survives into the
+      // settled band, and the same two facts are already on the state line and
+      // the embedded portify timeline below. The band holds its three awaited
+      // placeholders until the workflow measures them.
       // Natively concurrency-ready: every start command already declares a port
       // slot, so portify had nothing to rewrite and left no workflow to read.
       // That is a real, reportable outcome — without it the stage rendered
@@ -883,7 +854,7 @@ export const FACT_HELP: Record<string, string> = {
   // Requirements
   'Source docs': 'The files Canary read — briefs, specs, notes. The requirements come only from these.',
   'Source text': 'How much text those files hold. The token figure is a rough estimate, not a count.',
-  'Requirements distilled': 'One thing the app must do, small enough to test. Everything later is scored against these.',
+  'Requirements inferred': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
@@ -926,7 +897,7 @@ export const FACT_GLOSS: Record<string, string> = {
   'Port slots drafted': 'so two runs never clash',
   'Services booted': 'checked on a test start',
   'Source docs': 'where the requirements came from',
-  'Requirements distilled': 'things the app must do',
+  'Requirements inferred': 'things the app must do',
   'Test depth': 'how much each test checks',
   'Requirements': 'what the documents asked for',
   'Authoring pass': 'write, check, write again',

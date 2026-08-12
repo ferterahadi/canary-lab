@@ -146,18 +146,13 @@ export function agentActivityLine(stage: FlightStage): string | null {
   }
 }
 
-/** The newest words of the answer as it streams — the difference between knowing
- *  a count is climbing and seeing what is actually being written.
- *
- *  Sliced from the END and whitespace-flattened rather than CSS-truncated: the
- *  tail is the part a reader wants, and `truncate` would hide exactly that. */
-export function agentAnswerTail(stage: FlightStage, max = 120): string | null {
-  const activity = stage.status === 'running' ? stage.agentActivity : undefined
-  if (!activity || activity.phase !== 'writing') return null
-  const flat = activity.tail.replace(/\s+/g, ' ').trim()
-  if (!flat) return null
-  return flat.length > max ? `…${flat.slice(-max)}` : flat
-}
+// No answer-tail reader here any more. Showing the newest words of a streaming
+// answer sounded like the difference between a count climbing and seeing the
+// work — but the answers these agents write are JSON, so every sample was a
+// slice cut mid-token (`…"tier": 3, "description": "…` }]}]}`). It read as a
+// defect rather than as progress. The character count is the sign of life; the
+// full output is AgentSessionView's job. `agentActivity.tail` stays on the wire
+// for that view's use.
 
 export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
