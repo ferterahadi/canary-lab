@@ -87,6 +87,7 @@ export interface RunContext {
   readonly healSignalPollMs: number
   readonly healAgentTimeoutMs: number
   readonly healAgentIdleTimeoutMs: number
+  readonly healAgentPromptNudgeMs: number
   readonly repoBranchSnapshots?: RepoBranchSnapshot[]
   readonly executionType: ExecutionType
   readonly verification?: VerificationRunMetadata
@@ -213,6 +214,7 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     // is the primary safety net.
     healAgentTimeoutMs: opts.healAgentTimeoutMs ?? 120 * 60 * 1000,
     healAgentIdleTimeoutMs: opts.healAgentIdleTimeoutMs ?? 5 * 60 * 1000,
+    healAgentPromptNudgeMs: opts.healAgentPromptNudgeMs ?? 90 * 1000,
     repoBranchSnapshots: opts.repoBranchSnapshots,
     executionType: opts.executionType ?? 'run',
     verification: opts.verification,

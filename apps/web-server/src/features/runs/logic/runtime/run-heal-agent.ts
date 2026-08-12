@@ -199,6 +199,53 @@ export function agentPtyEnv(ctx: RunContext): Record<string, string> {
   }
 }
 
+// Re-sends per cycle. Two clears a swallowed paste; a third would only be
+// papering over a REPL that is not reading its stdin at all, which is what
+// the idle timeout is for.
+const HEAL_PROMPT_NUDGE_LIMIT = 2
+
+/**
+ * Build the clock that answers "is the heal agent actually doing anything?".
+ *
+ * The PTY stream is the wrong source. Claude's TUI repaints its footer on a
+ * timer, so every repaint bumps `lastAgentDataAt` and a REPL that has sat at
+ * an empty prompt for an hour still reads as busy — which is how a cycle can
+ * outlive `healAgentIdleTimeoutMs` without ever ending. `agent-session-log.ts`
+ * names the same stream "TUI redraw noise" and refuses to replay it for the
+ * same reason. The CLI's own JSONL session log grows only when a message, tool
+ * call, or result is appended, so it tracks real turn activity.
+ *
+ * Returns a getter for the last-active timestamp rather than a number, because
+ * the log ref is resolved lazily: `persistAgentSessionRef` writes it when the
+ * first cycle's wait ends, so cycle 1 legitimately has no log yet and falls
+ * back to the PTY clock. That same fallback covers an agent whose log the
+ * locator never found.
+ */
+export function createHealActivityClock(ctx: RunContext, startedAt: number): () => number {
+  const agent = ctx.autoHeal?.agent
+  let lastSize = -1
+  let lastGrowthAt = startedAt
+  return () => {
+    const logPath = agent ? ctx.agentSessionRefs.read()?.sessions[agent]?.logPath : undefined
+    if (logPath === undefined) return ctx.lastAgentDataAt
+    let size: number
+    try {
+      size = fs.statSync(logPath).size
+    } catch {
+      // Not on disk yet, or moved out from under us. Reporting a frozen agent
+      // on a missing file would turn a bookkeeping gap into a false give-up.
+      return ctx.lastAgentDataAt
+    }
+    // Any change counts, including a shrink: a truncated or rotated log is the
+    // agent writing, not the agent stalling.
+    if (size !== lastSize) {
+      lastSize = size
+      lastGrowthAt = Date.now()
+    }
+    return lastGrowthAt
+  }
+}
+
 // Block until a signal lands or we give up. Returns a tagged result so the
 // caller can react to *why* the wait ended:
 //   - signal:       agent wrote `.restart` / `.rerun` / `.heal`
@@ -214,10 +261,15 @@ export function agentPtyEnv(ctx: RunContext): Record<string, string> {
 //   - cancelled:    user clicked Stop Heal mid-cycle
 // The signal watcher feeds `signalGate`; this wait consumes one accepted
 // signal and lets the gate audit duplicates or late files.
-export async function waitForHealSignal(ctx: RunContext, 
+export async function waitForHealSignal(ctx: RunContext,
   hardTimeoutMs: number = ctx.healAgentTimeoutMs,
   idleTimeoutMs: number = ctx.healAgentIdleTimeoutMs,
   requiresAgent: boolean = true,
+  // Called when the agent has been provably still for `healAgentPromptNudgeMs`
+  // but the wait is still within its budget. Omitted by callers whose prompt
+  // cannot have been swallowed (cycle 1 carries it in argv) or who have no
+  // prompt to re-send (manual heal waits on a human).
+  onSilence?: () => void,
 ): Promise<{
   signal: HealSignal | null
   reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
@@ -226,6 +278,11 @@ export async function waitForHealSignal(ctx: RunContext,
   // Seed the idle clock at the start of the wait so the first chunk-less
   // poll doesn't insta-trip the idle timeout.
   ctx.lastAgentDataAt = startedAt
+  const lastActiveAt = createHealActivityClock(ctx, startedAt)
+  let nudges = 0
+  // Spaces re-sends out. A swallowed nudge leaves the log just as still as it
+  // was, so without this the silence test would fire again on the next poll.
+  let nudgeFloor = startedAt
   ctx.signalGate.beginWaiting()
   recordLifecycle(ctx, 'waiting-for-signal', 'Waiting for heal signal', {
     detail: 'The runner is waiting for .restart, .rerun, or .heal.',
@@ -266,8 +323,17 @@ export async function waitForHealSignal(ctx: RunContext,
       }
       const now = Date.now()
       if (now >= hardDeadline) return { signal: null, reason: 'hard-timeout' }
-      if (now - ctx.lastAgentDataAt >= idleTimeoutMs) {
+      const activeAt = lastActiveAt()
+      if (now - activeAt >= idleTimeoutMs) {
         return { signal: null, reason: 'idle-timeout' }
+      }
+      if (onSilence
+        && nudges < HEAL_PROMPT_NUDGE_LIMIT
+        && now - activeAt >= ctx.healAgentPromptNudgeMs
+        && now - nudgeFloor >= ctx.healAgentPromptNudgeMs) {
+        nudges += 1
+        nudgeFloor = now
+        onSilence()
       }
       await yieldOnce(Math.max(1, ctx.healSignalPollMs))
     }
@@ -361,18 +427,42 @@ export async function runHealAgent(ctx: RunContext, args: {
   // here: in Claude's input editor it can attach/read the file without
   // submitting the composer, leaving the run stuck until a human presses
   // Enter. Send a plain instruction with the prompt path instead.
+  const promptMessage = `Read ${healPromptFile(ctx)} and continue the auto-heal cycle now.`
+  const sendCyclePrompt = () =>
+    pty.write(BRACKETED_PASTE_BEGIN + promptMessage + BRACKETED_PASTE_END + '\r')
+
   if (!isFirstSpawn) {
     try {
-      const promptMessage = `Read ${healPromptFile(ctx)} and continue the auto-heal cycle now.`
-      pty.write(BRACKETED_PASTE_BEGIN + promptMessage + BRACKETED_PASTE_END + '\r')
+      sendCyclePrompt()
     } catch {
       return { exitCode: 1, signal: null, reason: 'pty-died' }
     }
   }
 
-  const { signal, reason } = await waitForHealSignal(ctx, 
+  // The cycle prompt is a stdin paste into a REPL that may still be finishing
+  // the *previous* cycle's turn: the runner accepts a signal the instant the
+  // file appears, but the agent goes on to write its closing summary, and a
+  // fast re-run can be back here within seconds. A paste that lands inside
+  // that tail is queued by the CLI and folded into the ending turn instead of
+  // starting a new one — the agent reads it as part of work it has just
+  // finished, answers nothing, and the cycle silently never happens. Re-sending
+  // once the agent's own log has gone still recovers it; a re-send that was
+  // not needed is just a duplicate instruction the agent is already acting on.
+  const resendCyclePrompt = isFirstSpawn ? undefined : () => {
+    try {
+      sendCyclePrompt()
+    } catch {
+      // A dead REPL is the wait's own `pty-died` outcome, not ours to report.
+      return
+    }
+    emitAgentSystemMessage(ctx, 'Heal agent went quiet without starting the cycle — re-sent the cycle prompt.')
+  }
+
+  const { signal, reason } = await waitForHealSignal(ctx,
     ctx.healAgentTimeoutMs,
     ctx.healAgentIdleTimeoutMs,
+    true,
+    resendCyclePrompt,
   )
   const exitCode = ctx.healAgentPty ? 0 : 1
   return { exitCode, signal, reason }

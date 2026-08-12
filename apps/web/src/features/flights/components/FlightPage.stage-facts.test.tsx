@@ -24,7 +24,8 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  getPortify: vi.fn(),
+  loadPortify: vi.fn(),
+  portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
@@ -64,7 +65,6 @@ vi.mock('@/shared/api/client', () => ({
   listRuns: mocks.listRuns,
   getEnvsetSlot: mocks.getEnvsetSlot,
   getEnvsetsIndex: mocks.getEnvsetsIndex,
-  getPortify: mocks.getPortify,
   getFeatureCoverage: mocks.getFeatureCoverage,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
@@ -112,6 +112,13 @@ vi.mock('@/features/evaluation/state/EvaluationExportContext', () => ({
   }),
 }))
 
+// The Parallel-readiness band reads its portify workflow off the live
+// `/ws/portify` store; the provider needs a socket, so stub the hooks.
+vi.mock('@/features/portify/state/PortifyContext', () => ({
+  usePortify: () => ({ loadPortify: mocks.loadPortify }),
+  usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
+}))
+
 import { FlightPage } from './FlightPage'
 
 ;
@@ -125,7 +132,6 @@ let root: Root
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getFeatureCoverage.mockResolvedValue(undefined)
-  mocks.getPortify.mockResolvedValue(undefined)
   mocks.getEnvsetsIndex.mockResolvedValue(undefined)
   mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
@@ -881,5 +887,86 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelectorAll('[data-testid="skeleton-bar"]')).toHaveLength(0)
     expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
     expect(container.querySelector('[data-testid="overlay-skeleton"]')).toBeNull()
+  })
+})
+
+describe('Parallel readiness follows the workflow live', () => {
+  // The stage pins its workflow id at START, before there is anything to show.
+  // A source keyed on that id alone therefore resolves once, empty, and never
+  // again — which is why both evidence cards used to stay blank until a reload.
+  const runningPortify = () => manifest({
+    status: 'running',
+    currentStage: 'portify',
+    stages: FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: key === 'portify' ? ('running' as const) : ('pending' as const),
+      ...(key === 'portify' ? { progress: { workflowId: 'wf-9' } } : {}),
+    })),
+  })
+
+  const verified = {
+    workflowId: 'wf-9',
+    repos: [{ name: 'shop-api' }],
+    verification: {
+      ok: true,
+      instances: [
+        { ok: true, ports: { web: 4001 } },
+        { ok: true, ports: { web: 4002 } },
+      ],
+    },
+    diff: ['# repo: shop-api', '+++ b/build.gradle', '+canaryPort = System.getenv("PORT")'].join('\n'),
+  }
+
+  // Re-render on the SAME key: one FlightPage instance, no remount — exactly
+  // what a `/ws/portify` push does to an open page. Remounting would prove
+  // nothing; that is the page reload this test exists to make unnecessary.
+  const push = async () => {
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <FlightPage key="live" flightId="fl_1" onSelectFlight={vi.fn()} onClose={vi.fn()} />
+        </InvalidationProvider>,
+      )
+    })
+  }
+
+  it('the proof and the port changes land on the store push, without a reload', async () => {
+    mocks.getFlight.mockResolvedValue(runningPortify())
+    await push()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    // Nothing verified yet: both cards hold their places as placeholders.
+    expect(container.querySelector('[data-testid="double-boot-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="overlay-panel"]')).toBeNull()
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')).not.toBeNull()
+
+    // The workflow verifies and captures its diff; the store pushes the full
+    // manifest and the open page re-renders off it.
+    mocks.portifyWorkflow.mockReturnValue(verified)
+    await push()
+    expect(container.querySelector('[data-testid="double-boot-panel"]')?.textContent).toContain('Instance A')
+    expect(container.querySelector('[data-testid="double-boot-panel"]')?.textContent).toContain(':4002')
+    expect(container.querySelector('[data-testid="overlay-panel"]')?.textContent).toContain('build.gradle')
+  })
+
+  it('hydrates a terminal workflow the socket snapshot left out — a settled flight has no push coming', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'portify' ? { evidence: { workflowId: 'wf-9', edits: true } } : {}),
+      })),
+    }))
+    // `clearAllMocks` leaves a `mockReturnValue` standing, and the store holds
+    // no detail for a terminal workflow — that is the case under test.
+    mocks.portifyWorkflow.mockReturnValue(undefined)
+    await push()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(mocks.loadPortify).toHaveBeenCalledWith('wf-9')
   })
 })

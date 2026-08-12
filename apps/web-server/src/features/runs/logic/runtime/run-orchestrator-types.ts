@@ -86,11 +86,18 @@ export interface OrchestratorOptions {
   // bound on how long one cycle can run; quieter checks live in
   // `healAgentIdleTimeoutMs` below.
   healAgentTimeoutMs?: number
-  // Idle window — max time the agent can go without emitting any output
-  // before the cycle is given up on. Resets every time a chunk arrives on
-  // the agent pty. Defaults to 3 min, which is generous for normal claude
-  // pacing but catches a wedged REPL.
+  // Idle window — max time the agent can go without doing anything before the
+  // cycle is given up on. Measured against the agent CLI's own session log
+  // where one has been located, and only against the pty stream before that:
+  // an idle TUI repaints its footer forever, so pty chunks alone never go
+  // quiet. Defaults to 3 min, generous for normal claude pacing but enough to
+  // catch a wedged REPL.
   healAgentIdleTimeoutMs?: number
+  // Silence window after which an unanswered cycle prompt is re-sent to the
+  // live REPL. Same clock as `healAgentIdleTimeoutMs`, and must stay well
+  // under it so a wedged REPL still ends on the idle timeout. Defaults to
+  // 90s.
+  healAgentPromptNudgeMs?: number
   // Optional runner-log sink. When present, the orchestrator subscribes to its
   // own lifecycle events on construction and tees a human-readable line for
   // each into `runner.log`. Both CLI and web entrypoints provide one.

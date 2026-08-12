@@ -10,6 +10,13 @@ import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
+// The Parallel-readiness band reads its portify workflow off the live
+// `/ws/portify` store; the provider needs a socket, so stub the hooks.
+vi.mock('@/features/portify/state/PortifyContext', () => ({
+  usePortify: () => ({ loadPortify: mocks.loadPortify }),
+  usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
+}))
+
 import { FlightPage } from './FlightPage'
 
 ;
@@ -33,7 +40,8 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  getPortify: vi.fn(),
+  loadPortify: vi.fn(),
+  portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
   getFeatureConfigDoc: vi.fn(),
@@ -73,7 +81,6 @@ vi.mock('@/shared/api/client', () => ({
   listRuns: mocks.listRuns,
   getEnvsetSlot: mocks.getEnvsetSlot,
   getEnvsetsIndex: mocks.getEnvsetsIndex,
-  getPortify: mocks.getPortify,
   getFeatureCoverage: mocks.getFeatureCoverage,
   getFeatureConfigDoc: mocks.getFeatureConfigDoc,
   getPlaywrightConfig: mocks.getPlaywrightConfig,
@@ -132,7 +139,6 @@ let root: Root
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.getFeatureCoverage.mockResolvedValue(undefined)
-  mocks.getPortify.mockResolvedValue(undefined)
   mocks.getEnvsetsIndex.mockResolvedValue(undefined)
   mocks.getEnvsetSlot.mockResolvedValue(undefined)
   mocks.getRunDetail.mockResolvedValue({ runId: 'run-9', manifest: { status: 'passed' } })
