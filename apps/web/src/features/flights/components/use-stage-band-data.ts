@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { useInvalidationKey } from '@/shared/state/invalidation'
-import type { FlightManifest, FlightStage, PortifyManifest } from '@/shared/api/client'
+import { usePortify, usePortifyWorkflow } from '@/features/portify'
+import type { FlightManifest, FlightStage } from '@/shared/api/client'
 import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
 import { asRecord } from './FeatureSetupPanel'
 import { evidenceOf, portifyWorkflowId, str } from './stage-meta'
@@ -9,9 +10,11 @@ import type { StageBandData } from './StageFacts'
 
 // The band's data sources live outside the flight record: the coverage ledger,
 // the boot run, the portify workflow, the on-disk config and the doc listing.
-// Fetching all five on every stage switch would be five requests for a band
+// Fetching all of them on every stage switch would be five requests for a band
 // that shows three tiles, so this resolves ONLY what the visible stage's band
-// actually reads — keyed on the stage, refetched when it changes.
+// actually reads — keyed on the stage, refetched when it changes. The portify
+// workflow is the exception: it comes off the live `/ws/portify` store rather
+// than a fetch, because it keeps changing while the stage is open.
 //
 // Every field stays optional: a source that hasn't resolved yet, or doesn't
 // exist for this flight, drops its tile rather than rendering a zero.
@@ -28,7 +31,6 @@ export function useStageBandData(
 ): StageBandData {
   const [ledger, setLedger] = useState<CoverageLedger | null>(null)
   const [boot, setBoot] = useState<RunDetail | null>(null)
-  const [portify, setPortify] = useState<PortifyManifest | null>(null)
   const [config, setConfig] = useState<StageBandData['config']>(null)
   const [docBytes, setDocBytes] = useState<number | null>(null)
   const [summaryBytes, setSummaryBytes] = useState<number | null>(null)
@@ -88,14 +90,20 @@ export function useStageBandData(
     return () => { alive = false }
   }, [bootRunId, feature, needsBoot])
 
+  // The workflow id is pinned at stage START (the stage's first setProgress), so
+  // a one-shot fetch here resolved a manifest that had no verification and no
+  // diff yet — and never re-ran, because the id it keys on never changes. The
+  // side-by-side proof and the port changes only appeared after a page reload.
+  // `/ws/portify` is the task-scoped stream for exactly this workflow and the
+  // app already holds it: the store pushes the FULL manifest on every attempt,
+  // verification and save, so reading it keeps both panels live. The one-shot
+  // hydrate covers the cold-load case — the WS snapshot omits details for
+  // terminal workflows, which is every settled flight.
+  const livePortify = usePortifyWorkflow(portifyId)
+  const { loadPortify } = usePortify()
   useEffect(() => {
-    if (!portifyId) { setPortify(null); return }
-    let alive = true
-    api.getPortify(portifyId)
-      .then((m) => { if (alive) setPortify(m) })
-      .catch(() => { if (alive) setPortify(null) })
-    return () => { alive = false }
-  }, [portifyId])
+    if (portifyId && !livePortify) void loadPortify(portifyId)
+  }, [portifyId, livePortify, loadPortify])
 
   useEffect(() => {
     if (!needsConfig) { setConfig(null); return }
@@ -133,7 +141,7 @@ export function useStageBandData(
     // to" was missing until the user reloaded the page.
   }, [feature, needsDocs, coverageRefreshKey])
 
-  return { evalTask, ledger, boot, portify, config, docBytes, summaryBytes }
+  return { evalTask, ledger, boot, portify: livePortify ?? null, config, docBytes, summaryBytes }
 }
 
 /** The feature's most recent dry-run boot. `aborted` is the NORMAL terminal

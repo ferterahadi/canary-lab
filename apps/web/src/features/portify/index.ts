@@ -6,7 +6,7 @@
 
 export { PortifyWizard } from './components/PortifyWizard'
 export { SavedOverlayPanel } from './components/SavedOverlayPanel'
-export { usePortify } from './state/PortifyContext'
+export { usePortify, usePortifyWorkflow } from './state/PortifyContext'
 export {
   isActivePortify,
   latestSavedWorkflowId,
