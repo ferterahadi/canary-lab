@@ -157,3 +157,82 @@ describe('POST /api/version/update', () => {
     }
   })
 })
+
+// The install job announces itself from its own record (the store-owns-its-events
+// rule). Every case above wires the routes WITHOUT a bus, so `bridgeStoreEvents`
+// returns before subscribing and the mapper never runs — leaving the one rule
+// that keeps an install from spamming the workspace untested.
+describe('version-changed bridging', () => {
+  /** A store whose events can be driven, unlike the inert `idleStore`. */
+  function drivableStore(status: () => string | null) {
+    const listeners = new Set<() => void>()
+    return {
+      store: {
+        current: () => (status() === null ? null : { status: status() }),
+        save: () => {},
+        onEvent: (fn: () => void) => { listeners.add(fn) },
+        offEvent: (fn: () => void) => { listeners.delete(fn) },
+      } as unknown as UpdateJobStore,
+      emit: () => { for (const fn of listeners) fn() },
+    }
+  }
+
+  const state = () => ({
+    status: () => baseStatus(),
+    refresh: async () => {},
+    pendingTarget: () => null,
+  } as unknown as VersionState)
+
+  it('stays silent while the install is still running', async () => {
+    const events: unknown[] = []
+    const { store, emit } = drivableStore(() => 'running')
+    const app = await makeApp({
+      projectRoot: '/x', state: state(), updateStore: store,
+      workspaceEvents: { publish: (e) => events.push(e) },
+    })
+    try {
+      // The runner saves on every chunk of npm output. Broadcasting those would
+      // make each client refetch /api/version dozens of times per install to
+      // learn nothing it renders.
+      emit(); emit(); emit()
+      expect(events).toEqual([])
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('announces the job once it settles', async () => {
+    const events: unknown[] = []
+    let status: string | null = 'running'
+    const { store, emit } = drivableStore(() => status)
+    const app = await makeApp({
+      projectRoot: '/x', state: state(), updateStore: store,
+      workspaceEvents: { publish: (e) => events.push(e) },
+    })
+    try {
+      emit()
+      expect(events).toEqual([])
+      status = 'done'
+      emit()
+      expect(events).toEqual([{ type: 'version-changed' }])
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('announces a job whose record is gone, rather than going quiet', async () => {
+    const events: unknown[] = []
+    const { store, emit } = drivableStore(() => null)
+    const app = await makeApp({
+      projectRoot: '/x', state: state(), updateStore: store,
+      workspaceEvents: { publish: (e) => events.push(e) },
+    })
+    try {
+      // `current()` is null — not running, so the client is told to refetch.
+      emit()
+      expect(events).toEqual([{ type: 'version-changed' }])
+    } finally {
+      await app.close()
+    }
+  })
+})

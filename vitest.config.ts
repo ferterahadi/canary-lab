@@ -121,6 +121,18 @@ export default defineConfig({
         'shared/verification.ts',
         // Frontend pure modules. React components are excluded — only the
         // API client, pure utilities, and benchmark state are gated.
+        //
+        // That exclusion is a decision, not a backlog item. Measured: the 173
+        // files under `features/*/components`, `features/*/state`, `shared/ui`,
+        // `shared/shell` and `shared/state` sit at ~65% statements, with 150 of
+        // them below 100. Reaching the gate's 100/100/100 there means several
+        // hundred render tests, and at 100% BRANCH coverage a component test
+        // stops asserting behaviour and starts asserting markup — which is the
+        // kind of test that breaks on every restyle and catches nothing. The
+        // logic worth pinning is extracted into the gated modules above; that is
+        // what `features/*/lib` and `features/*/utils` are for. Revisit only if
+        // component bugs start reaching users, and then by extracting more logic
+        // rather than by lowering the threshold for one directory.
         'apps/web/src/shared/api/**/*.ts',
         'apps/web/src/shared/lib/**/*.ts',
         'apps/web/src/features/benchmark/state/**/*.ts',

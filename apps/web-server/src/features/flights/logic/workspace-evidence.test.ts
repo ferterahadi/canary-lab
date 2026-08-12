@@ -210,6 +210,24 @@ describe('workspaceStageEvidence probes', () => {
       .toEqual({ repos: 1 })
   })
 
+  // A suite whose config declares no `repos` key at all — the shape a
+  // remote-URL-only feature has, and the shape every config had before repos
+  // were introduced. Reading the count off `undefined` would throw during a
+  // read-time probe, which runs on every flight-picker render.
+  it('reports nothing for Repo scan when the config declares no repos', () => {
+    fs.writeFileSync(
+      path.join(featureDir, 'feature.config.cjs'),
+      `module.exports = { config: {
+         name: '${FEATURE}',
+         description: 'fixture',
+         envs: ['local'],
+         featureDir: __dirname,
+       } }`,
+    )
+    expect(workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['scout'])['scout'])
+      .toBeUndefined()
+  })
+
   // What a scan saw is still never invented — only `similarity` has nothing on
   // disk to read at all, so it stays out of the probe table entirely.
   it('never probes similarity — nothing records which suites were compared', () => {

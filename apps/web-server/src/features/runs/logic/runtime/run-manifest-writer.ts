@@ -4,7 +4,7 @@
 // bodies are unchanged.
 import { type RunContext } from './run-context'
 import { emitAgentSystemMessage } from './run-heal-agent'
-import type { LifecycleRecordOptions } from './orchestrator'
+import type { LifecycleRecordOptions } from './run-orchestrator-types'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'

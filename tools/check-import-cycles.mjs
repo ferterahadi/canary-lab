@@ -28,8 +28,13 @@ const ROOTS = ['apps/web/src', 'apps/web-server/src', 'apps/cli', 'shared']
 // Current measured state. Raise ONLY with a note saying why the tangle is
 // justified; the normal direction is down.
 const CEILING = {
-  /** Knots of mutually-reachable modules. */
-  components: 29,
+  /** Knots of mutually-reachable modules.
+   *
+   *  Read this WITH `largest`, never alone: breaking one big knot into several
+   *  small ones raises this number while improving the code, which is exactly
+   *  what happened at 29 → 31 when the orchestrator's fourteen modules came
+   *  apart. A rise is only a regression when `largest` did not fall. */
+  components: 31,
   /** Modules inside the single largest knot — the real "how much must I read
    *  at once" number, and the one that hurts when it grows.
    *
@@ -38,12 +43,23 @@ const CEILING = {
    *  (`server-context` → `server` for `CreateServerOptions`). Moving that type
    *  to the file that already owned the context dissolved the knot.
    *
-   *  Now 14, and a different shape: the run orchestrator's own runtime modules
-   *  (`orchestrator`, `run-heal-loop`, `run-playwright`, `run-context`, …).
-   *  That one is cohesion, not accident — they are one run's lifecycle split
-   *  across files — so it is the next target only if it starts costing changes,
-   *  and it is a real decomposition rather than a one-edge move. */
-  largest: 14,
+   *  Then 14: the run orchestrator's fourteen runtime modules. Same shape as
+   *  the first — `orchestrator.ts` is a composition root that imports its parts
+   *  as values, and eight of those parts reached back into it for a TYPE. Every
+   *  one of those types was already declared in `run-orchestrator-types.ts`;
+   *  `orchestrator.ts` merely re-exported them, so the imports were pointed at
+   *  the barrel instead of the source and the knot came apart. `run-heal-loop`
+   *  is the sole real dependency left (it uses `RunOrchestrator['restart']` and
+   *  two siblings), and a two-node pair is not worth an interface to dodge.
+   *
+   *  Now 10, and every remaining knot of size > 4 is COHESION rather than
+   *  accident: the ten `test-review` modules are one HTML report generator, the
+   *  nine coverage/evaluation ones are the ledger and its export sharing a
+   *  service, the five `agent-session-*` are one transcript parser. Splitting
+   *  those would add indirection without removing coupling — measured, not
+   *  assumed: dropping the two `shared/workspace-events` → feature edges (the
+   *  one genuine direction inversion left) changes neither number. */
+  largest: 10,
 }
 
 function walk(dir, out = []) {

@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { CoverageJobRunStore } from './store'
+import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
+import type { WorkspaceEvent } from '../../../../../shared/workspace-events'
 import { coverageJobsIndexPath, coverageJobDir, buildCoverageJobPaths } from './paths'
 import type { CoverageJobManifest } from './types'
 
@@ -184,4 +185,32 @@ describe('CoverageJobRunStore', () => {
     store.remove('j1')
     expect(store.list()).toHaveLength(0)
   })
+})
+
+// The bridge is the only thing that turns a job write into the `coverage-changed`
+// event the ledger UI listens for — it replaced six hand-placed publishes, one
+// per lifecycle step, which is exactly how a step could be added without one.
+// Its two guards are what keep it from announcing a change that did not happen.
+describe('bridgeCoverageJobEvents', () => {
+  it('announces the job\'s feature on a write', () => {
+    const events: WorkspaceEvent[] = []
+    bridgeCoverageJobEvents(store, { publish: (e) => events.push(e) })
+    store.save(makeManifest('j-live', { feature: 'billing' }))
+    expect(events).toEqual([{ type: 'coverage-changed', feature: 'billing' }])
+  })
+
+  it('stays quiet for a removed job, which has no record to read a feature from', () => {
+    store.save(makeManifest('j-gone'))
+    const events: WorkspaceEvent[] = []
+    bridgeCoverageJobEvents(store, { publish: (e) => events.push(e) })
+    store.remove('j-gone')
+    // Nothing about the ledger changed — the job's history was pruned. An event
+    // here would send every open client to refetch a ledger that is unchanged.
+    expect(events).toEqual([])
+  })
+
+  // A third case belongs here in spirit — "a store event that names no job" —
+  // but the store cannot produce one: `jobId` is now required, sourced from a
+  // `TaskStoreEvent.id` that all four emit sites set. The guard that used to
+  // stand for it was unreachable, so the type carries the invariant instead.
 })

@@ -114,6 +114,23 @@ describe('POST /api/tests/draft/:id/cancel-generation', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'draft-updated' }))
   })
 
+  // The suites above all seed BEFORE the app (and therefore the bridge) exists,
+  // so the record is already in `knownIds` and every write reads as an update.
+  // A draft that first appears while the bridge is attached is the other half of
+  // the contract — and the half an external client actually produces.
+  it('announces a draft created after the bridge is attached as created, not updated', async () => {
+    const events: unknown[] = []
+    await makeApp(makeDeps({ workspaceEvents: { publish: (e) => events.push(e) } }))
+
+    seedExternalDraft('d-new')
+
+    expect(events).toContainEqual(expect.objectContaining({ type: 'draft-created' }))
+    // First write wins: the same record must not also announce itself as an
+    // update, or a client renders the new draft twice.
+    const created = events.filter((e) => (e as { type: string }).type === 'draft-created')
+    expect(created).toHaveLength(1)
+  })
+
   it('409s a draft that is not mid-generation', async () => {
     seedExternalDraft('d-1', { status: 'spec-ready' })
     const app = await makeApp(makeDeps())

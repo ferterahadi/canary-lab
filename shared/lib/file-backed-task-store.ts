@@ -16,7 +16,13 @@ import { atomicWrite } from './atomic-write'
 
 export interface TaskStoreEvent {
   kind: 'changed' | 'removed'
-  id?: string
+  /** Required, because this store is the only producer and all four of its emit
+   *  sites pass one. Declaring it optional made every consumer carry a guard for
+   *  a state nothing could create — `bridgeCoverageJobEvents` had one, and its
+   *  false arm was unreachable and therefore untestable. Consumers that genuinely
+   *  have no id (the update-job store, whose event names no record) declare their
+   *  own event type rather than widening this one. */
+  id: string
 }
 
 export interface TaskIndexEntry {

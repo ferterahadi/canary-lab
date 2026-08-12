@@ -146,7 +146,6 @@ export interface ExtractedStep {
 }
 
 export interface ExtractedTest {
-  id?: string
   name: string
   line: number
   bodySource: string

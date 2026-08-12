@@ -81,16 +81,6 @@ const UNION = {
 // the fields allowed to differ; any OTHER difference on the same type still
 // fails. Shrink this; don't grow it.
 const BASELINE = new Map([
-  ['DraftRecord', {
-    onlyServer: ['plan?'],
-    onlyWeb: [],
-    reason: 'server-only scratch field; typed `unknown` and never serialized to a client',
-  }],
-  ['ExternalHealSession', {
-    onlyServer: ['sessionUrl?'],
-    onlyWeb: [],
-    reason: 'deep link into the owning client; heal renders a resume BUTTON, not an href (see ExternalAgentCard), so only portify consumes it',
-  }],
   ['EvaluationExportTaskView', {
     onlyServer: ['producer'],
     onlyWeb: ['producer?'],
@@ -98,28 +88,13 @@ const BASELINE = new Map([
   }],
   ['ExtractedTest', {
     onlyServer: ['requirements?', 'pathTypes?', 'variants?', 'assertions?'],
-    onlyWeb: ['id?'],
-    reason: 'coverage-linkage fields the ledger resolves server-side; the UI reads them off the coverage payload instead',
+    onlyWeb: [],
+    reason: 'not drift: the AST extractor\'s type is an INTERNAL superset, and `GET /api/features/:name/tests` builds each entry fresh from name/line/bodySource/steps(/sourceFile). The mirror describes that projection. The coverage-linkage fields never leave the server — the UI reads them off the coverage payload — so mirroring them would describe a wire that does not exist',
   }],
   ['FeatureStageEvidence', {
     onlyServer: ['booted', 'portInjectability'],
     onlyWeb: ['booted?', 'portInjectability?'],
     reason: 'optionality-only: server always stamps both, web tolerates pre-1.5 records that lack them',
-  }],
-  ['JournalSection', {
-    onlyServer: [],
-    onlyWeb: [],
-    reason: 'kept as a recorded pair so the rename stays greppable; fields agree today',
-  }],
-  ['RunManifest', {
-    onlyServer: ['stoppedEarly?', 'healCycleHistory?', 'heartbeatAt?'],
-    onlyWeb: [],
-    reason: 'run-loop internals not yet surfaced in any view; adding them to the mirror would be speculative',
-  }],
-  ['RunSummaryFailedEntry', {
-    onlyServer: ['errorFile?'],
-    onlyWeb: [],
-    reason: 'agent-facing pointer surfaced in heal-index.md; no view reads it, so mirroring it would be speculative',
   }],
 ])
 

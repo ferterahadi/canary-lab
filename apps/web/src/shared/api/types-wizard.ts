@@ -51,6 +51,11 @@ export interface DraftRecord {
   generatedFiles?: string[]
   devDependencies?: string[]
   errorMessage?: string
+  /** The plan document an authoring session produced. Opaque to the client —
+   *  it is rendered by the session viewer, not read field-by-field — but it IS
+   *  on the wire: the record is returned whole by GET /api/tests/draft/:id and
+   *  carried on every draft-created / draft-updated event. */
+  plan?: unknown
 }
 
 export interface DraftPrdDocument {

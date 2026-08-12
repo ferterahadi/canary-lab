@@ -4,7 +4,7 @@
 // across cycles by design — cycle handoff is a stdin write, not a respawn.
 // Split out of orchestrator.ts; the bodies are unchanged.
 import { type RunContext } from './run-context'
-import type { InterjectResult } from './orchestrator'
+import type { InterjectResult } from './run-orchestrator-types'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'

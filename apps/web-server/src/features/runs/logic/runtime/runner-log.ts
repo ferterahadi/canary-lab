@@ -14,7 +14,7 @@
 
 import fs from 'fs'
 import path from 'path'
-import type { OrchestratorEventMap } from './orchestrator'
+import type { OrchestratorEventMap } from './run-orchestrator-types'
 
 export type RunnerLogLevel = 'INFO' | 'WARN' | 'ERROR'
 

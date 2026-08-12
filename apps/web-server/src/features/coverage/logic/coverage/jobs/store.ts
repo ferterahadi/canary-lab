@@ -12,7 +12,9 @@ import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../.
 
 export interface CoverageJobStoreEvent {
   kind: 'changed' | 'removed'
-  jobId?: string
+  /** Required for the same reason as `TaskStoreEvent.id`, which is its only
+   *  source (see the forward in the constructor). */
+  jobId: string
 }
 
 export interface CoverageJobStore {
@@ -139,10 +141,11 @@ export function coverageJobStore(logsDir: string): CoverageJobRunStore {
   return created
 }
 
-/** Drop the memo — for tests, which build a fresh logs dir per case. */
-export function resetCoverageJobStores(): void {
-  SHARED.clear()
-}
+// A `resetCoverageJobStores()` used to sit here, described as "for tests". No
+// test ever called it: the memo is keyed by resolved logs dir and every suite
+// builds a fresh tmpdir, so entries never collide. Kept as an unused export it
+// was a permanently uncovered function documenting a need that does not exist —
+// `resetSharedTaskStores()` is the real reset, for the store underneath.
 
 /**
  * Attach the workspace bus to a coverage-job store.
@@ -160,9 +163,10 @@ export function bridgeCoverageJobEvents(
   events: WorkspaceEventPublisher | undefined,
 ): void {
   bridgeStoreEvents(store, events, (e) => {
-    const feature = e.jobId ? store.get(e.jobId)?.feature : undefined
     // A removed job (pruned history) has no record to read a feature from, and
-    // nothing about the ledger changed — stay quiet.
+    // nothing about the ledger changed — stay quiet. The event always names a
+    // job, so only the missing RECORD is worth guarding.
+    const feature = store.get(e.jobId)?.feature
     return feature ? { type: 'coverage-changed', feature } : null
   })
 }

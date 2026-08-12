@@ -60,6 +60,22 @@ describe('settleOrchestratorRun', () => {
     expect(h.deleted).toEqual(['run-1'])
   })
 
+  // Both halves fail: the run threw, and the abort-stop that follows throws too.
+  // The success path's swallow is covered above; this is the other one, and it is
+  // the case that actually matters — a spawn failure whose teardown also fails is
+  // exactly when leaving the run registered would wedge the scheduler for good.
+  it('still deregisters when the run fails AND the abort-stop throws', async () => {
+    const h = harness(() => Promise.reject(new Error('teardown blew up')))
+
+    await expect(
+      settleOrchestratorRun(Promise.reject(new Error('posix_spawnp failed.')), h.deps),
+    ).resolves.toBeUndefined()
+
+    expect(h.orch.stopped).toEqual(['aborted'])
+    expect(h.errors).toEqual(['Run failed to complete: Error: posix_spawnp failed.'])
+    expect(h.deleted).toEqual(['run-1'])
+  })
+
   it('tolerates a missing runner log', async () => {
     const h = harness()
 

@@ -143,7 +143,11 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, on
                   ? dirtyDiffs[dirtySpec?.file ?? '']?.find((d) => d.name === t.name)?.changedLines
                   : undefined
                 const changedLines = diffLines ? new Set(diffLines) : undefined
-                const key = `${spec.file}:${t.line}:${t.id ?? t.name}`
+                // `t.id` used to be read here as a preferred key. The tests
+                // endpoint builds each entry from name/line/bodySource/steps and
+                // never sets an id, so the fallback was the only live arm — and
+                // the mirror declared a field the server does not send.
+                const key = `${spec.file}:${t.line}:${t.name}`
                 const isExpanded = expandedTest === key
                 const entryName = summaryEntryName(t.name)
                 const runningTest = isRunActivelyTesting && activeRunSummary

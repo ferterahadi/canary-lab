@@ -18,6 +18,7 @@ import {
   browseDir,
   readDotenvFile,
   putEnvsetSlot,
+  getOnboardingSamples,
   getProjectConfig,
   putProjectConfig,
   changeProjectPort,
@@ -156,6 +157,13 @@ describe('config api', () => {
     const r = await getProjectConfig({ fetchImpl })
     expect(r).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
     expect(fetchImpl).toHaveBeenCalledWith('/api/project-config', { method: 'GET' })
+  })
+
+  it('getOnboardingSamples GETs /api/onboarding', async () => {
+    const samples = { sampleSuite: 'storefront-journey', sampleFlightRepo: '/w/flight-app', sampleFlightDescription: 'd' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(samples))
+    await expect(getOnboardingSamples({ fetchImpl })).resolves.toEqual(samples)
+    expect(fetchImpl).toHaveBeenCalledWith('/api/onboarding', { method: 'GET' })
   })
 
   it('putProjectConfig sends the partial config as JSON', async () => {

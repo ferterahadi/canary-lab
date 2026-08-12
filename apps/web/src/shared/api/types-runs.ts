@@ -73,6 +73,11 @@ export interface ExternalHealSession {
   clientKind: ExternalHealClientKind
   clientVersion?: string
   conversationName?: string
+  /** Deep link back into the owning client. Portify renders one; heal offers a
+   *  resume BUTTON instead (see ExternalAgentCard), so no view reads this today
+   *  — but the server sends it, and a mirror that omits a field on the wire is
+   *  a field the UI cannot reach without a cast. */
+  sessionUrl?: string
   claimedAt: string
   lastHeartbeatAt: string
   status: ExternalHealSessionStatus
@@ -119,6 +124,24 @@ export interface RunManifest {
    *  say why (gh not signed in, no push rights, patch no longer applies). */
   prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
+  /** Set when the suite was cut short rather than run to completion — the
+   *  `healOnFailureThreshold` trip, a user pause, or a cancelled heal. */
+  stoppedEarly?: StoppedEarlyInfo
+  /** Per-cycle record of which specs the heal loop re-ran and which it kept.
+   *  Written for every cycle whose fix touched files. */
+  healCycleHistory?: Array<{ cycle: number; restarted: string[]; kept: string[] }>
+  /** ISO timestamp refreshed every few seconds while the orchestrator is alive;
+   *  compare against `Date.now()` to spot a stale or orphaned run. */
+  heartbeatAt?: string
+}
+
+/** Why a run stopped before finishing its suite. */
+export type StoppedEarlyReason = 'max-failures' | 'user-pause' | 'user-cancel-heal'
+
+export interface StoppedEarlyInfo {
+  reason: StoppedEarlyReason
+  failuresAtStop: number
+  suiteTotal: number
 }
 
 export interface RunSummaryFailedEntry {
@@ -131,6 +154,10 @@ export interface RunSummaryFailedEntry {
   retry?: number
   logFiles?: string[]
   traceSummaryFile?: string
+  /** Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
+   *  message + code-frame. Written for the heal agent (it rides `heal-index.md`)
+   *  and persisted in the summary, so it reaches the client too. */
+  errorFile?: string
 }
 
 export interface RunSummaryRunningStep {

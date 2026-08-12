@@ -65,3 +65,38 @@ describe('plan-features default spawner fallback', () => {
     ])
   })
 })
+
+// `PlanFeaturesStore` forwards both halves of the listener API so the workspace
+// bridge can attach to it (see flight-route-context). Only `onEvent` is wired in
+// production today — the pre-flight list has no WebSocket stream of its own — so
+// nothing exercised the unsubscribe half, and a forward that silently dropped
+// the call would look identical until the first stream was added.
+describe('PlanFeaturesStore listener forwarding', () => {
+  let dir: string
+
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-feat-ev-')) })
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }) })
+
+  const task = (taskId: string) => ({
+    taskId,
+    repoPaths: ['/repo/shop'],
+    description: 'plan the shop',
+    status: 'running' as const,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
+  })
+
+  it('stops delivering once a listener unsubscribes', () => {
+    const store = new PlanFeaturesStore(dir)
+    const seen: string[] = []
+    const listener = (e: { kind: string }): void => { seen.push(e.kind) }
+
+    store.onEvent(listener)
+    store.save(task('pf-1'))
+    expect(seen).toEqual(['changed'])
+
+    store.offEvent(listener)
+    store.save(task('pf-2'))
+    expect(seen).toEqual(['changed'])
+  })
+})

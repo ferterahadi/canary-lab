@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import Fastify from 'fastify'
 import {
   LEGACY_SAMPLE_SUITES,
+  onboardingRoutes,
   readOnboardingSamples,
   SAMPLE_FLIGHT_DESCRIPTION,
   SAMPLE_FLIGHT_REPO_DIR,
@@ -101,5 +103,35 @@ describe('readOnboardingSamples', () => {
   it('does not mistake a file for the sample repo directory', () => {
     fs.writeFileSync(path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR), 'not a directory')
     expect(readOnboardingSamples(projectRoot, featuresDir).sampleFlightRepo).toBeNull()
+  })
+})
+
+// The route is a one-line wrapper, but an untested one is still a place the
+// wiring can be wrong — a mistyped path or the deps read in the wrong order
+// serves 404 or the wrong workspace's samples, and every case above would still
+// pass. It also derives per request rather than caching, which is the behaviour
+// the "samples are disposable" rule depends on.
+describe('GET /api/onboarding', () => {
+  it('serves the samples for the wired workspace, re-read on every request', async () => {
+    const app = Fastify()
+    await app.register(async (a) => { await onboardingRoutes(a, { projectRoot, featuresDir }) })
+    try {
+      const before = await app.inject({ method: 'GET', url: '/api/onboarding' })
+      expect(before.statusCode).toBe(200)
+      expect(before.json()).toEqual({ sampleSuite: null, sampleFlightRepo: null, sampleFlightDescription: null })
+
+      fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
+      fs.mkdirSync(path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR))
+      writeSuite(SAMPLE_SUITE)
+
+      const after = await app.inject({ method: 'GET', url: '/api/onboarding' })
+      expect(after.json()).toEqual({
+        sampleSuite: SAMPLE_SUITE,
+        sampleFlightRepo: path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR),
+        sampleFlightDescription: SAMPLE_FLIGHT_DESCRIPTION,
+      })
+    } finally {
+      await app.close()
+    }
   })
 })

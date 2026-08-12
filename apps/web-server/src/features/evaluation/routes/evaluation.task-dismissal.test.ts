@@ -120,6 +120,32 @@ describe('GET /api/runs/:runId/evaluation.html', () => {
     expect(fetched.statusCode).toBe(404)
   })
 
+  // The dismissal cases above build without a publisher, so the store bridge
+  // installs nothing and the delete announces itself to no one. A client that
+  // never hears `evaluation-export-deleted` keeps rendering a task whose files
+  // are gone — the same class of staleness the bridge exists to prevent, and the
+  // only one of its three mappers no case reached.
+  it('announces a deleted export so an open client drops it', async () => {
+    writeManifestForRun('r-task-deleted', 'checkout', 'passed')
+    const events: WorkspaceEvent[] = []
+    const { app } = await build({ events })
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/runs/r-task-deleted/evaluation-export',
+      payload: { mode: 'raw' },
+    })
+    const task = await waitForEvaluationTask(app, started.json().taskId)
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/evaluation-exports/${encodeURIComponent(task.taskId)}`,
+    })
+
+    expect(deleted.statusCode).toBe(204)
+    expect(events).toContainEqual({ type: 'evaluation-export-deleted', taskId: task.taskId })
+  })
+
   it('deletes a task that was never in the active map (active === undefined branch)', async () => {
     const { app } = await build()
     createEvaluationExportTask(logsDir, {

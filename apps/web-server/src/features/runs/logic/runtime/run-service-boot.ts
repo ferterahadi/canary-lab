@@ -1,5 +1,5 @@
 import { recordLifecycle } from './run-manifest-writer'
-import type { ServiceSpec } from './orchestrator'
+import type { ServiceSpec } from './run-orchestrator-types'
 // Bringing a run's services up: one pty per service spec, the log tee, and the
 // health poll that decides whether the suite can run at all. A failed probe
 // records a boot failure on the context rather than throwing, because the run

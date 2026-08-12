@@ -192,6 +192,35 @@ describe('findBootProof', () => {
     expect(findBootProof(logsDir, 'shop')).toBeNull()
   })
 
+  // Both cases below are about reading state written by an OLDER build or left
+  // corrupt by a crash. This function decides whether a suite counts as set up,
+  // so throwing here would take out the whole flight picker rather than degrade
+  // one row.
+  it('reports no proof rather than throwing on a corrupt runs index', () => {
+    fs.mkdirSync(path.dirname(runsIndexPath(logsDir)), { recursive: true })
+    // A row that survives the feature filter but carries no `runId`: `listRuns`
+    // then resolves a run directory from it and throws
+    // `ERR_INVALID_ARG_TYPE`. A truncated write leaves exactly this. Rows that
+    // fail the filter are dropped before that point, so a row of the WRONG
+    // feature would not reach it — the shape matters.
+    fs.writeFileSync(
+      runsIndexPath(logsDir),
+      JSON.stringify([{ feature: 'shop', startedAt: '2026-08-07T10:00:00Z' }]),
+    )
+    expect(findBootProof(logsDir, 'shop')).toBeNull()
+  })
+
+  it('treats a manifest with no services key as nothing to boot', () => {
+    seedRun({ runId: 'r1', feature: 'shop', startedAt: '2026-08-07T10:00:00Z', status: 'passed', services: [] })
+    // Pre-services manifests exist on disk in workspaces upgraded from older
+    // builds; the key is absent rather than empty.
+    const manifestPath = path.join(runDirFor(logsDir, 'r1'), 'manifest.json')
+    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as Record<string, unknown>
+    delete raw.services
+    fs.writeFileSync(manifestPath, JSON.stringify(raw))
+    expect(findBootProof(logsDir, 'shop')).toEqual({ runId: 'r1', services: [] })
+  })
+
   it('skips a run whose manifest is gone', () => {
     seedRun({
       runId: 'r1',
