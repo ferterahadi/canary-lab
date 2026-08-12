@@ -63,6 +63,22 @@ describe('FactPlaceholder — a bar is a promise, a dash is not (R86)', () => {
       expect(slot(renderWith(fact, awaiting)).className).toContain('h-[22px]')
     }
   })
+
+  it('holds the meter slot only for a tile that settles WITH a meter', () => {
+    // A tile grid row is as tall as its tallest tile, so one metered tile
+    // settling used to grow every tile beside it by the bar's 11px.
+    const metered = renderWith({ label: 'Requirements covered', value: '', awaiting: true, meter: true }, 'live')
+    const track = metered.querySelector<HTMLElement>('[data-testid="fact-meter-track"]')
+    expect(track).not.toBeNull()
+    // The same geometry FactBar and FactSegments occupy — and an empty TRACK, not
+    // a meter drawn at 0%, which would state a measurement nobody made.
+    expect(track?.className).toContain('h-[3px]')
+    expect(track?.className).toContain('mt-2')
+    expect(track?.querySelector('div')).toBeNull()
+    // A bare count settles without one, so reserving the slot there would leave
+    // permanent dead space in the settled band.
+    expect(renderWith(fact, 'live').querySelector('[data-testid="fact-meter-track"]')).toBeNull()
+  })
 })
 
 describe('FactTile explanations', () => {

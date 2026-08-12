@@ -227,8 +227,10 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       progress: { pass: 1, maxPasses: 5, phase: 'authoring', coveragePct: 0, target: 100, gapsOpen: 18, passes: [] },
       evidence: {},
     } as unknown as FlightStage
+    // `meter` rides along because the settled tile carries a coverage bar: the
+    // slot is reserved so the figure and its bar land together.
     expect(stageFacts(authoring, flight()).find((f) => f.label === 'Requirements covered'))
-      .toEqual({ label: 'Requirements covered', value: '', awaiting: true })
+      .toEqual({ label: 'Requirements covered', value: '', awaiting: true, meter: true })
 
     // A 0% a pass actually MEASURED is a real verdict and still reports.
     const measuredZero = {
@@ -318,6 +320,42 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     // even though this ledger has three.
     expect(specs?.segments).toBeUndefined()
     expect(specs?.sub).toBeUndefined()
+  })
+
+  it('a SETTLED stage still holds placeholders while the ledger is being fetched — the record-backed tile alone would re-width the grid', () => {
+    const stage = {
+      key: 'specs-coverage',
+      status: 'done',
+      evidence: { coveragePct: 100, gaps: [] },
+    } as unknown as FlightStage
+    const facts = stageFacts(stage, flight(), undefined, { pending: true })
+    // The whole settled shape, in order: the tile the flight record already
+    // answers carries its figure, the two the ledger owes hold their slots.
+    expect(facts.map((f) => f.label)).toEqual(['Requirements covered', 'Requirements', 'Tests written'])
+    expect(facts.find((f) => f.label === 'Requirements covered')).toMatchObject({ value: '100%' })
+    expect(facts.find((f) => f.label === 'Requirements')).toEqual({ label: 'Requirements', value: '', awaiting: true })
+    expect(facts.find((f) => f.label === 'Tests written')).toEqual({ label: 'Tests written', value: '', awaiting: true })
+    // And the stand-in the stage falls back to without a ledger does NOT take a
+    // slot for one frame and get relabelled in the next.
+    expect(facts.find((f) => f.label === 'Coverage gaps')).toBeUndefined()
+  })
+
+  it('reserves the meter slot only on the awaited tile that settles with a bar', () => {
+    const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
+    const facts = stageFacts(stage, flight(), undefined, { pending: true })
+    // `Requirements covered` settles with a coverage bar; the two counts beside
+    // it settle bare, and a reserved slot under those would be dead space.
+    expect(facts.find((f) => f.label === 'Requirements')?.meter).toBeUndefined()
+    expect(facts.find((f) => f.label === 'Tests written')?.meter).toBeUndefined()
+  })
+
+  it('a resolved ledger ends the hold even on the same render — pending is about the READ, not the stage', () => {
+    const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
+    const facts = stageFacts(stage, flight(), undefined, {
+      ledger: ledger({ totals: { total: 3, covered: 3, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 } }),
+    })
+    expect(facts.find((f) => f.label === 'Requirements')).toMatchObject({ value: '3' })
+    expect(facts.some((f) => f.awaiting)).toBe(false)
   })
 
   it('a suite with specs but no requirements keeps the spec-FILE sub — it has no composition card to fall back to', () => {

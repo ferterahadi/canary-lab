@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  loadPortify: vi.fn(),
+  loadPortify: vi.fn(async () => {}),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),

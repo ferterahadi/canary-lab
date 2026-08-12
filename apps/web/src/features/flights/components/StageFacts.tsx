@@ -22,6 +22,10 @@ export interface StageFact {
    *  so no site can hand-write a tile that carries both a value and a
    *  placeholder. */
   awaiting?: true
+  /** Reserve the meter slot under an awaited figure, because the settled tile
+   *  for this label carries a `bar` or `segments`. Only ever set by
+   *  `awaitingFact`, from `METERED_FACT_LABELS`. */
+  meter?: true
   tone?: 'good' | 'warn' | 'bad'
   /** Render the value in the mono face (paths, filenames, commands). */
   mono?: boolean
@@ -95,6 +99,13 @@ export function plural(n: number, word: string): string {
  *  doesn't exist for this flight) is simply absent rather than showing a zero.
  *  Every field is optional for exactly that reason. */
 export interface StageBandData {
+  /** A source below is being fetched for the FIRST time. Settling is about what
+   *  the STAGE produced; this is about what the PANE has read, and the two are
+   *  a REST round-trip apart — so a settled stage holds its placeholders until
+   *  this clears, instead of showing the record-backed tiles alone and growing
+   *  the rest under the reader. Never set for a refetch that has a value in
+   *  hand (see `useStageBandData`). */
+  pending?: boolean
   /** The resolved export task behind an Evaluation Report stage. */
   evalTask?: EvaluationExportTask | null
   /** The feature's coverage ledger — the only source of proven coverage and
@@ -184,10 +195,28 @@ function stageSettled(stage: FlightStage): boolean {
   return stage.status === 'done' || stage.status === 'skipped'
 }
 
+/** The awaited labels whose SETTLED tile carries a meter under its figure — a
+ *  `bar` or a `segments` distribution. Both render as the same 11px block, and a
+ *  placeholder that omitted it made the whole band 11px short: a tile grid row is
+ *  as tall as its tallest tile, so one metered tile settling grew every tile
+ *  beside it. Held as a list because it is genuinely mixed — `Boot time`,
+ *  `Requirements` and `Files edited` are bare counts, and reserving a meter under
+ *  those would leave permanent dead space in the settled band instead. */
+const METERED_FACT_LABELS = new Set([
+  'Services booted',
+  'Env files',
+  'Requirements covered',
+  'Services injectable',
+  'Requirements with tests',
+  'Test depth',
+  'Tests that passed',
+  'Requirements proven',
+])
+
 /** A tile whose value the stage hasn't produced yet. The empty `value` is never
  *  read — `FactTile` branches on `awaiting` before it looks at one. */
 export function awaitingFact(label: string): StageFact {
-  return { label, value: '', awaiting: true }
+  return { label, value: '', awaiting: true, ...(METERED_FACT_LABELS.has(label) ? { meter: true as const } : {}) }
 }
 
 /** Fill the tiles the stage will have but hasn't measured yet (R83), so a
@@ -209,12 +238,24 @@ export function awaitingFact(label: string): StageFact {
  *  transient tiles came and went. Those live facts all have a home of their own
  *  further down the pane (the passes card, the state line, the Activity panel);
  *  the band's job is the settled shape, with placeholders where figures land. */
-export function withAwaitingTiles(stage: FlightStage, companion: FlightStage | undefined, known: StageFact[]): StageFact[] {
+export function withAwaitingTiles(
+  stage: FlightStage,
+  companion: FlightStage | undefined,
+  known: StageFact[],
+  /** A band source has not been READ yet (`StageBandData.pending`). A settled
+   *  stage keeps its placeholders while this holds: the tiles fed by the flight
+   *  record are ready a fetch before the ones fed by the ledger, boot run or
+   *  config, and dropping the latter meanwhile re-widths every tile in the grid
+   *  the moment they land. It also stops the fallback tile a stage substitutes
+   *  for a missing source (`Coverage gaps` for `Requirements`) from taking a
+   *  slot for one frame and being relabelled in the next. */
+  pending = false,
+): StageFact[] {
   // A merged row settles when BOTH halves do. Reading the primary alone told the
   // Suite setup row it was finished while its env capture had not started — the
   // row said `pending`, and its band showed one lonely tile where the two the
   // capture still owes belong.
-  if (stageSettled(stage) && (!companion || stageSettled(companion))) return known
+  if (stageSettled(stage) && (!companion || stageSettled(companion)) && !pending) return known
   const awaited = AWAITED_FACT_LABELS[stage.key]
   if (!awaited) return known
   const byLabel = new Map(known.map((f) => [f.label, f]))
@@ -234,7 +275,7 @@ export function stageFacts(
    *  their tile — the band never pads itself to a fixed width. */
   band: StageBandData = {},
 ): StageFact[] {
-  return withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band))
+  return withAwaitingTiles(stage, companion, measuredStageFacts(stage, flight, companion, band), band.pending)
 }
 
 /** What the stage has actually measured — evidence, live progress and the band's
@@ -979,6 +1020,25 @@ export function FactPlaceholder({ awaiting }: { awaiting: AwaitingState }) {
   )
 }
 
+/** The meter slot, held open. Geometrically identical to `FactBar` and
+ *  `FactSegments` — the two things that land here — so the figure and its meter
+ *  arrive together without the tile changing height.
+ *
+ *  Deliberately an empty TRACK and not a zero-width fill: a meter drawn at 0%
+ *  states a measurement nobody made, which is the same reason the authoring band
+ *  suppresses an unmeasured "0%". The bare track is the idiom the composition
+ *  card already uses for a distribution with nothing in it yet. */
+function FactMeterTrack() {
+  return (
+    <div
+      className="mt-2 h-[3px] rounded-full"
+      style={{ background: 'var(--border-strong)' }}
+      data-testid="fact-meter-track"
+      aria-hidden
+    />
+  )
+}
+
 /** A thin progress bar under a `big` value — coverage filling toward target. */
 export function FactBar({ frac, color }: { frac: number; color: string }) {
   const pct = Math.max(0, Math.min(1, Number.isFinite(frac) ? frac : 0)) * 100
@@ -1054,7 +1114,10 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
       </div>
       {help ? <span className="sr-only">{help}</span> : null}
       {f.awaiting ? (
-        <FactPlaceholder awaiting={awaiting} />
+        <>
+          <FactPlaceholder awaiting={awaiting} />
+          {f.meter ? <FactMeterTrack /> : null}
+        </>
       ) : f.big ? (
         <>
           <div className="mt-1 flex items-baseline gap-1 leading-none">

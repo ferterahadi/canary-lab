@@ -4,7 +4,7 @@ import type { CoverageLedger, EvaluationExportTask, RunDetail, ServiceManifestEn
 import { useEvaluationExports } from '@/features/evaluation'
 import { GAP_META, SEG_ORDER, STRENGTH_META, STRENGTH_ORDER, countFor } from '@/features/coverage'
 import { PanelCard } from '@/shared/ui/PanelCard'
-import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
+import { SkeletonBar, SkeletonBead, SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
 import { StatusDot } from '@/shared/ui/atoms'
 import { evaluationArchiveFilename, formatBytes, formatDuration, timeAgo } from '@/shared/lib/format'
 import { StageColumn } from './stage-meta'
@@ -29,9 +29,23 @@ type BootRow = Pick<ServiceManifestEntry, 'name' | 'safeName' | 'allocatedPorts'
   status?: string
 }
 
+/** The row geometry both states share. The settled row's height comes from its
+ *  12px text line box (measured: 30px with the padding); a placeholder row has no
+ *  text node to set one, so it would collapse to its bar's 7px and the card would
+ *  grow under the reader when the services land. The floor is on the SHARED class
+ *  so the two can't drift: it is what the settled row already measures, which is
+ *  why adding it changes nothing for that row. */
+const BOOT_ROW = 'flex min-h-[30px] min-w-0 items-center gap-2 py-1.5 text-[12px]'
+
 /** Boot check (Suite setup): which services came up, on which port, and how long
  *  each took. The band above states the total; this names the services, so a
- *  slow or failed one is identifiable rather than hidden inside "2/2". */
+ *  slow or failed one is identifiable rather than hidden inside "2/2".
+ *
+ *  The awaited card renders the same rows with bars where the name, port and
+ *  timing go. Unlike the portify instances, the service COUNT is genuinely
+ *  unknown until the boot run is read — nothing in the flight record holds it —
+ *  so two rows is an honest guess at the shape rather than a prediction, and only
+ *  the per-row geometry is pinned. */
 export function BootCheckPanel({ boot, recorded = [], awaiting }: {
   /** R83: the stage hasn't settled and there is no boot yet — hold the card's
    *  place with its skeleton instead of vanishing. A settled stage passes
@@ -51,23 +65,37 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
     : recorded
         .filter((s): s is { name: string; status?: string } => typeof s.name === 'string')
         .map((s) => ({ name: s.name, safeName: s.name, status: s.status }))
-  if (services.length === 0) {
-    return awaiting ? <StageColumn><SkeletonPanel kicker="Boot check" awaiting={awaiting} testId="boot-check-skeleton" variant="rows" rows={2} /></StageColumn> : null
-  }
   // Worst-first: a service that never passed its probe is the reason the stage
   // is worth looking at, so it sorts above the healthy ones.
-  const rows = [...services].sort((a, b) =>
-    Number(b.status === 'timeout') - Number(a.status === 'timeout'))
+  const known: BootRow[] | null = services.length > 0
+    ? [...services].sort((a, b) => Number(b.status === 'timeout') - Number(a.status === 'timeout'))
+    : null
+  if (!known && !awaiting) return null
   return (
     <StageColumn>
-      <PanelCard kicker="Boot check" testId="boot-check-panel">
+      <PanelCard kicker="Boot check" testId={known ? 'boot-check-panel' : 'boot-check-skeleton'}>
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
-          {rows.map((service) => {
+          {(known ?? [null, null]).map((service, i) => {
+            if (!service) {
+              return (
+                <li key={i} className={BOOT_ROW}>
+                  {awaiting && (
+                    <>
+                      {/* 0.55rem is `.cl-status-dot`'s own size — the bead has the
+                          knob for exactly this, so both sit on one axis. */}
+                      <SkeletonBead awaiting={awaiting} size={8.8} />
+                      <span className="min-w-0 flex-1"><SkeletonBar awaiting={awaiting} width="46%" height={7} /></span>
+                      <SkeletonBar awaiting={awaiting} width="58px" height={7} className="shrink-0" />
+                    </>
+                  )}
+                </li>
+              )
+            }
             const failed = service.status === 'timeout'
             const readyMs = serviceReadyMs(service)
             const port = Object.values(service.allocatedPorts ?? {})[0]
             return (
-              <li key={service.safeName} className="flex min-w-0 items-center gap-2 py-1.5 text-[12px]">
+              <li key={service.safeName} className={BOOT_ROW}>
                 <StatusDot state={failed ? 'failed' : 'success'} className="shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{service.name}</span>
                 {port != null && (
@@ -101,24 +129,43 @@ export function BootCheckPanel({ boot, recorded = [], awaiting }: {
 
 /** Double-boot proof (Parallel readiness): the two concurrent instances and the
  *  ports each was handed. This is the whole claim of the stage — that two runs of
- *  the same services can coexist — so the evidence is the port sets. */
+ *  the same services can coexist — so the evidence is the port sets.
+ *
+ *  The awaited card is the same two rows with a bar where the ports go, not a
+ *  generic row-list: the COUNT and the NAMES are known before the proof is (the
+ *  stage always boots exactly two, A and B), and it is the real `Instance A` text
+ *  node that gives the row its height. Sizing a stand-in row to match instead
+ *  meant tuning bar heights through three shared components, and it was 7px out
+ *  one way and 13px the other — enough to move the Port changes card below it. */
 export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifest | null; awaiting?: AwaitingState }) {
   const instances = portify?.verification?.instances ?? []
-  if (instances.length === 0) {
-    return awaiting ? <StageColumn><SkeletonPanel kicker="Side-by-side proof" awaiting={awaiting} testId="double-boot-skeleton" variant="rows" rows={2} /></StageColumn> : null
-  }
+  const proven: PortifyBootInstance[] | null = instances.length > 0 ? instances : null
+  if (!proven && !awaiting) return null
+  const rows = proven ?? [null, null]
   return (
     <StageColumn>
-      <PanelCard kicker="Side-by-side proof" testId="double-boot-panel">
+      <PanelCard kicker="Side-by-side proof" testId={proven ? 'double-boot-panel' : 'double-boot-skeleton'}>
         <ul className="m-0 flex list-none flex-col divide-y divide-line-subtle p-0">
-          {instances.map((instance: PortifyBootInstance, i: number) => (
+          {rows.map((instance, i) => (
             <li key={i} className="flex min-w-0 items-center gap-2 py-1.5 text-[12px]">
-              <StatusDot state={instance.ok ? 'success' : 'failed'} className="shrink-0" />
+              {instance
+                ? <StatusDot state={instance.ok ? 'success' : 'failed'} className="shrink-0" />
+                /* 0.55rem is `.cl-status-dot`'s own size — the bead has the knob
+                   for exactly this, so the two indicators sit on one axis. */
+                : awaiting && <SkeletonBead awaiting={awaiting} size={8.8} />}
               <span className="w-[76px] shrink-0">Instance {String.fromCharCode(65 + i)}</span>
-              <span className="min-w-0 flex-1 truncate text-[11px] text-secondary" style={{ fontFamily: 'var(--font-mono)' }}>
-                {Object.entries(instance.ports).map(([slot, port]) => `${slot} :${port}`).join(' · ')}
-              </span>
-              {!instance.ok && instance.failedService && (
+              {instance
+                ? (
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-secondary" style={{ fontFamily: 'var(--font-mono)' }}>
+                    {Object.entries(instance.ports).map(([slot, port]) => `${slot} :${port}`).join(' · ')}
+                  </span>
+                )
+                : awaiting && (
+                  <span className="min-w-0 flex-1">
+                    <SkeletonBar awaiting={awaiting} width="58%" height={7} />
+                  </span>
+                )}
+              {instance && !instance.ok && instance.failedService && (
                 <span className="shrink-0 text-[11px] text-danger">{instance.failedService} failed</span>
               )}
             </li>
@@ -221,46 +268,63 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
  *
  *  Zero buckets RENDER, dimmed, rather than dropping out: on a suite that is 7
  *  shallow and nothing else, "0 strong" is the finding. A distribution that hides
- *  its empty classes reads as a shorter distribution, not an emptier one. */
+ *  its empty classes reads as a shorter distribution, not an emptier one.
+ *
+ *  The same rule governs a whole GROUP: the depth column renders on a suite with
+ *  no mapped tests, all four buckets at zero, rather than dropping out. Dropping
+ *  it contradicted the rule one level up — and it moved the card, because the two
+ *  groups sit in an `auto-fit` grid: the requirement column stretched to the full
+ *  width alone and halved the moment the first mapping pass landed a test.
+ *
+ *  The awaited card is the SAME render, one prop different: the counts are the
+ *  only thing missing, so they are the only thing replaced by a bar. Every bucket
+ *  name is static vocabulary rather than a measurement, so naming them early
+ *  claims nothing — and it is what makes the placeholder the exact height of the
+ *  card it becomes. A generic three-line `SkeletonPanel` here was 74px short, so
+ *  the Passes card below still jumped when the ledger landed, which is the shift
+ *  the placeholder existed to prevent. */
 export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: CoverageLedger | null; awaiting?: AwaitingState }) {
-  if (!ledger || ledger.totals.total === 0) {
-    return awaiting ? <StageColumn><SkeletonPanel kicker="Composition" awaiting={awaiting} testId="coverage-composition-skeleton" rows={3} /></StageColumn> : null
-  }
-  const tests = ledger.tests
+  // A ledger with no requirements composes nothing — for the panel that is the
+  // same state as no ledger at all.
+  const composed = ledger && ledger.totals.total > 0 ? ledger : null
+  if (!composed && !awaiting) return null
+  const tests = composed?.tests ?? []
   const strengthOf = (t: TestCoverage): TestStrength => t.strength ?? 'shallow'
   return (
     <StageColumn>
-      <PanelCard kicker="Composition" testId="coverage-composition">
+      <PanelCard kicker="Composition" testId={composed ? 'coverage-composition' : 'coverage-composition-skeleton'}>
         <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
-          {tests.length > 0 && (
-            <CompositionGroup
-              testId="composition-strength"
-              // "Depth", not "strength": the heading has to say what the buckets
-              // measure, and depth is what a tier ramp is.
-              heading={`Test depth · ${plural(tests.length, 'test')}`}
-              rows={STRENGTH_ORDER.map((s) => ({
-                key: s,
-                label: STRENGTH_META[s].label,
-                title: STRENGTH_META[s].title,
-                color: STRENGTH_META[s].color,
-                count: tests.filter((t) => strengthOf(t) === s).length,
-              }))}
-            />
-          )}
+          <CompositionGroup
+            testId="composition-strength"
+            awaiting={composed ? undefined : awaiting}
+            // "Depth", not "strength": the heading has to say what the buckets
+            // measure, and depth is what a tier ramp is. Its count is dropped
+            // while awaited — the population is exactly what isn't known yet.
+            heading={composed ? `Test depth · ${plural(tests.length, 'test')}` : 'Test depth'}
+            rows={STRENGTH_ORDER.map((s) => ({
+              key: s,
+              label: STRENGTH_META[s].label,
+              title: STRENGTH_META[s].title,
+              color: STRENGTH_META[s].color,
+              count: composed ? tests.filter((t) => strengthOf(t) === s).length : null,
+            }))}
+          />
+
           <CompositionGroup
             testId="composition-gaps"
-            heading={`Requirement coverage · ${plural(ledger.totals.total, 'requirement')}`}
+            awaiting={composed ? undefined : awaiting}
+            heading={composed ? `Requirement coverage · ${plural(composed.totals.total, 'requirement')}` : 'Requirement coverage'}
             rows={SEG_ORDER.map((g) => ({
               key: g,
               label: GAP_META[g].label,
               color: GAP_META[g].color,
-              count: countFor(ledger, g),
+              count: composed ? countFor(composed, g) : null,
             }))}
           />
         </div>
-        {ledger.totals.orphanTests > 0 && (
+        {composed && composed.totals.orphanTests > 0 && (
           <p className="mt-2.5 mb-0 text-[11px] text-muted" data-testid="composition-orphans">
-            {plural(ledger.totals.orphanTests, 'test')} match no requirement — either a missing label,
+            {plural(composed.totals.orphanTests, 'test')} match no requirement — either a missing label,
             or a test for something nobody asked for.
           </p>
         )}
@@ -274,13 +338,20 @@ interface CompositionRow {
   label: string
   title?: string
   color: string
-  count: number
+  /** `null` = not measured yet; the row holds its place with a placeholder where
+   *  the figure goes. Distinct from `0`, which is a measurement. */
+  count: number | null
 }
 
 /** One distribution: a proportional bar, then a row per bucket. The bar drops its
  *  empty segments (a zero-width sliver is noise); the rows keep theirs, dimmed. */
-function CompositionGroup({ heading, rows, testId }: { heading: string; rows: CompositionRow[]; testId: string }) {
-  const total = rows.reduce((sum, r) => sum + r.count, 0)
+function CompositionGroup({ heading, rows, testId, awaiting }: {
+  heading: string
+  rows: CompositionRow[]
+  testId: string
+  awaiting?: AwaitingState
+}) {
+  const total = rows.reduce((sum, r) => sum + (r.count ?? 0), 0)
   return (
     <div data-testid={testId}>
       <div className="cl-rubric pb-1.5">{heading}</div>
@@ -288,23 +359,32 @@ function CompositionGroup({ heading, rows, testId }: { heading: string; rows: Co
         {total === 0
           ? <span className="flex-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
           : rows
-              .filter((r) => r.count > 0)
+              .filter((r) => r.count != null && r.count > 0)
               .map((r) => (
-                <span key={r.key} className="rounded-full" style={{ width: `${(r.count / total) * 100}%`, background: r.color }} />
+                <span key={r.key} className="rounded-full" style={{ width: `${((r.count ?? 0) / total) * 100}%`, background: r.color }} />
               ))}
       </div>
       <dl className="m-0 grid gap-x-2 gap-y-1 text-[11.5px]" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
-        {rows.map((r) => (
-          <div key={r.key} className="col-span-3 grid grid-cols-subgrid items-baseline" data-testid={`${testId}-${r.key}`}>
-            <span
-              className="h-[7px] w-[7px] translate-y-[-1px] rounded-full"
-              style={{ background: r.color, opacity: r.count === 0 ? 0.3 : 1 }}
-              aria-hidden
-            />
-            <dt className={r.count === 0 ? 'text-muted' : 'text-secondary'} {...(r.title ? { title: r.title } : {})}>{r.label}</dt>
-            <dd className={`m-0 tabular-nums ${r.count === 0 ? 'text-muted' : ''}`}>{r.count}</dd>
-          </div>
-        ))}
+        {rows.map((r) => {
+          // An unmeasured bucket reads like an empty one — quiet dot, quiet
+          // label — because that is what it is until the figure arrives.
+          const quiet = r.count == null || r.count === 0
+          return (
+            <div key={r.key} className="col-span-3 grid grid-cols-subgrid items-baseline" data-testid={`${testId}-${r.key}`}>
+              <span
+                className="h-[7px] w-[7px] translate-y-[-1px] rounded-full"
+                style={{ background: r.color, opacity: quiet ? 0.3 : 1 }}
+                aria-hidden
+              />
+              <dt className={quiet ? 'text-muted' : 'text-secondary'} {...(r.title ? { title: r.title } : {})}>{r.label}</dt>
+              <dd className={`m-0 tabular-nums ${quiet ? 'text-muted' : ''}`}>
+                {r.count == null && awaiting
+                  ? <SkeletonBar awaiting={awaiting} width="14px" height={7} className="translate-y-[-2px]" />
+                  : r.count}
+              </dd>
+            </div>
+          )
+        })}
       </dl>
     </div>
   )

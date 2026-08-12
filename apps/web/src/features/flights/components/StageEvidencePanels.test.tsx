@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { PortifyManifest } from '@/shared/api/client'
 import type { CoverageLedger, TestCoverage } from '@/shared/api/types'
-import { CoverageCompositionPanel, OverlayPanel } from './StageEvidencePanels'
+import { BootCheckPanel, CoverageCompositionPanel, DoubleBootPanel, OverlayPanel } from './StageEvidencePanels'
 
 // The overlay card's job is ATTRIBUTION. Its paths are repo-relative, so a
 // two-repo stack that gained a port-injection line in each `build.gradle` used to
@@ -191,6 +191,28 @@ describe('CoverageCompositionPanel', () => {
       .toContain('3 tests match no requirement')
   })
 
+  it('the awaited card is the same card minus its counts — every bucket named, a bar where each figure lands', async () => {
+    // The placeholder has to be the HEIGHT of the card it becomes, which a
+    // generic line-block is not: the Passes card below it moved 74px when the
+    // ledger landed. Naming the buckets costs nothing — they are vocabulary,
+    // not measurements — and it buys the exact geometry.
+    await act(async () => { root.render(<CoverageCompositionPanel ledger={null} awaiting="live" />) })
+    const card = container.querySelector('[data-testid="coverage-composition-skeleton"]')
+    expect(card?.textContent).toContain('Composition')
+    // Both groups, in the settled order, without the population counts they
+    // cannot yet know.
+    expect(container.querySelector('[data-testid="composition-strength"]')?.textContent).toContain('Test depth')
+    expect(card?.textContent).not.toContain('Test depth ·')
+    expect(container.querySelector('[data-testid="composition-gaps"]')?.textContent).toContain('Requirement coverage')
+    // Every bucket row of the settled card is present, and each carries a
+    // placeholder rather than a zero — an unmeasured bucket must not read as a
+    // measured empty one.
+    expect(container.querySelectorAll('[data-testid^="composition-strength-"]')).toHaveLength(4)
+    expect(container.querySelectorAll('[data-testid^="composition-gaps-"]')).toHaveLength(4)
+    expect(container.querySelectorAll('[data-testid="skeleton-bar"]')).toHaveLength(8)
+    expect(container.querySelector('[data-testid="composition-strength-strong"]')?.textContent).toBe('Strong')
+  })
+
   it('renders nothing without a ledger, or for a suite with no requirements to compose', async () => {
     await render(null)
     expect(container.querySelector('[data-testid="coverage-composition"]')).toBeNull()
@@ -198,11 +220,67 @@ describe('CoverageCompositionPanel', () => {
     expect(container.querySelector('[data-testid="coverage-composition"]')).toBeNull()
   })
 
-  it('drops the spec-depth group when no specs exist, keeping the requirement group', async () => {
+  it('keeps the spec-depth group when no specs exist — both columns hold their width', async () => {
+    // The group used to drop out, which halved the requirement column the moment
+    // the first authored test arrived. All-zero is also the honest reading of a
+    // suite with 4 untested requirements: no depth, not "no such measurement".
     await render(ledger({
       totals: { total: 4, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 4, orphanTests: 0 },
     }))
-    expect(container.querySelector('[data-testid="composition-strength"]')).toBeNull()
+    expect(container.querySelector('[data-testid="composition-strength"]')?.textContent)
+      .toContain('Test depth · 0 tests')
+    expect(row('composition-strength', 'shallow')).toContain('Shallow0')
+    expect(row('composition-strength', 'strong')).toContain('Strong0')
     expect(row('composition-gaps', 'untested')).toContain('Untested4')
+  })
+})
+
+// The awaited half of the two row-list cards. Both settle into a list of
+// single-line rows, and a placeholder row has no text node to set that line box —
+// so without a shared height floor the card grows under the reader when the rows
+// land. happy-dom does not lay out, so the floor is asserted as the CLASS both
+// branches carry (measured at 30px in the browser), not as a computed height.
+describe('row-list cards hold their row geometry while awaited', () => {
+  const rowsOf = (testId: string) =>
+    [...container.querySelectorAll(`[data-testid="${testId}"] li`)]
+
+  it('BootCheckPanel: two rows of the settled height, each with the name and timing slots held', async () => {
+    await act(async () => { root.render(<BootCheckPanel boot={null} awaiting="live" />) })
+    const held = rowsOf('boot-check-skeleton')
+    // Two rows is the SHAPE, not a prediction: nothing in the flight record holds
+    // the service count until the boot run is read.
+    expect(held).toHaveLength(2)
+    for (const li of held) expect(li.className).toContain('min-h-[30px]')
+    expect(held[0]?.querySelectorAll('[data-testid="skeleton-bar"]')).toHaveLength(2)
+    expect(held[0]?.querySelector('[data-testid="skeleton-bead"]')).not.toBeNull()
+
+    // The settled row carries the identical floor, which is why adding it changed
+    // nothing for that row — the two cannot drift apart.
+    await act(async () => {
+      root.render(<BootCheckPanel boot={null} recorded={[{ name: 'web', status: 'stopped' }]} />)
+    })
+    const settled = rowsOf('boot-check-panel')
+    expect(settled).toHaveLength(1)
+    expect(settled[0]?.className).toContain('min-h-[30px]')
+    expect(settled[0]?.textContent).toContain('web')
+  })
+
+  it('BootCheckPanel renders nothing once settled with no services — an empty card is not an empty promise', async () => {
+    await act(async () => { root.render(<BootCheckPanel boot={null} />) })
+    expect(container.querySelector('[data-testid="boot-check-skeleton"]')).toBeNull()
+    expect(container.querySelector('[data-testid="boot-check-panel"]')).toBeNull()
+  })
+
+  it('DoubleBootPanel names both instances while awaited — the count and names are known before the ports', async () => {
+    await act(async () => { root.render(<DoubleBootPanel portify={null} awaiting="live" />) })
+    const held = rowsOf('double-boot-skeleton')
+    expect(held).toHaveLength(2)
+    // The real text is what gives the row its height, so no floor is needed here.
+    expect(held[0]?.textContent).toContain('Instance A')
+    expect(held[1]?.textContent).toContain('Instance B')
+    expect(held[0]?.querySelector('[data-testid="skeleton-bar"]')).not.toBeNull()
+
+    await act(async () => { root.render(<DoubleBootPanel portify={null} />) })
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import * as api from '@/shared/api/client'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { usePortify, usePortifyWorkflow } from '@/features/portify'
@@ -18,6 +18,13 @@ import type { StageBandData } from './StageFacts'
 //
 // Every field stays optional: a source that hasn't resolved yet, or doesn't
 // exist for this flight, drops its tile rather than rendering a zero.
+//
+// `pending` is what tells the pane which of those two it is. A stage settles by
+// PRODUCING its evidence, but the pane still has to READ it — and these reads are
+// REST calls that resolve a frame or two after the flight record does. Without
+// the flag the pane rendered its record-backed tiles first and then, a fetch
+// later, inserted the ledger-backed ones and the whole Composition card beneath
+// them, so every visit to Test authoring & coverage moved under the reader.
 
 export function useStageBandData(
   flight: FlightManifest,
@@ -47,7 +54,7 @@ export function useStageBandData(
   // pre-mapping snapshot and a settled stage showed "100% covered" beside
   // "Untested 18" — one card apart, from the same ledger. A feature with no PRD
   // summary has no ledger at all; the tiles that read it simply don't render.
-  const { value: ledger } = useLiveResource<CoverageLedger>(
+  const { value: ledger, loading: ledgerLoading } = useLiveResource<CoverageLedger>(
     'coverage',
     needsLedger ? feature : null,
     (f) => api.getFeatureCoverage(f),
@@ -56,7 +63,7 @@ export function useStageBandData(
   // Keyed on the run id when the stage recorded one, else on the feature (the
   // probe path below). `repos` is the live trigger: a re-boot writes a new run,
   // and the same features refresh that carries it re-reads this proof.
-  const { value: boot } = useLiveResource<RunDetail>(
+  const { value: boot, loading: bootLoading } = useLiveResource<RunDetail>(
     'repos',
     needsBoot ? (bootRunId ?? feature) : null,
     async () => {
@@ -83,13 +90,27 @@ export function useStageBandData(
   // terminal workflows, which is every settled flight.
   const livePortify = usePortifyWorkflow(portifyId)
   const { loadPortify } = usePortify()
+  // Which id the hydrate has FINISHED for — the portify half of `pending`. The
+  // store cannot answer it: an absent workflow and one still being fetched are
+  // the same `undefined`, and `loadPortify` swallows its own failure, so gating
+  // on the value alone would hold the placeholders forever on a workflow whose
+  // record has been cleaned away.
+  const [hydratedId, setHydratedId] = useState<string | null>(null)
   useEffect(() => {
-    if (portifyId && !livePortify) void loadPortify(portifyId)
+    if (!portifyId || livePortify) return
+    let alive = true
+    void loadPortify(portifyId)
+      // `loadPortify` already swallows its own fetch failure; this keeps a
+      // future rewrite of it from turning a hydrate miss into an unhandled
+      // rejection, and the `finally` releases the hold either way.
+      .catch(() => {})
+      .finally(() => { if (alive) setHydratedId(portifyId) })
+    return () => { alive = false }
   }, [portifyId, livePortify, loadPortify])
 
   // `repos` is bumped on `features-changed`, which is what a config edit
   // publishes — so the digest re-reads itself instead of waiting for a remount.
-  const { value: config } = useLiveResource<StageBandData['config']>(
+  const { value: config, loading: configLoading } = useLiveResource<StageBandData['config']>(
     'repos',
     needsConfig ? feature : null,
     async (f) => configCounts((await api.getFeatureConfigDoc(f)).parsed.value),
@@ -100,7 +121,7 @@ export function useStageBandData(
   // showing the first half's tiles, and their write publishes `coverage-changed`.
   // Fetched once, this listing stayed at the pre-distillation snapshot and
   // "Distilled to" was missing until the user reloaded.
-  const { value: docSizes } = useLiveResource<DocSizes>(
+  const { value: docSizes, loading: docsLoading } = useLiveResource<DocSizes>(
     'coverage',
     needsDocs ? feature : null,
     async (f) => {
@@ -117,6 +138,15 @@ export function useStageBandData(
   )
 
   return {
+    // A FIRST resolve only. `loading` is also true during a refetch, and the
+    // ledger refetches on every `coverage-changed` the authoring loop publishes:
+    // treating that as pending would flick a settled band back to placeholders
+    // once per pass, with the previous ledger sitting right there in hand.
+    pending: (ledgerLoading && !ledger)
+      || (bootLoading && !boot)
+      || (configLoading && !config)
+      || (docsLoading && !docSizes)
+      || (portifyId != null && !livePortify && hydratedId !== portifyId),
     evalTask,
     ledger,
     boot,

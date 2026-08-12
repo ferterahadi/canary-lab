@@ -113,6 +113,12 @@ export function StageDetail({
     companion,
     evalTaskId ? taskById(evalTaskId) : null,
   )
+  // The same hold, for the cards the band's own sources feed. `live` is the
+  // right fill and not a fourth state: the three states answer WHY the slot is
+  // empty, and "a value is on its way" is what a fetch in flight means — `idle`
+  // would tell the user to act and `failed` that nothing is coming. A stage that
+  // is genuinely awaiting outranks it, so a running stage keeps its own reason.
+  const awaitingData = awaiting ?? (band.pending ? 'live' : undefined)
   const facts = stageFacts(stage, flight, companion ?? undefined, band)
   const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
@@ -238,7 +244,7 @@ export function StageDetail({
           has evidence, placeholders where it doesn't yet, sweeping while it
           works. A stage pane no longer collapses to a bare sentence, and a value
           lands in the slot its placeholder held. */}
-      <FactsGrid facts={facts} awaiting={awaiting} />
+      <FactsGrid facts={facts} awaiting={awaitingData} />
 
       {/* Paused with nothing else to act on (no checkpoint, no error): the
           "how to pick it back up" card fills the void the state sentence alone
@@ -276,7 +282,7 @@ export function StageDetail({
           screenful of start commands. */}
       {(stage.key === 'scaffold' || stage.key === 'env-capture') && (
         <BootCheckPanel
-          awaiting={awaiting}
+          awaiting={awaitingData}
           boot={band.boot ?? null}
           recorded={(() => {
             const ev = ((companion ?? stage).evidence ?? {}) as Record<string, unknown>
@@ -358,7 +364,7 @@ export function StageDetail({
       {/* Test authoring & coverage: the two distributions behind the band's
           counts — spec depth and requirement gap kinds. Above the pass timeline
           because it describes the RESULT; the timeline is how it got there. */}
-      {stage.key === 'specs-coverage' && <CoverageCompositionPanel ledger={band.ledger ?? null} awaiting={awaiting} />}
+      {stage.key === 'specs-coverage' && <CoverageCompositionPanel ledger={band.ledger ?? null} awaiting={awaitingData} />}
 
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
           timeline — coverage % after each mapping feeds the next authoring. */}
@@ -379,8 +385,8 @@ export function StageDetail({
           to get there. */}
       {stage.key === 'portify' && (
         <>
-          <DoubleBootPanel portify={band.portify ?? null} awaiting={awaiting} />
-          <OverlayPanel portify={band.portify ?? null} awaiting={awaiting} />
+          <DoubleBootPanel portify={band.portify ?? null} awaiting={awaitingData} />
+          <OverlayPanel portify={band.portify ?? null} awaiting={awaitingData} />
         </>
       )}
 

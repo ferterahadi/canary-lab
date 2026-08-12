@@ -24,7 +24,7 @@ const mocks = vi.hoisted(() => ({
   listRuns: vi.fn(),
   getEnvsetSlot: vi.fn(),
   getEnvsetsIndex: vi.fn(),
-  loadPortify: vi.fn(),
+  loadPortify: vi.fn(async () => {}),
   portifyWorkflow: vi.fn(),
   getFeatureCoverage: vi.fn(),
   downloadTask: vi.fn(),
@@ -889,6 +889,51 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
     expect(container.querySelector('[data-testid="overlay-skeleton"]')).toBeNull()
   })
+
+  it('a settled step holds its places while the band READS them — the ledger lands a fetch after the record', async () => {
+    // A stage settles by PRODUCING evidence; the pane still has to fetch it. The
+    // hold is what stops the pane rendering in two frames on EVERY visit — the
+    // stage remounts per rail click, so the ledger starts at null each time.
+    let landLedger: (ledger: unknown) => void = () => {}
+    mocks.getFeatureCoverage.mockReturnValue(new Promise((resolve) => { landLedger = resolve }))
+    await open('specs-coverage', manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'specs-coverage' ? { evidence: { coveragePct: 100, gaps: [] } } : {}),
+      })),
+    }))
+
+    // Frame 1 — the record has answered, the fetch has not.
+    const facts = container.querySelector('[data-testid="stage-facts"]')
+    expect(facts?.textContent).toContain('100%')
+    expect(facts?.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(2)
+    // Not the stand-in tile: `Coverage gaps` must not occupy the `Requirements`
+    // slot for one frame and be relabelled in the next.
+    expect(facts?.textContent).not.toContain('Coverage gaps')
+    expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')?.textContent).toContain('Composition')
+
+    // Frame 2 — every figure lands in the slot its placeholder held, and the
+    // Passes card below it has not moved.
+    await act(async () => {
+      landLedger({
+        feature: 'checkout',
+        requirements: [],
+        tests: [{ name: 't1', requirements: ['R1'], pathTypes: ['happy'], strength: 'solid', file: 'a.spec.ts' }],
+        totals: { total: 3, covered: 3, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
+        coveragePct: 100,
+        mappedPct: 100,
+        orphanRequirementIds: [],
+        orphanTestNames: [],
+      })
+    })
+    expect(container.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(0)
+    expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('Tests written')
+    expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')).toBeNull()
+    expect(container.querySelector('[data-testid="coverage-composition"]')?.textContent).toContain('Test depth · 1 test')
+  })
 })
 
 describe('Parallel readiness follows the workflow live', () => {
@@ -969,5 +1014,43 @@ describe('Parallel readiness follows the workflow live', () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
     expect(mocks.loadPortify).toHaveBeenCalledWith('wf-9')
+  })
+
+  it('holds both cards while that hydrate is in flight, and releases them when it comes back empty', async () => {
+    // The settled portify stage has the same two-frame problem the ledger had,
+    // from a different source: the store answers `undefined` for a workflow it
+    // has not fetched AND for one that no longer exists, so the hold has to
+    // track the hydrate itself — otherwise a cleaned-away workflow leaves the
+    // placeholders up forever.
+    let landHydrate: () => void = () => {}
+    mocks.loadPortify.mockReturnValue(new Promise<void>((resolve) => { landHydrate = () => resolve() }))
+    mocks.portifyWorkflow.mockReturnValue(undefined)
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'portify' ? { evidence: { workflowId: 'wf-9', edits: true } } : {}),
+      })),
+    }))
+    await push()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="overlay-skeleton"]')).not.toBeNull()
+    // The awaited proof is the real two rows — the count and the names are known
+    // before the ports are, and they are what make it the height of the card it
+    // becomes.
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Instance A')
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Instance B')
+
+    // Came back with nothing: the hold ends rather than promising a proof that
+    // is never coming.
+    await act(async () => { landHydrate() })
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')).toBeNull()
+    expect(container.querySelector('[data-testid="overlay-skeleton"]')).toBeNull()
+    expect(container.querySelector('[data-testid="double-boot-panel"]')).toBeNull()
   })
 })
