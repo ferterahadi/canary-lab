@@ -271,3 +271,37 @@ export class FileBackedTaskStore<T> {
     }
   }
 }
+
+// ── one instance per record directory ────────────────────────────────────────
+//
+// The store holds no cached data — every read hits disk — so a second instance
+// over the same directory reads and writes identically. What it does NOT share
+// is the listener set, and that is the whole problem: a feature whose accessors
+// each construct a store (`draftStore(logsDir).save(…)`) emits into a listener
+// set nobody is subscribed to, so its writes cannot be bridged to the workspace
+// bus and every caller has to announce them by hand.
+//
+// Memoizing by record directory makes the events reachable: one instance per
+// `<logsDir>/<dirName>` per process, so a bridge attached once hears every
+// write from every accessor.
+//
+// The config is captured from the FIRST call for a directory. That is correct
+// for the intended use — one module owning one directory, handing back the same
+// configuration every time — and wrong if two callers configure the same
+// directory differently, which no feature does and none should.
+const SHARED_STORES = new Map<string, FileBackedTaskStore<unknown>>()
+
+export function sharedTaskStore<T>(config: TaskStoreConfig<T>): FileBackedTaskStore<T> {
+  const key = `${path.resolve(config.logsDir)}::${config.dirName}`
+  const existing = SHARED_STORES.get(key)
+  if (existing) return existing as FileBackedTaskStore<T>
+  const created = new FileBackedTaskStore<T>(config)
+  SHARED_STORES.set(key, created as FileBackedTaskStore<unknown>)
+  return created
+}
+
+/** Drop the memo — for tests, which build a fresh logs dir per case and would
+ *  otherwise inherit a previous case's listeners through the shared instance. */
+export function resetSharedTaskStores(): void {
+  SHARED_STORES.clear()
+}

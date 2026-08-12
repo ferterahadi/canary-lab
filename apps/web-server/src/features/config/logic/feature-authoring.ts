@@ -248,7 +248,7 @@ export async function checkoutFeatureRepoBranch(ctx: FeatureAuthoringContext, in
   if (!repo) return { error: 'repo not found', statusCode: 404 }
   try {
     return {
-      ...await checkoutBranch(repo.localPath, input.branch.trim()),
+      ...await checkoutBranch(repo.localPath, input.branch.trim(), ctx.workspaceEvents),
       path: resolveRepoPath(repo.localPath),
       expectedBranch: repo.branch ?? null,
     }

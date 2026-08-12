@@ -2,7 +2,9 @@ import fs from 'fs'
 import path from 'path'
 import { createZip } from '../../../shared/simple-zip'
 import { isClientKind, type ClientKind, type RunProducer } from '../../../../../../shared/run-mode'
-import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
+import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import type { EvaluationArchiveContents } from './evaluation-export-archive'
 
 export type EvaluationExportMode = 'raw' | 'localized'
@@ -92,8 +94,12 @@ export function evalTaskStatusOf(r: EvaluationExportTaskRecord): string { return
 // the per-task sidecars (export.log, export.zip) still live alongside the record.
 // The isSafeTaskId guard stays at the free-function boundary so an unsafe id
 // never reaches the store's path join.
+// `sharedTaskStore`, not `new`: every accessor below calls this, and the store
+// is what announces an export write to the workspace bus
+// (bridgeEvaluationExportEvents). A fresh instance per call would emit into a
+// listener set nobody holds.
 function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRecord> {
-  return new FileBackedTaskStore<EvaluationExportTaskRecord>({
+  return sharedTaskStore<EvaluationExportTaskRecord>({
     logsDir,
     dirName: 'evaluation-exports',
     recordFile: 'task.json',
@@ -114,6 +120,30 @@ function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRec
     featureOf: (r) => r.feature,
     withFeature: (r, feature) => ({ ...r, feature }),
     sortNewestFirst: true,
+  })
+}
+
+/**
+ * Attach the workspace bus to the export store, once per process.
+ *
+ * Same rule as drafts: every writer (the REST route, the MCP export tools, the
+ * background rewrite job) goes through the shared store, so the store is what
+ * announces. The event carries the task VIEW because the export dialog renders
+ * it straight from the push.
+ */
+export function bridgeEvaluationExportEvents(
+  logsDir: string,
+  events: WorkspaceEventPublisher | undefined,
+): void {
+  const store = evalStore(logsDir)
+  bridgeRecordEvents<EvaluationExportTaskRecord>({
+    source: store,
+    events,
+    knownIds: () => store.list().map((e) => String(e.id)),
+    load: (id) => store.get(id),
+    created: (task) => ({ type: 'evaluation-export-created', task: evaluationExportTaskView(task) }),
+    updated: (task) => ({ type: 'evaluation-export-updated', task: evaluationExportTaskView(task) }),
+    removed: (taskId) => ({ type: 'evaluation-export-deleted', taskId }),
   })
 }
 

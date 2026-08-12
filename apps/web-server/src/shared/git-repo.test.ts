@@ -120,6 +120,33 @@ describe('git-repo helpers', () => {
     expect(status.currentBranch).toBe('feature/demo')
   })
 
+  it('announces the switch — three callers reach here and none of them should have to', async () => {
+    // The MCP tool, the workspace repo picker and the feature-config repo row
+    // all land on this one writer. Before it announced, an agent switching a
+    // branch left every other client's Repos tab on the old one.
+    const events: { type: string }[] = []
+    const repo = tmpRepo()
+    await checkoutBranch(repo, 'feature/demo', { publish: (e) => events.push(e) })
+    expect(events).toEqual([{ type: 'features-changed' }])
+  })
+
+  it('stays silent when the repo is already on that branch', async () => {
+    const events: { type: string }[] = []
+    const repo = tmpRepo()
+    await checkoutBranch(repo, 'main', { publish: (e) => events.push(e) })
+    // Nothing changed, so nothing is announced — a nudge with nothing behind it
+    // makes every client refetch for no reason.
+    expect(events).toEqual([])
+  })
+
+  it('stays silent when the checkout fails', async () => {
+    const events: { type: string }[] = []
+    const repo = tmpRepo()
+    await expect(checkoutBranch(repo, 'missing-branch', { publish: (e) => events.push(e) }))
+      .rejects.toThrow(/missing-branch|pathspec/)
+    expect(events).toEqual([])
+  })
+
   it('validates configured branch targets before run start', async () => {
     const repo = tmpRepo()
     await expect(validateConfiguredRepoBranches({

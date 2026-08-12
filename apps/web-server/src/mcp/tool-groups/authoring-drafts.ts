@@ -56,7 +56,6 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-created', draft: next })
     return asJsonResult({
       ...externalDraftView(next),
       canaryLabBehavior: 'tracking-only',
@@ -84,7 +83,6 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-updated', draft: next })
     return asJsonResult(externalDraftView(next))
   })
 
@@ -123,7 +121,6 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-updated', draft: next })
     publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: current.featureName })
     return asJsonResult({
       draftId,

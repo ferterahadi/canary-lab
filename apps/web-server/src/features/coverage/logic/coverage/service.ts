@@ -9,7 +9,7 @@ import { applyTestStrength, type TestAssertions } from './strength'
 import { changedDocPaths, diffDocs, fingerprintDocs } from './fingerprints'
 import { deriveCoverageStateView, type DeriveStateInput } from './state'
 import { readCoverageRunState } from './run-state'
-import { CoverageJobRunStore } from './jobs/store'
+import { coverageJobStore } from './jobs/store'
 import { GENERATED_DOC_PREFIX, readDocsCollection } from './docs-collection'
 import { readPrdSummary } from './prd-summary'
 
@@ -166,7 +166,7 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
     runState && summary?.requirementsHash && runState.requirementsHash !== summary.requirementsHash,
   )
   // A running background job (R4) overlays the persisted state with GENERATING.
-  const jobStore = new CoverageJobRunStore(args.logsDir)
+  const jobStore = coverageJobStore(args.logsDir)
   const activeJob: DeriveStateInput['activeJob'] = jobStore.activeFor(args.feature, 'summary')
     ? 'summary'
     : jobStore.activeFor(args.feature, 'coverage')

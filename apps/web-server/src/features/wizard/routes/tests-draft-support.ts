@@ -17,6 +17,5 @@ export function transitionDraft(
   patch?: Partial<DraftRecord>,
 ): DraftRecord {
   const next = transition(deps.logsDir, draftId, status, patch)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-updated', draft: next })
   return next
 }

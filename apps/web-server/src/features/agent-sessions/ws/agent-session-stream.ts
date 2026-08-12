@@ -18,7 +18,7 @@ import { paths as draftPaths } from '../../wizard/logic/draft-store'
 import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'
-import { CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
+import { coverageJobStore, type CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
 import type { RunStore } from '../../runs/logic/run-store'
 
 // WebSocket route that streams live structured agent-session events.
@@ -112,7 +112,7 @@ export async function agentSessionStreamRoutes(
     '/ws/coverage/jobs/:jobId/agent-session',
     { websocket: true },
     (socket, req) => {
-      const jobStore = new CoverageJobRunStore(deps.logsDir)
+      const jobStore = coverageJobStore(deps.logsDir)
       const resolve = () => resolveCoverageJobRef(jobStore, req.params.jobId, deps.coverageProjectRoot)
       attachTail(socket, { ref: resolve(), discoverRef: resolve })
     },

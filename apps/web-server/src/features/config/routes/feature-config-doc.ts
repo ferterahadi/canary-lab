@@ -178,7 +178,7 @@ export async function registerFeatureConfigDocRoutes(app: FastifyInstance, deps:
         return { error: 'branch required' }
       }
       try {
-        const status = await checkoutBranch(repo.localPath, branch.trim())
+        const status = await checkoutBranch(repo.localPath, branch.trim(), deps.workspaceEvents)
         // Branch moved; refresh the feature list + Repos tab git-status row live.
         publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
         return {

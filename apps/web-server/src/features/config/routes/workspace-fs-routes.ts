@@ -201,7 +201,7 @@ export async function registerWorkspaceFsRoutes(app: FastifyInstance, deps: Feat
       return { error: 'path must be absolute or start with ~' }
     }
     try {
-      const status = await checkoutBranch(target, branch.trim())
+      const status = await checkoutBranch(target, branch.trim(), deps.workspaceEvents)
       return {
         ...status,
         path: target,

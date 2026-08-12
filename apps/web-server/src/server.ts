@@ -23,7 +23,7 @@ import { register as registerWizard } from './features/wizard/index'
 import { register as registerEvaluation } from './features/evaluation/index'
 import { register as registerBenchmark } from './features/benchmark/index'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
-import { CoverageJobRunStore } from './features/coverage/logic/coverage/jobs/store'
+import { coverageJobStore as sharedCoverageJobStore } from './features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './features/flights/logic/store'
 import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
 import { PlanFeaturesStore } from './features/flights/logic/plan-features'
@@ -42,7 +42,9 @@ import { register as registerVersion } from './features/version/index'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../shared/runtime/upgrade-check'
 import { PaneBroker } from './features/runs/logic/pane-broker'
 import { loadFeatures } from './shared/feature-loader'
-import { reconcileInterruptedDrafts } from './features/wizard/logic/draft-store'
+import { bridgeDraftEvents, reconcileInterruptedDrafts } from './features/wizard/logic/draft-store'
+import { bridgeEvaluationExportEvents } from './features/evaluation/logic/evaluation-export-store'
+import { bridgeCoverageJobEvents } from './features/coverage/logic/coverage/jobs/store'
 import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './features/runs/logic/runtime/orchestrator'
 import { RunScheduler, type SchedulerActiveRun } from './features/runs/logic/runtime/run-scheduler'
@@ -134,7 +136,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // Coverage background jobs (R4): a job left 'running' belongs to a dead
   // process — flip it to 'aborted' so it doesn't hold the single-flight lock or
   // show as live forever.
-  const coverageJobStore = new CoverageJobRunStore(logsDir)
+  const coverageJobStore = sharedCoverageJobStore(logsDir)
   coverageJobStore.reconcileInterrupted(() => new Date().toISOString())
   // Flight background jobs: a flight left 'running' belongs to a dead
   // process — flip it to 'paused' (flights are resumable by design: the stage
@@ -158,6 +160,14 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // single source of truth both the UI feature list and the MCP run result read.
   // Its change events drive the live red cue; the watcher recomputes on spec
   // edits + commits. Best-effort throughout — never blocks a run.
+  // The three record stores whose accessors are free functions (drafts,
+  // evaluation exports) or per-call instances (coverage jobs): each is a single
+  // shared instance now, so each is bridged here once and its writers stopped
+  // announcing by hand. Same rule as the flight/plan/update stores, which are
+  // bridged where their routes are built.
+  bridgeDraftEvents(logsDir, workspaceEvents)
+  bridgeEvaluationExportEvents(logsDir, workspaceEvents)
+  bridgeCoverageJobEvents(coverageJobStore, workspaceEvents)
   const dirtySpecStore = new DirtySpecStore(logsDir)
   dirtySpecStore.onEvent((e) => {
     if (e.featureId) workspaceEvents.publish({ type: 'tests-dirty-changed', feature: e.featureId })

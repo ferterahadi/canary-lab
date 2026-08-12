@@ -1,3 +1,6 @@
+import path from 'path'
+import { bridgeStoreEvents } from '../../../../../shared/store-event-bridge'
+import type { WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../../shared/lib/file-backed-task-store'
 
@@ -119,4 +122,47 @@ export class CoverageJobRunStore implements CoverageJobStore {
       try { fn(event) } catch { /* a bad listener must not break persistence */ }
     }
   }
+}
+
+// One wrapper per logs dir. The wrapper owns the listener set the workspace
+// bridge attaches to, and the MCP coverage tools construct a store per tool
+// CALL — a fresh wrapper each time would both miss the bridge and pile up
+// forwarding listeners on the store underneath.
+const SHARED: Map<string, CoverageJobRunStore> = new Map()
+
+export function coverageJobStore(logsDir: string): CoverageJobRunStore {
+  const key = path.resolve(logsDir)
+  const existing = SHARED.get(key)
+  if (existing) return existing
+  const created = new CoverageJobRunStore(logsDir)
+  SHARED.set(key, created)
+  return created
+}
+
+/** Drop the memo — for tests, which build a fresh logs dir per case. */
+export function resetCoverageJobStores(): void {
+  SHARED.clear()
+}
+
+/**
+ * Attach the workspace bus to a coverage-job store.
+ *
+ * A coverage job's whole point is that it rewrites the feature's ledger, so the
+ * event is `coverage-changed` for the job's feature — the same event its
+ * runners used to publish by hand at six sites, one per lifecycle step, which
+ * is how a step could be added without one.
+ *
+ * The FEATURE has to come off the record, so the bridge loads it: a store event
+ * carries only the id.
+ */
+export function bridgeCoverageJobEvents(
+  store: CoverageJobRunStore,
+  events: WorkspaceEventPublisher | undefined,
+): void {
+  bridgeStoreEvents(store, events, (e) => {
+    const feature = e.jobId ? store.get(e.jobId)?.feature : undefined
+    // A removed job (pruned history) has no record to read a feature from, and
+    // nothing about the ledger changed — stay quiet.
+    return feature ? { type: 'coverage-changed', feature } : null
+  })
 }

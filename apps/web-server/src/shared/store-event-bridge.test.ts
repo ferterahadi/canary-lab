@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bridgeStoreEvents, type StoreEventSource } from './store-event-bridge'
+import { bridgeRecordEvents, bridgeStoreEvents, type StoreEventSource } from './store-event-bridge'
 import { WorkspaceEventBus, type WorkspaceEvent } from './workspace-events'
 
 // A store stand-in: `emit` plays the part of a record being written.
@@ -126,5 +126,86 @@ describe('bridgeStoreEvents', () => {
     expect(seen).toEqual([])
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(seen).toEqual([{ type: 'pre-flight-changed' }])
+  })
+})
+
+describe('bridgeRecordEvents', () => {
+  interface Draft { draftId: string; status: string }
+
+  function setup(known: string[] = []) {
+    const store = fakeStore<Change>()
+    const records = new Map<string, Draft>()
+    const { bus, seen } = capture()
+    bridgeRecordEvents<Draft>({
+      source: store,
+      events: bus,
+      knownIds: () => known,
+      load: (id) => records.get(id) ?? null,
+      created: (draft) => ({ type: 'draft-created', draft: draft as never }),
+      updated: (draft) => ({ type: 'draft-updated', draft: draft as never }),
+      removed: (draftId) => ({ type: 'draft-deleted', draftId }),
+    })
+    return { store, records, seen }
+  }
+
+  it('calls the first write to an unknown id a creation, and the rest updates', () => {
+    const { store, records, seen } = setup()
+    records.set('d-1', { draftId: 'd-1', status: 'planning' })
+
+    store.emit({ kind: 'changed', id: 'd-1' })
+    records.set('d-1', { draftId: 'd-1', status: 'ready' })
+    store.emit({ kind: 'changed', id: 'd-1' })
+
+    expect(seen.map((e) => e.type)).toEqual(['draft-created', 'draft-updated'])
+    // The record rides the event — the dialog renders it without a refetch.
+    expect((seen[1] as { draft: Draft }).draft.status).toBe('ready')
+  })
+
+  it('treats a record that already existed at boot as an update, not a creation', () => {
+    // Seeded from disk: a restart must not re-announce every existing draft as
+    // newly created, which would reopen dialogs and re-fire creation toasts.
+    const { store, records, seen } = setup(['d-1'])
+    records.set('d-1', { draftId: 'd-1', status: 'ready' })
+    store.emit({ kind: 'changed', id: 'd-1' })
+    expect(seen.map((e) => e.type)).toEqual(['draft-updated'])
+  })
+
+  it('announces a removal and forgets the id', () => {
+    const { store, records, seen } = setup()
+    records.set('d-1', { draftId: 'd-1', status: 'ready' })
+    store.emit({ kind: 'changed', id: 'd-1' })
+    store.emit({ kind: 'removed', id: 'd-1' })
+    // Re-created under the same id later: a creation again, not an update.
+    records.set('d-1', { draftId: 'd-1', status: 'planning' })
+    store.emit({ kind: 'changed', id: 'd-1' })
+    expect(seen.map((e) => e.type)).toEqual(['draft-created', 'draft-deleted', 'draft-created'])
+  })
+
+  it('stays quiet when the record cannot be read', () => {
+    // Written and already gone (a delete racing the write): the `removed` event
+    // is the one worth sending, and that is its own branch.
+    const { store, seen } = setup()
+    store.emit({ kind: 'changed', id: 'gone' })
+    expect(seen).toEqual([])
+  })
+
+  it('ignores an event with no id', () => {
+    const { store, seen } = setup()
+    store.emit({ kind: 'changed' })
+    expect(seen).toEqual([])
+  })
+
+  it('does not subscribe without a publisher', () => {
+    const listeners: unknown[] = []
+    bridgeRecordEvents<Draft>({
+      source: { onEvent: (fn) => { listeners.push(fn) } },
+      events: undefined,
+      knownIds: () => [],
+      load: () => null,
+      created: () => ({ type: 'draft-created', draft: {} as never }),
+      updated: () => ({ type: 'draft-updated', draft: {} as never }),
+      removed: (draftId) => ({ type: 'draft-deleted', draftId }),
+    })
+    expect(listeners).toHaveLength(0)
   })
 })

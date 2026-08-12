@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { FileBackedTaskStore, IllegalTaskTransitionError } from './file-backed-task-store'
+import {
+  FileBackedTaskStore,
+  IllegalTaskTransitionError,
+  resetSharedTaskStores,
+  sharedTaskStore,
+} from './file-backed-task-store'
 
 interface Rec {
   id: string
@@ -382,5 +387,67 @@ describe('FileBackedTaskStore', () => {
     store.onEvent(() => { throw new Error('bad listener') })
     expect(() => store.save({ id: 'a', status: 'created', feature: 'f', createdAt: '2026-01-01' })).not.toThrow()
     expect(store.get('a')).not.toBeNull()
+  })
+})
+
+describe('sharedTaskStore', () => {
+  const config = (logsDir: string, dirName = 'widgets') => ({
+    logsDir,
+    dirName,
+    recordFile: 'record.json',
+    idOf: (r: Rec) => r.id,
+    indexEntryOf: (r: Rec) => ({ id: r.id, status: r.status, feature: r.feature, createdAt: r.createdAt }),
+  })
+
+  let dir: string
+  beforeEach(() => {
+    resetSharedTaskStores()
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fbts-shared-'))
+  })
+  afterEach(() => {
+    resetSharedTaskStores()
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('hands the same instance back for a record directory', () => {
+    // Why this exists: the store holds no cached data, so a second instance
+    // reads and writes identically — but it has its OWN listener set. A feature
+    // whose accessors each construct a store emits into a listener set nobody
+    // holds, which is exactly why drafts and evaluation exports could not be
+    // bridged to the workspace bus.
+    expect(sharedTaskStore<Rec>(config(dir))).toBe(sharedTaskStore<Rec>(config(dir)))
+  })
+
+  it('a listener on the shared instance hears a write made through another accessor', () => {
+    const seen: string[] = []
+    sharedTaskStore<Rec>(config(dir)).onEvent((e) => seen.push(String(e.id)))
+    // A second "accessor" — what `draftStore(logsDir).save(…)` looks like.
+    sharedTaskStore<Rec>(config(dir)).save({ id: 'a', status: 'created', feature: 'f', createdAt: '2026-01-01' })
+    expect(seen).toEqual(['a'])
+  })
+
+  it('separates instances by record directory, not just by logs dir', () => {
+    const widgets = sharedTaskStore<Rec>(config(dir, 'widgets'))
+    const gadgets = sharedTaskStore<Rec>(config(dir, 'gadgets'))
+    expect(widgets).not.toBe(gadgets)
+  })
+
+  it('separates instances by logs dir', () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), 'fbts-other-'))
+    try {
+      expect(sharedTaskStore<Rec>(config(dir))).not.toBe(sharedTaskStore<Rec>(config(other)))
+    } finally {
+      fs.rmSync(other, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves the path, so two spellings of one directory are one store', () => {
+    expect(sharedTaskStore<Rec>(config(dir))).toBe(sharedTaskStore<Rec>(config(path.join(dir, '.'))))
+  })
+
+  it('drops every instance on reset, so a test cannot inherit another test\'s listeners', () => {
+    const first = sharedTaskStore<Rec>(config(dir))
+    resetSharedTaskStores()
+    expect(sharedTaskStore<Rec>(config(dir))).not.toBe(first)
   })
 })

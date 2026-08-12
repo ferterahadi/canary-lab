@@ -3,7 +3,9 @@ import path from 'path'
 import { validateFeatureTarget as validateScaffoldTarget } from '../../../../../../shared/feature-scaffold'
 import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
-import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
+import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -123,8 +125,11 @@ export function draftStatusOf(r: DraftRecord): string { return r.status }
 // draft.json) matches `paths()` so the per-draft sidecars (prd.md, plan.json,
 // agent logs, generated/) still live alongside the record. The draft-specific
 // state machine + IllegalTransitionError stay below in `transition()`.
+// `sharedTaskStore`, not `new`: every accessor below calls this, and the store
+// is what announces a draft write to the workspace bus (bridgeDraftEvents).
+// A fresh instance per call would emit into a listener set nobody holds.
 function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
-  return new FileBackedTaskStore<DraftRecord>({
+  return sharedTaskStore<DraftRecord>({
     logsDir,
     dirName: 'drafts',
     recordFile: 'draft.json',
@@ -160,6 +165,30 @@ function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
         updatedAt: now,
       }),
     },
+  })
+}
+
+/**
+ * Attach the workspace bus to the draft store, once per process.
+ *
+ * Every draft write — REST, the MCP authoring tools, the wizard agent — lands
+ * in `writeDraft`/`transition`/`deleteDraft`, all of which go through the one
+ * shared store above. Bridging here is what lets those callers stop announcing
+ * their own writes (the rule in shared/store-event-bridge.ts); the drafts
+ * dialog reads the pushed record, so the event carries it.
+ */
+export function bridgeDraftEvents(logsDir: string, events: WorkspaceEventPublisher | undefined): void {
+  const store = draftStore(logsDir)
+  bridgeRecordEvents<DraftRecord>({
+    source: store,
+    events,
+    // Seeded from disk so a restart doesn't re-announce every existing draft as
+    // newly created.
+    knownIds: () => store.list().map((e) => String(e.id)),
+    load: (id) => store.get(id),
+    created: (draft) => ({ type: 'draft-created', draft }),
+    updated: (draft) => ({ type: 'draft-updated', draft }),
+    removed: (draftId) => ({ type: 'draft-deleted', draftId }),
   })
 }
 

@@ -66,7 +66,6 @@ export async function testsDraftRoutes(
       reply.code(404)
       return { error: 'draft not found' }
     }
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'draft-deleted', draftId: req.params.id })
     reply.code(204)
     return null
   })

@@ -5,7 +5,7 @@ import path from 'path'
 import { startExternalCoverage, submitExternalCoverage, startExternalSummary, submitExternalSummary } from './external'
 import { readPrdSummary } from '../prd-summary'
 import { CoverageJobConflictError } from './runner'
-import { CoverageJobRunStore } from './store'
+import { CoverageJobRunStore, bridgeCoverageJobEvents } from './store'
 import { regeneratePrdSummary as regeneratePrdSummaryReal } from '../service'
 import { fakeSummarize } from '../__fixtures__/fake-coverage-agents'
 import type { WorkspaceEvent, WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
@@ -109,6 +109,10 @@ describe('startExternalCoverage', () => {
     await seedSummary('checkout')
     const store = new CoverageJobRunStore(logsDir)
     const { events, publisher } = collector()
+    // The job record is the emitter now (shared/store-event-bridge.ts, wired at
+    // boot in server.ts) — bridged here the same way, so this asserts the chain
+    // the server actually runs.
+    bridgeCoverageJobEvents(store, publisher)
     const res = startExternalCoverage(
       { featuresDir, logsDir, feature: 'checkout', sessionId: 's1' },
       { store, workspaceEvents: publisher },
@@ -121,6 +125,10 @@ describe('startExternalCoverage', () => {
     writeFeature('checkout')
     const store = new CoverageJobRunStore(logsDir)
     const { events, publisher } = collector()
+    // The job record is the emitter now (shared/store-event-bridge.ts, wired at
+    // boot in server.ts) — bridged here the same way, so this asserts the chain
+    // the server actually runs.
+    bridgeCoverageJobEvents(store, publisher)
     startExternalCoverage({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
     expect(events).toHaveLength(0)
   })
@@ -158,6 +166,7 @@ describe('submitExternalCoverage', () => {
     if (started.kind !== 'started') throw new Error('expected started')
 
     const { events, publisher } = collector()
+    bridgeCoverageJobEvents(store, publisher)
     const { manifest, result } = submitExternalCoverage(
       {
         featuresDir,
@@ -286,6 +295,10 @@ describe('startExternalSummary', () => {
     writeFeature('checkout')
     const store = new CoverageJobRunStore(logsDir)
     const { events, publisher } = collector()
+    // The job record is the emitter now (shared/store-event-bridge.ts, wired at
+    // boot in server.ts) — bridged here the same way, so this asserts the chain
+    // the server actually runs.
+    bridgeCoverageJobEvents(store, publisher)
     startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
     expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
   })
@@ -295,6 +308,10 @@ describe('startExternalSummary', () => {
     fs.rmSync(path.join(dir, 'docs'), { recursive: true, force: true })
     const store = new CoverageJobRunStore(logsDir)
     const { events, publisher } = collector()
+    // The job record is the emitter now (shared/store-event-bridge.ts, wired at
+    // boot in server.ts) — bridged here the same way, so this asserts the chain
+    // the server actually runs.
+    bridgeCoverageJobEvents(store, publisher)
     startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
     expect(events).toHaveLength(0)
   })
@@ -317,6 +334,7 @@ describe('submitExternalSummary', () => {
     if (started.kind !== 'started') throw new Error('expected started')
 
     const { events, publisher } = collector()
+    bridgeCoverageJobEvents(store, publisher)
     const { manifest, result } = submitExternalSummary(
       {
         featuresDir,

@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { FeatureConfig, RepoPrerequisite } from '../../../../shared/launcher/types'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from './workspace-events'
 
 export interface GitStatus {
   isGitRepo: boolean
@@ -102,7 +103,22 @@ export async function getGitStatus(repoPath: string): Promise<GitStatus> {
   }
 }
 
-export async function checkoutBranch(repoPath: string, branch: string): Promise<GitStatus> {
+/** Switch a declared repo's branch.
+ *
+ *  Takes the bus because it is the ONE place a repo's branch changes — three
+ *  callers reach it (the workspace repo picker, the feature-config repo row,
+ *  and the MCP `checkout_feature_repo_branch` tool) and none of them announced
+ *  it, so an agent switching a branch left every other client's Repos tab
+ *  showing the old one until something unrelated refreshed. Same rule the
+ *  stores follow (shared/store-event-bridge.ts): the writer announces.
+ *
+ *  `features-changed` is the event because that is what the client maps to the
+ *  `repos` invalidation topic the git-status readers subscribe to. */
+export async function checkoutBranch(
+  repoPath: string,
+  branch: string,
+  events?: WorkspaceEventPublisher,
+): Promise<GitStatus> {
   const target = resolveRepoPath(repoPath)
   if (!safeBranchName(branch)) {
     throw Object.assign(new Error('branch must be a non-empty branch name'), { statusCode: 400 })
@@ -115,6 +131,7 @@ export async function checkoutBranch(repoPath: string, branch: string): Promise<
   if (status.dirty) {
     throw Object.assign(new Error('repo has uncommitted changes'), { statusCode: 409 })
   }
+  // Already there: nothing changed, so nothing is announced.
   if (status.currentBranch === branch) return status
 
   const result = await runGit(target, ['checkout', branch])
@@ -124,7 +141,9 @@ export async function checkoutBranch(repoPath: string, branch: string): Promise<
       { statusCode: 500 },
     )
   }
-  return getGitStatus(target)
+  const next = await getGitStatus(target)
+  publishWorkspaceEvent(events, { type: 'features-changed' })
+  return next
 }
 
 export async function collectRepoBranchSnapshots(feature: FeatureConfig): Promise<RepoBranchSnapshot[]> {

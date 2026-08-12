@@ -60,7 +60,6 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     }
     createEvaluationExportTask(deps.store.logsDir, task)
     appendEvaluationExportLog(deps.store.logsDir, task.taskId, '[evaluation] external export task created\n')
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-created', task: evaluationExportTaskView(task) })
     return asJsonResult({
       task: evaluationExportTaskView(task),
       reportSchema: externalEvaluationReportSchema(detail),
@@ -111,7 +110,6 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
         downloadReady: true,
       })
       if (next) {
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(next) })
       }
       return asJsonResult({
         ...evaluationExportTaskView(next!),
@@ -173,7 +171,6 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   }, async ({ taskId }) => {
     const deleted = deleteEvaluationExportTask(deps.store.logsDir, taskId)
     if (!deleted) return errorResult(`evaluation export task not found: ${taskId}`)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-deleted', taskId })
     return asJsonResult({ deleted: true, taskId })
   })
 }

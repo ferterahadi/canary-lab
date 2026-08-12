@@ -25,7 +25,8 @@ vi.mock('../logic/draft-agent-session', async () => {
   }
 })
 
-import { createDraft, paths as draftPaths, readDraft, writeDraft, type DraftRecord } from '../logic/draft-store'
+import { bridgeDraftEvents, createDraft, paths as draftPaths, readDraft, writeDraft, type DraftRecord } from '../logic/draft-store'
+import { resetSharedTaskStores } from '../../../../../../shared/lib/file-backed-task-store'
 import { testsDraftRoutes, type TestsDraftRouteDeps } from './tests-draft'
 
 // These routes are the READ/TRACK surface for drafts an external MCP client
@@ -36,6 +37,9 @@ let logsDir: string
 let projectRoot: string
 
 beforeEach(() => {
+  // The draft store is memoized per logs dir; each case gets a fresh dir, and
+  // dropping the memo keeps a previous case's bridge from listening in.
+  resetSharedTaskStores()
   logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tests-draft-logs-'))
   projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tests-draft-proj-'))
 })
@@ -52,6 +56,11 @@ function makeDeps(overrides: Partial<TestsDraftRouteDeps> = {}): TestsDraftRoute
 
 async function makeApp(deps: TestsDraftRouteDeps): Promise<ReturnType<typeof Fastify>> {
   const app = Fastify()
+  // A draft write announces itself from the STORE now (bridgeDraftEvents,
+  // wired once at boot in server.ts), not from these handlers — so the app
+  // under test gets the same bridge the server gives it. Without it these
+  // routes are silent, which is the point: the emission is not theirs.
+  bridgeDraftEvents(deps.logsDir, deps.workspaceEvents)
   await testsDraftRoutes(app, deps)
   return app
 }

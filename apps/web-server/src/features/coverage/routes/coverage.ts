@@ -8,7 +8,7 @@ import {
   regeneratePrdSummary,
 } from '../logic/coverage/service'
 import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
-import { CoverageJobRunStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
+import { coverageJobStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
 import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
 import type { CoverageJobKind } from '../logic/coverage/jobs/types'
 import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc, type FeatureAuthoringContext } from '../../config/logic/feature-authoring'
@@ -54,7 +54,7 @@ function docsCtx(deps: CoverageRouteDeps): FeatureAuthoringContext {
 }
 
 export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDeps): Promise<void> {
-  const jobStore = deps.coverageJobStore ?? new CoverageJobRunStore(deps.logsDir)
+  const jobStore = deps.coverageJobStore ?? coverageJobStore(deps.logsDir)
 
   app.get<{ Params: { name: string } }>('/api/features/:name/coverage', async (req, reply) => {
     try {

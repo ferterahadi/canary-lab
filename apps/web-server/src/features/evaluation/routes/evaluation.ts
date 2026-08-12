@@ -117,7 +117,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
           error: message,
         })
         if (patched) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
         }
       }
     }
@@ -142,7 +141,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       abortController: new AbortController(),
     }
     createEvaluationExportTask(deps.store.logsDir, task)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-created', task: evaluationExportTaskView(task) })
     activeEvaluationExports.set(task.taskId, active)
     const push = (chunk: string): void => {
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, chunk)
@@ -153,7 +151,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     const onSession = (session: { agent: 'claude' | 'codex'; sessionId: string }): void => {
       const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, { sessionRef: session })
       if (patched) {
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
       }
     }
     push(`[evaluation] task ${task.taskId} started\n`)
@@ -169,7 +166,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
           downloadReady: true,
         })
         if (patched) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
         }
         push('[evaluation] task completed\n')
         active.broker.markExit('export', 0)
@@ -182,7 +178,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
           downloadReady: false,
         })
         if (patched) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
         }
         push(`[evaluation] task failed: ${error}\n`)
         active.broker.markExit('export', 1)
@@ -291,7 +286,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     if (active !== undefined) { active.broker.markExit('export', task.status === 'running' ? 1 : 0) }
     activeEvaluationExports.delete(req.params.taskId)
     deleteEvaluationExportTask(deps.store.logsDir, req.params.taskId)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-deleted', taskId: req.params.taskId })
     reply.code(204)
     return reply.send()
   })

@@ -7,7 +7,7 @@ import fastifyWebsocket from '@fastify/websocket'
 import WebSocket from 'ws'
 import { evaluationRoutes } from './evaluation'
 import { createRegistry, RunStore } from '../../runs/logic/run-store'
-import { createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
+import { bridgeEvaluationExportEvents, createEvaluationExportTask, evaluationExportsDir, patchEvaluationExportTask, readEvaluationExportTask, writeEvaluationExportZip } from '../logic/evaluation-export-store'
 import { writeManifest } from '../../runs/logic/runtime/manifest'
 import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
@@ -73,6 +73,10 @@ async function build(opts: {
   const registry = createRegistry()
   const store = new RunStore(logsDir, registry)
   const app = Fastify()
+  // An export task announces itself from the STORE now
+  // (bridgeEvaluationExportEvents, wired once at boot in server.ts) — the app
+  // under test gets the same bridge, because the routes no longer publish.
+  bridgeEvaluationExportEvents(logsDir, opts.events ? { publish: (event) => opts.events!.push(event) } : undefined)
   await app.register(evaluationRoutes, {
     featuresDir,
     projectRoot: opts.projectRoot,
@@ -87,6 +91,10 @@ async function buildWithWs(opts: Parameters<typeof build>[0] = {}) {
   const registry = createRegistry()
   const store = new RunStore(logsDir, registry)
   const app = Fastify()
+  // An export task announces itself from the STORE now
+  // (bridgeEvaluationExportEvents, wired once at boot in server.ts) — the app
+  // under test gets the same bridge, because the routes no longer publish.
+  bridgeEvaluationExportEvents(logsDir, opts.events ? { publish: (event) => opts.events!.push(event) } : undefined)
   await app.register(fastifyWebsocket)
   await app.register(evaluationRoutes, {
     featuresDir,

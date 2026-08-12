@@ -98,3 +98,46 @@ export function bridgeStoreEvents<E>(
     setTimer(flush, coalesceMs)
   })
 }
+
+/**
+ * The same rule for a store whose events CARRY the record — drafts and
+ * evaluation exports both push the full task so an open dialog can render it
+ * without a refetch.
+ *
+ * Two things the plain bridge can't do for them: it must load the record the
+ * change refers to, and it must tell a create from an update. A store event
+ * says only `changed`, so first-write-wins is tracked here — seeded from what
+ * is already on disk at boot, so a restart doesn't re-announce every existing
+ * record as newly created.
+ */
+export function bridgeRecordEvents<R>(opts: {
+  source: StoreEventSource<{ kind: 'changed' | 'removed'; id?: string }>
+  events: WorkspaceEventPublisher | undefined
+  /** Ids already persisted, read once when the bridge is attached. */
+  knownIds: () => string[]
+  load: (id: string) => R | null
+  created: (record: R) => WorkspaceEvent
+  updated: (record: R) => WorkspaceEvent
+  removed: (id: string) => WorkspaceEvent
+}): void {
+  const { events } = opts
+  if (!events) return
+  const seen = new Set<string>(opts.knownIds())
+  opts.source.onEvent((event) => {
+    const id = event.id
+    if (!id) return
+    if (event.kind === 'removed') {
+      seen.delete(id)
+      publishWorkspaceEvent(events, opts.removed(id))
+      return
+    }
+    const record = opts.load(id)
+    // Written and already gone (a delete racing us), or unreadable: the
+    // `removed` event for it is the one worth sending, and that is its own
+    // branch above.
+    if (!record) return
+    const isNew = !seen.has(id)
+    seen.add(id)
+    publishWorkspaceEvent(events, isNew ? opts.created(record) : opts.updated(record))
+  })
+}

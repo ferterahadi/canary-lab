@@ -97,7 +97,6 @@ export function startExternalCoverage(
   // Generating screen live, without a refresh (cl_ws-driven-state). Same event
   // the submit path uses; the client reaction (re-list states / re-attach) is
   // idempotent for both the start and the finish of a coverage job.
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
   return { kind: 'started', manifest, context }
 }
 
@@ -173,7 +172,6 @@ export function submitExternalCoverage(
     result: { applied: result.applied.length },
   }
   deps.store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: job.feature })
   return { manifest, result }
 }
 
@@ -234,7 +232,6 @@ export function startExternalSummary(
   deps.store.save(manifest)
   // Flip the coverage pill to "Generating" and re-attach an open ledger to the
   // Generating screen live (cl_ws-driven-state) — same event the submit path uses.
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
   return { kind: 'started', manifest, context: built.context }
 }
 
@@ -280,6 +277,5 @@ export function submitExternalSummary(
     result: { requirementCount: result.summary.requirements.length },
   }
   deps.store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: job.feature })
   return { manifest, result }
 }
