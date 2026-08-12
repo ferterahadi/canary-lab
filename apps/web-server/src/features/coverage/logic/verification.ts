@@ -398,13 +398,13 @@ function listFiles(root: string): string[] {
 }
 
 function readTraceSummary(runDir: string, entry: RunSummaryFailedEntry): string | null {
-  const traceSummaryFile = (entry as RunSummaryFailedEntry & { traceSummaryFile?: string }).traceSummaryFile
+  const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return null
   return safeRead(path.join(runDir, traceSummaryFile))
 }
 
 function readTraceExtractLines(runDir: string, entry: RunSummaryFailedEntry, filename: string): string[] {
-  const traceSummaryFile = (entry as RunSummaryFailedEntry & { traceSummaryFile?: string }).traceSummaryFile
+  const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return []
   const extractDir = path.join(runDir, path.dirname(traceSummaryFile), 'trace-extract')
   const raw = safeRead(path.join(extractDir, filename))

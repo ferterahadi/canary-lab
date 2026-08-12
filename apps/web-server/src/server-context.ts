@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import type { CreateServerOptions } from './server'
+import type { TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
 import type { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import type { OrchestratorRegistry, RunStore } from './features/runs/logic/run-store'
 import type { BenchmarkRunStore } from './features/benchmark/logic/runtime/store'
@@ -14,6 +14,42 @@ import type { VersionState } from './features/version/logic/version-state'
 import type { PaneBroker } from './features/runs/logic/pane-broker'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import type { BackupRecord } from './features/runs/logic/runtime/env-switcher/types'
+
+/**
+ * The inputs `createServer` takes.
+ *
+ * Declared here rather than in `server.ts` because of the direction of the
+ * dependency, not for tidiness. `server.ts` is the composition root: it imports
+ * all ten feature registrars, and each of those imports `ServerContext` from
+ * this file. When this file also reached back into `server.ts` for this one
+ * type, that closed the loop — server → features → server-context → server —
+ * and welded every server feature into a single 16-module strongly-connected
+ * component. Ten features that are supposed to be independent were mutually
+ * reachable, which is what makes "change one thing, recompile and re-reason
+ * about everything" the normal experience.
+ *
+ * The edge was type-only, so nothing failed at runtime and nothing in CI
+ * objected; `tools/check-import-cycles.mjs` now holds the line.
+ *
+ * `server.ts` re-exports this so `createServer`'s published surface is
+ * unchanged.
+ */
+export interface CreateServerOptions {
+  projectRoot: string
+  featuresDir?: string
+  logsDir?: string
+  journalPath?: string
+  // Override the wizard agent spawners — tests inject sync stubs.
+  testsDraftDepsOverride?: Partial<TestsDraftRouteDeps>
+  // Override the pty factory used by the wizard runner. Production uses
+  // the real node-pty factory; tests skip this branch by passing
+  // `testsDraftDepsOverride` instead.
+  ptyFactory?: PtyFactory
+  // Host hook invoked after a port change is persisted via the Project
+  // Settings dialog. The host (canary-lab ui) relaunches on the new port and
+  // shuts this process down. Absent in tests / non-CLI embeddings.
+  onPortChange?: (port: number) => void | Promise<void>
+}
 
 /**
  * What `createServer` builds before any feature registers, and what every

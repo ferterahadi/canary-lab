@@ -95,11 +95,48 @@ export type FlightCheckpointKind =
    *  it back to Canary's own agent instead of failing the stage. */
   | 'external-work'
 
+/** Every option key a checkpoint kind can ever offer.
+ *
+ *  The VOCABULARY, not the offer: one checkpoint instance may present a subset,
+ *  and `prd-source` genuinely does — it drops `continue` when the feature has no
+ *  docs to continue with. What is fixed is the set a client may ever be asked to
+ *  answer with, which is what every consumer needs to know up front.
+ *
+ *  Declared here because the option keys are wire values, spent by four
+ *  surfaces: the stage that emits them, `respond_flight_checkpoint` over MCP,
+ *  the CLI, and the web UI's label map. They used to be inline string literals
+ *  at nine stage sites, so nothing connected the emitter to the label — a
+ *  renamed key still compiled on both sides and simply degraded the button to
+ *  its raw key. `satisfies Record<FlightCheckpointKind, …>` makes a new kind a
+ *  compile error until its options are declared here.
+ *
+ *  `as const satisfies` rather than a plain annotation: the annotation alone
+ *  would widen every entry to `string[]` and throw away the literal types that
+ *  make a typo at an emit site fail to compile. */
+export const CHECKPOINT_OPTIONS = {
+  'similarity-choice': ['rerun', 'enhance', 'new'],
+  'config-approval': ['approve', 'redraft'],
+  'missing-env': ['retry', 'waive'],
+  'prd-source': ['continue', 'collect-repo-docs', 'infer-from-diff'],
+  'coverage-stuck': ['accept-partial', 'retry'],
+  'portify-gate': ['run', 'skip'],
+  'portify-apply': ['apply', 'revise', 'cancel'],
+  'run-failed': ['rerun', 'export-as-is'],
+  'export-mode': ['raw', 'localized'],
+  'external-work': ['submit', 'run-internally'],
+} as const satisfies Record<FlightCheckpointKind, readonly string[]>
+
+/** The option keys valid for one checkpoint kind. */
+export type CheckpointOption<K extends FlightCheckpointKind> =
+  (typeof CHECKPOINT_OPTIONS)[K][number]
+
 export interface FlightCheckpoint {
   kind: FlightCheckpointKind
   /** Human-readable question shown in the UI / CLI / MCP result. */
   message: string
-  /** Closed choice set when the checkpoint is a pick (e.g. rerun/enhance/new). */
+  /** Closed choice set when the checkpoint is a pick (e.g. rerun/enhance/new).
+   *  Build it from `CHECKPOINT_OPTIONS[kind]` — a bare literal here is how the
+   *  emitter and the UI's labels drifted apart. */
   options?: string[]
   /** Checkpoint payload — draft config source, missing key list, open gaps, … */
   data?: unknown

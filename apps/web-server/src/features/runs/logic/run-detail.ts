@@ -11,12 +11,33 @@ export interface RunSummaryFailedEntry {
   error?: { message: string; snippet?: string }
   durationMs?: number
   location?: string
+  /** Every frame of the failing step's location chain, innermost first. The
+   *  reporter writes this whenever the failure came from a step (see
+   *  `summary-reporter.ts`), and the UI prefers it over `location` to point at
+   *  the helper that actually threw. Declared here because it is on the wire:
+   *  the web mirror has always read it, while this read-side projection omitted
+   *  it — a one-directional gap that nothing could catch until `check:wire`. */
+  locations?: string[]
   retry?: number
   logFiles?: string[]
   /** Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
    *  error message + code-frame written by log enrichment. Persisted in the
    *  summary JSON; surfaced as `errorPath` in the heal pointer bundle. */
   errorFile?: string
+  /** Repo-relative path to the curated `failure-summary.md` extracted from this
+   *  test's Playwright trace.zip. Written by `summary-reporter.ts` in onEnd.
+   *
+   *  Declared here because readers need it: `coverage/logic/verification.ts`
+   *  reaches for it and, while this field was missing, could only do so through
+   *  an `as RunSummaryFailedEntry & { traceSummaryFile?: string }` widening cast
+   *  at both call sites. A cast is not a type — it silences the mismatch instead
+   *  of recording it, so the read shape drifted from what the reporter actually
+   *  persists without anything failing.
+   *
+   *  The producer of record for the on-disk `e2e-summary.json` entry is
+   *  `TestEntry` in `runtime/summary-types.ts`; this interface is the read-side
+   *  projection of it and must only ever be a subset. */
+  traceSummaryFile?: string
 }
 
 export interface RunSummaryRunningStep {

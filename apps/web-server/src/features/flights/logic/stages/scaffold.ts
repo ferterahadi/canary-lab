@@ -7,6 +7,7 @@ import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightCheckpoint } from '../types'
 import { featureDirFor, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Scaffold the feature with the existing create_feature core, lay the scout's
 // draft config over the skeleton's placeholder, then park on config-approval
@@ -53,7 +54,7 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
       message: extra?.error
         ? `The edited feature.config.cjs for "${m.feature}" does not parse — fix it and approve again. (${extra.error})`
         : `Feature "${m.feature}" is set up. Review the configuration (edit it in place via each service's ✎), then approve — it gets boot-verified after env capture. Redraft re-runs the repo scan.`,
-      options: ['approve', 'redraft'],
+      options: [...CHECKPOINT_OPTIONS['config-approval']],
       data: { feature: m.feature, configPath, configSource, ...(extra?.error ? { error: extra.error } : {}) },
     }
   }

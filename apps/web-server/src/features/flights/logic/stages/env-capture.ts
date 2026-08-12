@@ -7,6 +7,7 @@ import type { FlightStageErrorDetail } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Capture the scout's detected env files into the flight's envset, then prove
 // config + env together with a single dry-run boot (mode:'boot' run via the
@@ -150,7 +151,7 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
           checkpoint: {
             kind: 'missing-env',
             message: `${missing.length} env file(s) the app reads do not exist. Provide values (they are written to the missing path, then captured), waive them, or create the files and retry. Canary never guesses secrets.`,
-            options: ['retry', 'waive'],
+            options: [...CHECKPOINT_OPTIONS['missing-env']],
             data: { missing },
           },
         }

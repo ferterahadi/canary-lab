@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import type { FlightStageKey } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Lets ONE stage adapter serve both executors without a second implementation.
 //
@@ -40,8 +41,12 @@ export interface ExternalizableSpec {
 /** The two answers an `external-work` checkpoint accepts. `submit` means the
  *  client did the work and put its result on `data`; `run-internally` hands the
  *  job back to Canary's own agent, so a client that cannot do it (no file tools,
- *  no subagents, refused permission) degrades instead of failing the flight. */
-export const EXTERNAL_WORK_OPTIONS = ['submit', 'run-internally'] as const
+ *  no subagents, refused permission) degrades instead of failing the flight.
+ *
+ *  Re-exported from the shared vocabulary rather than re-declared: this constant
+ *  was the precedent every other stage now follows, and two copies of the same
+ *  option list is the drift it was introduced to prevent. */
+export const EXTERNAL_WORK_OPTIONS = CHECKPOINT_OPTIONS['external-work']
 
 /** True when this flight's hand-off-capable stages should be executed by the MCP
  *  client that started it rather than by a locally spawned CLI. */

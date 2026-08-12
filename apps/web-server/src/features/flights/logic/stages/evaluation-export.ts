@@ -3,6 +3,7 @@ import path from 'path'
 import { readEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Terminal stage: a flight isn't done at green — it ends by producing the
 // evaluation archive through the existing test-review-export engine, so the
@@ -79,7 +80,7 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       checkpoint: {
         kind: 'export-mode',
         message: `How should the evaluation for "${m.feature}" be written? raw = fast report straight from the run evidence; localized = an agent rewrites the per-test reasoning for readability (slower).`,
-        options: ['raw', 'localized'],
+        options: [...CHECKPOINT_OPTIONS['export-mode']],
         data: { runId: m.links?.runId },
       },
     }

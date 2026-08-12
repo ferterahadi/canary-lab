@@ -5,7 +5,6 @@ import websocketPlugin from '@fastify/websocket'
 import fastifyStatic from '@fastify/static'
 import { isActiveRunStatus, isRestartableRunStatus } from '../../../shared/run-state'
 import { runsRoutes, type ExternalHealAgentRequest } from './features/runs/routes/runs'
-import { type TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
 import { makeExternalHealAuditLogger } from './features/runs/routes/external-heal'
 import { ExternalHealBroker } from './features/runs/logic/heal/external-heal-broker'
 import { registerMcpRoutes } from './mcp/server'
@@ -62,7 +61,7 @@ import {
   type HealAgent,
 } from './features/runs/logic/runtime/auto-heal'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from './shared/git-repo'
-import { realPtyFactory, type PtyFactory } from './features/runs/logic/runtime/pty-spawner'
+import { realPtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import {
   restore,
 } from './features/runs/logic/runtime/env-switcher/switch'
@@ -78,22 +77,12 @@ import {
 // Bootstrap glue. Excluded from coverage — the testable logic lives under
 // routes/ and lib/.
 
-export interface CreateServerOptions {
-  projectRoot: string
-  featuresDir?: string
-  logsDir?: string
-  journalPath?: string
-  // Override the wizard agent spawners — tests inject sync stubs.
-  testsDraftDepsOverride?: Partial<TestsDraftRouteDeps>
-  // Override the pty factory used by the wizard runner. Production uses
-  // the real node-pty factory; tests skip this branch by passing
-  // `testsDraftDepsOverride` instead.
-  ptyFactory?: PtyFactory
-  // Host hook invoked after a port change is persisted via the Project
-  // Settings dialog. The host (canary-lab ui) relaunches on the new port and
-  // shuts this process down. Absent in tests / non-CLI embeddings.
-  onPortChange?: (port: number) => void | Promise<void>
-}
+// Declared in ./server-context alongside the ServerContext it produces, so this
+// file (which imports every feature registrar) is not also something those
+// registrars have to import from. Re-exported to keep the published surface of
+// `createServer` where callers already expect it.
+import type { CreateServerOptions } from './server-context'
+export type { CreateServerOptions }
 
 export interface CreateServerResult {
   app: FastifyInstance

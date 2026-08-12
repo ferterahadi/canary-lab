@@ -4,6 +4,7 @@ import type { RunSummary } from '../../../runs/logic/run-store'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Start the real run through the runs route — auto-heal per the workspace's
 // canary-lab.config.json, heal semantics untouched — and wait for a terminal
@@ -68,7 +69,7 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
       checkpoint: {
         kind: 'run-failed',
         message: `Run ${runId} ended ${status} after ${manifest!.healCycles} heal cycle(s).${whyLine} Rerun it, or export the evaluation as-is (status preserved)?`,
-        options: ['rerun', 'export-as-is'],
+        options: [...CHECKPOINT_OPTIONS['run-failed']],
         data: evidence,
       },
     }

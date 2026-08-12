@@ -4,6 +4,7 @@
 // module just re-exports it for feature-local imports.
 
 export {
+  CHECKPOINT_OPTIONS,
   FLIGHT_STAGE_KEYS,
   STAGE_DEPENDS_ON,
   ACTIVE_FLIGHT_STATUSES,

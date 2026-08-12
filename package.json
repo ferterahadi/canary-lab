@@ -72,6 +72,8 @@
     "check:boundaries": "node tools/check-feature-boundaries.mjs",
     "check:conventions": "node tools/check-conventions.mjs",
     "check:docs": "node tools/check-docs.mjs",
+    "check:wire": "node tools/check-wire-contracts.mjs",
+    "check:cycles": "node tools/check-import-cycles.mjs",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",

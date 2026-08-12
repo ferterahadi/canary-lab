@@ -6,6 +6,7 @@ import type { PortifyStageProgress } from '../../../../../../../shared/flights/t
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Port-ification runs by default — every flight attempts to leave the feature
 // concurrency-ready. The stage drives the existing portify background job
@@ -152,7 +153,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         `${note ? `${note}\n\n` : ''}Portify verified these edits with a concurrent double-boot. Save them as "${feature}"'s overlay? ` +
         `Nothing lands in your repos — runs apply the overlay into a throwaway per-run worktree at boot and reverse it at teardown. ` +
         `Request changes to send feedback back to the agent for another edit + re-verify pass. Declining discards the edits and SKIPS parallel readiness — the feature stays serial (runs go one at a time) and a later flight can retry.`,
-      options: ['apply', 'revise', 'cancel'],
+      options: [...CHECKPOINT_OPTIONS['portify-apply']],
       data: { workflowId, diff },
     },
   })
@@ -217,7 +218,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         `concurrent double-boot — heavy stacks can take 30-60+ minutes. If a sibling feature already portified the same app, ` +
         `its overlay is reused and verified FIRST (the agent only runs if that fails). Skipping keeps the feature serial — ` +
         `runs go one at a time — and a later flight can ask again.`,
-      options: ['run', 'skip'],
+      options: [...CHECKPOINT_OPTIONS['portify-gate']],
     },
   })
 

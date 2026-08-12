@@ -11,6 +11,7 @@ import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, stageFeedback, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork } from './externalizable'
 import { agentProgressSink } from './agent-progress'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Populate features/<f>/docs/ — the prd-source checkpoint is a two-path FORK:
 //   manual — the user supplies docs (UI drop zone / MCP write_feature_doc),
@@ -252,9 +253,10 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       checkpoint: {
         kind: 'prd-source',
         message: note ? `${note} ${base}` : base,
-        options: hasDocs
-          ? ['continue', 'collect-repo-docs', 'infer-from-diff']
-          : ['collect-repo-docs', 'infer-from-diff'],
+        // The one checkpoint that offers a SUBSET of its kind's vocabulary:
+        // with no docs present there is nothing for `continue` to continue
+        // with, so the option is withheld rather than shown and then rejected.
+        options: [...CHECKPOINT_OPTIONS['prd-source']].filter((o) => hasDocs || o !== 'continue'),
         data: { docs, linked, intent: m.description, lastAttempt: attempt },
       },
     }

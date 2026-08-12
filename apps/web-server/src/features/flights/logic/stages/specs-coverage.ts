@@ -15,6 +15,7 @@ import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork } from './externalizable'
 import { agentProgressSink } from './agent-progress'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
 // (Read/Write/Edit tools — no JSON proposal), the existing draft-apply
@@ -311,7 +312,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         checkpoint: {
           kind: 'coverage-stuck',
           message: `After ${MAX_ITERATIONS} authoring rounds coverage is ${ledger.coveragePct}% (target ${prep.target}%). Accept the remaining gaps or run another round.`,
-          options: ['accept-partial', 'retry'],
+          options: [...CHECKPOINT_OPTIONS['coverage-stuck']],
           data: ledgerEvidence(ledger),
         },
       }

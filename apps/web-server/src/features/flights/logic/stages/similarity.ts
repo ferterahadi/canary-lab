@@ -4,6 +4,7 @@ import path from 'path'
 import { loadFeatures } from '../../../../shared/feature-loader'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightStageDeps } from './context'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Pre-flight similarity check: never silently create a near-duplicate of a
 // feature that already covers the target repo(s). Deterministic scan — no
@@ -79,7 +80,7 @@ export function similarityStage(deps: FlightStageDeps): StageAdapter {
         checkpoint: {
           kind: 'similarity-choice',
           message: `Feature "${match.feature}" already targets ${match.repo} ("${match.description}"). Rerun it, enhance it with this flight's docs/specs delta, or create a new feature?`,
-          options: ['rerun', 'enhance', 'new'],
+          options: [...CHECKPOINT_OPTIONS['similarity-choice']],
           data: { match },
         },
       }
