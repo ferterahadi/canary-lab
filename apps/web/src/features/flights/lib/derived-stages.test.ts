@@ -116,6 +116,18 @@ describe('latestTerminalRunByFeature', () => {
     expect(map.get('f')?.runId).toBe('new-fail')
     expect(map.get('g')?.runId).toBe('other')
   })
+
+  // The list arrives newest-first from `/api/runs`, so the SECOND settled run a
+  // feature contributes is normally the older one and must not displace the
+  // first. The case above only ever walks older→newer, which exercises the
+  // replacing side of the comparison and never the keeping side.
+  it('keeps the run it already has when an older one for the same feature follows', () => {
+    const map = latestTerminalRunByFeature([
+      run({ runId: 'newest', startedAt: '2026-02-02T00:00:00Z', status: 'passed' }),
+      run({ runId: 'older', startedAt: '2026-02-01T00:00:00Z', status: 'failed' }),
+    ])
+    expect(map.get('f')?.runId).toBe('newest')
+  })
 })
 
 // R81 — the derived-flight id space and the pseudo-manifest FlightPage renders.

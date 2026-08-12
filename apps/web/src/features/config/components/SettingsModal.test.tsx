@@ -55,7 +55,7 @@ afterEach(() => {
 
 describe('SettingsModal', () => {
   it('R80: the GitHub section shows the connected account and refreshes on demand', async () => {
-    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'external', editor: 'auto' })
+    vi.mocked(api.getProjectConfig).mockResolvedValue({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
     await act(async () => { root.render(<SettingsModal onClose={vi.fn()} />) })
     await act(async () => {})
     const gh = container.querySelector('[data-testid="settings-github"]')

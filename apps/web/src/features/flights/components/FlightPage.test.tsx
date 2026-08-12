@@ -482,7 +482,11 @@ describe('FlightPage', () => {
 })
 
 describe('the open flight rides the push channel', () => {
-  const runningManifest = {
+  // Annotated rather than inferred: without it TypeScript pins `currentStage` to
+  // the literal `'scout'` and the stage statuses to the two values this object
+  // happens to use, so the later push below — which advances to `'scaffold'` and
+  // introduces `'done'` — cannot be assigned to the same shape.
+  const runningManifest: FlightManifest = {
     flightId: 'fl_1',
     feature: 'checkout',
     repoPaths: ['/repo/shop'],

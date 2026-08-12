@@ -16,7 +16,7 @@ const preflight: PrPreflight = {
   repos: [{ repoName: 'fnb', repoRoot: '/repos/fnb', origin: { owner: 'org', name: 'fnb', host: 'github.com' }, base: 'main', pushable: true }],
 }
 
-const config: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true }
+const config: ProjectConfig = { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true }
 
 /** A teardown-shaped context: only the fields auto-propose actually reads. */
 function mkCtx(over: Partial<RunContext> = {}) {

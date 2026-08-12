@@ -109,6 +109,7 @@ describe('defaultOpenBrowserSpawner', () => {
       await vi.importActual<typeof import('./open-browser-spawner')>('./open-browser-spawner')
 
     const child = defaultOpenBrowserSpawner('node', ['-e', 'process.exit(0)'], {
+      detached: false,
       stdio: 'ignore',
     })
 

@@ -46,6 +46,12 @@ jobs:
         run: npm run check:wire
       - name: Import cycles
         run: npm run check:cycles
+      # `typecheck` (tsconfig.build.json) only reaches what the CLI imports, and
+      # excludes every *.test.ts. These two cover the rest — all of apps/web, all
+      # of apps/web-server, tests included. They sat at 68 errors while nothing
+      # ran them, ten of those in shipped UI code.
+      - name: Typecheck (web + server, incl. tests)
+        run: npm run typecheck:web && npm run typecheck:server
       - name: Contributor docs
         run: npm run check:docs
       - name: Lint

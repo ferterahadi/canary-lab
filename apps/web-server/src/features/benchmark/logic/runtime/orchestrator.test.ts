@@ -121,24 +121,11 @@ describe('BenchmarkOrchestrator.run', () => {
     expect(final?.arms.find((a) => a.arm === 'B')?.worktreePath).toBeUndefined()
   })
 
-  it('tolerates setupArms returning nothing (no arm gets a worktree path)', async () => {
-    let final: BenchmarkManifest | undefined
-    const orch = new BenchmarkOrchestrator({
-      manifest: makeManifest({
-        arms: [{ arm: 'A', mode: 'harness', runIds: [] }],
-      }),
-      persist: (m) => { final = m },
-      sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
-      writeDiff: () => {},
-      // setupArms is typed non-nullable, but the `?? {}` fallback defends
-      // against a nullish resolve — force that here via a cast to exercise it.
-      setupArms: (async () => undefined) as BenchmarkOrchestratorDeps['setupArms'],
-      runRace: async () => REPORT,
-      now: () => 't',
-    })
-    await orch.run()
-    expect(final?.arms.find((a) => a.arm === 'A')?.worktreePath).toBeUndefined()
-  })
+  // A case here forced `setupArms` to resolve `undefined` through a cast, to
+  // cover a `?? {}` fallback in the orchestrator. `setupArms` is typed to resolve
+  // a real object, so no caller could produce that state — the cast manufactured
+  // it. The fallback is gone and so is the case; the empty-object behaviour is
+  // still covered by the arm above, which returns `{}` legitimately.
 
   it('marks the run aborted (not done) when isAborted() is true', async () => {
     let final: BenchmarkManifest | undefined

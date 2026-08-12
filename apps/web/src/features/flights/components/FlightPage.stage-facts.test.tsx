@@ -45,7 +45,7 @@ const mocks = vi.hoisted(() => ({
   restartRun: vi.fn(),
   taskById: vi.fn(),
   taskForRun: vi.fn(),
-  evaluationTasks: vi.fn(() => []),
+  evaluationTasks: vi.fn((): EvaluationExportTask[] => []),
 }))
 
 vi.mock('@/shared/api/client', () => ({
@@ -120,6 +120,7 @@ vi.mock('@/features/portify/state/PortifyContext', () => ({
 }))
 
 import { FlightPage } from './FlightPage'
+import type { EvaluationExportTask } from '@/shared/api/types'
 
 ;
 
@@ -575,7 +576,7 @@ describe('trailer model (R14–R18)', () => {
     })
   }
 
-  const readyTask = {
+  const readyTask: EvaluationExportTask = {
     taskId: 'task-7',
     runId: '2026-07-23T1603-z6kc',
     feature: 'merchant-pass-fnb',

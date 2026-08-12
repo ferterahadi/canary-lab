@@ -161,7 +161,11 @@ export function TestRunPanel({
                chip, or in the meta line) printed the same fraction twice, a
                hand's width apart. */
             passCount="hidden"
-            onSelect={() => onOpenRun?.(feature, runId)}
+            /* Guarded on `runId` like the `onOpenFixes` wiring above: the hero
+               also renders from a synthesized entry before the run list
+               resolves, and this used to hand `onOpenRun` an undefined id in
+               that window — asking the host to open a run that has no id. */
+            onSelect={() => { if (runId) onOpenRun?.(feature, runId) }}
           />
         </ul>
 
@@ -173,10 +177,12 @@ export function TestRunPanel({
         <FailingTests
           failing={failing}
           knownTests={summary?.knownTests}
-          {...(onOpenRun ? { onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }) } : {})}
+          {...(onOpenRun && runId ? { onOpenTest: (name: string) => onOpenRun(feature, runId, { test: name }) } : {})}
         />
 
-        <RunControls runId={runId} status={status} active={active} onError={report} />
+        {/* No run id means there is no run to control — the surrounding branch
+            can still render from manifest/evidence alone. */}
+        {runId && <RunControls runId={runId} status={status} active={active} onError={report} />}
 
         {/* External heal: the repair runs in the user's own MCP client, so there
             is no Canary transcript to embed — an honest status line, with the

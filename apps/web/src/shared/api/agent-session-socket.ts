@@ -1,15 +1,20 @@
 import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 import type { AgentSessionEvent, SubagentIdentity } from '@/shared/api/client'
 
-// WebSocket wrapper for live structured agent-session events. Source is
-// either a run id or a (draftId, stage) pair — the server routes are
-// /ws/runs/:runId/agent-session and the per-subsystem agent-session streams
-// respectively, and emit messages of the form { type: 'session', ... } |
+// WebSocket wrapper for live structured agent-session events. Each source kind
+// names one per-subsystem server stream (/ws/runs/:runId/agent-session and
+// friends), which emit messages of the form { type: 'session', ... } |
 // { type: 'event', event } | { type: 'error', error }.
+//
+// This union must stay in step with `AgentSessionSource` in
+// `@/shared/ui/AgentSessionView` — that is the type hosts actually construct,
+// and this is what it is translated into. They had drifted: this one still
+// carried a `draft` kind after the Add Test wizard was retired and
+// `/api/tests/draft/:id/agent-session` was deleted server-side, so `urlFor`
+// silently routed a draft source to the flight-plan endpoint.
 
 export type AgentSessionSocketSource =
   | { kind: 'run'; runId: string }
-  | { kind: 'draft'; draftId: string; stage: 'planning' | 'generating' }
   | { kind: 'benchmark'; benchmarkId: string }
   | { kind: 'portify'; workflowId: string }
   | { kind: 'coverage'; jobId: string }
@@ -47,26 +52,30 @@ export interface AgentSessionConnection {
   close(): void
 }
 
+// A switch with every kind returning, rather than an if-chain ending in a bare
+// fallback. The declared `: string` return type is what enforces it: add a kind
+// without a case and the function can fall through to `undefined`, which is a
+// compile error here. The old shape had the last kind AS the fallback, so a
+// `draft` source that no longer had an endpoint was routed to the flight-plan
+// stream instead of failing. No unreachable default arm, so the file stays
+// fully covered.
 function urlFor(base: string, source: AgentSessionSocketSource): string {
-  if (source.kind === 'run') {
-    return `${base}/ws/runs/${encodeURIComponent(source.runId)}/agent-session`
+  switch (source.kind) {
+    case 'run':
+      return `${base}/ws/runs/${encodeURIComponent(source.runId)}/agent-session`
+    case 'benchmark':
+      return `${base}/ws/benchmarks/${encodeURIComponent(source.benchmarkId)}/agent-session`
+    case 'portify':
+      return `${base}/ws/portify/${encodeURIComponent(source.workflowId)}/agent-session`
+    case 'coverage':
+      return `${base}/ws/coverage/jobs/${encodeURIComponent(source.jobId)}/agent-session`
+    case 'evaluation':
+      return `${base}/ws/evaluation-exports/${encodeURIComponent(source.taskId)}/agent-session`
+    case 'flight':
+      return `${base}/ws/flights/${encodeURIComponent(source.flightId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
+    case 'flight-plan':
+      return `${base}/ws/flight-plans/${encodeURIComponent(source.taskId)}/agent-session`
   }
-  if (source.kind === 'benchmark') {
-    return `${base}/ws/benchmarks/${encodeURIComponent(source.benchmarkId)}/agent-session`
-  }
-  if (source.kind === 'portify') {
-    return `${base}/ws/portify/${encodeURIComponent(source.workflowId)}/agent-session`
-  }
-  if (source.kind === 'coverage') {
-    return `${base}/ws/coverage/jobs/${encodeURIComponent(source.jobId)}/agent-session`
-  }
-  if (source.kind === 'evaluation') {
-    return `${base}/ws/evaluation-exports/${encodeURIComponent(source.taskId)}/agent-session`
-  }
-  if (source.kind === 'flight') {
-    return `${base}/ws/flights/${encodeURIComponent(source.flightId)}/agent-session?stage=${encodeURIComponent(source.stage)}`
-  }
-  return `${base}/ws/flight-plans/${encodeURIComponent(source.taskId)}/agent-session`
 }
 
 export function connectAgentSessionStream(opts: ConnectAgentSessionOptions): AgentSessionConnection {

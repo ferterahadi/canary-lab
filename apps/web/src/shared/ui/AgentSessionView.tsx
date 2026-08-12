@@ -15,7 +15,7 @@ export type { SystemGroup } from './AgentSessionRows'
 // `MessageCard` / `ThinkingCard` / `ToolCallCard` / `ToolResultCard`.
 //
 // Two transports:
-//   - REST snapshot via `getAgentSession` / `getDraftAgentSession` for the
+//   - REST snapshot via `getAgentSession` and its per-subsystem siblings for the
 //     initial render — gives us every event already on disk.
 //   - Live WS via `connectAgentSessionStream` when `live` is set — appends
 //     newly-tailed events as they arrive.
@@ -138,8 +138,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
       if (source.kind === 'coverage') return api.getCoverageAgentSession(source.jobId)
       if (source.kind === 'evaluation') return api.getEvaluationAgentSession(source.taskId)
       if (source.kind === 'flight') return api.getFlightAgentSession(source.flightId, source.stage)
-      if (source.kind === 'flight-plan') return api.getFlightPlanAgentSession(source.taskId)
-      return api.getDraftAgentSession(source.draftId, source.stage)
+      return api.getFlightPlanAgentSession(source.taskId)
     }
 
     fetchSnapshot()
@@ -436,6 +435,5 @@ function sourceCacheKey(source: AgentSessionSource): string {
   if (source.kind === 'coverage') return `coverage:${source.jobId}:${source.live ? '1' : '0'}`
   if (source.kind === 'evaluation') return `evaluation:${source.taskId}:${source.live ? '1' : '0'}`
   if (source.kind === 'flight') return `flight:${source.flightId}:${source.stage}:${source.live ? '1' : '0'}`
-  if (source.kind === 'flight-plan') return `flight-plan:${source.taskId}:${source.live ? '1' : '0'}`
-  return `draft:${source.draftId}:${source.stage}:${source.live ? '1' : '0'}`
+  return `flight-plan:${source.taskId}:${source.live ? '1' : '0'}`
 }

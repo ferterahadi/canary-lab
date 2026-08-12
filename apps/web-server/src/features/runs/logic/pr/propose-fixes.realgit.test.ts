@@ -78,7 +78,7 @@ function capture(f: Fixture, patchPath: string): RunFixCapture {
 
 function preflight(f: Fixture): PrPreflight {
   return {
-    gh: { installed: true, authed: true, account: 'proof' } as PrPreflight['gh'],
+    gh: { installed: true, authenticated: true, account: 'proof' },
     anyPushable: true,
     repos: [{
       repoName: 'svc',

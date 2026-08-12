@@ -70,6 +70,9 @@ function throwingStore(thrown: unknown): FlightStore {
     },
     save(): void {},
     remove(): void {},
+    renameFeature(): number {
+      return 0
+    },
     flightDir(flightId: string): string {
       return path.join(tmpDir, 'flights', flightId)
     },

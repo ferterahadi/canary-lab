@@ -72,6 +72,9 @@ function saveThrowsStore(thrown: unknown): FlightStore {
       throw thrown
     },
     remove(): void {},
+    renameFeature(): number {
+      return 0
+    },
     flightDir(flightId: string): string {
       return path.join(tmpDir, 'flights', flightId)
     },

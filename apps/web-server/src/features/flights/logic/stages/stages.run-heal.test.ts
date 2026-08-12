@@ -36,6 +36,7 @@ import type { FlightInject, FlightStageDeps } from './context'
 import type { StageContext, StageOutcome } from '../conductor'
 
 import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import { stageContextStub } from './__fixtures__/stage-context'
 
 let tmpDir: string
 
@@ -103,11 +104,9 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
   }
   return {
     progressLog,
-    ctx: {
+    ctx: stageContextStub({
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      signal: new AbortController().signal,
-      appendLog: () => {},
       setProgress: (progress) => { progressLog.push(progress) },
       patchFlight: (patch) => {
         state.m = {
@@ -116,7 +115,7 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
           links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
         }
       },
-    },
+    }),
     current: () => state.m,
     setStage,
   }
@@ -156,7 +155,7 @@ describe('run + heal stages', () => {
       }
       return undefined
     })
-    const outcome = await runStage(deps({ inject })).run(ctxFor(manifest({ opts: { env: 'local', yolo: true } })).ctx)
+    const outcome = await runStage(deps({ inject })).run(ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } })).ctx)
     expect(outcome).toMatchObject({
       kind: 'done',
       evidence: { runId: 'run-1', status: 'failed', counts: { passed: 2, total: 23, failed: 4 } },

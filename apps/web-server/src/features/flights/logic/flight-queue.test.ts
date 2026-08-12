@@ -252,6 +252,7 @@ describe('enqueueFlight + drainQueuedFlights (R54)', () => {
       latestForFeature: (...a) => store.latestForFeature(...a),
       save: (...a) => store.save(...a),
       remove: (...a) => store.remove(...a),
+      renameFeature: (...a) => store.renameFeature(...a),
       flightDir: (...a) => store.flightDir(...a),
       reconcileInterrupted: (...a) => store.reconcileInterrupted(...a),
       onEvent: (...a) => store.onEvent(...a),

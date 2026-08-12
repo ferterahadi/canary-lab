@@ -160,7 +160,7 @@ describe('legacy terminal-stage repair', () => {
     const reopened = new FlightRunStore(tmpDir)
     const repaired = reopened.get(stale.flightId)!
     expect(repaired.stages.find((stage) => stage.key === 'scout')?.status).toBe('pending')
-    expect(reopened.list().find((entry) => entry.flightId === stale.flightId)?.stages.find((stage) => stage.key === 'scout')?.status).toBe('pending')
+    expect(reopened.list().find((entry) => entry.flightId === stale.flightId)?.stages?.find((stage) => stage.key === 'scout')?.status).toBe('pending')
   })
 })
 

@@ -184,7 +184,8 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
     // Hooks, fixtures and attachments are Playwright's own bookkeeping —
     // `Before Hooks`, `Fixture "request"`, `Attach "canary-lab-final-page"`.
     if (step.category === 'hook' || step.category === 'fixture' || step.category === 'test.attach') return []
-    if (isBareAssertion(step.title, step.category)) return [{ step, title: null }]
+    const assertion = assertionRow(step.title, step.category)
+    if (assertion !== undefined) return assertion === null ? [{ step, title: null }] : [{ step, title: assertion }]
     const title = compactStepTitle(step.title, step.category)
     return title ? [{ step, title }] : []
   })
@@ -217,12 +218,31 @@ function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps
 }
 
 /** An `expect` step that named a matcher and nothing else. */
-function isBareAssertion(title: string, category: string): boolean {
-  if (category !== 'expect' && !/^[Ee]xpect/.test(title)) return false
+/** The row an `expect` step earns, or `null` when it names no target and should
+ *  join the assertion tally instead. `undefined` means "not a matcher-shaped
+ *  expect step" — the caller falls through to the generic compaction.
+ *
+ *  One function because there used to be two: `isBareAssertion` decided the
+ *  tally and `compactStepTitle` independently recomputed the same target to
+ *  build the row. Since the tally check ran FIRST and diverted every
+ *  no-target step, the guard inside `compactStepTitle` could never fire — dead
+ *  code that no test could reach, kept alive only because the duplication hid
+ *  it. Deciding and rendering in one place removes both. */
+function assertionRow(title: string, category: string): string | null | undefined {
+  if (category !== 'expect' && !/^[Ee]xpect/.test(title)) return undefined
   const matcher = EXPECT_MATCHER_RE.exec(title)
-  if (!matcher) return false
+  if (!matcher) return undefined
+  // Look for the target in what FOLLOWS the matcher, never in the matcher
+  // itself: `Expect "toBeVisible" getByRole('button', { name: 'Authorize' })`
+  // is about the Authorize button; `Expect "toBe"` is about nothing the UI
+  // can name, so it earns no row of its own.
   const rest = title.slice(matcher[0].length)
-  return describeActionTarget(rest, rest.match(/['"]([^'"]{1,80})['"]/)?.[1]) === null
+  const target = describeActionTarget(rest, rest.match(/['"]([^'"]{1,80})['"]/)?.[1])
+  if (target === null) return null
+  // The negation is load-bearing. Dropping it renders `not toBeVisible` as
+  // "is visible" — the opposite of what the test asserted, in a pane whose
+  // whole job is to be evidence.
+  return `Verified ${target} ${matcherPhrase(matcher[2], Boolean(matcher[1]))}`.trimEnd()
 }
 
 function preferredScreenshots(artifacts: PlaywrightArtifact[]): PlaywrightArtifact[] {
@@ -288,22 +308,9 @@ function compactStepTitle(title: string, category?: string): string | null {
   // Assertions are settled BEFORE the action verbs, because a matcher name
   // contains one: `Expect "toBeChecked" …` hits `includes('check')` and would
   // be reported as a *click on a checkbox* rather than as an assertion.
+  // Matcher-shaped `expect` steps never arrive here — `assertionRow` claims them
+  // in the caller, so this branch only sees the shapes it could not parse.
   if (category === 'expect' || lower.startsWith('expect')) {
-    const matcher = EXPECT_MATCHER_RE.exec(title)
-    if (matcher) {
-      // Look for the target in what FOLLOWS the matcher, never in the matcher
-      // itself: `Expect "toBeVisible" getByRole('button', { name: 'Authorize' })`
-      // is about the Authorize button; `Expect "toBe"` is about nothing the UI
-      // can name, so it earns no row.
-      const rest = title.slice(matcher[0].length)
-      const target = describeActionTarget(rest, rest.match(/['"]([^'"]{1,80})['"]/)?.[1])
-      if (!target) return null
-      // The negation is load-bearing. Dropping it renders `not toBeVisible` as
-      // "is visible" — the opposite of what the test asserted, in a pane whose
-      // whole job is to be evidence.
-      const phrase = matcherPhrase(matcher[2], Boolean(matcher[1]))
-      return `Verified ${target} ${phrase}`.trimEnd()
-    }
     // Not the matcher shape. Either the author supplied their own message
     // (`expect(x, 'auth probe should return a userId')` — Playwright uses the
     // message as the step title) or the quoted token names what was checked.

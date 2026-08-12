@@ -159,6 +159,7 @@ describe('startCoverageJob — non-Error throw paths', () => {
       get: (id) => store.get(id),
       save: (m) => store.save(m),
       remove: (id) => store.remove(id),
+      renameFeature: (from, to) => store.renameFeature(from, to),
       reconcileInterrupted: (fn) => store.reconcileInterrupted(fn),
       onEvent: (fn) => store.onEvent(fn),
       offEvent: (fn) => store.offEvent(fn),

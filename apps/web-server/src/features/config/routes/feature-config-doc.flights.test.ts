@@ -27,7 +27,7 @@ function buildFeature(name: string): string {
 async function makeApp(opts: {
   events?: WorkspaceEvent[]
   removeFlightRecordsFor?: (feature: string) => { error?: string; removed: number }
-  featureRename?: { apply: (from: string, to: string) => number }
+  featureRename?: { blockedBy: (feature: string) => string | null; apply: (from: string, to: string) => number }
 } = {}): Promise<FastifyInstance> {
   const app = Fastify()
   await app.register(async (a) => {
@@ -35,7 +35,10 @@ async function makeApp(opts: {
       featuresDir,
       ...(opts.removeFlightRecordsFor ? { removeFlightRecordsFor: opts.removeFlightRecordsFor } : {}),
       ...(opts.featureRename ? { featureRename: opts.featureRename } : {}),
-      workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
+      // Conditional SPREAD, like the two deps above it. `workspaceEvents: undefined`
+      // is not the same as an absent key when the dep is declared optional, and
+      // passing the explicit undefined is what made this argument unassignable.
+      ...(opts.events ? { workspaceEvents: { publish: (event: WorkspaceEvent) => { opts.events!.push(event) } } } : {}),
     })
   })
   await app.ready()

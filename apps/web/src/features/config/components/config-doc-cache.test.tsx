@@ -161,17 +161,22 @@ describe('useCachedDoc', () => {
 
   it('surfaces a load failure instead of sitting on the loading state', async () => {
     const load = vi.fn().mockRejectedValue(new Error('config.cjs is unreadable'))
-    let api: ReturnType<typeof useCachedDoc<{ value: string }>> | null = null
+    // A holder rather than a bare `let … = null`, because this is the one case
+    // that reads the captured value in the OUTER flow. TypeScript cannot see the
+    // assignment inside `onRead`, so it narrows the variable to `null` and the
+    // reads below become `never`. The sibling cases dodge it only by reading
+    // inside another callback.
+    const captured: { api: ReturnType<typeof useCachedDoc<{ value: string }>> | null } = { api: null }
 
     await act(async () => {
       root.render(
         <ConfigDocCacheProvider>
-          <Probe cacheKey="doc:a" load={load} seen={[]} onRead={(r) => { api = r }} />
+          <Probe cacheKey="doc:a" load={load} seen={[]} onRead={(r) => { captured.api = r }} />
         </ConfigDocCacheProvider>,
       )
     })
-    expect(api?.error).toBe('config.cjs is unreadable')
-    expect(api?.loading).toBe(false)
+    expect(captured.api?.error).toBe('config.cjs is unreadable')
+    expect(captured.api?.loading).toBe(false)
   })
 
   // A tab rendered outside the dialog (its own unit test) must behave exactly as

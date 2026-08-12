@@ -32,6 +32,7 @@ function fakeStore(over: Partial<PortifyStore> = {}): PortifyStore {
     get: () => null,
     save: () => {},
     remove: () => {},
+    renameFeature: () => 0,
     onEvent: () => {},
     offEvent: () => {},
     ...over,

@@ -2,28 +2,13 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import Fastify from 'fastify'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-// Pass-through mock for the session-ref resolver. Tests install a one-shot
-// override to exercise the route's TOCTOU guard (a ref that resolves but whose
-// log file no longer exists by the time the handler stats it).
-let resolveSessionRefOverride: (() => AgentSessionRef | null) | null = null
-
-vi.mock('../logic/draft-agent-session', async () => {
-  const actual = await vi.importActual<typeof import('../logic/draft-agent-session')>('../logic/draft-agent-session')
-  return {
-    ...actual,
-    resolveDraftStageSessionRef: (input: Parameters<typeof actual.resolveDraftStageSessionRef>[0]) => {
-      if (resolveSessionRefOverride) {
-        const override = resolveSessionRefOverride
-        resolveSessionRefOverride = null
-        return override()
-      }
-      return actual.resolveDraftStageSessionRef(input)
-    },
-  }
-})
+// A pass-through `vi.mock` for `../logic/draft-agent-session` used to sit here,
+// with a one-shot override for the route's TOCTOU guard. Both the module and the
+// route that used it went with the Add Test wizard, and no case installed the
+// override any more — the mock was targeting a path that no longer exists, which
+// vitest tolerates silently because nothing imports it.
 
 import { bridgeDraftEvents, createDraft, paths as draftPaths, readDraft, writeDraft, type DraftRecord } from '../logic/draft-store'
 import { resetSharedTaskStores } from '../../../../../../shared/lib/file-backed-task-store'
@@ -45,7 +30,6 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  resolveSessionRefOverride = null
   fs.rmSync(logsDir, { recursive: true, force: true })
   fs.rmSync(projectRoot, { recursive: true, force: true })
 })

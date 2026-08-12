@@ -52,6 +52,7 @@ import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightSt
 import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
 
 import { writeEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
+import { stageContextStub } from './__fixtures__/stage-context'
 
 let tmpDir: string
 
@@ -119,11 +120,9 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
   }
   return {
     progressLog,
-    ctx: {
+    ctx: stageContextStub({
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', state.m.flightId),
-      signal: new AbortController().signal,
-      appendLog: () => {},
       setProgress: (progress) => { progressLog.push(progress) },
       patchFlight: (patch) => {
         state.m = {
@@ -132,7 +131,7 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; current: () => FlightMa
           links: patch.links ? { ...state.m.links, ...patch.links } : state.m.links,
         }
       },
-    },
+    }),
     current: () => state.m,
     setStage,
   }

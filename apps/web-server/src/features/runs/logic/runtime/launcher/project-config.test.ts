@@ -170,15 +170,15 @@ describe('project config', () => {
 
   it('persists a valid port and drops invalid ones', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 8080 })
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 8080 })
     expect(loadProjectConfig(projectRoot).port).toBe(8080)
 
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 99999 })
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 99999 })
     expect(loadProjectConfig(projectRoot).port).toBeUndefined()
   })
 
   it('resolves the configured port or falls back to the default', () => {
-    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 8000 })).toBe(8000)
+    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 8000 })).toBe(8000)
     expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })).toBe(DEFAULT_PORT)
     expect(DEFAULT_PORT).toBe(7421)
   })

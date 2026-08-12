@@ -39,7 +39,15 @@ const ROOTS = ['apps', 'shared', 'tools']
 //   playwright-list and the shared workspace WebSocket stream all now carry real
 //   tests. `vitest.config.ts` has no per-file excludes left, so this floor is
 //   what stops one reappearing.
-const MIN_GATED_FILES = 302
+// 302 → 319 when the per-feature pure modules joined: `flights/lib`,
+//   `runs/utils`, and the three `features/*/api` dirs — 17 files that are the
+//   same KIND as the already-gated `shared/api` and `shared/lib`, and were
+//   outside only because the shared versions moved first. Sixteen were already
+//   at 100% unasked; the seventeenth needed one dead guard removed (a predicate
+//   `run-detail-playback.ts` computed twice, where the first call diverted every
+//   input the second one guarded against). React components remain OUT — that is
+//   a deliberate line, not the next tranche.
+const MIN_GATED_FILES = 319
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']

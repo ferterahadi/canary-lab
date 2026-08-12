@@ -29,7 +29,12 @@ export interface AutoProposeDeps {
 export function shouldAutoPropose(opts: {
   capture: RunFixCapture | null
   finalStatus: RunManifest['status']
-  executionType: RunContext['executionType']
+  /** Optional because line 37 already treats an absent value as `'run'`, and a
+   *  manifest written before `executionType` was recorded has none. Declaring it
+   *  required contradicted that fallback: the branch was reachable in practice
+   *  and covered by a test, yet the signature said the argument could not be
+   *  omitted — so the test only compiled because tests were never typechecked. */
+  executionType?: RunContext['executionType']
   healCycles: number
   autoProposePr: boolean
 }): boolean {

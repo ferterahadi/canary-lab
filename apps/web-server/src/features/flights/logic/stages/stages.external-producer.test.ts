@@ -8,6 +8,7 @@ import { specsCoverageStage } from './specs-coverage'
 import type { FlightStageDeps } from './context'
 import type { StageContext, StageOutcome } from '../conductor'
 import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
+import { stageContextStub } from './__fixtures__/stage-context'
 
 // The hand-off path: `opts.stageProducer === 'external'` makes scout, docs and
 // specs↔coverage park on an `external-work` checkpoint instead of spawning a local
@@ -70,14 +71,12 @@ function ctxFor(m: FlightManifest): { ctx: StageContext; setStage: (k: FlightSta
     setStage: (key, patch) => {
       state.m = { ...state.m, stages: state.m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)) }
     },
-    ctx: {
+    ctx: stageContextStub({
       manifest: () => state.m,
       flightDir: path.join(logsDir, 'flights', 'fl-ext'),
-      signal: new AbortController().signal,
       appendLog: (c) => { logs.push(c) },
-      setProgress: () => {},
       patchFlight: () => {},
-    },
+    }),
   }
 }
 

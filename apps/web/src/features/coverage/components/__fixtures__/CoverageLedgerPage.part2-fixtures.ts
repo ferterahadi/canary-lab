@@ -2,7 +2,6 @@
 
 import { act } from 'react'
 import type { CoverageLedger } from '@/shared/api/types'
-import { root } from '../CoverageLedgerPage.part2.test'
 
 export const LEDGER: CoverageLedger = {
   feature: 'checkout',

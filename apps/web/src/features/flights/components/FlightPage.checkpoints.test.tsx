@@ -7,6 +7,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import type { FlightCheckpoint } from '@shared/flights/types'
 
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
@@ -198,7 +199,7 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('checkpoint display language (R71/W3)', () => {
-  const parkedOn = (key: string, checkpoint: Record<string, unknown>) => manifest({
+  const parkedOn = (key: string, checkpoint: FlightCheckpoint) => manifest({
     status: 'waiting-for-approval',
     stages: FLIGHT_STAGE_KEYS.map((k) => ({
       key: k,
@@ -296,9 +297,14 @@ describe('checkpoint display language (R71/W3)', () => {
   it('folds a 4+-option checkpoint behind More options', async () => {
     // prd-source renders as the fork (R74), so folding is exercised on a
     // generic kind — the mechanism stays for any future many-option ask.
+      // `future-kind` is not in `FlightCheckpointKind` on purpose: this case
+      // simulates a NEWER server sending a kind this build has never heard of,
+      // which is the whole point of the raw-key fallback being tested. The cast
+      // is the honest spelling — checkpoints arrive over the wire, where the
+      // union is a claim about the peer rather than something tsc can check.
     mocks.getFlight.mockResolvedValue(parkedOn('scout', {
       kind: 'future-kind', message: 'Pick one.', options: ['first', 'second', 'third', 'fourth'],
-    }))
+    } as unknown as FlightCheckpoint))
     await render('fl_1')
     expect(container.querySelector('[data-testid="checkpoint-choice-first"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="checkpoint-choice-second"]')).toBeNull()

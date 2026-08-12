@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { FLIGHT_STAGE_KEYS, type FlightCheckpointKind, type FlightManifest, type FlightStageKey } from '../types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { EXTERNAL_WORK_OPTIONS, externalizable } from './externalizable'
+import { stageContextStub } from './__fixtures__/stage-context'
 
 // The wrapper needs no repo and no agent spawn, but it DOES write the task prompt
 // into the flight dir (so an oversized hand-off degrades to a path), so each test
@@ -44,14 +45,12 @@ function ctxFor(m: FlightManifest, flightDir?: string): { ctx: StageContext; log
   const logs: string[] = []
   return {
     logs,
-    ctx: {
+    ctx: stageContextStub({
       manifest: () => m,
       flightDir: flightDir ?? path.join(tmpDir, 'flights', 'fl-x'),
-      signal: new AbortController().signal,
       appendLog: (chunk) => { logs.push(chunk) },
-      setProgress: () => {},
       patchFlight: () => {},
-    },
+    }),
   }
 }
 

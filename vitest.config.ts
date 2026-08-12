@@ -124,6 +124,19 @@ export default defineConfig({
         'apps/web/src/shared/api/**/*.ts',
         'apps/web/src/shared/lib/**/*.ts',
         'apps/web/src/features/benchmark/state/**/*.ts',
+        // The per-feature equivalents of the two lines above. These are the same
+        // KIND of module — pure functions and socket/type wrappers, no JSX — and
+        // they were outside the gate only because the shared versions were moved
+        // first. Sixteen of the seventeen were already at 100% without being
+        // asked to be; enumerated per directory rather than as
+        // `features/*/{lib,utils,api}` because these patterns match UNANCHORED
+        // (see the note above), and a bare `**/utils/**` would also swallow the
+        // server's.
+        'apps/web/src/features/flights/lib/**/*.ts',
+        'apps/web/src/features/runs/utils/**/*.ts',
+        'apps/web/src/features/benchmark/api/**/*.ts',
+        'apps/web/src/features/evaluation/api/**/*.ts',
+        'apps/web/src/features/runs/api/**/*.ts',
         'apps/web/src/shared/shell/McpPromoContext.tsx',
         // 0.9.x → 0.10.x migration: pure detection + report rendering.
         'apps/cli/upgrade-migration.ts',

@@ -341,6 +341,7 @@ describe('coverage routes', () => {
       activeFor: () => null,
       save: () => { throw new Error('disk full') },
       remove: () => {},
+      renameFeature: () => 0,
       reconcileInterrupted: () => {},
       onEvent: () => {},
       offEvent: () => {},

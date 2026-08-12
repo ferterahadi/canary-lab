@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
 import { agentActivityLine } from './StageStatusLines'
 
-import type { EvaluationExportTask, FlightManifest, FlightStage } from '@/shared/api/client'
-import type { CoverageLedger, HealEnd } from '@/shared/api/types'
+import type { FlightManifest, FlightStage } from '@/shared/api/client'
+import type { CoverageLedger, EvaluationExportTask, HealEnd } from '@/shared/api/types'
 
 function flight(over: Partial<FlightManifest> = {}): FlightManifest {
   return {

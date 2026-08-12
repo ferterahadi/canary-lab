@@ -49,6 +49,7 @@ function fakeStore(over: Partial<BenchmarkStore> = {}): BenchmarkStore {
     list: () => [],
     get: () => null,
     save: () => {},
+    renameFeature: () => 0,
     onEvent: () => {},
     offEvent: () => {},
     ...over,

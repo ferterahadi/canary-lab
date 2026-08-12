@@ -708,7 +708,11 @@ function passedSub(led: LedgerEvidence): string {
  *  caveat displaces the rule: a number attributed to the wrong run is a worse
  *  problem than an unexplained one, and the deliverable card underneath names the
  *  report's own run a few inches below. */
-function provenSub(led: LedgerEvidence, reportRunId: string | undefined): string {
+// `reportRunId` admits null as well as undefined because its two sources differ:
+// `evalTask?.runId` is absent-as-undefined, while `str(ev, …)` reports a missing
+// evidence key as null. The body already treats both as "unknown" via `!= null`,
+// so the signature says so rather than the caller coercing one into the other.
+function provenSub(led: LedgerEvidence, reportRunId: string | null | undefined): string {
   if (led.provenRunId != null && reportRunId != null && led.provenRunId !== reportRunId) {
     return `proven on run ${led.provenRunId}, not this one`
   }
