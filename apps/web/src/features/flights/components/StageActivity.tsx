@@ -49,10 +49,6 @@ export function StageActivity({
    *  client, or its log was cleaned — and saying nothing ran contradicts the
    *  panels above it. */
   empty?: { title: string; body?: string }
-  /** The live agent this band is showing, when one can be stopped on its own.
-   *  Rides the Activity bar rather than the stage header: it acts on THIS
-   *  transcript, and the header's Pause already stops the whole flight. */
-  agentStop?: { label: string; onStop: () => void; busy?: boolean }
 }) {
   const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const lines = log.split('\n').filter((l) => l.trim() !== '')
@@ -104,13 +100,13 @@ export function StageActivity({
           One labelled bar for every stage; the toggle always rides it so the
           rail is collapsible in any state (default open while live / a fresh
           spawn, collapsed once settled — overridable per stage). */}
-      <div className="flex items-center gap-2.5 px-3 py-2">
+      <div className="flex items-center gap-2.5 px-3 py-1.5">
         <button
           type="button"
           data-testid="stage-details-toggle"
           aria-expanded={open}
           onClick={() => setUserToggled(!open)}
-          className="flex flex-1 items-center gap-2.5 text-left"
+          className="flex w-full flex-1 items-center gap-2.5 text-left"
         >
           <span className="cl-rubric flex items-center gap-1.5">
             {/* The same live pulse the stage's `generating` chip shows — echoed
@@ -124,23 +120,9 @@ export function StageActivity({
             {open ? '▾ Hide' : '▸ Show'}
           </span>
         </button>
-        {agentStop && (
-          // Outside the toggle button — nesting it would make every click on the
-          // stop also collapse the rail the user is watching.
-          <button
-            type="button"
-            data-testid="stage-agent-stop"
-            disabled={agentStop.busy}
-            onClick={agentStop.onStop}
-            title="Stop this agent. The step it is running will fail and the flight parks — its test run and export are left alone."
-            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
-          >
-            {agentStop.busy ? 'Stopping…' : agentStop.label}
-          </button>
-        )}
       </div>
       {open && (
-        <div className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+        <div className="flex min-h-0 flex-1 flex-col px-3 pb-2">
           {/* ONE rail for EVERY stage. The conductor's system lines and the
               stage's agent timeline (flight agent, or the export task) share it;
               an agentless stage (no `source`) renders system rows alone. */}
@@ -184,22 +166,53 @@ export function specsPhaseSub(phase: SpecsCoverageProgressT['phase'], gapsOpen: 
 /** The specs↔coverage loop as a pass timeline (R27/R77): settled passes show
  *  what authoring bought (the ledger % after mapping — the number that feeds
  *  the NEXT pass's prompt) with a done ✓; the live pass pulses with its current
- *  half of author↔map; the passes still ahead sit as quiet pending rows so
- *  "3 passes to go" is visible, not inferred. Pending is live-only — a loop that
- *  met target early never spends the rest. Rendered on the shared StepList so it
- *  matches every other stepped stage panel. Data is the adapter's structured
- *  progress, not parsed log. */
-export function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageProgressT; live: boolean }) {
+ *  half of author↔map. Rendered on the shared StepList so it matches every other
+ *  stepped stage panel. Data is the adapter's structured progress, not parsed log.
+ *
+ *  R87 — the passes still AHEAD are the kicker's count chip, not rows. As rows
+ *  they restated the ceiling the state line already gives ("Pass 2 of 5 — …"),
+ *  and read as rounds SCHEDULED rather than allowed: the same misread that kept
+ *  a pass stepper out of the facts band, where most loops close in two. Four
+ *  "pending" rows also left one row in five carrying a result.
+ *
+ *  The chip drops the ceiling once the loop settles, because a loop that met
+ *  target at 2 never spends the rest — "2 passes" is the whole fact. A FAILED
+ *  loop keeps it, in danger tone: there, how close it got to its ceiling is the
+ *  reason it stopped, and nothing else on the pane says so. */
+export function SpecsPassTimeline({ progress, live, failed }: {
+  progress: SpecsCoverageProgressT
+  live: boolean
+  failed: boolean
+}) {
   const phaseLabel =
     progress.phase === 'authoring' ? 'authoring tests' : progress.phase === 'validating' ? 'validating specs' : 'mapping coverage'
   if (!live && progress.passes.length === 0) return null
-  const pending =
-    live && Number.isFinite(progress.maxPasses)
-      ? Array.from({ length: Math.max(0, progress.maxPasses - progress.pass) }, (_, i) => progress.pass + 1 + i)
-      : []
+  // An older flight's progress may carry no ceiling at all — then the chip
+  // reports position alone rather than inventing a denominator.
+  const ceiling = Number.isFinite(progress.maxPasses) ? progress.maxPasses : null
+  const spent = live ? progress.pass : progress.passes.length
+  const count =
+    ceiling != null && (live || failed) ? `${spent} / ${ceiling} max`
+    : live ? `Pass ${spent}`
+    : `${spent} pass${spent === 1 ? '' : 'es'}`
   return (
     <StageColumn>
-      <PanelCard kicker="Passes" testId="specs-pass-timeline">
+      <PanelCard
+        kicker="Passes"
+        aside={
+          <span
+            data-testid="specs-pass-count"
+            className="cl-count-chip"
+            // The 15% mix is `Chip`'s own fill formula, so the one toned count
+            // chip in the app matches every other fill chip rather than
+            // introducing a second danger tint.
+            style={failed ? { background: 'color-mix(in srgb, var(--danger) 15%, transparent)', color: 'var(--danger)' } : undefined}
+          >
+            {count}
+          </span>
+        }
+        testId="specs-pass-timeline"
+      >
         <StepList>
           {progress.passes.map((p) => (
             <StepRow
@@ -222,9 +235,6 @@ export function SpecsPassTimeline({ progress, live }: { progress: SpecsCoverageP
               sub={specsPhaseSub(progress.phase, progress.gapsOpen)}
             />
           )}
-          {pending.map((n) => (
-            <StepRow key={n} testId={`specs-pass-pending-${n}`} state="pending" title={`Pass ${n} — pending`} />
-          ))}
         </StepList>
       </PanelCard>
     </StageColumn>

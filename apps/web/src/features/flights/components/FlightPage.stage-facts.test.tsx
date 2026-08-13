@@ -235,10 +235,11 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).not.toContain('2 of 5')
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('40% covered · 3 gaps open')
     expect(container.querySelector('[data-testid="specs-pass-live"]')?.textContent).toContain('authoring tests')
-    // R77: the passes still ahead show as quiet future rows (3 of 5 → 3, 4, 5).
-    expect(container.querySelector('[data-testid="specs-pass-pending-3"]')?.textContent).toContain('Pass 3 — pending')
-    expect(container.querySelector('[data-testid="specs-pass-pending-5"]')?.textContent).toContain('Pass 5 — pending')
-    expect(container.querySelector('[data-testid="specs-pass-pending-6"]')).toBeNull()
+    // R87: the ceiling is the kicker's chip, and the passes still ahead are NOT
+    // rows — as rows they read as three rounds already scheduled.
+    expect(container.querySelector('[data-testid="specs-pass-count"]')?.textContent).toBe('2 / 5 max')
+    expect(container.querySelector('[data-testid="specs-pass-pending-3"]')).toBeNull()
+    expect(container.querySelector('[data-testid="specs-pass-pending-5"]')).toBeNull()
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-stage')).toBe('specs-coverage')
   })
 
@@ -286,9 +287,76 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('specs failed to compile/list')
     expect(container.querySelector('[data-testid="specs-pass-2"]')?.textContent).toContain('100% covered')
     expect(container.querySelector('[data-testid="specs-pass-live"]')).toBeNull()
-    // R77: a settled loop spends no more passes — no future rows even though
-    // it stopped at 2 of 5 (target met early).
+    // R87: a settled loop spends no more passes, so the chip drops the ceiling —
+    // "2 of 5 max" on a loop that met target at 2 answers a question nobody has.
+    expect(container.querySelector('[data-testid="specs-pass-count"]')?.textContent).toBe('2 passes')
     expect(container.querySelector('[data-testid="specs-pass-pending-3"]')).toBeNull()
+  })
+
+  it('R87: a FAILED loop keeps the ceiling, in danger tone — how close it got is why it stopped', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'failed',
+      currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'specs-coverage' ? ('failed' as const) : ('pending' as const),
+        ...(key === 'specs-coverage'
+          ? {
+              progress: {
+                pass: 5, maxPasses: 5, phase: 'mapping', coveragePct: 74, target: 100, gapsOpen: 4,
+                passes: [{ pass: 4, coveragePct: 70, gapsOpen: 5 }, { pass: 5, coveragePct: 74, gapsOpen: 4 }],
+              },
+            }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    const chip = container.querySelector('[data-testid="specs-pass-count"]')
+    expect(chip?.textContent).toBe('2 / 5 max')
+    expect(chip?.getAttribute('style')).toContain('var(--danger)')
+  })
+
+  it('R87: progress with no ceiling reports position alone rather than inventing a denominator', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      currentStage: 'specs-coverage',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'specs-coverage' ? ('running' as const) : ('pending' as const),
+        // An older flight's progress shape carries no `maxPasses` at all.
+        ...(key === 'specs-coverage'
+          ? { progress: { pass: 3, phase: 'authoring', coveragePct: 50, target: 100, gapsOpen: 2, passes: [] } }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    const chip = container.querySelector('[data-testid="specs-pass-count"]')
+    expect(chip?.textContent).toBe('Pass 3')
+    expect(chip?.getAttribute('style')).toBeNull()
+  })
+
+  it('R87: a single settled pass reads in the singular', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'specs-coverage'
+          ? {
+              evidence: { coveragePct: 100, gaps: [] },
+              progress: {
+                pass: 1, maxPasses: 5, phase: 'mapping', coveragePct: 100, target: 100, gapsOpen: 0,
+                passes: [{ pass: 1, coveragePct: 100, gapsOpen: 0 }],
+              },
+            }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
+    })
+    expect(container.querySelector('[data-testid="specs-pass-count"]')?.textContent).toBe('1 pass')
   })
 
   it('R72: the status chip rides the title line, right of the name', async () => {

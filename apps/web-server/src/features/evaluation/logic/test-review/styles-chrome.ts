@@ -144,18 +144,18 @@ main { min-width: 0; padding: 40px 0 96px; }
 .nav-group a {
   display: grid; grid-template-columns: 7px 18px minmax(0, 1fr);
   align-items: baseline; gap: 8px;
-  padding: 5px 8px 5px 6px; border-radius: 7px;
+  padding: 5px 8px; border-radius: 7px;
   color: var(--ink-2); text-decoration: none; font-size: 12.2px; line-height: 1.35;
-  border-left: 2px solid transparent;
   transition: background .13s ease, color .13s ease;
 }
 .nav-group a .nav-dot { align-self: center; }
 .nav-num { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); }
 .nav-label { overflow-wrap: anywhere; }
 .nav-group a:hover { background: var(--surface-2); color: var(--ink); }
+/* Surface + weight carry "you are here"; the dot to its left already carries the
+   status, so an accent bar would stack a second colour on the same row. */
 .nav-group a[aria-current="true"] {
-  background: var(--surface); color: var(--ink);
-  border-left-color: var(--accent); font-weight: 600;
+  background: var(--surface); color: var(--ink); font-weight: 600;
 }
 .nav-empty { color: var(--ink-3); font-size: 12px; font-style: italic; }
 `

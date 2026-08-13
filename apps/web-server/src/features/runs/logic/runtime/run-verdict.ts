@@ -12,7 +12,7 @@ import path from 'path'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 import { type RunLifecyclePhase, type RunManifest, type StoppedEarlyReason } from './manifest'
 import { loadFeatures } from '../../../../shared/feature-loader'
-import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
+import { KnownSummaryTest, PlaywrightRerunSelection, computeRerunTargetsOrdered, expandForSerialSpecs, grepForKnownTests, isSpecLocation, knownTestsFromSummary, passedNameSet, serialSpecFiles, skippedNameSet, testListForKnownTests, uniqueByName } from './rerun-targets'
 
 export { computeNonPassedTargets, computeRerunTargetsOrdered, nonPassedSignatureFromPlan, normalizeRerunSelection, selectionForPlan, summaryHasPassingEvidence } from './rerun-targets'
 export type { NonPassedTargetsResult, PlaywrightRerunSelection, RerunTargetsOrderedResult } from './rerun-targets'
@@ -94,10 +94,16 @@ export type VerificationPlan =
   | { kind: 'full-suite'; reason: string; total: number }
   | { kind: 'all-passed'; total: number }
 
+// Used wherever a serial spec makes a targeted selection unsound and the only
+// safe answer is to run everything. See `serialSpecFiles` for why a serial
+// group's tests cannot be re-run apart.
+const SERIAL_FULL_SUITE_REASON = 'This feature has a serial spec whose tests hand state to each other, and this rerun cannot select the group intact; running the full suite with the configured failure threshold.'
+
 export function computeVerificationPlan(
   featureDir: string,
   summary: SummaryShape,
 ): VerificationPlan {
+  const serialFiles = serialSpecFiles(featureDir)
   const knownTests = knownTestsFromSummary(summary)
   if (knownTests.length > 0) {
     const passed = passedNameSet(summary)
@@ -120,28 +126,39 @@ export function computeVerificationPlan(
         reason: `Post-heal rerun could not match ${missingFailed.length} failed test${missingFailed.length === 1 ? '' : 's'} in the known Playwright inventory; running the full suite with the configured failure threshold.`,
       }
     }
+    // A serial group can only be re-run intact when every selected test's file
+    // is known. Summaries written before the reporter captured locations can't
+    // say, so the whole suite runs rather than a selection that would fail on a
+    // missing producer rather than on the app.
+    if (serialFiles.size > 0 && selected.some((test) => !test.location)) {
+      return { kind: 'full-suite', total: knownTests.length, reason: SERIAL_FULL_SUITE_REASON }
+    }
+    const { tests: runSet, companions } = expandForSerialSpecs(serialFiles, knownTests, selected)
     const passedCount = countPassed(summary)
     const failedCount = Array.isArray(summary.failed) ? summary.failed.length : 0
     const reason = `Rerunning ${selected.length} not-yet-passed tests (${failedFirst.length} failed first, then ${skipped.length} skipped, then ${pending.length} pending/not-run) because ${passedCount} passed and ${failedCount} failed before healing.`
+      + (companions.length > 0
+        ? ` Also re-running ${companions.length} already-passed test${companions.length === 1 ? '' : 's'} from the same serial spec file${companions.length === 1 ? '' : 's'}, because a serial group's tests hand state to each other and cannot run apart.`
+        : '')
     // A test list names each test exactly; `--grep` matches on title alone and
     // would also run same-titled tests in other spec files. Older summaries
     // predate `listLine`, so grep stays as the fallback.
-    const testList = testListForKnownTests(selected)
+    const testList = testListForKnownTests(runSet)
     return {
       kind: 'targeted',
       selection: testList
         ? {
             kind: 'test-list',
             testList,
-            selected: selected.length,
+            selected: runSet.length,
             total: knownTests.length,
             mode: 'failed-and-pending',
             reason,
           }
         : {
             kind: 'grep',
-            grep: grepForKnownTests(selected),
-            selected: selected.length,
+            grep: grepForKnownTests(runSet),
+            selected: runSet.length,
             total: knownTests.length,
             mode: 'failed-and-pending',
             reason,
@@ -156,6 +173,15 @@ export function computeVerificationPlan(
   const computed = computeRerunTargetsOrdered(featureDir, summary)
   if (computed.kind === 'all-passed') return { kind: 'all-passed', total: computed.total }
   if (computed.kind === 'targeted') {
+    // Both fallback paths select bare `file:line` targets and carry no per-test
+    // identity to widen a selection with, so a serial group cannot be
+    // reassembled here the way the inventory path above does it. Gated AFTER
+    // each path's all-passed arm: widening a fully-passed summary into a
+    // full-suite plan would turn a passing run into a failing one, since
+    // `decideRunStatus` reads `all-passed` as the pass.
+    if (serialFiles.size > 0) {
+      return { kind: 'full-suite', total: computed.total, reason: SERIAL_FULL_SUITE_REASON }
+    }
     if (computed.droppedFailedSlugs.length > 0) {
       return {
         kind: 'full-suite',
@@ -197,6 +223,13 @@ export function computeVerificationPlan(
 
   const failedSlugs = extractFailedSlugs(summary)
   if (failedSlugs.length === 0) return { kind: 'all-passed', total: computedTotal(summary) }
+  if (serialFiles.size > 0) {
+    return {
+      kind: 'full-suite',
+      total: computedTotal(summary) || failedSlugs.length,
+      reason: SERIAL_FULL_SUITE_REASON,
+    }
+  }
   const locations = extractFailedLocations(summary)
   const canTargetEveryFailure = locations.length >= failedSlugs.length && locations.every(isSpecLocation)
   if (canTargetEveryFailure) {

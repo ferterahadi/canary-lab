@@ -300,8 +300,9 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
               {live ? 'Live' : 'History'}
             </span>
             <span className="agentts-agent">{state.agent}</span>
-            <span className="agentts-sep">session</span>
-            <span className="agentts-sid">{shortSession(state.sessionId)}</span>
+            {/* No "session" caption — a short mono id sitting beside the agent
+                name is not something a user has to be told the name of. */}
+            <span className="agentts-sid" title={state.sessionId}>{shortSession(state.sessionId)}</span>
             {state.model && (
               <>
                 <span className="agentts-dot" aria-hidden="true">·</span>

@@ -275,25 +275,32 @@ export function ToolCallBody({ name, input, timestamp, toolId, threads }: {
 }) {
   const [expanded, setExpanded] = useState(false)
   const target = summarizeInput(input)
+  // No `RowHead`: a "TOOL CALL" caption on its own line doubled the row's height
+  // to restate what the gutter's tool glyph and the bold tool name already say.
+  // The clock rides the box instead, so the whole event is one line.
   return (
-    <>
-      <RowHead label="Tool call" timestamp={timestamp} />
-      <div className="agentts-tool">
-        <button type="button" className="agentts-toolbtn" onClick={() => setExpanded((v) => !v)} title={toolId}>
-          <span className="agentts-toolname">{name || 'tool'}</span>
-          {target && <span className="agentts-tooltarget">{target}</span>}
-          <Chevron open={expanded} className="agentts-chev" />
-        </button>
-        {expanded && <pre className="agentts-pre">{formatJson(input)}</pre>}
-        {/* Spawned children hang below the input disclosure as siblings, not
-            inside it: "what did it do" and "what were its args" are separate
-            questions, and gating the timeline behind the JSON would bury the
-            one that matters. */}
-        {(threads ?? []).map((thread) => (
-          <SubagentThreadRow key={thread.agentId} thread={thread} />
-        ))}
-      </div>
-    </>
+    <div className="agentts-tool">
+      <button
+        type="button"
+        className="agentts-toolbtn"
+        onClick={() => setExpanded((v) => !v)}
+        title={toolId}
+        aria-label={`Tool call: ${name || 'tool'}${target ? ` — ${target}` : ''}`}
+      >
+        <span className="agentts-toolname">{name || 'tool'}</span>
+        {target && <span className="agentts-tooltarget">{target}</span>}
+        <Timestamp value={timestamp} />
+        <Chevron open={expanded} className="agentts-chev" />
+      </button>
+      {expanded && <pre className="agentts-pre">{formatJson(input)}</pre>}
+      {/* Spawned children hang below the input disclosure as siblings, not
+          inside it: "what did it do" and "what were its args" are separate
+          questions, and gating the timeline behind the JSON would bury the
+          one that matters. */}
+      {(threads ?? []).map((thread) => (
+        <SubagentThreadRow key={thread.agentId} thread={thread} />
+      ))}
+    </div>
   )
 }
 
@@ -351,19 +358,27 @@ export function ToolResultBody({ output, isError, timestamp, toolId }: { output:
   const [expanded, setExpanded] = useState(false)
   const firstLine = output.split('\n').find((l) => l.trim().length > 0)?.trim() ?? ''
   const preview = firstLine.length > 140 ? firstLine.slice(0, 137) + '…' : firstLine
+  // One line, like its tool call above: the gutter's ✓/✗ node types the row, so
+  // a "RESULT" caption bought nothing but height. A failure still says so in
+  // words — an inline `error` tag, not a whole line of its own.
   return (
-    <>
-      <RowHead label={isError ? 'Tool error' : 'Result'} timestamp={timestamp} />
-      <div className="agentts-tool" style={isError ? { borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' } : undefined}>
-        <button type="button" className="agentts-toolbtn" onClick={() => setExpanded((v) => !v)} title={toolId}>
-          <span className="agentts-tooltarget" style={{ color: isError ? 'var(--danger)' : 'var(--text-secondary)' }}>
-            {preview || '(empty)'}
-          </span>
-          <Chevron open={expanded} className="agentts-chev" />
-        </button>
-        {expanded && <pre className="agentts-pre">{output || '(empty)'}</pre>}
-      </div>
-    </>
+    <div className="agentts-tool" style={isError ? { borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' } : undefined}>
+      <button
+        type="button"
+        className="agentts-toolbtn"
+        onClick={() => setExpanded((v) => !v)}
+        title={toolId}
+        aria-label={`${isError ? 'Tool error' : 'Result'}: ${preview || '(empty)'}`}
+      >
+        {isError && <span className="agentts-errtag">error</span>}
+        <span className="agentts-tooltarget" style={{ color: isError ? 'var(--danger)' : 'var(--text-secondary)' }}>
+          {preview || '(empty)'}
+        </span>
+        <Timestamp value={timestamp} />
+        <Chevron open={expanded} className="agentts-chev" />
+      </button>
+      {expanded && <pre className="agentts-pre">{output || '(empty)'}</pre>}
+    </div>
   )
 }
 

@@ -3,7 +3,7 @@ import { type ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { FlightStageKey } from '@/shared/api/client'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
-import { ChevronRightIcon, Modal, Textarea, Toggle } from '@/shared/ui/atoms'
+import { ChevronRightIcon, Modal, StatusDot, Textarea, Toggle } from '@/shared/ui/atoms'
 import { STAGE_BLURB, STAGE_ICON, STAGE_LABEL, stageStatusTone } from './stage-meta'
 import { RepoMultiPicker, type RepoOption } from './RepoMultiPicker'
 import { PlanningView, ProposalView, StageRow } from './FlightStartProposal'
@@ -352,8 +352,14 @@ export function FlightStartDialog({
           // promised editable inputs, so it must say WHY they're unavailable and
           // offer the only path to them (stop, then start fresh).
           <div className="flex flex-col gap-2.5">
-            <div className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>
-              It’s flying right now.
+            {/* The sky running dot is the status vocabulary's own "in progress"
+                — the sentence claims live state, so it carries the same cue the
+                pills and stage rails use rather than asserting it in prose. */}
+            <div className="flex items-center gap-2">
+              <StatusDot state="running" />
+              <span className="text-[12px] font-medium" style={{ color: 'var(--text-primary)' }}>
+                It’s flying right now.
+              </span>
             </div>
             {freshMode && (
               <div className="text-[11.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
@@ -361,13 +367,16 @@ export function FlightStartDialog({
               </div>
             )}
             {errorBlock}
+            {/* Open is the safe path out of this dead-end, so it takes the one
+                accent-filled skin instead of accent text on neutral chrome.
+                Stopping wipes the flight's results — the same destructive
+                secondary treatment the cleanup and worktree panels use. */}
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 data-testid="flight-start-open-active"
                 onClick={() => onOpenFlight(entry.flight!.flightId)}
-                className="cl-button px-2.5 py-1 text-xs"
-                style={{ color: 'var(--accent)' }}
+                className="cl-button-primary px-2.5 py-1 text-xs"
               >
                 Open the running flight →
               </button>
@@ -378,6 +387,7 @@ export function FlightStartDialog({
                   disabled={busy}
                   onClick={stopAndStartFresh}
                   className="cl-button px-2.5 py-1 text-xs"
+                  style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 45%, var(--border-default))' }}
                 >
                   {busy ? 'Stopping…' : 'Stop it and start fresh'}
                 </button>

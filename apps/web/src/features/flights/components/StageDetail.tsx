@@ -1,12 +1,4 @@
-import { useEffect, useState } from 'react'
 import type { FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-// Imported from the module, not the `api/client` barrel, on purpose: 41 component
-// suites mock that barrel with an explicit export list, and reaching for it here
-// would make every one of them fail on a missing key for a control most are not
-// testing. The fetch is guarded on `live` and its failure is caught, so a suite
-// that never mocks it simply renders no stop control.
-import { fetchAgentJobs, stopAgentJob, type AgentJobRow } from '@/shared/api/agent-jobs'
-import { useInvalidationKey } from '@/shared/state/invalidation'
 import { AgentSessionView, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
@@ -52,28 +44,6 @@ export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate }
 const PORTIFY_NO_TRANSCRIPT = {
   title: 'No transcript on record',
   body: 'The port work is kept as evidence, not as a replay — the side-by-side boot and the port changes above are what it produced.',
-}
-
-/** The live agent record for this stage, if the server has one. Refetched on the
- *  `agent-jobs-changed` workspace push, so the control appears and disappears with
- *  the agent rather than on a poll. */
-function useLiveAgentJob(flightId: string, stageKey: string, live: boolean): AgentJobRow | null {
-  const [job, setJob] = useState<AgentJobRow | null>(null)
-  const bump = useInvalidationKey('agent-jobs')
-  useEffect(() => {
-    if (!live) { setJob(null); return }
-    let cancelled = false
-    void fetchAgentJobs(flightId)
-      .then((rows) => {
-        if (cancelled) return
-        // The stage's OWN spawn: specs-coverage runs two (author + mapper) under
-        // separate rows, and the band the user is looking at belongs to one of them.
-        setJob(rows.find((r) => r.status === 'running' && r.stage === stageKey) ?? null)
-      })
-      .catch(() => { if (!cancelled) setJob(null) })
-    return () => { cancelled = true }
-  }, [flightId, stageKey, live, bump])
-  return job
 }
 
 export function StageDetail({
@@ -125,8 +95,6 @@ export function StageDetail({
   const runMerged = stage.key === 'run'
   const live = row.status === 'running'
   const settled = row.status === 'done' || row.status === 'failed'
-  const agentJob = useLiveAgentJob(flightId, stage.key, live)
-  const [stoppingAgent, setStoppingAgent] = useState(false)
   // R83: the pane keeps its SETTLED layout in every state — each card a finished
   // stage shows renders as its own skeleton until it has content. Undefined once
   // the stage settles, so a card with genuinely nothing to show still renders
@@ -401,7 +369,7 @@ export function StageDetail({
       {/* Test authoring & coverage (R27): the author↔map loop as a pass
           timeline — coverage % after each mapping feeds the next authoring. */}
       {loopProgress
-        ? <SpecsPassTimeline progress={loopProgress} live={live} />
+        ? <SpecsPassTimeline progress={loopProgress} live={live} failed={stage.status === 'failed'} />
         : stage.key === 'specs-coverage' && awaiting
           ? (
             // The loop's own shape before it starts: the same card, kicker and
@@ -463,20 +431,6 @@ export function StageDetail({
           live={live}
           settled={settled}
           log={combinedLog}
-          {...(agentJob
-            ? {
-                agentStop: {
-                  label: '⏹ Stop agent',
-                  busy: stoppingAgent,
-                  onStop: () => {
-                    setStoppingAgent(true)
-                    void stopAgentJob(agentJob.jobId)
-                      .catch((e: unknown) => onActionError?.(e instanceof Error ? e.message : String(e)))
-                      .finally(() => setStoppingAgent(false))
-                  },
-                },
-              }
-            : {})}
           {...(stage.key === 'portify' ? { empty: PORTIFY_NO_TRANSCRIPT } : {})}
         />
       )}

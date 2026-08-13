@@ -72,7 +72,6 @@ h1 {
   display: flex; gap: 14px; align-items: flex-start;
   margin-top: 18px; padding: 15px 18px;
   border: 1px solid color-mix(in srgb, var(--none) 40%, transparent);
-  border-left-width: 3px;
   border-radius: var(--radius); background: var(--none-soft);
 }
 .notice p { margin: 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }

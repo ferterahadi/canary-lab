@@ -13,6 +13,7 @@ import {
   computeNonPassedTargets,
   readLatestHealOnFailureThreshold,
 } from './run-verdict'
+import { specFileOfKnownTest } from './rerun-targets'
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
 
 // Branch-level cover for the verdict helpers that were unreachable while they
@@ -505,5 +506,240 @@ describe('readLatestHealOnFailureThreshold', () => {
 
   it('falls back to the in-memory threshold when nothing on disk matches', () => {
     expect(readLatestHealOnFailureThreshold(feature(mkFeatureDir()))).toBe(1)
+  })
+})
+
+// A Playwright serial spec is one unit: its tests share a worker, run in
+// declaration order, and hand state to each other. Re-running only the
+// not-yet-passed members leaves the producers out, so the consumers fail on
+// their own preconditions before touching the app — a heal loop that reads that
+// as "the fix didn't work" can never go green. Measured on run
+// 2026-08-13T0239-bi36: the borrow test passed in cycle 1, was excluded from
+// every later rerun, and the return test then failed on an empty loan id
+// forever while the app fix sitting in the worktree was correct.
+describe('computeVerificationPlan with a serial spec', () => {
+  const SERIAL_HEADER =
+    "import { test } from '@playwright/test'\n" +
+    "test.describe.configure({ mode: 'serial' })\n"
+
+  // Mirrors the demo lending spec: borrow produces the loan id that return
+  // consumes, and borrow passed in the previous cycle.
+  function serialFeature(): { featureDir: string; spec: string } {
+    const featureDir = mkFeatureDir()
+    const spec = writeSpec(featureDir, 'lending.spec.ts', SERIAL_HEADER +
+      "test('borrows a copy', async () => {})\n" +
+      "test('returns the loan', async () => {})\n" +
+      "test('lists the catalogue', async () => {})\n")
+    return { featureDir, spec }
+  }
+
+  const serialKnown = (spec: string, name: string, title: string, line: number) => ({
+    name,
+    title,
+    listLine: `lending.spec.ts › ${title}`,
+    location: `${spec}:${line}`,
+  })
+
+  it('re-runs the already-passed group members so the failing test can reach the app', () => {
+    const { featureDir, spec } = serialFeature()
+
+    const plan = computeVerificationPlan(featureDir, {
+      knownTests: [
+        serialKnown(spec, 'test-case-borrows-a-copy', 'borrows a copy', 3),
+        serialKnown(spec, 'test-case-returns-the-loan', 'returns the loan', 4),
+        serialKnown(spec, 'test-case-lists-the-catalogue', 'lists the catalogue', 5),
+      ],
+      passedNames: ['test-case-borrows-a-copy', 'test-case-lists-the-catalogue'],
+      passed: 2,
+      failed: [{ name: 'test-case-returns-the-loan' }],
+    })
+
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    if (plan.selection.kind !== 'test-list') return
+    // The failed test first, then both passed group-mates — without the borrow
+    // test in the list the return test cannot pass however good the fix is.
+    expect(plan.selection.testList).toEqual([
+      'lending.spec.ts › returns the loan',
+      'lending.spec.ts › borrows a copy',
+      'lending.spec.ts › lists the catalogue',
+    ])
+    expect(plan.selection.selected).toBe(3)
+    expect(plan.selection.reason).toContain('Also re-running 2 already-passed tests from the same serial spec files')
+    // The buckets stay the not-yet-passed set: a companion passing again is not
+    // heal progress, and `nonPassedSignatureFromPlan` reads these.
+    expect(plan.failedFirst.map((test) => test.name)).toEqual(['test-case-returns-the-loan'])
+    expect(plan.skipped).toEqual([])
+    expect(plan.pending).toEqual([])
+    expect(nonPassedSignatureFromPlan(plan)).toBe('test-case-returns-the-loan')
+  })
+
+  it('detects the test.describe.serial spelling too', () => {
+    const featureDir = mkFeatureDir()
+    const spec = writeSpec(featureDir, 'lending.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test.describe.serial('lending', () => {\n" +
+      "  test('borrows a copy', async () => {})\n" +
+      "  test('returns the loan', async () => {})\n" +
+      '})\n')
+
+    const plan = computeVerificationPlan(featureDir, {
+      knownTests: [
+        serialKnown(spec, 'test-case-borrows-a-copy', 'borrows a copy', 3),
+        serialKnown(spec, 'test-case-returns-the-loan', 'returns the loan', 4),
+      ],
+      passedNames: ['test-case-borrows-a-copy'],
+      passed: 1,
+      failed: [{ name: 'test-case-returns-the-loan' }],
+    })
+
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    if (plan.selection.kind !== 'test-list') return
+    expect(plan.selection.testList).toContain('lending.spec.ts › borrows a copy')
+    expect(plan.selection.reason).toContain('Also re-running 1 already-passed test from the same serial spec file,')
+  })
+
+  it('leaves a plain parallel spec targeted at only the not-yet-passed tests', () => {
+    // Negative control for the source match: `test.describe(...)` without a
+    // serial mode must not widen anything, or every rerun becomes a full suite.
+    const featureDir = mkFeatureDir()
+    const spec = writeSpec(featureDir, 'lending.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test.describe('lending', () => {\n" +
+      "  test('borrows a copy', async () => {})\n" +
+      "  test('returns the loan', async () => {})\n" +
+      '})\n')
+
+    const plan = computeVerificationPlan(featureDir, {
+      knownTests: [
+        serialKnown(spec, 'test-case-borrows-a-copy', 'borrows a copy', 3),
+        serialKnown(spec, 'test-case-returns-the-loan', 'returns the loan', 4),
+      ],
+      passedNames: ['test-case-borrows-a-copy'],
+      passed: 1,
+      failed: [{ name: 'test-case-returns-the-loan' }],
+    })
+
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    if (plan.selection.kind !== 'test-list') return
+    expect(plan.selection.testList).toEqual(['lending.spec.ts › returns the loan'])
+    expect(plan.selection.reason).not.toContain('serial')
+  })
+
+  it('does not widen when the selected tests live outside the serial file', () => {
+    const { featureDir } = serialFeature()
+    const other = writeSpec(featureDir, 'health.spec.ts',
+      "import { test } from '@playwright/test'\n" +
+      "test('serves health', async () => {})\n")
+
+    const plan = computeVerificationPlan(featureDir, {
+      knownTests: [
+        { name: 'test-case-serves-health', title: 'serves health', listLine: 'health.spec.ts › serves health', location: `${other}:2` },
+      ],
+      failed: [{ name: 'test-case-serves-health' }],
+    })
+
+    expect(plan.kind).toBe('targeted')
+    if (plan.kind !== 'targeted') return
+    if (plan.selection.kind !== 'test-list') return
+    expect(plan.selection.testList).toEqual(['health.spec.ts › serves health'])
+  })
+
+  it('treats an unreadable spec as non-serial rather than guessing', () => {
+    const featureDir = mkFeatureDir()
+    writeUnreadableSpec(featureDir, (good) => {
+      const plan = computeVerificationPlan(featureDir, {
+        knownTests: [
+          { name: 'test-case-still-parses', title: 'still parses', listLine: 'b-good.spec.ts › still parses', location: `${good}:2` },
+        ],
+        failed: [{ name: 'test-case-still-parses' }],
+      })
+
+      expect(plan.kind).toBe('targeted')
+    })
+  })
+
+  it('runs the full suite when a selected test cannot be placed in a file', () => {
+    // Summaries written before the reporter captured locations: membership in
+    // the serial group is unprovable, so widening to everything is the only
+    // sound answer.
+    const { featureDir, spec } = serialFeature()
+
+    const plan = computeVerificationPlan(featureDir, {
+      knownTests: [
+        serialKnown(spec, 'test-case-borrows-a-copy', 'borrows a copy', 3),
+        { name: 'test-case-returns-the-loan', title: 'returns the loan', listLine: 'lending.spec.ts › returns the loan' },
+      ],
+      passedNames: ['test-case-borrows-a-copy'],
+      failed: [{ name: 'test-case-returns-the-loan' }],
+    })
+
+    expect(plan.kind).toBe('full-suite')
+    if (plan.kind !== 'full-suite') return
+    expect(plan.reason).toContain('cannot select the group intact')
+  })
+
+  it('runs the full suite on the static-extraction path, which cannot name a group', () => {
+    // No `knownTests` at all — the AST fallback targets bare file:line and has
+    // no per-test identity to widen with.
+    const { featureDir, spec } = serialFeature()
+
+    const plan = computeVerificationPlan(featureDir, {
+      passedNames: ['test-case-borrows-a-copy'],
+      failed: [{ name: 'test-case-returns-the-loan', location: `${spec}:4` }],
+      total: 3,
+    })
+
+    expect(plan.kind).toBe('full-suite')
+    if (plan.kind !== 'full-suite') return
+    expect(plan.reason).toContain('cannot select the group intact')
+  })
+
+  it('runs the full suite on the failed-locations path when extraction finds no tests', () => {
+    // A serial spec that declares the mode but holds no `test()` call makes
+    // static extraction yield nothing, dropping through to failed-locations
+    // targeting — equally unable to reassemble a group.
+    const featureDir = mkFeatureDir()
+    writeSpec(featureDir, 'lending.spec.ts', SERIAL_HEADER)
+
+    const failed = [{ name: 'test-case-returns-the-loan', location: '/tmp/lending.spec.ts:4' }]
+
+    const plan = computeVerificationPlan(featureDir, { failed, total: 3 })
+    expect(plan.kind).toBe('full-suite')
+    if (plan.kind !== 'full-suite') return
+    expect(plan.reason).toContain('cannot select the group intact')
+    expect(plan.total).toBe(3)
+    // A summary carrying no total at all falls back to the failure count, so the
+    // plan never reports a suite of zero tests.
+    expect(computeVerificationPlan(featureDir, { failed })).toMatchObject({ kind: 'full-suite', total: 1 })
+  })
+
+  it('still reports all-passed for a serial spec with nothing left to run', () => {
+    // The gates sit AFTER each path's all-passed arm on purpose: widening a
+    // fully-passed summary would make `decideRunStatus` fail a passing run.
+    const { featureDir, spec } = serialFeature()
+
+    expect(computeVerificationPlan(featureDir, {
+      knownTests: [serialKnown(spec, 'test-case-borrows-a-copy', 'borrows a copy', 3)],
+      passedNames: ['test-case-borrows-a-copy'],
+    }).kind).toBe('all-passed')
+    // Static-extraction path: every extracted test is in passedNames.
+    expect(computeVerificationPlan(featureDir, {
+      passedNames: ['test-case-borrows-a-copy', 'test-case-returns-the-loan', 'test-case-lists-the-catalogue'],
+    }).kind).toBe('all-passed')
+    // Failed-locations path: no failures recorded at all.
+    expect(computeVerificationPlan(mkFeatureDir(), { total: 2 }).kind).toBe('all-passed')
+  })
+})
+
+describe('specFileOfKnownTest', () => {
+  it('returns undefined for a test with no location and for a location with no file', () => {
+    // Locations come from a summary on disk, so a malformed `:12` is
+    // representable even though the reporter never writes one — resolving it
+    // would silently name the process cwd as the spec file.
+    expect(specFileOfKnownTest({ name: 'a', title: 'a' })).toBeUndefined()
+    expect(specFileOfKnownTest({ name: 'a', title: 'a', location: ':12' })).toBeUndefined()
   })
 })

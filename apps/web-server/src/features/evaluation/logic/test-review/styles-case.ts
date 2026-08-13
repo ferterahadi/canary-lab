@@ -8,10 +8,9 @@ export const CSS_CASE = `
   border-top: 1px solid var(--rule);
   scroll-margin-top: 76px;
 }
-/* The status edge is an inset shadow rather than a border so it can sit on a
-   borderless entry without shifting the text off the column. */
-.case[data-status="failed"] { box-shadow: inset 3px 0 0 var(--bad); }
-.case[data-status="interrupted"] { box-shadow: inset 3px 0 0 var(--warn); }
+/* No coloured edge on the card. The header pill, the rail dot and the matrix
+   cell already state the status, and on a long open case the stripe stretches
+   the full scroll height — decoration, not signal. */
 .case[data-status="notRun"] { color: var(--ink-2); }
 .case[data-status="notRun"] .case-title { color: var(--ink-2); }
 .case.is-target { border-color: var(--accent); }
@@ -81,7 +80,8 @@ export const CSS_CASE = `
 
 .case-notrun {
   margin-bottom: 16px; padding: 11px 14px;
-  border-left: 2px solid var(--none); border-radius: 0 8px 8px 0;
+  border: 1px solid color-mix(in srgb, var(--none) 30%, transparent);
+  border-radius: var(--radius);
   background: var(--none-soft); color: var(--ink-2); font-size: 12.5px;
 }
 
@@ -101,7 +101,6 @@ export const CSS_CASE = `
   margin: 0 0 18px; padding: 14px 16px;
   background: var(--bad-soft);
   border: 1px solid color-mix(in srgb, var(--bad) 30%, transparent);
-  border-left-width: 3px;
   border-radius: var(--radius);
 }
 .failure h3 {
@@ -219,9 +218,10 @@ figcaption { margin-top: 6px; font-size: 12px; color: var(--ink-2); }
 .code-line { display: grid; grid-template-columns: 34px minmax(0, 1fr); min-width: max-content; }
 .line-number { padding-right: 10px; color: var(--ink-3); text-align: right; user-select: none; opacity: .7; }
 .line-source { white-space: pre; }
+/* The tint alone marks the failing line — no edge bar, matching the rest of the
+   report. */
 .code-line.is-highlighted {
   background: color-mix(in srgb, var(--warn) 20%, transparent) !important;
-  box-shadow: inset 2px 0 0 var(--warn);
 }
 
 /* ----------------------------------------------------------------- misc. */

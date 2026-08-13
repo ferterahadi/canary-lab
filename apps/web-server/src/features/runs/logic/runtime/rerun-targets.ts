@@ -8,6 +8,7 @@
 // here resolve paths via __dirname.
 
 import fs from 'fs'
+import path from 'path'
 import { type RunLifecycleTargetedRerun } from './manifest'
 import { slugify } from './summary-reporter'
 import { listSpecFiles } from '../../../../shared/feature-loader'
@@ -213,6 +214,85 @@ export function computeNonPassedTargets(
 
   if (locations.length === 0) return { kind: 'all-passed', total: allTests.length }
   return { kind: 'targeted', locations, total: allTests.length }
+}
+
+// Playwright serial mode makes a spec's tests ONE unit: they share a worker and
+// run in declaration order, which is what lets an earlier test hand state to a
+// later one (a loan id created by the borrow test and consumed by the return
+// test). A targeted rerun that selects only the not-yet-passed members of such a
+// group therefore CANNOT pass however good the app fix is — the producer is
+// missing, so the consumer fails on its own precondition before it issues a
+// single request, and the heal loop reads that as "the fix didn't work".
+//
+// Detected from source: Playwright's reporter API doesn't expose a suite's mode,
+// so `knownTests` cannot carry it, and the AST extractor models test calls only
+// (`test.describe` is explicitly not a test — see `extractTestsFromSource`).
+// Matching the declaration in either spelling is enough because both apply to a
+// whole describe block, and the file is the coarsest such block.
+const SERIAL_DECLARATION = /test\s*\.\s*describe\s*\.\s*(?:serial\b|configure\s*\(\s*\{[^}]*mode\s*:\s*['"]serial['"])/
+
+/** Absolute paths of the feature's spec files that declare Playwright serial
+ *  mode. Empty when nothing does, which is the common case and leaves the
+ *  targeted rerun exactly as it was. */
+export function serialSpecFiles(featureDir: string): Set<string> {
+  const out = new Set<string>()
+  for (const file of listSpecFiles(featureDir)) {
+    let source = ''
+    // A spec listed but unreadable (removed or re-permissioned since the
+    // listing) is treated as non-serial: this only ever widens a rerun, so
+    // guessing "serial" off a file we cannot read would be the unsafe default.
+    try { source = fs.readFileSync(file, 'utf-8') } catch { continue }
+    if (SERIAL_DECLARATION.test(source)) out.add(path.resolve(file))
+  }
+  return out
+}
+
+/** The spec file a known test lives in, or undefined for a summary written
+ *  before the reporter captured locations. */
+export function specFileOfKnownTest(test: KnownSummaryTest): string | undefined {
+  if (!test.location) return undefined
+  const file = test.location.replace(/:\d+(?::\d+)?$/, '')
+  return file.length > 0 ? path.resolve(file) : undefined
+}
+
+export interface SerialExpansion {
+  /** The tests to actually run: the selection plus its serial group-mates. */
+  tests: KnownSummaryTest[]
+  /** Already-passed tests added back solely to make the group runnable. */
+  companions: KnownSummaryTest[]
+}
+
+/**
+ * Widen a rerun selection to whole serial spec files.
+ *
+ * Every known test sharing a serial file with something selected joins the run,
+ * including tests that already passed — Playwright then runs the file in
+ * declaration order and the producers execute before their consumers.
+ *
+ * This adds work, never evidence: a companion re-runs and must pass on its own
+ * merits, so nothing is assumed green. The caller keeps its failed/skipped/
+ * pending buckets unwidened, which is what stops a re-passing companion from
+ * reading as heal progress.
+ */
+export function expandForSerialSpecs(
+  serialFiles: ReadonlySet<string>,
+  knownTests: KnownSummaryTest[],
+  selected: KnownSummaryTest[],
+): SerialExpansion {
+  if (serialFiles.size === 0) return { tests: selected, companions: [] }
+  const touched = new Set<string>()
+  for (const test of selected) {
+    const file = specFileOfKnownTest(test)
+    if (file && serialFiles.has(file)) touched.add(file)
+  }
+  if (touched.size === 0) return { tests: selected, companions: [] }
+  const selectedNames = new Set(selected.map((test) => test.name))
+  const companions = knownTests.filter((test) => {
+    if (selectedNames.has(test.name)) return false
+    const file = specFileOfKnownTest(test)
+    return file !== undefined && touched.has(file)
+  })
+  return { tests: [...selected, ...companions], companions }
 }
 
 export function knownTestsFromSummary(summary: SummaryShape): KnownSummaryTest[] {
