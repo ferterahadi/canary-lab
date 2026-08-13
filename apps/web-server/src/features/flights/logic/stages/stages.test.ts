@@ -31,6 +31,7 @@ vi.mock('child_process', async (importOriginal) => {
 
 import { defaultSpawnAgent, extractJson, pollUntil, PollTimeoutError } from './context'
 import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
+import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
 
 let tmpDir: string
 
@@ -97,6 +98,31 @@ describe('context helpers', () => {
       delete process.env.CANARY_LAB_CODEX_BIN
     })
 
+    it('reports a STOPPED agent as stopped, not as one that answered badly', async () => {
+      // The live-proof finding, and the reason it took two attempts. A scout
+      // stopped from the UI recorded "agent did not return parseable JSON" —
+      // blaming the agent for a decision the user made. The first fix keyed off
+      // the exit SIGNAL and did nothing, because the real claude CLI handles
+      // SIGTERM and exits cleanly. Only the stop REQUEST is reliable, so this
+      // fake exits 0 with partial output, exactly as the real one did.
+      // `exec node` on purpose: a `sleep` child would OUTLIVE the killed shell and
+      // hold its stdio pipes open, so `close` never fires and the stop hangs — the
+      // same grandchild leak this batch measured. exec leaves no grandchild.
+      process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript(
+        'exec node -e \'console.log(JSON.stringify({type:"assistant",message:{content:[{type:"text",text:"I will survey it myself."}]}})); setInterval(()=>{},1000)\'',
+      )
+      const stageDir = path.join(tmpDir, 'stage-stopped')
+      fs.mkdirSync(stageDir, { recursive: true })
+      const pending = defaultSpawnAgent({ prompt: 'p', cwd: tmpDir, stageDir, job: { flightId: 'fl-s', feature: 'f', stage: 'scout', logsDir } })
+      await new Promise((r) => setTimeout(r, 400))
+      // Short grace: a plain `sh` fake defers SIGTERM while it sleeps, so the
+      // escalation is what actually ends it. The real CLI exits on its own.
+      await stopAgentProcesses(stageDir, { by: 'user', graceMs: 50 })
+      await expect(pending).rejects.toThrow(/agent was stopped \(by user\) before it finished/)
+      // And the record agrees about WHO asked.
+      expect(agentJobStore(logsDir).get('fl-s:scout')).toMatchObject({ status: 'stopped', stoppedBy: 'user' })
+    })
+
     it('recovers the final text on a clean exit and writes the agent-session ref', async () => {
       process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript('echo \'{"type":"result","result":"hello from claude"}\'')
       const stageDir = path.join(tmpDir, 'stage-ok')
@@ -132,11 +158,16 @@ describe('context helpers', () => {
       await expect(defaultSpawnAgent({ prompt: 'x', cwd: tmpDir, stageDir })).rejects.toThrow('agent exited with code 9')
     })
 
-    it('falls back to "null" in the error message when the agent is killed by a signal (no exit code)', async () => {
+    it('names the signal when the agent is killed, instead of "exited with code null"', async () => {
+      // Deliberate wording change: a signalled agent was STOPPED, and the old
+      // message ("exited with code null") read like a crash with a missing code.
+      // Which it also is — but a stage error is what a user reads to find out what
+      // happened, and "stopped" is the true answer whenever a signal is involved.
       process.env.CANARY_LAB_CLAUDE_BIN = fakeAgentScript('kill -TERM $$\nsleep 5')
       const stageDir = path.join(tmpDir, 'stage-fail-signal')
       fs.mkdirSync(stageDir, { recursive: true })
-      await expect(defaultSpawnAgent({ prompt: 'x', cwd: tmpDir, stageDir })).rejects.toThrow('agent exited with code null')
+      await expect(defaultSpawnAgent({ prompt: 'x', cwd: tmpDir, stageDir }))
+        .rejects.toThrow(/agent was stopped \(SIGTERM\) before it finished/)
     })
 
     it('does not throw when the agent exits non-zero but still produced usable text', async () => {

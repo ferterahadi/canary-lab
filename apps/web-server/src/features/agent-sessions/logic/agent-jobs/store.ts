@@ -32,7 +32,14 @@ function indexEntryFromManifest(m: AgentJobManifest) {
     ...(m.stage ? { stage: m.stage } : {}),
     status: m.status,
     startedAt: m.startedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    // `endedAt` is ALWAYS present — as `undefined` when the record has none —
+    // because the index upsert is a shallow merge (`{ ...oldRow, ...entry }`): a
+    // merge can overwrite a key but never delete one. A stage's job id is stable
+    // (`<flightId>:<stage>`), so a re-run REUSES the row, and omitting the cleared
+    // key left the previous attempt's `endedAt` stuck on a `running` record —
+    // caught live, a re-spawned scout reported as both running and already ended.
+    // JSON.stringify drops the explicit undefined on write.
+    endedAt: m.endedAt,
   }
 }
 

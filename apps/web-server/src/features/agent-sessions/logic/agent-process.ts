@@ -75,6 +75,15 @@ export function buildClaudeAgenticArgs(
 export interface AgentProcessResult {
   code: number | null
   signal: NodeJS.Signals | null
+  /** Set when this child was stopped ON REQUEST (a per-agent stop, a flight
+   *  teardown, the shutdown sweep) rather than finishing.
+   *
+   *  The request is the authority, not the exit shape. A well-behaved CLI HANDLES
+   *  SIGTERM and exits cleanly, so `signal` is null and `code` looks ordinary —
+   *  measured live against claude, where a stopped scout returned partial output
+   *  that its stage then blamed on the agent ("did not return parseable JSON")
+   *  instead of on the user who stopped it. */
+  stopped?: 'user' | 'flight'
   /** Accumulated stdout (empty when `captureStdout` is false). */
   stdout: string
   /** Accumulated stderr (for error messages). */
@@ -287,7 +296,7 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
       if (stoppedBy) settleRecord('stopped', { stoppedBy, note: 'Stopped on request; it did not finish its work.' })
       else if (code === 0) settleRecord('done')
       else settleRecord('failed', { ...(code === null ? {} : { exitCode: code }), note: `The agent exited ${signal ? `on ${signal}` : `with code ${code}`}.` })
-      resolve({ code, signal, stdout, stderr })
+      resolve({ code, signal, stdout, stderr, ...(stoppedBy ? { stopped: stoppedBy } : {}) })
     }
     // Register the lifecycle listeners BEFORE starting the idle timer: a mocked
     // (or pathologically fast) timer could fire onIdle → kill → 'close'

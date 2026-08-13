@@ -156,9 +156,26 @@ export const defaultSpawnAgent: FlightAgentSpawner = async (opts) => {
     // that emits the config JSON then signs off with prose in a later turn must
     // not lose the JSON to that trailing turn (the display view tails the JSONL).
     // codex: `exec` prints the final message to stdout — use it as-is.
+    // Stopped rather than finished. Its partial output must NOT be handed back as
+    // an answer: the stage would then fail on whatever the fragment failed to
+    // parse as, and blame the agent for "not returning parseable JSON" when the
+    // truth is that someone stopped it. Caught live, twice — the second time
+    // because the first fix checked `signal`, and the real claude CLI HANDLES
+    // SIGTERM and exits cleanly, so only the request itself is reliable.
+    // (A flight-level pause never reaches here: ctx.signal makes it a
+    // StageCancelledError, which the drive swallows.)
+    if (result.stopped) {
+      throw new Error(`agent was stopped (by ${result.stopped}) before it finished — no answer to read`)
+    }
+    if (result.signal) {
+      throw new Error(`agent was stopped (${result.signal}) before it finished — no answer to read`)
+    }
     const text = agent === 'claude' ? recoverClaudeAssistantText(result.stdout) : result.stdout
     if (result.code !== 0 && !text.trim()) {
-      throw new Error(`agent exited with code ${result.code ?? 'null'}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
+      // `code` is a number here: a null code means the child was signalled, and
+      // that is thrown above as a stop. The old `?? 'null'` fallback became
+      // unreachable with it.
+      throw new Error(`agent exited with code ${result.code}${result.stderr ? `: ${result.stderr.slice(-400)}` : ''}`)
     }
     return { text }
   } finally {

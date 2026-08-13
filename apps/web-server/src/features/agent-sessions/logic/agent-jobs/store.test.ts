@@ -91,6 +91,19 @@ describe('AgentJobRunStore', () => {
     expect(store.get('fl-1:docs')).toMatchObject({ status: 'done', endedAt: '2026-01-01T00:05:00.000Z' })
   })
 
+  it('clears endedAt when a stage re-runs under the same job id', () => {
+    // The index upsert is a shallow merge, and a stage's job id is stable, so a
+    // re-run reuses the row. Caught live: a re-spawned scout listed as `running`
+    // while still carrying the PREVIOUS attempt's endedAt — running and already
+    // ended at once.
+    const store = new AgentJobRunStore(logsDir)
+    store.save(job({ status: 'stopped', endedAt: '2026-01-01T00:01:00.000Z' }))
+    store.save(job({ status: 'running', startedAt: '2026-01-01T00:02:00.000Z' }))
+    const row = store.list()[0]
+    expect(row.status).toBe('running')
+    expect(row.endedAt).toBeUndefined()
+  })
+
   it('drops every record for one flight (delete + restart wipe)', () => {
     const store = new AgentJobRunStore(logsDir)
     store.save(job())
