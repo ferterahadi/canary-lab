@@ -1,8 +1,15 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type { OnboardingSamples } from '@/shared/api/client'
+import type { FlightEntryOptions, OnboardingSamples } from '@/shared/api/client'
 import type { RunIndexEntry } from '@/shared/api/types'
 import type { FlightIndexEntry } from '@shared/flights/types'
-import { deriveDemoAvailability, readDemoSeen, writeDemoSeen, type DemoInput } from './demo-launcher'
+import {
+  DEMO_FLIGHT_STAGE,
+  demoFlightLaunch,
+  deriveDemoAvailability,
+  readDemoSeen,
+  writeDemoSeen,
+  type DemoInput,
+} from './demo-launcher'
 
 const SAMPLES: OnboardingSamples = {
   sampleSuite: 'storefront-journey',
@@ -29,6 +36,73 @@ const input = (over: Partial<DemoInput> = {}): DemoInput => ({
   seen: false,
   showDemo: true,
   ...over,
+})
+
+const flightEntry = (over: Partial<FlightEntryOptions> = {}): FlightEntryOptions => ({
+  feature: 'workflow-workbench',
+  flight: null,
+  active: false,
+  canContinue: false,
+  prefill: {
+    repoPaths: ['/workspace/workflow-app'],
+    description: 'Prepared workflow app',
+    env: 'local',
+    coverageTarget: 85,
+  },
+  stages: [],
+  ...over,
+})
+
+describe('Getting Started Flight destinations', () => {
+  it('maps each specialized workflow to its Flight tab', () => {
+    expect(DEMO_FLIGHT_STAGE).toEqual({
+      coverage: 'specs-coverage',
+      export: 'evaluation-export',
+      author: 'specs-coverage',
+      portify: 'portify',
+    })
+  })
+
+  it('starts a fresh Flight directly at the requested stage', () => {
+    expect(demoFlightLaunch('workflow-workbench', 'portify', flightEntry())).toEqual({
+      kind: 'start',
+      body: {
+        feature: 'workflow-workbench',
+        repoPaths: ['/workspace/workflow-app'],
+        description: 'Prepared workflow app',
+        env: 'local',
+        coverageTarget: 85,
+        fromStage: 'portify',
+        autopilot: false,
+      },
+    })
+  })
+
+  it('jumps an existing paused Flight to the requested stage', () => {
+    const entry = flightEntry({
+      flight: { flightId: 'fl_1', status: 'paused', stages: [] },
+    })
+    expect(demoFlightLaunch('workflow-workbench', 'evaluation-export', entry)).toEqual({
+      kind: 'start',
+      body: {
+        feature: 'workflow-workbench',
+        mode: 'jump',
+        fromStage: 'evaluation-export',
+        autopilot: false,
+      },
+    })
+  })
+
+  it('opens an active Flight without starting another conductor', () => {
+    const entry = flightEntry({
+      active: true,
+      flight: { flightId: 'fl_1', status: 'running', stages: [] },
+    })
+    expect(demoFlightLaunch('workflow-workbench', 'specs-coverage', entry)).toEqual({
+      kind: 'open',
+      flightId: 'fl_1',
+    })
+  })
 })
 
 describe('deriveDemoAvailability', () => {

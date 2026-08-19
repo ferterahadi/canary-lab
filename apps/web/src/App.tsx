@@ -3,7 +3,7 @@ import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
 import { DemoDialog } from './shared/shell/DemoDialog'
-import { useDemoLauncher } from './shared/state/demo-launcher'
+import { DEMO_FLIGHT_STAGE, demoFlightLaunch, useDemoLauncher } from './shared/state/demo-launcher'
 import { RunDetailColumn } from './features/runs/components/RunDetailColumn'
 import { FeatureConfigEditor } from './features/config/components/FeatureConfigEditor'
 import { ResizablePanels } from './shared/ui/ResizablePanels'
@@ -32,8 +32,6 @@ import { useWorkspaceData } from './shared/state/use-workspace-data'
 import { resolveActivityTarget } from './shared/state/nav-state'
 import * as api from './shared/api/client'
 import type { GettingStartedTarget, OnboardingWorkflowAction } from './shared/api/client'
-import { useEvaluationExports } from './features/evaluation'
-import { isTerminalRunStatus } from './features/runs/components/RunDetailColumn'
 
 const VERIFY_DEMO_BOOT_ATTEMPTS = 120
 const VERIFY_DEMO_BOOT_POLL_MS = 250
@@ -86,7 +84,6 @@ export function App() {
   // Runs come from the WebSocket-backed RunsProvider — no polling here. `runs` is
   // the full index across all features; the per-feature filter happens at render.
   const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
-  const { startExport } = useEvaluationExports()
   // Cross-feature refetch bus — the WS handler publishes topic invalidations that
   // fetch-owning leaves subscribe to (replaces the drilled `*RefreshKey`s).
   const { invalidate } = useInvalidation()
@@ -299,7 +296,7 @@ export function App() {
       run.feature === feature.feature
       && run.executionType !== 'boot'
       && run.executionType !== 'benchmark'
-      && isTerminalRunStatus(run.status)) ?? null
+      && run.status === 'passed') ?? null
   }, [allRuns, demo.workflows])
 
   const handleDemoAction = useCallback(async (action: OnboardingWorkflowAction): Promise<void> => {
@@ -322,49 +319,17 @@ export function App() {
       openFlight(manifest.flightId)
       return
     }
-    if (action.kind === 'coverage') {
-      await api.startCoverageJob(action.feature, 'coverage')
-      setDemoOpen(false)
-      navigateToCoverage(action.feature)
-      return
-    }
-    if (action.kind === 'export') {
-      const run = allRuns.find((entry) =>
-        entry.feature === action.feature
-        && entry.executionType !== 'boot'
-        && entry.executionType !== 'benchmark'
-        && isTerminalRunStatus(entry.status))
-      if (!run) return
-      setDemoOpen(false)
-      navigateToRun(action.feature, run.runId)
-      await startExport(run.runId, 'raw')
-      return
-    }
-    if (action.kind === 'author') {
+    if (action.kind === 'coverage' || action.kind === 'export' || action.kind === 'author' || action.kind === 'portify') {
+      const stage = DEMO_FLIGHT_STAGE[action.kind]
       const entry = await api.getFlightEntryOptions(action.feature)
-      if (entry.active && entry.flight) {
-        setDemoOpen(false)
-        openFlight(entry.flight.flightId)
-        return
-      }
-      const manifest = await api.startFlight(entry.flight
-        ? {
-            feature: action.feature,
-            mode: 'jump',
-            fromStage: 'specs-coverage',
-            autopilot: false,
-          }
-        : {
-            feature: action.feature,
-            repoPaths: entry.prefill.repoPaths,
-            description: entry.prefill.description,
-            env: entry.prefill.env,
-            coverageTarget: entry.prefill.coverageTarget,
-            fromStage: 'specs-coverage',
-            autopilot: false,
-          })
+      const launch = demoFlightLaunch(action.feature, stage, entry)
+      const flightId = launch.kind === 'start'
+        ? (await api.startFlight(launch.body)).flightId
+        : launch.flightId
+      setSelectedFeature(action.feature)
       setDemoOpen(false)
-      openFlight(manifest.flightId)
+      openFlight(flightId)
+      setFlightStage(stage)
       return
     }
     if (action.kind === 'verify') {
@@ -384,11 +349,7 @@ export function App() {
       }
       return
     }
-    const { workflowId } = await api.startPortify({ feature: action.feature, agent: 'claude' })
-    setDemoOpen(false)
-    setSelectedFeature(action.feature)
-    setPortifyTarget({ kind: 'revisit', workflowId })
-  }, [allRuns, navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setPortifyTarget, setSelectedFeature, startExport, startVerificationAction])
+  }, [navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature, startVerificationAction])
 
   const openDemoTarget = useCallback((target: GettingStartedTarget): void => {
     setDemoOpen(false)

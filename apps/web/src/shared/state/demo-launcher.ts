@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
 import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@/shared/api/client'
+import type { StartFlightBody } from '@/shared/api/flights'
 import type { RunIndexEntry } from '@/shared/api/types'
-import type { FlightIndexEntry } from '@shared/flights/types'
+import type { FlightEntryOptions, FlightIndexEntry, FlightStageKey } from '@shared/flights/types'
 import { useInvalidationKey } from './invalidation'
 
 // The Getting Started launcher: one guided path plus the specialized workflows
@@ -24,6 +25,48 @@ import { useInvalidationKey } from './invalidation'
 //     it has actually been opened.
 
 const SEEN_KEY = 'canary-lab:demo-seen'
+
+export type DemoFlightActionKind = 'coverage' | 'export' | 'author' | 'portify'
+
+export const DEMO_FLIGHT_STAGE: Record<DemoFlightActionKind, FlightStageKey> = {
+  coverage: 'specs-coverage',
+  export: 'evaluation-export',
+  author: 'specs-coverage',
+  portify: 'portify',
+}
+
+/** Build the same server-validated stage-entry request for every specialized
+ *  Getting Started workflow. Active flights are opened in place, so they do
+ *  not need a second start request. */
+export type DemoFlightLaunch =
+  | { kind: 'open'; flightId: string }
+  | { kind: 'start'; body: StartFlightBody }
+
+export function demoFlightLaunch(
+  feature: string,
+  stage: FlightStageKey,
+  entry: FlightEntryOptions,
+): DemoFlightLaunch {
+  if (entry.active && entry.flight) return { kind: 'open', flightId: entry.flight.flightId }
+  if (entry.flight) {
+    return {
+      kind: 'start',
+      body: { feature, mode: 'jump', fromStage: stage, autopilot: false },
+    }
+  }
+  return {
+    kind: 'start',
+    body: {
+      feature,
+      repoPaths: entry.prefill.repoPaths,
+      description: entry.prefill.description,
+      env: entry.prefill.env,
+      coverageTarget: entry.prefill.coverageTarget,
+      fromStage: stage,
+      autopilot: false,
+    },
+  }
+}
 
 /** Whether the chooser has ever been opened. One flag, not per-option: opening it
  *  is what retires the prompt, regardless of which demo (if any) was picked. */

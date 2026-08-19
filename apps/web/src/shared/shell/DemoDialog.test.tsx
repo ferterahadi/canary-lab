@@ -119,13 +119,16 @@ describe('DemoDialog', () => {
     expect(writeText).toHaveBeenCalledWith('/canary-lab-run exact-run')
   })
 
-  it('keeps one accent action per pane — running here is primary, copying is not', () => {
+  it('gives the two run paths equal weight — neither control outranks the other', () => {
     const onInternalAction = vi.fn()
     render({ onInternalAction })
     click(q('getting-started-action-run'))
     expect(onInternalAction).toHaveBeenCalledWith({ kind: 'run', feature: 'storefront-journey' })
-    expect(q('getting-started-action-run')?.className).toContain('cl-button-primary')
+    // An accent fill on either side would read as "this is the real option, the
+    // other is a footnote" — the whole point of the pair is that it isn't.
+    expect(q('getting-started-action-run')?.className).not.toContain('cl-button-primary')
     expect(q('getting-started-copy-run')?.className).not.toContain('cl-button-primary')
+    expect(q('getting-started-action-run')?.className).toContain('cl-button')
   })
 
   it('swaps the pane to any secondary workflow picked in the rail', () => {

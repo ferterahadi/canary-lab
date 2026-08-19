@@ -46,6 +46,15 @@ export interface FlightConductorDeps {
     /** Existing flight record for the feature, when jumping on one. */
     existing?: FlightManifest | null
   }) => string | null
+  /** Evidence links consumed by a direct stage entry after validation. A
+   *  standalone run entering Evaluation Export is the current use. */
+  resolveStageEntryLinks?: (args: {
+    feature: string
+    repoPaths: string[]
+    fromStage: FlightStageKey
+    env: string
+    existing?: FlightManifest | null
+  }) => FlightManifest['links'] | undefined
 }
 
 export interface StartFlightResult {
@@ -100,7 +109,7 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     }
     const nextRepoPaths = mode === 'redo' && wantsNewRepos ? args.repoPaths : existing.repoPaths
     const nextDescription = mode === 'redo' && wantsNewIntent ? trimmedDescription : existing.description
-    checkStageEntry({ ...args, repoPaths: nextRepoPaths }, deps, existing)
+    const entryLinks = checkStageEntry({ ...args, repoPaths: nextRepoPaths }, deps, existing)
     const manifest: FlightManifest = {
       ...existing,
       repoPaths: nextRepoPaths,
@@ -148,8 +157,8 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       // record's run — that runId is the stage's input, so it must survive
       // the reset (the deliverable links are dropped and regenerated).
       links:
-        mode === 'jump' && args.fromStage === 'evaluation-export' && existing.links?.runId
-          ? { runId: existing.links.runId }
+        mode === 'jump' && args.fromStage === 'evaluation-export'
+          ? (existing.links?.runId ? { runId: existing.links.runId } : entryLinks)
           : undefined,
     }
     store.save(manifest)
@@ -172,7 +181,7 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
   if (!args.description.trim()) {
     throw new FlightStageEntryError(`feature "${args.feature}" has no flight record — a description is required to start one`)
   }
-  checkStageEntry(args, deps, null)
+  const entryLinks = checkStageEntry(args, deps, null)
 
   const flightId = (deps.newFlightId ?? defaultFlightId)()
   const manifest: FlightManifest = {
@@ -184,6 +193,7 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
     status: 'running',
     currentStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
     stages: freshStages(args.fromStage, now),
+    links: entryLinks,
     createdAt: now(),
     updatedAt: now(),
   }

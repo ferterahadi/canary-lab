@@ -3,6 +3,7 @@ import fs from 'fs'
 import net from 'net'
 import os from 'os'
 import path from 'path'
+import { renderInteractiveGuide } from './smoke-demo-output.mjs'
 
 // The developer's `npx canary-lab init`.
 //
@@ -32,17 +33,22 @@ const portArg = argv.indexOf('--port')
 const agentArg = argv.indexOf('--agent')
 const requestedAgent = agentArg >= 0 ? argv[agentArg + 1] : 'auto'
 const featureName = 'storefront-journey'
-const demoIntent = 'Test the library lending contracts: borrowing a book with copies free reduces its available count by exactly one; returning an open loan marks it returned and restores the available count to what it was before; and when every copy is on loan a further request is refused with 409 without taking a copy. A Wizard of Earthsea has a single copy. The 404s for unknown books and loans are fixture support, not requirements.'
+const demoIntent = 'Test the library lending contracts. Borrowing an available book reduces its available copies by one. Returning an open loan marks it returned and restores the previous count. Borrowing when all copies are on loan returns 409 without changing inventory. A Wizard of Earthsea has one copy. Unknown-book and unknown-loan 404s are fixture support, not requirements.'
 
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-demo-'))
 const projectDir = path.join(tempRoot, 'demo-project')
 const appDir = path.join(projectDir, 'demo-app')
 const flightAppDir = path.join(projectDir, 'flight-app')
+const workflowAppDir = path.join(projectDir, 'workflow-app')
 const cacheDir = path.join(os.tmpdir(), 'canary-lab-npm-cache')
 
 const childEnv = {
   ...process.env,
   npm_config_cache: cacheDir,
+  // npm's lifecycle notices are implementation detail here. Interactive setup
+  // captures every command and prints it on failure, while Canary Lab's own
+  // server output remains visible after launch.
+  ...(interactive ? { npm_config_loglevel: 'error' } : {}),
   // Demo state must never disturb another Canary Lab workspace or rewrite the
   // developer's real MCP client registrations.
   CANARY_LAB_HOME: tempRoot,
@@ -63,16 +69,45 @@ function say(message) {
   console.log(`\n[${step}] ${message}`)
 }
 
+function progress(message) {
+  if (interactive) console.log(`    › ${message}…`)
+}
+
+function complete(message) {
+  if (interactive) console.log(`    ✓ ${message}`)
+}
+
+function commandText(command, args) {
+  return [command, ...args].map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(' ')
+}
+
+function printFailureOutput(command, args, result) {
+  console.error(`\n    Command failed: ${commandText(command, args)}`)
+  const stdout = result.stdout?.toString().trim()
+  const stderr = result.stderr?.toString().trim()
+  if (stdout) console.error(`\n${stdout}`)
+  if (stderr) console.error(`\n${stderr}`)
+  if (result.error) console.error(`\n${result.error.message}`)
+}
+
 function run(command, args, cwd, opts = {}) {
   const result = spawnSync(command, args, {
     cwd,
     stdio: opts.quiet ? 'pipe' : 'inherit',
     env: childEnv,
+    maxBuffer: 20 * 1024 * 1024,
   })
   if (result.status !== 0 && !opts.allowFailure) {
-    console.error(result.stderr?.toString() ?? '')
+    if (opts.quiet) printFailureOutput(command, args, result)
     throw new Error(`${command} ${args.join(' ')} failed (${result.status})`)
   }
+  return result
+}
+
+function setupTask(start, done, task) {
+  progress(start)
+  const result = task()
+  complete(done)
   return result
 }
 
@@ -275,29 +310,39 @@ function commitProductRepo(dir, message) {
 }
 
 async function provision() {
-  say(`Scaffolding a fresh workspace in ${projectDir}`)
+  say('Preparing an isolated workspace')
   let tarballPath
   if (noBuild) {
     const existing = fs.readdirSync(repoRoot).find((entry) => entry.endsWith('.tgz'))
     if (!existing) throw new Error('--no-build needs a packed .tgz in the repository root')
     tarballPath = path.join(repoRoot, existing)
+    complete(`Using ${existing}`)
   } else {
     // `npm pack` runs the package's prepack hook, which already performs the
     // full build. Running build separately doubles demo startup time.
-    run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)
+    setupTask('Building and packing this checkout', 'Package ready', () => (
+      run('npm', ['pack', '--pack-destination', tempRoot], repoRoot, { quiet: interactive })
+    ))
     const tarball = fs.readdirSync(tempRoot).find((entry) => entry.endsWith('.tgz'))
     if (!tarball) throw new Error('npm pack did not produce a tarball')
     tarballPath = path.join(tempRoot, tarball)
   }
 
   run('npm', ['init', '-y'], tempRoot, { quiet: true })
-  run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], tempRoot)
-  run('npx', ['canary-lab', 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], tempRoot)
-  run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'], projectDir)
+  setupTask('Installing Canary Lab locally', 'Canary Lab installed', () => (
+    run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], tempRoot, { quiet: interactive })
+  ))
+  setupTask('Creating the demo project', 'Demo project created', () => (
+    run('npx', ['canary-lab', 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], tempRoot, { quiet: interactive })
+  ))
+  setupTask('Installing project dependencies', 'Dependencies installed', () => (
+    run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'], projectDir, { quiet: interactive })
+  ))
 
-  say('Committing the two sample product repositories')
+  say('Committing the three sample product repositories')
   commitProductRepo(appDir, 'storefront baseline')
   commitProductRepo(flightAppDir, 'lending baseline')
+  commitProductRepo(workflowAppDir, 'workflow workbench baseline')
   // Nothing else. The suite ships inside the scaffold `canary-lab init` just
   // laid down, which is the whole point: what a developer sees here is exactly
   // what a user sees, because it came from the same command.
@@ -334,26 +379,15 @@ async function bootUi(agent) {
 
 async function runInteractive(port, agent) {
   const base = `http://127.0.0.1:${port}`
-  say('Workspace ready — the tester owns the journey from here')
-  console.log(`    Agent:      ${agent}`)
-  console.log('\n    Route A — repair loop (a suite already ships for this app)')
-  console.log(`      Open:  ${base}/?feature=${featureName}`)
-  console.log(`      Repository: ${appDir}`)
-  console.log('      Start a run. Catalog, inventory and checkout boot together. Two')
-  console.log('      journeys are sound and pass immediately; the other five are ordered')
-  console.log('      chains, and the run stops once four have failed — so the agent gets a')
-  console.log('      batch of broken contracts per cycle and repairing them uncovers the next.')
-
-  console.log('\n    Route B — full Flight (no suite exists for this app yet)')
-  console.log(`      Open:  ${base}/?dialog=flight-new`)
-  console.log(`      Repository: ${flightAppDir}`)
-  console.log('      Paste the intent below, choose that repository, then select Plan flight.')
-  console.log('      Watch it scan the repo, derive requirements, author the tests, make the')
-  console.log('      port injectable, run, heal one defect, and export the evaluation report.')
-  console.log(`      Intent: ${demoIntent}`)
-
-  console.log('\n    Nothing has run or healed yet — both routes wait for you.')
-  console.log(`    Ctrl-C stops the server but retains the workspace at:\n    ${projectDir}`)
+  console.log(renderInteractiveGuide({
+    base,
+    agent,
+    featureName,
+    appDir,
+    flightAppDir,
+    projectDir,
+    intent: demoIntent,
+  }))
   await new Promise(() => {})
 }
 

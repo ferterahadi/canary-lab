@@ -202,9 +202,12 @@ function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved
               <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>In Canary Lab</div>
               <p className="mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>Runs in this workspace.</p>
             </div>
-            {/* Both rows give their control the same column, so the pair reads
-                as one choice rather than as a small box beside a wide one. The
-                state line sits under the button in that column — absent at
+            {/* Both rows give their control the same column AND the same weight.
+                The accent-filled skin made this row win every time it was on
+                screen, which is the opposite of "either way" — an accent fill
+                next to a plain field reads as the real option beside a footnote.
+                Neutral on both sides lets the label column carry the difference.
+                The state line sits under the button in that column — absent at
                 rest, so the two rows stay the same height until there is news. */}
             <div className="min-w-0 flex-1">
               <button
@@ -212,7 +215,7 @@ function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved
                 data-testid={`getting-started-action-${workflow.id}`}
                 disabled={resolved.actionDisabled}
                 onClick={resolved.onAction}
-                className="cl-button-primary w-full px-3.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                className="cl-button w-full px-3.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <span className="block truncate">{resolved.actionLabel}</span>
               </button>

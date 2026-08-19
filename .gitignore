@@ -37,6 +37,7 @@ Thumbs.db
 
 playwright-report
 test-results
+output/playwright/
 logs/
 
 *.bak*

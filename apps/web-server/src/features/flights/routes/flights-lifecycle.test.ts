@@ -16,7 +16,7 @@ import type { StageAdapters } from '../logic/conductor'
 
 import type { FlightAgentSpawner } from '../logic/stages/context'
 
-import { FLIGHT_STAGE_KEYS } from '../logic/types'
+import { FLIGHT_STAGE_KEYS, type FlightManifest } from '../logic/types'
 
 let tmpDir: string
 
@@ -202,6 +202,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     app = await buildApp(allDone())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'evaluation-export' }) })
     expect(jump.statusCode).toBe(201)
+    expect((jump.json() as FlightManifest).links?.runId).toBe('2026-07-01T0245-o456')
   })
 
   it('still refuses the evaluation export when the feature has no settled run', async () => {

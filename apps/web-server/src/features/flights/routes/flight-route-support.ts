@@ -3,7 +3,7 @@ import os from 'os'
 import path from 'path'
 import { type FlightStore } from '../logic/store'
 import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDeps } from '../logic/conductor'
-import { STAGE_DEPENDS_ON, type FlightOptions, type FlightStageKey } from '../logic/types'
+import { STAGE_DEPENDS_ON, type FlightManifest, type FlightOptions, type FlightStageKey } from '../logic/types'
 import { type PlannedFeature } from '../../../../../../shared/flights/types'
 import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import { findBootProof, hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
@@ -20,21 +20,22 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
  *  would be skipped must already have its on-disk artifact — the same evidence
  *  the stage itself would have produced. Returns the FIRST missing
  *  prerequisite as a human-readable reason, or null when the jump is OK. */
-export function buildStageEntryValidator(featuresDir: string, logsDir?: string) {
-  /** R81: "has this feature produced a run?" without a flight record. A
-   *  standalone passed run is the same evidence the flight's own run stage
-   *  would have left behind, so it satisfies the evaluation-export
-   *  prerequisite. Only consulted when the record can't answer. */
-  const hasStandalonePassedRun = (feature: string): boolean => {
-    if (!logsDir) return false
-    try {
-      return listRuns(logsDir, { feature }).some(
-        (r) => r.status === 'passed' && r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify',
-      )
-    } catch {
-      return false
-    }
+/** R81: a standalone passed run is the same artifact the Flight run stage
+ *  produces. This one lookup owns both entry validation and the link carried
+ *  into Evaluation Export, so the gate cannot approve evidence the conductor
+ *  then forgets. */
+function standalonePassedRun(logsDir: string | undefined, feature: string) {
+  if (!logsDir) return null
+  try {
+    return listRuns(logsDir, { feature }).find(
+      (r) => r.status === 'passed' && r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify',
+    ) ?? null
+  } catch {
+    return null
   }
+}
+
+export function buildStageEntryValidator(featuresDir: string, logsDir?: string) {
   return (args: {
     feature: string
     fromStage: FlightStageKey
@@ -77,7 +78,7 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
         startFrom: 'specs-coverage',
       },
       'run': {
-        present: () => Boolean(args.existing?.links?.runId) || hasStandalonePassedRun(feature),
+        present: () => Boolean(args.existing?.links?.runId) || standalonePassedRun(logsDir, feature) !== null,
         missing: 'no passed run for this feature yet (run prerequisite)',
         startFrom: 'run',
       },
@@ -94,6 +95,21 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
       }
     }
     return null
+  }
+}
+
+/** Links external stage evidence into the record that is about to consume it.
+ *  Validation decides whether entry is allowed; this resolver makes the same
+ *  passed run the Evaluation Export stage's explicit input. */
+export function buildStageEntryLinkResolver(logsDir?: string) {
+  return (args: {
+    feature: string
+    fromStage: FlightStageKey
+    existing?: FlightManifest | null
+  }): FlightManifest['links'] | undefined => {
+    if (args.fromStage !== 'evaluation-export' || args.existing?.links?.runId) return undefined
+    const run = standalonePassedRun(logsDir, args.feature)
+    return run ? { runId: run.runId } : undefined
   }
 }
 

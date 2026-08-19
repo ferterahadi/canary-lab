@@ -5,7 +5,7 @@
 import { FlightRunStore, type FlightStore } from '../logic/store'
 import { PlanFeaturesStore } from '../logic/plan-features'
 import type { FlightConductorDeps } from '../logic/conductor'
-import { buildStageEntryValidator } from './flight-route-support'
+import { buildStageEntryLinkResolver, buildStageEntryValidator } from './flight-route-support'
 import type { FlightRouteDeps } from './flight-route-deps'
 import { bridgeStoreEvents } from '../../../shared/store-event-bridge'
 
@@ -38,6 +38,7 @@ export function buildFlightRouteContext(deps: FlightRouteDeps): FlightRouteConte
       adapters: deps.adapters,
       workspaceEvents: deps.workspaceEvents,
       validateStageEntry: buildStageEntryValidator(deps.featuresDir, deps.logsDir),
+      resolveStageEntryLinks: buildStageEntryLinkResolver(deps.logsDir),
     },
   }
 }

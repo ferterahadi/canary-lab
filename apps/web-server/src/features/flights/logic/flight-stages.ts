@@ -301,13 +301,13 @@ export function checkStageEntry(
   args: StartFlightArgs,
   deps: FlightConductorDeps,
   existing: FlightManifest | null,
-): void {
+): FlightManifest['links'] | undefined {
   const fromStage = args.fromStage
-  if (!fromStage) return
+  if (!fromStage) return undefined
   if (!FLIGHT_STAGE_KEYS.includes(fromStage)) {
     throw new FlightStageEntryError(`unknown stage: ${String(fromStage)}`)
   }
-  if (fromStage === 'similarity') return // stage 1 — a plain start
+  if (fromStage === 'similarity') return undefined // stage 1 — a plain start
   if (!deps.validateStageEntry) {
     throw new FlightStageEntryError('stage entry is not supported on this surface')
   }
@@ -319,4 +319,11 @@ export function checkStageEntry(
     existing,
   })
   if (reason) throw new FlightStageEntryError(reason)
+  return deps.resolveStageEntryLinks?.({
+    feature: args.feature,
+    repoPaths: args.repoPaths,
+    fromStage,
+    env: args.opts.env,
+    existing,
+  })
 }
