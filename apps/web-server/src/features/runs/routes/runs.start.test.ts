@@ -10,6 +10,7 @@ import { runDirFor } from '../logic/runtime/run-paths'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
 import type { ExecutionType } from '../../../../../../shared/verification'
+import { GettingStartedBusyError, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
 
@@ -65,6 +66,7 @@ async function build(opts: {
   projectRoot?: string
   events?: WorkspaceEvent[]
   isWorktreeOwnerActive?: (kind: 'run' | 'benchmark', id: string) => boolean
+  gettingStarted?: GettingStartedSessionStore
 } = {}) {
   const registry = createRegistry()
   const store = new RunStore(logsDir, registry)
@@ -80,6 +82,7 @@ async function build(opts: {
     restartRun: opts.restartRun,
     isWorktreeOwnerActive: opts.isWorktreeOwnerActive,
 	    workspaceEvents: opts.events ? { publish: (event) => opts.events!.push(event) } : undefined,
+	    gettingStarted: opts.gettingStarted,
 	  })
   return { app, registry, store }
 }
@@ -105,6 +108,44 @@ describe('POST /api/runs', () => {
     expect(res.statusCode).toBe(201)
     expect(res.json()).toEqual({ runId: 'run-1' })
     expect(registry.get('run-1')).toBe(stub)
+  })
+
+  it('claims and links a Getting Started run before returning its owner page id', async () => {
+    writeFeature('foo')
+    const claim = vi.fn(() => ({ sessionId: 'gs-1' }))
+    const attach = vi.fn()
+    const gettingStarted = { claim, attach, abandon: vi.fn() } as unknown as GettingStartedSessionStore
+    const { app } = await build({
+      startRun: async () => ({ kind: 'started', orch: makeStub('run-demo') }),
+      gettingStarted,
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: { feature: 'foo', gettingStartedSource: 'internal' },
+    })
+    expect(res.statusCode).toBe(201)
+    expect(claim).toHaveBeenCalledWith('run', 'internal')
+    expect(attach).toHaveBeenCalledWith('gs-1', { kind: 'run', id: 'run-demo' })
+  })
+
+  it('returns a typed busy result without starting a competing demo run', async () => {
+    writeFeature('foo')
+    const active = {
+      sessionId: 'gs-live', workflow: 'flight' as const, owner: 'external' as const,
+      target: { kind: 'flight' as const, id: 'fl-live' }, startedAt: 'a', updatedAt: 'a',
+    }
+    const startRun = vi.fn()
+    const gettingStarted = {
+      claim: () => { throw new GettingStartedBusyError(active) },
+    } as unknown as GettingStartedSessionStore
+    const { app } = await build({ startRun, gettingStarted })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: { feature: 'foo', gettingStartedSource: 'internal' },
+    })
+    expect(res.statusCode).toBe(409)
+    expect(res.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-live' } })
+    expect(startRun).not.toHaveBeenCalled()
   })
 
   it('surfaces a branch-mismatch throw as a typed 409 with per-repo rows', async () => {

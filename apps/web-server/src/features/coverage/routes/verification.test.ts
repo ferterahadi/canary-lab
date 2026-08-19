@@ -157,6 +157,41 @@ describe('verification routes', () => {
     expect(registry.get('verify-42')?.runId).toBe('verify-42')
   })
 
+  it('allows verification beside its own boot session and asks the runner to clean it up', async () => {
+    writeFeature()
+    const registry = createRegistry()
+    registry.set('boot-1', fakeOrchestrator('boot-1'))
+    const store = new RunStore(logsDir, registry)
+    store.bootstrap({
+      runId: 'boot-1',
+      executionType: 'boot',
+      feature: 'checkout',
+      startedAt: '2026-05-24T00:00:00.000Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+    })
+    const startVerification = vi.fn(async () => fakeOrchestrator('verify-with-boot'))
+    const app = Fastify()
+    await app.register(verificationRoutes, { featuresDir, store, startVerification })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/verifications',
+      payload: {
+        playwrightEnvsetId: 'local',
+        targetUrls: { api: 'http://127.0.0.1:4123' },
+        bootRunId: 'boot-1',
+      },
+    })
+
+    expect(res.statusCode).toBe(201)
+    expect(startVerification).toHaveBeenCalledWith('checkout', {
+      playwrightEnvsetId: 'local',
+      targetUrls: { api: 'http://127.0.0.1:4123' },
+    }, { cleanupBootRunId: 'boot-1' })
+  })
+
   it('returns not-found and validation errors for verification config routes', async () => {
     writeFeature()
     const store = new RunStore(logsDir, createRegistry())
@@ -285,6 +320,7 @@ describe('verification routes', () => {
       [{ playwrightEnvsetId: 1 }, 'playwrightEnvsetId must be a string'],
       [{ targetUrls: [] }, 'targetUrls must be a string map'],
       [{ targetUrls: { api: 1 } }, 'targetUrls must be a string map'],
+      [{ bootRunId: 1 }, 'bootRunId must be a string'],
     ] as const) {
       const res = await app.inject({
         method: 'POST',
@@ -294,6 +330,14 @@ describe('verification routes', () => {
       expect(res.statusCode).toBe(400)
       expect(res.json()).toEqual({ error })
     }
+
+    const missingBoot = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/verifications',
+      payload: { playwrightEnvsetId: 'local', bootRunId: 'missing' },
+    })
+    expect(missingBoot.statusCode).toBe(400)
+    expect(missingBoot.json()).toEqual({ error: 'bootRunId must name an active boot session for this feature' })
 
     startVerification.mockResolvedValueOnce(fakeOrchestrator('verify-config'))
     const configOnly = await app.inject({

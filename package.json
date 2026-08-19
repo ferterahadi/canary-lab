@@ -68,7 +68,7 @@
     "typecheck:all": "npm run typecheck && npm run typecheck:web && npm run typecheck:server",
     "gen:agents": "node tools/gen-agents-md.mjs",
     "gen:skills": "node tools/gen-codex-skills.mjs",
-    "gen:demo-prd": "tsx tools/gen-storefront-prd-summary.ts",
+    "gen:demo-prd": "tsx tools/gen-storefront-prd-summary.ts && tsx tools/gen-workflow-workbench-prd-summary.ts",
     "check:boundaries": "node tools/check-feature-boundaries.mjs",
     "check:conventions": "node tools/check-conventions.mjs",
     "check:docs": "node tools/check-docs.mjs",

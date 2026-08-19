@@ -15,7 +15,11 @@ import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../sh
 export interface VerificationRouteDeps {
   featuresDir: string
   store: RunStore
-  startVerification(feature: string, input: ResolveVerificationInput): Promise<OrchestratorLike>
+  startVerification(
+    feature: string,
+    input: ResolveVerificationInput,
+    options?: { cleanupBootRunId: string },
+  ): Promise<OrchestratorLike>
   workspaceEvents?: WorkspaceEventPublisher
 }
 
@@ -120,18 +124,30 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         reply.code(404)
         return { error: 'feature not found' }
       }
-      const active = deps.store.list().find((run) => isActiveRunStatus(run.status))
-      if (active) {
-        reply.code(409)
-        return { error: `Another execution is ${active.status} (${active.feature}). Stop it first.` }
-      }
       const parsed = parseExecuteBody(req.body)
       if ('error' in parsed) {
         reply.code(400)
         return { error: parsed.error }
       }
+      const { bootRunId, ...input } = parsed
+      if (bootRunId) {
+        const boot = deps.store.get(bootRunId)?.manifest
+        if (!boot || boot.executionType !== 'boot' || boot.feature !== feature.name || !isActiveRunStatus(boot.status)) {
+          reply.code(400)
+          return { error: 'bootRunId must name an active boot session for this feature' }
+        }
+      }
+      const active = deps.store.list().find((run) =>
+        run.runId !== bootRunId && isActiveRunStatus(run.status),
+      )
+      if (active) {
+        reply.code(409)
+        return { error: `Another execution is ${active.status} (${active.feature}). Stop it first.` }
+      }
       try {
-        const orch = await deps.startVerification(feature.name, parsed)
+        const orch = bootRunId
+          ? await deps.startVerification(feature.name, input, { cleanupBootRunId: bootRunId })
+          : await deps.startVerification(feature.name, input)
         deps.store.registry.set(orch.runId, orch)
         reply.code(201)
         return { runId: orch.runId, executionType: 'verify' }
@@ -153,6 +169,7 @@ interface ExecuteVerificationBody {
   configId?: unknown
   targetUrls?: unknown
   playwrightEnvsetId?: unknown
+  bootRunId?: unknown
 }
 
 function findFeature(featuresDir: string, name: string) {
@@ -182,10 +199,14 @@ function parseExecuteBody(body: ExecuteVerificationBody) {
   if (body.targetUrls !== undefined && !isStringRecord(body.targetUrls)) {
     return { error: 'targetUrls must be a string map' } as const
   }
+  if (body.bootRunId !== undefined && typeof body.bootRunId !== 'string') {
+    return { error: 'bootRunId must be a string' } as const
+  }
   return {
     ...(body.configId ? { configId: body.configId } : {}),
     ...(body.playwrightEnvsetId ? { playwrightEnvsetId: body.playwrightEnvsetId } : {}),
     ...(isStringRecord(body.targetUrls) ? { targetUrls: body.targetUrls } : {}),
+    ...(body.bootRunId ? { bootRunId: body.bootRunId } : {}),
   }
 }
 

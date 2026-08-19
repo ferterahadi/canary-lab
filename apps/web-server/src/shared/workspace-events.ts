@@ -42,6 +42,9 @@ export type WorkspaceEvent =
   // everywhere it is read without a refresh — the demo launcher's `showDemo`
   // being the first such setting to render outside the settings dialog itself.
   | { type: 'project-config-changed' }
+  // The workspace-level Getting Started demo guard changed. The client
+  // refetches /api/onboarding so internal and external starts share one truth.
+  | { type: 'getting-started-changed' }
 
 export interface WorkspaceEventPublisher {
   publish(event: WorkspaceEvent): void

@@ -313,12 +313,12 @@ describe('GlobalStatusBar', () => {
       })
     }
 
-    it('is absent when the workspace has nothing to demo — never a dead button', async () => {
+    it('is absent when the workspace hides Getting Started', async () => {
       await renderBar({ demoAvailable: false })
       expect(demoPill()).toBeUndefined()
     })
 
-    it('appears once the demos are available', async () => {
+    it('appears when Getting Started is enabled', async () => {
       await renderBar({ demoAvailable: true })
       expect(demoPill()).toBeDefined()
     })
@@ -333,7 +333,7 @@ describe('GlobalStatusBar', () => {
       expect(demoPill()?.querySelector('span[aria-hidden="true"].absolute')).toBeNull()
     })
 
-    it('opens the chooser — the only way back after it is closed', async () => {
+    it('opens the guide — the permanent way back after it is closed', async () => {
       const onOpenDemo = vi.fn()
       await renderBar({ demoAvailable: true, onOpenDemo })
       await act(async () => {

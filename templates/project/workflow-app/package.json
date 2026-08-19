@@ -1,0 +1,9 @@
+{
+  "name": "canary-workflow-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Small API used by Canary Lab's author, coverage, verify, and portify demos.",
+  "scripts": {
+    "dev": "npx tsx server.ts"
+  }
+}

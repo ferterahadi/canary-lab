@@ -51,6 +51,7 @@ export function buildRunsRouteDeps(
     benchmarkStore,
     dirtySpecStore,
     workspaceEvents,
+    gettingStarted,
     externalHealBroker,
     brokers,
     activeEnvsets,
@@ -65,6 +66,7 @@ export function buildRunsRouteDeps(
 	    store: runStore,
 	    broker: externalHealBroker,
       workspaceEvents,
+      gettingStarted,
       isWorktreeOwnerActive: (kind, id) => {
         if (kind === 'run') {
           const d = runStore.get(id)

@@ -27,6 +27,7 @@ export type WorkspaceEvent =
   | { type: 'agent-jobs-changed'; jobId: string }
   | { type: 'pre-flight-changed' }
   | { type: 'project-config-changed' }
+  | { type: 'getting-started-changed' }
 
 export interface ConnectWorkspaceEventsOptions {
   wsBase?: string

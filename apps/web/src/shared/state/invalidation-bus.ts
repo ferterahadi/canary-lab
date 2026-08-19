@@ -22,9 +22,9 @@ export type InvalidationTopic =
   | 'verification'
   | 'tests'
   | 'flights'
-  | 'agent-jobs'
   | 'journal'
   | 'project-config'
+  | 'onboarding'
 
 /** The version map: slot key → monotonically-increasing version. A slot is a
  *  topic, optionally qualified by a scope (`journal:<runId>`). */

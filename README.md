@@ -87,8 +87,10 @@ distilled requirements, and tagged tests at 100% coverage — so the only thing
 left is the run: press **Run** and watch the repair loop fix one contract per
 cycle until it is green. `flight-app/` is the opposite, shipping with no suite
 at all: point a Flight at it to watch Canary Lab discover the repo, derive the
-requirements, author the suite, prepare its ports, run, heal, and export. Delete
-both once you have seen them.
+requirements, author the suite, prepare its ports, run, heal, and export.
+`workflow-app/` and its `workflow-workbench` suite provide the smaller follow-up
+exercises: one intentional coverage gap for Author/Coverage and one fixed port
+for Portify. Delete the demo assets once you have seen them.
 
 ## How the Repair Loop Works
 
@@ -161,7 +163,7 @@ cd my-lab
 npx canary-lab ui
 ```
 
-`init` scaffolds a workspace with both sample apps and one worked suite, installs
+`init` scaffolds a workspace with three sample apps and two worked suites, installs
 deps, downloads the Playwright browser, and registers your agent's tools — so
 `canary-lab ui` opens at `http://localhost:7421` straight away. Add `--no-open`
 to skip the browser.
@@ -169,7 +171,9 @@ to skip the browser.
 The samples are a demonstration, not scaffolding you need:
 `demo-app/` + its `storefront-journey` suite show the repair loop (press Run,
 watch it go green); `flight-app/` ships bare so a Flight has something to
-onboard from scratch. Delete both once you have seen them.
+onboard from scratch; and `workflow-app/` + `workflow-workbench` give the
+specialized Author, Coverage, Verify, and Portify workflows prepared material.
+Delete the demo assets once you have seen them.
 
 CI / offline? Pass `--no-install`, then run the steps manually:
 

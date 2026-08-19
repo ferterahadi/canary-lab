@@ -160,7 +160,7 @@ describe('config api', () => {
   })
 
   it('getOnboardingSamples GETs /api/onboarding', async () => {
-    const samples = { sampleSuite: 'storefront-journey', sampleFlightRepo: '/w/flight-app', sampleFlightDescription: 'd' }
+    const samples = { sampleSuite: 'storefront-journey', sampleFlightRepo: '/w/flight-app', sampleFlightDescription: 'd', workflows: [], session: { active: null, completed: {} } }
     const fetchImpl = vi.fn().mockResolvedValue(ok(samples))
     await expect(getOnboardingSamples({ fetchImpl })).resolves.toEqual(samples)
     expect(fetchImpl).toHaveBeenCalledWith('/api/onboarding', { method: 'GET' })

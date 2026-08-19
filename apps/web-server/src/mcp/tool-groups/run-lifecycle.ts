@@ -166,6 +166,14 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         },
         isolation,
       )
+      if (outcome.kind === 'getting-started-busy') {
+        return asJsonResult({
+          type: 'getting_started_busy',
+          active: outcome.active,
+          message: outcome.message,
+          nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
+        })
+      }
       if (outcome.kind === 'collision') {
         // Same-repo collision and the client didn't choose. Nothing started —
         // ask the user, then re-call start_run with isolation:"worktree"|"queue".
@@ -213,6 +221,14 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
   }, async ({ feature, env, isolation }) => {
     try {
       const outcome = await deps.startRun(feature, env, undefined, isolation, 'boot')
+      if (outcome.kind === 'getting-started-busy') {
+        return asJsonResult({
+          type: 'getting_started_busy',
+          active: outcome.active,
+          message: outcome.message,
+          nextSteps: ['follow the active demo in its current owner; do not start another run or flight'],
+        })
+      }
       if (outcome.kind === 'collision') {
         return asJsonResult({
           type: 'repo_collision_requires_choice',

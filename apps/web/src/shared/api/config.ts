@@ -317,12 +317,65 @@ export interface ProjectConfig {
    *  server and in the UI but missing from this mirror, which `apps/web` never
    *  caught (the build tsconfig covers `shared`/`cli`/runtime only). */
   autoProposePr?: boolean
-  /** Offer the shipped demos from the status bar. Toggled from the demo chooser;
-   *  workspace-level, so turning it off settles it for the project rather than
-   *  for one browser. Optional for the same reason `autoProposePr` is: an older
-   *  server omits it, and every reader tests `!== false` so absent means on. */
+  /** Offer Getting Started from the status bar. The historical field name is
+   *  retained for config compatibility; runnable fixtures now sit inside the
+   *  guided Getting Started journey. Workspace-level, so turning it off
+   *  settles it for the project rather than one browser. Optional for the same
+   *  reason `autoProposePr` is: an older server omits it, and every reader tests
+   *  `!== false` so absent means on. */
   showDemo?: boolean
   port?: number
+}
+
+export type OnboardingWorkflowId = 'run' | 'flight' | 'coverage' | 'export' | 'author' | 'verify' | 'portify'
+
+export type OnboardingWorkflowAction =
+  | { kind: 'run'; feature: string }
+  | { kind: 'flight'; repoPath: string; description: string }
+  | { kind: 'coverage'; feature: string }
+  | { kind: 'export'; feature: string }
+  | { kind: 'author'; feature: string }
+  | { kind: 'verify'; feature: string }
+  | { kind: 'portify'; feature: string }
+
+export interface OnboardingWorkflow {
+  id: OnboardingWorkflowId
+  group: 'start' | 'more'
+  order: number
+  title: string
+  outcome: string
+  steps: string[]
+  skill: string
+  externalPrompt: string
+  internalAction: OnboardingWorkflowAction | null
+  unavailableReason: string | null
+}
+
+export type GettingStartedWorkflow = 'run' | 'flight'
+export type GettingStartedOwner = 'internal' | 'external'
+export type GettingStartedTarget = { kind: 'run' | 'flight'; id: string }
+
+export interface GettingStartedActiveSession {
+  sessionId: string
+  workflow: GettingStartedWorkflow
+  owner: GettingStartedOwner
+  target: GettingStartedTarget | null
+  startedAt: string
+  updatedAt: string
+}
+
+export interface GettingStartedCompletion {
+  workflow: GettingStartedWorkflow
+  owner: GettingStartedOwner
+  target: GettingStartedTarget
+  status: string
+  startedAt: string
+  endedAt: string
+}
+
+export interface GettingStartedSessionState {
+  active: GettingStartedActiveSession | null
+  completed: Partial<Record<GettingStartedWorkflow, GettingStartedCompletion>>
 }
 
 /** Mirrors the server's `OnboardingSamples` (config/routes/onboarding.ts). */
@@ -333,6 +386,10 @@ export interface OnboardingSamples {
   sampleFlightRepo: string | null
   /** Prefill for that Flight's "what should it test?" field. */
   sampleFlightDescription: string | null
+  /** Ordered, executable workflows for the Getting Started guide. */
+  workflows: OnboardingWorkflow[]
+  /** Shared internal/external demo activity and latest evidence. */
+  session: GettingStartedSessionState
 }
 
 export interface PortChangeResult {

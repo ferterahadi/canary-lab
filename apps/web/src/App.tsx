@@ -30,6 +30,32 @@ import { useInvalidation } from './shared/state/invalidation'
 import { useWorkspaceNavigation } from './shared/state/use-workspace-navigation'
 import { useWorkspaceData } from './shared/state/use-workspace-data'
 import { resolveActivityTarget } from './shared/state/nav-state'
+import * as api from './shared/api/client'
+import type { GettingStartedTarget, OnboardingWorkflowAction } from './shared/api/client'
+import { useEvaluationExports } from './features/evaluation'
+import { isTerminalRunStatus } from './features/runs/components/RunDetailColumn'
+
+const VERIFY_DEMO_BOOT_ATTEMPTS = 120
+const VERIFY_DEMO_BOOT_POLL_MS = 250
+
+async function waitForBootTargets(runId: string): Promise<Record<string, string>> {
+  for (let attempt = 0; attempt < VERIFY_DEMO_BOOT_ATTEMPTS; attempt += 1) {
+    const detail = await api.getRunDetail(runId)
+    const { manifest } = detail
+    if (manifest.status === 'failed' || manifest.status === 'aborted') {
+      throw new Error('The demo app could not start. Open Services for its boot log.')
+    }
+    const services = manifest.services ?? []
+    if (services.length > 0 && services.every((service) => service.status === 'ready' && service.healthUrl)) {
+      return Object.fromEntries(services.map((service) => [
+        service.name,
+        new URL(service.healthUrl!).origin,
+      ]))
+    }
+    await new Promise((resolve) => setTimeout(resolve, VERIFY_DEMO_BOOT_POLL_MS))
+  }
+  throw new Error('The demo app did not become ready in time. Open Services for its boot log.')
+}
 
 export function App() {
   const [specTotalTests, setSpecTotalTests] = useState(0)
@@ -60,6 +86,7 @@ export function App() {
   // Runs come from the WebSocket-backed RunsProvider — no polling here. `runs` is
   // the full index across all features; the per-feature filter happens at render.
   const { runs: allRuns, startRun: startRunAction, startVerification: startVerificationAction } = useRuns()
+  const { startExport } = useEvaluationExports()
   // Cross-feature refetch bus — the WS handler publishes topic invalidations that
   // fetch-owning leaves subscribe to (replaces the drilled `*RefreshKey`s).
   const { invalidate } = useInvalidation()
@@ -94,8 +121,8 @@ export function App() {
   // Evidence-derived stage rails for flightless picker rows — one instance,
   // same ownership rule as featureActivity (the pill stays presentational).
   const derivedStages = useDerivedFeatureStages(features)
-  // The demo launcher — what the workspace can offer of the two samples `init`
-  // shipped, and whether to offer it at all (see shared/state/demo-launcher.ts).
+  // The Getting Started launcher — the server-owned guided catalog `init`
+  // prepared for this workspace, plus whether to offer it at all.
   const demo = useDemoLauncher(allRuns, flights)
   // Set only when the new-flight dialog is opened FROM the demo chooser, so the
   // plain "+ New" button still opens an empty form. Deliberately not routed: a
@@ -264,6 +291,114 @@ export function App() {
     openFlight: (id) => openFlight(id),
     openFlightsView: () => setView('flights'),
   })
+
+  const demoExportRun = useMemo(() => {
+    const feature = demo.workflows.find((workflow) => workflow.id === 'export')?.internalAction
+    if (!feature || feature.kind !== 'export') return null
+    return allRuns.find((run) =>
+      run.feature === feature.feature
+      && run.executionType !== 'boot'
+      && run.executionType !== 'benchmark'
+      && isTerminalRunStatus(run.status)) ?? null
+  }, [allRuns, demo.workflows])
+
+  const handleDemoAction = useCallback(async (action: OnboardingWorkflowAction): Promise<void> => {
+    if (action.kind === 'run') {
+      const { runId } = await api.startRun(action.feature, { gettingStartedSource: 'internal' })
+      setSelectedFeature(action.feature)
+      setDemoOpen(false)
+      navigateToRun(action.feature, runId)
+      return
+    }
+    if (action.kind === 'flight') {
+      const feature = action.repoPath.split(/[\\/]/).filter(Boolean).at(-1) ?? 'flight-app'
+      const manifest = await api.startFlight({
+        feature,
+        repoPaths: [action.repoPath],
+        description: action.description,
+        gettingStartedSource: 'internal',
+      })
+      setDemoOpen(false)
+      openFlight(manifest.flightId)
+      return
+    }
+    if (action.kind === 'coverage') {
+      await api.startCoverageJob(action.feature, 'coverage')
+      setDemoOpen(false)
+      navigateToCoverage(action.feature)
+      return
+    }
+    if (action.kind === 'export') {
+      const run = allRuns.find((entry) =>
+        entry.feature === action.feature
+        && entry.executionType !== 'boot'
+        && entry.executionType !== 'benchmark'
+        && isTerminalRunStatus(entry.status))
+      if (!run) return
+      setDemoOpen(false)
+      navigateToRun(action.feature, run.runId)
+      await startExport(run.runId, 'raw')
+      return
+    }
+    if (action.kind === 'author') {
+      const entry = await api.getFlightEntryOptions(action.feature)
+      if (entry.active && entry.flight) {
+        setDemoOpen(false)
+        openFlight(entry.flight.flightId)
+        return
+      }
+      const manifest = await api.startFlight(entry.flight
+        ? {
+            feature: action.feature,
+            mode: 'jump',
+            fromStage: 'specs-coverage',
+            autopilot: false,
+          }
+        : {
+            feature: action.feature,
+            repoPaths: entry.prefill.repoPaths,
+            description: entry.prefill.description,
+            env: entry.prefill.env,
+            coverageTarget: entry.prefill.coverageTarget,
+            fromStage: 'specs-coverage',
+            autopilot: false,
+          })
+      setDemoOpen(false)
+      openFlight(manifest.flightId)
+      return
+    }
+    if (action.kind === 'verify') {
+      const { runId: bootRunId } = await api.startRun(action.feature, { mode: 'boot' })
+      try {
+        const targetUrls = await waitForBootTargets(bootRunId)
+        const verificationRunId = await startVerificationAction(action.feature, {
+          targetUrls,
+          playwrightEnvsetId: 'local',
+          bootRunId,
+        })
+        setDemoOpen(false)
+        navigateToRun(action.feature, verificationRunId)
+      } catch (error) {
+        await api.stopRun(bootRunId).catch(() => undefined)
+        throw error
+      }
+      return
+    }
+    const { workflowId } = await api.startPortify({ feature: action.feature, agent: 'claude' })
+    setDemoOpen(false)
+    setSelectedFeature(action.feature)
+    setPortifyTarget({ kind: 'revisit', workflowId })
+  }, [allRuns, navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setPortifyTarget, setSelectedFeature, startExport, startVerificationAction])
+
+  const openDemoTarget = useCallback((target: GettingStartedTarget): void => {
+    setDemoOpen(false)
+    if (target.kind === 'flight') {
+      openFlight(target.id)
+      return
+    }
+    const runWorkflow = demo.workflows.find((workflow) => workflow.id === 'run')?.internalAction
+    if (runWorkflow?.kind === 'run') navigateToRun(runWorkflow.feature, target.id)
+  }, [demo.workflows, navigateToRun, openFlight, setDemoOpen])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
@@ -457,29 +592,15 @@ export function App() {
       </div>
       <ToastHost toasts={toasts} onDismiss={dismissToast} />
       <DemoDialog
-        /* Guarded on the samples, not on `showDemo` — see demo-launcher.ts.
-           A deep link to `?dialog=demo` on a workspace whose samples are gone
-           must not open a chooser with nothing to choose. */
-        open={demoOpen && demo.hasSamples}
+        open={demoOpen}
         onClose={() => setDemoOpen(false)}
-        suite={demo.suite}
-        flightRepoAvailable={demo.flightPrefill !== null}
+        workflows={demo.workflows}
+        session={demo.session}
+        actionBlockers={demoExportRun ? {} : { export: 'Complete Run and Heal first.' }}
+        onInternalAction={handleDemoAction}
+        onOpenTarget={openDemoTarget}
         showDemo={demo.showDemo}
         onShowDemoChange={demo.setShowDemo}
-        onRunSuite={() => {
-          if (!demo.suite) return
-          setDemoOpen(false)
-          // Select the suite so the columns follow the run the user is about to
-          // watch, and pass it explicitly — `handleStartRun` closes over the
-          // selection, which this same tick has not applied yet.
-          setSelectedFeature(demo.suite)
-          void handleStartRun(undefined, 'test', demo.suite)
-        }}
-        onStartFlight={() => {
-          setDemoOpen(false)
-          setDemoFlightPrefill(demo.flightPrefill)
-          setFlightStartNew(true)
-        }}
       />
       {(flightStartFor !== null || flightStartNew) && (
         <FlightStartDialog

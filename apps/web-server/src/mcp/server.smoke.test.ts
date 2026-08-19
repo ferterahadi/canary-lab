@@ -335,12 +335,12 @@ describe('MCP HTTP server (smoke)', () => {
       const names = tools.tools.map((t) => t.name).sort()
       expect(names).toEqual(LIFECYCLE_TOOLS)
 
-      // A new scaffold ships its own demonstration (R89): the storefront suite
-      // is there from the start so a first-time user can press Run immediately.
+      // A new scaffold ships the two Getting Started suites: storefront for the
+      // core Run demo and workflow-workbench for the smaller workflow demos.
       const result = await client.callTool({ name: 'list_features', arguments: {} })
       const text = toolText(result)
       const features = decode(text) as Array<{ name: string }>
-      expect(features.map((f) => f.name)).toEqual(['storefront-journey'])
+      expect(features.map((f) => f.name)).toEqual(['storefront-journey', 'workflow-workbench'])
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()
@@ -363,14 +363,15 @@ describe('MCP HTTP server (smoke)', () => {
         features: Array<{ feature: string; portified: boolean; injectability: string }>
         summary: { total: number; portified: number; notPortified: number; concurrencyReady: number; needsPortify: number }
       }
-      // The shipped storefront suite carries no overlay and needs none: all
-      // three of its services read PORT, so the config declares every slot and
-      // the feature boots concurrently as shipped.
-      expect(parsed.features.map((f) => f.feature)).toEqual(['storefront-journey'])
+      // Storefront is concurrency-ready as shipped. The deliberately small
+      // workflow workbench keeps a fixed port so Portify has real work to show.
+      expect(parsed.features.map((f) => f.feature)).toEqual(['storefront-journey', 'workflow-workbench'])
       expect(parsed.features[0]!.portified).toBe(false)
       expect(parsed.features[0]!.injectability).toBe('declared')
+      expect(parsed.features[1]!.portified).toBe(false)
+      expect(parsed.features[1]!.injectability).toBe('none')
       for (const f of parsed.features) expect(typeof f.portified).toBe('boolean')
-      expect(parsed.summary).toEqual({ total: 1, portified: 0, notPortified: 1, concurrencyReady: 1, needsPortify: 0 })
+      expect(parsed.summary).toEqual({ total: 2, portified: 0, notPortified: 2, concurrencyReady: 1, needsPortify: 1 })
     } finally {
       if (client) await client.close().catch(() => undefined)
       await app.close()

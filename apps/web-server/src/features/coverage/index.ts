@@ -70,6 +70,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext, runs: R
   const startVerification = async (
     featureName: string,
     input: ResolveVerificationInput,
+    options?: { cleanupBootRunId: string },
   ): Promise<OrchestratorLike> => {
     const features = loadFeatures(featuresDir)
     const feature = features.find((f) => f.name === featureName)
@@ -137,6 +138,11 @@ export async function register(app: FastifyInstance, ctx: ServerContext, runs: R
         broker.push('playwright', `\n[verification error] ${String(err)}\n`)
         await orch.stop('aborted').catch(() => {})
         registry.delete(orch.runId)
+      })
+      .finally(async () => {
+        if (options?.cleanupBootRunId) {
+          await runStore.abort(options.cleanupBootRunId).catch(() => ({ ok: false as const }))
+        }
       })
     return orch
   }

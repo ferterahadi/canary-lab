@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { OnboardingSamples } from '@/shared/api/client'
+import type { GettingStartedSessionState, OnboardingSamples, OnboardingWorkflow } from '@/shared/api/client'
 import type { RunIndexEntry } from '@/shared/api/types'
 import type { FlightIndexEntry } from '@shared/flights/types'
 import { useInvalidationKey } from './invalidation'
 
-// The demo launcher: what a brand-new workspace should try first.
+// The Getting Started launcher: one guided path plus the specialized workflows
+// and exact fixture actions that still exist in this workspace.
 //
-// `init` lands a demonstration of both halves of the product — a worked suite to
-// run and repair, and a bare repo for a Flight to onboard. Both are offered at
-// once by the demo chooser (`DemoDialog`), because sequencing them hid the Flight
-// half behind a repair the user had to sit through first.
+// The guide remains useful after fixtures are deleted: the server leaves the
+// prompt visible and explains why its Internal action is unavailable. `showDemo`
+// retains its historical config name but controls the whole launcher.
 //
 // Two rules shape this:
 //
@@ -55,56 +55,37 @@ export interface DemoInput {
 }
 
 export interface DemoAvailability {
-  /** At least one shipped sample is still on disk. Guards the DIALOG — a deep
-   *  link to `?dialog=demo` on a workspace whose samples are gone would
-   *  otherwise open a chooser with nothing to choose.
-   *
-   *  Deliberately independent of `showDemo`: the chooser's own checkbox writes
-   *  that setting, so gating the dialog on it would make the dialog vanish out
-   *  from under the user the moment they untick the box. */
+  /** At least one shipped workflow fixture is still executable. */
   hasSamples: boolean
-  /** Render the launcher pill at all. False once both samples are deleted (there
-   *  is nothing left to demo) or once the workspace has switched the demos off. */
+  /** Render the launcher pill at all. The historical `showDemo` setting is the
+   *  user's explicit visibility choice. */
   available: boolean
   /** Attention dot on the pill: the chooser has never been opened. */
   unseen: boolean
-  /** Open the chooser unprompted. Only on a workspace that still has a sample
-   *  AND has never produced a run verdict or a flight — otherwise this is
-   *  somebody's working workspace and a dialog in their face is an interruption. */
+  /** Open the guide unprompted only in a workspace with no run or flight yet. */
   autoOpen: boolean
-}
-
-/** A run of the sample suite that actually reached a verdict — boots and
- *  benchmarks are not evidence that anyone has seen the product work. */
-function sampleRunsOf(runs: RunIndexEntry[], suite: string): RunIndexEntry[] {
-  return runs.filter(
-    (r) =>
-      r.feature === suite &&
-      r.executionType !== 'boot' &&
-      r.executionType !== 'benchmark' &&
-      r.executionType !== 'verify',
-  )
 }
 
 export function deriveDemoAvailability(input: DemoInput): DemoAvailability {
   const { samples, runs, flights, seen, showDemo } = input
-  const hasSamples = Boolean(samples && (samples.sampleSuite || samples.sampleFlightRepo))
-  const available = hasSamples && showDemo === true
+  const hasSamples = Boolean(samples && (
+    samples.workflows?.some((workflow) => workflow.internalAction !== null)
+    || samples.sampleSuite
+    || samples.sampleFlightRepo
+  ))
+  const available = showDemo === true
   if (!available) return { hasSamples, available: false, unseen: false, autoOpen: false }
 
-  const suite = samples?.sampleSuite ?? null
-  const hasRun = suite ? sampleRunsOf(runs, suite).length > 0 : false
-  const fresh = !hasRun && flights.length === 0
+  const fresh = runs.length === 0 && flights.length === 0
   return { hasSamples, available: true, unseen: !seen, autoOpen: !seen && fresh }
 }
 
 export interface DemoLauncher extends DemoAvailability {
+  /** Server-owned sequence, prompts, and actions for this exact workspace. */
+  workflows: OnboardingWorkflow[]
+  session: GettingStartedSessionState
   /** The shipped worked suite, or null once it (or its product repo) is gone. */
   suite: string | null
-  /** Everything the flight demo's launcher needs already filled in, so the tour
-   *  is one click rather than "now find the repo". Null when the sample repo has
-   *  been deleted. */
-  flightPrefill: { repoPaths: string[]; description: string } | null
   /** Record that the chooser has been opened — clears the dot and the auto-open. */
   markSeen: () => void
   /** The workspace's current `showDemo` setting (null while loading) — drives the
@@ -117,15 +98,17 @@ export interface DemoLauncher extends DemoAvailability {
 }
 
 /**
- * Reads the workspace's sample state once per mount. The samples are files on
- * disk that only `init` writes and only a human deletes, so there is nothing to
- * subscribe to — while the run/flight halves of the derivation come from live
- * context data the caller already holds.
+ * Reads the workspace's sample catalog and shared demo session. Workspace
+ * events refresh it quickly; a small fallback poll closes the best-effort push
+ * gap when an external agent starts from another client.
  */
 export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry[]): DemoLauncher {
   const [samples, setSamples] = useState<OnboardingSamples | null>(null)
   const [seen, setSeen] = useState<boolean>(() => readDemoSeen())
   const [showDemo, setShowDemoState] = useState<boolean | null>(null)
+  // Bumped by workspace events, so external-agent starts and terminal evidence
+  // appear while the dialog is open. A gentle poll backs the best-effort push.
+  const onboardingKey = useInvalidationKey('onboarding')
   // Bumped by the `project-config-changed` WorkspaceEvent, so a `showDemo` flip
   // made anywhere — this tab's chooser, another browser, an edit to the file —
   // reaches the pill without a reload.
@@ -137,6 +120,16 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
       .then((s) => { if (alive) setSamples(s) })
       .catch(() => { /* an older server has no such route — the launcher stays silent */ })
     return () => { alive = false }
+  }, [onboardingKey])
+
+  useEffect(() => {
+    // The workspace broadcast is a fast hint, not a guarantee. Poll this tiny
+    // file-backed record so an external start is still discovered if its one
+    // getting-started-changed frame was dropped.
+    const id = window.setInterval(() => {
+      api.getOnboardingSamples().then(setSamples).catch(() => {})
+    }, 5000)
+    return () => window.clearInterval(id)
   }, [])
 
   useEffect(() => {
@@ -165,10 +158,9 @@ export function useDemoLauncher(runs: RunIndexEntry[], flights: FlightIndexEntry
 
   return {
     ...availability,
+    workflows: samples?.workflows ?? [],
+    session: samples?.session ?? { active: null, completed: {} },
     suite: samples?.sampleSuite ?? null,
-    flightPrefill: samples?.sampleFlightRepo
-      ? { repoPaths: [samples.sampleFlightRepo], description: samples.sampleFlightDescription ?? '' }
-      : null,
     markSeen,
     showDemo,
     setShowDemo,

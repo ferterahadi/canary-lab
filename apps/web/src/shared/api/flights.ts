@@ -48,6 +48,8 @@ export interface StartFlightBody {
   /** R79: which CLI conducts the flight's stage agents. Sticky per record —
    *  jump/continue reuse the stored one. Absent = claude. */
   agent?: 'claude' | 'codex'
+  /** Marks one of the four Getting Started demos; ordinary flights omit it. */
+  gettingStartedSource?: 'internal' | 'external'
 }
 
 /** Start / continue / redo / jump a flight (POST /api/flights, non-blocking —

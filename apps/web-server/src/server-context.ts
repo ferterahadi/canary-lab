@@ -14,6 +14,7 @@ import type { VersionState } from './features/version/logic/version-state'
 import type { PaneBroker } from './features/runs/logic/pane-broker'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
 import type { BackupRecord } from './features/runs/logic/runtime/env-switcher/types'
+import type { GettingStartedSessionStore } from './features/config/logic/getting-started-session'
 
 /**
  * The inputs `createServer` takes.
@@ -85,6 +86,7 @@ export interface ServerContext {
   updateStore: UpdateJobStore
   versionState: VersionState
   workspaceEvents: WorkspaceEventBus
+  gettingStarted: GettingStartedSessionStore
   externalHealBroker: ExternalHealBroker
 
   /**

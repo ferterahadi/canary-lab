@@ -265,10 +265,10 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
               <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
                 Onboarding
               </div>
-              {/* The same flag the demo chooser's own footer toggles. Mirrored
-                  here so a workspace that switched the demos off from the dialog
-                  can switch them back on — the pill is the dialog's only entry
-                  point, so without this the choice would be irreversible. */}
+              {/* The same flag the Getting Started footer toggles. Mirrored here
+                  so a workspace that hid the guide can switch it back on — the
+                  pill is the dialog's only entry point, so without this the
+                  choice would be irreversible. */}
               <label className="cl-card-hover mb-1.5 flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5">
                 <input
                   type="checkbox"
@@ -278,9 +278,9 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
                   className="mt-1"
                 />
                 <div className="flex-1">
-                  <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>Show demos in the status bar</div>
+                  <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>Show Getting Started in the status bar</div>
                   <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    Offers the two shipped samples — repairing a broken suite, and onboarding a bare repo — from a Getting started pill. Off once you have seen what you needed.
+                    Shows the four-step starter journey, followed by the specialized workflows.
                   </div>
                 </div>
               </label>

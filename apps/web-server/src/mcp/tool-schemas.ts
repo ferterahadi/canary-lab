@@ -95,6 +95,16 @@ export type McpStartRunOutcome =
   | { kind: 'started'; runId: string }
   | { kind: 'queued'; runId: string; reason: 'resources' | 'repo-collision' }
   | {
+      kind: 'getting-started-busy'
+      active: {
+        sessionId: string
+        workflow: 'run' | 'flight'
+        owner: 'internal' | 'external'
+        target: { kind: 'run' | 'flight'; id: string } | null
+      }
+      message: string
+    }
+  | {
       kind: 'collision'
       conflictingRunId: string
       conflictingFeature: string

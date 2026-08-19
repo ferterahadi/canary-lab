@@ -7,6 +7,7 @@ import { type StageAdapters } from '../logic/conductor'
 import { PlanFeaturesStore } from '../logic/plan-features'
 import type { FlightAgentSpawner } from '../logic/stages/context'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import type { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface FlightRouteDeps {
   featuresDir: string
@@ -24,4 +25,5 @@ export interface FlightRouteDeps {
   /** Test seam for the plan-features agent spawn. */
   planAgent?: FlightAgentSpawner
   workspaceEvents?: WorkspaceEventPublisher
+  gettingStarted?: GettingStartedSessionStore
 }

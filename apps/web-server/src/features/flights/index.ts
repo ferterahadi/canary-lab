@@ -61,6 +61,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     flightStore,
     planStore,
     workspaceEvents,
+    gettingStarted: ctx.gettingStarted,
     adapters: buildFlightStageAdapters({
       featuresDir,
       logsDir,

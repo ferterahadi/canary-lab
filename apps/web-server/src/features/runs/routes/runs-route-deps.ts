@@ -6,6 +6,7 @@ import type { ExecutionType } from '../../../../../../shared/verification'
 import type { ExternalHealBroker } from '../logic/heal/external-heal-broker'
 import { type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { ExternalHealAgentRequest } from './runs-route-support'
+import type { GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
@@ -38,6 +39,7 @@ export interface RunsRouteDeps {
   isWorktreeOwnerActive?(kind: 'run' | 'benchmark', id: string): boolean
   broker?: Pick<ExternalHealBroker, 'claim'>
   workspaceEvents?: WorkspaceEventPublisher
+  gettingStarted?: GettingStartedSessionStore
   restartHeal?(runId: string, text: string): Promise<RestartHealResult>
   restartRun?(runId: string): Promise<RestartRunResult>
 }

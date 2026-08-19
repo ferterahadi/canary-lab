@@ -57,9 +57,9 @@ export interface NavState {
   /** The external authoring draft whose dialog is open (routed ?dialog=draft),
    *  by draft id. */
   draftFor: string | null
-  /** The demo chooser (routed ?dialog=demo) — which shipped sample to try. Opens
-   *  itself once on a workspace that has never run anything; afterwards it is
-   *  reached from the status bar's Getting-started pill. */
+  /** The Getting Started guide (routed ?dialog=demo). Opens itself once on a
+   *  workspace that has never run anything; afterwards it is reached from the
+   *  status bar. The route key stays `demo` for existing deep links. */
   demoOpen: boolean
   /** The pre-flight a pill row reopened the new-flight dialog onto. */
   resumePlanTaskId: string | null

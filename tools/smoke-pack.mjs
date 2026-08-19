@@ -118,6 +118,22 @@ const scaffoldPaths = [
   'features/storefront-journey/docs/storefront-journey-prd.md',
   'features/storefront-journey/docs/_prd-summary.json',
   'features/storefront-journey/docs/_prd-summary.md',
+  // The focused workbench gives Author/Coverage/Verify/Portify real, prepared
+  // material without disturbing the repair demo's ten-defect contract chain.
+  'workflow-app/package.json',
+  'workflow-app/README.md',
+  'workflow-app/REQUIREMENTS.md',
+  'workflow-app/server.ts',
+  'features/workflow-workbench/feature.config.cjs',
+  'features/workflow-workbench/playwright.config.ts',
+  'features/workflow-workbench/verification.configs.json',
+  'features/workflow-workbench/e2e/workflow.spec.ts',
+  'features/workflow-workbench/envsets/envsets.config.json',
+  'features/workflow-workbench/envsets/local/workflow-workbench.env',
+  'features/workflow-workbench/envsets/production/workflow-workbench.env',
+  'features/workflow-workbench/docs/workflow-workbench-prd.md',
+  'features/workflow-workbench/docs/_prd-summary.json',
+  'features/workflow-workbench/docs/_prd-summary.md',
   // The Flight demo's target: un-onboarded on purpose, so a Flight has a repo
   // to conduct from Repo scan through Evaluation. No suite ships for it.
   'flight-app/package.json',

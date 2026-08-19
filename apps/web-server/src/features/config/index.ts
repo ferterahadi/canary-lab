@@ -109,5 +109,5 @@ export async function register(app: FastifyInstance, ctx: ServerContext) {
     onPortChange: opts.onPortChange,
     workspaceEvents,
   })
-  await app.register(onboardingRoutes, { projectRoot, featuresDir })
+  await app.register(onboardingRoutes, { projectRoot, featuresDir, sessionStore: ctx.gettingStarted })
 }

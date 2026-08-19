@@ -11,6 +11,10 @@ import {
   SAMPLE_FLIGHT_REPO_DIR,
   SAMPLE_SUITE,
   SAMPLE_SUITE_REPO_DIR,
+  WORKBENCH_REPO_DIR,
+  WORKBENCH_SUITE,
+  isGettingStartedFlightStart,
+  isGettingStartedRunFeature,
 } from './onboarding'
 
 let projectRoot: string
@@ -37,22 +41,52 @@ afterEach(() => {
 
 describe('readOnboardingSamples', () => {
   it('reports nothing in a workspace with no samples', () => {
-    expect(readOnboardingSamples(projectRoot, featuresDir)).toEqual({
+    const samples = readOnboardingSamples(projectRoot, featuresDir)
+    expect(samples).toMatchObject({
       sampleSuite: null,
       sampleFlightRepo: null,
       sampleFlightDescription: null,
     })
+    expect(samples.workflows).toHaveLength(7)
+    expect(samples.session).toEqual({ active: null, completed: {} })
+    expect(samples.workflows.every((workflow) => workflow.internalAction === null)).toBe(true)
   })
 
   it('reports both samples a fresh scaffold leaves behind', () => {
     fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
     fs.mkdirSync(path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR))
     writeSuite(SAMPLE_SUITE)
-    expect(readOnboardingSamples(projectRoot, featuresDir)).toEqual({
+    expect(readOnboardingSamples(projectRoot, featuresDir)).toMatchObject({
       sampleSuite: SAMPLE_SUITE,
       sampleFlightRepo: path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR),
       sampleFlightDescription: SAMPLE_FLIGHT_DESCRIPTION,
     })
+  })
+
+  it('serves one ordered catalog with exact prompts and prepared actions', () => {
+    fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
+    fs.mkdirSync(path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR))
+    fs.mkdirSync(path.join(projectRoot, WORKBENCH_REPO_DIR))
+    writeSuite(SAMPLE_SUITE)
+    writeSuite(WORKBENCH_SUITE)
+
+    const { workflows } = readOnboardingSamples(projectRoot, featuresDir)
+    expect(workflows.map(({ id, group, order }) => ({ id, group, order }))).toEqual([
+      { id: 'run', group: 'start', order: 1 },
+      { id: 'flight', group: 'start', order: 2 },
+      { id: 'coverage', group: 'more', order: 1 },
+      { id: 'author', group: 'more', order: 2 },
+      { id: 'portify', group: 'more', order: 3 },
+      { id: 'verify', group: 'more', order: 4 },
+      { id: 'export', group: 'more', order: 5 },
+    ])
+    expect(workflows.every((workflow) => workflow.internalAction !== null)).toBe(true)
+    expect(workflows.every((workflow) => workflow.skill.startsWith('/canary-lab'))).toBe(true)
+    expect(workflows.every((workflow) => workflow.externalPrompt.startsWith(workflow.skill))).toBe(true)
+    expect(workflows.some((workflow) => workflow.externalPrompt.includes('$canary-lab'))).toBe(false)
+    expect(workflows.some((workflow) => workflow.externalPrompt.includes('<feature>'))).toBe(false)
+    expect(workflows.find((workflow) => workflow.id === 'flight')?.externalPrompt)
+      .toBe('/canary-lab flight-app')
   })
 
   // The samples are explicitly disposable. Nothing is remembered, so deleting
@@ -106,6 +140,20 @@ describe('readOnboardingSamples', () => {
   })
 })
 
+describe('external demo recognition', () => {
+  it('recognizes the shipped run names without tagging ordinary features', () => {
+    expect(isGettingStartedRunFeature(SAMPLE_SUITE)).toBe(true)
+    expect(isGettingStartedRunFeature(LEGACY_SAMPLE_SUITES[0])).toBe(true)
+    expect(isGettingStartedRunFeature('checkout')).toBe(false)
+  })
+
+  it('recognizes Full Flight by its short feature or resolved repo path', () => {
+    expect(isGettingStartedFlightStart({ feature: 'flight-app' })).toBe(true)
+    expect(isGettingStartedFlightStart({ feature: 'lending', repoPaths: ['/workspace/flight-app'] })).toBe(true)
+    expect(isGettingStartedFlightStart({ feature: 'checkout', repoPaths: ['/workspace/shop'] })).toBe(false)
+  })
+})
+
 // The route is a one-line wrapper, but an untested one is still a place the
 // wiring can be wrong — a mistyped path or the deps read in the wrong order
 // serves 404 or the wrong workspace's samples, and every case above would still
@@ -118,14 +166,14 @@ describe('GET /api/onboarding', () => {
     try {
       const before = await app.inject({ method: 'GET', url: '/api/onboarding' })
       expect(before.statusCode).toBe(200)
-      expect(before.json()).toEqual({ sampleSuite: null, sampleFlightRepo: null, sampleFlightDescription: null })
+      expect(before.json()).toMatchObject({ sampleSuite: null, sampleFlightRepo: null, sampleFlightDescription: null })
 
       fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
       fs.mkdirSync(path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR))
       writeSuite(SAMPLE_SUITE)
 
       const after = await app.inject({ method: 'GET', url: '/api/onboarding' })
-      expect(after.json()).toEqual({
+      expect(after.json()).toMatchObject({
         sampleSuite: SAMPLE_SUITE,
         sampleFlightRepo: path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR),
         sampleFlightDescription: SAMPLE_FLIGHT_DESCRIPTION,

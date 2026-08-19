@@ -54,6 +54,7 @@ async function createMcpHarness(opts: {
   startRun?: Parameters<typeof registerMcpRoutes>[1]['startRun']
   restartExternalRun?: Parameters<typeof registerMcpRoutes>[1]['restartExternalRun']
   startVerification?: Parameters<typeof registerMcpRoutes>[1]['startVerification']
+  flightsRequest?: Parameters<typeof registerMcpRoutes>[1]['flightsRequest']
 }) {
   const app = Fastify()
   const runStore = new RunStore(opts.logsDir, createRegistry())
@@ -71,6 +72,7 @@ async function createMcpHarness(opts: {
     startRun: opts.startRun ?? (async () => ({ kind: 'started', runId: 'new-run' })),
     restartExternalRun: opts.restartExternalRun,
     startVerification: opts.startVerification,
+    flightsRequest: opts.flightsRequest,
   })
   return { app, runStore }
 }
@@ -93,6 +95,77 @@ describe('MCP HTTP server (smoke)', () => {
   afterAll(() => {
     if (prevClaimClients === undefined) delete process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS
     else process.env.CANARY_LAB_HEAL_CLAIM_BLOCKED_CLIENTS = prevClaimClients
+  })
+
+  it('preserves the typed Getting Started owner when start_run is blocked', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-demo-busy-')))
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir: path.join(projectRoot, 'features'),
+      startRun: async () => ({
+        kind: 'getting-started-busy',
+        active: {
+          sessionId: 'gs-flight', workflow: 'flight', owner: 'internal',
+          target: { kind: 'flight', id: 'fl-live' },
+        },
+        message: 'Full Flight is already running.',
+      }),
+    })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address)
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: { feature: 'storefront-journey', claim_heal: true, session_id: 'external' },
+      })
+      expect(JSON.parse(toolText(result))).toMatchObject({
+        type: 'getting_started_busy',
+        active: { sessionId: 'gs-flight', owner: 'internal', target: { id: 'fl-live' } },
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('preserves the typed Getting Started owner when start_flight is blocked', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-flight-demo-busy-')))
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir: path.join(projectRoot, 'features'),
+      flightsRequest: async () => ({
+        statusCode: 409,
+        body: {
+          type: 'getting_started_busy',
+          error: 'Run and Heal is already running.',
+          active: {
+            sessionId: 'gs-run', workflow: 'run', owner: 'external',
+            target: { kind: 'run', id: 'run-live' },
+          },
+        },
+      }),
+    })
+    let client: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address)
+      const result = await client.callTool({
+        name: 'start_flight',
+        arguments: { repoPaths: [path.join(projectRoot, 'flight-app')], description: 'lending' },
+      })
+      expect(JSON.parse(toolText(result))).toMatchObject({
+        type: 'getting_started_busy',
+        active: { sessionId: 'gs-run', owner: 'external', target: { id: 'run-live' } },
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
   })
 
   it('start_run asks for a collision choice when a run is already using the same app', async () => {

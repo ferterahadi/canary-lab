@@ -9,6 +9,7 @@ import type { FlightRouteContext } from './flight-route-context'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
 import { expandHome } from './flight-route-support'
+import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
 
 export async function registerFlightStartRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -38,6 +39,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
           mode?: string
           /** Stage to start at (jump / fresh stage entry), prereq-validated. */
           fromStage?: string
+          gettingStartedSource?: GettingStartedOwner
         }
       | undefined
   }>('/api/flights', async (req, reply) => {
@@ -107,6 +109,17 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
       ...(body.stageProducer === 'internal' || body.stageProducer === 'external' ? { stageProducer: body.stageProducer } : {}),
     }
 
+    let gettingStartedSession: string | null = null
+    if (body.gettingStartedSource && deps.gettingStarted) {
+      try {
+        gettingStartedSession = deps.gettingStarted.claim('flight', body.gettingStartedSource).sessionId
+      } catch (err) {
+        if (!(err instanceof GettingStartedBusyError)) throw err
+        reply.code(409)
+        return { type: err.type, error: err.message, active: err.active }
+      }
+    }
+
     try {
       const { manifest } = startFlight(
         {
@@ -119,9 +132,13 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
         },
         conductorDeps,
       )
+      if (gettingStartedSession) {
+        deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })
+      }
       reply.code(201)
       return manifest
     } catch (err) {
+      if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
       if (err instanceof FlightConflictError) {
         reply.code(409)
         return { error: err.message, type: 'flight_conflict', existingFlightId: err.existingFlightId }

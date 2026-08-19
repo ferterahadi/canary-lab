@@ -185,6 +185,14 @@ describe('main (init-project orchestration)', () => {
     expect(fs.existsSync(path.join(target, 'demo-app', 'catalog-service', 'server.ts'))).toBe(true)
     expect(fs.existsSync(path.join(target, 'demo-app', 'inventory-service', 'server.ts'))).toBe(true)
     expect(fs.existsSync(path.join(target, 'demo-app', 'checkout-service', 'server.ts'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'workflow-app', 'server.ts'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'features', 'workflow-workbench', 'feature.config.cjs'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'features', 'workflow-workbench', 'e2e', 'workflow.spec.ts'))).toBe(true)
+    expect(fs.existsSync(path.join(target, 'features', 'workflow-workbench', 'docs', '_prd-summary.json'))).toBe(true)
+    const verification = JSON.parse(
+      fs.readFileSync(path.join(target, 'features', 'workflow-workbench', 'verification.configs.json'), 'utf-8'),
+    )
+    expect(verification.configs[0]).toMatchObject({ playwrightEnvsetId: 'production', name: 'Demo deployment' })
     expect(fs.existsSync(path.join(target, 'features', 'README.md'))).toBe(true)
     // Suite setup's figures come from a run, and a fresh scaffold has none — so
     // init seeds the recorded boot. This is also what keeps `npm run demo` and a

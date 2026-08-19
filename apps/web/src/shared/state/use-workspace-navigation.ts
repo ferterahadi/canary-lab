@@ -47,7 +47,7 @@ export interface WorkspaceNavigation {
   flightStartFresh: boolean
   flightStartNew: boolean
   draftFor: string | null
-  /** Whether the demo chooser is open (routed ?dialog=demo). */
+  /** Whether the Getting Started guide is open (routed ?dialog=demo). */
   demoOpen: boolean
   resumePlanTaskId: string | null
   portifyTarget: PortifyTarget | null
@@ -76,7 +76,7 @@ export interface WorkspaceNavigation {
   setFlightStartNew: (open: boolean) => void
   /** Open (id) / close (null) the external authoring-draft dialog. */
   setDraftFor: (id: string | null) => void
-  /** Open / close the demo chooser. */
+  /** Open / close the Getting Started guide. */
   setDemoOpen: (open: boolean) => void
   setResumePlanTaskId: (id: string | null) => void
   setPortifyTarget: (t: PortifyTarget | null) => void

@@ -68,8 +68,8 @@ entry. The three places that must agree for the web aliases are
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Scaffolded workspace files, including the product's own demonstration. `demo-app/` is a three-service storefront (catalog, inventory, checkout) with an ordered requirements document, and `features/storefront-journey/` is the suite that exercises it. The suite ships **fully onboarded** — a port slot per service, the collected requirements doc plus its generated `docs/_prd-summary.*`, and `@req-*`-tagged journeys the coverage ledger scores at 100% — so the only thing left undone is the run. The services carry ten contract defects between them; the seven journeys (five ordered pairs, two sound) expose them a batch at a time — `healOnFailureThreshold: 4` stops a run once four journeys have failed — so a successful Run records repair cycles and changes in all three service directories. `flight-app/` is the opposite sample: one service that hardcodes its port, shipped with no suite at all, so a Flight has real work at every stage. |
-| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, `gen-storefront-prd-summary`, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the two repo gates `check-feature-boundaries` and `check-conventions`. `tools/fixtures/` holds contributor-only fixtures; the storefront suite itself now ships in the scaffold at `templates/project/features/storefront-journey/`. |
+| `templates/project/` | Scaffolded workspace files, including the product's demonstrations. `demo-app/` is a three-service storefront (catalog, inventory, checkout) with an ordered requirements document, and `features/storefront-journey/` is the fully onboarded suite that exercises it. Its ten contract defects make Run and Heal produce real cross-service repair evidence. `flight-app/` is the opposite sample: one service that hardcodes its port, shipped with no suite, so a Flight has real work at every stage. `workflow-app/` plus `features/workflow-workbench/` is the focused workbench for the remaining workflows: one requirement is intentionally untested for Coverage and Author, its service port is intentionally fixed for Portify, and a production envset makes Verify ready once the user supplies a deployed URL. |
+| `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, the demo PRD-summary generators, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the repo gates. `tools/fixtures/` holds contributor-only fixtures; the storefront and workflow-workbench suites ship in the scaffold under `templates/project/features/`. |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
 feature consumes `/api/cleanup/*`, but those routes stay with the features that own
@@ -308,6 +308,27 @@ Runs beyond a CPU/free-RAM heuristic are parked as `queued` (status `queued`, wi
 `apps/web-server/src/features/runs/logic/runtime/run-scheduler.ts` (decision logic in `admission.ts`);
 it's wired into the `startRun` factory in `server.ts` and promotes on the RunStore
 `finalized` event.
+
+### Getting Started ownership
+
+The two core Getting Started workflows add a narrower workspace-level guard above
+normal run/Flight admission. `GettingStartedSessionStore` persists the current
+owner in `<logs>/getting-started/session.json`; both REST starts and MCP starts
+claim it before creating work, then attach the real run or Flight ID. A competing
+internal or external start receives the same typed `getting_started_busy` 409.
+Run/Flight store events reconcile the guard from persisted evidence, so closing
+the dialog never stops work and terminal evidence releases the owner. A failed
+Run gets a short settle grace because auto-heal records `failed` immediately
+before changing the same run to `healing`; releasing in that transition would
+allow two demos to overlap. Completed run and Flight targets remain in the file
+as navigation references.
+
+This guard does not serialize ordinary user runs. The smaller workflow demos use
+their existing subsystem locks. The Verify demo composes two existing run records:
+a held boot session supplies the allocated local URL to an observational verify
+run, and that verify run owns server-side cleanup of the boot session when it
+settles. The verification route permits that one named boot record beside the
+verify run while continuing to reject unrelated active executions.
 
 ### Multi-service limits (what concurrency can't auto-fix)
 

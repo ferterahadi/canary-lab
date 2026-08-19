@@ -210,7 +210,15 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         ...(from_stage ? { fromStage: from_stage } : {}),
       },
     })
-    const startedBody = started.body as { error?: string; type?: string; options?: string[]; existingFlightId?: string; existingStatus?: string }
+    const startedBody = started.body as { error?: string; type?: string; options?: string[]; existingFlightId?: string; existingStatus?: string; active?: unknown }
+    if (started.statusCode === 409 && startedBody.type === 'getting_started_busy') {
+      return asJsonResult({
+        type: 'getting_started_busy',
+        active: startedBody.active,
+        message: startedBody.error,
+        next: 'Follow the active demo in its current owner; do not start another run or Flight.',
+      })
+    }
     if (started.statusCode === 409 && startedBody.type === 'flight_exists_requires_choice') {
       return asJsonResult({
         type: 'flight_exists_requires_choice',

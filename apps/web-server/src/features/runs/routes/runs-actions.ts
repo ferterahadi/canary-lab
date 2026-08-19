@@ -10,6 +10,7 @@ import { isHealClaimAllowed } from '../logic/heal/heal-claim-policy'
 import { type RepoBranchMismatch } from '../../../shared/git-repo'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
+import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
@@ -26,6 +27,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       // Playwright. Stop the run (POST /api/runs/:runId/abort) to tear down +
       // revert env. Defaults to a normal test run.
       mode?: 'test' | 'boot'
+      gettingStartedSource?: GettingStartedOwner
     }
   }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
@@ -63,9 +65,22 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     // its own.
     const claimSuppressed = !!healAgent && !('error' in healAgent) && !isHealClaimAllowed(healAgent.clientKind)
     const externalRunReq = healAgent ? { ...healAgent, claimable: !claimSuppressed } : undefined
+    let gettingStartedSession: string | null = null
+    if (req.body?.gettingStartedSource && deps.gettingStarted) {
+      try {
+        gettingStartedSession = deps.gettingStarted.claim('run', req.body.gettingStartedSource).sessionId
+      } catch (err) {
+        if (!(err instanceof GettingStartedBusyError)) throw err
+        reply.code(409)
+        return { type: err.type, error: err.message, active: err.active }
+      }
+    }
     if (healAgent) {
       const active = findActiveRunForFeature(deps.store, feature, env)
       if (active) {
+        if (gettingStartedSession) {
+          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: active.manifest.runId })
+        }
         const claim = deps.broker?.claim(active.manifest.runId, {
           sessionId: healAgent.sessionId,
           clientKind: healAgent.clientKind,
@@ -102,6 +117,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     try {
       const outcome = await deps.startRun(feature, env, externalRunReq, isolation, executionType)
       if (outcome.kind === 'collision') {
+        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         // Same-repo collision and the caller didn't choose how to handle it.
         // Nothing started — surface the choice so the UI / MCP client can ask.
         reply.code(409)
@@ -115,12 +131,18 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
         }
       }
       if (outcome.kind === 'queued') {
+        if (gettingStartedSession) {
+          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: outcome.runId })
+        }
         reply.code(202)
         return { runId: outcome.runId, status: 'queued', queueReason: outcome.reason }
       }
       // started — the factory registers the orchestrator; set here too so the
       // registration is guaranteed regardless of factory implementation.
       deps.store.registry.set(outcome.orch.runId, outcome.orch)
+      if (gettingStartedSession) {
+        deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: outcome.orch.runId })
+      }
       reply.code(201)
       return {
         runId: outcome.orch.runId,
@@ -133,6 +155,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
           : {}),
       }
     } catch (err) {
+      if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
       const code = typeof (err as { statusCode?: unknown }).statusCode === 'number'
         ? (err as { statusCode: number }).statusCode
         : 500

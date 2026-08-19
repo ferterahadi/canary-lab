@@ -1,176 +1,341 @@
-import { ChevronRightIcon } from '@/shared/ui/atoms'
-import { Modal } from '@/shared/ui/Overlays'
+import { useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
+import type {
+  GettingStartedSessionState,
+  GettingStartedTarget,
+  OnboardingWorkflow,
+  OnboardingWorkflowAction,
+  OnboardingWorkflowId,
+} from '@/shared/api/client'
+import { CopyField } from '@/shared/ui/CopyField'
+import { Modal, StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 
-// The demo chooser — which of the two shipped samples to try.
-//
-// It replaces a pair of inline cards that appeared in sequence: press Run on the
-// worked suite, and only once that went green, an offer to fly the bare repo.
-// Sequencing them meant the Flight half — the product's headline command — was
-// invisible until someone had sat through a ten-cycle repair. Both are offered
-// here at once.
-//
-// Two rules the copy follows:
-//
-//   • RECOMMEND, don't fork. Two equal-weight options is the same failure as two
-//     equal-weight cards: the reader has to work out which one to spend their
-//     time on. The repair demo is marked, and the cost of picking wrong is
-//     lopsided — someone who starts the 25-minute flight first watches a repo
-//     scan before anything visible happens.
-//   • SAY WHAT TO WATCH FOR. The agent reporting a fix that the harness then
-//     rejects is the whole product; a viewer who hasn't been told that reads ten
-//     cycles as churn. That sentence is why the repair option earns the accent.
-
-interface DemoOption {
-  title: string
-  /** Rough wall-clock, so the choice is honest about what it costs. */
-  duration: string
-  body: string
-  /** Where to watch — the row this demo acts on, named so a first-time user
-   *  knows which line in the Suites column to keep an eye on. Mono, because it
-   *  is an identifier they will match against the column by eye. */
-  target: { label: string; value: string }
-  onStart: () => void
-  /** The marked option — carries the view's single accent (the wash + badge,
-   *  never a filled button on top of them). */
-  recommended?: boolean
-  testId: string
+const MORE_ACTION_LABEL: Record<Exclude<OnboardingWorkflowAction['kind'], 'run' | 'flight'>, string> = {
+  coverage: 'Measure coverage',
+  author: 'Author test',
+  portify: 'Enable parallel runs',
+  verify: 'Start app and verify',
+  export: 'Export evaluation',
 }
 
-// The whole card is the action, copying the run-start branch-mismatch dialog's
-// `.cl-branch-option` — the app's existing "pick one of these, this one is
-// recommended" surface. Reusing it fixes two things a card-with-a-button-inside
-// had: the secondary option's full-width outlined button read as disabled, and
-// the recommended option stacked three accents (border + label + filled button)
-// against the one-accent rule.
-function OptionCard({ option }: { option: DemoOption }) {
+type FeedbackTone = 'ready' | 'running' | 'done' | 'blocked'
+
+/** What the picked workflow offers right now. Both groups resolve into this
+ *  one shape so the detail pane renders a single thing rather than branching
+ *  on which list the workflow came from. */
+interface Resolved {
+  actionLabel: string
+  actionDisabled: boolean
+  copyDisabled: boolean
+  onAction: () => void
+  feedback: { tone: FeedbackTone; text: string }
+}
+
+function targetLabel(target: GettingStartedTarget): string {
+  return target.kind === 'flight' ? 'Flight' : 'run'
+}
+
+function toneColor(tone: FeedbackTone): string {
+  if (tone === 'running') return 'var(--running)'
+  if (tone === 'done') return 'var(--success)'
+  if (tone === 'blocked') return 'var(--warning)'
+  return 'var(--text-muted)'
+}
+
+/** The rail's dot: state stays visible on a workflow you aren't reading, so a
+ *  run started from here is still legible while you look at another one. */
+function railDot(tone: FeedbackTone): StatusDotState {
+  if (tone === 'running') return 'running'
+  if (tone === 'done') return 'success'
+  if (tone === 'blocked') return 'warning'
+  return 'idle'
+}
+
+function Feedback({ tone, text }: { tone: FeedbackTone; text: string }) {
+  const color = toneColor(tone)
+  if (text === '') return null
+  return (
+    <div className="flex h-9 flex-col justify-center" role="status" style={{ color }}>
+      <div className="flex items-start gap-1.5 text-[10.5px] leading-snug">
+        <span className="mt-[3px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
+        <span className="line-clamp-2">{text}</span>
+      </div>
+    </div>
+  )
+}
+
+function resolveCore(workflow: OnboardingWorkflow, session: GettingStartedSessionState, launching: boolean, launchError: string | null, onLaunch: () => void, onOpenTarget: (target: GettingStartedTarget) => void): Resolved {
+  const active = session.active
+  const isActive = active?.workflow === workflow.id
+  const completion = workflow.id === 'run' || workflow.id === 'flight'
+    ? session.completed[workflow.id]
+    : undefined
+  const internalTarget = isActive && active?.owner === 'internal' ? active.target : null
+  const referenceTarget = internalTarget ?? completion?.target ?? null
+  const unavailable = workflow.unavailableReason !== null || workflow.internalAction === null
+  const blocked = active !== null && !isActive
+
+  let actionLabel = 'Run in Canary Lab'
+  if (launching) actionLabel = 'Starting…'
+  else if (internalTarget) actionLabel = `Open ${targetLabel(internalTarget)}`
+  else if (isActive && active.owner === 'external') actionLabel = 'Running in your agent'
+  else if (isActive) actionLabel = 'Starting…'
+  else if (referenceTarget) actionLabel = `Open last ${targetLabel(referenceTarget)}`
+
+  let feedback: { tone: FeedbackTone; text: string } = { tone: 'ready', text: workflow.unavailableReason ?? '' }
+  if (launchError) feedback = { tone: 'blocked', text: launchError }
+  else if (blocked) feedback = {
+    tone: 'blocked',
+    text: `${active.workflow === 'flight' ? 'Full Flight' : 'Run and Heal'} is running. Try this when it finishes.`,
+  }
+  else if (isActive && active.owner === 'external') feedback = {
+    tone: 'running',
+    text: 'Running in your agent · Follow progress in your Claude or Codex session.',
+  }
+  else if (isActive) feedback = {
+    tone: 'running',
+    text: `Running · Continue in the ${active.target ? targetLabel(active.target) : 'progress'} page.`,
+  }
+  else if (completion) feedback = { tone: 'done', text: `Completed · Last result: ${completion.status}.` }
+
+  return {
+    actionLabel,
+    actionDisabled: unavailable || blocked || launching || (isActive && internalTarget === null),
+    copyDisabled: unavailable || active !== null || launching,
+    onAction: () => referenceTarget && !isActive
+      ? onOpenTarget(referenceTarget)
+      : internalTarget ? onOpenTarget(internalTarget) : onLaunch(),
+    feedback,
+  }
+}
+
+function resolveMore(workflow: OnboardingWorkflow, session: GettingStartedSessionState, blocker: string | undefined, launching: boolean, launchError: string | null, onLaunch: () => void): Resolved {
+  const blocked = session.active !== null
+  const unavailableReason = workflow.unavailableReason ?? blocker ?? null
+  const kind = workflow.internalAction?.kind
+  const actionLabel = kind && kind !== 'run' && kind !== 'flight' ? MORE_ACTION_LABEL[kind] : 'Run in Canary Lab'
+  const feedback: { tone: FeedbackTone; text: string } = launchError
+    ? { tone: 'blocked', text: launchError }
+    : blocked
+      ? { tone: 'blocked', text: 'A demo is running. Try this when it finishes.' }
+      : { tone: 'ready', text: unavailableReason ?? '' }
+  return {
+    actionLabel: launching ? 'Starting…' : actionLabel,
+    actionDisabled: blocked || launching || unavailableReason !== null || !workflow.internalAction,
+    copyDisabled: blocked || launching || workflow.unavailableReason !== null,
+    onAction: onLaunch,
+    feedback,
+  }
+}
+
+function RailGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="pb-2">
+      <div className="cl-rubric px-4 pb-1.5">{label}</div>
+      {children}
+    </div>
+  )
+}
+
+/** A workflow's persistent row. Selection is the app's selected-grey, never an
+ *  accent — every row here is clickable, so accent would say nothing. */
+function RailRow({ workflow, selected, tone, onSelect }: {
+  workflow: OnboardingWorkflow
+  selected: boolean
+  tone: FeedbackTone
+  onSelect: () => void
+}) {
   return (
     <button
       type="button"
-      data-testid={option.testId}
-      onClick={option.onStart}
-      className={`cl-branch-option ${option.recommended ? 'cl-branch-option-rec' : ''} flex w-full items-start gap-3 rounded px-3 py-2.5 text-left`}
+      data-testid={`getting-started-workflow-${workflow.id}`}
+      aria-current={selected}
+      onClick={onSelect}
+      className="cl-hover-row flex w-full cursor-pointer items-center gap-2 px-4 py-1.5 text-left text-[11.5px]"
+      style={{
+        background: selected ? 'var(--bg-selected)' : 'transparent',
+        color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
+      }}
     >
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>
-            {option.title}
-          </span>
-          {option.recommended && <span className="cl-badge-accent">Recommended</span>}
-          {/* Mono, right-aligned: the cost is the fact the choice turns on, so it
-              reads as data rather than as more prose. */}
-          <span
-            className="ml-auto shrink-0 text-[11px]"
-            style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}
-          >
-            {option.duration}
-          </span>
-        </div>
-        {/* Both bodies are `--text-secondary`: this is supporting copy, and
-            `--text-muted` is for metadata. The recommendation is carried by the
-            accent wash and the badge — fading the other option's prose would
-            make a real choice look half-disabled. */}
-        <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-          {option.body}
-        </p>
-        <div className="mt-2 flex items-baseline gap-1.5 text-[11px]">
-          <span style={{ color: 'var(--text-muted)' }}>{option.target.label}</span>
-          <span style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-            {option.target.value}
-          </span>
-        </div>
-      </div>
-      <ChevronRightIcon />
+      <span className="min-w-0 flex-1 truncate">{workflow.title}</span>
+      <span className="flex h-2 w-2 shrink-0 items-center justify-center">
+        {tone !== 'ready' && <StatusDot state={railDot(tone)} />}
+      </span>
     </button>
   )
 }
 
-export function DemoDialog({
-  open,
-  onClose,
-  suite,
-  flightRepoAvailable,
-  onRunSuite,
-  onStartFlight,
-  showDemo,
-  onShowDemoChange,
-}: {
+function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved: Resolved }) {
+  return (
+    <div data-testid="getting-started-detail" className="flex min-w-0 flex-col gap-3 px-4 py-3.5">
+      <div className="min-w-0">
+        <h3 className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>{workflow.title}</h3>
+        <p className="mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{workflow.outcome}</p>
+        {/* Ordered steps as a chevron chain — these are a sequence, so arrows
+            say more than the bordered boxes did. Mono numerals keep the index
+            reading as position rather than as prose. */}
+        <ol className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
+          {workflow.steps.map((step, index) => (
+            <li key={step} className="flex items-center gap-1.5">
+              {index > 0 && <span aria-hidden style={{ color: 'var(--border-strong)' }}>›</span>}
+              <span className="font-mono tabular-nums" style={{ color: 'var(--text-muted)' }}>{index + 1}</span>
+              <span style={{ color: 'var(--text-secondary)' }}>{step}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {/* Two ways to run the SAME workflow, as two rows of one frame. A button
+          stacked over a command field read as step one then step two — the
+          numbered sequence above them primes exactly that. Side-by-side cards
+          said "either" but sized themselves to their contents, so a button box
+          sat next to a much wider command box. Full-width rows keep the pair
+          the same size and let the label column carry the difference. */}
+      <div>
+        <div className="cl-rubric mb-2">Two ways to run it</div>
+        <div
+          className="overflow-hidden rounded-lg border"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)', boxShadow: 'var(--shadow-panel)' }}
+        >
+          <div className="flex items-center gap-3 border-b px-3 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
+            <div className="w-[150px] shrink-0">
+              <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>In Canary Lab</div>
+              <p className="mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>Runs in this workspace.</p>
+            </div>
+            {/* Both rows give their control the same column, so the pair reads
+                as one choice rather than as a small box beside a wide one. The
+                state line sits under the button in that column — absent at
+                rest, so the two rows stay the same height until there is news. */}
+            <div className="min-w-0 flex-1">
+              <button
+                type="button"
+                data-testid={`getting-started-action-${workflow.id}`}
+                disabled={resolved.actionDisabled}
+                onClick={resolved.onAction}
+                className="cl-button-primary w-full px-3.5 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <span className="block truncate">{resolved.actionLabel}</span>
+              </button>
+              <Feedback {...resolved.feedback} />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 px-3 py-2.5">
+            <div className="w-[150px] shrink-0">
+              <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>In your agent</div>
+              <p className="mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>Paste it in Claude or Codex.</p>
+            </div>
+            {/* CopyField carries its own 4px top margin for stacked use; in a row
+                it would sit 4px below centre, so the wrapper cancels it. */}
+            <div className="-mt-1 min-w-0 flex-1">
+              <CopyField
+                value={workflow.externalPrompt}
+                label={`${workflow.title} command`}
+                testId={`getting-started-command-${workflow.id}`}
+                buttonTestId={`getting-started-copy-${workflow.id}`}
+                disabled={resolved.copyDisabled}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function DemoDialog({ open, onClose, workflows, session, actionBlockers = {}, onInternalAction, onOpenTarget, showDemo, onShowDemoChange }: {
   open: boolean
   onClose: () => void
-  /** The shipped worked suite, or null once it has been deleted — the repair
-   *  option is dropped rather than offered as a button that can't work. */
-  suite: string | null
-  /** Whether the bare sample repo is still on disk, under the same rule. */
-  flightRepoAvailable: boolean
-  onRunSuite: () => void
-  onStartFlight: () => void
-  /** Current `showDemo` from canary-lab.config.json (null while loading). */
+  workflows: OnboardingWorkflow[]
+  session: GettingStartedSessionState
+  actionBlockers?: Partial<Record<OnboardingWorkflowId, string>>
+  onInternalAction: (action: OnboardingWorkflowAction) => Promise<void> | void
+  onOpenTarget: (target: GettingStartedTarget) => void
   showDemo: boolean | null
   onShowDemoChange: (next: boolean) => void
 }) {
-  const options: DemoOption[] = []
-  if (suite) {
-    options.push({
-      title: 'Repair a broken suite',
-      duration: '~4 min',
-      body: 'Ten of twelve contracts are broken on purpose. The agent will report each one fixed — watch the harness rerun the tests and disagree.',
-      // The suite name is a known constant (SAMPLE_SUITE), so it can be stated.
-      target: { label: 'Watch', value: suite },
-      onStart: onRunSuite,
-      recommended: true,
-      testId: 'demo-option-repair',
-    })
+  const [picked, setPicked] = useState<OnboardingWorkflowId | null>(null)
+  const [launching, setLaunching] = useState<OnboardingWorkflowId | null>(null)
+  const [launchErrors, setLaunchErrors] = useState<Partial<Record<OnboardingWorkflowId, string>>>({})
+  const core = useMemo(() => workflows.filter((item) => item.group === 'start').sort((a, b) => a.order - b.order), [workflows])
+  const more = useMemo(() => workflows.filter((item) => item.group === 'more').sort((a, b) => a.order - b.order), [workflows])
+
+  const launch = (workflow: OnboardingWorkflow): void => {
+    if (!workflow.internalAction) return
+    setLaunching(workflow.id)
+    setLaunchErrors((current) => ({ ...current, [workflow.id]: undefined }))
+    Promise.resolve(onInternalAction(workflow.internalAction))
+      .catch((error: unknown) => setLaunchErrors((current) => ({
+        ...current,
+        [workflow.id]: error instanceof Error ? error.message : String(error),
+      })))
+      .finally(() => setLaunching((current) => current === workflow.id ? null : current))
   }
-  if (flightRepoAvailable) {
-    options.push({
-      title: 'Onboard a repo from nothing',
-      duration: '~25 min',
-      body: 'A bare repo — no config, no requirements, no tests. Seven stages author a suite for it and name it themselves, so watch for a new row appearing. Run this one when you want to see it against your own code.',
-      // The REPO, not a suite name: the flight's plan agent names the suite it
-      // authors, so no fixed name can be promised here. Stating one would make
-      // the dialog claim something that is only sometimes true.
-      target: { label: 'Onboards', value: 'flight-app' },
-      onStart: onStartFlight,
-      // Recommended only when it is the only option left: the marker means "spend
-      // your time here", and on a lone option there is no comparison to draw.
-      testId: 'demo-option-flight',
-    })
-  }
+
+  const resolve = (workflow: OnboardingWorkflow): Resolved => workflow.group === 'start'
+    ? resolveCore(workflow, session, launching === workflow.id, launchErrors[workflow.id] ?? null, () => launch(workflow), onOpenTarget)
+    : resolveMore(workflow, session, actionBlockers[workflow.id], launching === workflow.id, launchErrors[workflow.id] ?? null, () => launch(workflow))
+
+  // The rail always opens on something: a running demo owns the view, else the
+  // first starter. A dialog that opens on an empty pane teaches nothing.
+  const ordered = [...core, ...more]
+  const selected = ordered.find((item) => item.id === picked)
+    ?? ordered.find((item) => item.id === session.active?.workflow)
+    ?? ordered[0]
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       eyebrow="Getting started"
-      title="See how this works"
-      description="Both routes end in an evaluation report — that's the deliverable, not the green tick."
-      width={430}
+      title="See Canary Lab in action"
+      width={760}
+      height={432}
       testId="demo-dialog"
       footer={(
-        /* In the footer rather than the body: it is a setting about this dialog,
-           not a third thing to choose between. Muted so it reads as housekeeping —
-           the accent belongs to the recommended card, and a second accented
-           control down here would compete with it. `mr-auto` because Modal's
-           footer is `justify-end`, which is right for action buttons but wrong for
-           a standing setting.
-           Unticking takes the pill out of the status bar; the setting is mirrored
-           in Settings → Onboarding, so it is never a one-way door. */
         <label className="mr-auto flex cursor-pointer items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
           <input
             type="checkbox"
             data-testid="demo-show-toggle"
             checked={showDemo !== false}
-            onChange={(e) => onShowDemoChange(e.target.checked)}
+            onChange={(event) => onShowDemoChange(event.target.checked)}
           />
-          Show demos in the status bar
+          Show in the status bar
         </label>
       )}
     >
-      {/* Modal's body wrapper is a bare scroller — every caller supplies its own
-          padding. `px-4 py-3` matches `.cl-dialog-header` and the footer, so the
-          cards line up with the title above and the checkbox below instead of
-          running into the dialog's edges. */}
-      <div className="flex flex-col gap-2 px-4 py-3">
-        {options.map((option) => <OptionCard key={option.testId} option={option} />)}
+      <div className="grid h-full min-h-0 grid-cols-[210px_minmax(0,1fr)]">
+        <nav
+          aria-label="Getting Started workflows"
+          className="min-h-0 overflow-y-auto border-r py-3.5 scrollbar-thin"
+          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
+        >
+          <RailGroup label="Start here">
+            {core.map((workflow) => (
+              <RailRow
+                key={workflow.id}
+                workflow={workflow}
+                selected={workflow.id === selected?.id}
+                tone={resolve(workflow).feedback.tone}
+                onSelect={() => setPicked(workflow.id)}
+              />
+            ))}
+          </RailGroup>
+          <RailGroup label="More workflows">
+            {more.map((workflow) => (
+              <RailRow
+                key={workflow.id}
+                workflow={workflow}
+                selected={workflow.id === selected?.id}
+                tone={resolve(workflow).feedback.tone}
+                onSelect={() => setPicked(workflow.id)}
+              />
+            ))}
+          </RailGroup>
+        </nav>
+        <div className="min-h-0 overflow-y-auto scrollbar-thin">
+          {selected && <Detail workflow={selected} resolved={resolve(selected)} />}
+        </div>
       </div>
     </Modal>
   )

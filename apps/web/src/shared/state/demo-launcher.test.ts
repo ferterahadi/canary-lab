@@ -8,6 +8,8 @@ const SAMPLES: OnboardingSamples = {
   sampleSuite: 'storefront-journey',
   sampleFlightRepo: '/w/flight-app',
   sampleFlightDescription: 'the ordering flow',
+  workflows: [],
+  session: { active: null, completed: {} },
 }
 
 const run = (over: Partial<RunIndexEntry> = {}): RunIndexEntry => ({
@@ -34,34 +36,32 @@ describe('deriveDemoAvailability', () => {
     expect(deriveDemoAvailability(input())).toEqual({ hasSamples: true, available: true, unseen: true, autoOpen: true })
   })
 
-  it('stays silent until the samples have loaded', () => {
-    // Null samples is "still fetching", not "deleted" — flashing a pill on and
-    // then off would be worse than arriving a beat late.
-    expect(deriveDemoAvailability(input({ samples: null }))).toEqual({ hasSamples: false, available: false, unseen: false, autoOpen: false })
+  it('offers the workflow guide while sample availability is loading', () => {
+    expect(deriveDemoAvailability(input({ samples: null }))).toEqual({ hasSamples: false, available: true, unseen: true, autoOpen: true })
   })
 
   it('stays silent while the config is still loading', () => {
     expect(deriveDemoAvailability(input({ showDemo: null })).available).toBe(false)
   })
 
-  it('hides everything when the workspace turned demos off', () => {
+  it('hides Getting Started when the workspace turned it off', () => {
     expect(deriveDemoAvailability(input({ showDemo: false }))).toEqual({ hasSamples: true, available: false, unseen: false, autoOpen: false })
   })
 
-  it('hides the pill once both samples are deleted — never a dead button', () => {
-    const gone = { sampleSuite: null, sampleFlightRepo: null, sampleFlightDescription: null }
-    expect(deriveDemoAvailability(input({ samples: gone })).available).toBe(false)
+  it('keeps the workflow guide after both samples are deleted', () => {
+    const gone: OnboardingSamples = { sampleSuite: null, sampleFlightRepo: null, sampleFlightDescription: null, workflows: [], session: { active: null, completed: {} } }
+    expect(deriveDemoAvailability(input({ samples: gone }))).toEqual({ hasSamples: false, available: true, unseen: true, autoOpen: true })
   })
 
-  it('reports hasSamples independently of showDemo, so the open dialog survives an untick', () => {
-    // The chooser's own checkbox writes `showDemo`. If the dialog were gated on
+  it('reports hasSamples independently of showDemo, so sample actions stay accurate', () => {
+    // The guide's own checkbox writes `showDemo`. If the dialog were gated on
     // it, unticking the box would make the dialog vanish mid-click.
     expect(deriveDemoAvailability(input({ showDemo: false })).hasSamples).toBe(true)
-    const gone = { sampleSuite: null, sampleFlightRepo: null, sampleFlightDescription: null }
+    const gone: OnboardingSamples = { sampleSuite: null, sampleFlightRepo: null, sampleFlightDescription: null, workflows: [], session: { active: null, completed: {} } }
     expect(deriveDemoAvailability(input({ samples: gone })).hasSamples).toBe(false)
   })
 
-  it('still offers the pill when only one sample survives', () => {
+  it('still reports a sample when only one survives', () => {
     const suiteOnly = { ...SAMPLES, sampleFlightRepo: null }
     expect(deriveDemoAvailability(input({ samples: suiteOnly })).available).toBe(true)
   })
@@ -70,39 +70,35 @@ describe('deriveDemoAvailability', () => {
     expect(deriveDemoAvailability(input({ seen: true }))).toEqual({ hasSamples: true, available: true, unseen: false, autoOpen: false })
   })
 
-  it('does not auto-open a workspace that has already run the sample', () => {
+  it('does not auto-open a workspace that already has a run', () => {
     const d = deriveDemoAvailability(input({ runs: [run({ status: 'passed' })] }))
     expect(d).toEqual({ hasSamples: true, available: true, unseen: true, autoOpen: false })
   })
 
-  it('counts a failed sample run as "already seen it work" for auto-open', () => {
-    // The point of the gate is "has anyone used this workspace", not "did it
-    // pass" — a failed run still means somebody is here and working.
+  it('counts a failed run as an active workspace', () => {
     expect(deriveDemoAvailability(input({ runs: [run({ status: 'failed' })] })).autoOpen).toBe(false)
   })
 
-  it('ignores boot, benchmark and verify runs — none of them is the demo', () => {
+  it('does not interrupt a workspace that already has boot, benchmark, or verify history', () => {
     const noise = [
       run({ runId: 'b', executionType: 'boot' }),
       run({ runId: 'm', executionType: 'benchmark' }),
       run({ runId: 'v', executionType: 'verify' }),
     ]
-    expect(deriveDemoAvailability(input({ runs: noise })).autoOpen).toBe(true)
+    expect(deriveDemoAvailability(input({ runs: noise })).autoOpen).toBe(false)
   })
 
-  it('ignores runs belonging to another suite', () => {
-    expect(deriveDemoAvailability(input({ runs: [run({ feature: 'other' })] })).autoOpen).toBe(true)
+  it('does not auto-open over work on another suite', () => {
+    expect(deriveDemoAvailability(input({ runs: [run({ feature: 'other' })] })).autoOpen).toBe(false)
   })
 
   it('does not auto-open a workspace that already has a flight', () => {
     expect(deriveDemoAvailability(input({ flights: [flight()] })).autoOpen).toBe(false)
   })
 
-  it('treats a deleted suite as no run history to check', () => {
+  it('still respects run history after the sample suite is deleted', () => {
     const flightOnly = { ...SAMPLES, sampleSuite: null }
-    // No suite means `sampleRunsOf` has nothing to match — the workspace is
-    // still fresh as far as the flight half is concerned.
-    expect(deriveDemoAvailability(input({ samples: flightOnly, runs: [run()] })).autoOpen).toBe(true)
+    expect(deriveDemoAvailability(input({ samples: flightOnly, runs: [run()] })).autoOpen).toBe(false)
   })
 })
 

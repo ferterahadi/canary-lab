@@ -20,6 +20,8 @@ composite `lifecycle`/`full` profiles carry the same tools).
 
 ## External Run Loop
 
+If `start_run` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace. Follow the returned active run or Flight in its current owner; do not start another.
+
 1. Call `list_features` and choose the requested feature.
 2. Call `start_run` with `claim_heal: true`, a stable `session_id`, and a useful `conversation_name`. Do **not** pass `client_kind` — the MCP bridge auto-detects it from the connection; guessing it yourself can mis-set it and suppress heal claim. Heal claiming is open to interactive Claude/Codex clients (Desktop or CLI alike) — only runner-spawned PTY agents are blocked — so an ordinary CLI session like this one can own the heal loop. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
 3. If `start_run` returns `type: "repo_collision_requires_choice"`, another run is using the same app/repo. Ask the user whether to run this one isolated in a per-run git worktree (runs now, concurrently) or queue it until the other run finishes, then re-call `start_run` with `isolation: "worktree"` or `isolation: "queue"`. Do not guess. If `start_run` returns `queued: true`, tell the user the run is parked (`queueReason`) and will start automatically when capacity frees; `wait_for_heal_task` still blocks until it starts and needs fixes.

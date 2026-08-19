@@ -74,6 +74,7 @@ describe('verification api', () => {
       configId: 'config/1',
       playwrightEnvsetId: 'production',
       targetUrls: { api: 'https://api.example.com' },
+      bootRunId: 'boot-1',
     }, { fetchImpl })).resolves.toEqual({ runId: 'verify-1', executionType: 'verify' })
 
     expect(fetchImpl).toHaveBeenCalledWith('/api/features/feat%2Fa/verifications', {
@@ -83,6 +84,7 @@ describe('verification api', () => {
         configId: 'config/1',
         playwrightEnvsetId: 'production',
         targetUrls: { api: 'https://api.example.com' },
+        bootRunId: 'boot-1',
       }),
     })
   })

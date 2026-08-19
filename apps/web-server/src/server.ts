@@ -24,6 +24,7 @@ import { register as registerBenchmark } from './features/benchmark/index'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import { coverageJobStore as sharedCoverageJobStore } from './features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './features/flights/logic/store'
+import { isActiveFlightStatus } from '../../../shared/flights/types'
 import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
 import { PlanFeaturesStore } from './features/flights/logic/plan-features'
 import { DirtySpecStore } from './features/runs/logic/dirty-specs/store'
@@ -34,6 +35,8 @@ import {
   resolveWorkflowAgentRef,
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
+import { GettingStartedSessionStore } from './features/config/logic/getting-started-session'
+import { isGettingStartedFlightStart, isGettingStartedRunFeature } from './features/config/routes/onboarding'
 import type { ServerContext } from './server-context'
 import { UpdateJobStore } from './features/version/logic/update-job'
 import { VersionState } from './features/version/logic/version-state'
@@ -153,6 +156,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // process's session and are deliberately left alone.
   reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
+  const gettingStarted = new GettingStartedSessionStore(logsDir, {
+    run: (runId) => runStore.get(runId)?.manifest.status ?? null,
+    flight: (flightId) => flightStore.get(flightId)?.status ?? null,
+    isRunActive: isActiveRunStatus,
+    isFlightActive: isActiveFlightStatus,
+  }, () => workspaceEvents.publish({ type: 'getting-started-changed' }))
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the
   // single source of truth both the UI feature list and the MCP run result read.
   // Its change events drive the live red cue; the watcher recomputes on spec
@@ -206,6 +215,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   // not controllable by this process. Finalize it immediately instead of
   // waiting for the heartbeat staleness window or requiring a manual Stop.
   await runStore.abortAllActiveOrStale()
+  gettingStarted.reconcileInterrupted()
+  runStore.onEvent(() => gettingStarted.reconcile())
+  flightStore.onEvent(() => gettingStarted.reconcile())
   // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
   // heal duty for each run. Routes hit this; the orchestrator subscribes to
   // claim-changed events through the run-store fan-out.
@@ -255,6 +267,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     updateStore,
     versionState,
     workspaceEvents,
+    gettingStarted,
     externalHealBroker,
     brokers,
     activeEnvsets,
@@ -302,10 +315,17 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     // Flight over MCP: reuse the flights REST routes so the MCP surface
     // shares the store + conductor (and single-flight guard) with the UI/CLI.
     flightsRequest: async (o) => {
+      const originalPayload = o.payload as Record<string, unknown> | undefined
+      const isGettingStartedFlight = o.method === 'POST'
+        && o.url === '/api/flights'
+        && isGettingStartedFlightStart(originalPayload)
+      const payload = isGettingStartedFlight
+        ? { ...originalPayload, gettingStartedSource: 'external' }
+        : originalPayload
       const resp = await app.inject({
         method: o.method,
         url: o.url,
-        ...(o.payload !== undefined ? { payload: o.payload as Record<string, unknown> } : {}),
+        ...(payload !== undefined ? { payload } : {}),
       })
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown
       return { statusCode: resp.statusCode, body }
@@ -314,7 +334,16 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	      const resp = await app.inject({
 	        method: 'POST',
 	        url: '/api/runs',
-	        payload: { feature, env, ...(healAgent ? { healAgent } : {}), ...(isolation ? { isolation } : {}), ...(executionType === 'boot' ? { mode: 'boot' } : {}) },
+	        payload: {
+            feature,
+            env,
+            ...(healAgent ? { healAgent } : {}),
+            ...(isolation ? { isolation } : {}),
+            ...(executionType === 'boot' ? { mode: 'boot' } : {}),
+            ...((executionType !== 'boot' && isGettingStartedRunFeature(feature))
+              ? { gettingStartedSource: 'external' }
+              : {}),
+          },
 	      })
 	      const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as Record<string, unknown>
 	      if (resp.statusCode === 201 || resp.statusCode === 200) {
@@ -333,6 +362,18 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
 	          message: String(body.message ?? 'Same-app collision.'),
 	        }
 	      }
+	      if (resp.statusCode === 409 && body.type === 'getting_started_busy') {
+          return {
+            kind: 'getting-started-busy',
+            active: body.active as {
+              sessionId: string
+              workflow: 'run' | 'flight'
+              owner: 'internal' | 'external'
+              target: { kind: 'run' | 'flight'; id: string } | null
+            },
+            message: String(body.error ?? 'Another Getting Started demo is already running.'),
+          }
+        }
 	      const message = body && 'error' in body ? String(body.error) : String(resp.payload)
 	      throw new Error(`start_run failed (${resp.statusCode}): ${message}`)
 	    },

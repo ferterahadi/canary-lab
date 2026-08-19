@@ -1,11 +1,14 @@
 # Features
 
-This workspace ships one worked example so you can see what Canary Lab does
+This workspace ships two worked examples so you can see what Canary Lab does
 before pointing it at your own code:
 
 - **`storefront-journey`** — a suite over the bundled `demo-app/` three-service
   storefront. Press **Run** and watch the repair loop work through the broken
   service contracts, a batch at a time, until the suite is green.
+- **`workflow-workbench`** — a small suite over `workflow-app/`. It has one
+  intentionally uncovered requirement and one fixed service port, giving the
+  Coverage, Author, Verify, and Portify workflows prepared material to inspect.
 
 It ships **finished**, so you can read what a fully onboarded suite looks like:
 
@@ -20,8 +23,8 @@ It ships **finished**, so you can read what a fully onboarded suite looks like:
 For the other half of the product — onboarding a repo that has *none* of this —
 start a Flight on the bundled `flight-app/`, which ships with no suite at all.
 
-Delete both once you have seen them; they are a demonstration, not scaffolding
-you need. Then add your own:
+Delete the two suites and their bundled apps once you have seen them; they are
+demonstrations, not scaffolding you need. Then add your own:
 
 ```bash
 npx canary-lab new feature <name>

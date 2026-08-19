@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as api from '../api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
-import { StatusDot, ChevronRightIcon, type StatusDotState } from '@/shared/ui/atoms'
+import { CopyField, StatusDot, ChevronRightIcon, type StatusDotState } from '@/shared/ui/atoms'
 
 const MCP_PROFILES = [
   { id: 'repair', label: 'Repair', detail: 'Run healing' },
@@ -368,51 +368,6 @@ function ConnectStep({ n, title, children }: { n: number; title: string; childre
         {children}
       </div>
     </li>
-  )
-}
-
-// Mono command box with a click-to-copy affordance; mirrors the Copy/Copied
-// text-button pattern from ManualHealBanner so the copy language is uniform.
-function CopyField({ value, label }: { value: string; label: string }) {
-  const [copied, setCopied] = useState(false)
-  const onCopy = async (): Promise<void> => {
-    try {
-      await navigator.clipboard.writeText(value)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* clipboard unavailable — non-fatal */
-    }
-  }
-  return (
-    <div
-      className="mt-1 flex items-stretch overflow-hidden rounded border"
-      style={{
-        borderColor: 'var(--border-default)',
-        background: 'color-mix(in srgb, var(--bg-elevated) 44%, transparent)',
-      }}
-    >
-      <code
-        className="min-w-0 flex-1 truncate px-2 py-1 text-[11px]"
-        style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}
-        title={value}
-      >
-        {value}
-      </code>
-      <button
-        type="button"
-        onClick={onCopy}
-        aria-label={`Copy ${label}`}
-        className="shrink-0 border-l px-2 text-[10px] uppercase transition-colors"
-        style={{
-          borderColor: 'var(--border-default)',
-          color: copied ? 'var(--success)' : 'var(--text-muted)',
-          letterSpacing: 0,
-        }}
-      >
-        {copied ? 'Copied' : 'Copy'}
-      </button>
-    </div>
   )
 }
 

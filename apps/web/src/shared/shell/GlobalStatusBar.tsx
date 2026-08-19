@@ -37,8 +37,7 @@ interface Props {
    *  App owns the one useDerivedFeatureStages instance (same ownership rule
    *  as `activity`). */
   derivedStages?: Map<string, DerivedStage[]>
-  /** Whether to offer the demo chooser at all — App derives it from the shipped
-   *  samples still being on disk AND the workspace's `showDemo` setting. */
+  /** Whether to offer Getting Started — driven by the workspace visibility setting. */
   demoAvailable?: boolean
   /** Attention dot on that pill: the chooser has never been opened. */
   demoUnseen?: boolean
@@ -267,19 +266,16 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}
             onOpenPreFlight={(taskId) => onOpenPreFlight?.(taskId)}
           />
-          {/* Onboarding's permanent home. The chooser opens itself once on a
-              workspace that has never run anything; after that this is the only
-              way back to it, which is why it carries an attention dot until it
-              has actually been opened. Hidden entirely once the samples are gone
-              or the workspace turns `showDemo` off — never a dead button. */}
+          {/* Onboarding's permanent home. It remains useful after the samples
+              are deleted because the external-agent side teaches every skill. */}
           {demoAvailable && (
             <StatusPill
               dotState="idle"
               name="Getting started"
               overlayDot={demoUnseen}
               onClick={() => onOpenDemo?.()}
-              title="See how this works — run the sample suite, or fly the bare repo"
-              ariaLabel="Open the demo chooser"
+              title="Choose a workflow for an external or internal agent"
+              ariaLabel="Open Getting Started"
             />
           )}
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
