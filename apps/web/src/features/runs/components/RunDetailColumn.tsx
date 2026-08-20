@@ -44,8 +44,8 @@ export function healEmptyCopy(status: RunStatus, healCycles: number): { title: s
     }
   }
   return {
-    title: 'Transcript unavailable',
-    body: `This run went through ${healCycles} repair ${healCycles === 1 ? 'cycle' : 'cycles'}, but the agent CLI left no readable session file. The Journal tab still holds what each cycle concluded.`,
+    title: 'No transcript found',
+    body: `This run went through ${healCycles} repair ${healCycles === 1 ? 'cycle' : 'cycles'}, but no session log for it could be read. If the run only just ended, the agent CLI may still be writing one — reopen this tab. The Journal tab holds what each cycle concluded either way.`,
     tone: 'neutral',
   }
 }

@@ -169,6 +169,7 @@ describe('RunStore', () => {
     healCycles: number
     healMode: 'auto' | 'manual' | 'external'
     services: NonNullable<ReturnType<typeof readManifest>>['services']
+    heartbeatAt: string
   }> = {}): string {
     const dir = runDirFor(tmpDir, runId)
     fs.mkdirSync(dir, { recursive: true })
@@ -182,6 +183,7 @@ describe('RunStore', () => {
       healCycles: overrides.healCycles ?? 0,
       services: overrides.services ?? [],
       ...(overrides.healMode ? { healMode: overrides.healMode } : {}),
+      ...(overrides.heartbeatAt ? { heartbeatAt: overrides.heartbeatAt } : {}),
     })
     writeRunsIndex(tmpDir, [
       ...readRunsIndex(tmpDir).filter((e) => e.runId !== runId),
@@ -346,6 +348,51 @@ describe('RunStore', () => {
     expect(readManifest(store.manifestPath('registered'))?.status).toBe('aborted')
     expect(readManifest(store.manifestPath('orphan'))?.status).toBe('aborted')
     expect(readManifest(store.manifestPath('done'))?.status).toBe('passed')
+  })
+
+  it('abortAllActiveOrStale leaves an unregistered active row alone while its heartbeat is fresh', async () => {
+    // The incident this guard exists for: a second server booting against the
+    // same logs dir marked a live healing run `aborted`. It could not stop the
+    // real heal loop (that lives in the owning process), so the run kept
+    // repairing while every disk reader was told it had ended.
+    seedRun('owned-elsewhere', { status: 'healing', heartbeatAt: new Date().toISOString() })
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: [] })
+    expect(readManifest(store.manifestPath('owned-elsewhere'))?.status).toBe('healing')
+    expect(readRunsIndex(tmpDir)[0].status).toBe('healing')
+  })
+
+  it('abortAllActiveOrStale still finalizes an unregistered active row once its heartbeat goes stale', async () => {
+    // Negative control for the guard above — without this the guard could be a
+    // blanket "never touch active rows" and the test above would still pass.
+    seedRun('really-dead', {
+      status: 'healing',
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 1_000).toISOString(),
+    })
+    const store = new RunStore(tmpDir, createRegistry())
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['really-dead'] })
+    expect(readManifest(store.manifestPath('really-dead'))?.status).toBe('aborted')
+  })
+
+  it('abortAllActiveOrStale stops a registered run even when its heartbeat is fresh', async () => {
+    // The guard is scoped to rows this process does NOT own. Shutdown aborts
+    // our own orchestrators, whose heartbeats are fresh by definition, so a
+    // guard applied to both loops would leave every run running at exit.
+    const reg = createRegistry()
+    let stopped = false
+    seedRun('mine', { status: 'healing', heartbeatAt: new Date().toISOString() })
+    reg.set('mine', {
+      runId: 'mine',
+      stop: async () => { stopped = true },
+      pauseAndHeal: async () => ({ ok: true as const, failureCount: 0 }),
+      cancelHeal: async () => ({ ok: true as const }),
+    })
+    const store = new RunStore(tmpDir, reg)
+
+    expect(await store.abortAllActiveOrStale()).toEqual({ aborted: ['mine'] })
+    expect(stopped).toBe(true)
   })
 
   it('abortAllActiveOrStale finalizes indexed active rows even when persisted detail is missing', async () => {

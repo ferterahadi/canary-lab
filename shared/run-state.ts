@@ -80,6 +80,12 @@ export interface RunBootFailure {
  * - `no-progress` — the same failing set survived the no-progress limit of
  *                   consecutive fix attempts, or a fixless rerun made no gain.
  * - `cancelled`   — the user stopped heal (or the run was aborted) mid-loop.
+ * - `foreign-abort` — a DIFFERENT process wrote a terminal status onto this
+ *                   run's manifest while this one was still repairing (a second
+ *                   server booting against the same logs dir is how this
+ *                   happens). Nothing outside the owning process can stop the
+ *                   heal loop, so the loop winds itself down and says so rather
+ *                   than repairing a run every reader thinks has ended.
  *
  * There is deliberately no `spawn-failed`: a heal agent that fails to spawn
  * throws out of the loop rather than settling it, so no run has ever ended with
@@ -87,7 +93,7 @@ export interface RunBootFailure {
  * call that can actually produce it.
  */
 export interface HealEnd {
-  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled'
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort'
   /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
   agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
   /** Best-effort classification of why the agent went quiet, from its output

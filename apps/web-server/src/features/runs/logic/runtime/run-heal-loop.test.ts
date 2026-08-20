@@ -477,6 +477,35 @@ describe('runAutoHealLoop', () => {
       expect(h.snapshotFeatureRepos).toHaveBeenCalledWith(ctx.feature, repoPathOverrides)
     })
 
+    it('winds down when another process marks the run terminal mid-cycle', async () => {
+      // The incident: a second server flipped the manifest to `aborted` 3s in.
+      // It could not stop this loop, so the loop kept repairing a run the UI
+      // had already reported as over.
+      const { ctx } = ctxFor({}, { autoHeal: AUTO })
+      h.runHealAgent.mockImplementation(async () => {
+        ctx.foreignTerminalStatus = 'aborted'
+        return { signal: undefined, reason: 'foreign-abort' }
+      })
+
+      expect(await runAutoHealLoop(ctx, makeLoopHost())).toBe('failed')
+      expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({
+        reason: 'foreign-abort',
+        message: expect.stringContaining('another process marked this run "aborted"'),
+      }))
+      // Must NOT fall through to the no-signal path, which would infer a rerun
+      // from the agent's uncommitted edits and publish a verdict against a
+      // record nobody is reading any more.
+      expect(h.runPlaywright).not.toHaveBeenCalled()
+    })
+
+    it('does not start another cycle after a foreign terminal write', async () => {
+      const { ctx } = ctxFor({ foreignTerminalStatus: 'failed' }, { autoHeal: AUTO })
+
+      expect(await runAutoHealLoop(ctx, makeLoopHost())).toBe('failed')
+      expect(h.runHealAgent).not.toHaveBeenCalled()
+      expect(h.recordHealEnd).toHaveBeenCalledWith(ctx, expect.objectContaining({ reason: 'foreign-abort' }))
+    })
+
     it('stops with a max-cycles reason once the cap is reached', async () => {
       const { ctx } = ctxFor({}, { autoHeal: { maxCycles: 1 } })
       h.runHealAgent.mockResolvedValue({ signal: rerunSignal(), reason: 'signal' })

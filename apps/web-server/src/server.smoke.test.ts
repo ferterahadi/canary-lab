@@ -7,6 +7,7 @@ import type { TestsDraftRouteDeps } from './features/wizard/routes/tests-draft'
 import { writeManifest, writeRunsIndex, readManifest, readRunsIndex } from './features/runs/logic/runtime/manifest'
 import { runDirFor } from './features/runs/logic/runtime/run-paths'
 import type { PtyFactory } from './features/runs/logic/runtime/pty-spawner'
+import { HEARTBEAT_STALE_MS } from '../../../shared/run-state'
 
 // Smoke test: exercises createServer() against the real templates/project
 // tree, hitting every read-side endpoint via inject(). Lives next to the
@@ -103,7 +104,11 @@ describe('createServer boot-time active-orphan cleanup', () => {
       status: 'running',
       healCycles: 0,
       services: [],
-      heartbeatAt: new Date(Date.now() - 60_000).toISOString(),
+      // Genuinely past the staleness window. This fixture used to be 60s old —
+      // which is FRESH against the 10-minute window — so the test's name never
+      // matched what it exercised; it passed only because boot cleanup used to
+      // abort every active row regardless of heartbeat.
+      heartbeatAt: new Date(Date.now() - HEARTBEAT_STALE_MS - 60_000).toISOString(),
     })
     writeRunsIndex(logsDir, [
       { runId, feature: 'demo_inventory', startedAt: '2026-01-01T00:00:00Z', status: 'running' },
@@ -124,7 +129,14 @@ describe('createServer boot-time active-orphan cleanup', () => {
     }
   })
 
-  it('aborts a fresh-heartbeat running entry from a previous process at startup', async () => {
+  it('leaves a fresh-heartbeat running entry alone at startup — a live process still owns it', async () => {
+    // Contract change. A fresh heartbeat is evidence the owning process is
+    // ALIVE, so this row is not a previous process's leftover at all. Boot
+    // cleanup used to abort it anyway, and since the real orchestrator lives in
+    // that other process's memory, the abort could not stop anything — it only
+    // rewrote the record. A live healing run was marked `aborted` 3s into its
+    // repair cycle, the UI swapped the streaming agent pane for an empty
+    // transcript view, and the repair carried on invisibly for another 51s.
     const runId = 'fresh-prev-run'
     const dir = runDirFor(logsDir, runId)
     fs.mkdirSync(dir, { recursive: true })
@@ -145,9 +157,9 @@ describe('createServer boot-time active-orphan cleanup', () => {
     const { app } = await createServer({ projectRoot, logsDir, ptyFactory: inertPtyFactory })
     try {
       const manifest = readManifest(path.join(dir, 'manifest.json'))
-      expect(manifest?.status).toBe('aborted')
-      expect(manifest?.endedAt).toBeDefined()
-      expect(readRunsIndex(logsDir).find((r) => r.runId === runId)?.status).toBe('aborted')
+      expect(manifest?.status).toBe('running')
+      expect(manifest?.endedAt).toBeUndefined()
+      expect(readRunsIndex(logsDir).find((r) => r.runId === runId)?.status).toBe('running')
     } finally {
       await app.close()
     }

@@ -94,6 +94,11 @@ export function indexSubagents(threads: SubagentThread[] | undefined): Map<strin
   return map
 }
 
+/** Back-off for the history (non-live) snapshot when nothing is on disk yet.
+ *  Three tries over ~9.5s covers a CLI flush racing the terminal status write;
+ *  past that, the log really is absent. */
+const HISTORY_RETRY_DELAYS_MS = [1500, 3000, 5000]
+
 export function AgentSessionView({ source, systemRows, empty }: Props) {
   const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -141,7 +146,25 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
       return api.getFlightPlanAgentSession(source.taskId)
     }
 
-    fetchSnapshot()
+    // A run whose status has just gone terminal can beat the agent CLI's final
+    // flush of its session log to disk. With `live` false there is no WS to
+    // tail, so that one-shot read is the only chance the pane gets — and a null
+    // there froze it on "no transcript" permanently, while the file appeared
+    // moments later. Retry a few times before believing the absence. Bounded on
+    // purpose: the `pollUntilFound` mode this replaces waited indefinitely and
+    // turned a genuinely absent log into a permanent spinner.
+    const fetchHistorySnapshot = async (): Promise<AgentSessionResponse | null> => {
+      let snapshot = await fetchSnapshot()
+      for (const delayMs of HISTORY_RETRY_DELAYS_MS) {
+        if (cancelled || (snapshot && snapshot.events.length > 0)) return snapshot
+        await new Promise((resolve) => setTimeout(resolve, delayMs))
+        if (cancelled) return snapshot
+        snapshot = await fetchSnapshot()
+      }
+      return snapshot
+    }
+
+    ;(source.live ? fetchSnapshot() : fetchHistorySnapshot())
       .then((snapshot) => {
         applySnapshot(snapshot)
         if (cancelled) return

@@ -159,4 +159,58 @@ describe('AgentSessionView lifecycle presentation', () => {
     expect(container.textContent).toContain("Waiting for the agent's first output")
     expect(container.querySelector('[data-testid="agent-session-live-tail"]')).not.toBeNull()
   })
+
+  describe('history snapshot retry', () => {
+    // A run whose status has just gone terminal can beat the agent CLI's final
+    // flush of the session log to disk. History mode has no WS to tail, so that
+    // one read was the pane's only chance — and a null there froze it on "no
+    // transcript" for good while the file appeared moments later.
+    const settled = {
+      agent: 'claude' as const,
+      sessionId: 'session-late',
+      events: [{ kind: 'assistant-message' as const, timestamp: '2026-08-05T08:00:00.000Z', text: 'Landed late' }],
+    }
+
+    it('retries a null history snapshot until the log lands', async () => {
+      vi.useFakeTimers()
+      mocks.getAgentSession.mockReset()
+      mocks.getAgentSession.mockResolvedValueOnce(null).mockResolvedValue(settled)
+
+      await act(async () => {
+        root.render(<AgentSessionView source={{ kind: 'run', runId: 'run-1', live: false }} />)
+      })
+      // Fires the first back-off step, then lets the refetch's promise settle.
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_500) })
+
+      expect(mocks.getAgentSession).toHaveBeenCalledTimes(2)
+      expect(container.textContent).toContain('Landed late')
+      vi.useRealTimers()
+    })
+
+    it('does not retry when the first history read already has events', async () => {
+      // Negative control: without this the retry could be unconditional and the
+      // test above would still pass, at the cost of a duplicate fetch on every
+      // settled run anyone opens.
+      await render(false)
+
+      expect(mocks.getAgentSession).toHaveBeenCalledTimes(1)
+    })
+
+    it('gives up after the bounded back-off rather than spinning forever', async () => {
+      // The `pollUntilFound` mode this replaces waited indefinitely and turned a
+      // genuinely absent log into a permanent spinner.
+      vi.useFakeTimers()
+      mocks.getAgentSession.mockReset()
+      mocks.getAgentSession.mockResolvedValue(null)
+
+      await act(async () => {
+        root.render(<AgentSessionView source={{ kind: 'run', runId: 'run-1', live: false }} />)
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+
+      // One initial read plus one per back-off step, and no more.
+      expect(mocks.getAgentSession).toHaveBeenCalledTimes(4)
+      vi.useRealTimers()
+    })
+  })
 })

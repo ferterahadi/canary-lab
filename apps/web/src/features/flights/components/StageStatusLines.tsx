@@ -38,6 +38,7 @@ export function healEndLine(healEnd: HealEnd | undefined): string | null {
     case 'max-cycles': return 'Auto-repair stopped — it hit the cycle limit without passing.'
     case 'no-progress': return 'Auto-repair stopped — repeated tries got nowhere.'
     case 'cancelled': return 'Auto-repair was stopped before the tests passed.'
+    case 'foreign-abort': return 'Auto-repair stopped — another Canary Lab server marked this run finished while it was still repairing.'
     default: return null
   }
 }
@@ -54,6 +55,7 @@ export function healEndShort(healEnd: HealEnd | undefined): string | null {
     case 'max-cycles': return 'stopped — cycle limit'
     case 'no-progress': return 'stopped — no progress'
     case 'cancelled': return 'stopped by you'
+    case 'foreign-abort': return 'stopped — record taken over'
     default: return null
   }
 }

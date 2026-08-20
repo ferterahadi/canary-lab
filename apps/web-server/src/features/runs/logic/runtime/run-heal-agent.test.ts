@@ -13,6 +13,7 @@ import {
   createHealActivityClock,
   interjectHealAgent,
   persistAgentSessionRef,
+  recordHealEnd,
   runHealAgent,
   spawnHealAgentRepl,
   waitForHealSignal,
@@ -354,6 +355,30 @@ describe('createHealActivityClock', () => {
   })
 })
 
+describe('recordHealEnd', () => {
+  it('mirrors the give-up reason into the runner log, not just the manifest', () => {
+    // Run Logs reads the runner log. Before this, a give-up left only
+    // "Heal agent exited: code=0" there — an exit code with no cause, which
+    // reads like a clean finish.
+    const { ctx, sink } = ctxFor()
+    const warn = vi.fn()
+    ;(ctx as { runnerLog?: unknown }).runnerLog = { warn, info: vi.fn(), error: vi.fn() }
+
+    recordHealEnd(ctx, { reason: 'no-progress', cycle: 2, message: 'Repeated tries got nowhere.', at: 'now' })
+
+    expect(sink.patches).toContainEqual({ healEnd: expect.objectContaining({ reason: 'no-progress' }) })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('no-progress'))
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Repeated tries got nowhere.'))
+  })
+
+  it('still writes the manifest when the run has no runner log attached', () => {
+    const { ctx, sink } = ctxFor()
+
+    expect(() => recordHealEnd(ctx, { reason: 'cancelled', cycle: 1, message: 'stopped', at: 'now' })).not.toThrow()
+    expect(sink.patches).toContainEqual({ healEnd: expect.objectContaining({ reason: 'cancelled' }) })
+  })
+})
+
 describe('waitForHealSignal activity source', () => {
   /** A ctx whose session log exists and never grows — a REPL sitting idle. */
   function stalledAgentCtx(over: Record<string, unknown> = {}) {
@@ -391,6 +416,18 @@ describe('waitForHealSignal activity source', () => {
     } finally {
       clearInterval(repaint)
     }
+  })
+
+  it('ends the wait as foreign-abort once the heartbeat has flagged an outside terminal write', async () => {
+    // The flag is set by the heartbeat tick, not read from disk here — one
+    // manifest read every 5s beats hundreds per cycle from this sub-second poll.
+    const { ctx } = stalledAgentCtx()
+    ctx.foreignTerminalStatus = 'aborted'
+
+    const { signal, reason } = await waitForHealSignal(ctx)
+
+    expect(reason).toBe('foreign-abort')
+    expect(signal).toBeNull()
   })
 
   it('re-sends the cycle prompt on silence, capped at two attempts', async () => {

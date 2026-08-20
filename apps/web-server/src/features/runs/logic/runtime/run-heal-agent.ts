@@ -115,8 +115,16 @@ export function captureHealAgentCause(ctx: RunContext): HealEnd['agentCause'] {
 
 // Write the typed give-up reason to the manifest so the Test Run surface can
 // state it plainly. One writer, called at each give-up site in the loop.
+//
+// It also mirrors the reason into the runner log, because that is the file the
+// Run Logs tab reads. Without this the log's account of a give-up was
+// "Heal agent exited: code=0" and nothing else — an exit code with no cause,
+// which reads like a clean finish. The manifest carried the real reason all
+// along; it simply never reached the one surface a user goes to for "what
+// happened".
 export function recordHealEnd(ctx: RunContext, healEnd: HealEnd): void {
   ctx.stateSink.patchManifest(ctx.runId, { healEnd })
+  ctx.runnerLog?.warn(`Auto-repair ended (${healEnd.reason}) on cycle ${healEnd.cycle}: ${healEnd.message}`)
 }
 
 export function echoUserInterject(ctx: RunContext, text: string): void {
@@ -259,6 +267,9 @@ export function createHealActivityClock(ctx: RunContext, startedAt: number): () 
 //                   bound on a single cycle)
 //   - stopped:      orchestrator aborted (full stop)
 //   - cancelled:    user clicked Stop Heal mid-cycle
+//   - foreign-abort: another process wrote a terminal status onto our manifest
+//                   (see `detectForeignTerminalWrite`). Nothing outside this
+//                   process can end the loop, so the wait ends it here.
 // The signal watcher feeds `signalGate`; this wait consumes one accepted
 // signal and lets the gate audit duplicates or late files.
 export async function waitForHealSignal(ctx: RunContext,
@@ -272,7 +283,7 @@ export async function waitForHealSignal(ctx: RunContext,
   onSilence?: () => void,
 ): Promise<{
   signal: HealSignal | null
-  reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
+  reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled' | 'foreign-abort'
 }> {
   const startedAt = Date.now()
   // Seed the idle clock at the start of the wait so the first chunk-less
@@ -305,6 +316,10 @@ export async function waitForHealSignal(ctx: RunContext,
     while (true) {
       if (ctx.stopped) return { signal: null, reason: 'stopped' }
       if (ctx.healCancelled) return { signal: null, reason: 'cancelled' }
+      // Set by the heartbeat tick, not read from disk here: one manifest read
+      // every 5s is enough to catch a foreign write, and putting it in this
+      // sub-second poll would read the file hundreds of times per cycle.
+      if (ctx.foreignTerminalStatus) return { signal: null, reason: 'foreign-abort' }
       const sig = ctx.signalGate.consume()
       if (sig) {
         return { signal: sig, reason: 'signal' }
@@ -379,7 +394,7 @@ export async function runHealAgent(ctx: RunContext, args: {
   // No `spawn-failed`: a heal-agent spawn failure throws out of the loop
   // instead of settling the cycle with a reason. Add it back here (and in the
   // heal loop's give-up handling) if that ever becomes a caught outcome.
-  reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled'
+  reason: 'signal' | 'pty-died' | 'idle-timeout' | 'hard-timeout' | 'stopped' | 'cancelled' | 'foreign-abort'
 }> {
   const cfg = ctx.autoHeal
   if (!cfg) throw new Error('autoHeal not configured')

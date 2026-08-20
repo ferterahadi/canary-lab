@@ -198,6 +198,14 @@ describe('healEndLine / healEndShort (R80)', () => {
     expect(healEndShort(he({ reason: 'max-cycles' }))).toBe('stopped — cycle limit')
     expect(healEndShort(he({ reason: 'cancelled' }))).toBe('stopped by you')
   })
+
+  it('names a record taken over by another server, so it is not read as the user stopping it', () => {
+    // The repair was healthy; a second server booting on the same logs dir
+    // marked the run finished under it. Attributing that to the user (or to the
+    // agent giving up) would point the reader at the wrong cause entirely.
+    expect(healEndLine(he({ reason: 'foreign-abort', message: '' }))).toMatch(/another Canary Lab server/i)
+    expect(healEndShort(he({ reason: 'foreign-abort' }))).toBe('stopped — record taken over')
+  })
 })
 
 describe('stageFacts — specs-coverage metric tiles (R77)', () => {

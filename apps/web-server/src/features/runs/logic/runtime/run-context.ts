@@ -159,6 +159,12 @@ export interface RunContext {
   /** Set by cancelHeal() so the heal loop in runFullCycle bails out instead of
    *  racing toward another Playwright rerun. */
   healCancelled: boolean
+  /** The terminal status a DIFFERENT process wrote onto this run's manifest
+   *  while we were still driving it, as seen by the heartbeat tick. Nothing
+   *  outside this process can stop our heal loop — it can only rewrite the
+   *  record — so without noticing it here the loop keeps repairing a run every
+   *  disk reader (the UI included) already believes is over. */
+  foreignTerminalStatus: RunManifest['status'] | null
 }
 
 export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent): RunContext {
@@ -247,5 +253,6 @@ export function createRunContext(opts: OrchestratorOptions, emit: EmitRunEvent):
     healAgentOutputTail: '',
     lastAgentDataAt: 0,
     healCancelled: false,
+    foreignTerminalStatus: null,
   }
 }

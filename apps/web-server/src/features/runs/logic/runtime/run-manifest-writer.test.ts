@@ -5,9 +5,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
+import { detectForeignTerminalWrite, setStatus, startHeartbeat, stopHeartbeat, writeInitialManifest } from './run-manifest-writer'
 import { makeHealLoopContext } from './__fixtures__/heal-loop-context'
 import type { RunContext } from './run-context'
+import type { RunManifest } from './manifest'
 import type { ServiceSpec } from './orchestrator'
 
 let tmpDir: string
@@ -85,6 +86,86 @@ describe('startHeartbeat', () => {
 
     stopHeartbeat(ctx)
     expect(ctx.heartbeatTimer).toBeNull()
+  })
+})
+
+describe('detectForeignTerminalWrite', () => {
+  // `heartbeatAt` is irrelevant here — the manifest is written straight to disk
+  // because the whole point is to observe a write this process did not make.
+  function writeDiskStatus(ctx: RunContext, status: RunManifest['status']): void {
+    fs.writeFileSync(ctx.paths.manifestPath, JSON.stringify({
+      runId: ctx.runId, feature: 'demo', startedAt: '2026-01-01T00:00:00Z', status, healCycles: 1, services: [],
+    }))
+  }
+
+  it('flags a terminal status written by another process while the run is still healing', () => {
+    const { ctx, sink } = ctxFor({ status: 'healing', healCycles: 1 })
+    const warn = vi.fn()
+    ;(ctx as { runnerLog?: unknown }).runnerLog = { warn, info: vi.fn(), error: vi.fn() }
+    writeDiskStatus(ctx, 'aborted')
+
+    detectForeignTerminalWrite(ctx)
+
+    expect(ctx.foreignTerminalStatus).toBe('aborted')
+    // Run Logs reads the runner log, so this line is the only place the user
+    // ever sees the interference named.
+    expect(warn.mock.calls[0][0]).toContain('aborted')
+    expect(sink.recordLifecycleEvent).toHaveBeenCalled()
+  })
+
+  it('says nothing while the manifest on disk still agrees the run is active', () => {
+    const { ctx } = ctxFor({ status: 'healing' })
+    writeDiskStatus(ctx, 'healing')
+
+    detectForeignTerminalWrite(ctx)
+
+    expect(ctx.foreignTerminalStatus).toBeNull()
+  })
+
+  it('ignores our OWN terminal write', () => {
+    // `stop()` writes the terminal status and this context knows about it.
+    // Without this arm every normal run would end by accusing itself.
+    const { ctx } = ctxFor({ status: 'failed' })
+    writeDiskStatus(ctx, 'failed')
+
+    detectForeignTerminalWrite(ctx)
+
+    expect(ctx.foreignTerminalStatus).toBeNull()
+  })
+
+  it('treats an unreadable manifest as no information', () => {
+    // A partial read must never trip this: a false give-up kills a healthy
+    // repair, which is the exact harm the whole detector exists to prevent.
+    const { ctx } = ctxFor({ status: 'healing' })
+    fs.writeFileSync(ctx.paths.manifestPath, '{ not json')
+
+    detectForeignTerminalWrite(ctx)
+
+    expect(ctx.foreignTerminalStatus).toBeNull()
+  })
+
+  it('files the event under the phase the run was actually in', () => {
+    // A foreign write can land during the post-cycle Playwright rerun, not just
+    // while the agent is thinking — the event has to say which.
+    const { ctx, sink } = ctxFor({ status: 'running' })
+    writeDiskStatus(ctx, 'aborted')
+
+    detectForeignTerminalWrite(ctx)
+
+    expect(sink.recordLifecycleEvent).toHaveBeenCalledWith(
+      ctx.runId,
+      expect.objectContaining({ phase: 'running-tests' }),
+    )
+  })
+
+  it('records the interference once, not on every heartbeat', () => {
+    const { ctx, sink } = ctxFor({ status: 'healing' })
+    writeDiskStatus(ctx, 'aborted')
+
+    detectForeignTerminalWrite(ctx)
+    detectForeignTerminalWrite(ctx)
+
+    expect(sink.recordLifecycleEvent).toHaveBeenCalledTimes(1)
   })
 })
 

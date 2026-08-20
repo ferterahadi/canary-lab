@@ -4,7 +4,7 @@ import { EventEmitter } from 'events'
 import { readManifest, readRunsIndex, updateManifest, upsertRunsIndexEntry, writeRunsIndex, type RunLifecycleEvent, type RunIndexEntry, type RunManifest, type ServiceStatus } from './runtime/manifest'
 import { runDirFor } from './runtime/run-paths'
 import { FileRunStateSink, type RunStateSink } from './runtime/run-state-sink'
-import { isActiveRunStatus } from '../../../../../../shared/run-state'
+import { isActiveRunStatus, isStaleHeartbeat } from '../../../../../../shared/run-state'
 import { trimRunArtifacts } from './run-artifacts'
 import { AbortAllResult, AbortResult, CleanupListing, DeleteResult, TrimResult, listCleanupEntries, reapStaleRuns, removeRunFromHistory } from './run-cleanup'
 import { RunDetail, getRunDetail } from './run-detail'
@@ -229,7 +229,20 @@ export class RunStore extends EventEmitter implements RunStateSink {
   }
 
   /** Abort every active orchestrator, then repair any remaining persisted
-   *  running/healing rows. Used by `canary-lab ui` SIGINT/SIGTERM cleanup. */
+   *  running/healing rows. Used by `canary-lab ui` SIGINT/SIGTERM cleanup and
+   *  by boot reconcile.
+   *
+   *  The two loops answer different questions, and only the first one owns a
+   *  process. Loop 1 stops the orchestrators THIS process is running — that is
+   *  what shutdown needs, and their heartbeats are fresh by definition. Loop 2
+   *  repairs rows left behind on disk, which is a guess about a process we
+   *  cannot see, so it defers to the heartbeat: a row beating within
+   *  `HEARTBEAT_STALE_MS` belongs to a live server and is not ours to
+   *  finalize. Without that check, a second server booting against the same
+   *  logs dir marked a healing run `aborted` 3s into its repair cycle — it
+   *  could not stop the real heal loop (that lived in the owning process), so
+   *  the run kept healing for another 51s while every disk reader, the UI
+   *  included, was told it had already ended. */
   async abortAllActiveOrStale(): Promise<AbortAllResult> {
     const aborted = new Set<string>()
     for (const orch of this.registry.list()) {
@@ -237,12 +250,24 @@ export class RunStore extends EventEmitter implements RunStateSink {
       await this.abort(orch.runId)
       aborted.add(orch.runId)
     }
+    const now = Date.now()
     for (const entry of this.list()) {
       if (!isActiveRunStatus(entry.status)) continue
+      if (this.isOwnedByLiveProcess(entry.runId, now)) continue
       const result = await this.abort(entry.runId)
       if (result.ok) aborted.add(entry.runId)
     }
     return { aborted: [...aborted] }
+  }
+
+  /** True when a persisted active row is beating fast enough that some other
+   *  live process must own it. A manifest with no `heartbeatAt` at all predates
+   *  the field and carries no such evidence, so it stays claimable — the same
+   *  distinction `reapStaleRuns` draws. */
+  private isOwnedByLiveProcess(runId: string, nowMs: number): boolean {
+    const heartbeatAt = this.get(runId)?.manifest.heartbeatAt
+    if (!heartbeatAt) return false
+    return !isStaleHeartbeat(heartbeatAt, nowMs)
   }
 
   /** Hard-delete a terminal run from history. Refuses (`reason: 'active'`)

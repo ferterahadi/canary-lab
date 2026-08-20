@@ -116,6 +116,35 @@ export async function runManualExternalHealLoop(ctx: RunContext, host: RunLoopHo
   return finalStatus
 }
 
+/**
+ * Persist why the loop wound down after another process claimed the record.
+ *
+ * Reports what was OBSERVED — which status appeared and during which cycle —
+ * and explicitly declines to claim anything about the fix. The agent may have
+ * edited files that never reached a rerun, so this is not a repair verdict and
+ * must not read like one.
+ */
+function recordForeignAbortEnd(ctx: RunContext, cycle: number): void {
+  const claimed = ctx.foreignTerminalStatus
+  recordHealEnd(ctx, {
+    reason: 'foreign-abort',
+    cycle,
+    message: `Auto-repair stopped: another process marked this run "${claimed}" while cycle ${cycle} was still working, so the repair was wound down instead of finishing.`,
+    at: new Date().toISOString(),
+  })
+  try {
+    appendJournalIteration(ctx, {
+      signal: 'none',
+      hypothesis: `Another process marked this run "${claimed}" mid-cycle. The repair was wound down; any edits the agent had already made are still in the worktree.`,
+      fixDescription: 'No fix verified — the cycle never reached a rerun.',
+      runId: ctx.runId,
+      manifestPath: ctx.paths.manifestPath,
+      summaryPath: ctx.paths.summaryPath,
+      journalPath: ctx.paths.diagnosisJournalPath,
+    })
+  } catch { /* journal write is best-effort */ }
+}
+
 export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initialUserGuidance?: string): Promise<RunManifest['status']> {
   if (!ctx.autoHeal) return 'failed'
   // Clear any give-up reason from a prior heal session — a restart-heal
@@ -143,6 +172,14 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
       // between cycles (or just before the next cycle starts). Bail out
       // before incrementing the cycle counter.
       if (ctx.healCancelled) {
+        finalStatus = 'failed'
+        setStatus(ctx, finalStatus)
+        break
+      }
+      // Same reasoning as the cancel above: a foreign terminal write observed
+      // between cycles must not start another one.
+      if (ctx.foreignTerminalStatus) {
+        recordForeignAbortEnd(ctx, ctx.healCycles)
         finalStatus = 'failed'
         setStatus(ctx, finalStatus)
         break
@@ -265,6 +302,18 @@ export async function runAutoHealLoop(ctx: RunContext, host: RunLoopHost, initia
       if (ctx.stopped) return ctx.status
 
       if (ctx.healCancelled) {
+        finalStatus = 'failed'
+        setStatus(ctx, finalStatus)
+        break
+      }
+
+      // Another process declared this run over mid-cycle. Do NOT fall through
+      // to the no-signal path below: that infers a rerun from whatever the
+      // agent happened to have edited, and re-running a suite for a run the
+      // rest of the system has already reported on would publish a verdict
+      // against a record nobody is reading any more.
+      if (ctx.foreignTerminalStatus) {
+        recordForeignAbortEnd(ctx, cycleNum)
         finalStatus = 'failed'
         setStatus(ctx, finalStatus)
         break

@@ -8,9 +8,9 @@ import type { LifecycleRecordOptions } from './run-orchestrator-types'
 import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
-import { createRunLifecycleEvent, type HealSignalKind } from '../../../../../../../shared/run-state'
+import { createRunLifecycleEvent, isTerminalRunStatus, type HealSignalKind } from '../../../../../../../shared/run-state'
 import { resolvePath } from '../../../../shared/launcher-startup'
-import { type RunLifecyclePhase, type RunManifest, type ServiceManifestEntry, type StoppedEarlyReason } from './manifest'
+import { readManifest, type RunLifecyclePhase, type RunManifest, type ServiceManifestEntry, type StoppedEarlyReason } from './manifest'
 import { appendJournalIteration as appendJournalIterationToFile, type JournalAppendInput } from './log-enrichment'
 import { readPlaywrightArtifactPolicy } from './playwright-artifact-policy'
 import { signalLabel, startingServicesDetail } from './run-verdict'
@@ -166,15 +166,49 @@ export function markStoppedEarly(ctx: RunContext, reason: StoppedEarlyReason, fa
 }
 
 /** Write a heartbeat timestamp to the manifest every 5 seconds so consumers
- *  can detect orphaned runs whose orchestrator crashed without cleaning up. */
+ *  can detect orphaned runs whose orchestrator crashed without cleaning up.
+ *  The same tick is where a foreign terminal write gets noticed — see
+ *  `detectForeignTerminalWrite`. */
 export function startHeartbeat(ctx: RunContext): void {
   const tick = (): void => {
     if (ctx.stopped) return
     ctx.stateSink.recordHeartbeat(ctx.runId)
+    detectForeignTerminalWrite(ctx)
   }
   ctx.heartbeatTimer = setInterval(tick, 5_000)
   // Don't keep the process alive just for heartbeats.
   ctx.heartbeatTimer.unref()
+}
+
+/**
+ * Notice when someone outside this process has declared our run over.
+ *
+ * `stop()` is the only in-process authority for a terminal manifest write, and
+ * it sets `ctx.stopped` first — so an active context reading a terminal status
+ * off disk means another writer got there. That writer cannot have stopped our
+ * heal loop (the orchestrator lives in this process's memory), so the run keeps
+ * repairing while the UI, the MCP tools and the Getting Started guard all read
+ * a finished run. Recording it here converts a silent divergence into a stated
+ * reason the loop can act on.
+ *
+ * Deliberately reads the manifest rather than trusting the sink's cache: the
+ * whole point is to see a write we did not make. A failed or partial read
+ * returns null and is treated as no information — a false give-up would kill a
+ * healthy repair, which is the exact harm this whole change exists to prevent.
+ */
+export function detectForeignTerminalWrite(ctx: RunContext): void {
+  if (ctx.foreignTerminalStatus) return
+  const onDisk = readManifest(ctx.paths.manifestPath)?.status
+  if (!onDisk || !isTerminalRunStatus(onDisk)) return
+  if (isTerminalRunStatus(ctx.status)) return
+  ctx.foreignTerminalStatus = onDisk
+  const detail = `Another process wrote status "${onDisk}" to this run's manifest while cycle ${ctx.healCycles} was still repairing. This runner did not end the run, and cannot be stopped from outside — the repair is being wound down here instead.`
+  ctx.runnerLog?.warn(detail)
+  recordLifecycle(ctx, ctx.status === 'healing' ? 'agent-healing' : 'running-tests', 'Run record marked finished by another process', {
+    detail,
+    severity: 'warning',
+  })
+  emitAgentSystemMessage(ctx, detail)
 }
 
 export function stopHeartbeat(ctx: RunContext): void {
