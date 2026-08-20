@@ -92,6 +92,17 @@ function click(element: Element | null): void {
   act(() => { element.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
 }
 
+/** Tooltip hover. `mouseenter`/`mouseleave` do not bubble, so React's delegated
+ *  listener sees them via the paired `mouseover`/`mouseout`. */
+function hover(element: Element | null | undefined, over: boolean): void {
+  if (!element) throw new Error('nothing to hover')
+  act(() => {
+    element.dispatchEvent(new MouseEvent(over ? 'mouseover' : 'mouseout', { bubbles: true }))
+  })
+}
+
+const tooltip = (): Element | null => document.querySelector('[role="tooltip"]')
+
 describe('DemoDialog', () => {
   it('renders nothing while closed', () => {
     render({ open: false })
@@ -175,7 +186,7 @@ describe('DemoDialog', () => {
       },
     })
     expect(q('getting-started-action-flight')?.textContent).toContain('Running in your agent')
-    expect(q('getting-started-detail')?.textContent).toContain('Follow progress in your Claude or Codex session')
+    expect(q('getting-started-detail')?.textContent).toContain('Running in your Claude or Codex session')
   })
 
   it('keeps completed evidence available as a link to the last owner page', () => {
@@ -198,7 +209,7 @@ describe('DemoDialog', () => {
     expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'flight', id: 'fl-done' })
   })
 
-  it('gives a state line a fixed height so its wording never resizes the card', () => {
+  it('states the run on the button as a dot, with the wording on hover', () => {
     render({
       session: {
         active: {
@@ -208,11 +219,46 @@ describe('DemoDialog', () => {
         completed: {},
       },
     })
-    expect(q('getting-started-detail')?.querySelector('[role="status"]')?.className).toContain('h-9')
-    // Nothing to report reserves nothing — an empty row read as dead space
-    // inside the card.
+    const button = q('getting-started-action-run')
+    expect(button?.querySelector('.cl-status-dot')?.className).toContain('bg-running')
+
+    // The wording is the hover, not the layout: nothing in the card renders it
+    // until the pointer asks, and the card is the same size either way.
+    expect(tooltip()).toBeNull()
+    hover(button?.parentElement, true)
+    expect(tooltip()?.textContent).toContain('Continue in the run page')
+    hover(button?.parentElement, false)
+    expect(tooltip()).toBeNull()
+
+    // A screen reader gets no hover, so the same wording stays in a live region.
+    expect(q('getting-started-detail')?.querySelector('[role="status"]')?.textContent)
+      .toContain('Continue in the run page')
+  })
+
+  it('explains a disabled action, which swallows hover on the button itself', () => {
+    render({
+      session: {
+        active: {
+          sessionId: 'gs-4', workflow: 'run', owner: 'internal',
+          target: { kind: 'run', id: 'run-9' }, startedAt: 'a', updatedAt: 'a',
+        },
+        completed: {},
+      },
+    })
     click(q('getting-started-workflow-flight'))
-    expect(q('getting-started-detail')?.querySelector('[role="status"]')?.textContent).toContain('Run and Heal is running')
+    const button = q('getting-started-action-flight') as HTMLButtonElement
+    expect(button.disabled).toBe(true)
+    expect(button.style.pointerEvents).toBe('none')
+    hover(button.parentElement, true)
+    expect(tooltip()?.textContent).toContain('Waiting for Run and Heal to finish')
+  })
+
+  it('shows no dot and no tooltip when there is nothing to report', () => {
+    render()
+    const button = q('getting-started-action-run')
+    expect(button?.querySelector('.cl-status-dot')).toBeNull()
+    hover(button?.parentElement, true)
+    expect(tooltip()).toBeNull()
   })
 
   it('does not use a Recommended label', () => {

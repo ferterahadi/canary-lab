@@ -8,6 +8,7 @@ import type {
   OnboardingWorkflowId,
 } from '@/shared/api/client'
 import { CopyField } from '@/shared/ui/CopyField'
+import { Tooltip } from '@/shared/ui/Tooltip'
 import { Modal, StatusDot, type StatusDotState } from '@/shared/ui/atoms'
 
 const MORE_ACTION_LABEL: Record<Exclude<OnboardingWorkflowAction['kind'], 'run' | 'flight'>, string> = {
@@ -35,13 +36,6 @@ function targetLabel(target: GettingStartedTarget): string {
   return target.kind === 'flight' ? 'Flight' : 'run'
 }
 
-function toneColor(tone: FeedbackTone): string {
-  if (tone === 'running') return 'var(--running)'
-  if (tone === 'done') return 'var(--success)'
-  if (tone === 'blocked') return 'var(--warning)'
-  return 'var(--text-muted)'
-}
-
 /** The rail's dot: state stays visible on a workflow you aren't reading, so a
  *  run started from here is still legible while you look at another one. */
 function railDot(tone: FeedbackTone): StatusDotState {
@@ -51,16 +45,44 @@ function railDot(tone: FeedbackTone): StatusDotState {
   return 'idle'
 }
 
-function Feedback({ tone, text }: { tone: FeedbackTone; text: string }) {
-  const color = toneColor(tone)
-  if (text === '') return null
+/** The action, carrying the workflow's live state as a dot on the button with
+ *  the wording in a tooltip. A full-colour sentence next to the button shouted
+ *  a one-line status at the same volume as the action itself, and stacking it
+ *  under the button resized the card every time a demo started or finished. A
+ *  dot says "there is news, and what kind" at 9px; the sentence is one hover
+ *  away, and stays in a live region for a screen reader that gets no hover.
+ *
+ *  The tooltip hangs off a wrapper, not the button: a disabled button swallows
+ *  hover, and the states that most need explaining (blocked, unavailable) are
+ *  exactly the disabled ones. */
+function ActionButton({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved: Resolved }) {
+  const { tone, text } = resolved.feedback
+  const control = (
+    <span className="relative flex min-w-0 flex-1" style={{ cursor: text === '' ? undefined : 'help' }}>
+      <button
+        type="button"
+        data-testid={`getting-started-action-${workflow.id}`}
+        disabled={resolved.actionDisabled}
+        onClick={resolved.onAction}
+        style={resolved.actionDisabled ? { pointerEvents: 'none' } : undefined}
+        className="cl-button relative w-full px-3.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {/* Absolute so the label stays centred: a dot in the flex line would
+            nudge the wording sideways the moment a demo started. */}
+        {tone !== 'ready' && (
+          <StatusDot state={railDot(tone)} className="absolute left-2.5 top-1/2 -translate-y-1/2" />
+        )}
+        <span className="block truncate">{resolved.actionLabel}</span>
+      </button>
+    </span>
+  )
   return (
-    <div className="flex h-9 flex-col justify-center" role="status" style={{ color }}>
-      <div className="flex items-start gap-1.5 text-[10.5px] leading-snug">
-        <span className="mt-[3px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
-        <span className="line-clamp-2">{text}</span>
-      </div>
-    </div>
+    <>
+      {text === '' ? control : <Tooltip label={text}>{control}</Tooltip>}
+      {/* Outside the conditional so the live region is never remounted — one
+          that appears with the news does not reliably announce it. */}
+      <span className="sr-only" role="status">{text}</span>
+    </>
   )
 }
 
@@ -86,11 +108,11 @@ function resolveCore(workflow: OnboardingWorkflow, session: GettingStartedSessio
   if (launchError) feedback = { tone: 'blocked', text: launchError }
   else if (blocked) feedback = {
     tone: 'blocked',
-    text: `${active.workflow === 'flight' ? 'Full Flight' : 'Run and Heal'} is running. Try this when it finishes.`,
+    text: `Waiting for ${active.workflow === 'flight' ? 'Full Flight' : 'Run and Heal'} to finish.`,
   }
   else if (isActive && active.owner === 'external') feedback = {
     tone: 'running',
-    text: 'Running in your agent · Follow progress in your Claude or Codex session.',
+    text: 'Running in your Claude or Codex session.',
   }
   else if (isActive) feedback = {
     tone: 'running',
@@ -117,7 +139,7 @@ function resolveMore(workflow: OnboardingWorkflow, session: GettingStartedSessio
   const feedback: { tone: FeedbackTone; text: string } = launchError
     ? { tone: 'blocked', text: launchError }
     : blocked
-      ? { tone: 'blocked', text: 'A demo is running. Try this when it finishes.' }
+      ? { tone: 'blocked', text: 'Waiting for the running demo to finish.' }
       : { tone: 'ready', text: unavailableReason ?? '' }
   return {
     actionLabel: launching ? 'Starting…' : actionLabel,
@@ -168,7 +190,9 @@ function RailRow({ workflow, selected, tone, onSelect }: {
 function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved: Resolved }) {
   return (
     <div data-testid="getting-started-detail" className="flex min-w-0 flex-col gap-3 px-4 py-3.5">
-      <div className="min-w-0">
+      {/* Reserved so switching workflows in the rail never floats the frame
+          below up or down — the card stays put and only its contents change. */}
+      <div className="min-h-[68px] min-w-0">
         <h3 className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>{workflow.title}</h3>
         <p className="mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{workflow.outcome}</p>
         {/* Ordered steps as a chevron chain — these are a sequence, so arrows
@@ -190,14 +214,17 @@ function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved
           numbered sequence above them primes exactly that. Side-by-side cards
           said "either" but sized themselves to their contents, so a button box
           sat next to a much wider command box. Full-width rows keep the pair
-          the same size and let the label column carry the difference. */}
+          the same size and let the label column carry the difference.
+
+          Live state rides the button itself as a dot, so the card is the same
+          height whether a demo has never run, is running, or has finished. */}
       <div>
         <div className="cl-rubric mb-2">Two ways to run it</div>
         <div
           className="overflow-hidden rounded-lg border"
           style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)', boxShadow: 'var(--shadow-panel)' }}
         >
-          <div className="flex items-center gap-3 border-b px-3 py-2.5" style={{ borderColor: 'var(--border-default)' }}>
+          <div className="flex items-center gap-3 border-b px-3 py-2" style={{ borderColor: 'var(--border-default)' }}>
             <div className="w-[150px] shrink-0">
               <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>In Canary Lab</div>
               <p className="mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>Runs in this workspace.</p>
@@ -205,25 +232,13 @@ function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved
             {/* Both rows give their control the same column AND the same weight.
                 The accent-filled skin made this row win every time it was on
                 screen, which is the opposite of "either way" — an accent fill
-                next to a plain field reads as the real option beside a footnote.
-                Neutral on both sides lets the label column carry the difference.
-                The state line sits under the button in that column — absent at
-                rest, so the two rows stay the same height until there is news. */}
-            <div className="min-w-0 flex-1">
-              <button
-                type="button"
-                data-testid={`getting-started-action-${workflow.id}`}
-                disabled={resolved.actionDisabled}
-                onClick={resolved.onAction}
-                className="cl-button w-full px-3.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <span className="block truncate">{resolved.actionLabel}</span>
-              </button>
-              <Feedback {...resolved.feedback} />
-            </div>
+                next to a plain field reads as the real option beside a
+                footnote. Neutral on both sides lets the label column carry the
+                difference. */}
+            <ActionButton workflow={workflow} resolved={resolved} />
           </div>
 
-          <div className="flex items-center gap-3 px-3 py-2.5">
+          <div className="flex items-center gap-3 px-3 py-2">
             <div className="w-[150px] shrink-0">
               <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>In your agent</div>
               <p className="mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>Paste it in Claude or Codex.</p>
