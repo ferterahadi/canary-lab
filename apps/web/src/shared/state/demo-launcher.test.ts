@@ -73,7 +73,7 @@ describe('Getting Started Flight destinations', () => {
         env: 'local',
         coverageTarget: 85,
         fromStage: 'portify',
-        autopilot: false,
+        autopilot: true,
       },
     })
   })
@@ -88,7 +88,7 @@ describe('Getting Started Flight destinations', () => {
         feature: 'workflow-workbench',
         mode: 'jump',
         fromStage: 'evaluation-export',
-        autopilot: false,
+        autopilot: true,
       },
     })
   })

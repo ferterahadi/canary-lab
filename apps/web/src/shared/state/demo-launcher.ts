@@ -51,7 +51,7 @@ export function demoFlightLaunch(
   if (entry.flight) {
     return {
       kind: 'start',
-      body: { feature, mode: 'jump', fromStage: stage, autopilot: false },
+      body: { feature, mode: 'jump', fromStage: stage, autopilot: true },
     }
   }
   return {
@@ -63,7 +63,7 @@ export function demoFlightLaunch(
       env: entry.prefill.env,
       coverageTarget: entry.prefill.coverageTarget,
       fromStage: stage,
-      autopilot: false,
+      autopilot: true,
     },
   }
 }
