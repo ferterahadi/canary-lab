@@ -1,11 +1,9 @@
 # Library lending requirements
 
-The lending service tracks copies of books and who has them out. Three
-contracts define correct behaviour.
+The service tracks book copies and loans. Three contracts define correct behavior.
 
-1. **Borrowing takes a copy out of circulation.** Creating a loan for a book
-   with copies free succeeds, and the book's available count drops by exactly
-   one.
+1. **Borrowing takes a copy out of circulation.** A successful loan reduces the
+   book's available count by one.
 2. **Returning puts the copy back.** Returning an open loan marks it returned
    and restores the available count to what it was before the loan.
 3. **You cannot borrow what is not there.** When every copy of a book is on
@@ -16,7 +14,5 @@ contract 3. `The Left Hand of Darkness` has two.
 
 ## Scope
 
-These three contracts are the whole feature. The service also returns 404s for
-unknown books and unknown loans so it behaves like a real small API, but those
-are not acceptance requirements — do not turn them into separate tests or
-coverage obligations.
+These contracts are the whole feature. The service also returns 404s for unknown
+books and loans, but those are fixture support—not tests or coverage obligations.

@@ -10,11 +10,11 @@ Create one from the UI or with:
 npx canary-lab new feature checkout-discounts --description "Validate checkout discounts"
 ```
 
-Flight can create the feature and turn requirement documents into tagged Playwright tests. It continues until the coverage target is met or the authoring loop needs your decision. External MCP clients can use `start_external_draft` → `apply_external_draft` to submit tests they authored themselves.
+Flight can create the feature and turn requirements into tagged Playwright tests. It runs until coverage reaches the target or needs your decision. External MCP clients submit their own tests with `start_external_draft` → `apply_external_draft`.
 
 ## Requirement Coverage
 
-A feature can keep specifications, tickets, and notes in `docs/`. Canary Lab summarizes those Markdown files into requirements with stable IDs. It stores the machine-readable summary in `_prd-summary.json` and a readable copy in `_prd-summary.md`. Regeneration preserves IDs for requirements that still exist, so test tags remain valid.
+Keep specifications, tickets, and notes in `docs/`. Canary Lab turns them into requirements with stable IDs, stored in `_prd-summary.json` and `_prd-summary.md`. Regeneration preserves IDs for unchanged requirements, keeping test tags valid.
 
 Tie tests to requirements with Playwright tags **on** the `test()` (greppable, rename-proof):
 
@@ -27,7 +27,7 @@ test('DELETE /todos/:id removes a todo', { tag: ['@req-R3', '@path-happy'] }, as
 - `@variant-<value>` — optional; for a requirement that must hold across a domain axis (channel, tenant, region…).
 - Legacy `// @requirement <id>` / `// @path happy` comments above the test still parse as a fallback.
 
-Open **Coverage** from a row in the Suites column. The ledger maps requirements to tests and calculates coverage from tags. It measures whether every required path and variant has a mapped test; it does not depend on the latest run result. Gap labels mean:
+Open **Coverage** from a suite row. The ledger maps requirements to tests and calculates coverage from tags, independent of run results. It checks that every required path and variant has a test. Gap labels mean:
 
 - **Untested** — no test mapped to the requirement.
 - **Path-incomplete** — some paths are claimed, but a sad/edge path has no test.

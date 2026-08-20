@@ -1,6 +1,6 @@
 ---
 name: cl_scope-the-ask
-description: Use the moment a request is vague or open-ended — "improve the cleanup UI", "make this better", "let's polish X", "can we redo Y" — where the WHAT is named but the specific change is not. Look at the target first; don't fire an options menu guessing the goal.
+description: Use for vague Canary Lab requests that name a target but not the desired change. Inspect the target, then surface the user's goal without guessing.
 ---
 
 <!-- GENERATED FROM .claude/skills — DO NOT EDIT.
@@ -8,68 +8,24 @@ description: Use the moment a request is vague or open-ended — "improve the cl
 
 # Scope the ask before offering options
 
-Applies to any Canary Lab work (UI, run loop, MCP, docs), not just UI.
+Applies to vague requests in any Canary Lab area.
 
-A vague opener — "improve the cleanup UI", "make X nicer", "let's clean this
-up" — is an invitation to **look**, not a cue to generate a menu of directions.
-The user almost always has a specific thing in mind. Your job is to surface
-*their* ask, not to make them react to *your* speculation.
+## Workflow
 
-## The trap
+1. **Inspect the named target and its closest precedent.** The desired change may
+   become clear from current behavior.
+2. If the goal is still unclear, ask **one open question** such as "What's
+   bothering you about it?" Do not offer a menu of guessed goals.
+3. Once the goal is concrete, recommend an approach and confirm any material
+   boundary before implementation.
 
-The reflex is to immediately fire an `AskUserQuestion` with 3–4 options —
-"Visual polish? / Disk insight? / Faster bulk? / New capability?" — to look
-proactive. This backfires:
+If the user dismisses a question, do not rephrase the same menu. Let them state
+the goal.
 
-- It forces the user to engage with your guesses instead of just stating their
-  goal. The fastest path to their intent is the one where they talk, not where
-  they pick from your list.
-- The real ask is frequently *none of the options* (in the session this skill
-  came from, the user wanted "click a run id → open that run" — not on any of
-  the four offered tiles).
-- It reads as not having looked. A menu of plausible directions is what you
-  write *before* understanding the surface, and the user can feel that.
-- It contradicts the standing **recommend, don't ask** preference: when you do
-  have enough to act, lead with a decisive pick, not an options buffet.
+## When options are appropriate
 
-A dismissed question is the signal you jumped early. Don't re-ask a reworded
-menu — back off and let them lead.
+Use options only for a real implementation fork that code and sensible defaults
+cannot settle. Recommend one. The test is simple:
 
-## What to do instead
-
-1. **Look at the target first.** Read the component / module they named (and how
-   the rest of the app does the equivalent) so you understand it before saying
-   anything. Often this alone reveals the obvious improvement.
-2. **Then pick exactly one:**
-   - **Ask one open question** — "What's bugging you about it?" / "What do you
-     want it to do that it doesn't?" Open, not multiple-choice. One message.
-   - **Or just wait / state intent and pause.** Users opening vague usually have
-     a concrete thing they'll reveal in their next message — sometimes by
-     clicking the exact element. Give them the room.
-3. **Only then,** once the concrete goal is on the table, do the normal design
-   pass (propose an approach, recommend, confirm scope).
-
-## When AskUserQuestion IS the right tool
-
-Use it for a **genuine fork that changes what you build** and that you can't
-settle from the code or sensible defaults — and where each option is real, not a
-guess at the goal:
-
-- "Clicking a run id leaves the page and jumps to the workspace, *or* opens it in
-  a new tab — which behavior?" (two concrete implementations, both viable)
-- "Auth via session cookie or JWT?" (a decision only the user can make)
-
-The test: **am I choosing between known alternatives, or fishing for the goal?**
-Fishing → don't use it. Choosing → use it, lead with your recommendation.
-
-## Example (the session this came from)
-
-Input: "i want to make improvement to the cleanup ui"
-
-- ❌ What I did: fired a 4-option menu (polish / disk insight / bulk / new
-  capability). Dismissed — none matched.
-- ✅ What worked: look at `LogCleanupPage`, then let the user point. They clicked
-  the run-id cell: "bring me to the actual run." Concrete, instantly actionable.
-
-The cost of guessing wrong was a wasted round-trip; the cost of looking + waiting
-was nearly zero.
+- Choosing between known implementations: options are useful.
+- Fishing for the user's goal: ask one open question instead.

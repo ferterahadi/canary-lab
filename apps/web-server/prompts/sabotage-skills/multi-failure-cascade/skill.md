@@ -4,17 +4,13 @@
 
 ## Description
 
-Introduce several interacting bugs across the app so more than one test fails and
-the failures partially mask one another. Hard mode for the repair loop.
+Introduce interacting bugs that fail several tests and partly mask one another.
 
 ## Sabotage instructions
 
-You are deliberately breaking this app to benchmark an AI repair loop. Introduce
-**three to five interacting** defects across multiple functions / handlers in the
-application / service code. Aim for failures that compound rather than stack
-independently — e.g. a wrong status, a skipped side effect, and a bad value that
-together confuse the symptom. E.g. bug A corrupts a value that bug B then
-mis-handles, so the visible symptom points at neither.
+To benchmark repair, introduce **three to five interacting** defects across
+application or service functions. Make them compound, such as corrupted data that
+another bug mishandles, rather than fail independently.
 
 Requirements:
 

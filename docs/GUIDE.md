@@ -4,7 +4,7 @@ Operational reference for Canary Lab. See the [README](../README.md) for setup a
 
 ## Environment Switching
 
-Envsets are temporary environment files for a feature. During a run, Canary Lab backs up the target files, applies the selected envset, and restores the originals when the run ends. Manage them from the Envsets tab; they live under `features/<feature>/envsets/`.
+Envsets are temporary feature environment files. Canary Lab backs up target files, applies the selected envset, and restores the originals after the run. Manage them under **Envsets**; files live in `features/<feature>/envsets/`.
 
 Feature configs can make service startup env-specific — for example, a `local` env starts services while a `production` env skips local startup and points tests at a deployed URL.
 
@@ -19,7 +19,7 @@ To run a feature's tests against a deployed environment without booting the loca
 
 ### Environment Variable Safety
 
-Envset files often contain credentials copied from local app configs. The default `.gitignore` ignores `features/*/envsets/*/*` so value files are not committed by accident. If you override this or use `git add -f`, review the files before pushing.
+Envsets may contain credentials. The default `.gitignore` excludes `features/*/envsets/*/*`. Review any value file you force-add before pushing.
 
 ## Run Output
 
@@ -40,7 +40,7 @@ Each run writes to `logs/runs/<runId>/`:
 
 ## Evaluation Report
 
-Export a completed run from the run detail Overview tab. The `.zip` contains `evaluation.html` and captured videos. Each test shows its flow, code, helpers, evidence, and checks.
+Export a completed run from its **Overview** tab. The `.zip` contains `evaluation.html` and captured videos, with each test's flow, code, helpers, evidence, and checks.
 
 When the feature has a PRD summary, the report compares semantic coverage with what this run proved. A requirement is proven only when its mapped test passed in the exported run; Canary Lab never borrows the outcome from another run.
 
@@ -50,7 +50,7 @@ The Export menu offers two formats. **Raw** renders directly from evidence and u
 
 ## Requirement Coverage
 
-Open **Coverage** from a row in the Suites column. The ledger shows every requirement, path, variant, and mapped test. Canary Lab calculates the percentage from test tags. Filters expose untested, path-incomplete, and variant-incomplete requirements, while strictness shows how deeply each test checks the application. Regenerating the requirement summary preserves stable IDs. See [FEATURES](FEATURES.md#requirement-coverage) for tags and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-coveragelifecyclefull-profiles) for MCP tools.
+Open **Coverage** from a suite row. The ledger shows each requirement, path, variant, and mapped test; tags determine the percentage. Filters show coverage gaps, while strictness measures assertion depth. Regeneration preserves stable requirement IDs. See [FEATURES](FEATURES.md#requirement-coverage) for tags and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-coveragelifecyclefull-profiles) for MCP tools.
 
 ## Repairing a Failed Run
 
@@ -58,9 +58,9 @@ When a run fails, Canary Lab pauses, waits for a repair, and continues the same 
 
 ### Where the repair lands
 
-Every test run uses a Git worktree for each repo. It starts from `HEAD`, includes your uncommitted changes, and reuses the source repo's `node_modules`. **The repair agent edits the worktree, not your checkout.**
+Each repo runs in a Git worktree created from `HEAD`, including uncommitted changes and shared `node_modules`. **The repair agent edits the worktree, not your checkout.**
 
-At teardown, Canary Lab saves the repair to `logs/runs/<runId>/fixes/<repo>.patch` and `fixes.json`. It then removes a normal worktree. If a repaired run passes, Canary Lab can update a `canary-lab/fix-<feature>-<repo>` branch and open a draft pull request. Disable this under **Settings → GitHub**. Failed or abandoned repairs are never pushed.
+At teardown, Canary Lab saves `<repo>.patch` under `logs/runs/<runId>/fixes/`, writes `fixes.json`, and removes normal worktrees. A passing repair can update `canary-lab/fix-<feature>-<repo>` and open a draft pull request; disable this under **Settings → GitHub**. Failed or abandoned repairs are never pushed.
 
 Portified features are the exception on teardown: their overlay is reverse-applied but the worktree is kept, since it holds the repair. The Cleanup page's **Worktrees** tab lists, opens, and removes those.
 
@@ -68,7 +68,7 @@ Portified features are the exception on teardown: their overlay is reverse-appli
 
 An external MCP client claims the failed run, reads its evidence, fixes application or service code, and signals the next action. It may change a test only when the test is provably wrong. The loop is `claim_heal` → `get_heal_context` → `wait_for_heal_task` → edit → `signal_run`.
 
-Prefer the compact `get_heal_context` and `wait_for_heal_task` over polling; use `get_run_snapshot` only when you need verbose summaries or deeper debugging fields. If an agent session reports the Canary Lab tools are unavailable, run `npx canary-lab setup --force` and start a fresh session — MCP tools are discovered per client session, and the local HTTP API is only a fallback for custom clients.
+Use `get_heal_context` and `wait_for_heal_task` instead of polling; reserve `get_run_snapshot` for deeper debugging. If tools are unavailable, run `npx canary-lab setup --force` and start a fresh session. MCP tools load per client session; the HTTP API is a fallback for custom clients.
 
 ### Auto-heal
 
@@ -78,7 +78,7 @@ Select **Claude** or **Codex** in Settings and Canary Lab starts that local CLI 
 
 `.rerun` and `.restart` under `logs/runs/<runId>/signals/` are the low-level mechanism both modes use. You can write them by hand (or via the UI controls) to drive a fix from a custom client or while debugging.
 
-Two further `healAgent` values exist but are no longer offered in Settings (which lists External / Claude / Codex): `manual` disables auto-heal and parks the run for hand-driven signals, and `auto` picks whichever supported CLI is on `PATH`. Both remain valid in `canary-lab.config.json`, over the config API, and as `handoff_heal` targets — an existing project keeps whichever it was set to.
+Two values hidden from Settings remain valid in `canary-lab.config.json`, the config API, and `handoff_heal`: `manual` waits for hand-driven signals; `auto` selects a supported CLI from `PATH`. Existing projects keep their value.
 
 ## Flight (`canary-lab flight`)
 
@@ -88,7 +88,7 @@ Agents draft the config, collect requirements, and author tests. Canary Lab veri
 
 ### Checkpoints and autopilot
 
-A flight has nine checkpoints, but **autopilot is on by default** and answers seven of them with a safe default — each one logged `[autopilot]` on its stage. Expect an unattended flight to stop only where a machine can't decide:
+A flight has nine checkpoints. **Autopilot answers seven by default**, logging each as `[autopilot]`. It stops only when a machine cannot decide:
 
 | Checkpoint | Asks | Autopilot |
 |---|---|---|
@@ -102,15 +102,15 @@ A flight has nine checkpoints, but **autopilot is on by default** and answers se
 | `export-mode` | `raw` (fast) vs `localized` (agent-rewritten reasoning) | `raw` |
 | `missing-env` | Secrets the env capture couldn't find | ❌ never skipped, not even with `--yolo` |
 
-Two overrides on top of that. A checkpoint that **re-parks** (a config parse error after an auto-approve, an unrecognized choice, a requirements collector that came back empty-handed) always reaches you — autopilot never answers the same one twice. And a stage you deliberately **re-enter** via redo or jump-to-stage always parks its first checkpoint, because choosing to re-run a step is the intent to answer it differently.
+Two rules override autopilot. A checkpoint that **re-parks** after an automatic answer always reaches you; autopilot never answers it twice. A deliberately re-entered stage also parks its first checkpoint so you can choose differently.
 
-Turn autopilot off to be asked at every checkpoint: the flight header's facts strip carries an **Autopilot on/off** toggle you can flip at any time (it takes effect at the next checkpoint), and MCP clients pass `autopilot: false` to `start_flight` — worth doing when you plan to distill the conversation into requirement docs at the `prd-source` stop.
+Turn autopilot off to answer every checkpoint. Use the flight header toggle or pass `autopilot: false` to `start_flight`; changes apply at the next checkpoint.
 
 Answer checkpoints in the terminal, the Flight view, or through `respond_flight_checkpoint`. From MCP, use `write_feature_doc` to add Markdown content or link a local file before answering `prd-source`. The Flight view shows stage evidence and live agent activity; a suite's paper-plane action opens its existing flight.
 
 ### Resuming, redoing, and queueing
 
-Flights are resumable background jobs. A crash or failed stage pauses the flight, and the next command resumes from the first unfinished stage. Use `--fresh` for a new feature. An existing feature triggers a rerun, enhance, or new-feature checkpoint instead of being duplicated.
+Flights are resumable background jobs. After a crash or failed stage, the next command starts at the first unfinished stage. Use `--fresh` for a new feature; existing features trigger a rerun, enhance, or new-feature checkpoint.
 
 A flight's repos and description are fixed after it starts. Resume, redo, and stage re-entry reuse those values. To change them, stop the flight and delete its record in the web UI. Deletion keeps the feature and its files. There is no CLI or MCP delete operation.
 
@@ -118,7 +118,7 @@ In the web UI, a broad description can be split into several proposed features f
 
 ## External Authoring Workflow
 
-External clients can create durable Canary Lab tasks without asking Canary Lab to author content. Connect on the default `lifecycle` profile — the walkthrough below crosses three workflow profiles, and `lifecycle` is their union:
+External clients can create durable tasks without Canary Lab authoring the content. Use the default `lifecycle` profile, which combines the three profiles below:
 
 1. *(`author`)* `create_feature` scaffolds `feature.config.cjs`, `playwright.config.ts`, and `envsets/`.
 2. *(`author`)* `capture_feature_env_files` captures existing `.env`, `.env.dev`, or `application.properties` files (responses show redacted key names only).

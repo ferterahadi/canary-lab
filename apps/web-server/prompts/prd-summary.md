@@ -1,6 +1,5 @@
-You are turning a feature's source documents into a structured, requirements-driven
-PRD for a verified-coverage ledger. The output describes **what the new feature is
-expected to do** — its requirements — NOT the problem it solves.
+Turn source documents into requirements for a verified-coverage ledger. Describe
+**what the feature must do**, not the problem it solves.
 
 ## What to produce
 
@@ -12,9 +11,7 @@ A flat, enumerated list of **requirements**. Two kinds:
 
 ## What is NOT a requirement — never emit these
 
-PRDs carry sections that explain **why** or **how**, not **what the feature must
-do**. These are NOT requirements — never emit a requirement for them, and never
-turn their heading into a requirement:
+Do not turn sections about **why** or **how** into requirements:
 
 - Goals / Objectives
 - Background / Context
@@ -27,36 +24,23 @@ turn their heading into a requirement:
 - Milestones / Timeline / Rollout
 - Success metrics
 
-A markdown heading is **not** automatically a requirement. Judge by content, not
-structure.
+A heading is not a requirement. Judge its content.
 
-**Balance — do not lose a real requirement hiding in one of these sections.** If a
-"Goals" or "Architecture" section states a concrete, testable expectation (e.g.
-"the API must paginate at 10k rows"), extract THAT expectation as a requirement —
-but never the goal/section framing itself. The litmus test for every entry: *could
-a Playwright test pass or fail against this statement?* If no, it is not a
-requirement.
+Still extract concrete expectations found in those sections. The test is: *could
+a Playwright test pass or fail against this statement?*
 
 ## Completeness
 
-Enumerate **every** functional and non-functional requirement as its own atomic
-line item. Decompose multi-part bullets, tables, and prose paragraphs into one
-requirement each — a requirement omitted is a permanent coverage blind spot. Be
-exhaustive over the requirement-bearing sections (while still inventing nothing —
-see Grounding below).
+Extract every requirement as one atomic item. Split compound bullets, tables, and
+paragraphs without inventing content.
 
 ## Grounding — extract, do NOT invent
 
-Every requirement must be **stated or directly implied by the source documents**.
+Every requirement must be **stated or directly implied by the source**.
 - **Do not invent requirements.** If the docs don't discuss it, it is not a
   requirement — no matter how standard or sensible it seems.
-- This applies especially to **non-functional** requirements: do NOT add generic
-  boilerplate ("it should be performant", "it should be secure", "it should be
-  accessible", "it should log errors") unless the documents actually call for it.
-  If the documents describe no non-functional constraints, emit **zero**
-  non-functional requirements — an all-functional list is correct and expected.
-- The two `kind` buckets are a *classification* of what you found, NOT a quota to
-  fill. Never manufacture a requirement to populate a section.
+- Never add generic non-functional boilerplate. If the source states none, emit none.
+- `kind` classifies findings; it is not a quota.
 - If a detail is ambiguous, prefer fewer, well-grounded requirements over more,
   speculative ones. Coverage is measured against this list, so an invented
   requirement becomes a permanent phantom gap.
@@ -71,12 +55,9 @@ Hard rules on framing:
 
 ## Variant dimension (cross-cutting breadth)
 
-Some features have ONE cross-cutting dimension a requirement must hold across —
-**channel** (email / whatsapp / call / line), **tenant**, **region**, **role**,
-**plan-tier**. When a requirement says "for all channels", "every tenant", "each
-region", or names several such values, the feature has a variant dimension and a
-single requirement secretly bundles N cases. Tested on only one, it is NOT fully
-covered — so the ledger must track this as a third axis.
+Some requirements span one cross-cutting dimension such as channel, tenant,
+region, role, or plan tier. Testing one value does not cover a requirement that
+names several.
 
 Detect AT MOST ONE such dimension for the whole feature:
 - Emit a top-level `variantDimension` with a lower-case single-token `name` and the
@@ -91,16 +72,12 @@ The litmus test: would a reviewer accept "we tested it on email" as proof a
 requirement about *all four channels* is done? If no, that requirement spans
 variants and must list them.
 
-**Not-Applicable variants.** Some variants a requirement nominally spans have **no
-testable surface** — the endpoint/feature simply does not exist for them (e.g.
-"broadcast is email-only", "LINE has no v2 read endpoint"). Listing such a variant
-as something to cover creates a permanent impossible gap. Instead:
+**Not-applicable variants.** When a named variant has no testable surface:
 - Keep the variant in `variants` (the requirement conceptually spans it), AND
 - Add it to `variantsNA` with a concrete `reason` (what's missing).
-A variant in `variantsNA` is excluded from coverage and shown as N/A with its
-reason. Only mark N/A when you confirmed from the code/docs that no surface exists
-— not merely because no test happens to exist yet (that's a real gap). When in
-doubt, leave it OUT of `variantsNA` (a real gap is safer than a hidden one).
+`variantsNA` excludes that value from coverage and shows the reason. Use it only
+after confirming no surface exists, not because no test exists. When unsure, keep
+the gap visible.
 
 ## Happy & unhappy paths
 
@@ -158,42 +135,23 @@ PREVIOUS requirements (with ids) when regenerating.
 
 ## How to work
 
-Work as an agent, not a one-shot. The source documents are **not** inlined here —
-only their file paths are listed below. Use your tools to **read each file** (and
-any specs, configs, or code they reference) before extracting requirements. Every
-requirement you emit must trace back to something you actually read (see
-"Grounding" above) — if you can't point to where a document says it, leave it out.
-This is read-only analysis: do not edit any file.
+Read every listed document and relevant referenced specs, config, or code. Every
+requirement must trace to something you read. This is read-only.
 
 ### Fan out when there is enough reading to divide
 
-A document is the unit of division, and never split one document across two
-readers — a requirement stated in one paragraph and qualified three paragraphs
-later only makes sense read together. When more than one document is listed
-below and there is more than a handful of reading, dispatch **one read-only
-subagent per document in a single parallel round** (up to 5 at once), each
-reading only its own file and the material that file references, and returning
-only that file's requirements. Below that, read them yourself; the round trips
-cost more than the reading.
+A document is the unit of work: never split one document across two readers. With
+several documents and substantial reading, dispatch one read-only
+subagent per document in a single
+parallel round (up to 5); each reads only its file and
+references and returns only that file's requirements. Otherwise read them yourself.
 
-Give every subagent the previous requirement list unchanged, and tell it the id
-stability rule verbatim. The documents divide; the id spine does not, because a
-subagent that cannot see a surviving requirement's previous id will mint a new
-one for it and silently break every test annotation pointing at the old id.
+Give each the full previous list and ID-stability rule verbatim.
+The documents divide; the id spine does not. Two whole-feature judgments are never delegated:
+the single `variantDimension` and de-duplication across returns.
 
-Two judgements stay yours and are never delegated, because both are properties
-of the WHOLE feature rather than of any one document:
-
-- the single `variantDimension` — it cross-cuts every document by definition, so
-  a per-document vote on it is a vote taken on partial evidence.
-- de-duplication across returns — two documents describing the same expectation
-  must collapse to ONE requirement, and only you can see both.
-
-The merged answer is yours, not theirs. Account for every document listed below
-before you send it: a subagent that returns nothing has **not** established that
-its document holds no requirements — it has failed to report. Say which document
-and why, or read that one yourself, rather than dropping it silently. Nothing
-downstream can tell an unread document from an empty one.
+A silent subagent has **not** established that its document has no requirements;
+it failed to report. Read it yourself and account for every document.
 
 ## Source documents to read
 

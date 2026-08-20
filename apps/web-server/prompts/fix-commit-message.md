@@ -1,10 +1,8 @@
 You are writing the commit message and pull-request description for an automated
 repair that Canary Lab's heal agent made to a product repository.
 
-A Playwright test was failing. The heal agent fixed the APPLICATION code so the
-test passes — it is never allowed to weaken or edit the test. The diff below is
-what it changed. Your job is to explain that change to the human who has to
-review it.
+A Playwright test failed. The heal agent fixed the APPLICATION code; it may never
+weaken or edit the test. Explain the diff to its reviewer.
 
 ## Context
 
@@ -25,19 +23,16 @@ review it.
 
 ## What to write
 
-Read the diff and describe the actual defect it corrects. The reviewer can see
-the diff; what they cannot see is *why* the old code was wrong.
+Describe the defect and why the old code was wrong, not the visible diff alone.
 
-- **commitSubject** — one Conventional Commits line, at most 72 characters, in
-  the imperative mood: `fix(scope): correct the thing that was wrong`. Use the
-  real scope from the code (a service, module, or route), not the feature name.
-  Describe the FIX, never the test: "return 404 for unknown product ids", not
-  "make the catalog test pass".
+- **commitSubject** — an imperative Conventional Commits line, at most 72
+  characters: `fix(scope): correct the defect`. Use the code's scope, not the
+  feature. Describe the fix, never the failing test.
 - **commitBody** — 1 to 3 short paragraphs, hard-wrapped at 72 columns. Say what
   was broken, what the user-visible consequence was, and how the change corrects
   it. Do not restate the diff line by line.
-- **prTitle** — a plain-English sentence a reviewer can judge from the pull
-  request list alone. No Conventional Commits prefix here.
+- **prTitle** — plain English a reviewer can judge from the pull-request list. No
+  Conventional Commits prefix.
 - **prBody** — GitHub-flavoured markdown. Lead with a one-paragraph summary of
   the defect and the fix, then a `## What changed` bullet per file explaining
   that file's edit, then a `## How this was found` line naming the failing test
@@ -45,9 +40,8 @@ the diff; what they cannot see is *why* the old code was wrong.
   out anything the reviewer should check by hand — edge cases the change touches,
   assumptions it makes, or behaviour it deliberately leaves alone.
 
-Be specific and factual. If the diff does not tell you why something was wrong,
-say what the change does and stop — do not invent a rationale, a ticket number,
-a metric, or a root cause the code does not show.
+Be factual. If the diff does not show why, state what changed and stop. Never
+invent rationale, tickets, metrics, or root causes.
 
 Return ONLY a JSON object with exactly these keys:
 

@@ -1,14 +1,10 @@
 # Canary Storefront — the repair-loop demo
 
-A deliberately small product repository that **ships with its suite already
-written, its requirements distilled and its coverage at 100%**:
-`features/storefront-journey/`. Everything an onboarded feature has is already
-there — the only thing left undone is the run. Open it, press Run, and watch the
-repair loop work: each repair reveals the next defect until the suite is green.
+A small product repository with a finished, 100%-covered suite:
+`features/storefront-journey/`. Press **Run** to watch each repair reveal the next
+defect until the suite is green.
 
-For the other half of the product — Canary Lab authoring a suite from nothing —
-see `flight-app/`, which ships with no suite at all so a Flight has something to
-onboard.
+To watch Canary Lab build a suite from nothing, use the un-onboarded `flight-app/`.
 
 The repository contains one customer flow across three services:
 
@@ -17,29 +13,22 @@ catalog-service → inventory-service → checkout-service
  product + SKU       reservation        final total
 ```
 
-The public acceptance contract is in [REQUIREMENTS.md](REQUIREMENTS.md): seven
-customer journeys covering twelve contracts. Five journeys are ordered pairs, so
-the second contract is unreachable until the first passes. Two (J0 and J6) are
-sound and pass from the very first run — a suite where everything fails cannot
-show that the harness reports what it finds rather than repairing whatever it
-touches.
+[REQUIREMENTS.md](REQUIREMENTS.md) defines seven journeys and twelve contracts.
+Five journeys are ordered pairs: the second contract appears only after the first
+passes. J0 and J6 pass immediately, proving the harness does not repair every test.
 
-Ten of the twelve contracts start broken, spread across all three services. The
-defects are not labelled in source; the current failures are the only evidence a
-repair agent should act on. A run stops once four journeys have failed and hands
-that batch over, and because each journey is an ordered pair, repairing what a
-cycle reports uncovers the contract behind it. A successful demo leaves Journal
-entries and application changes under all three service directories.
+Ten contracts start broken across all three services. Source does not label the
+defects; current failures are the repair agent's evidence. A run hands over after
+four failed journeys, and each repair cycle uncovers later contracts. A successful
+demo leaves Journal entries and changes under all three service directories.
 
 ## Start the demo
 
 From a scaffolded workspace, `npx canary-lab ui`, then open the
 `storefront-journey` suite and press **Run**.
 
-From the Canary Lab source checkout, `npm run demo` does the same thing the long
-way round: it packs the current build, runs the real `canary-lab init`, and opens
-the UI — so a contributor sees exactly what a user sees. It starts nothing; every
-run and repair is yours to trigger.
+From the Canary Lab source checkout, `npm run demo` packs the build, runs the real
+`canary-lab init`, and opens the shipped UI. It starts no run or repair.
 
 ## Service commands
 
@@ -47,9 +36,7 @@ run and repair is yours to trigger.
 - `npm run dev:inventory` — inventory API; reads `PORT` (standalone default 4400).
 - `npm run dev:checkout` — checkout API; reads `PORT` (standalone default 4300).
 
-All three read `PORT`, so the suite declares a slot per service and two copies
-of this demo can heal side by side. (`flight-app/` is the one that hardcodes its
-port — that repo is where the Parallel readiness stage has real work to do.)
+All three read `PORT`, so two demos can heal side by side. `flight-app/` instead
+hardcodes its port to give Parallel readiness real work.
 
-This repository is training material, not a dependency. Delete `demo-app/`
-after the tour when you are ready to point Flights at your own product repos.
+This is training material, not a dependency. Delete `demo-app/` after the tour.

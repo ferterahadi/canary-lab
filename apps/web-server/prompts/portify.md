@@ -1,33 +1,27 @@
-You are making the app(s) for the Canary Lab feature "{{featureName}}" use INJECTABLE, DYNAMIC ports so the SAME app can boot multiple times concurrently (benchmark arms / parallel runs) on one machine without an `EADDRINUSE` clash.
+Make every listener for "{{featureName}}" use injectable ports so the app can boot
+concurrently without `EADDRINUSE`.
 
-You are working inside an isolated, throwaway git worktree. Edit each repo's SOURCE in the worktree path listed below (NOT the original repo path), and edit the feature config at its real path. Do NOT commit and do NOT merge: your source edits are captured as an EPHEMERAL OVERLAY (a saved patch) — the product repo is never modified. On every future run Canary Lab applies that overlay into a fresh per-run worktree before boot and reverse-applies it at teardown. A human reviews the diff and SAVES it; the worktree itself is then discarded. (The feature-config + envset edits, by contrast, are permanent — they declare the injectable port slots Canary Lab reads to allocate ports, so they must persist.)
+Edit source only in the listed throwaway worktrees, but edit the feature config and
+envsets at their real paths. Do not commit or merge. Source changes become an
+ephemeral overlay applied per run and reversed at teardown; config and envset
+changes persist because they declare Canary Lab's port slots. A human reviews and
+saves the overlay; the scratch worktree is discarded and product repos stay unchanged.
 
 Repos / start commands in this feature:
 {{reposSummary}}
 
 ## Fan out across repos, then do the shared files yourself
 
-Each repo above is an independent unit of work — its own listeners, config
-files and env defaults. When there is more than one, dispatch **one sub-agent
-per repo in a single parallel round** (up to 5 at once), each scanning and
-editing only its own worktree path and each reporting back its own section-10
-accounting.
-
-Do the shared edits yourself, once, after they return: the feature config at
-{{featureConfigPath}} and the envsets (sections 4 and 6b) are single files that
-every repo's slots land in, so two sub-agents writing them concurrently would
-clobber each other.
-
-Merge their accountings into the single report in section 10, and treat an
-empty one as unfinished rather than as a repo with no listeners — say which
-repo and why, or scan it yourself. Verification will not cover for you here:
-the double-boot catches a missed listener only when it binds eagerly and dies
-loudly on the clash, so a lazily-bound or crash-tolerant one passes the check
-and breaks a later real run instead.
+With several repos, dispatch one subagent per repo in one round (up to 5). Each
+scans and edits only its worktree and returns section-10 accounting. You alone edit
+the shared feature config and envsets, then merge the report. A silent return is
+unfinished; inspect that repo yourself. Double-boot may miss lazy or crash-tolerant
+listeners, so verify the scan.
 
 ## The goal, and the mental model that makes it correct
 
-The harness boots the whole stack TWICE concurrently on two different injected port sets and requires BOTH to pass their health checks. The change succeeds only if, on the second boot, NOTHING tries to grab a port the first boot already holds. So your job is to find every port the app *binds* and make it come from an environment variable.
+The harness boots the stack twice on separate port sets. Both boots must pass;
+every bound port must come from an environment variable.
 
 Before touching anything, classify each port reference you find into exactly one of three buckets — they get different treatment:
 

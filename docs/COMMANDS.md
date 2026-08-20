@@ -21,12 +21,12 @@ npx canary-lab upgrade [--silent] [--check] [--force-archive]
 
 ### `flight`
 
-`flight` takes one or more product repos through suite setup, requirements, test authoring, coverage, parallel readiness, execution, repair, and evaluation export.
+`flight` takes one or more product repos from suite setup through evaluation export.
 
 - It creates or finds the workspace and starts the server when needed.
-- Autopilot is on by default. It answers seven routine checkpoints; an existing-feature choice, missing secrets, and failed automatic answers still reach you. See [Checkpoints and autopilot](GUIDE.md#checkpoints-and-autopilot).
+- Autopilot answers seven routine checkpoints. Existing-feature choices, missing secrets, and failed automatic answers still reach you. See [Checkpoints and autopilot](GUIDE.md#checkpoints-and-autopilot).
 - `--redo` restarts the existing flight. `--from-stage <key>` re-enters at a stage after checking its prerequisites. `--fresh` creates a new feature.
-- Repos and the test description are fixed after the first start. To change them, stop and delete the flight in the web UI, then start again.
+- Repos and the test description are fixed after startup. To change them, stop and delete the flight in the UI, then start again.
 - Exit codes are `0` for green, `1` for a completed non-green run, `2` for a checkpoint, and `3` for failure.
 
 The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_checkpoint`) use the same flight record.
@@ -37,24 +37,24 @@ The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_chec
 - `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
 - `setup` refreshes agent registration. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
 - `boot` starts a feature's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
-- `mcp` connects an AI client to the UI server. The default `lifecycle` profile includes everyday authoring, coverage, flight, run, repair, verification, and export tools. Use a narrower workflow profile when possible, `portify` for port injection, or `full` for everything.
+- `mcp` connects an AI client to the UI server. The default `lifecycle` profile covers authoring through export. Use a narrower profile when possible, `portify` for port injection, or `full` for every tool.
 - `new feature` creates a feature deterministically. `env` applies or restores an envset.
 - `upgrade` refreshes managed workspace files and skills. It does not upgrade the npm dependency.
 
 ## Requirement Coverage (MCP, `coverage`/`lifecycle`/`full` profiles)
 
-The coverage ledger is reachable over MCP as well as the UI — both call the same computation, so they can't diverge:
+MCP and the UI use the same coverage computation:
 
 - `get_feature_coverage(feature)` — the full ledger: each requirement → its mapped tests → a gap type (`covered` / `path-incomplete` / `variant-incomplete` / `untested`), the coverage %, and the per-test strictness grade with a suggested stronger check.
 - `list_feature_docs(feature)` — the docs that feed the PRD (source vs generated), plus the summary status.
-- `start_external_summary(feature)` → `submit_external_summary(jobId, requirements)` — YOU read the source docs (returned in the prompt) and propose the requirements; canary reconciles ids (preserving existing ones) and writes the summary. No local agent — over MCP you author it. Add docs first with `write_feature_doc`.
-- `start_external_coverage(feature)` → `submit_external_coverage(jobId, mappings)` — YOU read the tests and map them to requirements; canary writes the `@req-*` tags and recomputes. Needs a summary first.
+- `start_external_summary(feature)` → `submit_external_summary(jobId, requirements)` — you derive requirements from the returned source docs; Canary Lab preserves existing IDs and writes the summary. Add docs first with `write_feature_doc`.
+- `start_external_coverage(feature)` → `submit_external_coverage(jobId, mappings)` — you map tests to requirements; Canary Lab writes the `@req-*` tags and recomputes coverage. Requires a summary.
 
 Tests link to requirements through Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }`. Legacy `@requirement` and `@path` comments still work. Coverage tools map existing tests; Flight's authoring stage can create tests for uncovered requirements. See [FEATURES](FEATURES.md#requirement-coverage).
 
 ## Trigger-surface parity (skill / MCP / REST / UI)
 
-Major capabilities share the same stores, so work started on one surface appears on the others. The entry points differ where the interaction model requires it:
+Major capabilities share stores, so work started on one surface appears on the others:
 
 | Capability | Agent skill | MCP profile (tools) | REST | UI |
 |---|---|---|---|---|

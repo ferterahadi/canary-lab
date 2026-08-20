@@ -1,12 +1,12 @@
 # Contributing to Canary Lab
 
-**Quick start:** branch from `main`, make the change, run the checks that exercise it, then open a pull request back to `main`.
+**Quick start:** branch from `main`, make the change, run relevant checks, and open a pull request to `main`.
 
 > Usage: [README](../README.md) · Internals: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Code Orientation
 
-Both apps are organized **by feature, not by technical layer**. The server and web app share eight feature names: `runs`, `coverage`, `flights`, `wizard`, `evaluation`, `config`, `portify`, and `benchmark`. This makes one product area easy to trace across the client and server.
+Both apps are organized **by feature, not technical layer**. The server and web app share eight feature names: `runs`, `coverage`, `flights`, `wizard`, `evaluation`, `config`, `portify`, and `benchmark`, making each area easy to trace across client and server.
 
 `agent-sessions` and `version` exist only on the server. `cleanup` exists only in the web app; its routes remain with the `runs` and `portify` stores that own the data. Shared infrastructure belongs in each app's `src/shared/` folder.
 
@@ -42,12 +42,12 @@ npm run smoke:pack     # after any template/packaging change
 | `npm run check:wire` | server responses and their hand-written web mirrors stay aligned |
 | `npm run check:cycles` | import cycles stay within the recorded ceilings |
 | `npm run smoke:pack` | packs, scaffolds, installs, verifies scaffold flow |
-| `npm run smoke:demo` | LLM-free gate for the canonical five-journey repair cascade (ten cycles across three services); exits and removes its throwaway workspace |
-| `npm run demo -- --agent codex` | provisions the one demo workspace with the storefront suite installed, offers the repair-loop and full-Flight routes, leaves both under tester control, and keeps the workspace for inspection |
+| `npm run smoke:demo` | LLM-free gate for the five-journey repair cascade; removes its temporary workspace |
+| `npm run demo -- --agent codex` | creates an inspectable demo workspace with repair-loop and full-Flight routes |
 
 ### Test the demo from a desktop agent
 
-`npm run demo` deliberately does not change your real Model Context Protocol (MCP) client configuration. To run the Getting Started commands from Codex Desktop or Claude Desktop:
+`npm run demo` does not change your Model Context Protocol (MCP) client configuration. To use Getting Started from Codex Desktop or Claude Desktop:
 
 1. Run `npm run demo -- --agent codex`, leave that terminal running, and copy the **Workspace** path it prints.
 2. In another terminal, connect both supported agents from that generated workspace:
@@ -57,15 +57,11 @@ npm run smoke:pack     # after any template/packaging change
    npx canary-lab setup --force --agent all
    ```
 
-3. Fully quit and reopen Codex Desktop or Claude Desktop, then start a fresh session **whose working directory is the generated workspace**: open that folder in Codex Desktop, or select it as the session directory in Claude Desktop. A session started elsewhere resolves the Getting Started commands' sample folders against the wrong directory, and the agent has no way to tell.
+3. Restart the desktop app. Open a fresh session **in the generated workspace**. Otherwise, Getting Started resolves sample folders from the wrong directory.
 4. Confirm `Canary_Lab` appears in the session's MCP tools. Open **Getting Started** in Canary Lab and paste the selected **In your agent** command into the session.
 
-Keep the demo terminal running while you test. Each `npm run demo` creates a new temporary workspace, so repeat the setup command when you start a new demo. For a custom MCP client, open the **MCP** status item in Canary Lab and copy its endpoint instead.
+Keep the demo terminal running. Each demo creates a new workspace, so repeat setup for each one. For a custom MCP client, copy the endpoint from Canary Lab's **MCP** status.
 
-Run all five repository gates before opening a PR: `check:conventions`, `check:boundaries`, `check:docs`, `check:wire`, and `check:cycles`. They catch structural drift that tests and TypeScript cannot.
+Before opening a PR, run `check:conventions`, `check:boundaries`, `check:docs`, `check:wire`, and `check:cycles`. They catch structural drift missed by tests and TypeScript.
 
 `check:docs` proves that paths, links, and anchors resolve. It does not prove the wording is still true; compare factual claims with the current code during review.
-
-## Pull Requests
-
-Branch off `main` → PR back into `main`.

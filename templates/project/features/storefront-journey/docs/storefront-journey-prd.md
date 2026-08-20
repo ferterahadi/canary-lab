@@ -1,13 +1,11 @@
 # Storefront journey requirements
 
-The demo proves seven customer journeys across three services. Five are pairs of
-**ordered contracts**: if the first fails, the test stops and the second has not
-been established yet. Keep them in this order — a failed upstream contract must
-never be rounded into proof of a downstream one.
+The demo proves seven journeys across three services. Five contain **ordered
+contracts**: if the first fails, the second remains unproven. Keep this order;
+an upstream failure cannot prove a downstream contract.
 
-Two journeys (J0 and J6) are sound and pass from the first run. They are not
-padding: a suite in which everything fails cannot show that the harness reports
-what it finds rather than repairing whatever it touches.
+J0 and J6 pass from the first run. They prove the harness reports actual results
+instead of repairing every test.
 
 ## J0 — Listing what was created
 
@@ -55,18 +53,12 @@ Placing a cart with no items is refused with 409 and the cart stays open.
 
 ## Scope
 
-These twelve contracts and their ordering are the whole feature; ten of them
-start broken and two are sound. The services carry
-other input-validation and not-found responses so they are realistic small APIs;
-apart from the unknown-SKU reservation named in J3, those defensive branches are
-fixture support, not acceptance requirements — do not turn them into separate
-tests or coverage obligations.
+These twelve ordered contracts are the whole feature; ten start broken and two
+pass. Other validation and not-found responses make the services realistic but,
+except for J3's unknown SKU, are fixture support—not tests or coverage obligations.
 
-Contracts must also be **stateless across reruns**. These services hold their
-data in memory and are not restarted between heal cycles, so a contract whose
-evidence accumulates (a leaked reservation, a growing counter) drifts every
-cycle and eventually breaks its own setup.
+Contracts must be **stateless across reruns**. Services keep data in memory between
+heal cycles, so leaked state would eventually break test setup.
 
-Each journey must be one ordered Playwright test that exposes only the earliest
-broken contract, so a repair agent sees one defect at a time and each repair
-reveals the next.
+Each journey must be one ordered Playwright test exposing only its earliest defect;
+each repair reveals the next.

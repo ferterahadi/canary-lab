@@ -4,17 +4,13 @@
 
 ## Description
 
-Break an operation's contract so the response still looks successful, but the
-underlying state or data is wrong. The root cause is only visible in the service
-log — not the browser or the trace — which is exactly where structured failure
-context earns its keep.
+Make an operation report success while leaving incorrect state. Keep the cause
+visible only in the service log, not the browser or trace.
 
 ## Sabotage instructions
 
-You are deliberately breaking this app to benchmark an AI repair loop. Make one
-operation **lie**: it should still return a success status / response, but its
-underlying side effect must be wrong — e.g. a write / update / delete that
-responds "OK" yet doesn't actually persist (or persists the wrong thing).
+To benchmark repair, make one operation **lie**: return success while a write,
+update, or delete fails to persist correctly.
 
 Requirements:
 
