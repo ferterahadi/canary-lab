@@ -134,7 +134,9 @@ export async function registerMcpRoutes(
 
   const newSession = async (
     profile: CanaryLabMcpProfile,
-    defaultClientKind: ClientKind,
+    // undefined = the connect URL carried no client_kind; the session then
+    // brands itself from the initialize handshake (see registerCanaryLabTools).
+    defaultClientKind: ClientKind | undefined,
   ): Promise<StreamableHTTPServerTransport> => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
@@ -230,7 +232,10 @@ export async function registerMcpRoutes(
       ok: true,
       server: SERVER_INFO,
       profile: context.profile,
-      clientKind: context.clientKind,
+      // A bare health probe has no initialize handshake to brand itself from,
+      // so an absent param reports the same 'other' a kind-less session used
+      // to get; real sessions resolve the fallback per call instead.
+      clientKind: context.clientKind ?? 'other',
       toolCount: toolCounts[context.profile],
       tools: toolsForCanaryLabMcpProfile(context.profile),
       activeSessions: transports.size,
@@ -255,13 +260,19 @@ function countToolsForProfile(deps: McpRouteDeps, profile: CanaryLabMcpProfile):
 }
 
 function contextFromUrl(url: string):
-  | { ok: true; profile: CanaryLabMcpProfile; clientKind: ClientKind }
+  | { ok: true; profile: CanaryLabMcpProfile; clientKind: ClientKind | undefined }
   | { ok: false; error: string } {
   const params = new URL(url, 'http://localhost').searchParams
   const rawProfile = params.get('profile') ?? undefined
   const profile = normalizeCanaryLabMcpProfile(rawProfile)
   if (!profile) return { ok: false, error: `invalid MCP profile: ${rawProfile}` }
-  const rawClientKind = params.get('client_kind') ?? 'other'
+  // An absent param means "not stated", not "other": the session falls back to
+  // the initialize handshake identity (clientKindFromFacts), so the bridge's
+  // explicit param stays authoritative — including the runner's `*-pty` kinds
+  // that suppress heal claiming — while a raw HTTP client is still branded by
+  // who its handshake says it is instead of as a generic "AI Agent".
+  const rawClientKind = params.get('client_kind')
+  if (rawClientKind === null) return { ok: true, profile, clientKind: undefined }
   if (!isClientKind(rawClientKind)) {
     return { ok: false, error: `invalid MCP client_kind: ${rawClientKind}` }
   }

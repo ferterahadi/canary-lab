@@ -217,9 +217,15 @@ describe('MCP HTTP server (smoke)', () => {
     try {
       const res = await app.inject({ method: 'GET', url: '/mcp/health' })
       expect(res.statusCode).toBe(200)
-      const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number; profile: string; tools: string[] }
+      const body = res.json() as { ok: boolean; server: { name: string }; toolCount: number; profile: string; tools: string[]; clientKind: string }
       expect(body.ok).toBe(true)
       expect(body.server.name).toBe('canary-lab')
+      // A bare health probe has no handshake to brand itself from, so an
+      // absent client_kind still reports 'other'; an explicit one echoes back.
+      expect(body.clientKind).toBe('other')
+      const branded = await app.inject({ method: 'GET', url: '/mcp/health?client_kind=codex' })
+      expect(branded.statusCode).toBe(200)
+      expect((branded.json() as { clientKind: string }).clientKind).toBe('codex')
       // No-param default is `lifecycle` (everyday surface, no portify).
       expect(body.profile).toBe('lifecycle')
       expect(body.toolCount).toBe(LIFECYCLE_TOOLS.length)

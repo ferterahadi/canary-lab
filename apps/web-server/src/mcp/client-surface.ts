@@ -19,6 +19,8 @@
 // Reading this is what lets Canary tell a client to divide its work only when the
 // client can, instead of emitting prose it will silently skip.
 
+import type { ClientKind } from '../../../../shared/run-mode'
+
 export type McpClientSurface = 'claude-code' | 'claude-desktop-chat' | 'codex' | 'other'
 
 export interface McpClientFacts {
@@ -88,4 +90,26 @@ export function fanOutAdviceFor(facts: McpClientFacts): string {
     return 'This Claude Desktop chat client has no subagent primitive, so ignore the prompt\'s fan-out rule and read serially — it still works, it is just not parallel. For a parallel run, drive the same flight from Claude Code (Desktop\'s local-agent mode counts) instead.'
   }
   return 'This client does not advertise a subagent primitive, so read serially rather than trying to fan out; the prompt\'s fan-out rule is advisory and skipping it changes nothing about the result.'
+}
+
+/** Branding fallback for a session whose connect URL carried no `client_kind`.
+ *  The bridge (`canary-lab mcp`) always sets that param, so this only decides
+ *  for clients speaking HTTP to /mcp directly — observed live 2026-08-20, when
+ *  an agent hand-rolled a curl client whose handshake said `claude-code` and
+ *  the UI branded the heal session "AI Agent". Handshake identity is
+ *  client-asserted, which is fine here: the URL param it substitutes for is
+ *  equally client-asserted, and both drive branding only.
+ *  Deliberately never returns a `*-pty` kind: runner-spawned PTY agents are
+ *  identified by the explicit param their spawn config sets, so a handshake
+ *  can never mint the one kind that suppresses heal claiming. */
+export function clientKindFromFacts(facts: McpClientFacts): ClientKind {
+  switch (facts.surface) {
+    case 'claude-code':
+    case 'claude-desktop-chat':
+      return 'claude'
+    case 'codex':
+      return 'codex'
+    case 'other':
+      return 'other'
+  }
 }

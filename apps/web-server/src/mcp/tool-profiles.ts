@@ -253,5 +253,8 @@ export function toolsForCanaryLabMcpProfile(profile: CanaryLabMcpProfile): reado
 
 export interface CanaryLabMcpToolOptions {
   profile?: CanaryLabMcpProfile
+  /** The connect URL's explicit client_kind. Leave unset when the URL carried
+   *  none — tool calls then brand themselves from the initialize handshake
+   *  (clientKindFromFacts), which never yields a claim-suppressing *-pty kind. */
   defaultClientKind?: ClientKind
 }

@@ -45,6 +45,23 @@ npm run smoke:pack     # after any template/packaging change
 | `npm run smoke:demo` | LLM-free gate for the canonical five-journey repair cascade (ten cycles across three services); exits and removes its throwaway workspace |
 | `npm run demo -- --agent codex` | provisions the one demo workspace with the storefront suite installed, offers the repair-loop and full-Flight routes, leaves both under tester control, and keeps the workspace for inspection |
 
+### Test the demo from a desktop agent
+
+`npm run demo` deliberately does not change your real Model Context Protocol (MCP) client configuration. To run the Getting Started commands from Codex Desktop or Claude Desktop:
+
+1. Run `npm run demo -- --agent codex`, leave that terminal running, and copy the **Workspace** path it prints.
+2. In another terminal, connect both supported agents from that generated workspace:
+
+   ```bash
+   cd "<workspace path>"
+   npx canary-lab setup --force --agent all
+   ```
+
+3. Fully quit and reopen Codex Desktop or Claude Desktop, then start a fresh session. In Codex Desktop, open the generated workspace folder.
+4. Confirm `Canary_Lab` appears in the session's MCP tools. Open **Getting Started** in Canary Lab and paste the selected **In your agent** command into the session.
+
+Keep the demo terminal running while you test. Each `npm run demo` creates a new temporary workspace, so repeat the setup command when you start a new demo. For a custom MCP client, open the **MCP** status item in Canary Lab and copy its endpoint instead.
+
 Run all five repository gates before opening a PR: `check:conventions`, `check:boundaries`, `check:docs`, `check:wire`, and `check:cycles`. They catch structural drift that tests and TypeScript cannot.
 
 `check:docs` proves that paths, links, and anchors resolve. It does not prove the wording is still true; compare factual claims with the current code during review.

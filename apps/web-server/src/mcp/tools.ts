@@ -19,7 +19,7 @@ import { registerReadTools } from './tool-groups/reads'
 import { registerAuthoringTools } from './tool-groups/authoring'
 import { registerRunLifecycleTools } from './tool-groups/run-lifecycle'
 import { registerHealFlowTools } from './tool-groups/heal-flow'
-import { classifyMcpClient, type McpClientFacts } from './client-surface'
+import { classifyMcpClient, clientKindFromFacts, type McpClientFacts } from './client-surface'
 
 export * from './tool-support'
 
@@ -29,8 +29,20 @@ export function registerCanaryLabTools(
   opts: CanaryLabMcpToolOptions = {},
 ): void {
   const profile = opts.profile ?? DEFAULT_CANARY_LAB_MCP_PROFILE
-  const defaultClientKind = opts.defaultClientKind ?? 'other'
-  const clientKindInput = CLIENT_KIND.default(defaultClientKind)
+  // Read the peer at CALL time, not now: `clientInfo` and the client's declared
+  // capabilities only exist after the initialize handshake, which happens after
+  // registration. `server.server` is the public underlying Server.
+  const clientFacts = (): McpClientFacts =>
+    classifyMcpClient(server.server.getClientVersion(), server.server.getClientCapabilities())
+  // Also resolved per CALL: when the connect URL carried no client_kind
+  // (opts.defaultClientKind undefined), the fallback identity comes from that
+  // same handshake. Branding only: clientKindFromFacts never returns a `*-pty`
+  // kind, so heal-claim suppression still requires the explicit param the
+  // runner's spawn config sets. An explicit tool-call argument beats both —
+  // a zod default only fills absence.
+  const clientKindInput = CLIENT_KIND.default(
+    () => opts.defaultClientKind ?? clientKindFromFacts(clientFacts()),
+  )
   const enabled = new Set<CanaryLabMcpToolName>(TOOLS_BY_PROFILE[profile])
   const knownTools = new Set<CanaryLabMcpToolName>(FULL_TOOLS)
   const registerTool: McpServer['registerTool'] = ((name: string, config: unknown, cb: unknown) => {
@@ -43,12 +55,6 @@ export function registerCanaryLabTools(
       register.call(server, name, config, cb)
     }
   }) as McpServer['registerTool']
-
-  // Read the peer at CALL time, not now: `clientInfo` and the client's declared
-  // capabilities only exist after the initialize handshake, which happens after
-  // registration. `server.server` is the public underlying Server.
-  const clientFacts = (): McpClientFacts =>
-    classifyMcpClient(server.server.getClientVersion(), server.server.getClientCapabilities())
 
   const ctx = { registerTool, deps, clientKindInput, clientFacts }
   registerReadTools(ctx)

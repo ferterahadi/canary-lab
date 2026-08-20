@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { classifyMcpClient, fanOutAdviceFor } from './client-surface'
+import { classifyMcpClient, clientKindFromFacts, fanOutAdviceFor, type McpClientSurface } from './client-surface'
 
 // The `name` values below are the ones real clients send, not invented examples:
 // the Claude Code CLI and Desktop's local-agent mode both identify as
@@ -90,5 +90,35 @@ describe('fanOutAdviceFor', () => {
     const advice = fanOutAdviceFor(classifyMcpClient({ name: 'mcp-inspector' }))
     expect(advice).toMatch(/read serially/i)
     expect(advice).toMatch(/advisory/i)
+  })
+})
+
+describe('clientKindFromFacts — branding fallback when the connect URL had no client_kind', () => {
+  // The incident this pins: a raw HTTP client (no bridge, so no client_kind
+  // param) whose handshake said `claude-code` was branded "AI Agent" in the
+  // Heal Agent panel. The fallback must brand by handshake identity instead.
+  it.each([
+    ['claude-code', 'claude'],
+    ['local-agent-mode-Canary_Lab', 'claude'],
+    ['claude-ai', 'claude'],
+    ['codex-cli', 'codex'],
+    ['mcp-inspector', 'other'],
+  ])('brands a %s handshake as %s', (name, kind) => {
+    expect(clientKindFromFacts(classifyMcpClient({ name }))).toBe(kind)
+  })
+
+  it('brands an absent handshake as other', () => {
+    expect(clientKindFromFacts(classifyMcpClient(undefined))).toBe('other')
+  })
+
+  it('never mints a claim-suppressing *-pty kind from a handshake, for any surface', () => {
+    // Exhaustive over McpClientSurface: the *-pty kinds may only arrive via the
+    // explicit client_kind the runner's spawn config sets, never by inference —
+    // otherwise a handshake string could flip heal-claim suppression.
+    const surfaces: McpClientSurface[] = ['claude-code', 'claude-desktop-chat', 'codex', 'other']
+    for (const surface of surfaces) {
+      const kind = clientKindFromFacts({ surface, canFanOut: false, sampling: false })
+      expect(['claude', 'codex', 'other']).toContain(kind)
+    }
   })
 })

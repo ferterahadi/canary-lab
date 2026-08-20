@@ -38,9 +38,9 @@ function toolText(result: ToolCallResult): string {
   return first?.text ?? ''
 }
 
-async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
+async function connectClient(address: string, pathAndQuery = '/mcp', clientName = 'canary-lab-smoke'): Promise<Client> {
   const client = new Client(
-    { name: 'canary-lab-smoke', version: '0.0.1' },
+    { name: clientName, version: '0.0.1' },
     { capabilities: {} },
   )
   await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
@@ -191,6 +191,103 @@ describe('MCP HTTP server (smoke)', () => {
         sessionId: 'sess-pty',
         clientKind: 'claude-pty',
         conversationName: 'pty fresh start',
+        claimable: false,
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('brands a kind-less raw client by its initialize handshake (the curl-client incident)', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-handshake-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const calls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['startRun']>>> = []
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      startRun: async (...args) => {
+        calls.push(args)
+        return { kind: 'started', runId: 'new-run' }
+      },
+    })
+    let client: Client | null = null
+    // 2026-08-20: an agent drove /mcp with a hand-rolled curl client — no
+    // bridge, so no client_kind on the URL — while its handshake said
+    // `claude-code`. The session claimed fine but the UI branded it "AI Agent".
+    // With no URL param and no tool argument, the kind must now come from the
+    // handshake instead of collapsing to 'other'.
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full', 'claude-code')
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'demo_catalog',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-handshake',
+          conversation_name: 'raw client, no client_kind anywhere',
+        },
+      })
+      const body = JSON.parse(toolText(result))
+      expect(body).toMatchObject({ runId: 'new-run', reused: false, claimed: true })
+      expect(calls).toHaveLength(1)
+      expect(calls[0][2]).toEqual({
+        kind: 'external',
+        sessionId: 'sess-handshake',
+        clientKind: 'claude',
+        conversationName: 'raw client, no client_kind anywhere',
+        claimable: true,
+      })
+    } finally {
+      if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('keeps an explicit client_kind URL param authoritative over the handshake', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
+    const logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-mcp-start-url-kind-')))
+    const featuresDir = path.join(projectRoot, 'features')
+    const calls: Array<Parameters<NonNullable<Parameters<typeof registerMcpRoutes>[1]['startRun']>>> = []
+    const { app } = await createMcpHarness({
+      logsDir,
+      projectRoot,
+      featuresDir,
+      startRun: async (...args) => {
+        calls.push(args)
+        return { kind: 'started', runId: 'new-run' }
+      },
+    })
+    let client: Client | null = null
+    // The runner spawns PTY agents whose bridge URL says client_kind=claude-pty
+    // — the one kind that suppresses heal claiming. Those agents run the real
+    // CLI, so their handshake ALSO says `claude-code`; if the handshake could
+    // override the param, every runner-spawned agent would claim its own run.
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      client = await connectClient(address, '/mcp?profile=full&client_kind=claude-pty', 'claude-code')
+      const result = await client.callTool({
+        name: 'start_run',
+        arguments: {
+          feature: 'demo_catalog',
+          env: 'local',
+          claim_heal: true,
+          session_id: 'sess-url-pty',
+          conversation_name: 'pty url param vs claude-code handshake',
+        },
+      })
+      const body = JSON.parse(toolText(result))
+      expect(body).toMatchObject({ runId: 'new-run', claimed: false, claimSuppressed: true })
+      expect(calls).toHaveLength(1)
+      expect(calls[0][2]).toEqual({
+        kind: 'external',
+        sessionId: 'sess-url-pty',
+        clientKind: 'claude-pty',
+        conversationName: 'pty url param vs claude-code handshake',
         claimable: false,
       })
     } finally {
