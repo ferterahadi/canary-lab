@@ -22,11 +22,12 @@ flight` (the composite `lifecycle`/`full` profiles carry the same tools).
 Before calling Canary Lab MCP tools, make sure the workspace and UI server are available.
 
 1. Read the user-level registry at `~/.canary-lab/workspaces.json`. On Windows, resolve it from the user's home directory, for example `%USERPROFILE%\.canary-lab\workspaces.json`.
-2. If the registry has exactly one workspace, use that workspace. If it has multiple workspaces, list their `name` and `path` values and ask which one to use.
+2. If the registry has exactly one workspace, use that workspace. If it has multiple, do NOT ask yet — step 5 usually settles it. Ask (listing each `name` and `path`) only when no server is running.
 3. If the registry is missing or empty, ask the user to run `npx canary-lab setup` from the Canary Lab workspace.
 4. Check the MCP health endpoint: read `port` from the workspace's `canary-lab.config.json` (fallback `7421`), then `curl -s http://127.0.0.1:<port>/mcp/health` — success is a JSON response. If it does not respond, run `npx canary-lab mcp doctor` to discover the active URL.
-5. If the health check succeeds, confirm `projectRoot` matches the selected workspace. If it points at a different workspace, ask the user whether to stop the existing Canary Lab server before continuing.
+5. If the health check succeeds, `projectRoot` names the workspace that server actually serves — and one server serves one workspace, so this SETTLES the choice. Use `projectRoot`, tell the user which workspace you are in, and continue. A registry entry that disagrees is not a conflict to resolve, and a `projectRoot` under a temp directory is a legitimate demo workspace, not a stray to shut down. Only when the user explicitly wants a DIFFERENT workspace does this server need stopping first.
 6. If the health check fails, start `npx canary-lab ui` from the selected workspace in a visible long-running terminal when the host supports that; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up. The port comes from `canary-lab.config.json` (default `7421`); do not pass `--port` (it was removed).
+7. Resolve this skill's ARGUMENTS against that workspace before calling any tool. A bare name — `flight-app` — is a directory in the workspace root (`<workspace>/flight-app`); it is not a suite name and not a repo to hunt for elsewhere on the machine. The Getting Started guide emits exactly that shape, with the intent string quoted beside it, so pass the resolved path as `repoPaths` and that string as `description`. An absolute path is used as given. If the named directory is not in the workspace, say so and ask — never substitute a similarly-named repo from somewhere else, and never invent the intent.
 
 ## Flight (end-to-end pipeline)
 

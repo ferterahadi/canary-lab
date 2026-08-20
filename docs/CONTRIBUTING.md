@@ -57,7 +57,7 @@ npm run smoke:pack     # after any template/packaging change
    npx canary-lab setup --force --agent all
    ```
 
-3. Fully quit and reopen Codex Desktop or Claude Desktop, then start a fresh session. In Codex Desktop, open the generated workspace folder.
+3. Fully quit and reopen Codex Desktop or Claude Desktop, then start a fresh session **whose working directory is the generated workspace**: open that folder in Codex Desktop, or select it as the session directory in Claude Desktop. A session started elsewhere resolves the Getting Started commands' sample folders against the wrong directory, and the agent has no way to tell.
 4. Confirm `Canary_Lab` appears in the session's MCP tools. Open **Getting Started** in Canary Lab and paste the selected **In your agent** command into the session.
 
 Keep the demo terminal running while you test. Each `npm run demo` creates a new temporary workspace, so repeat the setup command when you start a new demo. For a custom MCP client, open the **MCP** status item in Canary Lab and copy its endpoint instead.

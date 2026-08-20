@@ -85,8 +85,10 @@ describe('readOnboardingSamples', () => {
     expect(workflows.every((workflow) => workflow.externalPrompt.startsWith(workflow.skill))).toBe(true)
     expect(workflows.some((workflow) => workflow.externalPrompt.includes('$canary-lab'))).toBe(false)
     expect(workflows.some((workflow) => workflow.externalPrompt.includes('<feature>'))).toBe(false)
+    // The flight prompt is the one that names a directory, so it must also carry
+    // the intent — an agent that has to invent "what to test" tests something else.
     expect(workflows.find((workflow) => workflow.id === 'flight')?.externalPrompt)
-      .toBe('/canary-lab flight-app')
+      .toBe(`/canary-lab flight-app "${SAMPLE_FLIGHT_DESCRIPTION}"`)
   })
 
   // The samples are explicitly disposable. Nothing is remembered, so deleting

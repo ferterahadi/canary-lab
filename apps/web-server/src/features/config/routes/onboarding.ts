@@ -154,7 +154,13 @@ export function readOnboardingSamples(
       outcome: 'Take the prepared lending app from an empty repo to a finished evaluation.',
       steps: ['Understand the repo', 'Create and run tests', 'Export the evaluation'],
       skill: '/canary-lab',
-      externalPrompt: `/canary-lab ${SAMPLE_FLIGHT_REPO_DIR}`,
+      // The only prompt here that names a DIRECTORY rather than a suite. Every
+      // other workflow passes a suite name the server resolves on its own, so a
+      // bare token is enough; a flight takes repo paths and an intent, and an
+      // agent handed neither has to invent the intent — which changes what gets
+      // tested. Carry the same description the GUI button passes, and let the
+      // skill resolve `flight-app` against the workspace the server serves.
+      externalPrompt: `/canary-lab ${SAMPLE_FLIGHT_REPO_DIR} "${SAMPLE_FLIGHT_DESCRIPTION}"`,
       ...(flightRepoPresent
         ? sampleAction({ kind: 'flight', repoPath: flightRepo, description: SAMPLE_FLIGHT_DESCRIPTION })
         : unavailable('The bare Flight repository was removed from this workspace.')),

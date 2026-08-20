@@ -15,8 +15,8 @@ feature's Playwright specs against a saved environment config (remote URLs)
 
 ## Workspace Bootstrap
 
-1. Read `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`); one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`.
-2. Check `/mcp/health` on the UI's port: read `port` from the workspace's `canary-lab.config.json` (fallback `7421`), then `curl -s http://127.0.0.1:<port>/mcp/health` — success is a JSON response. Confirm `projectRoot` matches the selected workspace.
+1. Read `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`); one workspace → use it, several → ask which **only if** the health check below does not settle it, none → ask the user to run `npx canary-lab setup`.
+2. Check `/mcp/health` on the UI's port: read `port` from the workspace's `canary-lab.config.json` (fallback `7421`), then `curl -s http://127.0.0.1:<port>/mcp/health` — success is a JSON response. `projectRoot` names the workspace that server actually serves, and one server serves one workspace — so a healthy response SETTLES which workspace you are in. Use it, tell the user which one, and do not ask them to pick from the registry or offer to stop the server; a registry entry that disagrees is not a conflict, and a `projectRoot` under a temp directory is a legitimate demo workspace.
 3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up.
 
 ## Verification Loop
