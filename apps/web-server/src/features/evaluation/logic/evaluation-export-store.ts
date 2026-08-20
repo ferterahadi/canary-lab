@@ -1,68 +1,26 @@
 import fs from 'fs'
 import path from 'path'
 import { createZip } from '../../../shared/simple-zip'
-import { isClientKind, type ClientKind, type RunProducer } from '../../../../../../shared/run-mode'
+import { isClientKind } from '../../../../../../shared/run-mode'
 import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
 import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
-import type { EvaluationArchiveContents } from './evaluation-export-archive'
+import type {
+  EvaluationArchiveContents,
+  EvaluationExportSessionRef,
+  EvaluationExportTaskRecord,
+  EvaluationExportTaskView,
+} from './evaluation-export-types'
 
-export type EvaluationExportMode = 'raw' | 'localized'
-export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
-export type EvaluationExportProducer = RunProducer
-
-export interface EvaluationExportTaskRecord {
-  taskId: string
-  runId: string
-  feature: string
-  mode: EvaluationExportMode
-  producer?: EvaluationExportProducer
-  status: EvaluationExportStatus
-  createdAt: string
-  updatedAt: string
-  downloadReady: boolean
-  archiveBase: string
-  clientKind?: ClientKind
-  sessionId?: string
-  conversationName?: string
-  language?: string
-  externalSessionUrl?: string
-  error?: string
-  /** Set once the localized-rewrite agent is spawned, so the export dialog can
-   *  stream its JSONL through AgentSessionView (claude: a pinned session id;
-   *  codex: '' — located by cwd + start). Absent for raw/external/cached runs,
-   *  which have no live agent and keep the text progress panel. */
-  sessionRef?: EvaluationExportSessionRef
-  /** What the built archive holds — recorded once, when the zip is written.
-   *  Absent on a running/failed task and on records written before this
-   *  existed, so every reader must treat it as optional rather than zero. */
-  archive?: EvaluationArchiveContents
-}
-
-export interface EvaluationExportSessionRef {
-  agent: 'claude' | 'codex'
-  sessionId: string
-}
-
-export interface EvaluationExportTaskView {
-  taskId: string
-  runId: string
-  feature: string
-  mode: EvaluationExportMode
-  producer: EvaluationExportProducer
-  status: EvaluationExportStatus
-  createdAt: string
-  updatedAt: string
-  downloadReady: boolean
-  clientKind?: ClientKind
-  sessionId?: string
-  conversationName?: string
-  language?: string
-  externalSessionUrl?: string
-  error?: string
-  sessionRef?: EvaluationExportSessionRef
-  archive?: EvaluationArchiveContents
-}
+export type {
+  EvaluationArchiveContents,
+  EvaluationExportMode,
+  EvaluationExportProducer,
+  EvaluationExportSessionRef,
+  EvaluationExportStatus,
+  EvaluationExportTaskRecord,
+  EvaluationExportTaskView,
+} from './evaluation-export-types'
 
 export interface EvaluationExportTaskPaths {
   taskDir: string

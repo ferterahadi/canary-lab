@@ -51,13 +51,13 @@ const PAIRS = [
   { name: 'CleanupRunEntry', server: 'apps/web-server/src/features/runs/logic/run-cleanup.ts' },
   { name: 'PortifyCleanupEntry', server: 'apps/web-server/src/features/portify/logic/runtime/cleanup.ts' },
   { name: 'PortifyCleanupListing', server: 'apps/web-server/src/features/portify/logic/runtime/cleanup.ts' },
-  { name: 'DraftRecord', server: 'apps/web-server/src/features/wizard/logic/draft-store.ts' },
-  { name: 'DraftRepo', server: 'apps/web-server/src/features/wizard/logic/draft-store.ts' },
-  { name: 'DraftPrdDocument', server: 'apps/web-server/src/features/wizard/logic/draft-store.ts' },
+  { name: 'DraftRecord', server: 'apps/web-server/src/features/wizard/logic/draft-types.ts' },
+  { name: 'DraftRepo', server: 'apps/web-server/src/features/wizard/logic/draft-types.ts' },
+  { name: 'DraftPrdDocument', server: 'apps/web-server/src/features/wizard/logic/draft-types.ts' },
   // Renamed across the seam: `…TaskView` is the server's projection of its
   // stored record; the web receives exactly that object and calls it `…Task`.
-  { name: 'EvaluationExportTaskView', webName: 'EvaluationExportTask', server: 'apps/web-server/src/features/evaluation/logic/evaluation-export-store.ts' },
-  { name: 'EvaluationArchiveContents', server: 'apps/web-server/src/features/evaluation/logic/evaluation-export-archive.ts' },
+  { name: 'EvaluationExportTaskView', webName: 'EvaluationExportTask', server: 'apps/web-server/src/features/evaluation/logic/evaluation-export-types.ts' },
+  { name: 'EvaluationArchiveContents', server: 'apps/web-server/src/features/evaluation/logic/evaluation-export-types.ts' },
   { name: 'ExtractedTest', server: 'apps/web-server/src/shared/ast-extractor.ts' },
   { name: 'ExtractedStep', server: 'apps/web-server/src/shared/ast-extractor.ts' },
   { name: 'FeatureDoc', server: 'apps/web-server/src/features/coverage/logic/coverage/feature-docs.ts' },

@@ -1,17 +1,14 @@
 # Contributing to Canary Lab
 
-**Quickstart** — branch off `main` → code → `npm run build && npm test && npm run smoke:pack` → PR back into `main`.
+**Quick start:** branch from `main`, make the change, run the checks that exercise it, then open a pull request back to `main`.
 
 > Usage: [README](../README.md) · Internals: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Code Orientation
 
-Both apps are organized **by feature, not by layer**. `apps/web-server/src/features/`
-and `apps/web/src/features/` share an eight-feature spine — `runs`, `coverage`,
-`flights`, `wizard`, `evaluation`, `config`, `portify`, `benchmark` — so a feature
-traces client↔server. Three features live on one side only: `agent-sessions` and
-`version` are server-only, `cleanup` is web-only (its `/api/cleanup/*` routes are owned
-by `runs` and `portify`). Cross-feature infra lives in each app's `src/shared/`.
+Both apps are organized **by feature, not by technical layer**. The server and web app share eight feature names: `runs`, `coverage`, `flights`, `wizard`, `evaluation`, `config`, `portify`, and `benchmark`. This makes one product area easy to trace across the client and server.
+
+`agent-sessions` and `version` exist only on the server. `cleanup` exists only in the web app; its routes remain with the `runs` and `portify` stores that own the data. Shared infrastructure belongs in each app's `src/shared/` folder.
 
 | Entry point | What it does |
 |---|---|
@@ -42,13 +39,15 @@ npm run smoke:pack     # after any template/packaging change
 | `npm run check:conventions` | the mechanical half of the code conventions (incl. the `v8 ignore` allowlist) |
 | `npm run check:boundaries` | web feature barrels — no deep cross-feature imports, no stale `ALLOWED_DEEP` entry |
 | `npm run check:docs` | contributor docs — every backticked repo path, link and `#anchor` resolves |
+| `npm run check:wire` | server responses and their hand-written web mirrors stay aligned |
+| `npm run check:cycles` | import cycles stay within the recorded ceilings |
 | `npm run smoke:pack` | packs, scaffolds, installs, verifies scaffold flow |
 | `npm run smoke:demo` | LLM-free gate for the canonical five-journey repair cascade (ten cycles across three services); exits and removes its throwaway workspace |
 | `npm run demo -- --agent codex` | provisions the one demo workspace with the storefront suite installed, offers the repair-loop and full-Flight routes, leaves both under tester control, and keeps the workspace for inspection |
 
-Run all three `check:*` gates before opening a PR; they catch what tests don't.
-`check:docs` only proves references resolve, never that the prose is still true —
-the judgement half of the docs audit lives in the `cl_verify-changes` skill.
+Run all five repository gates before opening a PR: `check:conventions`, `check:boundaries`, `check:docs`, `check:wire`, and `check:cycles`. They catch structural drift that tests and TypeScript cannot.
+
+`check:docs` proves that paths, links, and anchors resolve. It does not prove the wording is still true; compare factual claims with the current code during review.
 
 ## Pull Requests
 

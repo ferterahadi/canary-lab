@@ -5,21 +5,21 @@
 
 📋 **[Changelog](docs/CHANGELOG.md)** — what shipped in each release. Also tagged on [GitHub Releases](https://github.com/ferterahadi/canary-lab/releases).
 
-**Your AI agent implements the code. Canary Lab verifies it independently before it ships.**
+**Your AI agent writes the code. Canary Lab verifies it independently.**
 
-Coding agents optimize for the literal instruction — *"tests pass," "done," "fixed"* — which isn't always the same as the code working as intended, and an agent that both writes and grades its own run can mark it green. Canary Lab is the independent harness on your machine: it boots your real services, runs your Playwright tests **itself**, and owns the verdict. Green means it actually passed.
+Canary Lab is a local evaluation harness for Playwright. It starts your real services, runs the tests, stores the evidence, and owns the verdict. The agent can fix the application, but it cannot declare its own work green.
 
-Canary Lab doesn't replace Playwright or your agent — it gives both of them steroids. Playwright still runs the tests; the LLM still writes the code and the fixes. Canary Lab owns everything around them: booting real services, isolating ports and worktrees, grounding coverage in requirements, driving the repair loop on evidence, and rendering the proof. The intended loop is simple: **implement a feature with your agent → invoke Canary Lab as the eval → review the evaluation export** (per-test reasoning + verdicts, with video playback where the tests drive a browser). The evaluation report is the deliverable, not the green checkmark.
+Canary Lab does not replace Playwright or your agent. Playwright executes the tests, the agent writes code, and Canary Lab manages everything around them: service startup, isolated ports and worktrees, requirement coverage, evidence-based repair, and the final evaluation report. The core loop is: **implement → verify with Canary Lab → review the evaluation report**.
 
 ![Canary Lab end-to-end: an AI agent scaffolds a Checkout test suite, checks requirement coverage (47%), authors more tests to reach 100%, runs the suite green (12/12), and exports a verified evaluation report](docs/assets/canary-lab-flight.gif)
 
-**One command, from your workspace:**
+**One command, from your product repo:**
 
-```text
-/canary-lab-run checkout locally, fix it if it fails, and run it again until it passes
+```bash
+npx canary-lab flight . "checkout flow"
 ```
 
-Boots your services → runs the tests → agent reads the failure, fixes the code, signals a rerun → Canary Lab reruns until green. The agent only reads results and asks for a retry — it never writes the verdict.
+Flight creates the test suite, checks requirement coverage, prepares parallel-safe ports, runs the tests, repairs application failures, and exports the evaluation. Canary Lab computes each stage result from saved evidence.
 
 ## Why the Verdict Is Independent
 
@@ -28,13 +28,13 @@ A good agent can already start a dev server and run Playwright. The gap is trust
 | The agent **can** | The agent **can't** |
 | --- | --- |
 | Read logs, traces, screenshots, videos | Run the tests itself |
-| Fix the app or the test | Declare a run green |
+| Fix the application, or correct a test only when it is provably wrong | Declare a run green |
 | Signal `rerun` / `restart` | Touch the evidence |
 
 Three things a bare terminal agent can't do alone:
 
 - **Results it doesn't own** — the harness runs the tests and holds the pass/fail.
-- **Concurrency without conflicts** — per-run ports (injected as `${port.api}`) + a git worktree per repo on every run, so repairs never touch your working copy; extras queue. Several agents share one laptop safely.
+- **Concurrency without conflicts** — each run gets its own ports and Git worktrees. Repairs do not touch your working copy, and conflicting runs wait in a queue.
 - **Safe env switching** — env files are backed up before changes and restored when the run ends.
 
 ## What You Write
@@ -80,24 +80,20 @@ test('applying SAVE10 produces a 10% discount on the summary', async ({ request 
 })
 ```
 
-The scaffold ships its own demonstration, so you can see both halves of the
-product before writing anything. `demo-app/` comes with the
-`storefront-journey` suite fully onboarded — services with injectable ports,
-distilled requirements, and tagged tests at 100% coverage — so the only thing
-left is the run: press **Run** and watch the repair loop fix one contract per
-cycle until it is green. `flight-app/` is the opposite, shipping with no suite
-at all: point a Flight at it to watch Canary Lab discover the repo, derive the
-requirements, author the suite, prepare its ports, run, heal, and export.
-`workflow-app/` and its `workflow-workbench` suite provide the smaller follow-up
-exercises: one intentional coverage gap for Author/Coverage and one fixed port
-for Portify. Delete the demo assets once you have seen them.
+New workspaces include three demonstrations:
+
+- `demo-app/` and `storefront-journey` show the repair loop on a complete suite.
+- `flight-app/` has no suite, so Flight must build and verify one from scratch.
+- `workflow-app/` and `workflow-workbench` provide focused coverage, authoring, verification, and Portify exercises.
+
+Delete the demo files after you finish exploring them.
 
 ## How the Repair Loop Works
 
 1. Canary Lab applies the selected envset and starts your local services.
 2. Playwright runs the feature tests.
 3. Logs, screenshots, traces, videos, summaries, and failure slices land under `logs/runs/<runId>/`.
-4. Your agent reads the failure context, fixes the app or the test, and signals `rerun` or `restart` — Canary Lab, not the agent, reruns the tests.
+4. Your agent reads the failure context, fixes the application, and signals `rerun` or `restart`. It changes a test only when the test is provably wrong.
 5. Canary Lab continues from the same run until the check passes.
 
 ## How It Compares
@@ -110,13 +106,13 @@ for Portify. Delete the demo assets once you have seen them.
 | Concurrent runs on one machine (ports + worktrees) | manual | not out of the box | hosted, not local | ✓ |
 | Per-run evidence owned by the harness, not the agent | — | — | ✓ (cloud) | ✓ (your machine) |
 | Env-file switching with backup/restore | manual | manual | — | ✓ |
-| Fully local / offline | ✓ | ✓ | — | ✓ |
+| Harness and evidence stay on your machine | ✓ | ✓ | — | ✓ |
 
-Canary Lab earns its place when a failure depends on more than a browser assertion — which services were up, which env was active, what the backend logged — and you want an agent to fix it unattended. Skip it when `npx playwright test` already tells you enough, when you want self-healing locators, or when you'd rather a hosted dashboard manage your tests.
+Use Canary Lab when a failure depends on service startup, environment files, backend logs, or evidence an agent should not control. Plain `npx playwright test` is enough for simple suites that do not need orchestration or independent repair evidence. Canary Lab stores the harness data locally; Claude, Codex, and other repair agents may still require network access.
 
 ### Works with docker-compose
 
-Compose runs services as images, so a one-line fix waits on a rebuild. Canary Lab runs the dev commands you already use (`npm run dev`, `./gradlew bootRun`): hot reload picks up the fix in seconds, no Dockerfile. Use both — `docker compose up postgres redis` in a Canary Lab `startCommand` for infra, Canary Lab for your app services in dev mode.
+Use Docker Compose for infrastructure such as Postgres or Redis, and let Canary Lab start application services with their normal development commands. This keeps hot reload available during repair.
 
 ## Quick Start
 
@@ -126,9 +122,9 @@ One command: `flight`. Point Canary Lab at a bare product repo and say what to t
 npx canary-lab flight ../your-app "checkout flow"
 ```
 
-`flight` conducts the whole onboarding as one background flight — an agent does every stage, the harness computes every verdict, and you only answer a few checkpoints:
+`flight` runs onboarding as one resumable background task. Agents propose work; Canary Lab verifies each result. You answer only the checkpoints that need human input.
 
-scout the repo → draft `feature.config.cjs` (you approve) → capture env files → gather/infer the PRD → author specs until requirement coverage hits 100% → port-ify → run → heal to green → **export the evaluation archive** (the flight's deliverable).
+scan the repo → create the suite → collect requirements → author covered tests → prepare ports → run and repair → **export the evaluation archive**.
 
 | | Before (manual) | After (`flight`) |
 |---|---|---|
@@ -140,7 +136,7 @@ scout the repo → draft `feature.config.cjs` (you approve) → capture env file
 | Run + heal + proof | drive the loop, export manually | stages; the flight ends with the evaluation archive on disk |
 | Human steps | ~10, expert knowledge required | 1 command + approve checkpoints (`--yolo` skips all but missing secrets) |
 
-Re-running `flight` on the same repo never duplicates work: an interrupted flight resumes from its failed stage, and a finished one parks on a rerun / enhance / new choice. Watch it live in the web UI's **Flights** pill, or drive the same flight from Claude/Codex over MCP (`start_flight`).
+Re-running `flight` on the same repo resumes existing work instead of creating a silent duplicate. Watch it from the **Flights** pill or control it through MCP with `start_flight`.
 
 Contributors can launch that exact tour from this source checkout with:
 
@@ -148,12 +144,7 @@ Contributors can launch that exact tour from this source checkout with:
 npm run demo -- --agent codex
 ```
 
-`npm run demo` adds nothing of its own — it packs the current build, runs the
-real `canary-lab init`, and opens the UI. What a contributor sees is exactly what
-a user sees, which is the point. It prints two deep links and starts neither:
-run the shipped `storefront-journey` suite and watch a real agent repair
-catalog, inventory and checkout a batch of contracts per cycle, or start a **New
-Flight** over `flight-app/`, which ships with no suite at all.
+`npm run demo` packs the current source, creates a real workspace, and opens the same UI users receive. It leaves the repair demo and the full Flight demo ready for you to start.
 
 `flight` creates the workspace if none exists. To set one up yourself:
 
@@ -163,17 +154,7 @@ cd my-lab
 npx canary-lab ui
 ```
 
-`init` scaffolds a workspace with three sample apps and two worked suites, installs
-deps, downloads the Playwright browser, and registers your agent's tools — so
-`canary-lab ui` opens at `http://localhost:7421` straight away. Add `--no-open`
-to skip the browser.
-
-The samples are a demonstration, not scaffolding you need:
-`demo-app/` + its `storefront-journey` suite show the repair loop (press Run,
-watch it go green); `flight-app/` ships bare so a Flight has something to
-onboard from scratch; and `workflow-app/` + `workflow-workbench` give the
-specialized Author, Coverage, Verify, and Portify workflows prepared material.
-Delete the demo assets once you have seen them.
+`init` creates a workspace with three sample apps and two worked suites. It also installs dependencies, downloads Chromium for Playwright, and registers the agent tools. `canary-lab ui` then opens the local interface. Add `--no-open` to keep the browser closed.
 
 CI / offline? Pass `--no-install`, then run the steps manually:
 
@@ -184,7 +165,7 @@ npm install          # postinstall also downloads the Playwright browser
 npx canary-lab ui
 ```
 
-The UI and MCP server share one port (default `7421`). Pin another with `--port 8200`, or change it later in Project Settings.
+The UI and MCP server share one port, `7421` by default. Choose another during setup with `npx canary-lab init my-lab --port 8200`, or change it later in Project Settings. The `ui --port` option is not supported.
 
 Restart your agent after setup so it discovers the Canary Lab tools. If they don't appear, run `npx canary-lab setup --force` and start a fresh session.
 
@@ -200,8 +181,8 @@ No test language, assertion model, or browser runner — Playwright runs the tes
 ## Requirements
 
 - Node.js >= 22.12 and npm >= 9. (Node 20 reached end-of-life in April 2026.)
-- A modern browser: Chrome, Firefox, or Safari.
-- Local UI server on `http://localhost:7421` (set per project via `--port` or Project Settings), with orchestration through `node-pty`.
+- Chromium for Playwright, installed automatically by `canary-lab init` unless installation is skipped.
+- A local UI server on port `7421` by default. Set the initial port with `init --port` or change it in Project Settings.
 - Optional repair agents: supported AI agent CLIs (`claude`, `codex`) on `PATH`.
 
 `node-pty` is a native module giving each service a real terminal, so interactive dev servers behave as in your own shell. It ships prebuilt binaries — a normal install compiles nothing. One postinstall step (`fix-node-pty-permissions.mjs`) re-adds the execute bit to node-pty's `spawn-helper` ([upstream packaging bug](https://github.com/microsoft/node-pty/issues)); a no-op on Windows or if node-pty isn't installed.

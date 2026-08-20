@@ -1,11 +1,6 @@
 # Canary Lab — Design System
 
-The **reference catalog**: every token, primitive, and pattern the web UI
-(`apps/web`) is built from. Look things up here.
-
-For *judgment* — when to reach for which precedent, why a surface is shaped the
-way it is — read the `cl_ui-design-philosophy` skill. This doc says **what
-exists**; the skill says **how to decide**. Neither replaces the other.
+This is the reference catalog for the web UI's tokens, primitives, and patterns. Use the `cl_ui-design-philosophy` skill for design decisions; use this document to find what already exists.
 
 | Layer | Lives in |
 | --- | --- |
@@ -122,11 +117,12 @@ ids, tags, file paths, ports, branch names, counts.
 
 ### Size scale (as built)
 
-The app runs a 9–13px operator-console scale, with one deliberate outlier. There is
+The app uses a dense 8.5–13.5px operator-console scale, with one deliberate outlier. There is
 no `--font-size-*` token yet, so sizes appear as Tailwind arbitrary values.
 
 | px | Class | Role |
 | --- | --- | --- |
+| 8.5 | `text-[8.5px]` | One compact status label |
 | 9–10 | `text-[9px]` / `text-[9.5px]` / `text-[10px]` | Micro-labels, badges, numbered beads, `cl-rubric` caps |
 | 10.5 | `text-[10.5px]` | Chip label default, id badges, count chips |
 | 11 | `text-[11px]` | **Workhorse** — the most common size in the app |
@@ -328,24 +324,18 @@ command that produced it — re-run before trusting a number.
 | Radius / fonts | ✅ | Token names match Tailwind's theme vars, so the utilities resolve to them automatically |
 | Shadow / overlay | ✅ | Two shadow levels, one backdrop |
 | **Status hues** | ✅ | **Was 210 raw palette classes; all rewritten to token utilities.** Zero remain outside the xterm theme |
-| Typography size | 🔥 None | **414** arbitrary `text-[Npx]` across 11 distinct sizes; no `--text-*` step defined |
+| Typography size | 🔥 None | **457** arbitrary `text-[Npx]` uses across 12 distinct sizes; no named type scale |
 | Spacing | ➖ Tailwind only | A handful of arbitrary `p-[…]` / `gap-[…]` escapes; everything else is on Tailwind's 4px scale |
-| Hardcoded hex | ✅ Contained | 9 are the xterm terminal theme (legitimate — xterm takes literal hex), 2 are external-client brand colours. Every `#fff`-on-a-fill is now `var(--on-accent)`; the only hex left in `apps/web/src` outside those two exemptions is the token *declarations* themselves, which is where hex belongs |
+| Hardcoded hex | ✅ Contained | Literal colors remain only in token declarations, terminal rendering, two external-client brand colors, and CSS mask values |
 
 ```bash
-grep -roh "text-\[[0-9.]*px\]" apps/web/src --include="*.tsx" | sort | uniq -c | sort -rn
-grep -roE "(bg|text|border)-(rose|amber|emerald|sky|violet|blue|red|green|slate|zinc|neutral)-[0-9]{3}" apps/web/src --include="*.tsx"
+rg -o 'text-\[[0-9.]+px\]' apps/web/src -g '*.tsx' | sed 's/.*://' | sort | uniq -c | sort -rn
+rg -o '(bg|text|border)-(rose|amber|emerald|sky|violet|blue|red|green|slate|zinc|neutral)-[0-9]{3}' apps/web/src -g '*.tsx'
 ```
 
 ### Remaining work
 
-**Fold the type scale into named steps.** Eleven distinct sizes — ten of them packed
-between 9 and 13.5px — is more resolution than the design needs. The fix mirrors what the colour
-bridge did: pick ~5 steps, add them to `@theme` under **`--text-*`** — but note
-that namespace currently holds three colour tokens in `:root`
-(`--text-primary/-secondary/-muted`), so the type steps need names that can't
-collide with them, or those three need renaming first. That coupling is why this
-wasn't done alongside the colour pass.
+**Replace arbitrary font sizes with named steps.** Twelve sizes are more than the design needs. Reduce them to about five roles. Tailwind reserves `--text-*` for font sizes, while this project currently uses `--text-primary`, `--text-secondary`, and `--text-muted` for colors. Rename or avoid those color variables before adding type tokens.
 
 Spacing is intentionally left on Tailwind's own 4px scale — there is no
 competing project scale for it to drift from.

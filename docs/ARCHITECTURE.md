@@ -1,10 +1,6 @@
 # Canary Lab Architecture
 
-Contributor-facing reference for how the system fits together. This is the canonical
-home for mechanisms and invariants: `CLAUDE.md` carries only commands and hard rules,
-the `.claude/skills/` workflows carry procedures, and both point here for the "why".
-For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
-[README](../README.md) and [GUIDE.md](GUIDE.md).
+Contributor reference for system structure, mechanisms, and invariants. `CLAUDE.md` contains commands and hard rules; skills contain procedures. See [PRD.md](PRD.md) for product intent and the [README](../README.md) or [GUIDE.md](GUIDE.md) for usage.
 
 **Contents**
 
@@ -15,13 +11,12 @@ For product intent, see [PRD.md](PRD.md). For user-facing usage, see the
 - [Heal System](#heal-system)
 - [MCP Layer](#mcp-layer)
 - [Portify and Benchmark](#portify-and-benchmark)
+- [Requirement Coverage](#requirement-coverage)
 - [Keep-in-Sync Invariants](#keep-in-sync-invariants)
 
 ## Package Model
 
-- One published CLI: `canary-lab`. Main subcommands: `flight` (the front door),
-  `init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `boot`, `upgrade`. `fly` is a
-  hidden deprecated alias forwarding to `flight`; `agent` is internal.
+- Canary Lab publishes one CLI. Public commands are `flight`, `init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `boot`, and `upgrade`. `fly` is a deprecated alias for `flight`; `agent` and `install-browsers` are internal support commands.
 - Package internals ship as compiled code in `dist/` (built by `npm run build`:
   `tools/gen-agents-md.mjs` → `tools/gen-codex-skills.mjs` → `tools/clean-dist.mjs`
   → `tsc -p tsconfig.build.json` → `tools/prepare-assets.mjs` → Vite build for the
@@ -145,14 +140,7 @@ HTTP or streams. On the web, `components/` is universal while `state/`, `api/`,
 components with no state or api layer, and that is correct. A feature with no
 realtime surface should **not** carry an empty `ws/`.
 
-**When a module belongs in `shared/`, not a feature.** If two or more features
-import it and it imports no feature itself, it is infrastructure that was filed
-wherever it was first needed. Phase 9 moved five such modules out of `apps/web`
-features (`atoms.tsx`, `AgentSessionView`, `agent-session-socket`,
-`workspace-socket`, `ExternalAgentCard`, `external-client-branding`), which cut
-cross-feature imports from 57 to 20 — and all but 2 of those now go through a barrel. Note that `apps/web/src/shared/api/**` and
-`shared/lib/**` are inside the coverage gate while `features/*/api/**` is not —
-moving a module there brings it into the gate and it must reach 100%.
+**When a module belongs in `shared/`, not a feature.** If several features use a module and it imports no feature code, treat it as shared infrastructure. Shared agent views, sockets, atoms, and client branding already follow this rule. Two recorded cross-feature exemptions remain; `npm run check:boundaries` is the source of truth. Moving code into `apps/web/src/shared/api/**` or `shared/lib/**` also brings it into the 100% coverage gate.
 
 ## Run Lifecycle
 
@@ -468,11 +456,10 @@ link, or the per-repo reason there is none.
   `canary-lab ui`. Health: `GET /mcp/health?profile=<p>`. The port is configured in
   `canary-lab.config.json` (`port` field) in the workspace directory — read it
   dynamically rather than assuming a fixed value (default 7421 if unset).
-- **Profiles** pick the tool subset via `?profile=`. Nine of them, six workflow-scoped
-  plus three composed: `repair` (heal loop), `verify` (verification configs), `author`
+- **Profiles** pick the tool subset via `?profile=`. There are seven workflow profiles and two composed profiles: `repair` (heal loop), `verify` (verification configs), `author`
   (feature/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
-  workflow) — then `lifecycle` (**the default**: repair + verify + author + coverage +
+  workflow), then `lifecycle` (**the default**: repair + verify + author + coverage +
   export + flight, no portify) and `full` (lifecycle + portify). `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional
@@ -483,9 +470,7 @@ link, or the per-repo reason there is none.
   via `app.inject()`; don't duplicate orchestrator logic. Author-profile tools call
   `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
   `tools.ts` itself only builds the profile gate and calls the four registrars.
-  The grouping is **by domain, not by profile** — seven tools (`list_features` in
-  six) belong to several profiles at once, so profile membership is data in
-  `tool-profiles.ts`, never file layout.
+  The grouping is **by domain, not by profile**. Tools may belong to several profiles, so `tool-profiles.ts` owns membership; file layout does not.
 - Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`COVERAGE_TOOLS`/
   `EXPORT_TOOLS`/`FLIGHT_TOOLS`/`PORTIFY_TOOLS` arrays, which live in
   **`mcp/tool-profiles.ts`** and reach the rest of the layer re-exported through
@@ -647,7 +632,7 @@ procedure.
 
 | Invariant | Files involved | Enforced by | Owning skill |
 | --- | --- | --- | --- |
-| MCP tool ↔ profile membership | `apps/web-server/src/mcp/tool-profiles.ts` (`REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`PORTIFY_TOOLS`/`FULL_ONLY_TOOLS`) ↔ mirror arrays in `apps/web-server/src/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/src/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
+| MCP tool ↔ profile membership | `apps/web-server/src/mcp/tool-profiles.ts` workflow arrays and composed unions ↔ mirror arrays in `apps/web-server/src/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/src/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
 | Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/src/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/heal-task-wait.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | nothing automated — discipline only | `cl_sync-agent-surfaces` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tool-groups/`) ↔ instructions ↔ the same discovered skill set | partial: tool unit tests | `cl_sync-agent-surfaces` |
 | **Repair rule + honest counts on every agent surface** | `MODE_COPY` (`runs/logic/runtime/auto-heal.ts`) ↔ `REPAIR_INSTRUCTIONS` (`mcp/server.ts`) ↔ `EXTERNAL_HEAL_NEXT_STEPS` (`runs/logic/heal/external-heal-surface.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "fix app/service code, not tests, unless provably wrong"; counts from `statusLine`, never `total - failed`. **Presence in `instructions` is not delivery**: the Claude Code CLI truncates a server's `instructions` at 2048 chars, so a rule must sit inside that window OR ride a tool result (results and tool descriptions are not truncated). The pass-count rule and the test-failure repair rule ride the heal result for exactly this reason. | `mcp/repair-guardrail.test.ts` (asserts POSITION, not just presence) + `auto-heal.test.ts` | `cl_run-evidence-invariants` |
@@ -662,7 +647,7 @@ procedure.
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
 | Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST, server-spawned) ↔ `get_feature_coverage`/`list_feature_docs`/`start_external_summary`/`start_external_coverage` (`mcp/tool-groups/`, external-only) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
-| Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) ↔ the `.claude/skills/` index in `CLAUDE.md` — AGENTS.md is a pointer only | the grep audit in `cl_verify-changes` → "Contributor-docs audit" | `cl_verify-changes` |
-| **Web↔server wire contract** | the server's response shapes (`runs/logic/{manifest,run-detail,run-artifacts,run-cleanup,journal-store}.ts`, `wizard/logic/draft-store.ts`, `evaluation/logic/evaluation-export-{store,archive}.ts`, `coverage/logic/coverage/feature-docs.ts`, `flights/logic/stage-evidence.ts`, `version/logic/*`, `apps/web-server/src/shared/ast-extractor.ts`, `portify/logic/runtime/cleanup.ts`) ↔ their hand-written mirrors in `apps/web/src/shared/api/**` ↔ the `WorkspaceEvent` union declared on BOTH sides (`apps/web-server/src/shared/workspace-events.ts` ↔ `apps/web/src/shared/api/workspace-socket.ts`). The web app must not import server code, so `tsc` cannot link a mirror to its original — 29 types are copied by hand and 8 differences are recorded, each with a reason. Two of the mirrors are RENAMED across the seam (`JournalSection`→`JournalEntry`, `EvaluationExportTaskView`→`EvaluationExportTask`), so grep will not pair them. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
+| Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
+| **Web↔server wire contract** | Server response types ↔ hand-written mirrors in `apps/web/src/shared/api/**` ↔ the `WorkspaceEvent` union on both sides. The web app cannot import server code, so this contract needs a dedicated comparison gate. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
 | **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ the nine stage emitters (`flights/logic/stages/*.ts`, via the `logic/types.ts` re-export) ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values; they used to be inline literals at each emit site, so a rename degraded the UI button to its raw key silently. `prd-source` is the one kind that offers a SUBSET of its vocabulary (it withholds `continue` when no docs exist). | `stage-meta.checkpoints.test.ts` (every kind titled, every option labelled, fallback intact) + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
-| **Import-cycle ceiling** | `tools/check-import-cycles.mjs` holds a ceiling on strongly-connected import knots across `apps/**` + `shared/**`. Not zero — 49 of the surveyed cycles are sibling React components and are left alone. The point is that a new one cannot arrive unnoticed: a single **type-only** back edge (`server-context.ts` → `server.ts`) once welded all ten server feature registrars into one 16-module knot, and nothing failed. Lower the ceiling when work shrinks the tangle; the gate asks you to. | `npm run check:cycles` | — |
+| **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |

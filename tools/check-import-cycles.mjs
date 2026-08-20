@@ -52,13 +52,16 @@ const CEILING = {
    *  is the sole real dependency left (it uses `RunOrchestrator['restart']` and
    *  two siblings), and a two-node pair is not worth an interface to dodge.
    *
-   *  Now 10, and every remaining knot of size > 4 is COHESION rather than
-   *  accident: the ten `test-review` modules are one HTML report generator, the
-   *  nine coverage/evaluation ones are the ledger and its export sharing a
-   *  service, the five `agent-session-*` are one transcript parser. Splitting
-   *  those would add indirection without removing coupling — measured, not
-   *  assumed: dropping the two `shared/workspace-events` → feature edges (the
-   *  one genuine direction inversion left) changes neither number. */
+   *  A later store-event bridge grew the largest knot to 25: the shared
+   *  workspace-event bus imported payload types from two feature stores, while
+   *  those stores imported the bridge back. Moving the payload contracts into
+   *  dependency-free `draft-types` and `evaluation-export-types` modules
+   *  restored the ceiling to 10.
+   *
+   *  Every remaining knot of size > 4 is COHESION rather than accident: the ten
+   *  `test-review` modules are one HTML report generator, the nine coverage and
+   *  evaluation modules share one ledger service, and the five
+   *  `agent-session-*` modules are one transcript parser. */
   largest: 10,
 }
 

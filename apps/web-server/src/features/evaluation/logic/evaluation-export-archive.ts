@@ -5,6 +5,9 @@ import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 import { createEvaluationExport, type AssertionHtmlOptions } from './test-review-export'
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
+import type { EvaluationArchiveContents } from './evaluation-export-types'
+
+export type { EvaluationArchiveContents } from './evaluation-export-types'
 
 export interface EvaluationExportArchiveOptions {
   logsDir: string
@@ -13,19 +16,6 @@ export interface EvaluationExportArchiveOptions {
   featuresDir?: string
   audienceAdapter?: AssertionHtmlOptions['audienceAdapter']
   rewrite?: AssertionHtmlOptions['rewrite']
-}
-
-/** What the archive actually ended up holding. Counted from the entries that
- *  went into the zip — never from what the run *had*, so a video that failed to
- *  resolve is absent here too. The report page itself is not counted; it is
- *  always present and says nothing. */
-export interface EvaluationArchiveContents {
-  /** Byte length of the built zip. */
-  bytes: number
-  /** Playwright videos bundled alongside the report. */
-  videos: number
-  /** The report's own assets (styles, inline media it references). */
-  assets: number
 }
 
 export async function buildEvaluationExportArchive(

@@ -1,6 +1,6 @@
 # Canary Lab Guide
 
-Operator and reference detail for Canary Lab. For the overview, quick start, and core workflow, see the [README](../README.md).
+Operational reference for Canary Lab. See the [README](../README.md) for setup and the main workflow.
 
 ## Environment Switching
 
@@ -40,29 +40,33 @@ Each run writes to `logs/runs/<runId>/`:
 
 ## Evaluation Report
 
-Completed runs can export an Evaluation Report from the run detail Overview tab — a `.zip` containing `evaluation.html` and captured videos. It summarizes what was tested, the result, and the evidence; each test case expands to show its flowchart, test code, helper code, videos, and checks. When the feature has a PRD summary, the report also opens with a semantic-coverage banner — what the tags claim is covered, beside how much of that this run actually **proved** (a requirement whose covering test passed). The proven figure appears only when the coverage ledger was joined against the very run the report is headed by, so it never attributes another run's outcome to this one.
+Export a completed run from the run detail Overview tab. The `.zip` contains `evaluation.html` and captured videos. Each test shows its flow, code, helpers, evidence, and checks.
 
-The Export menu offers two flavors. **Raw output** renders straight from the run evidence — fast, no LLM involved. **Localized output** spawns a local agent to rewrite the per-test reasoning for readability, so it takes longer; you can watch it run in the agent view. Both cover the same tests with the same verdicts — only the wording differs. Exports driven by an external MCP client are always client-authored (Canary Lab never rewrites those).
+When the feature has a PRD summary, the report compares semantic coverage with what this run proved. A requirement is proven only when its mapped test passed in the exported run; Canary Lab never borrows the outcome from another run.
+
+The Export menu offers two formats. **Raw** renders directly from evidence and uses no LLM. **Localized** asks a local agent to improve the per-test explanation. Both keep the same tests and verdicts. External MCP exports use wording supplied by the connected client.
 
 ![Evaluation Report sample](assets/assertion-review.png)
 
 ## Requirement Coverage
 
-Open the **Coverage** view (the target icon on a feature's row in the features column) to see which of a feature's PRD requirements have tests mapped — every requirement × path (× variant) cell, not just a test count. Requirements on the left, tests on the right, synced colour highlighting, and a coverage % canary computes from the tags rather than an agent's guess. Gap badges (Untested, Path-incomplete, Variant-incomplete) filter the view; a **strictness** badge grades how deep each test checks — app log → internal state → app API → real browser effect — and suggests a stronger assertion where achievable. The Docs tab holds the PRD's source material, with a "Regenerate" action that preserves requirement ids. See [FEATURES](FEATURES.md#requirement-coverage) for annotating tests and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-coveragelifecyclefull-profiles) for the MCP tools.
+Open **Coverage** from a row in the Suites column. The ledger shows every requirement, path, variant, and mapped test. Canary Lab calculates the percentage from test tags. Filters expose untested, path-incomplete, and variant-incomplete requirements, while strictness shows how deeply each test checks the application. Regenerating the requirement summary preserves stable IDs. See [FEATURES](FEATURES.md#requirement-coverage) for tags and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-coveragelifecyclefull-profiles) for MCP tools.
 
 ## Repairing a Failed Run
 
-When a run fails, Canary Lab pauses it and waits for a fix, then reruns from the same run. Every fix ends in a `rerun` (test or config-only changes) or `restart` (service or app changes) signal. Two modes drive the fix:
+When a run fails, Canary Lab pauses, waits for a repair, and continues the same run. Use `rerun` when no service restart is needed and `restart` after application or service changes.
 
 ### Where the repair lands
 
-Every test run boots inside a per-run `git worktree` for each of the feature's repos — cut from `HEAD`, with your uncommitted changes hydrated in and `node_modules` symlinked from the source repo, so the run tests your work-in-progress without occupying your checkout. **The heal agent edits that worktree, not your working copy.** At teardown Canary Lab diffs the worktree against a pre-boot baseline and writes the repair to `logs/runs/<runId>/fixes/<repo>.patch` (plus `fixes.json`), then removes the worktree. Your working copy is left as you had it. If the run then went green, Canary Lab force-pushes that patch to a `canary-lab/fix-<feature>-<repo>` branch and opens a **draft** pull request, so the repair is waiting for review rather than sitting in a patch file — one PR per feature, updated in place by each later heal. Turn it off with the "Open a draft PR when a run heals green" checkbox under Settings → GitHub; nothing is pushed for a run that failed or gave up.
+Every test run uses a Git worktree for each repo. It starts from `HEAD`, includes your uncommitted changes, and reuses the source repo's `node_modules`. **The repair agent edits the worktree, not your checkout.**
+
+At teardown, Canary Lab saves the repair to `logs/runs/<runId>/fixes/<repo>.patch` and `fixes.json`. It then removes a normal worktree. If a repaired run passes, Canary Lab can update a `canary-lab/fix-<feature>-<repo>` branch and open a draft pull request. Disable this under **Settings → GitHub**. Failed or abandoned repairs are never pushed.
 
 Portified features are the exception on teardown: their overlay is reverse-applied but the worktree is kept, since it holds the repair. The Cleanup page's **Worktrees** tab lists, opens, and removes those.
 
 ### External heal (default)
 
-An external MCP client (Claude or Codex CLI, or Claude Desktop) claims the failed run, fetches run-scoped context, fixes the app or test, and signals the next action. The orchestrator parks at `waiting-for-signal` and does not spawn its own agent. The loop is `claim_heal` → `get_heal_context` → `wait_for_heal_task` → edit code → `signal_run`.
+An external MCP client claims the failed run, reads its evidence, fixes application or service code, and signals the next action. It may change a test only when the test is provably wrong. The loop is `claim_heal` → `get_heal_context` → `wait_for_heal_task` → edit → `signal_run`.
 
 Prefer the compact `get_heal_context` and `wait_for_heal_task` over polling; use `get_run_snapshot` only when you need verbose summaries or deeper debugging fields. If an agent session reports the Canary Lab tools are unavailable, run `npx canary-lab setup --force` and start a fresh session — MCP tools are discovered per client session, and the local HTTP API is only a fallback for custom clients.
 
@@ -78,7 +82,9 @@ Two further `healAgent` values exist but are no longer offered in Settings (whic
 
 ## Flight (`canary-lab flight`)
 
-The one-command onboarding pipeline: `npx canary-lab flight <repo...> "<what to test>"` conducts a bare product repo through every stage — similarity check, repo scout (an agent drafts `feature.config.cjs` + detects env files), scaffold, env capture (proven by a single dry-run boot), docs/PRD (drop a doc, or it's inferred from repo docs / the diff vs your base branch / the description), a specs↔coverage loop that authors tagged Playwright specs until the ledger hits the target (default 100%), portify (offered up front and run by default — the double-boot verify earns the concurrency-ready mark; skip it and the feature stays serial), the run with auto-heal, and finally the evaluation export. The archive is the flight's deliverable; a stage never succeeds on the agent's say-so — canary computes every verdict (config parses + boots, ledger met, run green, zip on disk).
+`npx canary-lab flight <repo...> "<what to test>"` takes a bare repo through setup, requirements, test authoring, coverage, parallel readiness, execution, repair, and evaluation export.
+
+Agents draft the config, collect requirements, and author tests. Canary Lab verifies the config by booting it, calculates coverage from tags, runs the tests, and confirms that the evaluation archive exists. The default coverage target is 100%. Portify uses a concurrent double boot to prove the feature can run with injected ports; skipping it leaves the feature serial.
 
 ### Checkpoints and autopilot
 
@@ -100,15 +106,15 @@ Two overrides on top of that. A checkpoint that **re-parks** (a config parse err
 
 Turn autopilot off to be asked at every checkpoint: the flight header's facts strip carries an **Autopilot on/off** toggle you can flip at any time (it takes effect at the next checkpoint), and MCP clients pass `autopilot: false` to `start_flight` — worth doing when you plan to distill the conversation into requirement docs at the `prd-source` stop.
 
-Answer checkpoints in the terminal, in the web UI (Flights pill → routed flight view with per-stage evidence and the agent's live timeline — or hover a suite in the Suites column and click its paper-plane icon, which jumps straight to that suite's flight and is tinted by its state), or over MCP (`start_flight` / `get_flight` / `respond_flight_checkpoint`; on that path, distill the conversation's requirements with `write_feature_doc` — content or `link_path` for a local file — before answering `prd-source`; dropped docs win the source hierarchy).
+Answer checkpoints in the terminal, the Flight view, or through `respond_flight_checkpoint`. From MCP, use `write_feature_doc` to add Markdown content or link a local file before answering `prd-source`. The Flight view shows stage evidence and live agent activity; a suite's paper-plane action opens its existing flight.
 
 ### Resuming, redoing, and queueing
 
-Flights are resumable background jobs: a crash or a failed stage parks the flight `paused`, and the next `flight` on the same repo resumes from the first open stage (`--fresh` starts over). A repo that already has a feature parks on a rerun / enhance / new choice — never a silent duplicate.
+Flights are resumable background jobs. A crash or failed stage pauses the flight, and the next command resumes from the first unfinished stage. Use `--fresh` for a new feature. An existing feature triggers a rerun, enhance, or new-feature checkpoint instead of being duplicated.
 
-A flight's **repos and intent freeze** the moment it first starts — redo, jump-to-stage, and resume all reuse the stored repos + description across the CLI, the web UI, and MCP. Passing a different repo set or description is rejected (`flight_frozen`); to change them, **delete the flight in the web UI** (Flights pill → flight → delete — only when it is not active; stop it first). Deletion drops the flight record only: the feature and its on-disk artifacts stay, and its pill row returns to "not flown" so a fresh flight can pick new repos/intent. There is no delete command or MCP tool — deletion is a web-UI action.
+A flight's repos and description are fixed after it starts. Resume, redo, and stage re-entry reuse those values. To change them, stop the flight and delete its record in the web UI. Deletion keeps the feature and its files. There is no CLI or MCP delete operation.
 
-Broad intent, several features: in the web UI's new-flight dialog, a wide description ("test the whole app") is split by an agent into N proposed features for you to confirm; launch then creates one flight per feature. The first starts immediately and the rest are **queued** (`paused`, `pauseReason: "queued"`) — a queued flight is waiting its turn behind another flight on the same repo(s), not stuck, and auto-starts the moment that repo frees. Same-`group` features (set `group: "<name>"` in `feature.config.cjs`) render together under one accordion in the pill's feature list. (The intent breakdown is a web-UI flow; it is not exposed over the CLI or MCP.)
+In the web UI, a broad description can be split into several proposed features for confirmation. The first flight starts and the rest wait for the shared repos to become free. Features with the same `group` value appear under one accordion. This multi-feature planning flow is not available through CLI or MCP.
 
 ## External Authoring Workflow
 

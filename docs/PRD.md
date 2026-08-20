@@ -1,34 +1,18 @@
 # Canary Lab — Product Requirements (reverse-engineered)
 
-> **Status**: reverse-engineered from the README, CHANGELOG, GUIDE, and code; last
-> reconciled against the 1.6.0 tree. This captures the product intent implied
-> by what's shipped so agents and new contributors share the same picture. Correct
-> anything that misreads the intent — this document is the tie-breaker when a change
-> is technically possible but product-questionable.
+> **Status:** reverse-engineered from the README, changelog, guide, and current 1.6.0 code. This is the product-intent reference for contributors and agents. Update it when shipped behavior changes.
 
 ## Positioning
 
-Canary Lab **augments Playwright and an LLM — it replaces neither.** Plain
-Playwright runs the tests; the agent writes the code and the fixes; Canary Lab
-owns the context around them (boot, isolation, coverage grounding, evidence,
-verdicts, the rendered evaluation). It is an **eval tool invoked after a feature
-is implemented**: build with your agent, then point Canary Lab at the result
-(`canary-lab flight`, or a run on an existing feature), then review the
-evaluation export — the human-facing proof with per-test reasoning and playback.
-That review step is the core usage loop, not an optional extra.
+Canary Lab augments Playwright and an AI agent; it replaces neither. Playwright runs tests, the agent writes code, and Canary Lab owns service startup, isolation, requirement coverage, evidence, verdicts, and the rendered evaluation.
+
+The main loop is: implement a feature, verify it with `canary-lab flight` or an existing suite, then review the evaluation export. The report is the human-facing proof, not an optional extra.
 
 ## Problem
 
-An AI agent asked to fix a failing test can report success it hasn't earned —
-declaring a pass, rounding up a count, or quietly editing the test instead of the app.
-Self-reported "it passes now" isn't really evidence. Canary Lab tries to make that
-harder by keeping the outcome grounded in things the agent doesn't author: the harness
-runs the tests, not the agent; pass counts come from the real result lines; the coverage
-% is computed by canary from the tags, not asserted by the agent; and repairs are
-expected to change the application, not the test. The rough shape is **requirement
-coverage → test run → end-to-end verification** — enough that a human can check the
-result independently, and so the same output can feed back to the agent as a signal to
-fix against rather than just a pass/fail gate.
+An agent can claim success without earning it: it can misread counts, declare a pass, or weaken a test instead of fixing the application. Canary Lab keeps the result outside the agent's control. The harness runs the tests, pass counts come from Playwright, coverage comes from requirement tags, and repairs target application or service code unless a test is provably wrong.
+
+The evidence chain is **requirement coverage → test run → end-to-end verification**. A human can review it, and the same evidence guides the next repair attempt.
 
 The repair loop leans on the same evidence. A failing Playwright test usually scatters
 its context — service logs in one terminal, a trace somewhere, a screenshot you have
@@ -59,16 +43,12 @@ under `[General]` there).
 
 ### [Flight]
 
-- The product's front door: one command (`canary-lab flight <repo…> "<what to test>"`)
-  or one tool (`start_flight`) conducts a bare product repo through every stage to a
-  green, covered, healed run ending in an evaluation archive. The archive is the
-  deliverable, not the green check.
+- The product's front door: `canary-lab flight <repo…> "<what to test>"` or `start_flight` takes a bare repo through setup, requirements, coverage, execution, repair, and evaluation export. A failed run can still export honestly; the archive preserves its real verdict.
 - **The server conducts and the harness computes every verdict; the agent only proposes.**
-  A stage never succeeds on an agent's say-so — the config must parse and boot, the ledger
-  must be met, the run must be green, the zip must be on disk.
-- Resumable background job with typed checkpoints. Autopilot answers the ones with a safe
-  default so an unattended flight only stops where a machine genuinely can't decide
-  (the similarity choice, missing secrets, a docs-less PRD source, any re-park).
+  A stage never succeeds on an agent's say-so — the config must parse and boot, coverage
+  comes from the ledger, the run verdict comes from Playwright, and the archive must exist
+  on disk.
+- Resumable background job with typed checkpoints. Autopilot answers routine choices, including collecting repo documents when none are linked. It stops for an existing-feature choice, missing secrets, or any automatic answer that fails and re-parks.
 - **One flight record per feature**, with repos and intent frozen at first start — a
   re-entry resumes or redoes; it never silently duplicates or quietly swaps inputs.
 - Drivable identically from the CLI, the web UI, and MCP, all against one store.
@@ -80,8 +60,7 @@ under `[General]` there).
 - Repair loop: auto-heal (local `claude`/`codex` agent) or external heal (MCP client
   claims the run, fixes, signals `rerun`/`restart`); the run continues until it
   passes or fails terminally.
-- Concurrent runs with per-run port allocation, same-repo collision handling
-  (worktree or queue), and resource-aware admission queueing.
+- Concurrent runs with per-run ports and worktrees. Fixed-port conflicts and resource limits place runs in a queue.
 - **The repair never lands in the user's checkout.** Every test run boots in a per-run
   git worktree (WIP hydrated in), and the heal agent's edits are diffed out to
   `logs/runs/<runId>/fixes/` at teardown. The checkout is never modified; a run that heals
@@ -139,10 +118,7 @@ under `[General]` there).
 
 - One published CLI (`flight`, `init`, `setup`, `ui`, `mcp`, `new feature`, `env`,
   `boot`, `upgrade`), a local web UI, and an MCP server sharing one port.
-- Profile-scoped MCP surface — six workflow profiles (`repair`/`verify`/`author`/
-  `coverage`/`export`/`flight`), `portify` for the specialized case, and two composed
-  unions (`lifecycle`, the default, and `full`) — so each client kind sees only the
-  tools its workflow needs.
+- Profile-scoped MCP surface with seven workflow profiles (`repair`, `verify`, `author`, `coverage`, `export`, `flight`, and `portify`) plus two composed profiles (`lifecycle` and `full`). `lifecycle` is the default.
 
 ## Non-goals
 
@@ -195,4 +171,4 @@ invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 | **Draft** | An externally authored set of spec files tracked through staged validation before apply |
 | **Requirement coverage** | Whether a mapped test claims every path (and variant) a requirement implies; the ledger maps requirements ↔ tests with a coverage % canary computes from the tags — semantic, decoupled from run history |
 | **Verification (Verify)** | Running a feature's tests against a deployed environment to confirm it works end-to-end — no local boot, no heal |
-| **Evaluation export** | A rendered archive of a terminal run with client-authored report wording |
+| **Evaluation export** | A rendered archive of a terminal run. Wording may come directly from evidence, a local rewrite agent, or an external MCP client. |

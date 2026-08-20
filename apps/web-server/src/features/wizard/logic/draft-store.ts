@@ -1,11 +1,27 @@
 import fs from 'fs'
 import path from 'path'
 import { validateFeatureTarget as validateScaffoldTarget } from '../../../../../../shared/feature-scaffold'
-import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
 import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
 import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
 import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import type {
+  DraftPrdDocument,
+  DraftRecord,
+  DraftRepo,
+  DraftSource,
+  DraftStatus,
+  ExternalDraftStage,
+} from './draft-types'
+
+export type {
+  DraftPrdDocument,
+  DraftRecord,
+  DraftRepo,
+  DraftSource,
+  DraftStatus,
+  ExternalDraftStage,
+} from './draft-types'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -17,26 +33,6 @@ import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
 // feature to the project root belongs to the MCP path (apply_external_draft →
 // applyExternalDraftFiles), not here.
 
-export type DraftStatus =
-  | 'created'
-  | 'planning'
-  | 'plan-ready'
-  | 'generating'
-  | 'spec-ready'
-  | 'accepted'
-  | 'rejected'
-  | 'cancelled'
-  | 'error'
-
-export type DraftSource = RunProducer
-export type ExternalDraftStage =
-  | 'scaffolding'
-  | 'authoring-tests'
-  | 'validating'
-  | 'ready'
-  | 'applied'
-  | 'error'
-
 const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
   created: ['planning', 'rejected', 'cancelled', 'error'],
   planning: ['plan-ready', 'rejected', 'cancelled', 'error'],
@@ -47,51 +43,6 @@ const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
   rejected: [],
   cancelled: ['rejected'],
   error: ['rejected'],
-}
-
-export interface DraftRepo {
-  name: string
-  localPath: string
-  branch?: string
-}
-
-export interface DraftPrdDocument {
-  filename: string
-  contentType: string
-  characters: number
-  text?: string
-  contentBase64?: string
-}
-
-export interface DraftRecord {
-  draftId: string
-  prdText: string
-  additionalNotes?: string
-  prdDocuments: DraftPrdDocument[]
-  repos: DraftRepo[]
-  featureName?: string
-  producer?: DraftSource
-  externalStage?: ExternalDraftStage
-  externalClientKind?: ClientKind
-  externalSessionId?: string
-  externalConversationName?: string
-  externalSessionUrl?: string
-  intentSummary?: string
-  activeAgentStage?: 'planning' | 'generating'
-  planAgentSessionId?: string
-  planAgentSessionKind?: 'claude' | 'codex'
-  // Structured-session ref + spawn timestamp for the live agent-session WS.
-  // Claude pins the session id at spawn so `planAgentSessionRef` is set before
-  // the first byte of agent output. Codex has no equivalent flag — the WS
-  // tailer discovers the rollout file post-hoc using `planAgentSpawnedAt` as
-  // the lower bound and the draft dir as the cwd match.
-  status: DraftStatus
-  createdAt: string
-  updatedAt: string
-  plan?: unknown
-  generatedFiles?: string[]
-  devDependencies?: string[]
-  errorMessage?: string
 }
 
 export interface DraftPaths {
