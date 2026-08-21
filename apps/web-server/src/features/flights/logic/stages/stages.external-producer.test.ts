@@ -5,13 +5,15 @@ import path from 'path'
 import { scoutStage } from './scout'
 import { docsStage } from './docs'
 import { specsCoverageStage } from './specs-coverage'
+import { prdSummaryStage } from './prd-summary'
 import type { FlightStageDeps } from './context'
 import type { StageContext, StageOutcome } from '../conductor'
 import { FLIGHT_STAGE_KEYS, type FlightManifest, type FlightStage, type FlightStageKey } from '../types'
 import { stageContextStub } from './__fixtures__/stage-context'
 
-// The hand-off path: `opts.stageProducer === 'external'` makes scout, docs and
-// specs↔coverage park on an `external-work` checkpoint instead of spawning a local
+// The hand-off path: `opts.stageProducer === 'external'` makes the thinking
+// stages (scout, docs, prd-summary, specs↔coverage) park on an `external-work`
+// checkpoint instead of spawning a local
 // CLI, and their responders settle from what the CLIENT left on disk.
 //
 // The property under test throughout is that the hand-off changes WHO does the
@@ -324,9 +326,13 @@ describe('specs-coverage — external producer', () => {
     expect(String(cp.data.prompt)).toContain('Fan out when the gaps span more than one spec file')
   })
 
+  // Fixtures place `pass` under data.context — the shape externalWorkCheckpoint
+  // actually emits. Hand-built checkpoints that put it at data.pass masked a
+  // real bug (the responder read the wrong key and every round resumed at pass
+  // 1); the round-trip test below pins the emitter→responder agreement.
   it('settles on the recomputed ledger when the client\'s specs close the gap', async () => {
     const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
-    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { pass: { iteration: 1, validationErrors: '', passes: [] } } } })
+    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { pass: { iteration: 1, validationErrors: '', passes: [] } } } } })
     // Fresh compute on resume sees 100% — the CLIENT's files raised it, and the
     // ledger (not the client's word) is what settles the stage.
     const d = specsDeps({ coverage: { compute: (() => ledger(100)) as unknown as never, runEngine: (async () => ({})) as unknown as never } })
@@ -343,7 +349,7 @@ describe('specs-coverage — external producer', () => {
       checkpoint: {
         kind: 'external-work',
         message: 'x',
-        data: { pass: { iteration: 1, validationErrors: '', passes: [] }, handOffId: 'live-id' },
+        data: { context: { pass: { iteration: 1, validationErrors: '', passes: [] } }, handOffId: 'live-id' },
       },
     })
     const out = await specsCoverageStage(specsDeps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'stale-id' })
@@ -355,7 +361,7 @@ describe('specs-coverage — external producer', () => {
 
   it('hands the pass back to the local agent on run-internally, keeping the pass number', async () => {
     const { ctx, setStage, logs } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
-    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { pass: { iteration: 2, validationErrors: '', passes: [] } } } })
+    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { pass: { iteration: 2, validationErrors: '', passes: [] } } } } })
     // Coverage stays short, so the taken-back pass actually authors (a 100% ledger
     // would settle at the head of runPass before any spawn) and the loop then runs
     // out its remaining rounds and parks on coverage-stuck.
@@ -376,7 +382,7 @@ describe('specs-coverage — external producer', () => {
 
   it('fails the resume when the PRD summary went missing while parked', async () => {
     const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
-    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { pass: { iteration: 1, validationErrors: '', passes: [] } } } })
+    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { pass: { iteration: 1, validationErrors: '', passes: [] } } } } })
     const d = specsDeps()
     fs.rmSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), { force: true })
     expect(await specsCoverageStage(d).onCheckpointResponse!(ctx, { choice: 'submit' })).toMatchObject({ kind: 'failed' })
@@ -387,5 +393,404 @@ describe('specs-coverage — external producer', () => {
     setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: {} } })
     const d = specsDeps({ coverage: { compute: (() => ledger(100)) as unknown as never, runEngine: (async () => ({})) as unknown as never } })
     expect(await specsCoverageStage(d).onCheckpointResponse!(ctx, { choice: 'submit' })).toMatchObject({ kind: 'done' })
+  })
+})
+
+describe('prd-summary — external producer', () => {
+  /** A discoverable feature (loadFeatures needs the config) with one source doc,
+   *  so buildSummaryAuthoringContext has something to hand off and
+   *  applyExternalSummary can resolve the feature dir. */
+  const writeFeature = (opts: { docs?: boolean } = {}): string => {
+    const dir = path.join(featuresDir, 'checkout')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'checkout', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
+    )
+    if (opts.docs !== false) {
+      fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
+      fs.writeFileSync(path.join(dir, 'docs', 'spec.md'), '# Create todo\na user can create a new todo item\n')
+    }
+    return dir
+  }
+
+  const summaryOnDisk = () =>
+    JSON.parse(fs.readFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), 'utf-8')) as {
+      requirements: Array<{ id: string; title: string; deprecated?: boolean }>
+    }
+
+  /** deps whose internal engine must never run — the external pin, mirroring
+   *  the file-level spawnAgent throw for the stages that spawn directly. */
+  const prdDeps = (over: Partial<FlightStageDeps> = {}): FlightStageDeps =>
+    deps({
+      coverage: {
+        regenerate: (async () => { throw new Error('regenerate must not run for an external producer') }) as unknown as never,
+      },
+      ...over,
+    })
+
+  const prdManifest = () => manifest({ currentStage: 'prd-summary' })
+
+  const REQUIREMENT = { title: 'create todo', text: 'a user can create a new todo item', pathTypes: ['happy'] }
+
+  it('parks with the summary engine\'s own prompt and context instead of spawning', async () => {
+    writeFeature()
+    const { ctx } = ctxFor(prdManifest())
+    const cp = handOffOf(await prdSummaryStage(prdDeps()).run(ctx))
+    expect(cp.kind).toBe('external-work')
+    expect(cp.data.stage).toBe('prd-summary')
+    // The internal summarizer's prompt (prompts/prd-summary.md), not a summary.
+    expect(String(cp.data.prompt)).toContain('Turn source documents into requirements')
+    const context = cp.data.context as { docs: Array<{ relPath: string }>; previousRequirementIds: string[] }
+    expect(context.docs.map((d) => d.relPath)).toEqual(['spec.md'])
+    expect(context.previousRequirementIds).toEqual([])
+    expect(cp.options).toEqual(['submit', 'run-internally'])
+  })
+
+  it('reuses a fresh summary before any hand-off', async () => {
+    const dir = writeFeature()
+    fs.writeFileSync(
+      path.join(dir, 'docs', '_prd-summary.json'),
+      JSON.stringify({ requirements: [{ id: 'R1', title: 't', text: 'x', pathTypes: ['happy'] }], generatedAt: '2999-01-01T00:00:00Z' }),
+    )
+    const out = await prdSummaryStage(prdDeps()).run(ctxFor(prdManifest()).ctx)
+    expect(out).toMatchObject({ kind: 'done', evidence: { requirementCount: 1, reused: true } })
+  })
+
+  it('fails (not parks) when there are no docs to summarize — a client cannot conjure sources', async () => {
+    writeFeature({ docs: false })
+    const out = await prdSummaryStage(prdDeps()).run(ctxFor(prdManifest()).ctx)
+    expect(out).toMatchObject({ kind: 'failed', error: expect.stringContaining('no requirement docs') })
+  })
+
+  it('applies a submitted requirements list through the canonical assembler and settles from disk', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: { requirements: [REQUIREMENT] },
+    })
+    expect(out).toMatchObject({ kind: 'done', evidence: { requirementCount: 1 } })
+    // The evidence is the file Canary assembled, not the submission echoed back.
+    expect(summaryOnDisk().requirements[0]).toMatchObject({ title: 'create todo' })
+  })
+
+  it('parses a submission handed back as a JSON string', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: '```json\n' + JSON.stringify({ requirements: [REQUIREMENT] }) + '\n```',
+    })
+    expect(out).toMatchObject({ kind: 'done', evidence: { requirementCount: 1 } })
+  })
+
+  it('preserves a surviving requirement id across an external resubmit', async () => {
+    const dir = writeFeature()
+    fs.writeFileSync(
+      path.join(dir, 'docs', '_prd-summary.json'),
+      JSON.stringify({ requirements: [{ id: 'R1', title: 'create todo', text: 'old text', pathTypes: ['happy'] }], generatedAt: '2020-01-01T00:00:00Z' }),
+    )
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: { requirements: [{ id: 'R1', ...REQUIREMENT }] },
+    })
+    expect(out).toMatchObject({ kind: 'done' })
+    expect(summaryOnDisk().requirements.find((r) => !r.deprecated)?.id).toBe('R1')
+  })
+
+  it('RE-PARKS an empty requirements list before anything lands on disk', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: { requirements: [] },
+    }))
+    expect(cp.kind).toBe('external-work')
+    expect(String((cp.data.context as { lastRejection: string }).lastRejection)).toContain('requirements')
+    expect(fs.existsSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'))).toBe(false)
+  })
+
+  it('re-parks a submission missing required requirement fields, naming the first', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: { requirements: [{ title: 'only a title' }] },
+    }))
+    expect(cp.kind).toBe('external-work')
+    expect(String((cp.data.context as { lastRejection: string }).lastRejection)).toContain('requirements.0')
+  })
+
+  it('re-parks an unparseable string submission', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: 'no json here at all',
+    }))
+    expect(cp.kind).toBe('external-work')
+    expect((cp.data.context as { lastRejection: string }).lastRejection).toBe('the submission was not parseable JSON')
+  })
+
+  it('discards a submit answering a superseded hand-off', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x', data: { handOffId: 'live-id' } } })
+    const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'stale-id' })
+    expect(out).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { data: { lastRejection: 'stale_submission', handOffId: 'live-id' } },
+    })
+  })
+
+  it('runs the engine locally when the client hands the step back', async () => {
+    const dir = writeFeature()
+    const { ctx, setStage, logs } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const d = deps({
+      coverage: {
+        regenerate: (async () => {
+          fs.writeFileSync(
+            path.join(dir, 'docs', '_prd-summary.json'),
+            JSON.stringify({ requirements: [{ id: 'R1', title: 't', text: 'x', pathTypes: ['happy'] }], generatedAt: '2999-01-01T00:00:00Z' }),
+          )
+        }) as unknown as never,
+      },
+    })
+    expect(await prdSummaryStage(d).onCheckpointResponse!(ctx, { choice: 'run-internally' })).toMatchObject({
+      kind: 'done',
+      evidence: { requirementCount: 1 },
+    })
+    expect(logs.join('')).toContain('handed the step back')
+  })
+
+  it('carries a submitted variantDimension through the canonical assembler', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const out = await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: { requirements: [{ ...REQUIREMENT, variants: ['email', 'sms'] }], variantDimension: { name: 'channel', values: ['email', 'sms'] } },
+    })
+    expect(out).toMatchObject({ kind: 'done' })
+    const written = JSON.parse(fs.readFileSync(path.join(featuresDir, 'checkout', 'docs', '_prd-summary.json'), 'utf-8')) as { variantDimension?: { name: string } }
+    expect(written.variantDimension?.name).toBe('channel')
+  })
+
+  it('re-parks a non-object submission with the top-level reason (no field path to name)', async () => {
+    writeFeature()
+    const { ctx, setStage } = ctxFor(prdManifest())
+    setStage('prd-summary', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, { choice: 'submit', data: 42 }))
+    expect(cp.kind).toBe('external-work')
+    expect(typeof (cp.data.context as { lastRejection: string }).lastRejection).toBe('string')
+  })
+
+  it('a replayed answer with nothing parked re-runs the stage (parks a fresh hand-off)', async () => {
+    writeFeature()
+    const { ctx } = ctxFor(prdManifest())
+    const cp = handOffOf(await prdSummaryStage(prdDeps()).onCheckpointResponse!(ctx, { choice: 'submit' }))
+    expect(cp.kind).toBe('external-work')
+  })
+})
+
+describe('specs-coverage mapping — external producer', () => {
+  const ledger = (pct: number) => ({
+    coveragePct: pct,
+    totals: { covered: pct, total: 100 },
+    requirements: pct >= 100 ? [] : [{ requirement: { id: 'R1', title: 'checkout works' }, gapType: 'untested' }],
+  })
+
+  const TEST_NAME = 'create makes a new todo item'
+
+  // The marker import is load-bearing: the authoring-submit path re-validates
+  // what is on disk via applyExternalDraftFiles, which rejects a spec without it.
+  const SPEC = [
+    "import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'",
+    `test('${TEST_NAME}', async () => { expect(1).toBe(1) })`,
+    '',
+  ].join('\n')
+
+  /** A REAL feature (config + spec + summary): the mapping half resolves the
+   *  feature dir, collects the tests for the roster, and writes tags through
+   *  the canonical tag-writer — none of which a bare docs dir can serve. */
+  const fullFeature = (): string => {
+    const dir = path.join(featuresDir, 'checkout')
+    fs.mkdirSync(path.join(dir, 'e2e'), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'checkout', description: 'd', envs: ['local'], repos: [{ name: 'r', localPath: __dirname }], featureDir: __dirname } }`,
+    )
+    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), SPEC)
+    fs.mkdirSync(path.join(dir, 'docs'), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'docs', '_prd-summary.json'),
+      JSON.stringify({ requirements: [{ id: 'R1', title: 'checkout works', text: 'it works', pathTypes: ['happy'] }], generatedAt: '2020-01-01T00:00:00Z' }),
+    )
+    return dir
+  }
+
+  const mapDeps = (over: Partial<FlightStageDeps> = {}): FlightStageDeps =>
+    deps({
+      validateSpecs: async () => ({ ok: true }),
+      coverage: {
+        compute: (() => ledger(100)) as unknown as never,
+        runEngine: (async () => { throw new Error('runEngine must not run for an external producer') }) as unknown as never,
+      },
+      ...over,
+    })
+
+  const mappingPark = (over: Record<string, unknown> = {}) => ({
+    checkpoint: {
+      kind: 'external-work' as const,
+      message: 'x',
+      data: {
+        handOffId: 'live-id',
+        context: { phase: 'mapping', pass: { iteration: 1, validationErrors: '', passes: [] }, roster: [TEST_NAME] },
+        ...over,
+      },
+    },
+  })
+
+  it('a validated authoring submit parks AGAIN for the mapping half, roster pinned', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { phase: 'authoring', pass: { iteration: 1, validationErrors: '', passes: [] } } } } })
+    const d = mapDeps({ coverage: { compute: (() => ledger(0)) as unknown as never, runEngine: (async () => ({})) as unknown as never } })
+    const cp = handOffOf(await specsCoverageStage(d).onCheckpointResponse!(ctx, { choice: 'submit', data: 'wrote specs' }))
+    expect(cp.kind).toBe('external-work')
+    const context = cp.data.context as { phase: string; pass: { iteration: number }; roster: string[] }
+    expect(context.phase).toBe('mapping')
+    expect(context.pass.iteration).toBe(1)
+    expect(context.roster).toEqual([TEST_NAME])
+    // The annotate prompt, not the authoring one — the mapping is its own job.
+    expect(String(cp.data.prompt)).not.toContain('Write the spec files')
+  })
+
+  it('a complete mapping answer writes the tags via the canonical writer and settles on the recompute', async () => {
+    const dir = fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: 'live-id',
+      data: { mappings: [{ testName: TEST_NAME, requirements: ['R1'] }] },
+    })
+    expect(out).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
+    // The tag landed on disk — the canonical writer ran, not an agent's claim.
+    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
+  })
+
+  it('an incomplete answer re-parks the SAME ask, naming the missing tests', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: 'live-id',
+      data: { mappings: [], unmappable: [] },
+    })
+    const cp = handOffOf(out)
+    expect(String(cp.data.lastRejection)).toContain(TEST_NAME)
+    // Same ask: the pinned roster and hand-off id survive the rejection.
+    expect(cp.data.handOffId).toBe('live-id')
+    expect((cp.data.context as { roster: string[] }).roster).toEqual([TEST_NAME])
+  })
+
+  it('a test in unmappable[] satisfies the roster (silence is the only rejection)', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: 'live-id',
+      data: { mappings: [], unmappable: [{ testName: TEST_NAME, reason: 'no requirement applies' }] },
+    })
+    expect(out).toMatchObject({ kind: 'done' })
+  })
+
+  it('a malformed mapping submission re-parks naming the first bad field', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: 'live-id',
+      data: { mappings: [{ testName: 42 }] },
+    })
+    const cp = handOffOf(out)
+    expect(String(cp.data.lastRejection)).toContain('mappings.0')
+  })
+
+  it('discards a mapping submit answering a superseded hand-off', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'stale-id' })
+    expect(out).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { data: { lastRejection: 'stale_submission', handOffId: 'live-id' } },
+    })
+  })
+
+  it('maps locally when the client hands the MAPPING back — one step, not the stage', async () => {
+    fullFeature()
+    const { ctx, setStage, logs } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    let engineRuns = 0
+    const d = mapDeps({
+      coverage: {
+        compute: (() => ledger(100)) as unknown as never,
+        runEngine: (async () => { engineRuns += 1 }) as unknown as never,
+      },
+    })
+    expect(await specsCoverageStage(d).onCheckpointResponse!(ctx, { choice: 'run-internally' })).toMatchObject({ kind: 'done' })
+    expect(engineRuns).toBe(1)
+    expect(logs.join('')).toContain('mapping back')
+  })
+
+  it('a park that lost its roster skips the completeness check (upgrade safety) and still recomputes', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark({ context: { phase: 'mapping', pass: { iteration: 1, validationErrors: '', passes: [] } } }))
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: 'live-id',
+      data: { mappings: [], unmappable: [] },
+    })
+    expect(out).toMatchObject({ kind: 'done' })
+  })
+
+  it('round-trips the pass number through the real emitter — a burned pass re-parks at pass 2, not pass 1', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    const prompts: string[] = []
+    const d = deps({
+      // Every dry-run fails, so each authoring pass burns and the loop re-parks
+      // the NEXT pass through the real emitter.
+      validateSpecs: async () => ({ ok: false, errors: 'specs do not compile' }),
+      spawnAgent: async ({ prompt }) => { prompts.push(prompt); return { text: 'ok' } },
+      coverage: { compute: (() => ledger(0)) as unknown as never, runEngine: (async () => ({})) as unknown as never },
+    })
+    const adapter = specsCoverageStage(d)
+    const first = await adapter.run(ctx)
+    const firstCp = handOffOf(first)
+    setStage('specs-coverage', { checkpoint: (first as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
+    const second = await adapter.onCheckpointResponse!(ctx, { choice: 'submit', data: 'wrote specs', token: String(firstCp.data.handOffId) })
+    const cp2 = handOffOf(second)
+    // The park the EMITTER produced carries pass 2 where the responder reads it.
+    expect((cp2.data.context as { pass: { iteration: number } }).pass.iteration).toBe(2)
+    setStage('specs-coverage', { checkpoint: (second as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint })
+    await adapter.onCheckpointResponse!(ctx, { choice: 'run-internally' })
+    // The taken-back pass authored as pass 2 — the number survived the round trip.
+    expect(prompts[0]).toContain('iteration 2')
   })
 })

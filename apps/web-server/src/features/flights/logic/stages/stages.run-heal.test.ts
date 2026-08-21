@@ -420,3 +420,340 @@ describe('run + heal stages', () => {
     })
   })
 })
+
+describe('run — external producer (heal engagement hand-off)', () => {
+  const externalManifest = (over: Partial<FlightManifest> = {}) =>
+    manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
+      currentStage: 'run',
+      ...over,
+    })
+
+  const parkOf = (outcome: StageOutcome) => {
+    expect(outcome.kind).toBe('checkpoint')
+    const cp = (outcome as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint
+    return { kind: cp.kind, message: cp.message, data: (cp.data ?? {}) as Record<string, unknown> }
+  }
+
+  const externalPark = (runId = 'run-ext') => ({
+    checkpoint: {
+      kind: 'external-work' as const,
+      message: 'x',
+      data: { handOffId: 'live-id', context: { runId } },
+    },
+  })
+
+  it('starts the run UNCLAIMED in external-heal mode and parks immediately — no verdict poll', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-ext' } }
+      return undefined
+    }, calls)
+    const { ctx, current } = ctxFor(externalManifest())
+    const cp = parkOf(await runStage(deps({ inject })).run(ctx))
+    expect(cp.kind).toBe('external-work')
+    expect(cp.data.stage).toBe('run')
+    expect(cp.data.context).toMatchObject({ runId: 'run-ext' })
+    // The rendered hand-off template — the repair rule leads, the loop follows.
+    expect(String(cp.data.prompt)).toMatch(/fix app\/service code, not tests/i)
+    expect(String(cp.data.prompt)).toContain('claim_heal(runId: "run-ext"')
+    // claimable:false — a synthetic flight claim would block the real client's.
+    const start = calls.find((c) => c.method === 'POST' && c.url === '/api/runs')
+    expect(start?.payload).toMatchObject({
+      healAgent: { kind: 'external', sessionId: 'flight:fl-test', clientKind: 'other', claimable: false },
+    })
+    expect(current().links?.runId).toBe('run-ext')
+    // Parked, not polled: the only calls are the start (plus none for wf status).
+    expect(calls.filter((c) => c.method === 'GET')).toHaveLength(0)
+  })
+
+  it('a submit while the run is still active re-parks the SAME engagement', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'healing', healCycles: 1 } } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', externalPark())
+    const cp = parkOf(await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' }))
+    expect(cp.kind).toBe('external-work')
+    expect(String(cp.data.lastRejection)).toContain('still "healing"')
+    expect(cp.data.handOffId).toBe('live-id')
+  })
+
+  it('a submit on a PASSED run settles with the manifest verdict and counts — never the client word', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
+        return {
+          statusCode: 200,
+          body: {
+            manifest: { status: 'passed', healCycles: 2 },
+            summary: { complete: true, total: 3, passed: 3, passedNames: ['a', 'b', 'c'], failed: [] },
+          },
+        }
+      }
+      return undefined
+    })
+    const { ctx, setStage, current } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', externalPark())
+    const outcome = await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-ext', status: 'passed', healCycles: 2 } })
+    expect(current().runVerdict).toBe('passed')
+  })
+
+  it('a submit on a FAILED run parks the run-failed question (yolo settles as-is)', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 3 } } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', externalPark())
+    const failed = await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })
+    expect(failed).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'run-failed' } })
+
+    const yolo = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: true, stageProducer: 'external' }, links: { runId: 'run-ext' } }))
+    yolo.setStage('run', externalPark())
+    const asIs = await runStage(deps({ inject })).onCheckpointResponse!(yolo.ctx, { choice: 'submit', token: 'live-id' })
+    expect(asIs).toMatchObject({ kind: 'done', evidence: { status: 'failed' } })
+  })
+
+  it('rerun after a failed external run re-enters the external posture', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 1 } } }
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-ext-2' } }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', { checkpoint: { kind: 'run-failed', message: 'q', options: ['rerun', 'export-as-is'] } })
+    const cp = parkOf(await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'rerun' }))
+    expect(cp.kind).toBe('external-work')
+    expect((calls.find((c) => c.method === 'POST' && c.url === '/api/runs')?.payload as { healAgent?: unknown }).healAgent).toMatchObject({ claimable: false })
+  })
+
+  it('run-internally on an ACTIVE run aborts it and starts a fresh internal run', async () => {
+    const calls: InjectCall[] = []
+    let aborted = false
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
+        return { statusCode: 200, body: { manifest: { status: aborted ? 'aborted' : 'healing', healCycles: 1 } } }
+      }
+      if (call.method === 'POST' && call.url === '/api/runs/run-ext/abort') { aborted = true; return { statusCode: 200, body: {} } }
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-int' } }
+      if (call.method === 'GET' && call.url === '/api/runs/run-int') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0 } } }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', externalPark())
+    const outcome = await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-int', status: 'passed' } })
+    expect(calls.some((c) => c.url === '/api/runs/run-ext/abort')).toBe(true)
+    // The fresh start is INTERNAL — no healAgent body, workspace auto-heal applies.
+    const start = calls.find((c) => c.method === 'POST' && c.url === '/api/runs')
+    expect((start?.payload as { healAgent?: unknown }).healAgent).toBeUndefined()
+  })
+
+  it('run-internally on a TERMINAL failed run restarts heal locally via the handoff route', async () => {
+    const calls: InjectCall[] = []
+    let handed = false
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
+        return { statusCode: 200, body: { manifest: { status: handed ? 'passed' : 'failed', healCycles: 2 } } }
+      }
+      if (call.method === 'POST' && call.url === '/api/runs/run-ext/heal-agent/handoff') { handed = true; return { statusCode: 202, body: { accepted: true, to: 'auto' } } }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', externalPark())
+    const outcome = await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })
+    // Remaining-test mode on the SAME run — cheaper than a fresh suite.
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-ext', status: 'passed' } })
+    expect(calls.find((c) => c.url.endsWith('/heal-agent/handoff'))?.payload).toMatchObject({ to: 'auto' })
+  })
+
+  it('run-internally falls back to a fresh internal run when the local handoff is unavailable', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'failed', healCycles: 2 } } }
+      if (call.method === 'POST' && call.url === '/api/runs/run-ext/heal-agent/handoff') return { statusCode: 409, body: { reason: 'restart-local-heal-unavailable' } }
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-int' } }
+      if (call.method === 'GET' && call.url === '/api/runs/run-int') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0 } } }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', externalPark())
+    const outcome = await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-int' } })
+  })
+
+  it('run-internally with no run yet just starts an internal run', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-int' } }
+      if (call.method === 'GET' && call.url === '/api/runs/run-int') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0 } } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('run', { checkpoint: { kind: 'external-work', message: 'x', data: { context: {} } } })
+    expect(await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })).toMatchObject({
+      kind: 'done',
+      evidence: { runId: 'run-int' },
+    })
+  })
+
+  it('discards a submit answering a superseded hand-off', async () => {
+    const { ctx, setStage } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    setStage('run', externalPark())
+    expect(await runStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'stale-id' })).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { data: { lastRejection: 'stale_submission', handOffId: 'live-id' } },
+    })
+  })
+
+  it('fails a submit when the hand-off lost its run id everywhere', async () => {
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('run', { checkpoint: { kind: 'external-work', message: 'x', data: { context: {} } } })
+    expect(await runStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit' })).toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('lost its run id'),
+    })
+  })
+
+  it('resume re-issues the hand-off for a still-active external run instead of polling it', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'healing', healCycles: 1 } } }
+      return undefined
+    })
+    const { ctx } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    const cp = parkOf(await runStage(deps({ inject })).run(ctx))
+    expect(cp.kind).toBe('external-work')
+    expect(cp.data.context).toMatchObject({ runId: 'run-ext' })
+  })
+
+  it('resume settles straight from a run that reached its verdict while parked', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 1 } } }
+      return undefined
+    })
+    const { ctx } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    expect(await runStage(deps({ inject })).run(ctx)).toMatchObject({ kind: 'done', evidence: { status: 'passed' } })
+  })
+
+  it('heal mirror reports an externally-healed run exactly like an internal one', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 2, healMode: 'external' } } }
+      return undefined
+    })
+    const { ctx } = ctxFor(externalManifest({ links: { runId: 'run-ext' } }))
+    expect(await healStage(deps({ inject })).run(ctx)).toMatchObject({
+      kind: 'done',
+      evidence: { runId: 'run-ext', healCycles: 2, healMode: 'external', finalStatus: 'passed' },
+    })
+  })
+})
+
+describe('run stage — re-attach and take-back arms', () => {
+  it('run() re-attaches to a still-ACTIVE internal run and polls it to the verdict', async () => {
+    let reads = 0
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-live') {
+        reads += 1
+        return { statusCode: 200, body: { manifest: { status: reads === 1 ? 'healing' : 'passed', healCycles: 1, services: [] } } }
+      }
+      return undefined
+    })
+    const outcome = await runStage(deps({ inject })).run(ctxFor(manifest({ links: { runId: 'run-live' } })).ctx)
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { runId: 'run-live', status: 'passed' } })
+  })
+
+  it('rerun with the previous run still ACTIVE re-attaches per producer (internal polls, external re-parks)', async () => {
+    let reads = 0
+    const internalInject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-live') {
+        reads += 1
+        return { statusCode: 200, body: { manifest: { status: reads === 1 ? 'running' : 'passed', healCycles: 0, services: [] } } }
+      }
+      return undefined
+    })
+    const internal = ctxFor(manifest({ links: { runId: 'run-live' } }))
+    internal.setStage('run', { checkpoint: { kind: 'run-failed', message: 'q', options: ['rerun', 'export-as-is'] } })
+    expect(await runStage(deps({ inject: internalInject })).onCheckpointResponse!(internal.ctx, { choice: 'rerun' })).toMatchObject({
+      kind: 'done',
+      evidence: { status: 'passed' },
+    })
+
+    const externalInject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-live') return { statusCode: 200, body: { manifest: { status: 'running', healCycles: 0, services: [] } } }
+      return undefined
+    })
+    const external = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' }, links: { runId: 'run-live' } }))
+    external.setStage('run', { checkpoint: { kind: 'run-failed', message: 'q', options: ['rerun', 'export-as-is'] } })
+    const out = await runStage(deps({ inject: externalInject })).onCheckpointResponse!(external.ctx, { choice: 'rerun' })
+    expect(out).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'external-work' } })
+  })
+
+  it('run-internally on an ABORTED terminal run hands heal to the local agent', async () => {
+    let handed = false
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
+        return { statusCode: 200, body: { manifest: { status: handed ? 'passed' : 'aborted', healCycles: 1, services: [] } } }
+      }
+      if (call.method === 'POST' && call.url === '/api/runs/run-ext/heal-agent/handoff') { handed = true; return { statusCode: 202, body: { accepted: true } } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' }, links: { runId: 'run-ext' } }))
+    setStage('run', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { runId: 'run-ext' } } } })
+    expect(await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })).toMatchObject({
+      kind: 'done',
+      evidence: { runId: 'run-ext', status: 'passed' },
+    })
+  })
+
+  it('run-internally when the handed-off run has VANISHED just starts an internal run', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-gone') return { statusCode: 200, body: {} }
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, body: { runId: 'run-int' } }
+      if (call.method === 'GET' && call.url === '/api/runs/run-int') return { statusCode: 200, body: { manifest: { status: 'passed', healCycles: 0, services: [] } } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' }, links: { runId: 'run-gone' } }))
+    setStage('run', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { runId: 'run-gone' } } } })
+    expect(await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })).toMatchObject({
+      kind: 'done',
+      evidence: { runId: 'run-int' },
+    })
+  })
+
+  it('a submit on a run with no manifest fails instead of guessing', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') return { statusCode: 200, body: {} }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' }, links: { runId: 'run-ext' } }))
+    setStage('run', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { runId: 'run-ext' } } } })
+    expect(await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit' })).toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('has no manifest'),
+    })
+  })
+
+  it('run-internally survives a rejecting abort + poll (best-effort teardown, never a sink)', async () => {
+    let reads = 0
+    const inject: FlightInject = async (call) => {
+      if (call.method === 'GET' && call.url === '/api/runs/run-ext') {
+        reads += 1
+        if (reads === 1) return { statusCode: 200, json: () => ({ manifest: { status: 'healing', healCycles: 1, services: [] } }) }
+        // The post-abort poll read rejects — the .catch keeps the takeover going.
+        throw new Error('poll read boom')
+      }
+      if (call.method === 'POST' && call.url === '/api/runs/run-ext/abort') throw new Error('abort boom')
+      if (call.method === 'POST' && call.url === '/api/runs') return { statusCode: 201, json: () => ({ runId: 'run-int' }) }
+      if (call.method === 'GET' && call.url === '/api/runs/run-int') return { statusCode: 200, json: () => ({ manifest: { status: 'passed', healCycles: 0, services: [] } }) }
+      throw new Error(`unstubbed ${call.method} ${call.url}`)
+    }
+    const { ctx, setStage } = ctxFor(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' }, links: { runId: 'run-ext' } }))
+    setStage('run', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { runId: 'run-ext' } } } })
+    expect(await runStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })).toMatchObject({
+      kind: 'done',
+      evidence: { runId: 'run-int' },
+    })
+  })
+})

@@ -118,6 +118,21 @@ describe('useLiveResource', () => {
     expect(read('value')).toBe('second:b')
   })
 
+  it('ignores a fetch that FAILS after its key changed', async () => {
+    const rejecters: Array<(e: Error) => void> = []
+    const fetcher = (key: string) => key === 'first'
+      ? new Promise<string>((_resolve, reject) => { rejecters.push(reject) })
+      : Promise.resolve(`${key}:ok`)
+    await render({ id: 'first', fetcher })
+    await render({ id: 'second', fetcher })
+
+    // The abandoned key's rejection lands last. Without the alive guard on the
+    // catch it would blank the value the new key had already resolved.
+    await act(async () => { rejecters[0]!(new Error('offline')) })
+
+    expect(read('value')).toBe('second:ok')
+  })
+
   it('does not re-fetch just because the caller passed a new closure', async () => {
     let calls = 0
     // An inline arrow is a NEW function every render; keying the effect on it

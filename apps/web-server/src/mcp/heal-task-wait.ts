@@ -291,8 +291,12 @@ export async function waitForHealTask(
       finish({ ok: true, value: stillWaitingValue(runId, detail ?? null) })
     }, windowMs)
     const heartbeat = setInterval(beat, 5_000)
-    if (typeof timeout.unref === 'function') timeout.unref()
-    if (typeof heartbeat.unref === 'function') heartbeat.unref()
+    // Unconditional: both are `NodeJS.Timeout`, which always carries `unref`, so
+    // a `typeof` guard here was an arm no test could reach. If a future runtime
+    // returns a bare handle instead, this is a compile error rather than a timer
+    // that silently holds the process open.
+    timeout.unref()
+    heartbeat.unref()
     beat()
     check()
   })

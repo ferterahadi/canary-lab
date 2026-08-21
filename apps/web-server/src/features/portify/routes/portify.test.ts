@@ -45,6 +45,8 @@ async function buildApp(deps: Partial<PortifyRouteDeps>) {
     store: deps.store ?? fakeStore(),
     logsDir: deps.logsDir ?? '/tmp/canary-portify-test-logs',
     startPortify: deps.startPortify ?? (async () => ({ workflowId: 'portify-1' })),
+    startExternalPortify: deps.startExternalPortify ?? (async () => ({ workflowId: 'portify-ext', targets: [], configPath: '/cfg', instructions: 'task' })),
+    reviseExternalPortify: deps.reviseExternalPortify ?? (() => ({ manifest: manifest({ status: 'editing' }), instructions: 'revise task' })),
     savePortify: deps.savePortify ?? (async () => manifest({ status: 'saved' })),
     cancelPortify: deps.cancelPortify ?? (async () => manifest({ status: 'aborted' })),
     revisePortify: deps.revisePortify ?? (async () => manifest({ status: 'editing', feedbackRounds: 1 })),
@@ -67,6 +69,35 @@ describe('portifyRoutes', () => {
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ workflowId: 'portify-abc' })
     expect(received).toMatchObject({ feature: 'cns', agent: 'claude' })
+  })
+
+  it('POST /api/portify with producer:"external" starts the external workflow (no local agent)', async () => {
+    let received: unknown
+    const app = await build({
+      startExternalPortify: async (input) => { received = input; return { workflowId: 'wf-ext', targets: [{ name: 'app', editPath: '/wt' }], configPath: '/cfg', instructions: 'edit the listeners' } },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/portify', payload: { feature: 'cns', producer: 'external', sessionId: 'flight:fl-1' } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ workflowId: 'wf-ext', instructions: 'edit the listeners' })
+    expect(received).toMatchObject({ feature: 'cns', sessionId: 'flight:fl-1', clientKind: 'other' })
+  })
+
+  it('POST /api/portify with producer:"external" 400s without a sessionId', async () => {
+    const app = await build({})
+    const res = await app.inject({ method: 'POST', url: '/api/portify', payload: { feature: 'cns', producer: 'external' } })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toMatchObject({ error: expect.stringContaining('sessionId') })
+  })
+
+  it('POST /:id/revise with external:true reopens via reviseExternalPortify and returns the instructions', async () => {
+    let received: unknown
+    const app = await build({
+      reviseExternalPortify: (workflowId, feedback) => { received = { workflowId, feedback }; return { manifest: manifest({ status: 'editing' }), instructions: 'constraints restated' } },
+    })
+    const res = await app.inject({ method: 'POST', url: '/api/portify/portify-1/revise', payload: { feedback: 'fix ports', external: true } })
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ status: 'editing', instructions: 'constraints restated' })
+    expect(received).toEqual({ workflowId: 'portify-1', feedback: 'fix ports' })
   })
 
   it('POST /api/portify 400s when feature is missing', async () => {

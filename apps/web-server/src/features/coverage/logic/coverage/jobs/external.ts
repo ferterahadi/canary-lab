@@ -13,6 +13,7 @@ import {
   type SummaryAuthoringContext,
 } from '../service'
 import { CoverageJobConflictError } from './runner'
+import { IncompleteCoverageAnswerError, missingFromRoster } from '../external-submissions'
 import type { CoverageJobStore } from './store'
 import type { CoverageJobManifest } from './types'
 import type { ParsedRequirement } from '../prd-summary'
@@ -112,18 +113,9 @@ export interface SubmitExternalCoverageArgs {
   now?: () => string
 }
 
-/** Thrown when a submitted answer leaves some of the job's tests unaccounted for.
- *  Carries the names so the client can finish the job rather than guess. */
-export class IncompleteCoverageAnswerError extends Error {
-  constructor(public readonly missing: string[], total: number) {
-    super(
-      `answer accounts for ${total - missing.length} of ${total} tests — every test must appear in mappings[] `
-      + `or unmappable[]. Missing: ${missing.slice(0, 10).join(', ')}`
-      + `${missing.length > 10 ? ` (+${missing.length - 10} more)` : ''}`,
-    )
-    this.name = 'IncompleteCoverageAnswerError'
-  }
-}
+// Moved to external-submissions.ts so the flight's mapping hand-off words its
+// re-park identically; re-exported to keep this module's public surface.
+export { IncompleteCoverageAnswerError }
 
 export interface SubmitExternalCoverageResult {
   manifest: CoverageJobManifest
@@ -151,8 +143,7 @@ export function submitExternalCoverage(
   // rejected (recoverable — the client re-submits with the rest).
   // Jobs started before the roster existed skip the check; see the field's doc.
   if (job.externalTestRoster?.length) {
-    const accounted = new Set<string>([...args.mappings.map((m) => m.testName), ...(args.unmappable ?? [])])
-    const missing = job.externalTestRoster.filter((name) => !accounted.has(name))
+    const missing = missingFromRoster(job.externalTestRoster, args.mappings, args.unmappable ?? [])
     if (missing.length) throw new IncompleteCoverageAnswerError(missing, job.externalTestRoster.length)
   }
 

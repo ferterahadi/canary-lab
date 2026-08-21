@@ -9,6 +9,7 @@ import { type OrchestratorLike } from './logic/run-store'
 import { allocateRunPorts, applyFeatureEnvset } from './logic/runtime/run-primitives'
 import { PaneBroker } from './logic/pane-broker'
 import { loadFeatures } from '../../shared/feature-loader'
+import { httpFailure } from '../../shared/http-error'
 import { runDirFor, buildRunPaths } from './logic/runtime/run-paths'
 import { RunOrchestrator } from './logic/runtime/orchestrator'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
@@ -137,7 +138,7 @@ export function makeRestartExternalRun(
       if (backups) runnerLog.info(`Applied envset "${env}" for external restart ${feature.name}`)
     } catch (err) {
       runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
-      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+      throw httpFailure(err, 500)
     }
   }
 
@@ -148,7 +149,7 @@ export function makeRestartExternalRun(
   } catch (err) {
     if (backups) restore(backups)
     runnerLog.warn(`External restart rejected: ${(err as Error).message}`)
-    throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 409 })
+    throw httpFailure(err, 409)
   }
 
   const nowIso = new Date().toISOString()
@@ -185,7 +186,7 @@ export function makeRestartExternalRun(
   } catch (err) {
     if (backups) restore(backups)
     runnerLog.warn(`External restart failed: ${(err as Error).message}`)
-    throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+    throw httpFailure(err, 500)
   }
 
   if (canClaim) {

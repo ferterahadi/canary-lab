@@ -1,15 +1,13 @@
 // MCP tools — port-ification (make a feature's apps take injectable ports) plus
 // the two external heal-context reads. Split out of authoring.ts; bodies unchanged.
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import { buildExternalFailureDetail, buildExternalHealContext } from '../../features/runs/logic/heal/external-heal-surface'
 import { loadFeatures } from '../../shared/feature-loader'
 import { computePortPreflight } from '../../features/runs/logic/runtime/port-preflight'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { overlayExists as portifyOverlayExists } from '../../features/portify/logic/runtime/overlay'
 import { portInjectability } from '../../../../../shared/launcher/port-injectability'
-import { type ToolGroupContext, asJsonResult, ensureExternalClaimForMcpCall, errorResult, summarizeUnifiedDiff } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, ensureExternalClaimForMcpCall, errorResult, failureResult, summarizeUnifiedDiff } from '../tool-support'
 
 export function registerPortifyTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -43,7 +41,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
         next: `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -60,7 +58,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
         next: `Poll get_portify with workflowId "${workflowId}": on "ready-to-save" call save_portify; if it returns to "editing", read verification.failureDetail, fix the worktree, and submit_external_portify again. cancel_portify discards the workflow.`,
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -85,7 +83,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
         next: `Follow prompt: apply the feedback ON TOP of the existing edits in the worktree (they are still there — do not start over), then call submit_external_portify with workflowId "${workflowId}" to re-verify. The double-boot runs again, so re-check the change did not reintroduce a hardcoded listener.`,
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -160,7 +158,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
         next: `Overlay saved to features/${manifest.feature}/portify/. The feature now boots with injectable ports on every run — concurrent runs and benchmark arms will not clash — without ever modifying the product repo.`,
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -176,7 +174,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     try {
       return asJsonResult(await deps.cancelPortify(workflowId))
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -194,7 +192,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult(result)
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 

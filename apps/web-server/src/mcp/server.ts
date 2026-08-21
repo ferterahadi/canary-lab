@@ -73,7 +73,7 @@ const COVERAGE_INSTRUCTIONS = `Canary Lab — coverage profile. Feature docs →
 
 const FLIGHT_INSTRUCTIONS = `Canary Lab — flight profile. One conducted background pipeline takes bare product repo(s) to a green, covered, healed run ending in an evaluation export; the server owns every stage verdict, this client only answers checkpoints.
 
-- Flight: start_flight(repoPaths, description) runs ONE background pipeline from bare repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict — you only approve checkpoints. Follow with get_flight and do what its next: field says: on waiting-for-approval call respond_flight_checkpoint(flightId) with choice (from checkpoint.options), values (missing-env KEY→value map), or data ({ configSource } for config-approval — the feature is already scaffolded, so this writes through to its REAL on-disk feature.config.cjs; "redraft" re-runs the repo scan). Autopilot is ON by default: checkpoints with a safe default answer themselves (config-approval→approve, prd-source→continue when requirement docs exist and collect-repo-docs when they do not, coverage-stuck→accept-partial, portify-gate→run, portify-apply→apply, run-failed→export-as-is, export-mode→raw), each logged [autopilot] on its stage; the flight still parks on similarity-choice, missing-env, and any re-parked checkpoint — including a prd-source whose collector came back empty (data.lastAttempt present). A stage you explicitly RE-ENTER (from_stage / redo) always parks its FIRST checkpoint even under autopilot — choosing to re-run a step IS the intent to answer it differently. Start with autopilot:false to be asked at every checkpoint — do that when you plan to distill THIS conversation into requirement docs at the prd-source stop. A prd-source park is a two-path fork: supply docs yourself (write_feature_doc with content, or link_path for a local file, then respond "continue"), or have Canary's agent gather them guided by the flight's frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback on the respond rides a retry into the agent's prompt. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos — runs apply it into throwaway per-run worktrees), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without parallel readiness (the feature stays serial; a later flight can retry). If the checkpoint's data.lastAttempt is present, a previous gather already came back EMPTY (outcome: empty|no-output|no-diff, with the agent's own reason) — do NOT simply repeat that same choice; the material is not in these repos. Supply the docs yourself, or re-run the agent only with feedback naming what it missed, or after the user points the flight at different repos. ONE flight record per feature: re-calling start_flight follows an active one and resumes a paused one from its first open stage; a settled one requires redo:true (restart from stage 1) or from_stage:"<stage>" (jump to a chosen stage — prerequisites are checked and a rejection names the missing artifact). A restart WIPES: the entry step and every later step are rewound to zero on disk — requirement docs (user-added files and links included), authored specs, captured envsets, the portify overlay, the run record, the evaluation export — as if those steps never ran; warn the user before a redo/from_stage on a flight whose artifacts they still want, and use plain resume (no flag) to continue WITHOUT wiping. A flight's repos and intent are FROZEN against MID-PIPELINE re-entry: on from_stage / resume OMIT repoPaths/description (the stored values are reused) — passing DIFFERENT ones is rejected with type:"flight_frozen". A full restart (redo:true) discards every stage's evidence and artifacts, so THERE new repoPaths/description are accepted and replace the stored ones (omit to reuse); deleting the flight (web UI only) remains for removing the record, not for changing inputs. A flight with status:"paused", pauseReason:"queued" is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — narrate it as queued, not stuck, and do NOT ask the user to resume it (re-calling start_flight does start it early if they want). agent:"claude"|"codex" picks which CLI conducts the flight's stage agents — sticky per record (jump/continue reuse the stored one; only redo:true may change it; the run stage's auto-heal follows the workspace heal setting instead). yolo:true skips every checkpoint except missing env secrets (export defaults to raw); on done, links.evaluationZip is the deliverable. When get_flight returns a remedy field (a stage failed on uncommitted repo changes), help the user clean each listed repo — git stash push -u (undoable) or commit — then start_flight resumes and the stage retries.`
+- Flight: start_flight(repoPaths, description) runs ONE background pipeline from bare repo(s) to a green, covered, healed run ending in an evaluation export (similarity → scout → scaffold → env → docs → PRD → specs↔coverage → portify → run → heal → export). The server conducts every stage and computes every verdict — you only approve checkpoints. Follow with get_flight and do what its next: field says: on waiting-for-approval call respond_flight_checkpoint(flightId) with choice (from checkpoint.options), values (missing-env KEY→value map), or data ({ configSource } for config-approval — the feature is already scaffolded, so this writes through to its REAL on-disk feature.config.cjs; "redraft" re-runs the repo scan). Autopilot is ON by default: checkpoints with a safe default answer themselves (config-approval→approve, prd-source→continue when requirement docs exist and collect-repo-docs when they do not, coverage-stuck→accept-partial, portify-gate→run, portify-apply→apply, run-failed→export-as-is, export-mode→raw — localized when stage_producer is external), each logged [autopilot] on its stage; the flight still parks on similarity-choice, missing-env, and any re-parked checkpoint — including a prd-source whose collector came back empty (data.lastAttempt present). A stage you explicitly RE-ENTER (from_stage / redo) always parks its FIRST checkpoint even under autopilot — choosing to re-run a step IS the intent to answer it differently. Start with autopilot:false to be asked at every checkpoint — do that when you plan to distill THIS conversation into requirement docs at the prd-source stop. A prd-source park is a two-path fork: supply docs yourself (write_feature_doc with content, or link_path for a local file, then respond "continue"), or have Canary's agent gather them guided by the flight's frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback on the respond rides a retry into the agent's prompt. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos — runs apply it into throwaway per-run worktrees), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without parallel readiness (the feature stays serial; a later flight can retry). If the checkpoint's data.lastAttempt is present, a previous gather already came back EMPTY (outcome: empty|no-output|no-diff, with the agent's own reason) — do NOT simply repeat that same choice; the material is not in these repos. Supply the docs yourself, or re-run the agent only with feedback naming what it missed, or after the user points the flight at different repos. ONE flight record per feature: re-calling start_flight follows an active one and resumes a paused one from its first open stage; a settled one requires redo:true (restart from stage 1) or from_stage:"<stage>" (jump to a chosen stage — prerequisites are checked and a rejection names the missing artifact). A restart WIPES: the entry step and every later step are rewound to zero on disk — requirement docs (user-added files and links included), authored specs, captured envsets, the portify overlay, the run record, the evaluation export — as if those steps never ran; warn the user before a redo/from_stage on a flight whose artifacts they still want, and use plain resume (no flag) to continue WITHOUT wiping. A flight's repos and intent are FROZEN against MID-PIPELINE re-entry: on from_stage / resume OMIT repoPaths/description (the stored values are reused) — passing DIFFERENT ones is rejected with type:"flight_frozen". A full restart (redo:true) discards every stage's evidence and artifacts, so THERE new repoPaths/description are accepted and replace the stored ones (omit to reuse); deleting the flight (web UI only) remains for removing the record, not for changing inputs. A flight with status:"paused", pauseReason:"queued" is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees — narrate it as queued, not stuck, and do NOT ask the user to resume it (re-calling start_flight does start it early if they want). agent:"claude"|"codex" picks which CLI conducts the flight's stage agents — sticky per record (jump/continue reuse the stored one; only redo:true may change it; the run stage's auto-heal follows the workspace heal setting instead). yolo:true skips every checkpoint except missing env secrets (export defaults to raw; localized under an external stage producer); on done, links.evaluationZip is the deliverable. When get_flight returns a remedy field (a stage failed on uncommitted repo changes), help the user clean each listed repo — git stash push -u (undoable) or commit — then start_flight resumes and the stage retries.`
 
 const EXPORT_INSTRUCTIONS = `Canary Lab — export profile. Produce the evaluation archive for a terminal run; Canary Lab renders the final report, this client writes the reasoning.
 
@@ -144,14 +144,17 @@ export async function registerMcpRoutes(
         transports.set(id, transport)
         sessionServers.set(id, mcp)
       },
-      onsessionclosed: (id) => {
-        transports.delete(id)
-        sessionServers.delete(id)
-      },
     })
+    // One cleanup path for every way a session can end. The transport's
+    // `onsessionclosed` hook fires only for a client DELETE, while `onclose`
+    // covers that *and* any close the transport initiates itself — so wiring
+    // both meant the second one always ran against maps the first had already
+    // emptied. The entry is found by identity rather than by reading
+    // `transport.sessionId`, which is typed nullable and would need a guard no
+    // reachable close can take (a transport only closes after its handshake).
     transport.onclose = () => {
-      const id = transport.sessionId
-      if (id) {
+      for (const [id, live] of transports) {
+        if (live !== transport) continue
         transports.delete(id)
         sessionServers.delete(id)
       }
@@ -167,8 +170,12 @@ export async function registerMcpRoutes(
   // POST (client→server message), and DELETE (close session).
   const handle = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
-      const header = req.headers['mcp-session-id']
-      const sessionId = Array.isArray(header) ? header[0] : header
+      // Fastify types every header as `string | string[]`, but Node's parser
+      // only hands back an array for `set-cookie`: a repeated Mcp-Session-Id
+      // arrives already comma-joined, and that joined value simply matches no
+      // session and 404s below. `toString()` keeps the type in step with that
+      // instead of leaving an array arm no request can reach.
+      const sessionId = req.headers['mcp-session-id']?.toString()
 
       let transport: StreamableHTTPServerTransport
       if (sessionId) {
@@ -208,11 +215,13 @@ export async function registerMcpRoutes(
       await transport.handleRequest(req.raw, reply.raw, req.body)
     } catch (err) {
       // The transport writes directly to res.raw, so if it threw before
-      // sending, our Fastify layer needs to close the reply cleanly.
+      // sending, our Fastify layer needs to close the reply cleanly. No
+      // `reply.sent` guard: every refusal above sends and returns in the same
+      // breath, so nothing inside the try can throw after a reply went out —
+      // and a reply the transport already wrote to res.raw leaves `sent` false
+      // anyway, so the guard never protected that case either.
       app.log.error({ err }, 'MCP transport.handleRequest threw')
-      if (!reply.sent) {
-        reply.code(500).send({ error: (err as Error).message })
-      }
+      reply.code(500).send({ error: (err as Error).message })
     }
   }
 
@@ -281,8 +290,11 @@ function contextFromUrl(url: string):
 
 function countTools(mcp: McpServer): number {
   // The McpServer keeps registered tools on a private field; the public
-  // surface doesn't expose a count. Best-effort introspection — we cast to
-  // any only here so the rest of the file stays typed.
-  const tools = (mcp as unknown as { _registeredTools?: Record<string, unknown> })._registeredTools
-  return tools ? Object.keys(tools).length : 0
+  // surface doesn't expose a count. Introspection — we cast to any only here so
+  // the rest of the file stays typed. The field is initialized in the SDK's
+  // constructor, so it is always an object; an SDK rename would throw here
+  // rather than silently report every profile as having zero tools, which the
+  // smoke test's tool-count mirror would then have to catch on its own.
+  const tools = (mcp as unknown as { _registeredTools: Record<string, unknown> })._registeredTools
+  return Object.keys(tools).length
 }

@@ -106,6 +106,22 @@ describe('autopilot (R71/W4)', () => {
     )
   })
 
+  it('export-mode defaults to "localized" for an EXTERNAL producer — the rewrite is the thinking being handed off', async () => {
+    const responses: unknown[] = []
+    const adapters = allDone()
+    adapters.docs = parkThenDone('export-mode', ['raw', 'localized'], responses)
+    const { manifest, completion } = startFlight(
+      { ...args('/repo/auto-export-external'), opts: { ...OPTS, stageProducer: 'external' } },
+      deps(adapters),
+    )
+    await completion
+    const final = store.get(manifest.flightId)!
+    expect(final.status).toBe('done')
+    // The internal default stays 'raw' (the AUTO table above); only the
+    // producer-aware branch flips it.
+    expect(responses).toEqual([{ choice: 'localized' }])
+  })
+
   it('similarity-choice and missing-env always park — no safe default exists', async () => {
     const cases: Array<[Kind, string[]]> = [
       ['similarity-choice', ['rerun', 'enhance', 'new']],

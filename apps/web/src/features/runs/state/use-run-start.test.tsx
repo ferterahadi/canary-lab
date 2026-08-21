@@ -129,6 +129,42 @@ describe('resolveCollision', () => {
     expect(onRunStarted).toHaveBeenCalledWith('run-1')
     expect(hook.collisionPrompt).toBeNull()
   })
+
+  it('surfaces a failure of the isolated retry as a start error', async () => {
+    startRun.mockRejectedValueOnce(new Error('409'))
+    mocks.asRepoCollision.mockReturnValue({ repo: 'shop' })
+    mount()
+    await act(async () => { await hook.handleStartRun('local', 'boot') })
+    startRun.mockRejectedValueOnce(new Error('no disk space for a worktree'))
+
+    await act(async () => { await hook.resolveCollision('worktree') })
+
+    // The retry carries the ORIGINAL mode through, so the error dialog's own
+    // replay can't silently turn a boot into a test run.
+    expect(hook.startError).toMatchObject({ feature: 'checkout', env: 'local', mode: 'boot' })
+    expect(hook.collisionPrompt).toBeNull()
+  })
+
+  it('does NOT select an isolated boot run either', async () => {
+    startRun.mockRejectedValueOnce(new Error('409'))
+    mocks.asRepoCollision.mockReturnValue({ repo: 'shop' })
+    mount()
+    await act(async () => { await hook.handleStartRun('local', 'boot') })
+
+    await act(async () => { await hook.resolveCollision('queue') })
+
+    expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', 'queue', 'boot')
+    expect(onRunStarted).not.toHaveBeenCalled()
+  })
+
+  it('does nothing when there is no prompt to resolve', async () => {
+    mount()
+
+    await act(async () => { await hook.resolveCollision('queue') })
+
+    expect(startRun).not.toHaveBeenCalled()
+    expect(hook.startError).toBeNull()
+  })
 })
 
 describe('branch-mismatch recovery', () => {
@@ -158,6 +194,34 @@ describe('branch-mismatch recovery', () => {
     expect(startRun).toHaveBeenLastCalledWith('checkout', 'local', undefined, 'test')
     expect(hook.startError).toBeNull()
   })
+
+  it('does nothing when there is no start error to recover from', async () => {
+    mount()
+
+    await act(async () => {
+      await hook.switchBranchesAndRun()
+      await hook.pinCurrentAndRun()
+    })
+
+    // Both are dialog buttons; the dialog is only up while an error is held, so
+    // a stray call must not pin branches or replay a start on its own.
+    expect(mocks.checkoutRepoBranch).not.toHaveBeenCalled()
+    expect(mocks.pinFeatureBranchesToCurrent).not.toHaveBeenCalled()
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('leaves a non-mismatch error alone rather than checking anything out', async () => {
+    startRun.mockRejectedValueOnce(new Error('playwright is not installed'))
+    mocks.asBranchMismatch.mockReturnValue(null)
+    mount()
+    await act(async () => { await hook.handleStartRun('local') })
+    const held = hook.startError
+
+    await act(async () => { await hook.switchBranchesAndRun() })
+
+    expect(mocks.checkoutRepoBranch).not.toHaveBeenCalled()
+    expect(hook.startError).toBe(held)
+  })
 })
 
 describe('handleStartVerification', () => {
@@ -166,5 +230,13 @@ describe('handleStartVerification', () => {
     await act(async () => { await hook.handleStartVerification({ configId: 'cfg-1' }) })
     expect(startVerification).toHaveBeenCalledWith('checkout', { configId: 'cfg-1' })
     expect(onRunStarted).toHaveBeenCalledWith('verify-1')
+  })
+
+  it('no-ops when no feature is selected', async () => {
+    mount({ selectedFeature: null })
+
+    await act(async () => { await hook.handleStartVerification({ configId: 'cfg-1' }) })
+
+    expect(startVerification).not.toHaveBeenCalled()
   })
 })

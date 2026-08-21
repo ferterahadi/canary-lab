@@ -1,12 +1,22 @@
 # Canary Lab Architecture
 
-Contributor reference for system structure, mechanisms, and invariants. `CLAUDE.md` contains commands and hard rules; skills contain procedures. See [PRD.md](PRD.md) for product intent and the [README](../README.md) or [GUIDE.md](GUIDE.md) for usage.
+Contributor reference for system boundaries, runtime mechanisms, and contracts
+that must move together. `CLAUDE.md` owns commands and hard rules; repository
+skills own procedures; this document explains how the shipped parts cooperate.
+See the [PRD](PRD.md) for product intent and the [README](../README.md) or
+[Guide](GUIDE.md) for usage.
+
+At runtime, one local server composes the web UI, REST routes, WebSocket streams,
+and Model Context Protocol (MCP) tools over shared stores. Thin CLI commands and
+external agents call those same server-owned workflows. Playwright and the
+coverage ledger compute verdicts; agents produce candidate artifacts and fixes.
 
 **Contents**
 
 - [Package Model](#package-model)
 - [Module Map](#module-map)
 - [Run Lifecycle](#run-lifecycle)
+- [Flight Pipeline](#flight-pipeline)
 - [Concurrency](#concurrency)
 - [Heal System](#heal-system)
 - [MCP Layer](#mcp-layer)
@@ -16,7 +26,10 @@ Contributor reference for system structure, mechanisms, and invariants. `CLAUDE.
 
 ## Package Model
 
-- Canary Lab publishes one CLI. Public commands are `flight`, `init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `boot`, and `upgrade`. `fly` is a deprecated alias for `flight`; `agent` and `install-browsers` are internal support commands.
+- Canary Lab publishes one CLI. User-facing commands are `flight`, `init`,
+  `setup`, `ui`, `mcp`, `new feature`, `env`, `boot`, and `upgrade`. `fly` is a
+  deprecated alias for `flight`. `agent` and `install-browsers` support setup
+  and generated workspaces rather than the normal product workflow.
 - Package internals ship as compiled code in `dist/` (built by `npm run build`:
   `tools/gen-agents-md.mjs` → `tools/gen-codex-skills.mjs` → `tools/clean-dist.mjs`
   → `tsc -p tsconfig.build.json` → `tools/prepare-assets.mjs` → Vite build for the
@@ -55,15 +68,15 @@ entry. The three places that must agree for the web aliases are
 | --- | --- |
 | `apps/cli/` | CLI entry, scaffold/setup/upgrade/env commands, MCP bridge (`apps/cli/mcp.ts` includes `inferMcpClientKind` client-kind detection) |
 | `apps/web-server/src/server.ts` | Fastify app: UI assets, REST routes, WebSocket streams, the `startRun` factory, scheduler wiring |
-| `apps/web-server/src/mcp/` | MCP HTTP server (`server.ts`: transports, profile instructions); `tools.ts` builds the profile gate and delegates to `tool-groups/{reads,authoring,run-lifecycle,heal-flow}.ts` (`authoring.ts` composes seven domain siblings); `tool-schemas.ts` holds the input schemas and deps interface, `tool-profiles.ts` the tool-name union and profile arrays, `heal-task-wait.ts` the wait/boot-session steering, `tool-support.ts` the run-resolution and result helpers |
-| `apps/web-server/src/features/` | Feature-based modules, each with some of `logic/`, `routes/`, `ws/` subdirs (which ones vary per feature): `runs` (run store, runtime/orchestrator, panes, journal, `logic/heal/` external-heal broker/surface/claim-policy, and `logic/pr/` fix-to-pull-request: preflight, propose, end-of-run auto-propose), `agent-sessions` (agent process, stream, session log/tailer, idle timer), `coverage` (coverage ledger, PRD extractor, verification), `flights` (flight store, conductor/drive loop, per-stage adapters), `wizard` (draft records for external authoring sessions, tests-draft route — read/track only; the internal plan→spec agents were retired in favour of the flight pipeline), `evaluation` (export archive/store, test-review export, localized-rewrite agent), `config` (feature/project config authoring, AST, dotenv), `portify`, `benchmark`, `version` (npm-registry update check) |
+| `apps/web-server/src/mcp/` | MCP HTTP server and tool registration. `server.ts` owns transports and profile instructions; `tools.ts` applies the profile gate and calls the `reads`, `authoring`, `run-lifecycle`, and `heal-flow` registrars. `authoring.ts` composes feature, envset, draft, coverage, export, Flight, and Portify tool groups. `tool-profiles.ts` is the source of truth for profile membership. |
+| `apps/web-server/src/features/` | Server features. `runs` owns execution and repair; `coverage` owns the ledger and deployed verification; `flights` owns the conducted pipeline; `wizard` stores external test-authoring drafts; `evaluation` owns exports; `config` owns feature and project configuration; `portify` owns port overlays; `benchmark` owns the preview harness; `agent-sessions` owns process and transcript state; `version` owns update checks. |
 | `apps/web-server/src/shared/` | Web-server-local shared infra: `git-repo`, `gh-cli`, `ring-buffer`, `simple-zip`, `toon`, `workspace-events`, `editor-launch`, `open-browser`, `prompts` (the `.md` template loader), `feature-loader`, `launcher-startup` (service startup + health probes), `config-ast`, `ast-extractor` (the Playwright tag/assertion parser the coverage ledger reads), and `ws/workspace-stream` |
 | `apps/web-server/src/features/runs/logic/runtime/` | The run orchestrator and its modules (see [Run Lifecycle](#run-lifecycle) and below) |
 | `apps/web/` | React UI (Vite, Tailwind) |
 | `shared/e2e-runner/` | Playwright fixture support (`log-marker-fixture`, summary reporter) |
 | `shared/configs/` | Base Playwright config and env loader |
 | `shared/runtime/` | Shared project-root resolver |
-| `templates/project/` | Scaffolded workspace files, including the product's demonstrations. `demo-app/` is a three-service storefront (catalog, inventory, checkout) with an ordered requirements document, and `features/storefront-journey/` is the fully onboarded suite that exercises it. Its ten contract defects make Run and Heal produce real cross-service repair evidence. `flight-app/` is the opposite sample: one service that hardcodes its port, shipped with no suite, so a Flight has real work at every stage. `workflow-app/` plus `features/workflow-workbench/` is the focused workbench for the remaining workflows: one requirement is intentionally untested for Coverage and Author, its service port is intentionally fixed for Portify, and a production envset makes Verify ready once the user supplies a deployed URL. |
+| `templates/project/` | Files copied into initialized workspaces. The storefront sample exercises Run and Heal, `flight-app/` starts without a feature so Flight has real onboarding work, and `workflow-app/` plus `features/workflow-workbench/` exercises Coverage, Author, Portify, and Verify. |
 | `tools/` | Build/publish utilities: `gen-agents-md`, `gen-codex-skills`, the demo PRD-summary generators, `clean-dist`, `prepare-assets`, `smoke-pack`, `smoke-demo`, `publish-package`, `generate-changelog`, `tag-release`, `fix-node-pty-permissions`, plus the repo gates. `tools/fixtures/` holds contributor-only fixtures; the storefront and workflow-workbench suites ship in the scaffold under `templates/project/features/`. |
 
 **Web `cleanup` has no server twin, on purpose.** The `apps/web/src/features/cleanup`
@@ -90,19 +103,17 @@ Key `apps/web-server/src/features/runs/logic/runtime/` modules:
 | `heal-cycle.ts`, `heal-prompt-builder.ts` | Heal-cycle state machine and prompt assembly |
 | `manifest.ts`, `run-paths.ts`, `run-id.ts` | Run manifest schema and path/id conventions |
 | `summary-reporter.ts`, `log-enrichment.ts`, `trace-enrichment.ts` | Evidence capture and enrichment |
-| `features/portify/logic/runtime/` | Agent-driven port-injection workflow, now its own feature (see [Portify](#portify-and-benchmark)) |
-| `features/benchmark/logic/runtime/` | Multi-arm self-heal benchmarking, its own feature (retired in 1.0.0, **revived in 1.3.0** as a preview behind `?showBenchmark=true`) |
-| `apps/web-server/src/features/coverage/logic/coverage/` | Coverage ledger: PRD summarization (`prd-summary.ts`), docs collection (`docs-collection.ts`), breadth computation (`ledger.ts`), strictness grading (`strength.ts`), and the shared service both REST and MCP call (`service.ts`). Shared output types live in `shared/coverage/types.ts`. See [Requirement Coverage](#requirement-coverage). |
+| `apps/web-server/src/features/portify/logic/runtime/` | Agent-driven port-injection workflow; see [Portify](#portify-and-benchmark) |
+| `apps/web-server/src/features/benchmark/logic/runtime/` | Multi-arm self-heal benchmark, exposed as a preview behind `?showBenchmark=true` |
+| `apps/web-server/src/features/coverage/logic/coverage/` | PRD summary, semantic coverage, latest-run proof join, strictness grading, and the shared service used by REST and MCP |
 
 ### Feature boundaries and per-feature layout
 
 The two apps share an **eight-feature spine** — `runs`, `coverage`, `flights`,
-`wizard`, `evaluation`, `config`, `portify`, `benchmark` — with three deliberate
-asymmetries: the server also has `agent-sessions` and `version`, and the web also
-has `cleanup` (see above). Ten server features, nine web ones. Note that
-`agent-sessions` is server-only *now*: its web half (`AgentSessionView` and the
-session socket) moved to `apps/web/src/shared/` in Phase 9, since six features
-render agent output. The two sides enforce the taxonomy differently.
+`wizard`, `evaluation`, `config`, `portify`, and `benchmark`. The server also has
+`agent-sessions` and `version`; the web app also has `cleanup`. Shared agent
+views and sockets live in `apps/web/src/shared/` because several web features
+render the same agent-session data. The two sides enforce ownership differently.
 
 **Server features are registrars, not re-export barrels.** Each
 `apps/web-server/src/features/<name>/index.ts` exports `register(app, ctx)` and
@@ -197,28 +208,80 @@ flowchart TD
     class state,logs,evidence,healctx,session,signals artifact
 ```
 
-In prose: the `startRun` factory in `apps/web-server/src/server.ts` admits/queues the run
-(see [Concurrency](#concurrency)), isolates every repo in a per-run worktree (see
-[Always-worktree runs](#always-worktree-runs-r80)), then `orchestrator.ts` applies the
-selected envset, boots services through the launcher/PTY layer (each service's PTY output
-is captured programmatically into `svc-<name>.log` — never echoed to the server's stdout),
-runs Playwright, and captures evidence. On failure, the run either spawns a local heal agent
-(`auto-heal.ts`) or parks for an external client (see [Heal System](#heal-system)).
-The agent fixes code and drops a `rerun`/`restart` signal; the orchestrator continues
-the same run until pass or terminal failure. At teardown the agent's edits are diffed out
-of each worktree into `<runDir>/fixes/` before the worktree is released, and a run that
-healed green proposes that diff as a draft pull request (see
-[End-of-run pull request](#end-of-run-pull-request)).
+In prose: the run routes use `buildRunsRouteDeps` to admit or queue work, allocate
+ports, apply the selected envset, and attempt per-repository worktree isolation.
+The MCP `start_run` tool calls the same route through `app.inject()`, so it does not
+own a second execution path. `orchestrator.ts` then boots services through the
+launcher/PTY layer, runs Playwright, and captures evidence. Service output is
+written directly to `svc-<name>.log`; it does not depend on a visible terminal.
+
+On failure, the run either spawns a local heal agent or parks for an external
+client. The agent fixes code and signals `rerun` or `restart`; the orchestrator
+continues the same run until pass or terminal failure. At teardown, Canary Lab
+captures repair diffs only for worktrees with a valid baseline. A captured repair
+that heals the run green may then be proposed as a draft pull request.
 
 ### Logging and retention
 
 Logs live under `<workspace>/logs/`. Per-run artifacts are in `logs/runs/<runId>/`:
 `runner.log` (orchestrator narration), `svc-<name>.log`, `playwright.log`,
-`external-commands.jsonl` (per-command audit for external heal), `fixes/` (the captured
-heal diff), failure slices, and the manifest. There is no automatic retention/pruning —
+`external-commands.jsonl` (per-command audit for external heal), `fixes/` (captured
+repair diffs), `playwright-artifacts-keep/` (latest per-test artifacts across repair
+reruns), failure slices, and the manifest. There is no automatic retention/pruning:
 runs persist on disk until removed manually via the Cleanup page's **Runs** tab
 (`GET /api/cleanup/runs`, backed by `RunStore.delete` / `trimArtifacts`), which deletes
 whole runs or trims Playwright artifacts while keeping the manifest and `runner.log`.
+
+## Flight Pipeline
+
+Flight is the server-owned onboarding pipeline behind the CLI, web UI, and MCP
+surface. `shared/flights/types.ts` defines the ordered stage keys and wire model;
+`apps/web-server/src/features/flights/logic/conductor.ts` persists transitions;
+adapters under `apps/web-server/src/features/flights/logic/stages/` call the owning feature's routes rather than
+reimplementing coverage, Portify, runs, or export.
+
+| Stage | Server-owned result |
+| --- | --- |
+| `similarity` | Match an existing feature or establish a new one |
+| `scout` | Candidate repository survey and feature config |
+| `scaffold` | Valid feature skeleton on disk |
+| `env-capture` | Envset files and unresolved-key checkpoint |
+| `docs` | Requirement source collection |
+| `prd-summary` | Stable structured requirements and readable summary |
+| `specs-coverage` | Compiling Playwright specs plus deterministic coverage ledger |
+| `portify` | Saved overlay backed by concurrent double-boot verification |
+| `run` | Terminal Playwright run manifest |
+| `heal` | Read-only mirror of the run manifest's heal mode and cycle count |
+| `evaluation-export` | Existing evaluation archive |
+
+One feature has one Flight manifest. The conductor persists stage evidence and
+typed checkpoints, then resumes from the first unfinished stage. A plain resume
+preserves artifacts. A stage jump resets that stage and all later stages after
+checking declared prerequisites in `STAGE_DEPENDS_ON`; a full redo resets the
+entire pipeline.
+
+### Stage producers
+
+`FlightOptions.stageProducer` selects who performs judgment-heavy work:
+
+- `internal` is the default. Canary Lab spawns the CLI selected by `agent`.
+- `external` is available to MCP-started Flights. Scout, docs, PRD summary,
+  spec authoring and mapping, Portify, run repair, and localized export park on
+  `external-work` checkpoints. The connected client performs the task and
+  submits its result.
+
+The producer does not own the verdict. Every adapter re-reads or recomputes its
+artifact before settling: configs must parse and boot, requirement submissions
+are reconciled and read back, specs must compile, every roster test must be
+accounted for before Canary Lab writes tags, Portify must reach its verified
+state, runs must have a terminal manifest, and exports must exist. A client can
+hand one step back with `run-internally`.
+
+`external-work` reuses checkpoint persistence so the conductor returns instead
+of polling while another client works. Each handoff carries a `handOffId`; a late
+submission is rejected if the Flight stopped, resumed, or issued a newer handoff.
+Portify and run/heal park once per engagement while the client drives their
+standalone workflows.
 
 ## Concurrency
 
@@ -252,40 +315,45 @@ run's allocation. Test helpers resolve the target as
 `templates/project/features/storefront-journey/e2e/helpers/api.ts`). The CLI `env`
 switching path passes no resolver, so it stays a verbatim copy.
 
-### Always-worktree runs (R80)
+### Run worktrees and fix capture
 
-**Every `executionType: 'run'` isolates every one of the feature's repos in a per-run
-`git worktree`** under `<runDir>/worktrees/` — not just colliding ones, and not only
-when the user asks. Set in `runs-route-deps.ts` (`alwaysWorktree = executionType === 'run'`).
-Each worktree is cut from `HEAD`, gets the source repo's `node_modules` symlinked in
-(`linkNodeModules` — a bare worktree skips gitignored deps and the boot command dies at
-exit 127, which then reads as a health-check timeout), and has the user's uncommitted
-changes replayed into it (`hydrateWorkingTreeDiff`), so the run tests their WIP rather
-than committed state. A repo that can't be worktree'd falls back to running in place with
-a warning; a **portified** repo that can't be worktree'd fails the run loudly, because its
-overlay could not apply and it would boot un-portified.
+Every regular `executionType: 'run'` **attempts** to isolate each configured repo
+in a per-run Git worktree under `<runDir>/worktrees/`. Each worktree starts from
+`HEAD`, links the source repo's `node_modules`, and replays the user's tracked and
+untracked work in progress through `hydrateWorkingTreeDiff`, so the run normally
+tests the checkout's current state rather than committed state alone.
 
-The point is fix capture. `captureFixBaseline` stashes a baseline ref after
+Isolation is best-effort for a non-portified repo. If `git worktree add` fails,
+the run logs the failure and uses the source checkout in place. That fallback
+keeps the run usable, but it also means the repair agent may edit the checkout
+and no worktree baseline exists for automatic fix capture. A portified repo has
+no such fallback: the run fails before boot because its overlay must be applied
+in an isolated worktree.
+
+The normal worktree path exists for fix capture. `captureFixBaseline` stores a baseline ref after
 overlay + envset + WIP hydration, so the teardown diff is exactly the repair; `captureFixes`
 writes it to `<runDir>/fixes/<repo>.patch` + `fixes.json` + `manifest.fixCapture` before the
-worktree goes away. **The heal agent never mutates the product repo's working copy** — its
-edits reach the user as a patch file and, on a green healed run, as a draft pull request
-pushed from a throwaway worktree (see [End-of-run pull request](#end-of-run-pull-request));
-HEAD and the checkout are left exactly as they were, though the repo does gain the fix
-branch ref. Non-portified worktrees are removed at teardown; a portified run reverses
+worktree goes away. On this path, the heal agent does not mutate the source checkout;
+its edits reach the user as a patch file and, on a green healed run, may become a draft
+pull request (see [End-of-run pull request](#end-of-run-pull-request)). Non-portified
+worktrees are removed at teardown; a portified run reverses
 its overlay but *keeps* the worktree (it holds the repair, and the Cleanup page's Worktrees
 tab owns its lifecycle). Boot, verify and benchmark sessions keep the older
 portified/collision-only behaviour — they don't heal, so there is nothing to capture.
 
 ### Same-repo collision
 
-Worktrees isolate the *working tree*, not the feature's **fixed ports** — so two runs of the
-same feature still can't boot side by side unless it has been port-ified. Starting a second
-run on an active repo therefore returns `repo_collision_requires_choice` (REST 409 / MCP
-result) and the user chooses **worktree** (run now) or **queue** (wait for the conflicting
-run to finish). Different-repo runs never collide, and a portified feature auto-isolates with
-no prompt at all — its overlay gives each boot disjoint injected ports, which makes it
-inherently collision-free. See
+Worktrees isolate files, not fixed network listeners. Starting a non-portified
+run while another active run uses the same repo returns
+`repo_collision_requires_choice` (REST 409 / MCP result). The user may choose
+**worktree** to bypass the edit collision and run now, or **queue** to wait.
+Choosing worktree does not rewrite fixed ports; the second boot can still fail
+with an address-in-use error. Queue is the safe choice unless the feature's
+services already accept distinct injected ports.
+
+Different-repo runs do not trigger this collision check. A portified feature
+registers no repo collision because its verified overlay gives each boot
+distinct allocated ports and it always uses worktrees. See
 `apps/web-server/src/features/runs/logic/runtime/repo-collision.ts` + `repo-worktree.ts`.
 
 ### Admission and queue
@@ -320,15 +388,14 @@ verify run while continuing to reject unrelated active executions.
 
 ### Multi-service limits (what concurrency can't auto-fix)
 
-Worktree isolation covers concurrent heal *edits*, not *ports* — two runs of the same
-multi-service app still can't both boot, so they queue. Apps that hardcode a port in
-source (ignoring `PORT`/`--port`/config) can't be relocated — that's what
+Worktree isolation covers concurrent repair edits, not ports. Two runs of the
+same fixed-port app should queue; an explicit worktree bypass may still fail at
+boot. Apps that hardcode a port in source (ignoring `PORT`/`--port`/config) cannot be relocated until
 [Portify](#portify-and-benchmark) fixes. OAuth issuer + redirect URIs are
 pre-registered with the provider for a fixed host:port, so OAuth features (e.g.
 `shop_oauth`) run one at a time regardless of any rewiring. The `${port}` envset
-resolver unlocks *different* multi-service features running concurrently (each gets
-distinct ports) and cleaner single multi-service runs — not same-app concurrent
-isolation.
+resolver and a verified source overlay unlock same-app concurrency; the envset
+resolver alone cannot fix a listener that ignores its injected value.
 
 ## Heal System
 
@@ -366,8 +433,9 @@ When `manifest.healMode === 'external'` the orchestrator parks at
 edit code → `signal_run`. `ExternalHealBroker`
 (`apps/web-server/src/features/runs/logic/heal/external-heal-broker.ts`) owns the single-claim
 lock and reclaims a claim whose heartbeat has gone stale — `HEARTBEAT_STALE_MS` in
-`shared/run-state.ts`, currently **10 minutes**, long enough that a client thinking between
-tool calls is never evicted. Every external command is audited at
+`shared/run-state.ts`, currently **10 minutes**. `wait_for_heal_task` heartbeats
+while it waits; a client doing longer local work must refresh its claim before
+the window expires. Every external command is audited at
 `<runDir>/external-commands.jsonl`.
 
 ### Heal-claim policy (block runner PTYs)
@@ -540,7 +608,7 @@ agent edits source in a throwaway scratch worktree and the verified diff is capt
 as a per-repo patch under `features/<feature>/portify/` (`overlay.ts`: `writeOverlay`/
 `readOverlay`/`overlayExists`/`checkStaleness`). `save_portify` writes the overlay and
 discards the scratch worktree — nothing is committed or merged. At RUN time every repo is
-already worktree-isolated (see [Always-worktree runs](#always-worktree-runs-r80); for a
+already worktree-isolated (see [Run worktrees and fix capture](#run-worktrees-and-fix-capture); for a
 portified feature this is non-negotiable rather than best-effort — a repo that can't be
 worktree'd fails the run). The orchestrator `applyOverlay`s the
 patch (plain `git apply`, `--3way` fallback) before boot after a staleness check, and
@@ -580,8 +648,10 @@ internal-only (no MCP tools); the sabotage agent streams through `AgentSessionVi
 
 ## Requirement Coverage
 
-The coverage ledger (`apps/web-server/src/features/coverage/logic/coverage/`) computes two
-facts about a feature's tests as math over the tags — never an agent's opinion:
+The coverage ledger (`apps/web-server/src/features/coverage/logic/coverage/`)
+computes static coverage from requirements, tags, and test source. When a run
+exists, it joins a separate latest-run proof axis. Neither result is an agent's
+self-report:
 
 - **Breadth** — which PRD requirements have a mapped test. Source docs in
   `features/<feature>/docs/` are summarized into a `_prd-summary.json` sidecar of
@@ -590,18 +660,25 @@ facts about a feature's tests as math over the tags — never an agent's opinion
   the `test()` (legacy `@requirement` / `@path` comments parse too), extracted by
   `apps/web-server/src/shared/ast-extractor.ts`. `ledger.ts` joins these into per-requirement gap types
   (`covered` / `path-incomplete` / `variant-incomplete` / `untested`) and the coverage %.
-  Coverage is **decoupled from runs**: it asks "does a mapped test claim every path (and
-  variant) this requirement implies?", never "did a run pass?".
+  This headline is claim-based: it asks whether mapped tests claim every path
+  and applicable variant cell. A test result never changes its gap type or
+  `coveragePct`.
 - **Depth (strictness)** — how strict each covering test is. `strength.ts` classifies every
   assertion snippet (collected by `ast-extractor.ts`) into a stack-layer tier (log → 1,
   DB/state → 2, app API/UI → 3, browser-at-real-destination → 4) by structural heuristics
   (no agent), grades the test `shallow` / `basic` / `solid` / `strong`, and surfaces a
   `suggestedStrongerCheck`.
+- **Latest-run proof** — `service.ts` reads the feature's latest run outcomes
+  and joins them to tests by title. `ledger.ts` then adds per-path or
+  path-by-variant `proven` flags, `totals.proven`, and `provenPct`. A test that
+  failed or never ran may still claim coverage, but it proves nothing in that
+  run. This axis is additive; it does not rewrite the semantic coverage result.
 
 `service.ts` is the single computation layer; `routes/coverage.ts` (REST) and the
-`get_feature_coverage` / `list_feature_docs` MCP tools both call it, so the UI and an
-agent can't diverge. The agent's role is bounded to *generate and map* (summarize docs,
-map tests → requirements); canary *computes* the %, the gaps, and the tiers.
+`get_feature_coverage` MCP tool both call it, so the returned ledger cannot
+diverge by surface. `list_feature_docs` reads the related doc state. An agent may
+generate requirements and propose mappings; Canary Lab writes validated tags and
+computes coverage, proof, gaps, and strictness.
 
 **Internal vs external execution.** Both PRD summarization and the annotate-pass
 (mapping tests → requirements) have two execution models, split by who *initiates* the
@@ -639,15 +716,15 @@ procedure.
 | Auto-PR on a healed green run | `shouldAutoPropose` gate (`runs/logic/pr/auto-propose.ts`) ↔ `autoProposePr` default + parse (`runs/logic/runtime/launcher/project-config.ts`) + write validator (`config/routes/project-config.ts`) ↔ `RunPrAttempt` / `proposedPrs` on the manifest (`shared/run-state.ts`) ↔ the `fix` block on the `passed` result (`healFixOutcome`, `mcp/heal-task-wait.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "the run opens the draft PR; the agent reports it and opens none of its own". The rule is **not** in `REPAIR_INSTRUCTIONS`, so it reaches skill-less clients through the tool result alone: loosen the gate and the result text has to move with it, or an agent pushes a duplicate branch onto the one the run just opened. | `pr/auto-propose.test.ts` (gate + manifest writes) + `mcp/heal-fix-outcome.test.ts` (result shape); the skill prose is discipline only | `cl_sync-agent-surfaces` |
 | Read-only agent spawns keep both arms in step | the codex arm's `--sandbox read-only` ↔ the claude arm's `readOnly: true` (`buildClaudeAgenticArgs` → `--tools Read,Glob,Grep`, `agent-sessions/logic/agent-process.ts`) at all three read-only spawns: `coverage/logic/coverage/prd-summary.ts`, `coverage/logic/coverage/annotate-engine.ts`, `evaluation/logic/test-review/rewrite-agent.ts`. Headless agents must bypass permission prompts — `-p` has nobody to answer one — so the bound has to be a capability allowlist, not an approval; `--tools` and `--disallowedTools` are both evaluated ahead of the bypass. The resolver prefers claude, so an unflagged claude arm is the one that actually runs. **Still open:** the write-capable unattended spawns (flight `scout`/`docs`/`specs-coverage`, portify, benchmark sabotage) hold full filesystem and network reach for their whole window. | `agent-sessions/logic/agent-read-only-parity.test.ts` (fails when either arm drops its flag) | `cl_reuse-shared-logic` |
 | Heal workspace trust ↔ the folder-trust prompt | `healWorkspaceTrustRoot` + `ensureHealWorkspaceTrusted` (`runs/logic/runtime/run-heal-agent.ts`) ↔ Claude's persistent seed (`agent-sessions/logic/agent-workspace-trust.ts`) ↔ Codex's invocation-scoped whole-map `projects={...}` override plus `--disable hooks` (`runs/logic/runtime/heal-agent-spawn.ts`) ↔ the `trust-prompt` fingerprint (`runs/logic/runtime/heal-failure-classifier.ts`) ↔ `agentCause` (`shared/run-state.ts`) ↔ `healAgentCauseSuffix` + `HEAL_CAUSE_PHRASE` (`apps/web/.../StageStatusLines.tsx`). The heal REPL is the only agent spawned on an interactive TTY, so it is the only spawn either CLI's folder-trust prompt can stop. Claude trust inherits from the project root; Codex receives the same root only for that invocation, does not mutate `config.toml`, and cannot run unreviewed hooks. `CANARY_LAB_NO_WORKSPACE_TRUST=1` disables both paths. If trust setup ever stops running, the classifier keeps the stall from reading as "the agent tried and failed". | `agent-workspace-trust.test.ts` + `heal-workspace-trust.test.ts` + Codex command tests in `auto-heal.test.ts` + the real-tail cases in `heal-failure-classifier.test.ts` | `cl_locate-agent-session-logs` |
-| Flight stage hand-off (`stage_producer: "external"`) | `externalizable.ts` (`flights/logic/stages/`) ↔ the three wired adapters (`scout.ts`, `docs.ts`, `specs-coverage.ts`) ↔ `'external-work'` in `FlightCheckpointKind` (`shared/flights/types.ts`) ↔ `flightNext` steering + the oversized-payload fallback (`mcp/tool-groups/flight.ts`) ↔ the umbrella `canary-lab/SKILL.md` in all three channels ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`) | `stages.external-producer.test.ts` + `externalizable.test.ts` | `cl_sync-agent-surfaces` |
+| Flight stage hand-off (`stage_producer: "external"`) | `externalizable.ts` (`flights/logic/stages/`) ↔ the seven wired adapters (`scout.ts`, `docs.ts`, `prd-summary.ts`, `specs-coverage.ts` — which parks twice per pass: authoring, then mapping — `portify.ts` and `run.ts`, which park ONCE per engagement while the client drives the standalone workflow/heal tools (`run.ts` starts the run external-heal UNCLAIMED via the runs route's `healAgent.claimable:false` hook), and `evaluation-export.ts`, whose localized mode is the external default) ↔ `'external-work'` in `FlightCheckpointKind` (`shared/flights/types.ts`) ↔ `flightNext` steering + the oversized-payload fallback (`mcp/tool-groups/flight.ts`) ↔ the umbrella `canary-lab/SKILL.md` in all three channels ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`) | `stages.external-producer.test.ts` + `externalizable.test.ts` | `cl_sync-agent-surfaces` |
 | **A stage's work is stoppable — every stage, one contract** | `StageAdapter.teardown(ctx): StageJob \| null` (REQUIRED, `flights/logic/flight-stages.ts`) ↔ the four job factories (`flights/logic/stages/stage-jobs.ts`) ↔ `interruptStage` (awaited by `pauseFlight`/`abortFlight`) ↔ `stopAgentProcesses` scopes threaded through `stages/context.ts`, `coverage/.../feature-docs.ts` + `prd-summary.ts`, `coverage/.../coverage-engine.ts` + `annotate-engine.ts`. It replaced an OPTIONAL `interrupt?` hook that was silently skipped when absent, so ten of eleven adapters opted out with no compile error — a pause stopped the flight's *waiting* while the portify agent kept editing the user's repo. Required-ness is the invariant: a new stage cannot compile without answering. Portify's stop is deliberately state-aware (a verified `ready-to-save` review survives a pause, because resume re-adopts it). | `stage-jobs.test.ts` (incl. a table asserting all 11 adapters answer) + `conductor.pause.test.ts` (awaited order, live teardown ctx) | `cl_run-evidence-invariants` |
-| Stop reaches every surface, and says the same thing | `pause_flight` / `abort_flight` / `stop_flight_agent` (`mcp/tool-groups/flight.ts`) ↔ the routes the web UI calls (`flights-lifecycle.ts`, `flights-plan.ts`, `agent-sessions/routes/agent-jobs.ts`) ↔ `flightNext` steering, split by `pauseReason` so a USER pause says stand down instead of offering the resume ↔ the umbrella `canary-lab/SKILL.md` in all three channels. An external client cannot be interrupted mid-turn (tools-only server, no `sampling`, work happens BETWEEN calls), so the guarantee is "nothing lands after a stop, and the agent learns within one tool call" — never "it stops instantly". A late `submit` is refused with a typed `flight_not_parked` body, and a superseded one is caught by the `handOffId` token (`externalizable.ts` `rejectStaleSubmit`, shared by all three hand-off stages). | `flight.stand-down.test.ts` + `externalizable.test.ts` (the resume→stale-submit race) + `server.smoke.test.ts` mirrors | `cl_sync-agent-surfaces` |
+| Stop reaches every surface, and says the same thing | `pause_flight` / `abort_flight` / `stop_flight_agent` (`mcp/tool-groups/flight.ts`) ↔ the routes the web UI calls (`flights-lifecycle.ts`, `flights-plan.ts`, `agent-sessions/routes/agent-jobs.ts`) ↔ `flightNext` steering, split by `pauseReason` so a USER pause says stand down instead of offering the resume ↔ the umbrella `canary-lab/SKILL.md` in all three channels. An external client cannot be interrupted mid-turn (tools-only server, no `sampling`, work happens BETWEEN calls), so the guarantee is "nothing lands after a stop, and the agent learns within one tool call" — never "it stops instantly". A late `submit` is refused with a typed `flight_not_parked` body, and a superseded one is caught by the `handOffId` token (`externalizable.ts` `rejectStaleSubmit`, shared by every hand-off stage). | `flight.stand-down.test.ts` + `externalizable.test.ts` (the resume→stale-submit race) + `server.smoke.test.ts` mirrors | `cl_sync-agent-surfaces` |
 | Spawned agents leave a durable record | `agent-jobs` store (`agent-sessions/logic/agent-jobs/`) ↔ the record written by the RUNNER itself (`runAgentProcess`, one lifecycle for every agent feature) ↔ boot reconcile in `server.ts` (`running` → `orphaned`, an honest tombstone: an in-process child cannot be re-attached, but its `sessionId` keeps the transcript readable) ↔ the feature-rename fan-out (`config/index.ts`) ↔ flight delete (`flight-queue.ts`) + the R78 restart wipe (`flight-stages.ts`, alongside the sidecar dir) ↔ `agentJob` on the MCP flight view. The standalone coverage job deliberately passes NO descriptor — its own manifest is already the durable, reconciled, surfaced record. | `agent-jobs/store.test.ts` + the record-lifecycle cases in `agent-process.test.ts` + `routes/agent-jobs.test.ts` | `cl_async-task-ux` |
 | Heal-claim policy | `apps/web-server/src/features/runs/logic/heal/heal-claim-policy.ts` ↔ `broker.claim()` backstop ↔ `start_run`/`POST /api/runs` suppression ↔ skill prose | policy + broker unit tests | `cl_sync-agent-surfaces` |
 | Templates ↔ shipped package | `templates/project/**` ↔ `dist/templates/` copy (`tools/prepare-assets.mjs`) ↔ consumer `canary-lab upgrade` | `npm run smoke:pack` | `cl_add-sample-feature` |
-| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` ↔ `apps/web-server/src/features/coverage/routes/coverage.ts` (REST, server-spawned) ↔ `get_feature_coverage`/`list_feature_docs`/`start_external_summary`/`start_external_coverage` (`mcp/tool-groups/`, external-only) — both surfaces call the service, never recompute | route + MCP tests; `server.smoke.test.ts` tool count | `cl_add-mcp-tool` / `cl_sync-agent-surfaces` |
+| Coverage ledger single computation layer | `apps/web-server/src/features/coverage/logic/coverage/service.ts` joins requirements + tags + `run-outcomes.ts` ↔ `ledger.ts` computes claim and proof axes ↔ `routes/coverage.ts` and `get_feature_coverage` return that result without recomputing it | service, ledger, route, and MCP tests | `cl_run-evidence-invariants` |
 | Requirement-id stability | `reconcileRequirementIds` (`apps/web-server/src/features/coverage/logic/coverage/prd-summary.ts`) ↔ inline `@requirement` annotations (`ast-extractor.ts`) — regen must preserve surviving ids | `prd-summary.test.ts` before/after fixture | — |
-| Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ this file (mechanisms) ↔ `docs/PRD.md` (intent) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
+| Contributor docs single-source | `CLAUDE.md` (commands + rules) ↔ generated `AGENTS.md` ↔ `docs/ARCHITECTURE.md` (mechanisms) ↔ `docs/PRD.md` (intent) ↔ `docs/GUIDE.md` / `docs/FEATURES.md` (user-facing operation) ↔ the skill index in `CLAUDE.md` | contributor-doc audit in `cl_verify-changes` | `cl_verify-changes` |
 | **Web↔server wire contract** | Server response types ↔ hand-written mirrors in `apps/web/src/shared/api/**` ↔ the `WorkspaceEvent` union on both sides. The web app cannot import server code, so this contract needs a dedicated comparison gate. | `npm run check:wire` (`tools/check-wire-contracts.mjs`) | — |
-| **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ the nine stage emitters (`flights/logic/stages/*.ts`, via the `logic/types.ts` re-export) ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values; they used to be inline literals at each emit site, so a rename degraded the UI button to its raw key silently. `prd-source` is the one kind that offers a SUBSET of its vocabulary (it withholds `continue` when no docs exist). | `stage-meta.checkpoints.test.ts` (every kind titled, every option labelled, fallback intact) + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
+| **Checkpoint option vocabulary** | `CHECKPOINT_OPTIONS` (`shared/flights/types.ts`) ↔ checkpoint emitters under `flights/logic/stages/` ↔ `respond_flight_checkpoint` ↔ `CHECKPOINT_TITLE`/`CHECKPOINT_OPTION_LABEL` (`apps/web/.../stage-meta.tsx`). Option keys are wire values. `prd-source` may offer a subset, and `external-work` is a work handoff rather than a human decision. | `stage-meta.checkpoints.test.ts` (every kind titled, every option labelled, fallback intact) + `satisfies Record<FlightCheckpointKind, …>` | `cl_sync-agent-surfaces` |
 | **Import-cycle ceiling** | `tools/check-import-cycles.mjs` records ceilings for cycle count and largest cycle across `apps/**` and `shared/**`. Lower a ceiling when refactoring removes cycles; review any increase instead of accepting it silently. | `npm run check:cycles` | — |

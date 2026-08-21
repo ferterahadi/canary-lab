@@ -72,6 +72,16 @@ describe('runs api', () => {
     })
   })
 
+  it('startRun forwards the Getting Started source so the server can claim it', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rd' }, 201))
+    await startRun('feat-x', { fetchImpl, gettingStartedSource: 'internal' })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ feature: 'feat-x', gettingStartedSource: 'internal' }),
+    })
+  })
+
   it('startRun omits mode for a normal test run', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rt' }, 201))
     await startRun('feat-x', { fetchImpl, mode: 'test' })

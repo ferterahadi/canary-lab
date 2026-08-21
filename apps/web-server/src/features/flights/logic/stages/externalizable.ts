@@ -18,8 +18,9 @@ import { CHECKPOINT_OPTIONS } from '../types'
 // prose in three skill channels EACH (see cl_add-mcp-tool), and there is already a
 // tool that does exactly this — respond_flight_checkpoint. It is also the safer
 // mechanism: a parked checkpoint makes run() RETURN, so nothing polls and no idle
-// deadline can starve. Portify's external path polls instead, which is why a real
-// external portify over 30 minutes gets abandoned mid-hand-off.
+// deadline can starve — the flaw that used to abandon a poll-driven external
+// portify mid-hand-off, and why the portify/run stages now PARK their external
+// engagements instead of polling them.
 //
 // What this deliberately does NOT do is make a stage runnable standalone outside a
 // flight. The five existing start/submit_external_* jobs are standalone on purpose

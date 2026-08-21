@@ -26,6 +26,9 @@ export class FakeWebSocket {
   static instances: FakeWebSocket[] = []
   readyState = 0
   onmessage: ((event: MessageEvent) => void) | null = null
+  // Never fired by the constructor: the reconnect handler only runs on a
+  // RE-open, so a test has to drive open/close ordering itself.
+  onopen: (() => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   closeCalls = 0
@@ -497,5 +500,60 @@ describe('EvaluationExportProvider', () => {
 
     // …and not on a later one either.
     expect(exportSockets()).toHaveLength(0)
+  })
+
+  it('re-lists on a workspace reconnect, since the bus has no replay', async () => {
+    vi.useFakeTimers()
+    const created = task({ taskId: 'missed-task', runId: 'run-missed', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks)
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([created])
+
+    const captured = renderProbe()
+    await act(async () => { await Promise.resolve() })
+    const first = workspaceSocket()
+    act(() => { first.onopen?.() })
+    expect(captured.value?.tasks).toEqual([])
+
+    // Drop the socket and let it come back. Anything the server published in
+    // the gap — this export finishing — was never delivered.
+    await act(async () => {
+      first.close()
+      vi.advanceTimersByTime(2000)
+      await Promise.resolve()
+    })
+    const reopened = workspaceSocket()
+    await act(async () => {
+      reopened.onopen?.()
+      await Promise.resolve()
+    })
+
+    expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['missed-task'])
+  })
+
+  it('survives a re-list that fails on reconnect', async () => {
+    vi.useFakeTimers()
+    const known = task({ taskId: 'known-task', runId: 'run-known', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks)
+      .mockResolvedValueOnce([known])
+      .mockRejectedValue(new Error('offline'))
+
+    const captured = renderProbe()
+    await act(async () => { await Promise.resolve() })
+    const first = workspaceSocket()
+    act(() => { first.onopen?.() })
+
+    await act(async () => {
+      first.close()
+      vi.advanceTimersByTime(2000)
+      await Promise.resolve()
+    })
+    await act(async () => {
+      workspaceSocket().onopen?.()
+      await Promise.resolve()
+    })
+
+    // A later valid push still recovers state, so the known list stays put.
+    expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['known-task'])
   })
 })

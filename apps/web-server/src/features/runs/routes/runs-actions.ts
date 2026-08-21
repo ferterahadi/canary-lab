@@ -64,7 +64,9 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     // reuse-active path below funnels through broker.claim, which rejects on
     // its own.
     const claimSuppressed = !!healAgent && !('error' in healAgent) && !isHealClaimAllowed(healAgent.clientKind)
-    const externalRunReq = healAgent ? { ...healAgent, claimable: !claimSuppressed } : undefined
+    // The caller's own claimable:false survives (never the reverse — policy
+    // suppression cannot be overridden upward). See parseExternalHealAgent.
+    const externalRunReq = healAgent ? { ...healAgent, claimable: !claimSuppressed && healAgent.claimable !== false } : undefined
     let gettingStartedSession: string | null = null
     if (req.body?.gettingStartedSource && deps.gettingStarted) {
       try {
@@ -81,12 +83,18 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
         if (gettingStartedSession) {
           deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: active.manifest.runId })
         }
-        const claim = deps.broker?.claim(active.manifest.runId, {
-          sessionId: healAgent.sessionId,
-          clientKind: healAgent.clientKind,
-          ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
-          ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
-        }) ?? null
+        // A caller that explicitly declined the claim must not grab the reuse
+        // claim either — the whole point of claimable:false is leaving the loop
+        // for a real client. Policy suppression (a PTY kind) still funnels
+        // through broker.claim, which rejects with its own reason.
+        const claim = healAgent.claimable !== false
+          ? deps.broker?.claim(active.manifest.runId, {
+              sessionId: healAgent.sessionId,
+              clientKind: healAgent.clientKind,
+              ...(healAgent.clientVersion ? { clientVersion: healAgent.clientVersion } : {}),
+              ...(healAgent.conversationName ? { conversationName: healAgent.conversationName } : {}),
+            }) ?? null
+          : null
         reply.code(200)
         return {
           runId: active.manifest.runId,

@@ -33,6 +33,7 @@ import {
 } from '../runs/logic/runtime/auto-heal'
 import { collectRepoBranchSnapshots, validateConfiguredRepoBranches } from '../../shared/git-repo'
 import { RunnerLog } from '../runs/logic/runtime/runner-log'
+import { httpFailure } from '../../shared/http-error'
 import { realPtyFactory, type PtyFactory } from '../runs/logic/runtime/pty-spawner'
 import {
   restore,
@@ -91,7 +92,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext, runs: R
       if (backups) runnerLog.info(`Applied Playwright envset "${resolved.metadata.playwrightEnvsetId}" for verification`)
     } catch (err) {
       runnerLog.warn(`envset apply failed: ${(err as Error).message}`)
-      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+      throw httpFailure(err, 500)
     }
 
     const verificationFeature = { ...feature, repos: [] }
@@ -112,7 +113,7 @@ export async function register(app: FastifyInstance, ctx: ServerContext, runs: R
       })
     } catch (err) {
       if (backups) restore(backups)
-      throw Object.assign(err instanceof Error ? err : new Error(String(err)), { statusCode: 500 })
+      throw httpFailure(err, 500)
     }
 
     attachRunStreams(orch, runnerLog, feature.name, backups)

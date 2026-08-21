@@ -4,8 +4,6 @@
 // enclosing function is new. Add a tool here, then wire its name into the
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import { buildExternalRunSnapshotSlim } from '../../features/runs/logic/heal/external-heal-surface'
 import { loadFeatures } from '../../shared/feature-loader'
 import { createVerificationConfig, getVerificationConfig, listVerificationConfigs, updateVerificationConfig } from '../../features/coverage/logic/verification'
@@ -15,11 +13,7 @@ import {
   deriveRunActionAvailability,
 } from '../../../../../shared/run-state'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
-import { type ToolGroupContext,
-  asJsonResult,
-  asToonResult,
-  errorResult,
-  verificationResult } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, failureResult, verificationResult } from '../tool-support'
 
 export function registerReadTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -147,7 +141,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
       const created = createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId }, deps.workspaceEvents)
       return asJsonResult(created)
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -168,7 +162,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
       if (!config) return errorResult(`verification config not found: ${configId}`)
       return asJsonResult(config)
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -200,7 +194,7 @@ export function registerReadTools(ctx: ToolGroupContext): void {
       }
       return asJsonResult(verificationResult(detail))
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 

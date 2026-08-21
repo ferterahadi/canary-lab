@@ -14,6 +14,7 @@ import {
   RunsProvider,
   useActiveBootSessions,
   useActiveRuns,
+  useActiveVerifyRuns,
   useGlobalActiveRun,
   useRun,
   useRunActions,
@@ -279,6 +280,38 @@ describe('RunsProvider', () => {
     })
     expect(boots!.count).toBe(2)
     expect(boots!.sessions.map((r) => r.runId).sort()).toEqual(['b1', 'b2'])
+  })
+
+  it('useActiveVerifyRuns returns only live deploy-check runs', () => {
+    let verifies: { runs: RunIndexEntry[]; count: number } | null = null
+    function P(): null {
+      verifies = useActiveVerifyRuns()
+      return null
+    }
+    act(() => {
+      root.render(
+        <RunsProvider WebSocketImpl={FakeWebSocket as unknown as typeof WebSocket}>
+          <P />
+        </RunsProvider>,
+      )
+    })
+    act(() => {
+      FakeWebSocket.instances[0].onmessage?.({
+        data: JSON.stringify({
+          type: 'snapshot',
+          runs: [
+            entry({ runId: 'v1', status: 'running', executionType: 'verify' }),
+            entry({ runId: 'v2', status: 'queued', executionType: 'verify' }),
+            entry({ runId: 'v3', status: 'passed', executionType: 'verify' }),  // settled → excluded
+            entry({ runId: 'b1', status: 'running', executionType: 'boot' }),   // boot → excluded
+            entry({ runId: 'r1', status: 'running' }),                          // test run → excluded
+          ],
+          details: {},
+        }),
+      })
+    })
+    expect(verifies!.count).toBe(2)
+    expect(verifies!.runs.map((r) => r.runId).sort()).toEqual(['v1', 'v2'])
   })
 
   it('startRun forwards env + isolation, and omits opts when neither is given', async () => {

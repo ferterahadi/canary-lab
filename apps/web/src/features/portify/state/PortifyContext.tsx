@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react'
 import * as api from '@/shared/api/client'
+import { defaultWsBase } from '@/shared/api/reconnecting-socket'
 import type { PortifyManifest, PortifyIndexEntry } from '@/shared/api/client'
 import {
   portifyReducer,
@@ -60,8 +61,10 @@ export function PortifyProvider({
     let backoff = RECONNECT_INITIAL_MS
     let cancelled = false
 
+    // No `cancelled` guard of its own: its only callers are the initial call
+    // below and the reconnect timer, and cleanup clears that timer before its
+    // callback can fire. Same shape as RunsContext's socket lifecycle.
     const connect = (): void => {
-      if (cancelled) return
       try {
         socket = new Ctor(url)
       } catch {
@@ -89,8 +92,9 @@ export function PortifyProvider({
       }
     }
 
+    // Same reasoning: the constructor's catch runs inside `connect`, and
+    // `onclose` checks `cancelled` before it gets here.
     const scheduleReconnect = (): void => {
-      if (cancelled) return
       reconnectTimer = setTimeout(() => {
         if (backoff >= RECONNECT_MAX_MS) {
           dispatchRef.current({ type: 'connection', status: 'disconnected' })
@@ -174,7 +178,7 @@ export function useActivePortify(): PortifyIndexEntry | undefined {
 }
 
 function defaultWsUrl(): string {
-  if (typeof window === 'undefined') return 'ws://localhost/ws/portify'
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${window.location.host}/ws/portify`
+  // The app's one origin→ws-base helper, rather than a third copy of the same
+  // protocol/host derivation.
+  return `${defaultWsBase()}/ws/portify`
 }

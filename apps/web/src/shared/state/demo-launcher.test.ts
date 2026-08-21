@@ -176,6 +176,31 @@ describe('deriveDemoAvailability', () => {
   })
 })
 
+// Mirrors the module-private key; asserted on so a rename cannot leave these
+// tests writing a key the code no longer reads.
+const SEEN_KEY = 'canary-lab:demo-seen'
+
+/** Makes `window.localStorage` unavailable the way a private-mode browser does —
+ *  the property access itself throws.
+ *
+ *  Patching `window.localStorage.getItem` (or `Storage.prototype.getItem`) does
+ *  NOT work here: happy-dom serves the store through an accessor whose methods a
+ *  spy never reaches, so an instance- or prototype-level stub is silently
+ *  ignored and the assertion below passes against a working, merely-empty store
+ *  — proving the default rather than the failure it names. */
+function withUnavailableStorage(body: () => void): void {
+  const original = Object.getOwnPropertyDescriptor(window, 'localStorage')!
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    get() { throw new Error('storage is denied in private mode') },
+  })
+  try {
+    body()
+  } finally {
+    Object.defineProperty(window, 'localStorage', original)
+  }
+}
+
 describe('demo-seen storage', () => {
   beforeEach(() => { window.localStorage.clear() })
 
@@ -183,25 +208,23 @@ describe('demo-seen storage', () => {
     expect(readDemoSeen()).toBe(false)
     writeDemoSeen()
     expect(readDemoSeen()).toBe(true)
+    expect(window.localStorage.getItem(SEEN_KEY)).toBe('1')
   })
 
-  it('reads false when storage throws', () => {
-    const original = window.localStorage.getItem
-    window.localStorage.getItem = () => { throw new Error('denied') }
-    try {
-      expect(readDemoSeen()).toBe(false)
-    } finally {
-      window.localStorage.getItem = original
-    }
+  it('reads false when storage is unavailable', () => {
+    // Seeded first, so a stub that failed to take would read `true` and the
+    // test would fail loudly instead of passing on the empty-store default.
+    window.localStorage.setItem(SEEN_KEY, '1')
+
+    withUnavailableStorage(() => { expect(readDemoSeen()).toBe(false) })
+
+    expect(readDemoSeen()).toBe(true)
   })
 
   it('swallows a failed write rather than breaking the dialog', () => {
-    const original = window.localStorage.setItem
-    window.localStorage.setItem = () => { throw new Error('quota') }
-    try {
-      expect(() => writeDemoSeen()).not.toThrow()
-    } finally {
-      window.localStorage.setItem = original
-    }
+    withUnavailableStorage(() => { expect(() => writeDemoSeen()).not.toThrow() })
+
+    // Nothing was written, so the dot comes back on the next load.
+    expect(readDemoSeen()).toBe(false)
   })
 })

@@ -115,7 +115,7 @@ export function buildRunsRouteDeps(
       // they don't heal, so there's nothing to capture.
       const alwaysWorktree = executionType === 'run'
       const useWorktree = portified || alwaysWorktree || (Boolean(collision) && isolation === 'worktree')
-      const worktreeRepoNames = useWorktree ? (feature.repos ?? []).map((r) => r.name) : []
+      const worktreeRepos = useWorktree ? (feature.repos ?? []) : []
 
       // The actual launch: envset apply, worktree isolation, orchestrator
       // construction + kickoff. Deferred and reused by the queue when the run
@@ -217,9 +217,11 @@ export function buildRunsRouteDeps(
       }
 
       const worktrees: WorktreeHandle[] = []
-      for (const repoName of worktreeRepoNames) {
-        const repo = (feature.repos ?? []).find((r) => r.name === repoName)
-        if (!repo) continue
+      // Iterating the repos themselves rather than their names: the previous
+      // shape collected the names off `feature.repos` and then looked each one
+      // back up in the same list, so its `if (!repo) continue` could not fire.
+      for (const repo of worktreeRepos) {
+        const repoName = repo.name
         try {
           const handle = await addWorktree({ repoName, localPath: repo.localPath, worktreesDir: path.join(runDir, 'worktrees') })
           // Git worktrees skip gitignored deps, so a fresh worktree has no

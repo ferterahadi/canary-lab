@@ -1,67 +1,126 @@
 # Contributing to Canary Lab
 
-**Quick start:** branch from `main`, make the change, run relevant checks, and open a pull request to `main`.
+Canary Lab is one published CLI with a local Fastify server, a React web app,
+and scaffolded Playwright projects. Start changes from `main`, keep them inside
+the owning feature, run the checks that exercise the changed surface, and open a
+pull request to `main`.
 
-> Usage: [README](../README.md) · Internals: [ARCHITECTURE.md](ARCHITECTURE.md)
+> Product intent: [PRD](PRD.md) · Internals: [Architecture](ARCHITECTURE.md) · Usage: [Guide](GUIDE.md)
 
-## Code Orientation
+## Prerequisites
 
-Both apps are organized **by feature, not technical layer**. The server and web app share eight feature names: `runs`, `coverage`, `flights`, `wizard`, `evaluation`, `config`, `portify`, and `benchmark`, making each area easy to trace across client and server.
+- Node.js 22.12 or newer
+- npm 9 or newer
 
-`agent-sessions` and `version` exist only on the server. `cleanup` exists only in the web app; its routes remain with the `runs` and `portify` stores that own the data. Shared infrastructure belongs in each app's `src/shared/` folder.
-
-| Entry point | What it does |
-|---|---|
-| `apps/web-server/src/server.ts` | Fastify app, UI assets, routes, WebSocket streams |
-| `…/runs/logic/runtime/orchestrator.ts` | services, health checks, Playwright runs, heal signals |
-| `…/runs/logic/run-store.ts` | per-run manifests, summaries, events, artifacts |
-| `…/runs/logic/runtime/env-switcher/switch.ts` | env-file apply/revert |
-| `canary-lab/feature-support/*` | public import surface for generated projects — an exports map in `package.json`, not a directory; it points into `dist/shared/` |
-
-Everything under `apps/` and `shared/` is **internal** unless exposed via
-`canary-lab/feature-support/...`. Full map: [ARCHITECTURE.md → Module Map](ARCHITECTURE.md#module-map).
-Run path + diagram: [ARCHITECTURE.md → Run Lifecycle](ARCHITECTURE.md#run-lifecycle).
-
-## Build and Test
+Install dependencies once:
 
 ```bash
 npm install
-npm run build          # required first
-npm test
-npm run smoke:pack     # after any template/packaging change
 ```
 
-| Command | When |
-|---|---|
-| `npm run test:watch` | active development |
-| `npm run test:coverage` | coverage report |
-| `npx tsc -p tsconfig.build.json --noEmit` | typecheck |
-| `npm run check:conventions` | the mechanical half of the code conventions (incl. the `v8 ignore` allowlist) |
-| `npm run check:boundaries` | web feature barrels — no deep cross-feature imports, no stale `ALLOWED_DEEP` entry |
-| `npm run check:docs` | contributor docs — every backticked repo path, link and `#anchor` resolves |
-| `npm run check:wire` | server responses and their hand-written web mirrors stay aligned |
-| `npm run check:cycles` | import cycles stay within the recorded ceilings |
-| `npm run smoke:pack` | packs, scaffolds, installs, verifies scaffold flow |
-| `npm run smoke:demo` | LLM-free gate for the five-journey repair cascade; removes its temporary workspace |
-| `npm run demo -- --agent codex` | creates an inspectable demo workspace with repair-loop and full-Flight routes |
+## Find the owner before editing
 
-### Test the demo from a desktop agent
+The server and web app are organized by product feature, not by technical
+layer. They share eight feature names: `runs`, `coverage`, `flights`, `wizard`,
+`evaluation`, `config`, `portify`, and `benchmark`.
 
-`npm run demo` does not change your Model Context Protocol (MCP) client configuration. To use Getting Started from Codex Desktop or Claude Desktop:
+- `agent-sessions` and `version` are server-only features.
+- `cleanup` is web-only. Its server routes stay with the `runs` and `portify`
+  stores that own the deleted data.
+- Cross-feature infrastructure belongs in the relevant `src/shared/` folder.
 
-1. Run `npm run demo -- --agent codex`, leave that terminal running, and copy the **Workspace** path it prints.
-2. In another terminal, connect both supported agents from that generated workspace:
+| Entry point | Responsibility |
+| --- | --- |
+| `apps/cli/cli.ts` | CLI command dispatch |
+| `apps/web-server/src/server.ts` | Server composition, shared stores, and feature registration |
+| `apps/web-server/src/features/runs/logic/runtime/orchestrator.ts` | Service boot, Playwright execution, repair cycles, and teardown |
+| `apps/web-server/src/features/runs/logic/run-store.ts` | Run manifests, summaries, events, and artifacts |
+| `apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts` | Envset apply and restore |
+| `apps/web/src/features/` | React feature modules and their public barrels |
+| `shared/` | Code shared by the CLI, server, generated projects, or web app |
+| `templates/project/` | Files copied into newly initialized workspaces |
+
+Everything under `apps/` and `shared/` is internal unless `package.json`
+exports it under `canary-lab/feature-support/...`. See the
+[module map](ARCHITECTURE.md#module-map) and
+[run lifecycle](ARCHITECTURE.md#run-lifecycle) before changing ownership or
+runtime flow.
+
+## Work in the existing design
+
+- Server features register routes and return only the handles another feature
+  genuinely needs. They are not re-export barrels.
+- Web features expose their cross-feature API through `index.ts`. Do not deep
+  import another feature's implementation.
+- Put LLM prompts in `apps/web-server/prompts/` and load them through the shared
+  prompt loader. Do not inline prompts in TypeScript.
+- Change generated workspace behavior in `templates/project/`, then verify the
+  packed artifact. A source-only test does not prove the template shipped.
+- Preserve the repair rule: fix application or service code. Do not weaken a
+  test to make a run pass.
+
+The repository-specific skills under `.codex/skills/` and `.claude/skills/`
+contain procedures for high-risk areas. `CLAUDE.md` is the canonical index of
+when to use them.
+
+## Build and test
+
+Start with the narrowest check that exercises your change. A full build is not
+a prerequisite for every unit-test iteration.
+
+| Command | Use it for |
+| --- | --- |
+| `npx vitest run <paths>` | Tests closest to the changed code |
+| `npm run typecheck:all` | CLI, server, and web TypeScript contracts |
+| `npm run build` | Complete distributable build, including generated docs, skills, templates, and web assets |
+| `npm run test:watch` | Local test-driven development |
+| `npm run test:coverage` | Coverage report |
+| `npm run check:conventions` | Repository rules that lint and TypeScript do not express |
+| `npm run check:boundaries` | Web feature barrels and cross-feature imports |
+| `npm run check:docs` | Backticked paths, relative links, and Markdown anchors |
+| `npm run check:wire` | Server responses and their hand-written web mirrors |
+| `npm run check:cycles` | Import-cycle ceilings |
+| `npm run smoke:pack` | Packed install, scaffold, exports, templates, or prompts |
+| `npm run smoke:demo` | LLM-free storefront repair cascade |
+| `npm run demo -- --agent codex` | Inspectable demo workspace and full Flight routes |
+
+Before opening a pull request, always run the structural gates:
+
+```bash
+npm run check:conventions
+npm run check:boundaries
+npm run check:docs
+npm run check:wire
+npm run check:cycles
+```
+
+Also run scoped tests and the relevant typecheck. Add `npm run smoke:pack` when
+the change touches `templates/`, prompts, packaging, build tools, or exports.
+
+`check:docs` proves that paths, links, and anchors resolve. It cannot prove that
+the prose describes current behavior. Compare enumerations, defaults, constants,
+and lifecycle claims with the implementation during review.
+
+## Test the demo from a desktop agent
+
+`npm run demo` starts a demo workspace but does not rewrite a Model Context
+Protocol (MCP) client's configuration.
+
+1. Run `npm run demo -- --agent codex`, keep the terminal open, and copy the
+   printed **Workspace** path.
+2. From another terminal, register both supported agent clients in that
+   generated workspace:
 
    ```bash
    cd "<workspace path>"
    npx canary-lab setup --force --agent all
    ```
 
-3. Restart the desktop app. Open a fresh session **in the generated workspace**. Otherwise, Getting Started resolves sample folders from the wrong directory.
-4. Confirm `Canary_Lab` appears in the session's MCP tools. Open **Getting Started** in Canary Lab and paste the selected **In your agent** command into the session.
+3. Restart the desktop app and open a new session in the generated workspace.
+   A session rooted elsewhere resolves the sample folders from the wrong place.
+4. Confirm `Canary_Lab` appears in the session's MCP tools. In Canary Lab, open
+   **Getting Started** and paste its **In your agent** command into the session.
 
-Keep the demo terminal running. Each demo creates a new workspace, so repeat setup for each one. For a custom MCP client, copy the endpoint from Canary Lab's **MCP** status.
-
-Before opening a PR, run `check:conventions`, `check:boundaries`, `check:docs`, `check:wire`, and `check:cycles`. They catch structural drift missed by tests and TypeScript.
-
-`check:docs` proves that paths, links, and anchors resolve. It does not prove the wording is still true; compare factual claims with the current code during review.
+Keep the demo terminal running. Each demo command creates a new workspace, so
+repeat registration when the workspace changes. Custom MCP clients can use the
+endpoint shown by Canary Lab's **MCP** status.

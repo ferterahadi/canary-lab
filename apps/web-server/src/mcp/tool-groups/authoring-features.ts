@@ -1,8 +1,6 @@
 // MCP tools — feature skeletons, feature docs, and the coverage read a client
 // needs before authoring. Split out of authoring.ts; bodies are unchanged.
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import { captureFeatureEnvFiles, createFeatureSkeleton, writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc, type EnvFileSource } from '../../features/config/logic/feature-authoring'
 import {
   FeatureNotFoundError,
@@ -11,7 +9,7 @@ import {
   listFeatureDocs,
 } from '../../features/coverage/logic/coverage/service'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
-import { type ToolGroupContext, asJsonResult, authoringCtx, coverageBlockedNext, errorResult } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, authoringCtx, coverageBlockedNext, errorResult, failureResult } from '../tool-support'
 
 export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -62,7 +60,7 @@ export function registerFeatureAuthoringTools(ctx: ToolGroupContext): void {
         ...(captured?.ok ? { captured: captured.captured, envsets: captured.summary } : {}),
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 

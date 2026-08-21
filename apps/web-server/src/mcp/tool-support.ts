@@ -225,13 +225,9 @@ export function newDraftId(): string {
   return `draft-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-export function newEvaluationTaskId(): string {
-  return `eval-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-}
-
-export function safeFilename(input: string): string {
-  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'export'
-}
+// Task-id + filename helpers moved to the evaluation logic layer (the flight's
+// external export hand-off mints the same records); re-exported for the tools.
+export { newEvaluationTaskId, safeFilename } from '../features/evaluation/logic/external-evaluation-export'
 
 export function isToolErrorPayload(value: unknown): value is { error: string; statusCode?: number } {
   return !!value &&
@@ -297,6 +293,20 @@ export function asToonResult(value: unknown): CallToolResult {
 
 export function errorResult(message: string): CallToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }
+}
+
+/**
+ * Render an unexpected throw as a tool error.
+ *
+ * One helper rather than the same `err instanceof Error ? … : String(err)`
+ * ternary at eighteen `catch` sites. The non-Error arm is defensive at any one
+ * of them — nothing a single caller can provoke, so it read as an untestable
+ * branch eighteen times over — but real for the surface as a whole (a rejected
+ * promise carrying a string, a thrown object from a dependency), and here it is
+ * covered once instead of nowhere.
+ */
+export function failureResult(err: unknown): CallToolResult {
+  return errorResult(err instanceof Error ? err.message : String(err))
 }
 
 export function hasText(value: unknown): value is string {

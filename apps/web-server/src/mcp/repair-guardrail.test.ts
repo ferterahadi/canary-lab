@@ -37,6 +37,32 @@ function findShippedSkills(dir: string): string[] {
 const shippedSkills = findShippedSkills(AGENT_INTEGRATIONS)
 const runLoopSkills = shippedSkills.filter((f) => path.basename(path.dirname(f)) === 'canary-lab-run')
 
+describe('repair guardrail — the flight heal hand-off prompt', () => {
+  // A stage_producer:"external" flight hands the whole heal engagement to the
+  // client via prompts/flight-heal-handoff.md — the one place that client is
+  // TOLD the repair rule before it claims the loop. Prose is deletable in a
+  // template rewrite without breaking a single test — hence this pin, the
+  // sibling of the MODE_COPY pin in auto-heal.test.ts.
+  const template = fs.readFileSync(
+    path.join(REPO_ROOT, 'apps', 'web-server', 'prompts', 'flight-heal-handoff.md'),
+    'utf-8',
+  )
+
+  it('leads with fix-the-app-not-the-test, with the provably-wrong exception intact', () => {
+    expect(template).toMatch(/fix app\/service code, not tests/i)
+    expect(template).toMatch(/never delete, skip, weaken, or loosen/i)
+    expect(template).toMatch(/provably wrong/i)
+  })
+
+  it('routes the client through the evidence loop, never a self-report', () => {
+    expect(template).toContain('claim_heal')
+    expect(template).toContain('wait_for_heal_task')
+    expect(template).toContain('signal_run')
+    // The submit is a "check the record" release, not an answer payload.
+    expect(template).toMatch(/reads the verdict from the run record/i)
+  })
+})
+
 describe('repair guardrail — MCP instructions', () => {
   // Any profile that can drive a heal loop must carry the rule. `repair` is the
   // dedicated one; `lifecycle`/`full` compose it in, so a broken composition

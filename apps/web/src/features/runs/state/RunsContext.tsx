@@ -9,6 +9,7 @@ import type {
 } from '@/shared/api/types'
 import { deriveDisplayStatus } from '../utils/run-actions'
 import { isActiveRunStatus } from '@shared/run-state'
+import { defaultWsBase } from '@/shared/api/reconnecting-socket'
 import {
   errorMessage,
   frameToAction,
@@ -92,9 +93,10 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     let backoff = RECONNECT_INITIAL_MS
     let cancelled = false
 
+    // Never runs after teardown, so it needs no `cancelled` guard of its own:
+    // its only callers are the initial call below and the reconnect timer, and
+    // cleanup clears that timer before its callback can fire.
     const connect = (): void => {
-      // Cleanup clears the reconnect timers before this closure can run.
-      if (cancelled) return
       try {
         socket = new Ctor(url)
       } catch {
@@ -126,9 +128,10 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
       }
     }
 
+    // Same reasoning: both callers have already ruled out teardown — the
+    // constructor's catch runs inside `connect`, and `onclose` checks
+    // `cancelled` before it gets here.
     const scheduleReconnect = (): void => {
-      // Callers guard cleanup through cleared timers or a closed socket.
-      if (cancelled) return
       reconnectTimer = setTimeout(() => {
         // After multiple rounds of growing backoff, surface the
         // disconnect to the user. They can still click around the
@@ -427,8 +430,8 @@ export function useRunDetails(): Record<string, RunDetail> {
 // ─── Internals ───────────────────────────────────────────────────────────
 
 function defaultWsUrl(): string {
-  // Non-browser callers (SSR, a bare node import) have no window to read.
-  if (typeof window === 'undefined') return 'ws://localhost/ws/runs'
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${window.location.host}/ws/runs`
+  // Shares the app's one origin→ws-base helper rather than re-deriving it: this
+  // was a second copy of the same protocol/host logic, including its own
+  // no-window fallback.
+  return `${defaultWsBase()}/ws/runs`
 }

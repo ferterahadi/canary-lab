@@ -20,6 +20,8 @@ export const AUTOPILOT_CHOICE: Record<string, string[]> = {
   'portify-gate': ['run'],
   'portify-apply': ['apply'],
   'run-failed': ['export-as-is'],
+  // The INTERNAL default only — an external producer's export defaults to
+  // `localized` via the producer-aware branch in autopilotChoice below.
   'export-mode': ['raw'],
 }
 
@@ -36,6 +38,15 @@ export function autopilotChoice(opts: FlightOptions, checkpoint: FlightCheckpoin
   if (opts.autopilot === false || opts.yolo) return null // yolo has its own per-adapter skips
   if (afterFailedAttempt(checkpoint)) return null
   const options = checkpoint.options ?? []
+  // The export's safe default follows the PRODUCER (user decision, 2026-08-21):
+  // an external flight wants its thinking external, and the localized rewrite
+  // IS this stage's thinking — `raw` would silently take the deterministic
+  // path on the one checkpoint where that difference is the product. Internal
+  // flights keep `raw` (fast, no agent). A human at the checkpoint (autopilot
+  // off, or a re-entered stage) can still pick either.
+  if (checkpoint.kind === 'export-mode' && opts.stageProducer === 'external' && options.includes('localized')) {
+    return 'localized'
+  }
   return AUTOPILOT_CHOICE[checkpoint.kind]?.find((choice) => options.includes(choice)) ?? null
 }
 

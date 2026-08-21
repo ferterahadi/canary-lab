@@ -25,16 +25,7 @@ export async function generateEvaluationRewriteWithAgent(
   if (!agents.length) return null
   const packet = buildTestReviewPacket(detail)
   const fallback = deterministicEvaluationRewrite(packet)
-  const flowcharts = createFlowcharts(packet, fallback)
-  const textSlots = evaluationTextSlots(fallback)
-  const prompt = buildEvaluationLlmPrompt({
-    packet,
-    textSlots,
-    flowcharts: flowcharts.map((flowchart) => ({
-      testName: flowchart.testName,
-      steps: flowchart.steps.map((step) => step.detail ? `${step.title}: ${step.detail}` : step.title),
-    })),
-  })
+  const prompt = buildEvaluationRewritePrompt(packet, fallback)
   const failures: string[] = []
   for (let i = 0; i < agents.length; i++) {
     const agent = agents[i]
@@ -49,13 +40,7 @@ export async function generateEvaluationRewriteWithAgent(
     try {
       options.onOutput?.(`[agent:${agent}] starting localized rewrite (model: ${evaluationAgentModel(agent) ?? 'agent default'})\n`)
       const output = await runEvaluationAgent(agent, prompt, cwd, options.onOutput, options.signal, options.onSession)
-      const slotRewrite = parseEvaluationTextSlotRewrite(output)
-      if (slotRewrite) {
-        options.onOutput?.(`[agent:${agent}] localized rewrite completed\n`)
-        return applyEvaluationTextSlotRewrite(fallback, slotRewrite)
-      }
-      const parsed = parseEvaluationRewrite(output)
-      const rewrite = normalizeEvaluationRewrite(parsed, packet)
+      const rewrite = resolveRewriteOutput(output, packet, fallback)
       if (rewrite) {
         options.onOutput?.(`[agent:${agent}] localized rewrite completed\n`)
         return rewrite
@@ -193,6 +178,38 @@ export function previewAgentOutput(output: string): string {
   const text = output.replace(/\s+/g, ' ').trim()
   if (!text) return '<empty output>'
   return text.length > 500 ? `${text.slice(0, 500)}...` : text
+}
+
+/** The full localized-rewrite prompt for one run — packet + text slots + the
+ *  flowchart walk, rendered from evaluation-rewrite.md. One home so the
+ *  internal agent spawn and the flight's external hand-off send identical
+ *  instructions. */
+export function buildEvaluationRewritePrompt(packet: ReturnType<typeof buildTestReviewPacket>, fallback: EvaluationRewrite): string {
+  const flowcharts = createFlowcharts(packet, fallback)
+  const textSlots = evaluationTextSlots(fallback)
+  return buildEvaluationLlmPrompt({
+    packet,
+    textSlots,
+    flowcharts: flowcharts.map((flowchart) => ({
+      testName: flowchart.testName,
+      steps: flowchart.steps.map((step) => step.detail ? `${step.title}: ${step.detail}` : step.title),
+    })),
+  })
+}
+
+/** Resolve a producer's raw answer into a normalized rewrite: the slot form
+ *  wins (it keeps the case roster intact by construction), else the full
+ *  envelope is normalized against the packet — which is where a wrong case
+ *  count dies. One parse chain for the internal spawn loop and the flight's
+ *  external consume, so both producers are judged identically. */
+export function resolveRewriteOutput(
+  output: string,
+  packet: ReturnType<typeof buildTestReviewPacket>,
+  fallback: EvaluationRewrite,
+): EvaluationRewrite | undefined {
+  const slotRewrite = parseEvaluationTextSlotRewrite(output)
+  if (slotRewrite) return applyEvaluationTextSlotRewrite(fallback, slotRewrite)
+  return normalizeEvaluationRewrite(parseEvaluationRewrite(output), packet) ?? undefined
 }
 
 export function parseEvaluationRewrite(output: string): EvaluationRewrite | undefined {

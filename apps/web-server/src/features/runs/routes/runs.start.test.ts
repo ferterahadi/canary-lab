@@ -148,6 +148,106 @@ describe('POST /api/runs', () => {
     expect(startRun).not.toHaveBeenCalled()
   })
 
+  it('propagates a claim failure that is not the busy conflict', async () => {
+    writeFeature('foo')
+    const startRun = vi.fn()
+    const gettingStarted = {
+      claim: () => { throw new Error('session.json is not writable') },
+    } as unknown as GettingStartedSessionStore
+    const { app } = await build({ startRun, gettingStarted })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: { feature: 'foo', gettingStartedSource: 'internal' },
+    })
+    // Degrading to a claim-less demo would leave the owner page with nothing to
+    // follow, so this has to surface instead of being swallowed like a conflict.
+    expect(res.statusCode).toBe(500)
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
+  it('links a Getting Started claim to the queued run it produced', async () => {
+    writeFeature('foo')
+    const attach = vi.fn()
+    const gettingStarted = {
+      claim: vi.fn(() => ({ sessionId: 'gs-q' })), attach, abandon: vi.fn(),
+    } as unknown as GettingStartedSessionStore
+    const { app } = await build({
+      startRun: async () => ({ kind: 'queued', runId: 'q-demo', reason: 'repo-collision' }),
+      gettingStarted,
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: { feature: 'foo', isolation: 'queue', gettingStartedSource: 'internal' },
+    })
+    // A queued demo is still the demo's target — without the link the guard
+    // holds a target-less claim, which the next boot reconciles away.
+    expect(res.statusCode).toBe(202)
+    expect(attach).toHaveBeenCalledWith('gs-q', { kind: 'run', id: 'q-demo' })
+  })
+
+  it('links a Getting Started claim to the active run it reused', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local'], featureDir: __dirname } }`,
+    )
+    const runDir = runDirFor(logsDir, 'active-demo')
+    fs.mkdirSync(runDir, { recursive: true })
+    writeManifest(path.join(runDir, 'manifest.json'), {
+      runId: 'active-demo',
+      feature: 'foo',
+      featureDir: dir,
+      env: 'local',
+      startedAt: '2026-05-19T00:00:00.000Z',
+      status: 'healing',
+      healCycles: 1,
+      services: [],
+      healMode: 'external',
+    })
+    writeRunsIndex(logsDir, [
+      { runId: 'active-demo', feature: 'foo', startedAt: '2026-05-19T00:00:00.000Z', status: 'healing' },
+    ])
+    const attach = vi.fn()
+    const gettingStarted = {
+      claim: vi.fn(() => ({ sessionId: 'gs-reuse' })), attach, abandon: vi.fn(),
+    } as unknown as GettingStartedSessionStore
+    const { app } = await build({ gettingStarted })
+
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: {
+        feature: 'foo', env: 'local',
+        healAgent: { kind: 'external', sessionId: 'sess-demo', clientKind: 'claude' },
+        gettingStartedSource: 'internal',
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ runId: 'active-demo', reused: true })
+    expect(attach).toHaveBeenCalledWith('gs-reuse', { kind: 'run', id: 'active-demo' })
+  })
+
+  it('releases a Getting Started claim when the run fails to start', async () => {
+    writeFeature('foo')
+    const abandon = vi.fn()
+    const gettingStarted = {
+      claim: vi.fn(() => ({ sessionId: 'gs-fail' })), attach: vi.fn(), abandon,
+    } as unknown as GettingStartedSessionStore
+    const { app } = await build({
+      startRun: async () => { throw new Error('playwright is not installed') },
+      gettingStarted,
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: { feature: 'foo', gettingStartedSource: 'internal' },
+    })
+    // Without the release, one failed demo start locks the workspace out of
+    // every Getting Started workflow until the server restarts.
+    expect(res.statusCode).toBe(500)
+    expect(abandon).toHaveBeenCalledWith('gs-fail')
+  })
+
   it('surfaces a branch-mismatch throw as a typed 409 with per-repo rows', async () => {
     writeFeature('foo')
     const branchMismatch = [
@@ -421,6 +521,84 @@ describe('POST /api/runs', () => {
       conversationName: 'pty should not own heal',
       claimable: false,
     })
+  })
+
+  it('honors an explicit healAgent.claimable:false — external mode, unclaimed (the flight posture)', async () => {
+    writeFeature('foo')
+    const stub = makeStub('flight-run')
+    const startRun = vi.fn(async (
+      _feature: string,
+      _env?: string,
+      _healAgent?: ExternalHealAgentRequest,
+      _isolation?: 'worktree' | 'queue',
+      _executionType?: ExecutionType,
+    ) => ({ kind: 'started' as const, orch: stub }))
+    const { app } = await build({ startRun })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        healAgent: { kind: 'external', sessionId: 'flight:fl-1', clientKind: 'other', claimable: false },
+      },
+    })
+
+    expect(res.statusCode).toBe(201)
+    // An allowed client kind that DECLINED the claim: external heal mode with
+    // no session — a later claim_heal from the real client is not blocked.
+    expect(startRun.mock.calls[0][2]).toEqual({
+      kind: 'external',
+      sessionId: 'flight:fl-1',
+      clientKind: 'other',
+      claimable: false,
+    })
+    // Not policy-suppressed — the caller opted out, so no suppression banner.
+    expect(res.json().claimSuppressed).toBeUndefined()
+  })
+
+  it('claimable:false skips the reuse-path broker claim too', async () => {
+    const dir = path.join(featuresDir, 'foo')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, 'feature.config.cjs'),
+      `module.exports = { config: { name: 'foo', description: 'd', envs: ['local'], featureDir: __dirname } }`,
+    )
+    const runDir = runDirFor(logsDir, 'active-heal-2')
+    fs.mkdirSync(runDir, { recursive: true })
+    writeManifest(path.join(runDir, 'manifest.json'), {
+      runId: 'active-heal-2',
+      feature: 'foo',
+      featureDir: dir,
+      env: 'local',
+      startedAt: '2026-05-19T00:00:00.000Z',
+      status: 'healing',
+      healCycles: 1,
+      services: [],
+      healMode: 'external',
+    })
+    writeRunsIndex(logsDir, [
+      { runId: 'active-heal-2', feature: 'foo', startedAt: '2026-05-19T00:00:00.000Z', status: 'healing' },
+    ])
+    const claim = vi.fn()
+    const startRun = vi.fn()
+    const { app } = await build({ startRun, broker: { claim } })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        env: 'local',
+        healAgent: { kind: 'external', sessionId: 'flight:fl-1', clientKind: 'other', claimable: false },
+      },
+    })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toMatchObject({ runId: 'active-heal-2', reused: true, claimed: false })
+    // The synthetic flight session must NOT hold the claim the real client needs.
+    expect(claim).not.toHaveBeenCalled()
+    expect(startRun).not.toHaveBeenCalled()
   })
 
   it('500s with stringified non-Error rejection', async () => {

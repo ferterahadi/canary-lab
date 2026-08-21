@@ -121,4 +121,16 @@ describe('useFlightsStream', () => {
     await act(async () => { root.render(<></>) })
     expect(socket.closed).toBe(true)
   })
+
+  it('derives the socket base from the page when none is given', async () => {
+    // Production never passes wsBase — the app is served by the same origin as
+    // the socket, which is exactly the case every other test here overrides.
+    function Bare() {
+      useFlightsStream({ WebSocketImpl: FakeSocket as unknown as typeof WebSocket })
+      return null
+    }
+    await act(async () => { root.render(<Bare />) })
+
+    expect(FakeSocket.opened.at(-1)).toBe(`ws://${window.location.host}/ws/flights`)
+  })
 })

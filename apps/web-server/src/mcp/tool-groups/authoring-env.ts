@@ -1,11 +1,9 @@
 // MCP tools — envset capture/inspection, feature deletion, and the feature repo
 // branch surface. Split out of authoring.ts; bodies are unchanged.
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import { captureFeatureEnvFiles, checkoutFeatureRepoBranch, deleteFeature, getFeatureEnvsetSummary, getFeatureRepoStatus, type EnvFileSource } from '../../features/config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
-import { type ToolGroupContext, asJsonResult, authoringCtx, errorResult, isToolErrorPayload } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, authoringCtx, errorResult, failureResult, isToolErrorPayload } from '../tool-support'
 
 export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -39,7 +37,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
       return asJsonResult(result)
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -60,7 +58,7 @@ export function registerFeatureEnvTools(ctx: ToolGroupContext): void {
       publishWorkspaceEvent(deps.workspaceEvents, { type: 'envsets-changed', feature })
       return asJsonResult({ feature, env, slot, path: result.path, entries: result.entries, unparsedLines: result.unparsedLines })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 

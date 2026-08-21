@@ -259,6 +259,28 @@ describe('startFlight', () => {
     await rerun.completion
   })
 
+  it('a jump to evaluation-export adopts a standalone run when the record has none', async () => {
+    const adapters = allDone()
+    let exportSawRunId: string | undefined
+    adapters['evaluation-export'] = {
+      run: async (ctx) => { exportSawRunId = ctx.manifest().links?.runId; return { kind: 'done' } },
+    }
+    const first = startFlight(args(), deps(adapters))
+    await first.completion
+    // The pipeline produced no run of its own, so the jump's only prerequisite
+    // is the standalone passed run the resolver finds on disk.
+    expect(store.get(first.manifest.flightId)!.links?.runId).toBeUndefined()
+
+    const jumped = startFlight({ ...args(), mode: 'jump' as const, fromStage: 'evaluation-export' as const }, {
+      ...deps(adapters),
+      validateStageEntry: () => null,
+      resolveStageEntryLinks: () => ({ runId: 'standalone-7' }),
+    })
+    await jumped.completion
+
+    expect(exportSawRunId).toBe('standalone-7')
+  })
+
   it('rejects fromStage when no validator is wired (stage entry unsupported)', () => {
     expect(() =>
       startFlight({ ...args(), fromStage: 'docs' as const }, deps(allDone())),

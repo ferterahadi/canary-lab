@@ -2,7 +2,7 @@ import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
 import type { PortifyStore } from '../logic/runtime/store'
 import { portifyCleanupListing } from '../logic/runtime/cleanup'
-import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../logic/runtime/types'
+import type { PortifyManifest, StartExternalPortifyInput, StartExternalPortifyResult, StartPortifyInput, StartPortifyResult } from '../logic/runtime/types'
 import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { launchEditorDir } from '../../../shared/editor-launch'
@@ -16,6 +16,13 @@ import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/l
 export interface PortifyRouteDeps {
   store: PortifyStore
   startPortify(input: StartPortifyInput): Promise<StartPortifyResult>
+  /** External producer: set up the worktree and park at `editing` — the CALLER's
+   *  client does the edits (no local agent). The flight's portify hand-off and
+   *  any REST caller reuse the same runner path the MCP tools drive. */
+  startExternalPortify(input: StartExternalPortifyInput): Promise<StartExternalPortifyResult>
+  /** External twin of revise: reopen a verified workflow for the client's own
+   *  edits and return the feedback prompt (constraints restated). */
+  reviseExternalPortify(workflowId: string, feedback: string): { manifest: PortifyManifest; instructions: string }
   savePortify(workflowId: string): Promise<PortifyManifest>
   cancelPortify(workflowId: string): Promise<PortifyManifest>
   revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
@@ -32,10 +39,17 @@ interface StartBody {
   feature?: string
   agent?: string
   maxAttempts?: number
+  /** `external` = the caller's own client edits the worktree; no local agent.
+   *  Requires `sessionId` (an MCP session id, or `flight:<id>`). */
+  producer?: string
+  sessionId?: string
 }
 
 interface ReviseBody {
   feedback?: string
+  /** True = reopen for the external client's own edits (reviseExternalPortify)
+   *  instead of resuming a local agent. Only valid on an external workflow. */
+  external?: boolean
 }
 
 export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps): Promise<void> {
@@ -57,6 +71,16 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       body.agent === 'codex' ? 'codex' : body.agent === 'claude' ? 'claude' : undefined
     const maxAttempts = Number.isInteger(body.maxAttempts) ? body.maxAttempts : undefined
     try {
+      if (body.producer === 'external') {
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+        if (!sessionId) {
+          reply.code(400)
+          return { error: 'sessionId is required for an external workflow' }
+        }
+        // The caller here is a server-side driver (the flight) or a REST client,
+        // not a detected MCP connection — 'other' is the honest kind.
+        return await deps.startExternalPortify({ feature, clientKind: 'other', sessionId })
+      }
       return await deps.startPortify({ feature, agent, maxAttempts })
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
@@ -161,6 +185,10 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       return { error: 'feedback is required' }
     }
     try {
+      if (req.body?.external === true) {
+        const { manifest, instructions } = deps.reviseExternalPortify(req.params.workflowId, feedback)
+        return { ...manifest, instructions }
+      }
       return await deps.revisePortify(req.params.workflowId, feedback)
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)

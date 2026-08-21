@@ -78,6 +78,11 @@ export function parseExternalHealAgent(
     clientKind: v.clientKind as ExternalHealAgentRequest['clientKind'],
     ...(typeof v.clientVersion === 'string' ? { clientVersion: v.clientVersion } : {}),
     ...(typeof v.conversationName === 'string' ? { conversationName: v.conversationName } : {}),
+    // Only an explicit false is honored, and only ever to DOWNGRADE: a caller
+    // can decline the claim it would have been allowed (the flight's run stage
+    // starts external-heal runs unclaimed so the REAL client's claim_heal is
+    // not blocked by a synthetic holder), but can never claim past the policy.
+    ...(v.claimable === false ? { claimable: false } : {}),
   }
 }
 

@@ -4,21 +4,9 @@
 // enclosing function is new. Add a tool here, then wire its name into the
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import { writeHealSignal } from '../../features/runs/logic/heal/external-heal-surface'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { type ToolGroupContext,
-  HEAL_STATUS,
-  SIGNAL_KIND,
-  WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS,
-  WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS,
-  asJsonResult,
-  ensureExternalClaimForMcpCall,
-  errorResult,
-  hasText,
-  healWaitNext,
-  waitForHealTask } from '../tool-support'
+import { type ToolGroupContext, HEAL_STATUS, SIGNAL_KIND, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, asJsonResult, ensureExternalClaimForMcpCall, errorResult, failureResult, hasText, healWaitNext, waitForHealTask } from '../tool-support'
 
 export function registerHealFlowTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -156,7 +144,7 @@ export function registerHealFlowTools(ctx: ToolGroupContext): void {
         : typeof body === 'string' ? body : `handoff failed (${result.statusCode})`
       return errorResult(message)
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 }

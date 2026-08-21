@@ -90,7 +90,10 @@ export type FlightCheckpointKind =
    *  `data`. Unlike every other kind this is not a question for a human — it is a
    *  work hand-off — but it reuses the checkpoint machinery deliberately: a parked
    *  checkpoint makes run() RETURN, so there is no poll and therefore no idle
-   *  deadline to starve (the flaw in portify's poll-based external path). It also
+   *  deadline to starve (the flaw in the retired poll-based external portify
+   *  path). Multi-round stages (portify, heal) park ONCE per engagement and the
+   *  client drives the standalone tools; their submit means "check the record
+   *  now" — Canary re-reads it and re-parks if it has not settled. It also
    *  accepts choice:"run-internally" so a client that cannot do the job can hand
    *  it back to Canary's own agent instead of failing the stage. */
   | 'external-work'
@@ -282,16 +285,22 @@ export interface FlightOptions {
    *  the record's lifetime: jump/continue reuse the stored value; only a full
    *  redo may change it. Absent → claude. */
   agent?: 'claude' | 'codex'
-  /** Who executes the reading/authoring stages that CAN be handed off (scout,
-   *  docs, specs↔coverage). `internal` (the default, and the only option for a
-   *  GUI-started flight, which has no MCP client at all) spawns the CLI named by
-   *  `agent` above. `external` parks each of those stages on an `external-work`
-   *  checkpoint so the MCP client driving the flight does the job in its own
-   *  harness — with its own subagents, permissions and token accounting — and
-   *  returns the result via respond_flight_checkpoint. Sticky for the record's
-   *  lifetime for the same reason `agent` is: a flight that changes executor
-   *  mid-pipeline produces stage evidence from two different sources. Stages with
-   *  no hand-off spec (similarity, scaffold, env, portify, run, export) ignore it. */
+  /** Who executes the thinking stages that CAN be handed off: scout, docs,
+   *  prd-summary, specs↔coverage (authoring AND mapping), portify, the run's
+   *  heal engagement, and the export's localized rewrite (also the external
+   *  default). `internal` (the default, and the only option for a GUI-started
+   *  flight, which has no MCP client at all) spawns the CLI named by `agent`
+   *  above / runs the workspace-config loops. `external` parks each of those
+   *  stages on an `external-work` checkpoint so the MCP client driving the
+   *  flight does the job in its own harness — with its own subagents,
+   *  permissions and token accounting — and returns the result via
+   *  respond_flight_checkpoint; multi-round stages (portify, run/heal) park
+   *  once per engagement while the client drives the standalone tools. Sticky
+   *  for the record's lifetime for the same reason `agent` is: a flight that
+   *  changes executor mid-pipeline produces stage evidence from two different
+   *  sources. Purely mechanical stages (similarity, scaffold, env, the run's
+   *  playwright execution, a raw export) have no thinking to move and ignore
+   *  it. */
   stageProducer?: 'internal' | 'external'
   /** Base branch for diff-inferred requirements (auto-detected when absent). */
   base?: string
@@ -301,7 +310,9 @@ export interface FlightOptions {
    *  (config-approval→approve, prd-source→continue when docs exist and
    *  collect-repo-docs when they don't, coverage-stuck→accept-partial,
    *  portify-gate→run, portify-apply→apply,
-   *  run-failed→export-as-is, export-mode→raw); similarity-choice and
+   *  run-failed→export-as-is, export-mode→raw — localized instead when
+   *  stageProducer is external, where the rewrite is the thinking being handed
+   *  off); similarity-choice and
    *  missing-env always park. Absent = ON (default for new flights); set
    *  `false` to be asked at every checkpoint. Milder than yolo: every
    *  auto-answer is logged `[autopilot]` on the stage, and a re-parked

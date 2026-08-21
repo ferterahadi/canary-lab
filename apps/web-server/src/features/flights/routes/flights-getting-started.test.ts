@@ -74,4 +74,41 @@ describe('Getting Started flight admission', () => {
     expect(response.statusCode).toBe(409)
     expect(response.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
   })
+
+  it('propagates a claim failure that is not the busy conflict', async () => {
+    const app = await appWith({
+      claim: () => { throw new Error('session.json is not writable') },
+    } as unknown as GettingStartedSessionStore)
+    const response = await app.inject({
+      method: 'POST', url: '/api/flights',
+      payload: {
+        feature: 'flight-app', repoPaths: [repoDir], description: 'lending',
+        gettingStartedSource: 'internal',
+      },
+    })
+    // Swallowing this would leave the demo permanently unclaimable while
+    // reporting success, so it must surface rather than degrade.
+    expect(response.statusCode).toBe(500)
+  })
+
+  it('releases the claim when the flight itself refuses to start', async () => {
+    const abandon = vi.fn()
+    const app = await appWith({
+      claim: vi.fn(() => ({ sessionId: 'gs-flight' })),
+      attach: vi.fn(),
+      abandon,
+    } as unknown as GettingStartedSessionStore)
+    const payload = {
+      feature: 'flight-app', repoPaths: [repoDir], description: 'lending',
+      gettingStartedSource: 'internal' as const,
+    }
+
+    expect((await app.inject({ method: 'POST', url: '/api/flights', payload })).statusCode).toBe(201)
+    // The feature now has a record, so the second start needs an explicit mode.
+    // Without the release, that dead claim would own the workspace forever.
+    const second = await app.inject({ method: 'POST', url: '/api/flights', payload })
+
+    expect(second.statusCode).toBe(409)
+    expect(abandon).toHaveBeenCalledWith('gs-flight')
+  })
 })

@@ -43,6 +43,8 @@ export async function register(app: FastifyInstance, ctx: ServerContext): Promis
     store: ctx.portifyStore,
     logsDir: ctx.logsDir,
     startPortify: runner.startPortify,
+    startExternalPortify: runner.startExternalPortify,
+    reviseExternalPortify: runner.reviseExternalPortify,
     savePortify: runner.save,
     cancelPortify: runner.cancel,
     revisePortify: runner.revise,

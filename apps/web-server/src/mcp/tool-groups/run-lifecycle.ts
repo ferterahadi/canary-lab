@@ -4,22 +4,10 @@
 // enclosing function is new. Add a tool here, then wire its name into the
 // profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import { normalizeRunCounts } from '../../features/runs/logic/heal/external-heal-surface'
 import { isHealClaimAllowed } from '../../features/runs/logic/heal/heal-claim-policy'
 import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { type ToolGroupContext,
-  CLAIM_SUPPRESSED_MESSAGE,
-  asJsonResult,
-  bootSessionValue,
-  claimRun,
-  errorResult,
-  findHealingRunForFeature,
-  healWaitNext,
-  isActiveBootRun,
-  resolveRunRef,
-  runCandidate } from '../tool-support'
+import { type ToolGroupContext, CLAIM_SUPPRESSED_MESSAGE, asJsonResult, bootSessionValue, claimRun, errorResult, failureResult, findHealingRunForFeature, healWaitNext, isActiveBootRun, resolveRunRef, runCandidate } from '../tool-support'
 
 export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -206,7 +194,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         ...(claimAllowed ? healWaitNext() : {}),
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -254,7 +242,7 @@ export function registerRunLifecycleTools(ctx: ToolGroupContext): void {
         nextSteps: ['services are booting and will be held — exercise them, then call abort_run (confirm:true) to stop services + revert the envset. A service that fails its readiness probe is marked failed (status "timeout") but the session stays held; boot does not self-abort on a health-check failure'],
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 

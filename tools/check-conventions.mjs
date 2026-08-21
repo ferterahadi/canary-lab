@@ -47,7 +47,14 @@ const ROOTS = ['apps', 'shared', 'tools']
 //   `run-detail-playback.ts` computed twice, where the first call diverted every
 //   input the second one guarded against). React components remain OUT — that is
 //   a deliberate line, not the next tranche.
-const MIN_GATED_FILES = 319
+// 319 → 350 when every `apps/web` `state/` tree joined (was: `benchmark/state`
+//   alone) — the stores, the context providers and the hooks that own socket
+//   lifecycles, fetch orchestration and navigation. A provider is state with a
+//   JSX wrapper, so its tests drive fake sockets and stubbed API calls and
+//   assert behaviour, never rendered output. Measured 353 files; the floor keeps
+//   a small margin because the count only includes files a test actually loaded.
+//   `features/*/components`, `shared/ui` and `shared/shell` remain OUT.
+const MIN_GATED_FILES = 350
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']

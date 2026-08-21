@@ -2,19 +2,35 @@ import { isTerminalRunStatus } from '../../../../../../../shared/run-state'
 import { runCounts } from '../../../runs/logic/run-detail'
 import type { RunSummary } from '../../../runs/logic/run-store'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
+import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
 import { runJob } from './stage-jobs'
-import { CHECKPOINT_OPTIONS } from '../types'
+import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
+import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 
-// Start the real run through the runs route — auto-heal per the workspace's
-// canary-lab.config.json, heal semantics untouched — and wait for a terminal
-// verdict. The flight's verdict IS the run's terminal status (harness-owned).
-// A non-green terminal run parks on the run-failed checkpoint (rerun vs
+// Start the real run through the runs route and wait for a terminal verdict.
+// The flight's verdict IS the run's terminal status (harness-owned). A
+// non-green terminal run parks on the run-failed checkpoint (rerun vs
 // export-as-is); `--yolo` exports as-is, status preserved, per the PRD.
 //
-// The heal stage is a read-only mirror: it reports what the run's heal loop
-// actually did (healCycles from the manifest), it never re-runs anything.
+// INTERNAL producer: auto-heal per the workspace's canary-lab.config.json,
+// heal semantics untouched, and the stage polls the run to its verdict.
+//
+// EXTERNAL producer: the heal loop is the client's thinking, so the run is
+// started in external-heal mode UNCLAIMED (healAgent claimable:false — no
+// auto-heal agent spawns, no synthetic claim blocks the client's own
+// claim_heal) and the stage PARKS immediately on one external-work checkpoint
+// for the whole engagement. The park is also the notification channel — a
+// flight cannot push to an MCP client, so the checkpoint is how the client
+// learns it owns heal duty. The client drives the standalone loop (claim_heal
+// → wait_for_heal_task → fix APP code → signal_run); its submit means "the run
+// is terminal — check it", and consume re-reads the manifest, re-parking while
+// the run is still active. No stage-side poll runs in that mode, so no
+// wall-clock budget can starve a client mid-repair.
+//
+// The heal stage below is a read-only mirror either way: it reports what the
+// run's heal loop actually did (healCycles from the manifest), never re-runs.
 
 const RUN_TIMEOUT_MS = 90 * 60 * 1000
 
@@ -34,17 +50,15 @@ async function readManifest(deps: FlightStageDeps, runId: string): Promise<RunMa
 
 
 export function runStage(deps: FlightStageDeps): StageAdapter {
-  const waitForVerdict = async (ctx: StageContext, runId: string): Promise<StageOutcome> => {
+  /** Terminal manifest → the stage outcome. One settle for BOTH producers —
+   *  the verdict is the run record, never anyone's report of it. */
+  const settleVerdict = (
+    ctx: StageContext,
+    runId: string,
+    detail: { manifest?: RunManifest; summary?: RunSummary },
+  ): StageOutcome => {
     const m = ctx.manifest()
-    // `readRun` always resolves to an object, so the readiness test lives where
-    // it always did — in the predicate, which already had to tolerate a run whose
-    // manifest isn't written yet.
-    const detail = await pollUntil(
-      () => readRun(deps, runId),
-      (d) => Boolean(d?.manifest && isTerminalRunStatus(d.manifest.status)),
-      { what: `run ${runId}`, intervalMs: 3000, timeoutMs: RUN_TIMEOUT_MS, signal: ctx.signal },
-    )
-    const manifest = detail!.manifest
+    const manifest = detail.manifest
     const status = manifest!.status as 'passed' | 'failed' | 'aborted'
     ctx.patchFlight({ runVerdict: status })
     // `healEnd` (why auto-heal stopped) rides along in the evidence + checkpoint
@@ -56,7 +70,7 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     // 1 repair cycle") instead of pointing at a decision below it. Same response
     // the verdict poll already reads — no extra fetch.
     const healEnd = manifest!.healEnd
-    const counts = runCounts(detail!.summary)
+    const counts = runCounts(detail.summary)
     const evidence = { runId, status, healCycles: manifest!.healCycles, healEnd, ...(counts ? { counts } : {}) }
 
     if (status === 'passed') return { kind: 'done', evidence }
@@ -76,8 +90,43 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     }
   }
 
-  const startAndWait = async (ctx: StageContext, opts?: { forceNew?: boolean }): Promise<StageOutcome> => {
+  const waitForVerdict = async (ctx: StageContext, runId: string): Promise<StageOutcome> => {
+    // `readRun` always resolves to an object, so the readiness test lives where
+    // it always did — in the predicate, which already had to tolerate a run whose
+    // manifest isn't written yet.
+    const detail = await pollUntil(
+      () => readRun(deps, runId),
+      (d) => Boolean(d?.manifest && isTerminalRunStatus(d.manifest.status)),
+      { what: `run ${runId}`, intervalMs: 3000, timeoutMs: RUN_TIMEOUT_MS, signal: ctx.signal },
+    )
+    return settleVerdict(ctx, runId, detail!)
+  }
+
+  /** Park the heal engagement on the client. The prompt leads with the repair
+   *  rule and the standalone loop; the client's submit means "the run is
+   *  terminal — check it". */
+  const externalHealHandOff = (ctx: StageContext, runId: string): StageOutcome => {
     const m = ctx.manifest()
+    ctx.appendLog(`[run] heal duty handed to the external client (run ${runId}, unclaimed)\n`)
+    return externalWorkCheckpoint(ctx, 'run', renderPrompt('flight-heal-handoff.md', { runId, feature: m.feature }), {
+      message: `Run ${runId} started with heal duty assigned to YOU: claim_heal with your own session id, loop wait_for_heal_task, fix APP code (never tests) and signal_run — then respond submit here once the run is terminal. Canary reads the verdict from the run record itself. Answer run-internally to hand the run back to Canary's own heal agent.`,
+      context: { runId },
+    })
+  }
+
+  /** Re-park the SAME engagement — the ask (drive this run) has not changed,
+   *  so the checkpoint is reused wholesale and keeps its hand-off id. */
+  const reparkExternal = (ctx: StageContext, checkpoint: FlightCheckpoint, why: string): StageOutcome => {
+    ctx.appendLog(`[run] external submit re-parked — ${why}\n`)
+    return { kind: 'checkpoint', checkpoint: { ...checkpoint, data: { ...(checkpoint.data as object), lastRejection: why } } }
+  }
+
+  const startAndWait = async (
+    ctx: StageContext,
+    opts?: { forceNew?: boolean; forceInternal?: boolean },
+  ): Promise<StageOutcome> => {
+    const m = ctx.manifest()
+    const external = !opts?.forceInternal && handsOffToClient(ctx)
 
     // Resume after a pause/restart: the run this flight started may still be
     // going (or have reached a verdict while we weren't watching) — re-attach
@@ -88,18 +137,34 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     // replay that abort as this stage's verdict and park the user on the
     // run-failed checkpoint — when Continue promised to re-run the step.
     if (!opts?.forceNew && m.links?.runId) {
-      const existing = await readManifest(deps, m.links.runId)
-      if (existing && existing.status !== 'aborted') {
-        ctx.appendLog(`[run] re-attaching to ${m.links.runId} (${existing.status})\n`)
-        return waitForVerdict(ctx, m.links.runId)
+      const existing = await readRun(deps, m.links.runId)
+      if (existing.manifest && existing.manifest.status !== 'aborted') {
+        if (isTerminalRunStatus(existing.manifest.status)) {
+          ctx.appendLog(`[run] re-attaching to ${m.links.runId} (${existing.manifest.status})\n`)
+          return settleVerdict(ctx, m.links.runId, existing)
+        }
+        // Still going: the external engagement re-parks (a resume must re-issue
+        // the hand-off — the park was cleared by the pause); internal re-polls.
+        ctx.appendLog(`[run] re-attaching to ${m.links.runId} (${existing.manifest.status})\n`)
+        return external ? externalHealHandOff(ctx, m.links.runId) : waitForVerdict(ctx, m.links.runId)
       }
     }
 
-    let resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature: m.feature, env: m.opts.env } })
+    // External: start the run in external-heal mode, UNCLAIMED. claimable:false
+    // is the whole trick — a claim held by `flight:<id>` would block the real
+    // client's claim_heal with already-claimed.
+    const payload = {
+      feature: m.feature,
+      env: m.opts.env,
+      ...(external
+        ? { healAgent: { kind: 'external', sessionId: `flight:${m.flightId}`, clientKind: 'other', claimable: false } }
+        : {}),
+    }
+    let resp = await deps.inject({ method: 'POST', url: '/api/runs', payload })
     let body = resp.json() as Record<string, unknown>
     if (resp.statusCode === 409 && body.type === 'repo_collision_requires_choice') {
       ctx.appendLog(`[run] repo busy (${String(body.conflictingFeature)}) — queueing\n`)
-      resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { feature: m.feature, env: m.opts.env, isolation: 'queue' } })
+      resp = await deps.inject({ method: 'POST', url: '/api/runs', payload: { ...payload, isolation: 'queue' } })
       body = resp.json() as Record<string, unknown>
     }
     if (resp.statusCode !== 201 && resp.statusCode !== 202) {
@@ -107,6 +172,7 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
     }
     const runId = String(body.runId)
     ctx.patchFlight({ links: { runId } })
+    if (external) return externalHealHandOff(ctx, runId)
     ctx.appendLog(`[run] ${runId} started (auto-heal per workspace settings)\n`)
     return waitForVerdict(ctx, runId)
   }
@@ -114,16 +180,67 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
   return {
     run: (ctx) => startAndWait(ctx),
     async onCheckpointResponse(ctx, response) {
+      // Releasing the heal ENGAGEMENT park, not the run-failed question.
+      if (parkedOnExternalWork(ctx, 'run')) {
+        const m = ctx.manifest()
+        const checkpoint = m.stages.find((s) => s.key === 'run')!.checkpoint!
+        const runId = (checkpoint.data as { context?: { runId?: string } } | undefined)?.context?.runId ?? m.links?.runId
+        if (response.choice === 'run-internally') {
+          ctx.appendLog('[run] client handed the heal duty back — running internally\n')
+          if (runId) {
+            const existing = await readManifest(deps, runId)
+            if (existing && !isTerminalRunStatus(existing.status)) {
+              // The orchestrator cannot hot-swap an active external run to a
+              // local agent (handoff 409s on active runs) — abort it and start
+              // fresh with the workspace heal config. Losing the suite's
+              // progress is the documented price of taking the job back mid-run.
+              await deps.inject({ method: 'POST', url: `/api/runs/${encodeURIComponent(runId)}/abort`, payload: {} }).catch(() => {})
+              await pollUntil(
+                () => readManifest(deps, runId),
+                (man) => !man || isTerminalRunStatus(man.status),
+                { what: `run ${runId} abort before internal takeover`, timeoutMs: 60_000 },
+              ).catch(() => {})
+              return startAndWait(ctx, { forceNew: true, forceInternal: true })
+            }
+            if (existing && (existing.status === 'failed' || existing.status === 'aborted')) {
+              // Cheaper than a fresh suite: restart just the heal with a local
+              // agent (remaining-test mode) through the existing handoff route.
+              const handed = await deps.inject({
+                method: 'POST',
+                url: `/api/runs/${encodeURIComponent(runId)}/heal-agent/handoff`,
+                payload: { to: 'auto' },
+              })
+              if (handed.statusCode < 300) {
+                ctx.appendLog(`[run] heal handed to the local agent — following ${runId}\n`)
+                return waitForVerdict(ctx, runId)
+              }
+              // e.g. no local CLI installed — a fresh internal run still works.
+              return startAndWait(ctx, { forceNew: true, forceInternal: true })
+            }
+          }
+          return startAndWait(ctx, { forceInternal: true })
+        }
+        const stale = rejectStaleSubmit(ctx, 'run', response)
+        if (stale) return stale
+        if (!runId) return { kind: 'failed', error: 'external run hand-off lost its run id' }
+        const detail = await readRun(deps, runId)
+        if (!detail.manifest) return { kind: 'failed', error: `run ${runId} has no manifest` }
+        if (!isTerminalRunStatus(detail.manifest.status)) {
+          return reparkExternal(ctx, checkpoint, `run ${runId} is still "${detail.manifest.status}" — keep driving the heal loop (wait_for_heal_task / signal_run) and submit here once it is terminal`)
+        }
+        return settleVerdict(ctx, runId, detail)
+      }
       if (response.choice === 'rerun') {
         // A REPLAYED rerun (resume after a mid-rerun pause) may find the rerun
         // already started — links.runId then points at a live run. Re-attach
-        // instead of force-starting a second run into our own repo lock.
+        // instead of force-starting a second run into our own repo lock. Under
+        // an external producer the re-attach is the engagement park itself.
         const runId = ctx.manifest().links?.runId
         if (runId) {
           const existing = await readManifest(deps, runId)
           if (existing && !isTerminalRunStatus(existing.status)) {
             ctx.appendLog(`[run] rerun already in flight — re-attaching to ${runId} (${existing.status})\n`)
-            return waitForVerdict(ctx, runId)
+            return handsOffToClient(ctx) ? externalHealHandOff(ctx, runId) : waitForVerdict(ctx, runId)
           }
         }
         return startAndWait(ctx, { forceNew: true })

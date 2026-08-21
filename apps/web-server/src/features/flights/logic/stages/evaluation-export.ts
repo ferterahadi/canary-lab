@@ -1,9 +1,14 @@
 import fs from 'fs'
 import path from 'path'
 import { readEvaluationExportTask } from '../../../evaluation/logic/evaluation-export-store'
+import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../../evaluation/logic/external-evaluation-export'
+import { buildTestReviewPacket, deterministicEvaluationRewrite } from '../../../evaluation/logic/test-review-export'
+import { buildEvaluationRewritePrompt, resolveRewriteOutput } from '../../../evaluation/logic/test-review/rewrite-agent'
+import { getRunDetail } from '../../../runs/logic/run-store'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { pollUntil, type FlightStageDeps } from './context'
 import { evaluationExportJob } from './stage-jobs'
+import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { CHECKPOINT_OPTIONS } from '../types'
 
 // Terminal stage: a flight isn't done at green — it ends by producing the
@@ -12,8 +17,17 @@ import { CHECKPOINT_OPTIONS } from '../types'
 // (status preserved, per the PRD). Before the export starts, non-yolo flights
 // park on the export-mode checkpoint: `raw` (fast report, no LLM rewrite) vs
 // `localized` (an agent rewrites per-test reasoning) — the mode the existing
-// engine already supports. Yolo defaults to raw. Harness predicate: the zip
-// exists on disk and is linked from the manifest.
+// engine already supports. Harness predicate: the zip exists on disk and is
+// linked from the manifest.
+//
+// The DEFAULT mode follows the producer (user decision, 2026-08-21): an
+// internal flight defaults to `raw` (yolo and autopilot alike); an external
+// one defaults to `localized`, because the rewrite is the stage's thinking and
+// an external flight wants its thinking external. The explicit checkpoint
+// still lets a human pick `raw` either way. Under stageProducer:"external" the
+// localized rewrite is handed to the client (the SAME evaluation-rewrite.md
+// prompt the internal agent gets); `raw` stays internal and deterministic for
+// every producer — there is no thinking in it to move.
 
 const EXPORT_TIMEOUT_MS = 10 * 60 * 1000
 
@@ -40,18 +54,71 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
     return { kind: 'done', evidence: { taskId, evaluationZip, archiveBase: task.archiveBase, mode } }
   }
 
-  const startExport = async (ctx: StageContext, mode: ExportMode): Promise<StageOutcome> => {
+  /** Hand the localized rewrite to the client: mint (or re-adopt) an EXTERNAL
+   *  export task so links/cleanup/reset behave exactly as for an internal one,
+   *  then park with the same rendered prompt the internal rewrite agent gets. */
+  const handOffLocalized = async (ctx: StageContext, runId: string, lastRejection?: string): Promise<StageOutcome> => {
+    const m = ctx.manifest()
+    const detail = getRunDetail(deps.logsDir, runId)
+    if (!detail) return { kind: 'failed', error: `run ${runId} has no manifest — nothing to export` }
+
+    // Re-adopt the task a previous park of THIS flight minted (resume/re-park),
+    // instead of littering one record per park.
+    const priorTaskId = m.links?.evaluationTaskId
+    let task = priorTaskId ? readEvaluationExportTask(deps.logsDir, priorTaskId) : null
+    if (task && (task.producer !== 'external' || task.status === 'failed' || task.error)) task = null
+    if (task?.downloadReady) return settleTask(ctx, task.taskId, 'localized')
+    if (!task) {
+      task = createExternalEvaluationExportTask({
+        logsDir: deps.logsDir,
+        detail,
+        sessionId: `flight:${m.flightId}`,
+      })
+      // Linked at CREATION, like the internal path — a pause/crash mid-hand-off
+      // must leave the pointer behind for the re-adopt above.
+      ctx.patchFlight({ links: { evaluationTaskId: task.taskId } })
+      ctx.appendLog(`[export] external evaluation task ${task.taskId} created (localized)\n`)
+    }
+
+    const packet = buildTestReviewPacket(detail)
+    const fallback = deterministicEvaluationRewrite(packet)
+    ctx.appendLog(lastRejection
+      ? `[export] external rewrite rejected — ${lastRejection}\n`
+      : '[export] localized rewrite handed off to the external client\n')
+    return externalWorkCheckpoint(ctx, 'evaluation-export', buildEvaluationRewritePrompt(packet, fallback), {
+      message: lastRejection
+        ? `That rewrite was rejected: ${lastRejection}. Answer again with the shape the prompt asks for — or "run-internally" to hand the step to Canary's own agent.`
+        : 'Rewrite the evaluation wording in your own client following the prompt, then respond with its answer on `data` — { slots: [...] } (preferred: the case roster stays intact by construction) or the full { cases: [...] } envelope. Canary renders the final evaluation.html itself; a failed run\'s status is preserved, never softened.',
+      context: {
+        taskId: task.taskId,
+        runId,
+        caseCount: packet.tests.length,
+        ...(lastRejection === undefined ? {} : { lastRejection }),
+      },
+    })
+  }
+
+  const startExport = async (ctx: StageContext, mode: ExportMode, opts: { forceInternal?: boolean } = {}): Promise<StageOutcome> => {
     const m = ctx.manifest()
     const runId = m.links?.runId
     if (!runId) return { kind: 'failed', error: 'no run to export — the run stage must settle first' }
 
+    // The localized rewrite is thinking; under an external producer it is the
+    // client's — unless the client just handed it back (forceInternal).
+    if (mode === 'localized' && !opts.forceInternal && handsOffToClient(ctx)) {
+      return handOffLocalized(ctx, runId)
+    }
+
     // A REPLAYED answer (resume after a mid-export pause) may find the task
     // this flight already started still running or finished — re-attach
-    // instead of producing a duplicate archive.
+    // instead of producing a duplicate archive. An unfinished EXTERNAL task is
+    // the exception: nobody local will ever complete it, so a forced-internal
+    // export starts fresh rather than dead-waiting on it (the abandoned record
+    // stays for Log Cleanup).
     const priorTaskId = m.links?.evaluationTaskId
     if (priorTaskId) {
       const prior = readEvaluationExportTask(deps.logsDir, priorTaskId)
-      if (prior && prior.status !== 'failed' && !prior.error) {
+      if (prior && prior.status !== 'failed' && !prior.error && ((prior.producer ?? 'internal') === 'internal' || prior.downloadReady)) {
         ctx.appendLog(`[export] re-attaching to export task ${priorTaskId}\n`)
         return settleTask(ctx, priorTaskId, mode)
       }
@@ -103,10 +170,48 @@ export function evaluationExportStage(deps: FlightStageDeps): StageAdapter {
       if (!m.links?.runId) {
         return { kind: 'failed', error: 'no run to export — the run stage must settle first' }
       }
-      if (m.opts.yolo) return startExport(ctx, 'raw')
+      // Yolo skips the ASK, not the work: scout and specs-coverage already park
+      // their hand-offs under yolo+external, so the export's default mode does
+      // the same — external defaults to the localized hand-off, internal to raw.
+      if (m.opts.yolo) return startExport(ctx, handsOffToClient(ctx) ? 'localized' : 'raw')
       return modeCheckpoint(ctx)
     },
     async onCheckpointResponse(ctx, response) {
+      // Releasing the localized hand-off, not the export-mode question.
+      if (parkedOnExternalWork(ctx, 'evaluation-export')) {
+        const m = ctx.manifest()
+        const runId = m.links?.runId
+        if (!runId) return { kind: 'failed', error: 'no run to export — the run stage must settle first' }
+        if (response.choice === 'run-internally') {
+          ctx.appendLog('[export] client handed the localized rewrite back — running it here\n')
+          return startExport(ctx, 'localized', { forceInternal: true })
+        }
+        const stale = rejectStaleSubmit(ctx, 'evaluation-export', response)
+        if (stale) return stale
+        const handOff = m.stages.find((s) => s.key === 'evaluation-export')?.checkpoint?.data as
+          | { context?: { taskId?: string } }
+          | undefined
+        const taskId = handOff?.context?.taskId
+        if (!taskId) return { kind: 'failed', error: 'external evaluation hand-off lost its task id' }
+        const detail = getRunDetail(deps.logsDir, runId)
+        if (!detail) return { kind: 'failed', error: `run ${runId} has no manifest — nothing to export` }
+        const packet = buildTestReviewPacket(detail)
+        const fallback = deterministicEvaluationRewrite(packet)
+        // The SAME parse chain the internal agent's output goes through — a
+        // structured object submission is stringified into it, so one resolver
+        // judges both producers and both answer forms.
+        const output = typeof response.data === 'string' ? response.data : JSON.stringify(response.data ?? '')
+        const rewrite = resolveRewriteOutput(output, packet, fallback)
+        if (!rewrite) {
+          return handOffLocalized(ctx, runId,
+            `the submission was not a usable rewrite — reply with { slots: [...] } (preferred) or a full { cases: [...] } envelope carrying exactly ${packet.tests.length} case(s) in the given order`)
+        }
+        const completed = await completeExternalEvaluationExport({ logsDir: deps.logsDir, detail, taskId, rewrite })
+        if (!completed.ok) return { kind: 'failed', error: completed.error }
+        // Harness predicate: the zip on disk, linked from the manifest — the
+        // same settle the internal producer goes through.
+        return settleTask(ctx, taskId, 'localized')
+      }
       const choice = response.choice ?? ''
       if (choice === 'raw' || choice === 'localized') return startExport(ctx, choice)
       return modeCheckpoint(ctx)

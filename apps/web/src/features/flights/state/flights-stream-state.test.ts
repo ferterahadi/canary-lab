@@ -70,6 +70,39 @@ describe('flightsStreamReducer', () => {
     expect(next.flights.map((f) => f.flightId)).toEqual(['fl_new', 'fl_old'])
   })
 
+  it('files an older update below the rows it arrived after', () => {
+    const start = flightsStreamReducer(EMPTY_FLIGHTS_STREAM, {
+      type: 'snapshot',
+      flights: [flightIndexEntry(manifest({ flightId: 'fl_new', createdAt: '2026-02-01T00:00:00Z' }))],
+      details: {},
+    })
+    const next = flightsStreamReducer(start, {
+      type: 'update',
+      flightId: 'fl_old',
+      manifest: manifest({ flightId: 'fl_old', createdAt: '2026-01-01T00:00:00Z' }),
+    })
+    expect(next.flights.map((f) => f.flightId)).toEqual(['fl_new', 'fl_old'])
+  })
+
+  it('keeps same-instant rows in their existing order', () => {
+    // Two flights started in the same millisecond must not swap places on every
+    // update, which is what a comparator without the equal case would do.
+    const start = flightsStreamReducer(EMPTY_FLIGHTS_STREAM, {
+      type: 'snapshot',
+      flights: [
+        flightIndexEntry(manifest({ flightId: 'fl_a', createdAt: '2026-01-01T00:00:00Z' })),
+        flightIndexEntry(manifest({ flightId: 'fl_b', createdAt: '2026-01-01T00:00:00Z' })),
+      ],
+      details: {},
+    })
+    const next = flightsStreamReducer(start, {
+      type: 'update',
+      flightId: 'fl_b',
+      manifest: manifest({ flightId: 'fl_b', createdAt: '2026-01-01T00:00:00Z' }),
+    })
+    expect(next.flights.map((f) => f.flightId)).toEqual(['fl_b', 'fl_a'])
+  })
+
   it('drops the row and its detail on removal', () => {
     const start = flightsStreamReducer(EMPTY_FLIGHTS_STREAM, {
       type: 'snapshot',

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   GettingStartedBusyError,
   GettingStartedSessionStore,
@@ -39,7 +39,12 @@ beforeEach(() => {
   changes = 0
 })
 
-afterEach(() => fs.rmSync(logsDir, { recursive: true, force: true }))
+afterEach(() => {
+  vi.useRealTimers()
+  fs.rmSync(logsDir, { recursive: true, force: true })
+})
+
+const sessionFile = (): string => path.join(logsDir, 'getting-started', 'session.json')
 
 describe('GettingStartedSessionStore', () => {
   it('allows one owner and returns a typed conflict to every competitor', () => {
@@ -132,5 +137,72 @@ describe('GettingStartedSessionStore', () => {
       active: null,
       completed: { run: { status: 'failed', target: { kind: 'run', id: 'r' } } },
     })
+  })
+
+  it('schedules one recheck per failed session, however often it is reconciled', () => {
+    const timers: Array<() => void> = []
+    const sessions = store((fn) => { timers.push(fn) })
+    const claim = sessions.claim('run', 'internal')
+    runStatus = 'failed'
+    sessions.attach(claim.sessionId, { kind: 'run', id: 'r' })
+    sessions.read()
+    expect(timers).toHaveLength(1)
+
+    // Every UI poll calls read() → reconcile(). Without the pending-set guard
+    // each one would arm another 500ms timer for the same session.
+    sessions.read()
+    sessions.reconcile()
+
+    expect(timers).toHaveLength(1)
+  })
+
+  it('rechecks a failed run on a real unref\'d timer when none is injected', async () => {
+    vi.useFakeTimers()
+    // The production server omits setTimer, so this is the only test that
+    // exercises the module's own setTimeout(...).unref() default.
+    const sessions = store()
+    const claim = sessions.claim('run', 'internal')
+    runStatus = 'failed'
+    sessions.attach(claim.sessionId, { kind: 'run', id: 'r' })
+    expect(sessions.read().active?.sessionId).toBe(claim.sessionId)
+
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(sessions.read()).toMatchObject({
+      active: null,
+      completed: { run: { status: 'failed' } },
+    })
+  })
+
+  it('settles a target that vanished out-of-band as missing', () => {
+    const sessions = store()
+    const claim = sessions.claim('run', 'internal')
+    runStatus = 'running'
+    sessions.attach(claim.sessionId, { kind: 'run', id: 'r' })
+
+    // Logs cleanup deleted the run record; the resolver has nothing to report.
+    runStatus = null
+
+    expect(sessions.read()).toMatchObject({
+      active: null,
+      completed: { run: { status: 'missing', target: { kind: 'run', id: 'r' } } },
+    })
+  })
+
+  it('ignores attach and abandon for a session that no longer holds the claim', () => {
+    const sessions = store()
+
+    sessions.attach('gs-stale', { kind: 'run', id: 'r' })
+    sessions.abandon('gs-stale')
+
+    expect(sessions.read()).toMatchObject({ active: null, completed: {} })
+    expect(changes).toBe(0)
+  })
+
+  it('reads a state file written before the completed map existed', () => {
+    fs.mkdirSync(path.dirname(sessionFile()), { recursive: true })
+    fs.writeFileSync(sessionFile(), JSON.stringify({ active: null }), 'utf8')
+
+    expect(store().read()).toEqual({ active: null, completed: {} })
   })
 })

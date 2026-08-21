@@ -1,8 +1,6 @@
 // MCP tools — the externally-driven PRD-summary and coverage-mapping passes.
 // Split out of authoring.ts; bodies are unchanged.
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import { FeatureNotFoundError } from '../../features/coverage/logic/coverage/service'
 import { coverageJobStore } from '../../features/coverage/logic/coverage/jobs/store'
 import { CoverageJobConflictError } from '../../features/coverage/logic/coverage/jobs/runner'
@@ -14,7 +12,7 @@ import {
 } from '../../features/coverage/logic/coverage/jobs/external'
 import type { ParsedRequirement } from '../../features/coverage/logic/coverage/prd-summary'
 import type { ProposedMapping } from '../../../../../shared/coverage/types'
-import { type ToolGroupContext, asJsonResult, coverageMappingInput, errorResult, summaryRequirementInput, variantDimensionInput } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, coverageMappingInput, errorResult, failureResult, summaryRequirementInput, variantDimensionInput } from '../tool-support'
 
 export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -96,7 +94,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
       })
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 
@@ -190,7 +188,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
       })
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 }

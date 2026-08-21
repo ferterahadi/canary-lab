@@ -13,7 +13,10 @@ import type { RepoCollisionChoice } from '@/shared/api/client'
 export interface CollisionPrompt {
   feature: string
   env?: string
-  mode?: 'test' | 'boot'
+  /** Required, not optional: `handleStartRun` is the only producer and always
+   *  resolves a mode, so the retry cannot silently downgrade a boot to a test
+   *  run — and there is no untestable fallback to carry. */
+  mode: 'test' | 'boot'
   info: RepoCollisionChoice
   /** Whether ports are injectable — lets the dialog offer the durable portify
    *  fix alongside worktree/queue. Best-effort (undefined if the probe failed). */
@@ -101,7 +104,7 @@ export function useRunStart({ selectedFeature, startRun, startVerification, onRu
       const runId = await startRun(prompt.feature, prompt.env, isolation, prompt.mode)
       if (prompt.mode !== 'boot') onRunStarted(runId)
     } catch (err) {
-      setStartError({ feature: prompt.feature, env: prompt.env, mode: prompt.mode ?? 'test', error: err })
+      setStartError({ feature: prompt.feature, env: prompt.env, mode: prompt.mode, error: err })
     }
   }, [collisionPrompt, startRun, onRunStarted])
 

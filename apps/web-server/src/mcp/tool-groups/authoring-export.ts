@@ -1,25 +1,17 @@
 // MCP tools — the externally-authored evaluation export lifecycle.
-// Split out of authoring.ts; bodies are unchanged.
+// Split out of authoring.ts.
 import { z } from 'zod'
-import fs from 'fs'
-import path from 'path'
 import {
-  appendEvaluationExportLog,
-  createEvaluationExportTask,
   deleteEvaluationExportTask,
   evaluationExportTaskView,
   listEvaluationExportTasks,
-  patchEvaluationExportTask,
   readEvaluationExportTask,
   readEvaluationExportZip,
-  writeEvaluationExportZip,
-  type EvaluationExportTaskRecord,
 } from '../../features/evaluation/logic/evaluation-export-store'
-import { buildEvaluationExportArchive } from '../../features/evaluation/logic/evaluation-export-archive'
+import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../features/evaluation/logic/external-evaluation-export'
 import { applyEvaluationTextSlotRewrite, buildTestReviewPacket, deterministicEvaluationRewrite, normalizeEvaluationRewrite, type EvaluationRewrite } from '../../features/evaluation/logic/test-review-export'
 import { isTerminalRunStatus } from '../../../../../shared/run-state'
-import { publishWorkspaceEvent } from '../../shared/workspace-events'
-import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, newEvaluationTaskId, safeFilename } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult } from '../tool-support'
 
 export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -40,26 +32,16 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     if (!isTerminalRunStatus(detail.manifest.status)) {
       return errorResult('evaluation export is available after the run finishes')
     }
-    const now = new Date().toISOString()
-    const task: EvaluationExportTaskRecord = {
-      taskId: newEvaluationTaskId(),
-      runId,
-      feature: detail.manifest.feature,
-      mode: 'localized',
-      producer: 'external',
-      status: 'running',
-      createdAt: now,
-      updatedAt: now,
-      downloadReady: false,
-      archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(runId)}`,
-      clientKind: client_kind,
+    // Record shape + persistence shared with the flight's export hand-off.
+    const task = createExternalEvaluationExportTask({
+      logsDir: deps.store.logsDir,
+      detail,
       sessionId: session_id,
+      clientKind: client_kind,
       ...(conversation_name ? { conversationName: conversation_name } : {}),
       language,
-      ...(external_session_url ? { externalSessionUrl: external_session_url } : {}),
-    }
-    createEvaluationExportTask(deps.store.logsDir, task)
-    appendEvaluationExportLog(deps.store.logsDir, task.taskId, '[evaluation] external export task created\n')
+      ...(external_session_url ? { sessionUrl: external_session_url } : {}),
+    })
     return asJsonResult({
       task: evaluationExportTaskView(task),
       reportSchema: externalEvaluationReportSchema(detail),
@@ -78,47 +60,50 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   }, async ({ taskId, textSlots, rewrite }) => {
     const task = readEvaluationExportTask(deps.store.logsDir, taskId)
     if (!task) return errorResult(`evaluation export task not found: ${taskId}`)
-    if ((task.producer ?? 'internal') !== 'external') return errorResult('only external export tasks can be submitted through this tool')
+    // No `?? 'internal'` default: the store's validator fills `producer` on every
+    // record it hands back, so a read task always carries one.
+    if (task.producer !== 'external') return errorResult('only external export tasks can be submitted through this tool')
     if (!rewrite && (!textSlots || textSlots.length === 0)) return errorResult('submit textSlots[] or rewrite')
     const detail = deps.store.get(task.runId)
     if (!detail) return errorResult(`run not found: ${task.runId}`)
     try {
       const packet = buildTestReviewPacket(detail)
-      const normalizedRewrite = rewrite
-        ? normalizeEvaluationRewrite(rewrite as EvaluationRewrite, packet)
-        : applyEvaluationTextSlotRewrite(deterministicEvaluationRewrite(packet), textSlots!)
-      if (!normalizedRewrite) {
-        const expected = packet.tests.length
-        const received = Array.isArray((rewrite as EvaluationRewrite | undefined)?.cases)
-          ? (rewrite as EvaluationRewrite).cases.length
-          : 0
-        return errorResult(
-          `rewrite.cases must contain exactly ${expected} ${expected === 1 ? 'entry' : 'entries'} — one per evaluated test, in the same order as reportSchema.rewrite.cases (got ${received}). Do NOT merge, dedupe, or drop skipped or duplicate run entries; every run entry needs its own case. Each case requires title, whatWasChecked, whyItMatters, and confidence (all strings).`,
-        )
+      // Only the rewrite arm can fail the count check, so the rejection lives
+      // inside it: a text-slot submission is applied OVER the deterministic
+      // rewrite, so its case list comes from the roster and can never disagree
+      // with it. Narrowing on `rewrite` here (rather than reporting a defensive
+      // 0) is also what makes `rewrite.cases` a checked read — the input schema
+      // requires the array, and a future schema change becomes a compile error.
+      let normalizedRewrite: EvaluationRewrite
+      if (rewrite) {
+        const normalized = normalizeEvaluationRewrite(rewrite as EvaluationRewrite, packet)
+        if (!normalized) {
+          const expected = packet.tests.length
+          const received = rewrite.cases.length
+          return errorResult(
+            `rewrite.cases must contain exactly ${expected} ${expected === 1 ? 'entry' : 'entries'} — one per evaluated test, in the same order as reportSchema.rewrite.cases (got ${received}). Do NOT merge, dedupe, or drop skipped or duplicate run entries; every run entry needs its own case. Each case requires title, whatWasChecked, whyItMatters, and confidence (all strings).`,
+          )
+        }
+        normalizedRewrite = normalized
+      } else {
+        normalizedRewrite = applyEvaluationTextSlotRewrite(deterministicEvaluationRewrite(packet), textSlots!)
       }
-      const built = await buildEvaluationExportArchive(detail, {
+      // Render + store + complete via the shared path (also the flight's).
+      const completed = await completeExternalEvaluationExport({
         logsDir: deps.store.logsDir,
-        audienceAdapter: 'deterministic',
+        detail,
+        taskId,
         rewrite: normalizedRewrite,
       })
-      writeEvaluationExportZip(deps.store.logsDir, taskId, built.zip)
-      appendEvaluationExportLog(deps.store.logsDir, taskId, '[evaluation] external report submitted\n')
-      const next = patchEvaluationExportTask(deps.store.logsDir, taskId, {
-        archiveBase: built.archiveBase,
-        archive: built.contents,
-        status: 'completed',
-        downloadReady: true,
-      })
-      if (next) {
-      }
+      if (!completed.ok) return errorResult(completed.error)
       return asJsonResult({
-        ...evaluationExportTaskView(next!),
+        ...evaluationExportTaskView(completed.task),
         // Compact, chat-ready digest of the rendered evaluation so the agent can
         // relay the result in the conversation instead of only pointing at the
         // UI. Kept small (titles + verdicts, not full flow steps); the full
         // rendered evaluation.html ships via download_evaluation_export.
         evaluation: {
-          featureTitle: normalizedRewrite.featureTitle ?? next!.feature,
+          featureTitle: normalizedRewrite.featureTitle ?? completed.task.feature,
           summary: normalizedRewrite.summary,
           cases: normalizedRewrite.cases.map((c) => ({ title: c.title, confidence: c.confidence })),
         },
@@ -128,7 +113,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
         ],
       })
     } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err))
+      return failureResult(err)
     }
   })
 

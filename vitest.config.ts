@@ -86,17 +86,49 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: 'coverage',
-      // Coverage threshold scope is intentionally narrow: server runtime
-      // business logic + the web-server's own lib/routes layer + the
-      // frontend's pure API/util modules. Thin I/O glue (`server.ts`,
-      // `ws/`, the formatter scripts, the node-pty wrapper) and the CLI
-      // shims are excluded below.
+      // Coverage threshold scope: every module that decides something. The
+      // server's runtime business logic, its route handlers and registrars, the
+      // whole MCP layer (the external-agent API), the cross-cutting `shared/`
+      // tree, and the frontend's non-component modules.
+      //
+      // What is deliberately OUT, and why — each of these is a decision, not a
+      // backlog item:
+      //   • `apps/web/**/components`, `shared/ui`, `shared/shell` — 155 files of
+      //     markup. At 100% BRANCH coverage a component test stops asserting
+      //     behaviour and starts asserting markup. See the note further down.
+      //   • `server.ts` and the `ws/` transports — thin I/O glue whose behaviour
+      //     is proven through the routes and stores they hand off to.
+      //   • `apps/cli/**` shims, `tools/**` scripts, the node-pty wrapper.
+      // `tools/check-conventions.mjs` holds a file-count floor so this scope
+      // cannot shrink back without someone raising the floor on purpose.
       include: [
         // Web-server business logic + route handlers (feature `logic/` and
         // `routes/`) plus the web-server-local shared infra.
         'apps/web-server/src/features/**/logic/**/*.ts',
         'apps/web-server/src/features/**/routes/**/*.ts',
         'apps/web-server/src/shared/**/*.ts',
+        // The MCP layer: the transport, the profile/tool tables, the shared
+        // result helpers, and every tool group. This is the whole external-agent
+        // surface — the tools ARE the product's API — and it was outside the gate
+        // only because it landed as one 2740-line `tools.ts` that nothing could
+        // unit-test. The tool-groups split fixed that, so it is gated now.
+        'apps/web-server/src/mcp/**/*.ts',
+        // Run-loop logic that happens to sit beside `index.ts` rather than under
+        // `logic/`: the route-deps factory, the stream wiring, the scheduler
+        // wrapper, the local-heal restart and the heal-agent choice. Same KIND of
+        // code as the gated `logic/` tree — enumerated rather than globbed so a
+        // future thin-glue file in this directory is a deliberate addition.
+        'apps/web-server/src/features/runs/pick-heal-agent.ts',
+        'apps/web-server/src/features/runs/restart-local-heal.ts',
+        'apps/web-server/src/features/runs/run-scheduling.ts',
+        'apps/web-server/src/features/runs/run-stream-wiring.ts',
+        'apps/web-server/src/features/runs/runs-route-deps.ts',
+        // Each feature's registrar — it wires that feature's routes and jobs onto
+        // Fastify from the ServerContext, so a mistake here takes the whole
+        // feature offline at boot. NOT re-export barrels.
+        'apps/web-server/src/features/*/index.ts',
+        // The DI context every registrar above reads.
+        'apps/web-server/src/server-context.ts',
         // Cross-cutting root `shared/` tree: consumed by the CLI, the server and
         // the web app alike, and published as `canary-lab/feature-support/*`.
         //
@@ -119,23 +151,40 @@ export default defineConfig({
         'shared/run-mode.ts',
         'shared/run-state.ts',
         'shared/verification.ts',
-        // Frontend pure modules. React components are excluded — only the
-        // API client, pure utilities, and benchmark state are gated.
+        // Frontend non-component modules: the API client, the pure utilities,
+        // and every `state/` tree — the stores, the context providers and the
+        // hooks that own socket lifecycles, fetch orchestration and navigation.
+        // A provider is state with a JSX wrapper, not markup, so it is gated
+        // like the reducer beside it: its tests drive fake sockets and stubbed
+        // API calls and assert observable behaviour, never rendered output.
         //
-        // That exclusion is a decision, not a backlog item. Measured: the 173
-        // files under `features/*/components`, `features/*/state`, `shared/ui`,
-        // `shared/shell` and `shared/state` sit at ~65% statements, with 150 of
-        // them below 100. Reaching the gate's 100/100/100 there means several
-        // hundred render tests, and at 100% BRANCH coverage a component test
-        // stops asserting behaviour and starts asserting markup — which is the
-        // kind of test that breaks on every restyle and catches nothing. The
-        // logic worth pinning is extracted into the gated modules above; that is
-        // what `features/*/lib` and `features/*/utils` are for. Revisit only if
-        // component bugs start reaching users, and then by extracting more logic
-        // rather than by lowering the threshold for one directory.
+        // What stays out is `features/*/components`, `shared/ui` and
+        // `shared/shell` — 155 files of actual markup. That exclusion is a
+        // decision, not a backlog item: reaching 100% BRANCH coverage there
+        // means a component test stops asserting behaviour and starts asserting
+        // markup, which is the kind of test that breaks on every restyle and
+        // catches nothing. The logic worth pinning gets extracted into the
+        // gated modules instead; that is what `features/*/lib`,
+        // `features/*/utils` and `features/*/state` are for. Revisit only if
+        // component bugs start reaching users, and then by extracting more
+        // logic rather than by lowering the threshold for one directory.
         'apps/web/src/shared/api/**/*.ts',
         'apps/web/src/shared/lib/**/*.ts',
+        // Sits directly in `shared/`, not in `shared/lib/`, which is the only
+        // reason it was never gated: it is the same kind of pure module, and the
+        // stable test ids it derives are what make one badge mean the same test
+        // in the Tests column, Playback and the Coverage Ledger.
+        'apps/web/src/shared/test-numbering.ts',
+        'apps/web/src/shared/state/**/*.ts',
+        // Enumerated per feature rather than as `**/state/**`: these patterns
+        // are matched UNANCHORED (see the note above), so the `apps/web/src/`
+        // prefix is what keeps them off the server's own trees.
         'apps/web/src/features/benchmark/state/**/*.ts',
+        'apps/web/src/features/evaluation/state/**/*.ts',
+        'apps/web/src/features/flights/state/**/*.ts',
+        'apps/web/src/features/portify/state/**/*.ts',
+        'apps/web/src/features/runs/state/**/*.ts',
+        'apps/web/src/features/wizard/state/**/*.ts',
         // The per-feature equivalents of the two lines above. These are the same
         // KIND of module — pure functions and socket/type wrappers, no JSX — and
         // they were outside the gate only because the shared versions were moved

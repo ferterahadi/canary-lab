@@ -7,7 +7,8 @@ import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { featureDirFor, pollUntil, type FlightStageDeps } from './context'
 import { editFingerprint } from '../../../portify/logic/runtime/git-ops'
 import { portifyJob } from './stage-jobs'
-import { CHECKPOINT_OPTIONS } from '../types'
+import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
+import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 
 // Port-ification runs by default — every flight attempts to leave the feature
 // concurrency-ready. The stage drives the existing portify background job
@@ -20,6 +21,14 @@ import { CHECKPOINT_OPTIONS } from '../types'
 // flight retries — skipping is a decision, not a failure. A natively
 // port-injectable service is the fast path through the stage (double-boot
 // passes with zero edits, no review needed), not a skip.
+//
+// Under an external stageProducer the stage starts an EXTERNAL workflow and
+// PARKS on one external-work checkpoint for the whole engagement — the client
+// drives the existing standalone loop (submit_external_portify / get_portify /
+// revise) against the workflowId, and the checkpoint submit means "check the
+// workflow now": consume re-reads its status and the overlay mark, re-parking
+// while it is still editing/verifying. No stage-side poll runs in that mode,
+// so no idle budget can starve a client mid-edit.
 
 const PORTIFY_TIMEOUT_MS = 30 * 60 * 1000
 
@@ -206,6 +215,60 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     return settleReview(ctx, workflowId, view)
   }
 
+  /** Park the whole external engagement on ONE checkpoint. The prompt is the
+   *  runner's own instructions (the same task the local agent gets); the rounds
+   *  ride the standalone tools against `workflowId`, and this park just waits
+   *  for "it is ready — check it". */
+  const parkExternal = (
+    ctx: StageContext,
+    workflowId: string,
+    instructions: string,
+    context: Record<string, unknown>,
+    note?: string,
+  ): StageOutcome =>
+    externalWorkCheckpoint(ctx, 'portify', instructions, {
+      message:
+        `${note ? `${note}\n\n` : ''}Port-ify in your own client: edit the worktree paths in context.targets so every listener reads an injected port and declare the matching \`ports\` slots in context.configPath, then drive the standalone loop — submit_external_portify("${workflowId}"), poll get_portify, re-edit on a failed verify. STOP at status "ready-to-save" and respond submit here (no data needed — Canary re-reads the workflow and the overlay mark). Do NOT call save_portify or cancel_portify: this flight owns the save decision. Answer run-internally to hand the whole job to Canary's own agent.`,
+      context: { workflowId, ...context },
+    })
+
+  // External producer: start the workflow through the same route, producer
+  // 'external' — Canary sets up the scratch worktrees and parks at `editing`
+  // with no local agent. The stage then PARKS instead of polling.
+  const startExternal = async (ctx: StageContext): Promise<StageOutcome> => {
+    const m = ctx.manifest()
+    const started = await deps.inject({
+      method: 'POST',
+      url: '/api/portify',
+      payload: { feature: m.feature, producer: 'external', sessionId: `flight:${m.flightId}` },
+    })
+    const body = started.json() as { workflowId?: string; targets?: unknown; configPath?: string; instructions?: string; error?: string }
+    if (started.statusCode >= 300 || !body.workflowId) {
+      return { kind: 'failed', error: `portify start rejected (${started.statusCode}): ${body.error ?? 'unknown'}` }
+    }
+    const workflowId = body.workflowId
+    ctx.appendLog(`[portify] external workflow ${workflowId} started — handed to the client\n`)
+    // Same pin as the internal path: the drill-through and the teardown reach
+    // the workflow through this id while the stage is parked.
+    ctx.setProgress({ workflowId } satisfies PortifyStageProgress)
+    return parkExternal(ctx, workflowId, body.instructions ?? '', {
+      ...(body.targets === undefined ? {} : { targets: body.targets }),
+      ...(body.configPath === undefined ? {} : { configPath: body.configPath }),
+    })
+  }
+
+  /** Which producer runs the workflow once the gate said 'run'. */
+  const startWorkflow = (ctx: StageContext): Promise<StageOutcome> =>
+    handsOffToClient(ctx) ? startExternal(ctx) : startAndFollow(ctx)
+
+  /** Re-park the SAME engagement with a status note — the ask (the workflowId
+   *  and the task) has not changed, so the checkpoint is reused wholesale and
+   *  keeps its hand-off id (rejectStaleSubmit's rule). */
+  const reparkExternal = (ctx: StageContext, checkpoint: FlightCheckpoint, why: string): StageOutcome => {
+    ctx.appendLog(`[portify] external submit re-parked — ${why}\n`)
+    return { kind: 'checkpoint', checkpoint: { ...checkpoint, data: { ...(checkpoint.data as object), lastRejection: why } } }
+  }
+
   // The upfront ask, BEFORE any worktree/agent/double-boot cost is spent.
   // Autopilot answers 'run' (the pipeline default); with autopilot off — or on
   // an explicitly re-entered stage — the human gets the skip here instead of
@@ -254,14 +317,54 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
 
       // Yolo skips every ask; otherwise the gate parks (autopilot answers it
       // 'run' automatically, so the default pipeline never stalls here).
-      if (m.opts.yolo) return startAndFollow(ctx)
+      if (m.opts.yolo) return startWorkflow(ctx)
       return gateCheckpoint(m.feature)
     },
     async onCheckpointResponse(ctx, response) {
+      // Releasing the external ENGAGEMENT park — the whole multi-round job
+      // rides the standalone tools; a submit here means "check the workflow".
+      if (parkedOnExternalWork(ctx, 'portify')) {
+        const m = ctx.manifest()
+        const checkpoint = ctx.manifest().stages.find((s) => s.key === 'portify')!.checkpoint!
+        const handOff = (checkpoint.data as { context?: { workflowId?: string } } | undefined)?.context
+        const workflowId = handOff?.workflowId
+        if (response.choice === 'run-internally') {
+          ctx.appendLog('[portify] client handed the job back — running the internal workflow\n')
+          if (workflowId) {
+            await deps.inject({ method: 'POST', url: `/api/portify/${encodeURIComponent(workflowId)}/cancel`, payload: {} }).catch(() => {})
+          }
+          return startAndFollow(ctx)
+        }
+        const stale = rejectStaleSubmit(ctx, 'portify', response)
+        if (stale) return stale
+        if (!workflowId) return { kind: 'failed', error: 'external portify hand-off lost its workflow id' }
+        // The verdict is the workflow record + the overlay mark — never the
+        // client's account of what it did.
+        const view = await read(workflowId)
+        if (view.status === 'ready-to-save') {
+          const hasEdits = Boolean(view.diff && view.diff.trim())
+          if (!hasEdits || m.opts.yolo) {
+            if (!hasEdits) ctx.appendLog('[portify] double-boot passed with zero edits — native port injection\n')
+            return saveAndVerify(ctx, workflowId, hasEdits)
+          }
+          return settleReview(ctx, workflowId, view)
+        }
+        if (view.status === 'saved') {
+          // The client called save_portify despite the instructions — accept the
+          // outcome, but on the harness-owned mark, exactly as saveAndVerify does.
+          return overlayExists(featureDirFor(deps, m.feature))
+            ? { kind: 'done', evidence: { workflowId, edits: Boolean(view.diff) } }
+            : { kind: 'failed', error: 'portify saved but the overlay mark is missing' }
+        }
+        if (view.status === 'failed' || view.status === 'aborted') {
+          return { kind: 'failed', error: `portify ${view.status}${view.error ? `: ${view.error}` : ''}` }
+        }
+        return reparkExternal(ctx, checkpoint, `the workflow is still "${view.status ?? 'starting'}" — keep driving submit_external_portify / get_portify and submit here once it reaches ready-to-save`)
+      }
       const stage = ctx.manifest().stages.find((s) => s.key === 'portify')
       const cp = stage?.checkpoint
       if (cp?.kind === 'portify-gate') {
-        if (response.choice === 'run') return startAndFollow(ctx)
+        if (response.choice === 'run') return startWorkflow(ctx)
         if (response.choice === 'skip') return { kind: 'skipped', reason: SKIP_REASON }
         // Unknown (e.g. a stale replayed 'apply' from an older park) → re-ask.
         return { kind: 'checkpoint', checkpoint: cp }
@@ -287,7 +390,15 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         if (!feedback) {
           return applyCheckpoint(ctx.manifest().feature, workflowId, data.diff, 'Request changes needs feedback text — say what to change.')
         }
-        const revised = await deps.inject({ method: 'POST', url: `/api/portify/${encodeURIComponent(workflowId)}/revise`, payload: { feedback } })
+        // Under an external producer the reopened editing window belongs to the
+        // client (reviseExternalPortify — same worktree, no local agent), so the
+        // stage re-parks the engagement instead of polling.
+        const external = handsOffToClient(ctx)
+        const revised = await deps.inject({
+          method: 'POST',
+          url: `/api/portify/${encodeURIComponent(workflowId)}/revise`,
+          payload: { feedback, ...(external ? { external: true } : {}) },
+        })
         if (revised.statusCode >= 300) {
           // e.g. the server restarted since verification — the worktrees (and
           // the agent session revise resumes) are gone. The verified diff is
@@ -296,6 +407,10 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
           return applyCheckpoint(ctx.manifest().feature, workflowId, data.diff, `Revise unavailable${why ? ` — ${why}` : ''}. Save or discard.`)
         }
         ctx.appendLog(`[portify] revise requested: ${feedback}\n`)
+        if (external) {
+          const instructions = (revised.json() as { instructions?: string }).instructions
+          return parkExternal(ctx, workflowId, instructions ?? feedback, {}, 'The reviewer requested changes — the workflow is back in your editing window.')
+        }
         const view = await awaitReview(ctx, workflowId)
         return settleReview(ctx, workflowId, view)
       }

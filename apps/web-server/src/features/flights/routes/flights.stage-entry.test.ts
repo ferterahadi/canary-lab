@@ -13,6 +13,8 @@ vi.mock('../../runs/logic/run-store', async (importOriginal) => {
 })
 
 const { buildStageEntryValidator } = await import('./flights')
+// Not re-exported from the barrel — the conductor context is its only consumer.
+const { buildStageEntryLinkResolver } = await import('./flight-route-support')
 
 // `evaluation-export` is the only stage whose prerequisite is a *run*, so it's
 // the entry point that consults the standalone-run fallback. Every earlier
@@ -155,5 +157,39 @@ describe('buildStageEntryValidator — the standalone-run fallback', () => {
     const validator = buildStageEntryValidator(featuresDir, logsDir)
     expect(validator({ feature: FEATURE, fromStage: 'evaluation-export', env: 'local', existing: { links: { runId: 'r9' } } })).toBeNull()
     expect(runMocks.listRuns).not.toHaveBeenCalled()
+  })
+})
+
+// The validator decides whether the jump is allowed; this resolver decides what
+// the Evaluation Export stage then reads as its input. They consult the same
+// index, so a resolver that returned nothing where the validator said yes would
+// start the stage with no run to export.
+describe('buildStageEntryLinkResolver', () => {
+  const resolve = (existing?: { links?: { runId?: string } } | null) =>
+    buildStageEntryLinkResolver(logsDir)({
+      feature: FEATURE,
+      fromStage: 'evaluation-export',
+      existing: existing as never,
+    })
+
+  it('adopts the standalone passed run as the stage input', () => {
+    useRealIndex([runRow({ runId: 'r7', status: 'passed' })])
+    expect(resolve()).toEqual({ runId: 'r7' })
+  })
+
+  it('resolves nothing when the feature has no passed run', () => {
+    useRealIndex([runRow({ status: 'failed' })])
+    expect(resolve()).toBeUndefined()
+  })
+
+  it('leaves a record that already links a run alone', () => {
+    useRealIndex([runRow({ runId: 'r7', status: 'passed' })])
+    expect(resolve({ links: { runId: 'r9' } })).toBeUndefined()
+    expect(runMocks.listRuns).not.toHaveBeenCalled()
+  })
+
+  it('resolves nothing for any other entry stage', () => {
+    useRealIndex([runRow({ runId: 'r7', status: 'passed' })])
+    expect(buildStageEntryLinkResolver(logsDir)({ feature: FEATURE, fromStage: 'run' })).toBeUndefined()
   })
 })

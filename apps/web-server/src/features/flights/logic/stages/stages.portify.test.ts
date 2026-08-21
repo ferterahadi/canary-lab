@@ -535,3 +535,320 @@ describe('portify stage', () => {
   })
 
 })
+
+describe('portify — external producer', () => {
+  beforeEach(() => {
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+  })
+
+  const externalManifest = (over: Partial<FlightManifest> = {}) =>
+    manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: true, stageProducer: 'external' },
+      currentStage: 'portify',
+      ...over,
+    })
+
+  const markPortified = (): void => {
+    const dir = path.join(featuresDir, 'checkout', 'portify')
+    fs.mkdirSync(dir, { recursive: true })
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({ version: 1, featureName: 'checkout', agent: 'claude', repos: [{ name: 'app' }], capturedAt: 'x' }))
+  }
+
+  const parkOf = (outcome: StageOutcome) => {
+    expect(outcome.kind).toBe('checkpoint')
+    const cp = (outcome as Extract<StageOutcome, { kind: 'checkpoint' }>).checkpoint
+    return { kind: cp.kind, message: cp.message, data: (cp.data ?? {}) as Record<string, unknown> }
+  }
+
+  const externalPark = (workflowId = 'wf-1', over: Record<string, unknown> = {}) => ({
+    checkpoint: {
+      kind: 'external-work' as const,
+      message: 'x',
+      data: { handOffId: 'live-id', context: { workflowId }, ...over },
+    },
+  })
+
+  it('yolo + external starts an EXTERNAL workflow and parks the whole engagement — no stage-side poll', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
+      if (call.method === 'POST' && call.url === '/api/portify') {
+        return { statusCode: 201, body: { workflowId: 'wf-1', targets: [{ name: 'app', editPath: '/wt/app' }], configPath: '/cfg/feature.config.cjs', instructions: 'Port-ify the listeners.' } }
+      }
+      return undefined
+    }, calls)
+    const { ctx, progressLog } = ctxFor(externalManifest())
+    const cp = parkOf(await portifyStage(deps({ inject })).run(ctx))
+    expect(cp.kind).toBe('external-work')
+    expect(cp.data.stage).toBe('portify')
+    // The runner's own task instructions, workflowId + edit targets alongside.
+    expect(cp.data.prompt).toBe('Port-ify the listeners.')
+    expect(cp.data.context).toMatchObject({ workflowId: 'wf-1', configPath: '/cfg/feature.config.cjs' })
+    expect(cp.message).toContain('Do NOT call save_portify')
+    // Producer + flight identity rode the start request.
+    const start = calls.find((c) => c.method === 'POST' && c.url === '/api/portify')
+    expect(start?.payload).toMatchObject({ producer: 'external', sessionId: 'flight:fl-test' })
+    // The id is pinned for drill-through/teardown, and nothing polled the workflow.
+    expect(progressLog).toContainEqual({ workflowId: 'wf-1' })
+    expect(calls.some((c) => c.method === 'GET' && c.url === '/api/portify/wf-1')).toBe(false)
+  })
+
+  it('the gate answered "run" under an external producer starts the external workflow', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') {
+        // No instructions/targets/configPath — a degraded start still parks
+        // (the workflowId is the load-bearing part; the client can get_portify).
+        return { statusCode: 201, body: { workflowId: 'wf-1' } }
+      }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', { checkpoint: { kind: 'portify-gate', message: 'q', options: ['run', 'skip'] } })
+    const cp = parkOf(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run' }))
+    expect(cp.kind).toBe('external-work')
+    expect(cp.data.prompt).toBe('')
+    expect(cp.data.context).toEqual({ workflowId: 'wf-1' })
+  })
+
+  it('a submit while the workflow is still editing re-parks the SAME engagement with the live status', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'editing', producer: 'external' } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    const cp = parkOf(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' }))
+    expect(cp.kind).toBe('external-work')
+    expect(String(cp.data.lastRejection)).toContain('still "editing"')
+    expect(cp.data.handOffId).toBe('live-id')
+  })
+
+  it('a submit at ready-to-save parks the portify-apply review (non-yolo)', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'ready-to-save', diff: '+ port' } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', externalPark())
+    const outcome = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf-1', diff: '+ port' } } })
+  })
+
+  it('a submit at ready-to-save with zero edits saves and settles on the overlay mark (yolo saves too)', async () => {
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    // The consume's read sees ready-to-save with no diff; the save poll that
+    // follows sees 'saved' — sequenced on call count.
+    let reads = 0
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') {
+        reads += 1
+        return { statusCode: 200, body: reads === 1 ? { status: 'ready-to-save', diff: '' } : { status: 'saved' } }
+      }
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/save') { markPortified(); return { statusCode: 200, body: {} } }
+      return undefined
+    })
+    const outcome = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf-1', edits: false } })
+  })
+
+  it('a workflow the client saved ITSELF settles on the overlay mark alone', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'saved', diff: '+ port' } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    // No mark → the claim of "saved" does not pass.
+    const missing = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })
+    expect(missing).toMatchObject({ kind: 'failed', error: expect.stringContaining('overlay mark is missing') })
+    markPortified()
+    const { ctx: ctx2, setStage: setStage2 } = ctxFor(externalManifest())
+    setStage2('portify', externalPark())
+    const done = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx2, { choice: 'submit', token: 'live-id' })
+    expect(done).toMatchObject({ kind: 'done', evidence: { workflowId: 'wf-1', edits: true } })
+  })
+
+  it('a failed workflow fails the stage', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'failed', error: 'boom' } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    expect(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })).toMatchObject({
+      kind: 'failed',
+      error: 'portify failed: boom',
+    })
+  })
+
+  it('discards a submit answering a superseded hand-off', async () => {
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    expect(await portifyStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'stale-id' })).toMatchObject({
+      kind: 'checkpoint',
+      checkpoint: { data: { lastRejection: 'stale_submission', handOffId: 'live-id' } },
+    })
+  })
+
+  it('fails when the hand-off lost its workflow id', async () => {
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark('wf-1', { context: {} }))
+    expect(await portifyStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })).toMatchObject({
+      kind: 'failed',
+      error: expect.stringContaining('lost its workflow id'),
+    })
+  })
+
+  it('run-internally cancels the external workflow and runs the internal one', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/cancel') return { statusCode: 200, body: {} }
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-2' } }
+      if (call.method === 'GET' && call.url === '/api/portify/wf-2') return { statusCode: 200, body: { status: 'ready-to-save', diff: '+ p' } }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', externalPark())
+    const outcome = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })
+    // The internal workflow parks the normal review; the external one was cancelled
+    // and the fresh start carried NO producer flag.
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply', data: { workflowId: 'wf-2' } } })
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/portify/wf-1/cancel')).toBe(true)
+    const start = calls.find((c) => c.method === 'POST' && c.url === '/api/portify')
+    expect((start?.payload as { producer?: string }).producer).toBeUndefined()
+  })
+
+  it('a revise on the review re-opens the EXTERNAL window and re-parks the engagement', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/revise') return { statusCode: 200, body: { instructions: 'Revised task — ports only.' } }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', { checkpoint: { kind: 'portify-apply', message: 'save?', data: { workflowId: 'wf-1', diff: '+ p' } } })
+    const cp = parkOf(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'use env-driven ports' }))
+    expect(cp.kind).toBe('external-work')
+    expect(cp.data.prompt).toBe('Revised task — ports only.')
+    expect(cp.message).toContain('requested changes')
+    // The route was asked for the EXTERNAL reopen, not the local revise agent.
+    expect(calls.find((c) => c.url.endsWith('/revise'))?.payload).toMatchObject({ external: true, feedback: 'use env-driven ports' })
+  })
+  it('a rejected external start fails the stage with the server reason (or "unknown" without one)', async () => {
+    const rejected = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 500, body: { error: 'nope' } }
+      return undefined
+    })
+    expect(await portifyStage(deps({ inject: rejected })).run(ctxFor(externalManifest()).ctx)).toMatchObject({
+      kind: 'failed',
+      error: 'portify start rejected (500): nope',
+    })
+
+    const idless = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify') return { statusCode: 200, body: [] }
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: {} }
+      return undefined
+    })
+    expect(await portifyStage(deps({ inject: idless })).run(ctxFor(externalManifest()).ctx)).toMatchObject({
+      kind: 'failed',
+      error: 'portify start rejected (201): unknown',
+    })
+  })
+
+  it('run-internally without a recorded workflow id skips the cancel and starts internally', async () => {
+    const calls: InjectCall[] = []
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, body: { workflowId: 'wf-2' } }
+      if (call.method === 'GET' && call.url === '/api/portify/wf-2') return { statusCode: 200, body: { status: 'ready-to-save', diff: '+ p' } }
+      return undefined
+    }, calls)
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', externalPark('wf-1', { context: {} }))
+    const outcome = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply' } })
+    expect(calls.some((c) => c.url.endsWith('/cancel'))).toBe(false)
+  })
+
+  it('run-internally survives a rejecting cancel (best-effort, never a sink)', async () => {
+    const inject: FlightInject = async (call) => {
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/cancel') throw new Error('cancel boom')
+      if (call.method === 'POST' && call.url === '/api/portify') return { statusCode: 201, json: () => ({ workflowId: 'wf-2' }) }
+      if (call.method === 'GET' && call.url === '/api/portify/wf-2') return { statusCode: 200, json: () => ({ status: 'ready-to-save', diff: '+ p' }) }
+      throw new Error(`unstubbed ${call.method} ${call.url}`)
+    }
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', externalPark())
+    const outcome = await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'run-internally' })
+    expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'portify-apply' } })
+  })
+
+  it('a yolo submit at ready-to-save WITH edits saves without the zero-edit log', async () => {
+    let reads = 0
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') {
+        reads += 1
+        return { statusCode: 200, body: reads === 1 ? { status: 'ready-to-save', diff: '+ port' } : { status: 'saved' } }
+      }
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/save') { markPortified(); return { statusCode: 200, body: {} } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    expect(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })).toMatchObject({
+      kind: 'done',
+      evidence: { workflowId: 'wf-1', edits: true },
+    })
+  })
+
+  it('a client-saved workflow with NO diff settles as a zero-edit save', async () => {
+    markPortified()
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'saved' } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    expect(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })).toMatchObject({
+      kind: 'done',
+      evidence: { workflowId: 'wf-1', edits: false },
+    })
+  })
+
+  it('an aborted workflow (no error detail) fails the stage plainly', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: { status: 'aborted' } }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    expect(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' })).toMatchObject({
+      kind: 'failed',
+      error: 'portify aborted',
+    })
+  })
+
+  it('a submit before the workflow reports any status re-parks as "starting"', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'GET' && call.url === '/api/portify/wf-1') return { statusCode: 200, body: {} }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest())
+    setStage('portify', externalPark())
+    const cp = parkOf(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'submit', token: 'live-id' }))
+    expect(String(cp.data.lastRejection)).toContain('still "starting"')
+  })
+
+  it('a revise whose reopen returns no instructions re-parks with the feedback as the task', async () => {
+    const inject = makeInject((call) => {
+      if (call.method === 'POST' && call.url === '/api/portify/wf-1/revise') return { statusCode: 200, body: {} }
+      return undefined
+    })
+    const { ctx, setStage } = ctxFor(externalManifest({ opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }))
+    setStage('portify', { checkpoint: { kind: 'portify-apply', message: 'save?', data: { workflowId: 'wf-1', diff: '+ p' } } })
+    const cp = parkOf(await portifyStage(deps({ inject })).onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'use env ports' }))
+    expect(cp.kind).toBe('external-work')
+    expect(cp.data.prompt).toBe('use env ports')
+  })
+})
+

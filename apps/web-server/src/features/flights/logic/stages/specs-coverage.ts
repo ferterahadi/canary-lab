@@ -1,7 +1,8 @@
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
-import { computeFeatureCoverage, LEGACY_MAPPINGS_JSON, runCoverageEngine } from '../../../coverage/logic/coverage/service'
+import { applyExternalCoverageMappings, buildCoverageMappingContext, computeFeatureCoverage, LEGACY_MAPPINGS_JSON, runCoverageEngine } from '../../../coverage/logic/coverage/service'
+import { IncompleteCoverageAnswerError, missingFromRoster, parseMappingSubmission } from '../../../coverage/logic/coverage/external-submissions'
 import { COVERAGE_STATE_JSON } from '../../../coverage/logic/coverage/run-state'
 import { readPrdSummary } from '../../../coverage/logic/coverage/prd-summary'
 import { applyExternalDraftFiles } from '../../../config/logic/feature-authoring'
@@ -16,7 +17,7 @@ import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type Fligh
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
-import { CHECKPOINT_OPTIONS } from '../types'
+import { CHECKPOINT_OPTIONS, type FlightCheckpoint } from '../types'
 
 // The specs↔coverage loop: the agent edits <featureDir>/e2e/*.spec.ts in place
 // (Read/Write/Edit tools — no JSON proposal), the existing draft-apply
@@ -28,6 +29,12 @@ import { CHECKPOINT_OPTIONS } from '../types'
 // iteration's prompt so the agent repairs broken specs instead of the loop
 // silently burning rounds. Bounded: when the loop can't close the remaining
 // gaps it parks on coverage-stuck instead of spinning.
+//
+// Under an external stageProducer BOTH agent jobs hand off, sequentially: the
+// authoring park releases into validation, and a validated batch parks a
+// second time for the mapping (same prompt + roster the standalone
+// start_external_coverage hands out). Only one checkpoint is ever outstanding,
+// so the conductor's one-park-per-stage model needs no second slot.
 
 const MAX_ITERATIONS = 5
 /** Cap on validation-error text injected into the next prompt. */
@@ -215,54 +222,39 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     } satisfies SpecsCoverageProgress)
   }
 
-  /** Validate → dry-run → map → recompute: the half of a pass that runs AFTER the
-   *  specs were written, by WHICHEVER producer wrote them. Shared by the local
-   *  agent and the external hand-off deliberately — the pass verdict is the
-   *  harness-computed ledger plus a real tsc/playwright dry-run, never the
-   *  producer's account of what it did. Returns the state the next pass starts
-   *  from; a rejected or non-compiling batch burns an iteration exactly as before. */
-  const afterAuthoring = async (
+  const bumpPass = (state: PassState, over: Partial<PassState>): PassState => ({
+    iteration: state.iteration + 1,
+    validationErrors: '',
+    passes: state.passes,
+    ...over,
+  })
+
+  /** Tags landed (by WHICHEVER mapper) → record the pass off a fresh recompute
+   *  and continue the loop. The verdict ledger is the stage's own compute — the
+   *  producer's account of what it mapped never reaches a loop decision. */
+  const settleMapped = (
     ctx: StageContext,
     prep: Extract<Prep, { ok: true }>,
     state: PassState,
-    ledger: CoverageLedger,
-  ): Promise<{ state: PassState; ledger: CoverageLedger }> => {
+  ): Promise<StageOutcome> => {
     const m = ctx.manifest()
-    const bump = (over: Partial<PassState>): PassState => ({
-      iteration: state.iteration + 1,
-      validationErrors: '',
-      passes: state.passes,
-      ...over,
-    })
-    // The producer edited <featureDir>/e2e/*.spec.ts in place; re-read what
-    // landed on disk and gate it through the same draft validation as the
-    // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
-    publishProgress(ctx, ledger, prep.target, state, 'validating')
-    const applied = applyExternalDraftFiles({ featureDir: prep.featureDir })
-    if (!applied.ok) {
-      ctx.appendLog(`[specs] spec files rejected: ${applied.error}\n`)
-      return { ledger, state: bump({ validationErrors: applied.error, passes: [...state.passes, { pass: state.iteration, note: 'spec files rejected' }] }) }
-    }
-    ctx.appendLog(`[specs] validated ${applied.written.length} file(s)\n`)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: m.feature })
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
+    const mapped = compute(m.feature)
+    const next = bumpPass(state, { passes: [...state.passes, { pass: state.iteration, coveragePct: mapped.coveragePct, gapsOpen: gapRows(mapped).length }] })
+    // Settle the pass in the published shape (phase stays 'mapping' — the next
+    // pass head flips it to 'authoring' if another one starts).
+    publishProgress(ctx, mapped, prep.target, { ...state, passes: next.passes }, 'mapping')
+    return runPass(ctx, next, mapped)
+  }
 
-    // Deterministic dry-run: specs that don't compile/list can't raise
-    // coverage — skip the mapping agent, keep the ledger current, and feed
-    // the errors into the next iteration's prompt instead of hard-aborting.
-    const dryRun = await validateSpecs({ featureDir: prep.featureDir, projectRoot: deps.projectRoot })
-    if (!dryRun.ok) {
-      ctx.appendLog(`[specs] dry-run validation failed:\n${dryRun.errors.slice(0, MAX_VALIDATION_ERROR_CHARS)}\n`)
-      return {
-        ledger: compute(m.feature),
-        state: bump({ validationErrors: dryRun.errors, passes: [...state.passes, { pass: state.iteration, note: 'specs failed to compile/list' }] }),
-      }
-    }
-
-    publishProgress(ctx, ledger, prep.target, state, 'mapping')
-    // The mapping half stays a local engine spawn even under an external
-    // stageProducer: it is a DIFFERENT agent job with its own standalone
-    // hand-off (start_external_coverage), and nesting a second hand-off inside
-    // this one would need two parked checkpoints on a single stage.
+  /** The mapping half as a local engine spawn — the internal producer's path,
+   *  and the per-step escape hatch when the client hands a mapping back. */
+  const mapInternally = async (
+    ctx: StageContext,
+    prep: Extract<Prep, { ok: true }>,
+    state: PassState,
+  ): Promise<StageOutcome> => {
+    const m = ctx.manifest()
     await runEngine({
       featuresDir: deps.featuresDir,
       logsDir: deps.logsDir,
@@ -289,13 +281,86 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         })
       },
     })
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: m.feature })
-    const mapped = compute(m.feature)
-    const next = bump({ passes: [...state.passes, { pass: state.iteration, coveragePct: mapped.coveragePct, gapsOpen: gapRows(mapped).length }] })
-    // Settle the pass in the published shape (phase stays 'mapping' — the next
-    // pass head flips it to 'authoring' if another one starts).
-    publishProgress(ctx, mapped, prep.target, { ...state, passes: next.passes }, 'mapping')
-    return { state: next, ledger: mapped }
+    return settleMapped(ctx, prep, state)
+  }
+
+  /** Park the mapping half on the client — the stage's SECOND, sequential
+   *  hand-off. The authoring park has been consumed by the time this is built,
+   *  so only one checkpoint is ever outstanding: the conductor's
+   *  one-park-per-stage model holds without a second slot. The roster is pinned
+   *  at park time (the standalone job's externalTestRoster rule): the answer is
+   *  judged against what the client was HANDED, never a suite that moved while
+   *  it worked. */
+  const mappingHandOff = (
+    ctx: StageContext,
+    prep: Extract<Prep, { ok: true }>,
+    state: PassState,
+  ): StageOutcome => {
+    const mappingContext = buildCoverageMappingContext({ featuresDir: deps.featuresDir, feature: ctx.manifest().feature })
+    ctx.appendLog(`[specs] pass ${state.iteration} mapping handed off to the external client\n`)
+    return externalWorkCheckpoint(ctx, 'specs-coverage', mappingContext.prompt, {
+      message: `Map the tests onto the requirements in your own client (pass ${state.iteration}), then respond with { mappings[], unmappable[] } on \`data\` — every roster test must appear in one of them. Canary writes the tags itself and recomputes the ledger.`,
+      context: { phase: 'mapping', pass: state, roster: mappingContext.tests.map((t) => t.testName), target: prep.target },
+    })
+  }
+
+  /** Re-park the SAME mapping ask with the rejection reason. The checkpoint is
+   *  reused wholesale (rejectStaleSubmit's rule): the roster and prompt were
+   *  pinned at hand-off time and the ask has not changed — only the answer fell
+   *  short. `lastRejection` rides on data rather than the message so a second
+   *  rejection cannot stack prefixes. */
+  const reparkMapping = (ctx: StageContext, checkpoint: FlightCheckpoint, why: string): StageOutcome => {
+    ctx.appendLog(`[specs] mapping submission rejected — ${why}\n`)
+    return { kind: 'checkpoint', checkpoint: { ...checkpoint, data: { ...(checkpoint.data as object), lastRejection: why } } }
+  }
+
+  /** Validate → dry-run → map → recompute: the half of a pass that runs AFTER the
+   *  specs were written, by WHICHEVER producer wrote them. Shared by the local
+   *  agent and the external hand-off deliberately — the pass verdict is the
+   *  harness-computed ledger plus a real tsc/playwright dry-run, never the
+   *  producer's account of what it did. A rejected or non-compiling batch burns
+   *  an iteration exactly as before. `forceInternalMap` rides a whole-pass
+   *  take-back (run-internally on an AUTHORING park): the client asked Canary to
+   *  run that pass, mapping half included — the NEXT pass hands off again. */
+  const afterAuthoring = async (
+    ctx: StageContext,
+    prep: Extract<Prep, { ok: true }>,
+    state: PassState,
+    ledger: CoverageLedger,
+    forceInternalMap = false,
+  ): Promise<StageOutcome> => {
+    const m = ctx.manifest()
+    // The producer edited <featureDir>/e2e/*.spec.ts in place; re-read what
+    // landed on disk and gate it through the same draft validation as the
+    // old JSON-proposal path (fixture import, e2e/ placement, no traversal).
+    publishProgress(ctx, ledger, prep.target, state, 'validating')
+    const applied = applyExternalDraftFiles({ featureDir: prep.featureDir })
+    if (!applied.ok) {
+      ctx.appendLog(`[specs] spec files rejected: ${applied.error}\n`)
+      return runPass(ctx, bumpPass(state, { validationErrors: applied.error, passes: [...state.passes, { pass: state.iteration, note: 'spec files rejected' }] }), ledger)
+    }
+    ctx.appendLog(`[specs] validated ${applied.written.length} file(s)\n`)
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'tests-changed', feature: m.feature })
+
+    // Deterministic dry-run: specs that don't compile/list can't raise
+    // coverage — skip the mapping agent, keep the ledger current, and feed
+    // the errors into the next iteration's prompt instead of hard-aborting.
+    const dryRun = await validateSpecs({ featureDir: prep.featureDir, projectRoot: deps.projectRoot })
+    if (!dryRun.ok) {
+      ctx.appendLog(`[specs] dry-run validation failed:\n${dryRun.errors.slice(0, MAX_VALIDATION_ERROR_CHARS)}\n`)
+      return runPass(
+        ctx,
+        bumpPass(state, { validationErrors: dryRun.errors, passes: [...state.passes, { pass: state.iteration, note: 'specs failed to compile/list' }] }),
+        compute(m.feature),
+      )
+    }
+
+    publishProgress(ctx, ledger, prep.target, state, 'mapping')
+    // The mapping half is a DIFFERENT agent job with its own standalone twin
+    // (start_external_coverage), so under an external producer it becomes the
+    // stage's second sequential hand-off rather than a local spawn.
+    if (!forceInternalMap && handsOffToClient(ctx)) return mappingHandOff(ctx, prep, state)
+    return mapInternally(ctx, prep, state)
   }
 
   /** One authoring pass, then recurse. Expressed recursively rather than as a
@@ -342,7 +407,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       ctx.appendLog(`[specs] iteration ${state.iteration} handed off to the external client\n`)
       return externalWorkCheckpoint(ctx, 'specs-coverage', prompt, {
         message: `Write the spec files for pass ${state.iteration} in your own client (under ${prep.featureDir}/e2e), then respond. Canary re-reads what landed on disk, compiles it, and recomputes the ledger.`,
-        context: { pass: state, featureDir: prep.featureDir, gaps: gapRows(ledger), target: prep.target },
+        context: { phase: 'authoring', pass: state, featureDir: prep.featureDir, gaps: gapRows(ledger), target: prep.target },
       })
     }
 
@@ -357,8 +422,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
       signal: ctx.signal,
       agent: m.opts.agent,
     })
-    const done = await afterAuthoring(ctx, prep, state, ledger)
-    return runPass(ctx, done.state, done.ledger)
+    return afterAuthoring(ctx, prep, state, ledger, forceInternal)
   }
 
   // ONE compute on entry; every later ledger is threaded from the point the
@@ -372,16 +436,45 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
     teardown: (ctx) => agentSpawnJob(ctx, 'specs-coverage'),
     run: loop,
     async onCheckpointResponse(ctx, response) {
-      // Releasing an authoring hand-off, not the coverage-stuck park. Resume the
-      // pass the client was given — its number and accumulated notes ride on the
-      // checkpoint, so a restart or a reconnect loses nothing.
+      // Releasing one of this stage's TWO hand-offs (authoring, or the mapping
+      // that follows it), not the coverage-stuck park. The pass state and the
+      // hand-off's phase ride on the checkpoint's `context`, so a restart or a
+      // reconnect loses nothing — read from where the park actually put them
+      // (externalWorkCheckpoint nests caller context under `data.context`).
       if (parkedOnExternalWork(ctx, 'specs-coverage')) {
         const prep = prepare(ctx)
         if (!prep.ok) return prep.outcome
-        const handOff = ctx.manifest().stages.find((s) => s.key === 'specs-coverage')?.checkpoint?.data as
-          | { pass?: PassState }
-          | undefined
+        const checkpoint = ctx.manifest().stages.find((s) => s.key === 'specs-coverage')?.checkpoint
+        const handOff = (checkpoint?.data as { context?: { phase?: string; pass?: PassState; roster?: string[] } } | undefined)?.context
         const state = handOff?.pass ?? FIRST_PASS
+
+        // A pre-phase park carried no `phase` and can only be an authoring one.
+        if (handOff?.phase === 'mapping') {
+          if (response.choice === 'run-internally') {
+            ctx.appendLog(`[specs] client handed the pass ${state.iteration} mapping back — mapping here\n`)
+            return mapInternally(ctx, prep, state)
+          }
+          const stale = rejectStaleSubmit(ctx, 'specs-coverage', response)
+          if (stale) return stale
+          const parsed = parseMappingSubmission(response.data)
+          if (!parsed.ok) return reparkMapping(ctx, checkpoint!, parsed.error)
+          const roster = handOff.roster ?? []
+          const missing = missingFromRoster(roster, parsed.submission.mappings, parsed.submission.unmappable)
+          if (missing.length > 0) {
+            return reparkMapping(ctx, checkpoint!, new IncompleteCoverageAnswerError(missing, roster.length).message)
+          }
+          // Write the tags through the canonical tag-writer (unknown ids / test
+          // names dropped) — then the pass verdict is settleMapped's recompute,
+          // exactly as it is for the internal mapper.
+          applyExternalCoverageMappings({
+            featuresDir: deps.featuresDir,
+            logsDir: deps.logsDir,
+            feature: ctx.manifest().feature,
+            mappings: parsed.submission.mappings,
+          })
+          return settleMapped(ctx, prep, state)
+        }
+
         // Fresh compute on resume, unlike the threaded in-loop path: the client
         // has been writing to disk since the hand-off, so a carried ledger would
         // be stale by exactly the work we are here to measure.
@@ -394,8 +487,7 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         if (stale) return stale
         // No branch on response.data: whether the pass advanced coverage is
         // decided by re-reading the specs off disk and recomputing the ledger.
-        const done = await afterAuthoring(ctx, prep, state, resumed)
-        return runPass(ctx, done.state, done.ledger)
+        return afterAuthoring(ctx, prep, state, resumed)
       }
       if (response.choice === 'accept-partial') {
         const ledger = compute(ctx.manifest().feature)

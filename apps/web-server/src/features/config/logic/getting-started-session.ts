@@ -83,7 +83,7 @@ export class GettingStartedSessionStore {
   constructor(
     logsDir: string,
     private readonly resolver: GettingStartedStatusResolver,
-    private readonly onChanged: () => void = () => {},
+    private readonly onChanged: () => void,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly setTimer: (fn: () => void, ms: number) => void = defaultSetTimer,
   ) {

@@ -154,6 +154,14 @@ describe('external demo recognition', () => {
     expect(isGettingStartedFlightStart({ feature: 'lending', repoPaths: ['/workspace/flight-app'] })).toBe(true)
     expect(isGettingStartedFlightStart({ feature: 'checkout', repoPaths: ['/workspace/shop'] })).toBe(false)
   })
+
+  it('treats a body-less or repo-less start as not the demo', () => {
+    // The server reads this off an arbitrary request body, so neither a missing
+    // body nor a `repoPaths` of the wrong shape may throw its way into a claim.
+    expect(isGettingStartedFlightStart(undefined)).toBe(false)
+    expect(isGettingStartedFlightStart({ feature: 'checkout' })).toBe(false)
+    expect(isGettingStartedFlightStart({ feature: 'checkout', repoPaths: 'flight-app' })).toBe(false)
+  })
 })
 
 // The route is a one-line wrapper, but an untested one is still a place the

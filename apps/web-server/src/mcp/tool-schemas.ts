@@ -6,7 +6,6 @@
 // they share has to live below both of them.
 
 import { z } from 'zod'
-import path from 'path'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../features/runs/logic/run-store'
 import type { RunDetail } from '../features/runs/logic/run-store'
@@ -35,44 +34,15 @@ export const evaluationTextSlotInput = z.object({
   text: z.string(),
 })
 
-// One mapping the offloaded client produces for submit_external_coverage —
-// matches the internal annotate output shape (coverage-annotate.schema.json).
-export const coverageMappingInput = z.object({
-  testName: z.string().describe('Exact test name as given in the start context.'),
-  requirements: z.array(z.string()).describe('Requirement id(s) this test verifies (e.g. ["R1"]). Unknown ids are dropped.'),
-  pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).optional(),
-  variants: z.array(z.string()).optional().describe('Variant value(s) this test exercises (e.g. ["email"]), from the feature\'s variant dimension. Values outside it are dropped. Omit for a variant-agnostic test.'),
-  file: z.string().optional().describe('Relative spec path; omit and Canary resolves it by test name.'),
-  rationale: z.string().optional(),
-  confidence: z.number().optional(),
-})
-
-// One requirement an offloaded client proposes for an external PRD summary —
-// mirrors prompts/prd-summary.schema.json (the shape the returned prompt asks
-// for). Canary reconciles ids against the prior summary; never trust the agent's
-// echoed id to renumber the spine.
-export const summaryRequirementInput = z.object({
-  id: z.string().optional().describe('Echo a prior requirement id to PRESERVE it; omit for a new requirement.'),
-  kind: z.enum(['functional', 'non-functional']).optional(),
-  title: z.string().describe('Short "it should …" title.'),
-  text: z.string().describe('The requirement statement.'),
-  happyPath: z.string().optional(),
-  unhappyPath: z.string().optional(),
-  pathTypes: z.array(z.enum(['happy', 'sad', 'edge'])).describe('At least one of happy/sad/edge.'),
-  variants: z.array(z.string()).optional().describe('Variant value(s) this requirement must hold across (≥2 of the feature\'s variantDimension values, e.g. ["email","whatsapp"]). Omit for a single-value / variant-agnostic requirement.'),
-  variantsNA: z.array(z.object({ variant: z.string(), reason: z.string() })).optional().describe('Variants from `variants` with NO testable surface (e.g. {variant:"line",reason:"no broadcast endpoint"}). Excluded from coverage + shown as N/A. Only when you confirmed the surface is absent — not merely untested.'),
-  strictnessLadder: z.array(z.object({
-    tier: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]),
-    description: z.string(),
-  })).optional(),
-})
-
-// The feature-level variant dimension (D1) an offloaded client may declare on
-// submit_external_summary — mirrors prompts/prd-summary.schema.json.
-export const variantDimensionInput = z.object({
-  name: z.string().describe('Lower-case single-token dimension name (e.g. "channel").'),
-  values: z.array(z.string()).describe('Closed set of values a requirement may span (≥2, e.g. ["email","whatsapp","call","line"]).'),
-})
+// The external-submission shapes (coverage mappings, summary requirements, the
+// variant dimension) moved to the coverage logic layer so the flight's
+// external-work responders validate with the SAME schemas these tools declare —
+// re-exported here so the tool groups keep one import home.
+export {
+  coverageMappingInput,
+  summaryRequirementInput,
+  variantDimensionInput,
+} from '../features/coverage/logic/coverage/external-submissions'
 
 export const evaluationRewriteInput = z.object({
   formatVersion: z.number().optional(),

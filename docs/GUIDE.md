@@ -1,131 +1,295 @@
 # Canary Lab Guide
 
-Operational reference for Canary Lab. See the [README](../README.md) for setup and the main workflow.
+Operational reference for environments, runs, repair, Flight, coverage, and
+evaluation export. See the [README](../README.md) for installation and the main
+workflow, and [FEATURES](FEATURES.md) for the feature-folder contract.
 
-## Environment Switching
+## Environment switching
 
-Envsets are temporary feature environment files. Canary Lab backs up target files, applies the selected envset, and restores the originals after the run. Manage them under **Envsets**; files live in `features/<feature>/envsets/`.
+An envset is a named collection of files applied for one feature environment.
+Canary Lab backs up each configured target, writes the selected values before
+the run, and restores the originals during teardown. Manage envsets in the UI;
+their source files live under `features/<feature>/envsets/`.
 
-Feature configs can make service startup env-specific — for example, a `local` env starts services while a `production` env skips local startup and points tests at a deployed URL.
+Feature configuration can also make service startup environment-specific. A
+typical feature starts local services for `local` and skips them for
+`production`, where Playwright points at a deployed URL.
 
-### Testing Against a Remote URL
+### Test a deployed URL
 
-To run a feature's tests against a deployed environment without booting the local server:
+To run the same feature against a deployed environment without booting its local
+services:
 
-1. Add the env to `feature.config.cjs` → `envs: ['local', 'production']`.
-2. Gate each `startCommand` (or whole `repo`) with `envs: ['local']` so it only boots locally.
-3. Add a matching envset under `envsets/<env>/<feature>.env` with the remote target — e.g. `GATEWAY_URL=https://api.example.com`. Tests read this via `process.env.GATEWAY_URL` (see `e2e/helpers/api.ts`).
-4. Pick the env from the env dropdown in the web UI (`canary-lab ui`). The run flow applies/reverts the envset and skips booting filtered services.
+1. Add the environment to `feature.config.cjs`, for example
+   `envs: ['local', 'production']`.
+2. Add `envs: ['local']` to each local repository or `startCommand`.
+3. Create a matching envset under `envsets/production/` with the remote target,
+   for example `GATEWAY_URL=https://api.example.com`.
+4. Make the tests read that value from `process.env.GATEWAY_URL`.
+5. Choose **production** from the run's environment control.
 
-### Environment Variable Safety
+The run applies the production envset, skips local-only commands, executes the
+tests, and restores every configured target afterwards.
 
-Envsets may contain credentials. The default `.gitignore` excludes `features/*/envsets/*/*`. Review any value file you force-add before pushing.
+### Protect secrets
 
-## Run Output
+Envsets may contain credentials. The scaffold's `.gitignore` excludes
+`features/*/envsets/*/*` by default. Review any envset file before force-adding
+it to Git. The MCP env-capture tools return redacted key previews, not values.
 
-Each run writes to `logs/runs/<runId>/`:
+## Run output
 
-- `manifest.json` — run metadata, services, repo snapshots, artifact policy, and signal paths
-- `runner.log`, `lifecycle-events.jsonl` — orchestration events and UI lifecycle events
-- `svc-*.log`, `playwright.log` — service stdout/stderr and raw Playwright output
-- `playwright-events.jsonl` — structured test and browser-action events
-- `playwright-artifacts/` — retained screenshots, videos, traces, and attachments
-- `e2e-summary.json` — current test state and failure context
-- `failed/<slug>/` — per-failure context slices
-- `heal-index.md` — compact failure index for repair
-- `diagnosis-journal.md` — heal-cycle notes and outcomes
-- `signals/` — `.heal`, `.rerun`, and `.restart`
+Each run has a durable directory under `logs/runs/<runId>/`. Files appear only
+when that part of the lifecycle runs.
 
-`logs/runs/index.json` tracks run history. Run detail pages and MCP flows resolve artifacts by run id.
+| Path | Evidence |
+| --- | --- |
+| `manifest.json` | Status, lifecycle, services, repository snapshots, ports, heal cycles, and artifact policy |
+| `runner.log` | Orchestrator decisions and lifecycle narration |
+| `svc-*.log` | Captured service output |
+| `playwright.log` | Raw Playwright output |
+| `playwright-events.jsonl` | Structured test and browser-action events |
+| `playwright-artifacts/` | Current Playwright screenshots, videos, traces, and attachments |
+| `playwright-artifacts-keep/` | Latest retained artifact set per test across repair reruns |
+| `e2e-summary.json` | Current declared-test roster, verdicts, and failure context |
+| `failed/<slug>/` | One compact evidence slice per failure |
+| `heal-index.md` | Failure index and recommended reading order |
+| `diagnosis-journal.md` | Repair hypotheses, changes, signals, and outcomes |
+| `external-commands.jsonl` | Audited commands from an external repair session |
+| `fixes/` | Captured repair patches and `fixes.json`, when available |
+| `signals/` | Low-level `.heal`, `.rerun`, and `.restart` controls |
 
-## Evaluation Report
+`logs/runs/index.json` is the run-history index. Run pages and MCP tools resolve
+artifacts by run ID. Canary Lab does not automatically prune run evidence;
+removal and artifact trimming are explicit actions under **Cleanup → Runs**.
 
-Export a completed run from its **Overview** tab. The `.zip` contains `evaluation.html` and captured videos, with each test's flow, code, helpers, evidence, and checks.
+## Evaluation report
 
-When the feature has a PRD summary, the report compares semantic coverage with what this run proved. A requirement is proven only when its mapped test passed in the exported run; Canary Lab never borrows the outcome from another run.
+Export a terminal run from its **Overview** tab. The archive contains
+`evaluation.html` plus captured media, with each declared test's flow, source,
+helpers, evidence, checks, and actual status. Failed, aborted, skipped, and
+never-run cases keep those states; export never rounds them into passes.
 
-The Export menu offers two formats. **Raw** renders directly from evidence and uses no LLM. **Localized** asks a local agent to improve the per-test explanation. Both keep the same tests and verdicts. External MCP exports use wording supplied by the connected client.
+When the feature has a PRD summary, the report separates two questions:
+
+- **Claimed coverage:** tags map a test to every required path and variant.
+- **Proven in this run:** the mapped test passed in the exported run.
+
+Canary Lab never borrows a result from another run for an export.
+
+The Export menu offers two wording modes:
+
+- **Raw** renders directly from captured evidence and uses no LLM.
+- **Localized** asks a local agent to improve each test's explanation.
+
+Both modes preserve the same roster and verdicts. External MCP exports use
+client-supplied wording; Canary Lab validates, stores, and renders it without
+rewriting it again.
 
 ![Evaluation Report sample](assets/assertion-review.png)
 
-## Requirement Coverage
+## Requirement coverage
 
-Open **Coverage** from a suite row. The ledger shows each requirement, path, variant, and mapped test; tags determine the percentage. Filters show coverage gaps, while strictness measures assertion depth. Regeneration preserves stable requirement IDs. See [FEATURES](FEATURES.md#requirement-coverage) for tags and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-coveragelifecyclefull-profiles) for MCP tools.
+Open **Coverage** from a suite row. The ledger computes claim-based coverage
+from requirement, path, and variant tags. If a latest run exists, it overlays a
+separate proven percentage and per-requirement proof state without changing the
+claim-based gap types or headline coverage percentage. Strictness describes the
+strongest assertion layer in each test.
 
-## Repairing a Failed Run
+Regenerating the PRD summary preserves surviving requirement IDs. Changes to
+source docs mark the summary and dependent coverage state stale instead of
+silently reusing old mappings. See [FEATURES](FEATURES.md#requirement-coverage)
+for the tag contract and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-coveragelifecyclefull-profiles)
+for MCP tools.
 
-When a run fails, Canary Lab pauses, waits for a repair, and continues the same run. Use `rerun` when no service restart is needed and `restart` after application or service changes.
+## Repair a failed run
 
-### Where the repair lands
+When a normal run fails, Canary Lab either starts the configured local repair
+agent or waits for an external client or manual signal. A repair continues the
+same run so its evidence and journal remain one history.
 
-Each repo runs in a Git worktree created from `HEAD`, including uncommitted changes and shared `node_modules`. **The repair agent edits the worktree, not your checkout.**
+Use `rerun` when the changed code can be exercised without restarting services.
+Use `restart` after service, boot configuration, or environment changes.
 
-At teardown, Canary Lab saves `<repo>.patch` under `logs/runs/<runId>/fixes/`, writes `fixes.json`, and removes normal worktrees. A passing repair can update `canary-lab/fix-<feature>-<repo>` and open a draft pull request; disable this under **Settings → GitHub**. Failed or abandoned repairs are never pushed.
+### Where edits land
 
-Portified features are the exception on teardown: their overlay is reverse-applied but the worktree is kept, since it holds the repair. The Cleanup page's **Worktrees** tab lists, opens, and removes those.
+For a regular test run, Canary Lab attempts to create one Git worktree per
+configured repository from `HEAD`, hydrate the user's uncommitted work, and link
+the repository's existing `node_modules`. The repair agent normally edits these
+per-run worktrees, not the user's checkout.
 
-### External heal (default)
+There are two important limits:
 
-An external MCP client claims the failed run, reads its evidence, fixes application or service code, and signals the next action. It may change a test only when the test is provably wrong. The loop is `claim_heal` → `get_heal_context` → `wait_for_heal_task` → edit → `signal_run`.
+- If worktree creation fails for a non-portified repository, the run falls back
+  to that repository in place and records a warning in `runner.log`. In that
+  fallback, checkout isolation and automatic fix capture are not guaranteed.
+- A portified repository never falls back in place. The run fails before boot
+  if its worktree cannot be created, because the saved port overlay must not be
+  applied to the user's checkout.
 
-Use `get_heal_context` and `wait_for_heal_task` instead of polling; reserve `get_run_snapshot` for deeper debugging. If tools are unavailable, run `npx canary-lab setup --force` and start a fresh session. MCP tools load per client session; the HTTP API is a fallback for custom clients.
+At teardown, Canary Lab diffs repair edits from successful worktree baselines
+into `logs/runs/<runId>/fixes/`. Non-portified worktrees are normally removed.
+Portified worktrees are kept after reversing the overlay because they may still
+hold repair edits; manage them under **Cleanup → Worktrees**.
 
-### Auto-heal
+When a captured repair makes the run green and **Settings → GitHub → Open a
+draft PR when a run heals green** is enabled, Canary Lab updates a
+feature-and-repository fix branch and opens or
+updates a draft pull request. A GitHub failure is recorded on the manifest and
+does not change the test verdict. Red or abandoned repairs are never proposed.
 
-Select **Claude** or **Codex** in Settings and Canary Lab starts that local CLI in a PTY tab when a run fails, rendering `apps/web-server/prompts/heal-agent.md` with the active run paths. Auto-heal stops when tests pass, the user stops the run, the agent exits without a useful signal, a cycle times out, or no supported CLI is available.
+### External repair
 
-### Signal files
+An interactive MCP client can own one repair claim. The normal loop is:
 
-`.rerun` and `.restart` under `logs/runs/<runId>/signals/` are the low-level mechanism both modes use. You can write them by hand (or via the UI controls) to drive a fix from a custom client or while debugging.
+```text
+start or claim run → wait for repair task → inspect focused evidence
+→ edit app/service code → signal rerun or restart → wait again
+```
 
-Two values hidden from Settings remain valid in `canary-lab.config.json`, the config API, and `handoff_heal`: `manual` waits for hand-driven signals; `auto` selects a supported CLI from `PATH`. Existing projects keep their value.
+Use `wait_for_heal_task` as the blocking status call. It heartbeats the claim and
+returns `still_waiting`, `needs_heal`, `passed`, `failed`, or `boot_session`.
+Use `get_heal_context` to refresh the compact failure packet and
+`get_failure_detail` for one failure. Reserve `get_run_snapshot` for verbose
+debugging; do not poll it.
+
+Fix application or service code. Never delete, skip, weaken, or loosen a test to
+turn the run green. Signal once per repair cycle, with the hypothesis and change
+description, then wait on the same run again.
+
+If MCP tools are missing from a new client session, run
+`npx canary-lab setup --force`, reconnect the client, and start a fresh session.
+Tool discovery is session-scoped.
+
+### Local auto-heal
+
+Select **Claude** or **Codex** in Settings and a UI- or REST-started run launches
+that local CLI in a PTY when repair is needed. The agent receives the active run
+paths through `apps/web-server/prompts/heal-agent.md`.
+
+Auto-heal stops when tests pass, the user stops the run, the agent exits without
+a useful signal, a cycle times out, or no supported CLI is available. Runs
+started through MCP use external-heal mode; the workspace's local-agent choice
+does not take over that run.
+
+### Manual signals
+
+`signals/.rerun` and `signals/.restart` are the low-level controls used by the
+UI, local agent, and external flow. They can also drive a custom integration.
+`signals/.heal` is an internal repair trigger. Prefer the UI or MCP tools because
+they also preserve claim ownership and journal metadata.
+
+The hidden `manual` and `auto` heal-agent values remain valid in
+`canary-lab.config.json`, the config API, and `handoff_heal` for existing
+workspaces. `manual` waits for explicit signals; `auto` selects an available
+local CLI.
 
 ## Flight (`canary-lab flight`)
 
-`npx canary-lab flight <repo...> "<what to test>"` takes a bare repo through setup, requirements, test authoring, coverage, parallel readiness, execution, repair, and evaluation export.
+`npx canary-lab flight <repo...> "<what to test>"` takes one or more product
+repositories through one server-owned pipeline:
 
-Agents draft the config, collect requirements, and author tests. Canary Lab verifies the config by booting it, calculates coverage from tags, runs the tests, and confirms that the evaluation archive exists. The default coverage target is 100%. Portify uses a concurrent double boot to prove the feature can run with injected ports; skipping it leaves the feature serial.
+```text
+similarity → scout → scaffold → env capture → docs → PRD summary
+→ test authoring and coverage → portify → run → heal → evaluation export
+```
+
+The server owns stage order, persistence, and every verdict. Judgment work can
+come from two producers:
+
+- **Internal** (default): Canary Lab spawns the selected local CLI for agentic
+  stages.
+- **External** (MCP only): `start_flight(..., stage_producer: "external")`
+  parks on `external-work` handoffs. The connected client performs scout, docs,
+  PRD summary, test authoring and mapping, Portify, the repair engagement, and a
+  localized export. Canary Lab still re-reads artifacts and computes the verdict.
+
+Mechanical work—scaffold writes, env application, Playwright execution, and raw
+export—stays in Canary Lab in both modes. An external client can return one
+handoff to the internal agent with `choice: "run-internally"`.
+
+The default coverage target is 100%. Portify proves injected-port readiness with
+a concurrent double boot. Skipping it leaves the feature serial; it does not
+make fixed ports safe for concurrent runs.
 
 ### Checkpoints and autopilot
 
-A flight has nine checkpoints. **Autopilot answers seven by default**, logging each as `[autopilot]`. It stops only when a machine cannot decide:
+Flight defines nine human-decision checkpoint kinds. External flights add a
+tenth checkpoint kind, `external-work`, which is a work handoff rather than a
+human approval.
 
-| Checkpoint | Asks | Autopilot |
-|---|---|---|
-| `similarity-choice` | This repo already has a feature — rerun / enhance / new? | ❌ always asks |
-| `config-approval` | Approve the scaffolded, on-disk `feature.config.cjs` (edit it on the Suite setup stage or in Advanced setup; `redraft` re-runs the repo scan) | `approve` |
-| `prd-source` | Supply requirement docs, or have an agent gather them (`collect-repo-docs` / `infer-from-diff`) | `continue` when docs exist — **`collect-repo-docs` when none do**, so the fork is not a stop |
-| `coverage-stuck` | The authoring loop can't reach the target | `accept-partial` |
-| `portify-gate` | Run the parallel-readiness workflow at all, before any agent cost? | `run` |
-| `portify-apply` | Review the verified diff — `apply` / `revise` (needs feedback) / `cancel` | `apply` |
-| `run-failed` | Terminal run isn't green — rerun or export as-is? | `export-as-is` |
-| `export-mode` | `raw` (fast) vs `localized` (agent-rewritten reasoning) | `raw` |
-| `missing-env` | Secrets the env capture couldn't find | ❌ never skipped, not even with `--yolo` |
+Autopilot answers seven routine decisions by default and logs each answer as
+`[autopilot]`:
 
-Two rules override autopilot. A checkpoint that **re-parks** after an automatic answer always reaches you; autopilot never answers it twice. A deliberately re-entered stage also parks its first checkpoint so you can choose differently.
+| Checkpoint | Decision | Autopilot |
+| --- | --- | --- |
+| `similarity-choice` | Rerun, enhance, or create a new feature when one already matches | Always asks |
+| `config-approval` | Accept the on-disk `feature.config.cjs` or re-scan | `approve` |
+| `prd-source` | Continue with docs, collect repo docs, or infer from the branch diff | `continue` with docs; otherwise `collect-repo-docs` |
+| `coverage-stuck` | Accept partial coverage or retry | `accept-partial` |
+| `portify-gate` | Run or skip parallel-readiness work | `run` |
+| `portify-apply` | Apply, revise, or cancel the verified overlay | `apply` |
+| `run-failed` | Rerun or export the terminal non-green result | `export-as-is` |
+| `export-mode` | Raw or localized evaluation wording | `raw` internally; `localized` externally |
+| `missing-env` | Supply or waive unresolved secrets | Always asks, including with `--yolo` |
 
-Turn autopilot off to answer every checkpoint. Use the flight header toggle or pass `autopilot: false` to `start_flight`; changes apply at the next checkpoint.
+An automatically answered checkpoint that re-parks always reaches the user; it
+is never auto-answered twice. Explicitly re-entering a stage also exposes that
+stage's first checkpoint. Disable autopilot to answer every decision by passing
+`autopilot: false` to `start_flight`.
 
-Answer checkpoints in the terminal, the Flight view, or through `respond_flight_checkpoint`. From MCP, use `write_feature_doc` to add Markdown content or link a local file before answering `prd-source`. The Flight view shows stage evidence and live agent activity; a suite's paper-plane action opens its existing flight.
+Answer checkpoints from the terminal, Flight view, or
+`respond_flight_checkpoint`. At `prd-source`, use `write_feature_doc` to add
+Markdown content or link a local file before choosing `continue`.
 
-### Resuming, redoing, and queueing
+### Resume, redo, and queue
 
-Flights are resumable background jobs. After a crash or failed stage, the next command starts at the first unfinished stage. Use `--fresh` for a new feature; existing features trigger a rerun, enhance, or new-feature checkpoint.
+One feature has one Flight record.
 
-A flight's repos and description are fixed after it starts. Resume, redo, and stage re-entry reuse those values. To change them, stop the flight and delete its record in the web UI. Deletion keeps the feature and its files. There is no CLI or MCP delete operation.
+- Recalling an active Flight follows it.
+- Recalling a paused Flight resumes its first open stage without deleting
+  artifacts.
+- `from_stage` re-enters one stage after checking prerequisites and deletes that
+  stage's and every later stage's artifacts before rerunning them.
+- `redo: true` restarts from stage one and deletes all stage artifacts. A full
+  redo may replace the stored repos and description; omit them to reuse the old
+  values.
+- Plain resume and `from_stage` keep repos and intent frozen. Do not pass
+  different values during those operations.
 
-In the web UI, a broad description can be split into several proposed features for confirmation. The first flight starts and the rest wait for the shared repos to become free. Features with the same `group` value appear under one accordion. This multi-feature planning flow is not available through CLI or MCP.
+Queued Flights use `status: "paused"` with `pauseReason: "queued"` and start
+automatically when the shared repositories become free. A user pause is
+different: it stops live stage work and must not be resumed without the user's
+request.
 
-## External Authoring Workflow
+Deleting a Flight record is available only in the web UI. It removes Flight
+history but keeps the feature and its files.
 
-External clients can create durable tasks without Canary Lab authoring the content. Use the default `lifecycle` profile, which combines the three profiles below:
+The web UI can split a broad description into several proposed features. After
+confirmation, the first Flight starts and siblings sharing the same repositories
+queue. This planning surface is not available through the CLI or MCP.
 
-1. *(`author`)* `create_feature` scaffolds `feature.config.cjs`, `playwright.config.ts`, and `envsets/`.
-2. *(`author`)* `capture_feature_env_files` captures existing `.env`, `.env.dev`, or `application.properties` files (responses show redacted key names only).
-3. *(`author`)* Author Playwright specs in the client, then `start_external_draft` → `update_external_draft_stage` → `apply_external_draft`.
-4. *(`repair` / `verify`)* Run or verify the feature.
-5. *(`export`)* After tests pass, `start_external_evaluation_export`, generate the report, and `submit_external_evaluation_export`.
+## External authoring workflow
 
-A client narrowed to `--profile author` gets steps 1–3 only; it will not see the run, verify, or export tools.
+The default `lifecycle` MCP profile combines six workflows—repair, verify,
+author, coverage, export, and Flight—while leaving specialized Portify tools out.
+A client can use the following standalone flow without asking Canary Lab to
+author the content:
 
-The UI marks these tasks as generated by an external client and stores stages, session names, and downloadable artifacts, but it does not replay the client transcript.
+1. `create_feature` writes the feature config, Playwright config, and envset
+   skeleton.
+2. `capture_feature_env_files` or `write_envset` adds environment files. Capture
+   responses expose redacted key names only.
+3. The client authors Playwright specs, then records and applies them through
+   `start_external_draft` → `update_external_draft_stage` →
+   `apply_external_draft`.
+4. Under the `coverage` profile, add source docs, submit structured requirements,
+   map the tests, and read Canary Lab's computed ledger.
+5. Run and repair locally with the `repair` profile, or execute an observational
+   deployed check with `verify`.
+6. Export a terminal run through `start_external_evaluation_export` and
+   `submit_external_evaluation_export`.
+
+Use a leaf profile when a client needs only one part of the lifecycle. Use
+`full` when the same connection also needs Portify. The UI stores these external
+tasks and artifacts but does not reconstruct the external client's transcript.

@@ -212,6 +212,19 @@ describe('WizardDraftProvider', () => {
     expect(api.deleteDraft).toHaveBeenCalledWith('never-seen')
   })
 
+  it('ignores workspace events that are not about drafts', async () => {
+    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])
+    const captured = renderProbe()
+    await settle()
+
+    // The workspace bus carries every surface's events, so a run or version
+    // frame must not disturb the list this provider owns.
+    await act(async () => { workspaceSocket().fire({ type: 'version-changed' }) })
+
+    expect(captured.value?.drafts.map((d) => d.draftId)).toEqual(['d-1'])
+    expect(api.listDrafts).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps working when the workspace socket cannot be opened', async () => {
     const Boom = function Boom() { throw new Error('no socket') } as unknown as typeof WebSocket
     vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'planning' })])

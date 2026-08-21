@@ -181,13 +181,13 @@
       }
     }
   ],
-  "docsHash": "b2f0a5716486b345ad20f4d0553807b0e1129cd94c09c2f8a46abaf84797e224",
+  "docsHash": "23caf91537d021e37d2fc833bd46b6c7a65332dc62705ac3192b96f7ca731982",
   "sourceDocs": [
     "storefront-journey-prd.md"
   ],
   "generatedAt": "2026-08-07T00:00:00.000Z",
   "docFingerprints": {
-    "storefront-journey-prd.md": "b2f0a5716486b345ad20f4d0553807b0e1129cd94c09c2f8a46abaf84797e224"
+    "storefront-journey-prd.md": "23caf91537d021e37d2fc833bd46b6c7a65332dc62705ac3192b96f7ca731982"
   },
   "requirementsHash": "898d2d123d48abd6aea42d93cfd549494b92ed81948d5270207247fca1d63ed9"
 }
