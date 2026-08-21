@@ -115,7 +115,7 @@ describe('startExternalCoverage', () => {
     bridgeCoverageJobEvents(store, publisher)
     const res = startExternalCoverage(
       { featuresDir, logsDir, feature: 'checkout', sessionId: 's1' },
-      { store, workspaceEvents: publisher },
+      { store },
     )
     expect(res.kind).toBe('started')
     expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
@@ -129,7 +129,7 @@ describe('startExternalCoverage', () => {
     // boot in server.ts) — bridged here the same way, so this asserts the chain
     // the server actually runs.
     bridgeCoverageJobEvents(store, publisher)
-    startExternalCoverage({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
+    startExternalCoverage({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store })
     expect(events).toHaveLength(0)
   })
 
@@ -174,7 +174,7 @@ describe('submitExternalCoverage', () => {
         jobId: started.manifest.jobId,
         mappings: [{ testName: 'create makes a new todo item', requirements: ['R1'], pathTypes: ['happy'], source: 'agent' }],
       },
-      { store, workspaceEvents: publisher },
+      { store },
     )
 
     expect(manifest.status).toBe('done')
@@ -299,7 +299,7 @@ describe('startExternalSummary', () => {
     // boot in server.ts) — bridged here the same way, so this asserts the chain
     // the server actually runs.
     bridgeCoverageJobEvents(store, publisher)
-    startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
+    startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store })
     expect(events).toEqual([{ type: 'coverage-changed', feature: 'checkout' }])
   })
 
@@ -312,7 +312,7 @@ describe('startExternalSummary', () => {
     // boot in server.ts) — bridged here the same way, so this asserts the chain
     // the server actually runs.
     bridgeCoverageJobEvents(store, publisher)
-    startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store, workspaceEvents: publisher })
+    startExternalSummary({ featuresDir, logsDir, feature: 'checkout', sessionId: 's1' }, { store })
     expect(events).toHaveLength(0)
   })
 
@@ -344,7 +344,7 @@ describe('submitExternalSummary', () => {
         ],
         now: () => '2026-02-02T00:00:00Z',
       },
-      { store, workspaceEvents: publisher },
+      { store },
     )
 
     expect(manifest.status).toBe('done')

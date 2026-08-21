@@ -9,6 +9,7 @@ import { portifyDir } from './logic/runtime/paths'
 import { portifyRoutes } from './routes/portify'
 import { portifyStreamRoutes } from './ws/portify-stream'
 import type { PtyFactory } from '../runs/logic/runtime/pty-spawner'
+import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
 
@@ -57,6 +58,19 @@ const inertPtyFactory: PtyFactory = () => ({
   kill: () => { /* noop */ },
 })
 
+/**
+ * Module-scope so the registration can be identity-checked. `workspaceEvents`
+ * is OPTIONAL in `PortifyRouteDeps` and `publishWorkspaceEvent` is
+ * `publisher?.publish(...)`, so a registrar that stops passing it still
+ * compiles, still boots, and silently stops pushing `features-changed` — the
+ * user just sees a stale screen until they refresh (the `cl_ws-driven-state`
+ * bug class; the 1.4.0 portify-save gap was exactly this). Only an identity
+ * assertion catches that, since `toMatchObject` lets the omission through.
+ */
+const workspaceEvents: WorkspaceEventPublisher = {
+  publish: () => { /* nothing subscribes in this suite */ },
+}
+
 let tmpDir: string
 let logsDir: string
 let featuresDir: string
@@ -89,7 +103,7 @@ function makeCtx(): ServerContext {
     logsDir,
     portifyStore,
     ptyFactory: inertPtyFactory,
-    workspaceEvents: { publish: () => { /* nothing subscribes in this suite */ } },
+    workspaceEvents,
   } as unknown as ServerContext
 }
 
@@ -138,6 +152,9 @@ describe('portify feature registrar', () => {
       revisePortify: feature.runner.revise,
       removePortify: feature.runner.remove,
     })
+    // The live-update bus, by identity: an omission here is invisible until a
+    // user notices the Ports tab only changes after a refresh.
+    expect(registrations[0].opts.workspaceEvents).toBe(workspaceEvents)
     expect(registrations[1].opts).toEqual({ store: portifyStore })
     // One runner, and it is the instance the MCP layer is handed — a second
     // would mean two owners of the same store.

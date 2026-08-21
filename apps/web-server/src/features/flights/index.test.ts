@@ -9,6 +9,8 @@ import { PlanFeaturesStore } from './logic/plan-features'
 import { flightsRoutes } from './routes/flights'
 import { flightsStreamRoutes } from './ws/flights-stream'
 import type { FlightInject } from './logic/stages/index'
+import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
+import type { GettingStartedSessionStore } from '../config/logic/getting-started-session'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
 
@@ -32,12 +34,32 @@ vi.mock('./logic/stages/index', async (importOriginal) => {
   }
 })
 
+/**
+ * Both of these are module-scope for one reason: they can only be checked by
+ * IDENTITY, and both are OPTIONAL on `FlightRouteDeps`, so dropping either from
+ * the registration compiles and boots.
+ *
+ * `workspaceEvents` — `publishWorkspaceEvent` is `publisher?.publish(...)`, so
+ * an absent bus silently stops every `flights-changed` / `coverage-changed` /
+ * `envsets-changed` push the routes and the stage adapters make: the user just
+ * sees a flight that only moves when they refresh (the `cl_ws-driven-state` bug
+ * class).
+ *
+ * `gettingStarted` — `flights-start.ts` guards on `body.gettingStartedSource &&
+ * deps.gettingStarted`, so an absent store makes the demo's claim/attach/abandon
+ * a no-op and the `getting_started_busy` protection disappear, with no error
+ * anywhere. A marker object is enough: nothing in this suite calls it.
+ */
+const workspaceEvents: WorkspaceEventPublisher = {
+  publish: () => { /* nothing subscribes in this suite */ },
+}
+const gettingStarted = { marker: 'getting-started' } as unknown as GettingStartedSessionStore
+
 let tmpDir: string
 let logsDir: string
 let featuresDir: string
 let flightStore: FlightRunStore
 let planStore: PlanFeaturesStore
-let published: unknown[]
 let app: FastifyInstance
 
 beforeEach(async () => {
@@ -48,7 +70,6 @@ beforeEach(async () => {
   fs.mkdirSync(featuresDir, { recursive: true })
   flightStore = new FlightRunStore(logsDir)
   planStore = new PlanFeaturesStore(logsDir)
-  published = []
   stageBuild.deps = []
   app = Fastify()
   // The flights stream declares a `{ websocket: true }` route.
@@ -66,8 +87,8 @@ function makeCtx(): ServerContext {
     logsDir,
     flightStore,
     planStore,
-    workspaceEvents: { publish: (e: unknown) => { published.push(e) } },
-    gettingStarted: { marker: 'getting-started' },
+    workspaceEvents,
+    gettingStarted,
   } as unknown as ServerContext
 }
 
@@ -102,11 +123,18 @@ describe('flights feature registrar', () => {
     // Both surfaces must read the same store instance, or the stream would
     // report a manifest the REST routes never wrote.
     expect(registrations[1].opts).toEqual({ store: flightStore })
+    // The two optional deps, by identity — see the fixture comment for what
+    // each one silently costs when it stops being passed.
+    expect(registrations[0].opts.workspaceEvents).toBe(workspaceEvents)
+    expect(registrations[0].opts.gettingStarted).toBe(gettingStarted)
     expect(Object.keys(registrations[0].opts.adapters as object)).toContain('evaluation-export')
     // One adapter set, built with the resolved paths the registrar was given
     // rather than any re-derived from projectRoot.
     expect(stageBuild.deps).toHaveLength(1)
     expect(stageBuild.deps[0]).toMatchObject({ featuresDir, logsDir, projectRoot: tmpDir })
+    // The adapters need the SAME bus: a stage that writes a doc or captures an
+    // envset announces it through here, not through the route layer's copy.
+    expect(stageBuild.deps[0].workspaceEvents).toBe(workspaceEvents)
 
     const res = await app.inject({ method: 'GET', url: '/api/flights' })
     expect(res.statusCode).toBe(200)

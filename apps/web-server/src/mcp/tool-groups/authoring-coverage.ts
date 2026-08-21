@@ -39,7 +39,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
           ...(conversation_name ? { conversationName: conversation_name } : {}),
           ...(external_session_url ? { sessionUrl: external_session_url } : {}),
         },
-        { store: coverageJobStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+        { store: coverageJobStore(deps.store.logsDir) },
       )
       if (res.kind === 'needs-docs') {
         return asJsonResult({
@@ -81,7 +81,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
           requirements: requirements as ParsedRequirement[],
           ...(variantDimension ? { variantDimension } : {}),
         },
-        { store: coverageJobStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+        { store: coverageJobStore(deps.store.logsDir) },
       )
       return asJsonResult({
         jobId: manifest.jobId,
@@ -120,7 +120,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
           ...(conversation_name ? { conversationName: conversation_name } : {}),
           ...(external_session_url ? { sessionUrl: external_session_url } : {}),
         },
-        { store: coverageJobStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+        { store: coverageJobStore(deps.store.logsDir) },
       )
       if (res.kind === 'needs-summary') {
         return asJsonResult({
@@ -169,7 +169,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
           mappings: mappings as ProposedMapping[],
           unmappable: unmappable?.map((u) => u.testName),
         },
-        { store: coverageJobStore(deps.store.logsDir), workspaceEvents: deps.workspaceEvents },
+        { store: coverageJobStore(deps.store.logsDir) },
       )
       // Deterministic validation flags mappings (still applied — no review gate);
       // surface only a count here, token-cheap. Details ride on each applied

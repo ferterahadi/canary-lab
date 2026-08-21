@@ -152,6 +152,11 @@ export async function registerMcpRoutes(
     // emptied. The entry is found by identity rather than by reading
     // `transport.sessionId`, which is typed nullable and would need a guard no
     // reachable close can take (a transport only closes after its handshake).
+    //
+    // ORDERING IS LOAD-BEARING: this assignment must stay ABOVE `mcp.connect`
+    // below. The SDK's `Protocol.connect` CHAINS whatever `onclose` it finds
+    // rather than replacing it, so assigning first means both handlers run.
+    // Moving this after the connect would silently drop the SDK's own cleanup.
     transport.onclose = () => {
       for (const [id, live] of transports) {
         if (live !== transport) continue

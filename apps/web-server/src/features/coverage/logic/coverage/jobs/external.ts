@@ -18,7 +18,6 @@ import type { CoverageJobStore } from './store'
 import type { CoverageJobManifest } from './types'
 import type { ParsedRequirement } from '../prd-summary'
 import type { ProposedMapping, VariantDimension } from '../../../../../../../../shared/coverage/types'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 
 // Offloaded ("external") coverage + PRD summary: the calling MCP client does the
 // agent work itself — Canary spawns NO local agent. The start_* tool hands the
@@ -46,7 +45,6 @@ export type StartExternalCoverageResult =
 
 export interface ExternalCoverageDeps {
   store: CoverageJobStore
-  workspaceEvents?: WorkspaceEventPublisher
 }
 
 function defaultJobId(): string {
@@ -93,11 +91,11 @@ export function startExternalCoverage(
     ...(args.sessionUrl ? { externalSessionUrl: args.sessionUrl } : {}),
   }
   deps.store.save(manifest)
-  // The job now exists and is `running` — tell every open client so the feature's
-  // coverage pill flips to "Generating" and an open ledger re-attaches to the
-  // Generating screen live, without a refresh (cl_ws-driven-state). Same event
-  // the submit path uses; the client reaction (re-list states / re-attach) is
-  // idempotent for both the start and the finish of a coverage job.
+  // Saving is what announces it: the store's boot-time bridge
+  // (`bridgeCoverageJobEvents`, wired in server.ts) publishes off this write, so
+  // the feature's coverage pill flips to "Generating" and an open ledger
+  // re-attaches live without a refresh (cl_ws-driven-state). Nothing publishes
+  // from HERE — do not add a call, it would double-fire.
   return { kind: 'started', manifest, context }
 }
 
@@ -221,8 +219,8 @@ export function startExternalSummary(
     ...(args.sessionUrl ? { externalSessionUrl: args.sessionUrl } : {}),
   }
   deps.store.save(manifest)
-  // Flip the coverage pill to "Generating" and re-attach an open ledger to the
-  // Generating screen live (cl_ws-driven-state) — same event the submit path uses.
+  // Announced by the store bridge off this save, exactly as above — not from
+  // here.
   return { kind: 'started', manifest, context: built.context }
 }
 

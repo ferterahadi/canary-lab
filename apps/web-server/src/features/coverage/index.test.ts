@@ -8,13 +8,16 @@ import { PaneBroker } from '../runs/logic/pane-broker'
 import { DirtySpecStore } from '../runs/logic/dirty-specs/store'
 import { writeManifest } from '../runs/logic/runtime/manifest'
 import { buildRunPaths, runDirFor } from '../runs/logic/runtime/run-paths'
+import { RunnerLog } from '../runs/logic/runtime/runner-log'
 import { CoverageJobRunStore } from './logic/coverage/jobs/store'
+import type { CoverageJobManifest } from './logic/coverage/jobs/types'
 import { FlightRunStore } from '../flights/logic/store'
 import { coverageRoutes } from './routes/coverage'
 import { verificationRoutes } from './routes/verification'
 import type { ResolveVerificationInput } from './logic/verification'
 import type { RunsFeature } from '../runs/index'
 import type { PtyFactory } from '../runs/logic/runtime/pty-spawner'
+import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import type { ServerContext } from '../../server-context'
 import { register } from './index'
 
@@ -71,6 +74,18 @@ const inertPtyFactory: PtyFactory = () => ({
   kill: () => { /* noop */ },
 })
 
+/**
+ * Module-scope so both registrations can be identity-checked. `workspaceEvents`
+ * is OPTIONAL on `CoverageRouteDeps` and `VerificationRouteDeps`, and
+ * `publishWorkspaceEvent` is `publisher?.publish(...)` — so a registrar that
+ * stops passing it compiles, boots, and silently stops pushing
+ * `coverage-changed` / `tests-changed`. The only symptom is a user whose
+ * Coverage panel needs a manual refresh (the `cl_ws-driven-state` bug class).
+ */
+const workspaceEvents: WorkspaceEventPublisher = {
+  publish: () => { /* nothing subscribes in this suite */ },
+}
+
 let tmpDir: string
 let logsDir: string
 let featuresDir: string
@@ -78,6 +93,7 @@ let registry: OrchestratorRegistry
 let runStore: RunStore
 let coverageJobStore: CoverageJobRunStore
 let flightStore: FlightRunStore
+let dirtySpecStore: DirtySpecStore
 let brokers: Map<string, PaneBroker>
 let attached: Array<{ runId: string; feature: string; backups: unknown }>
 let runs: RunsFeature
@@ -93,6 +109,7 @@ beforeEach(() => {
   runStore = new RunStore(logsDir, registry)
   coverageJobStore = new CoverageJobRunStore(logsDir)
   flightStore = new FlightRunStore(logsDir)
+  dirtySpecStore = new DirtySpecStore(logsDir)
   brokers = new Map()
   attached = []
   orchHarness.constructFails = false
@@ -130,8 +147,8 @@ function makeCtx(): ServerContext {
     runStore,
     coverageJobStore,
     flightStore,
-    dirtySpecStore: new DirtySpecStore(logsDir),
-    workspaceEvents: { publish: () => { /* nothing subscribes in this suite */ } },
+    dirtySpecStore,
+    workspaceEvents,
     brokers,
     ptyFactory: inertPtyFactory,
   } as unknown as ServerContext
@@ -165,6 +182,10 @@ async function registerFeature(): Promise<{
   }
 }
 
+/** What the `staging` envset writes over the target file, including the deployed
+ *  URL the verification is supposed to point Playwright at. */
+const ENVSET_ENV = 'APPLIED=1\nWEB_URL=https://envset.example.com\n'
+
 /** A real on-disk suite config — `loadFeatures` requires and re-reads it. */
 function writeFeature(name: string, cfg: Record<string, unknown> = {}): string {
   const dir = path.join(featuresDir, name)
@@ -185,7 +206,12 @@ function writeEnvset(featureDir: string, setName: string, rawConfig?: string): s
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.writeFileSync(target, 'ORIGINAL=1\n')
   fs.mkdirSync(path.join(envsetsDir, setName), { recursive: true })
-  fs.writeFileSync(path.join(envsetsDir, setName, '.env'), 'APPLIED=1\n')
+  // The `WEB_URL` line is load-bearing, not decoration: it is what makes the
+  // envset's deployed target discoverable, so `resolveVerificationRun` infers
+  // `envVar: WEB_URL` for the `web` repo and produces a NON-EMPTY
+  // `playwrightEnv`. With a URL-less envset the resolved env is `{}`, and an
+  // assertion that the target reached the orchestrator could not fail.
+  fs.writeFileSync(path.join(envsetsDir, setName, '.env'), ENVSET_ENV)
   fs.writeFileSync(
     path.join(envsetsDir, 'envsets.config.json'),
     rawConfig ?? JSON.stringify({
@@ -199,6 +225,19 @@ function writeEnvset(featureDir: string, setName: string, rawConfig?: string): s
 
 function runnerLogText(runId: string): string {
   return fs.readFileSync(buildRunPaths(runDirFor(logsDir, runId)).runnerLogPath, 'utf-8')
+}
+
+/** A record in the context's coverage-job store, so a route read proves which
+ *  instance is actually behind the mounted plugin. */
+function seedCoverageJob(jobId: string, feature: string): void {
+  coverageJobStore.save({
+    jobId,
+    feature,
+    kind: 'coverage',
+    status: 'done',
+    startedAt: '2026-08-21T00:00:00.000Z',
+    log: '',
+  } satisfies CoverageJobManifest)
 }
 
 function seedManifest(runId: string, status: string): void {
@@ -225,18 +264,31 @@ describe('coverage feature registrar', () => {
     const { registrations } = await registerFeature()
 
     expect(registrations.map((r) => r.plugin)).toEqual([coverageRoutes, verificationRoutes])
-    expect(registrations[0].opts).toMatchObject({
-      featuresDir,
-      logsDir,
-      projectRoot: tmpDir,
-      coverageJobStore,
-      flightStore,
-    })
+    expect(registrations[0].opts).toMatchObject({ featuresDir, logsDir, projectRoot: tmpDir })
+    // Store identity, not shape: `coverageJobStore` and `flightStore` are both
+    // OPTIONAL on CoverageRouteDeps and the route falls back to its own
+    // file-backed instance over the same logsDir — so an omission reads and
+    // writes the same FILES while missing the event bridge attached to the
+    // context's instance.
+    expect(registrations[0].opts.coverageJobStore).toBe(coverageJobStore)
+    expect(registrations[0].opts.flightStore).toBe(flightStore)
+    expect(registrations[0].opts.workspaceEvents).toBe(workspaceEvents)
     expect(registrations[1].opts).toMatchObject({ featuresDir, store: runStore })
     expect(registrations[1].opts.startVerification).toBeTypeOf('function')
+    expect(registrations[1].opts.workspaceEvents).toBe(workspaceEvents)
 
-    const res = await app.inject({ method: 'GET', url: '/api/verification/runs' })
-    expect(res.statusCode).toBeLessThan(500)
+    // One live request per plugin, against a path each one really declares —
+    // and the coverage read comes back off the CONTEXT's job store, so this
+    // fails if the route were left to build its own.
+    writeFeature('shop')
+    seedCoverageJob('cj_1', 'shop')
+    const jobs = await app.inject({ method: 'GET', url: '/api/coverage/jobs' })
+    expect(jobs.statusCode).toBe(200)
+    expect(jobs.json()).toMatchObject([{ jobId: 'cj_1', feature: 'shop' }])
+
+    const configs = await app.inject({ method: 'GET', url: '/api/features/shop/verification-configs' })
+    expect(configs.statusCode).toBe(200)
+    expect(configs.json()).toEqual([])
   })
 })
 
@@ -288,7 +340,7 @@ describe('startVerification — refusals', () => {
 
 describe('startVerification — the run it builds', () => {
   it('runs observationally: no repos, no services, the Playwright envset applied', async () => {
-    const dir = writeFeature('shop', { repos: [{ name: 'r', localPath: tmpDir }] })
+    const dir = writeFeature('shop', { repos: [{ name: 'web', localPath: tmpDir }] })
     const target = writeEnvset(dir, 'staging')
     const { startVerification } = await registerFeature()
 
@@ -304,11 +356,34 @@ describe('startVerification — the run it builds', () => {
       executionType: 'verify',
       ptyFactory: inertPtyFactory,
       runStateSink: runStore,
+      // WHERE the verification points is the entire point of a verify run, and
+      // `playwrightEnv` is the only channel that carries it (run-playwright
+      // spreads it into Playwright's process env). It is an OPTIONAL
+      // orchestrator option, so dropping it compiles and silently re-points
+      // every verification at the local defaults instead of the deployed
+      // environment — the caller's `targetUrls` override beating the envset's
+      // own URL is what proves the resolved value, not a default, arrived.
+      playwrightEnv: { WEB_URL: 'https://staging.example.com' },
+      // The record of what was verified: also optional, and stamped onto the
+      // run manifest at bootstrap. Without it a green verification keeps no
+      // evidence of which environment it was green against.
+      verification: {
+        playwrightEnvsetId: 'staging',
+        targetUrls: { web: 'https://staging.example.com' },
+        targets: [{ id: 'web', name: 'web', envVar: 'WEB_URL', url: 'https://staging.example.com' }],
+      },
     })
+    // The shared dirty-spec store, by identity — a verify run that recorded its
+    // spec integrity against some other instance would report a clean suite the
+    // rest of the server disagrees with.
+    expect(orchHarness.options[0].dirtySpecHooks).toBe(dirtySpecStore)
+    // The runner log the registrar just wrote its own two lines to. Absent, the
+    // orchestrator stops teeing its lifecycle into runner.log.
+    expect(orchHarness.options[0].runnerLog).toBeInstanceOf(RunnerLog)
     // Verification never boots local services, so the suite's repos are
     // deliberately stripped from the orchestrator's copy of the config.
     expect((orchHarness.options[0].feature as { repos: unknown[] }).repos).toEqual([])
-    expect(fs.readFileSync(target, 'utf-8')).toBe('APPLIED=1\n')
+    expect(fs.readFileSync(target, 'utf-8')).toBe(ENVSET_ENV)
     expect(attached).toEqual([{ runId: orch.runId, feature: 'shop', backups: attached[0].backups }])
     expect(attached[0].backups).toHaveLength(1)
 

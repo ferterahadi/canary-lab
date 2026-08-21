@@ -11,6 +11,12 @@ import { PortifyRunStore } from '../portify/logic/runtime/store'
 import { CoverageJobRunStore } from '../coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from '../flights/logic/store'
 import type { FlightManifest, FlightStatus } from '../../../../../shared/flights/types'
+import type { CoverageJobManifest } from '../coverage/logic/coverage/jobs/types'
+import type { PortifyManifest } from '../portify/logic/runtime/types'
+import type { BenchmarkManifest } from '../benchmark/logic/runtime/types'
+import { agentJobStore } from '../agent-sessions/logic/agent-jobs/store'
+import type { AgentJobManifest } from '../agent-sessions/logic/agent-jobs/types'
+import type { WorkspaceEventPublisher } from '../../shared/workspace-events'
 import { featuresRoutes } from './routes/features'
 import { featureConfigRoutes } from './routes/feature-config'
 import { projectConfigRoutes } from './routes/project-config'
@@ -31,6 +37,19 @@ let dirtySpecStore: DirtySpecStore
 let gettingStarted: unknown
 let onPortChange: (port: number) => void
 let app: FastifyInstance
+
+/**
+ * Module-scope so the registrations can be identity-checked. `workspaceEvents`
+ * is OPTIONAL on both `FeatureConfigRouteDeps` and the project-config deps, and
+ * `publishWorkspaceEvent` is `publisher?.publish(...)` — so a registrar that
+ * stops passing it compiles, boots, and silently stops pushing
+ * `features-changed` / `envsets-changed` / `project-config-changed`. The only
+ * symptom is a user who has to refresh to see their own edit (the
+ * `cl_ws-driven-state` bug class).
+ */
+const workspaceEvents: WorkspaceEventPublisher = {
+  publish: () => { /* nothing subscribes in this suite */ },
+}
 
 beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-config-reg-')))
@@ -67,7 +86,7 @@ function makeCtx(): ServerContext {
     coverageJobStore,
     flightStore,
     dirtySpecStore,
-    workspaceEvents: { publish: () => { /* nothing subscribes in this suite */ } },
+    workspaceEvents,
     gettingStarted,
   } as unknown as ServerContext
 }
@@ -147,6 +166,10 @@ describe('config feature registrar', () => {
     expect(registrations[0].opts).toEqual({ featuresDir, logsDir, dirtySpecStore })
     expect(registrations[1].opts).toMatchObject({ featuresDir })
     expect(registrations[2].opts).toMatchObject({ projectRoot: tmpDir, onPortChange })
+    // The live-update bus on both writing surfaces, by identity — see the
+    // fixture comment for what an omission silently costs.
+    expect(registrations[1].opts.workspaceEvents).toBe(workspaceEvents)
+    expect(registrations[2].opts.workspaceEvents).toBe(workspaceEvents)
     expect(registrations[3].opts).toMatchObject({ projectRoot: tmpDir, featuresDir, sessionStore: gettingStarted })
 
     const res = await app.inject({ method: 'GET', url: '/api/features' })

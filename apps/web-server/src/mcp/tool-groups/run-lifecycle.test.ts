@@ -537,6 +537,14 @@ describe('cancel_heal', () => {
 })
 
 describe('abort_run', () => {
+  it('is marked destructive so a client can gate the call before making it', () => {
+    const { configs } = harness()
+
+    // Not idempotent: a second abort has nothing left to kill, so a client that
+    // retries on the hint alone would be told the run is still abortable.
+    expect(configs.get('abort_run')!.annotations).toMatchObject({ destructiveHint: true, idempotentHint: false })
+  })
+
   it('relays the store\'s refusal verbatim', async () => {
     const { text } = harness({ store: storeOf([], { abort: async () => ({ ok: false, reason: 'already terminal' }) }) })
 

@@ -211,6 +211,23 @@ describe('findHealingRunForFeature', () => {
     )).toBe(newer)
   })
 
+  it('never hands back another feature\'s healing run', () => {
+    const mine = runDetail({ runId: 'run-mine', feature: 'checkout' })
+    const theirs = runDetail({ runId: 'run-theirs', feature: 'search' })
+    const rows = [
+      // Listed FIRST and started LATER, so both the index order and the recency
+      // tiebreak would pick it if the feature filter were dropped.
+      indexRow({ runId: 'run-theirs', feature: 'search', startedAt: '2026-05-25T09:00:00.000Z' }),
+      indexRow({ runId: 'run-mine', feature: 'checkout', startedAt: '2026-05-25T08:00:00.000Z' }),
+    ]
+
+    const found = findHealingRunForFeature(asDeps({ store: fakeStore(rows, [mine, theirs]) }), 'checkout', undefined)
+
+    // start_run("checkout") continuing search's heal loop would drive an agent
+    // at the wrong repos entirely.
+    expect(found).toBe(mine)
+  })
+
   it('keeps the index order when two runs started in the same millisecond', () => {
     const first = runDetail({ runId: 'run-a' })
     const second = runDetail({ runId: 'run-b' })
@@ -245,6 +262,19 @@ describe('resolveRunRef', () => {
 
   it('skips a row whose run artifacts are gone', () => {
     const store = fakeStore([...rows, indexRow({ runId: 'run-2026-05-24-7cvh' })], [detail])
+
+    expect(resolveRunRef(asDeps({ store }), 'checkout', undefined, '7cvh')).toEqual({ kind: 'resolved', detail })
+  })
+
+  it('never resolves a ref against another feature\'s run', () => {
+    // Same 4-char suffix in a different feature. Without the feature filter this
+    // is either the WRONG run or a bogus `ambiguous`, and "rerun 7cvh" would act
+    // on a foreign repo set.
+    const foreign = runDetail({ runId: 'run-2026-05-24-7cvh', feature: 'search' })
+    const store = fakeStore(
+      [...rows, indexRow({ runId: 'run-2026-05-24-7cvh', feature: 'search' })],
+      [detail, foreign],
+    )
 
     expect(resolveRunRef(asDeps({ store }), 'checkout', undefined, '7cvh')).toEqual({ kind: 'resolved', detail })
   })

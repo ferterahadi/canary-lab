@@ -24,10 +24,11 @@ import {
 // branches that a live run can only reach by racing — the still_waiting elapse,
 // the mid-wait store event, and the heartbeat that fires while the wait blocks.
 //
-// Nothing here fakes a clock: every wait is given a 1ms window, or is resolved
-// by an event the test emits itself. A fake clock would decouple the timeout
-// from the heartbeat interval that shares it, which is the interleaving the
-// `settled` guard exists for.
+// Waits run on the real clock: each is given a 1ms window or is resolved by an
+// event the test emits itself, so the timeout/heartbeat interleaving the
+// `settled` guard exists for stays the real one. The one exception is the last
+// test, which installs a fake clock because the leak it pins only shows on the
+// heartbeat interval's NEXT fire, 5s past an answer that already went out.
 
 let tmpDir: string
 let logsDir: string
@@ -94,7 +95,12 @@ beforeEach(() => {
   fs.mkdirSync(logsDir, { recursive: true })
 })
 
-afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }))
+afterEach(() => {
+  // Unconditional: a no-op for every test that never installed a fake clock,
+  // and leaving one installed would strand the next test's 1ms window.
+  vi.useRealTimers()
+  fs.rmSync(tmpDir, { recursive: true, force: true })
+})
 
 describe('healWaitNext', () => {
   it('names wait_for_heal_task as the machine-readable next step', () => {
@@ -479,10 +485,24 @@ describe('waitForHealTask', () => {
     const store = fakeStore(() => detail)
 
     const wait = waitForHealTask(asDeps({ store, broker: ownedBroker() }), 'run-1', 'sess-1', 'claude', 60_000)
-    // Events for other runs share the one store channel — reacting to them
-    // would classify (and answer) the wrong run.
-    store.emit({ kind: 'changed', runId: 'other-run' })
+    // The parked state goes in BEFORE the foreign event, so the runId filter is
+    // the only thing left between that event and an answer. Emitting it while
+    // the run still read as running-tests would classify to null either way,
+    // and dropping the filter would leave no trace.
+    let answeredEarly: unknown
+    // Two-arg then: the awaited assertion below owns any rejection, and a bare
+    // `.then` here would re-surface it as an unhandled one.
+    void wait.then((result) => { answeredEarly = result }, () => { /* asserted below */ })
     detail = needsHealDetail()
+    // Events for other runs share the one store channel; every waiting session
+    // sees them, so answering on one is work spent on the wrong run's news.
+    store.emit({ kind: 'changed', runId: 'other-run' })
+    // A whole macrotask turn drains every microtask the wait would resolve
+    // through — the entire window a leaked answer could appear in, rather than
+    // a sampled guess at one.
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(answeredEarly).toBeUndefined()
+
     // `index-changed` carries no runId at all: a list-level event the wait must
     // still re-check on, since it cannot tell whether this run moved.
     store.emit({ kind: 'index-changed' })
@@ -538,5 +558,32 @@ describe('waitForHealTask', () => {
 
     expect(result).toMatchObject({ ok: true, value: { type: 'needs_heal' } })
     expect(offEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops heartbeating the moment the wait is answered', async () => {
+    // The heartbeat is an interval, so it outlives the answer unless finish()
+    // clears it — and an agent re-calls wait_for_heal_task every window, so a
+    // leak accumulates one beater per call, each still refreshing a heal claim
+    // nobody is waiting on. A fake clock is the only way to look past the
+    // answer: the next fire is 5s out, and the surviving timer is unref'd, so
+    // nothing else in the suite would ever notice it.
+    vi.useFakeTimers()
+    let detail = runDetail({ healMode: 'external', status: 'running', lifecycle: { phase: 'running-tests' } })
+    const store = fakeStore(() => detail)
+    const broker = ownedBroker()
+
+    const wait = waitForHealTask(asDeps({ store, broker }), 'run-1', 'sess-1', 'claude', 60_000)
+    // The setup's own synchronous beat — the one heartbeat the call owes.
+    expect(broker.heartbeat).toHaveBeenCalledTimes(1)
+
+    detail = needsHealDetail()
+    store.emit({ kind: 'changed', runId: 'run-1' })
+    await expect(wait).resolves.toMatchObject({ ok: true, value: { type: 'needs_heal' } })
+
+    // Three interval periods past the answer, still that one beat. The run is
+    // deliberately left non-terminal, so a surviving interval WOULD get through
+    // beat()'s terminal guard and touch the claim again.
+    vi.advanceTimersByTime(15_000)
+    expect(broker.heartbeat).toHaveBeenCalledTimes(1)
   })
 })

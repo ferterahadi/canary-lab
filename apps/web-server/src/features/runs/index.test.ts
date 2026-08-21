@@ -5,6 +5,7 @@ import path from 'path'
 import Fastify, { type FastifyInstance } from 'fastify'
 import websocketPlugin from '@fastify/websocket'
 import { PaneBroker } from './logic/pane-broker'
+import { ExternalHealBroker } from './logic/heal/external-heal-broker'
 import { RunStore, createRegistry, type OrchestratorRegistry } from './logic/run-store'
 import { DirtySpecStore } from './logic/dirty-specs/store'
 import type { PtyFactory } from './logic/runtime/pty-spawner'
@@ -32,6 +33,7 @@ let registry: OrchestratorRegistry
 let runStore: RunStore
 let brokers: Map<string, PaneBroker>
 let activeEnvsets: Map<string, BackupRecord[]>
+let externalHealBroker: ExternalHealBroker
 let app: FastifyInstance
 
 const inertPtyFactory: PtyFactory = () => ({
@@ -54,6 +56,17 @@ beforeEach(async () => {
   runStore = new RunStore(logsDir, registry)
   brokers = new Map()
   activeEnvsets = new Map()
+  // A real broker, not a marker: it holds its claims in memory, so the only
+  // thing that makes the REST surface, the run-stream wiring and the MCP layer
+  // agree about who holds heal duty is that all three were handed THIS
+  // instance. Identity is therefore the property under test — a second
+  // `new ExternalHealBroker(...)` reads and writes the same manifests while
+  // seeing none of the other's claims.
+  externalHealBroker = new ExternalHealBroker({
+    now: () => Date.now(),
+    emit: (event) => runStore.emit('event', event),
+    patchManifest: (runId, patch) => runStore.patchManifest(runId, patch),
+  })
   app = Fastify()
   // The pane and run streams declare `{ websocket: true }` routes, which is an
   // option @fastify/websocket adds. Without the plugin the registrar's last two
@@ -68,9 +81,11 @@ afterEach(async () => {
 /**
  * `register` destructures the whole context but reads only these members; the
  * factories it calls (`buildRunScheduling`, `buildRunsRouteDeps`) additionally
- * pass `benchmarkStore`, `externalHealBroker` and `gettingStarted` straight
- * through into closures no test here invokes, so those are markers rather than
- * real stores — the fixture stays honest about what this file depends on.
+ * pass `benchmarkStore` and `gettingStarted` straight through into closures no
+ * test here invokes, so those two stay markers — the fixture stays honest about
+ * what this file depends on. `externalHealBroker` is the exception: this file
+ * hands it to `externalHealRoutes` directly, so it is a real instance and gets
+ * identity-checked below.
  */
 function makeCtx(): ServerContext {
   return {
@@ -84,7 +99,7 @@ function makeCtx(): ServerContext {
     benchmarkStore: { marker: 'benchmark-store' },
     dirtySpecStore: new DirtySpecStore(logsDir),
     workspaceEvents: { publish: () => { /* nothing subscribes in this suite */ } },
-    externalHealBroker: { marker: 'external-heal-broker' },
+    externalHealBroker,
     gettingStarted: { marker: 'getting-started' },
     brokers,
     activeEnvsets,
@@ -124,6 +139,9 @@ describe('runs feature registrar', () => {
     ])
     expect(registrations[0].opts).toEqual({ logsDir, journalPath })
     expect(registrations[1].opts).toMatchObject({ store: runStore })
+    // `toBe`, not a shape match: two brokers over the same run store are
+    // structurally identical and behaviourally split.
+    expect(registrations[1].opts.broker).toBe(externalHealBroker)
     expect(registrations[2].opts).toMatchObject({ featuresDir, projectRoot: tmpDir, store: runStore })
     expect(registrations[3].opts).toMatchObject({ registry, logsDir })
     expect(registrations[4].opts).toEqual({ store: runStore })

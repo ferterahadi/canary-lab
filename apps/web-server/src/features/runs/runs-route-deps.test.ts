@@ -82,7 +82,13 @@ vi.mock('./logic/runtime/orchestrator', async (importOriginal) => {
 const agentProbe = vi.hoisted(() => ({
   answer: 'claude' as 'claude' | 'codex' | null,
   asked: [] as (string | undefined)[],
-  binary: '/opt/canary/bin/claude' as string | null,
+  // Which agent each `resolveAgentBinary` call named, and whether a path was
+  // found for it. Answering PER AGENT rather than with one fixed string is
+  // load-bearing: `buildAgentSpawnCommand` uses `binaryPath` verbatim as the
+  // command head, so a resolver hard-coded to one agent would otherwise spawn
+  // the wrong CLI with no test able to see it.
+  resolved: [] as string[],
+  binaryFound: true,
   promptFails: null as string | null,
 }))
 
@@ -94,7 +100,10 @@ vi.mock('./logic/runtime/auto-heal', async (importOriginal) => {
       agentProbe.asked.push(requested)
       return agentProbe.answer
     },
-    resolveAgentBinary: () => agentProbe.binary,
+    resolveAgentBinary: (agent: Parameters<typeof actual.resolveAgentBinary>[0]) => {
+      agentProbe.resolved.push(agent)
+      return agentProbe.binaryFound ? `/opt/canary/bin/${agent}` : null
+    },
     buildOrchestratorHealPrompt: (opts: Parameters<typeof actual.buildOrchestratorHealPrompt>[0]) => {
       if (agentProbe.promptFails) throw new Error(agentProbe.promptFails)
       return actual.buildOrchestratorHealPrompt(opts)
@@ -130,7 +139,8 @@ beforeEach(() => {
   orchHarness.restart = () => new Promise(() => { /* held */ })
   agentProbe.answer = 'claude'
   agentProbe.asked = []
-  agentProbe.binary = '/opt/canary/bin/claude'
+  agentProbe.resolved = []
+  agentProbe.binaryFound = true
   agentProbe.promptFails = null
 })
 
@@ -213,6 +223,11 @@ function git(cwd: string, args: string[]): void {
 function initRepo(dir: string): string {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, 'server.ts'), 'export const port = 3000\n')
+  // Committed, not incidental: `node_modules` must be IGNORED for the worktree
+  // paths to behave like a real repo. Untracked, git would list it as WIP and
+  // copy it into the fresh worktree, which both inflates the untracked count
+  // and pre-creates the directory `linkNodeModules` refuses to overwrite.
+  fs.writeFileSync(path.join(dir, '.gitignore'), 'node_modules/\n')
   git(dir, ['init', '-q', '-b', 'main'])
   git(dir, ['config', 'user.email', 'test@example.com'])
   git(dir, ['config', 'user.name', 'Test'])
@@ -340,6 +355,17 @@ function lastOpts(): Record<string, unknown> {
   return orchHarness.options[orchHarness.options.length - 1]
 }
 
+/**
+ * The shape this module hands the orchestrator as `autoHeal`. The two builders
+ * are called back here rather than inspected, because what matters is the text
+ * they produce for the agent.
+ */
+interface AutoHealWiring {
+  agent: string
+  buildSpawnCommand: (a: { mcpOutputDir: string }) => string
+  buildCyclePrompt: (a: { cycle: number; outputDir: string }) => string
+}
+
 /** Start a run that is expected to launch, and hand back its run id. */
 async function startOk(h: Harness, ...args: Parameters<Harness['deps']['startRun']>): Promise<string> {
   const outcome = await h.deps.startRun(...args)
@@ -465,6 +491,9 @@ describe('startRun — same-repo collision', () => {
 
   it('honours an explicit worktree choice for a session that is not auto-isolated', async () => {
     initRepo(repoDir)
+    // Uncommitted, so "not hydrated" below is a real observation rather than a
+    // clean repo having nothing to hydrate.
+    fs.writeFileSync(path.join(repoDir, 'scratch.ts'), 'export const wip = true\n')
     writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir }] })
     const h = harness()
     seedRun(h.runStore, 'active-1', { status: 'running', feature: 'other' })
@@ -478,8 +507,26 @@ describe('startRun — same-repo collision', () => {
       runId: outcome.kind === 'queued' ? outcome.runId : '',
       reason: 'repo-collision',
     })
-    expect(h.runStore.get(outcome.kind === 'queued' ? outcome.runId : '')!.manifest.executionType)
-      .toBe('boot')
+    const runId = outcome.kind === 'queued' ? outcome.runId : ''
+    expect(h.runStore.get(runId)!.manifest.executionType).toBe('boot')
+
+    // The queued outcome is NOT evidence that the answer was honoured: a
+    // collision parks the run either way (the scheduler re-detects it), so the
+    // isolation decision only becomes observable in the deferred launch. Free
+    // the repo and let the promotion run it.
+    h.runStore.finalize('active-1', 'passed', new Date().toISOString(), 0)
+
+    await vi.waitFor(() => {
+      expect(orchHarness.options).toHaveLength(1)
+    })
+    const worktrees = lastOpts().worktrees as { repoName: string; worktreeRoot: string }[]
+    expect(worktrees).toHaveLength(1)
+    expect(worktrees[0].repoName).toBe('app')
+    expect(worktrees[0].worktreeRoot).toBe(path.join(runDirFor(logsDir, runId), 'worktrees', 'app'))
+    // Isolated but NOT hydrated: a boot session never heals, so there are no
+    // agent edits to capture and the uncommitted file stays out of the tree.
+    expect(fs.existsSync(path.join(worktrees[0].worktreeRoot, 'scratch.ts'))).toBe(false)
+    expect(runnerLogText(runId)).not.toContain('Hydrated uncommitted changes')
   })
 
   it('still queues an accepted worktree isolation, because the fixed ports collide too', async () => {
@@ -528,10 +575,15 @@ describe('startRun — resource admission', () => {
 // ─── startRun: worktree isolation ────────────────────────────────────────────
 
 describe('startRun — worktree isolation', () => {
-  it('isolates every repo and reproduces the uncommitted working tree', async () => {
+  it('isolates every repo, links its deps in and reproduces the uncommitted working tree', async () => {
     initRepo(repoDir)
     fs.writeFileSync(path.join(repoDir, 'server.ts'), 'export const port = 4000\n')
     fs.writeFileSync(path.join(repoDir, 'scratch.ts'), 'export const wip = true\n')
+    // Gitignored deps a `git worktree add` cannot carry over. Without the
+    // symlink the service boot command can't resolve its bins and dies with
+    // exit 127, which then reads as a health-check timeout.
+    fs.mkdirSync(path.join(repoDir, 'node_modules', '.bin'), { recursive: true })
+    fs.writeFileSync(path.join(repoDir, 'node_modules', '.bin', 'concurrently'), '#!/bin/sh\n')
     writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir }] })
     const h = harness()
 
@@ -547,6 +599,12 @@ describe('startRun — worktree isolation', () => {
       .toBe('export const port = 4000\n')
     expect(fs.readFileSync(path.join(worktrees[0].localPath, 'scratch.ts'), 'utf-8'))
       .toBe('export const wip = true\n')
+    // A symlink, not a copy: the run must resolve the SOURCE repo's installed
+    // deps, and a per-run copy of node_modules would be unusable on disk.
+    const linkedDeps = path.join(worktrees[0].worktreeRoot, 'node_modules')
+    expect(fs.lstatSync(linkedDeps).isSymbolicLink()).toBe(true)
+    expect(fs.realpathSync(linkedDeps)).toBe(fs.realpathSync(path.join(repoDir, 'node_modules')))
+    expect(fs.existsSync(path.join(linkedDeps, '.bin', 'concurrently'))).toBe(true)
     const log = runnerLogText(runId)
     expect(log).toContain('Hydrated uncommitted changes into "app" worktree (1 untracked file(s)).')
     expect(log).toContain('Isolated repo "app" in a per-run worktree.')
@@ -721,7 +779,7 @@ describe('startRun — envset application', () => {
 // ─── startRun: heal-mode selection ───────────────────────────────────────────
 
 describe('startRun — heal mode', () => {
-  it('configures a local auto-heal agent with a run-scoped spawn command and a fix-the-app prompt', async () => {
+  it('configures a local auto-heal agent with a run-scoped spawn command', async () => {
     writeProjectConfig('claude')
     writeFeature('demo')
     const h = harness()
@@ -732,42 +790,85 @@ describe('startRun — heal mode', () => {
     const opts = lastOpts()
     expect(opts.manualHeal).toBe(false)
     expect(opts.externalHeal).toBe(false)
-    const autoHeal = opts.autoHeal as {
-      agent: string
-      buildSpawnCommand: (a: { mcpOutputDir: string }) => string
-      buildCyclePrompt: (a: { cycle: number; outputDir: string }) => string
-    }
+    const autoHeal = opts.autoHeal as AutoHealWiring
     expect(autoHeal.agent).toBe('claude')
     expect(agentProbe.asked).toEqual(['claude'])
     const paths = buildRunPaths(runDir)
     const spawn = autoHeal.buildSpawnCommand({ mcpOutputDir: paths.failedDir })
     // The absolute binary is what lets the agent spawn under a restricted PATH
     // (a Desktop-launched server), and the per-run MCP config is what scopes
-    // its Canary tools to this run.
+    // its Canary tools to this run. The binary must be resolved for the CHOSEN
+    // agent — the spawn command uses the path verbatim as its command head.
+    expect(agentProbe.resolved).toEqual(['claude'])
     expect(spawn).toContain('/opt/canary/bin/claude')
     expect(spawn).toContain(path.join(runDir, 'mcp-config.json'))
+  })
 
-    const prompt = autoHeal.buildCyclePrompt({ cycle: 0, outputDir: paths.failedDir })
-    // The repair rule is the product's core guarantee: this feature has an
-    // editable repo, so the agent must be told to fix the app, not the test.
+  it('tells the agent to fix the app, not the test, when the run has editable repos', async () => {
+    writeProjectConfig('claude')
+    initRepo(repoDir)
+    writeFeature('demo', { repos: [{ name: 'app', localPath: repoDir }] })
+    const h = harness()
+
+    const runId = await startOk(h, 'demo')
+    // The prompt re-reads the run's manifest on every cycle, and the REAL
+    // orchestrator writes it before the first heal cycle — the fake here never
+    // does. Seeding it is what makes `service` mode a decision about evidence:
+    // without a manifest the mode comes from detectHealMode's missing-file
+    // fallback, which is also `service`, so the assertion below would hold even
+    // with the repoPaths gate deleted.
+    seedRun(h.runStore, runId, { status: 'healing', repoPaths: [repoDir] })
+
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const prompt = (lastOpts().autoHeal as AutoHealWiring)
+      .buildCyclePrompt({ cycle: 0, outputDir: paths.failedDir })
+
+    // The repair rule is the product's core guarantee: this run has an editable
+    // repo, so the agent must be told to fix the app, not the test.
     expect(prompt).toContain(MODE_COPY.service.healingDirective)
     expect(prompt).not.toContain(MODE_COPY.test.healingDirective)
+    // Scoped to THIS run: the agent reads its evidence and writes its signals
+    // through these paths, so a prompt built against another run's directory
+    // would send a correct repair to a directory nothing is watching.
+    expect(prompt).toContain(paths.healIndexPath)
+    expect(prompt).toContain(paths.rerunSignal)
+    expect(fs.existsSync(path.join(runDirFor(logsDir, runId), 'heal-prompt.md'))).toBe(true)
+  })
+
+  it('points the agent at the specs only when the run has no editable repos', async () => {
+    writeProjectConfig('claude')
+    writeFeature('demo')
+    const h = harness()
+
+    const runId = await startOk(h, 'demo')
+    // The deliberate exception to the repair rule: zero editable repoPaths
+    // means the spec is the only fixable code. The mode is read from the
+    // manifest and nothing else, so this arm and the one above are separated by
+    // repo EVIDENCE rather than by a file that happens to be missing.
+    seedRun(h.runStore, runId, { status: 'healing', repoPaths: [] })
+
+    const paths = buildRunPaths(runDirFor(logsDir, runId))
+    const prompt = (lastOpts().autoHeal as AutoHealWiring)
+      .buildCyclePrompt({ cycle: 0, outputDir: paths.failedDir })
+
+    expect(prompt).toContain(MODE_COPY.test.healingDirective)
+    expect(prompt).not.toContain(MODE_COPY.service.healingDirective)
   })
 
   it('spawns the agent by bare name when its binary is not on a known path', async () => {
     writeProjectConfig('codex')
     writeFeature('demo')
     agentProbe.answer = 'codex'
-    agentProbe.binary = null
+    agentProbe.binaryFound = false
     const h = harness()
 
     await startOk(h, 'demo')
 
-    const autoHeal = lastOpts().autoHeal as {
-      agent: string
-      buildSpawnCommand: (a: { mcpOutputDir: string }) => string
-    }
+    const autoHeal = lastOpts().autoHeal as AutoHealWiring
     expect(autoHeal.agent).toBe('codex')
+    // Resolution was attempted for CODEX: a lookup hard-coded to claude would
+    // hand codex claude's path and spawn the wrong CLI.
+    expect(agentProbe.resolved).toEqual(['codex'])
     expect(autoHeal.buildSpawnCommand({ mcpOutputDir: logsDir })).toMatch(/^codex/)
   })
 
@@ -1181,19 +1282,22 @@ describe('restartRun — heal mode', () => {
     expect(opts.manualHeal).toBe(false)
     expect(opts.externalHeal).toBe(false)
     expect(opts.externalHealSession).toBeUndefined()
-    const autoHeal = opts.autoHeal as {
-      agent: string
-      buildSpawnCommand: (a: { mcpOutputDir: string }) => string
-      buildCyclePrompt: (a: { cycle: number; outputDir: string }) => string
-    }
+    const autoHeal = opts.autoHeal as AutoHealWiring
     expect(autoHeal.agent).toBe('claude')
+    expect(agentProbe.resolved).toEqual(['claude'])
     const paths = buildRunPaths(runDirFor(logsDir, 's1'))
     expect(autoHeal.buildSpawnCommand({ mcpOutputDir: paths.failedDir }))
       .toContain(path.join(runDirFor(logsDir, 's1'), 'mcp-config.json'))
     // A restarted run is the easiest place for the repair rule to go missing.
+    // The seeded manifest carries editable repoPaths, so `service` mode here is
+    // read off the run's own evidence.
     const prompt = autoHeal.buildCyclePrompt({ cycle: 0, outputDir: paths.failedDir })
     expect(prompt).toContain(MODE_COPY.service.healingDirective)
     expect(prompt).not.toContain(MODE_COPY.test.healingDirective)
+    // And scoped to the run being restarted, not to some other directory.
+    expect(prompt).toContain(paths.healIndexPath)
+    expect(prompt).toContain(paths.rerunSignal)
+    expect(fs.existsSync(path.join(runDirFor(logsDir, 's1'), 'heal-prompt.md'))).toBe(true)
 
     expect(h.registry.get('s1')).toBe(orchHarness.instances[0])
     expect(h.brokers.get('s1')!.snapshot('agent'))
@@ -1276,18 +1380,25 @@ describe('restartRun — heal mode', () => {
 
     expect(await h.deps.restartRun!('c3')).toEqual({ ok: true, mode: 'remaining' })
     expect(agentProbe.asked).toEqual(['codex'])
-    expect((lastOpts().autoHeal as { agent: string }).agent).toBe('codex')
+    const autoHeal = lastOpts().autoHeal as AutoHealWiring
+    expect(autoHeal.agent).toBe('codex')
+    // The binary is resolved for the persisted agent too, and the resolved path
+    // becomes the command head verbatim.
+    expect(agentProbe.resolved).toEqual(['codex'])
+    expect(autoHeal.buildSpawnCommand({ mcpOutputDir: logsDir }))
+      .toContain('/opt/canary/bin/codex')
   })
 
   it('spawns the restarted agent by bare name when its binary is not on a known path', async () => {
     writeProjectConfig('claude')
     writeFeature('demo')
-    agentProbe.binary = null
+    agentProbe.binaryFound = false
     const h = harness()
     seedRun(h.runStore, 'c4')
 
     expect(await h.deps.restartRun!('c4')).toEqual({ ok: true, mode: 'remaining' })
-    const autoHeal = lastOpts().autoHeal as { buildSpawnCommand: (a: { mcpOutputDir: string }) => string }
+    expect(agentProbe.resolved).toEqual(['claude'])
+    const autoHeal = lastOpts().autoHeal as AutoHealWiring
     expect(autoHeal.buildSpawnCommand({ mcpOutputDir: logsDir })).toMatch(/^claude/)
   })
 })

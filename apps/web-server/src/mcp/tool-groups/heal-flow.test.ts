@@ -2,6 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { z } from 'zod'
 import type { RunDetail } from '../../features/runs/logic/run-store'
 import { registerHealFlowTools } from './heal-flow'
 import { captureTools } from './__fixtures__/tool-group-harness'
@@ -162,10 +163,22 @@ describe('heartbeat', () => {
 
 describe('wait_for_heal_task', () => {
   it('returns the classified task', async () => {
-    const { call } = harness({ store: { get: () => runDetail({ status: 'passed' }) } })
+    // A coherent one-test pass, so the counts can be asserted alongside the
+    // verdict. This tool's whole job is to forward the classification verbatim:
+    // matching only `type` would let a payload trim (drop counts/summary to save
+    // tokens) through, and a verdict with no counts behind it is not evidence.
+    const passed = {
+      ...runDetail({ status: 'passed' }),
+      summary: { complete: true, total: 1, passed: 1, passedNames: ['checkout pays'], failed: [] },
+    } as unknown as RunDetail
+    const { call } = harness({ store: { get: () => passed } })
 
-    expect(await call('wait_for_heal_task', { ...SESSION, timeout_ms: 1 }))
-      .toMatchObject({ type: 'passed', runId: 'run-1' })
+    expect(await call('wait_for_heal_task', { ...SESSION, timeout_ms: 1 })).toMatchObject({
+      type: 'passed',
+      runId: 'run-1',
+      summary: { total: 1, passed: 1 },
+      counts: { totalKnown: 1, passed: 1, failed: 0, notRun: 0, statusLine: '1/1 passed, 0 failed, 0 not run' },
+    })
   })
 
   it('surfaces the wait\'s own refusal as a tool error', async () => {
@@ -213,7 +226,12 @@ describe('signal_run', () => {
   }
 
   it('writes a restart signal with the trimmed diagnosis and bumps the cycle', async () => {
-    const { call, broker } = signalHarness()
+    // Deliberately NOT signalHarness(): its run is healMode 'external', and
+    // ensureExternalClaimForMcpCall touches the SAME run + session for such a
+    // run, so the touch assertion below would pass even with signal_run's own
+    // touch deleted. On a non-external run the claim helper returns early, which
+    // leaves signal_run as the only possible caller.
+    const { call, broker } = harness({ store: { get: () => runDetail() } })
 
     const out = await call('signal_run', { ...SESSION, kind: 'restart', ...DIAGNOSIS })
 
@@ -292,8 +310,17 @@ describe('handoff_heal', () => {
 
   it('is guarded against an accidental handoff', () => {
     const { configs } = harness()
+    const config = configs.get('handoff_heal')!
 
-    expect(configs.get('handoff_heal')?.annotations).toMatchObject({ destructiveHint: true })
+    expect(config.annotations).toMatchObject({ destructiveHint: true })
+    // The annotation is only a client-side hint; the gate is the literal schema.
+    // Driven explicitly because this harness calls handlers directly, so zod
+    // never runs — every other test here passes confirm:true of its own accord
+    // and would sail straight past a relaxed `z.boolean().optional()`.
+    const confirm = config.inputSchema!.confirm as z.ZodTypeAny
+    expect(confirm.parse(true)).toBe(true)
+    expect(() => confirm.parse(false)).toThrow()
+    expect(() => confirm.parse(undefined)).toThrow()
   })
 
   it('says so when the hand-off wiring is absent', async () => {

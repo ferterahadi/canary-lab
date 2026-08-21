@@ -51,12 +51,17 @@ describe('failureResult', () => {
 })
 
 describe('asJsonResult', () => {
-  it('renders a value as pretty JSON text', () => {
+  it('renders a value as COMPACT JSON — the whitespace is tokens on every result', () => {
     const out = asJsonResult({ runId: 'r1', counts: { passed: 2 } })
 
     expect(out.isError).toBeUndefined()
     const text = (out.content as Array<{ text: string }>)[0].text
-    expect(JSON.parse(text)).toEqual({ runId: 'r1', counts: { passed: 2 } })
+    // Asserted as an exact string, not via JSON.parse: a parse-and-compare is
+    // blind to formatting, so it would pass just as happily with the 2-space
+    // pretty-print this helper deliberately dropped — which was pure whitespace
+    // tokens on every tool result of every profile.
+    expect(text).toBe('{"runId":"r1","counts":{"passed":2}}')
+    expect(text).not.toContain('\n')
   })
 })
 

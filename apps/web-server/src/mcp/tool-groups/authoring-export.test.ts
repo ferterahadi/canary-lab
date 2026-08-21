@@ -2,6 +2,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import type { ZodTypeAny } from 'zod'
 import { decode } from '@toon-format/toon'
 import type { RunDetail } from '../../features/runs/logic/run-store'
 import {
@@ -442,5 +443,20 @@ describe('delete_evaluation_export', () => {
 
     expect(await text('delete_evaluation_export', { taskId: 'eval-ghost', confirm: true }))
       .toBe('evaluation export task not found: eval-ghost')
+  })
+
+  it('gates the delete on confirm, and declares itself destructive', () => {
+    const { configs } = harness()
+    const config = configs.get('delete_evaluation_export')!
+
+    // Asserted against the SCHEMA, not by calling the handler: this harness
+    // invokes handlers directly, so zod never runs and every test above passes
+    // `confirm: true` of its own accord. Relaxing the literal to an optional
+    // boolean would therefore go unnoticed — and this tool deletes the archive a
+    // run's whole evaluation lives in.
+    expect(() => (config.inputSchema!.confirm as ZodTypeAny).parse(false)).toThrow()
+    expect(() => (config.inputSchema!.confirm as ZodTypeAny).parse(undefined)).toThrow()
+    expect((config.inputSchema!.confirm as ZodTypeAny).parse(true)).toBe(true)
+    expect(config.annotations).toMatchObject({ destructiveHint: true, idempotentHint: false })
   })
 })
