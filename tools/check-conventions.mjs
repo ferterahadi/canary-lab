@@ -54,7 +54,15 @@ const ROOTS = ['apps', 'shared', 'tools']
 //   assert behaviour, never rendered output. Measured 353 files; the floor keeps
 //   a small margin because the count only includes files a test actually loaded.
 //   `features/*/components`, `shared/ui` and `shared/shell` remain OUT.
-const MIN_GATED_FILES = 350
+// 350 → 385 when the MCP layer joined, with the run-loop logic that sits beside
+//   `index.ts` rather than under `logic/` (route-deps, stream wiring, scheduler,
+//   local-heal restart, heal-agent choice), the six feature registrars, the DI
+//   context, and `apps/web/src/shared/test-numbering.ts`. The MCP tree is the
+//   whole external-agent API — 18 files, ~3.6k lines — and was ungated only
+//   because it shipped as one 2740-line `tools.ts`; the tool-groups split made it
+//   testable. Measured 389 files at 100/100/100/100 over 7658 tests. The floor
+//   keeps a small margin because the count only includes files a test loaded.
+const MIN_GATED_FILES = 385
 
 // `console.*` is CLI output, not server logging. These trees ARE the CLI.
 const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']

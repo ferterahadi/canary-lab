@@ -62,13 +62,17 @@ services. Each structured start command can declare a readiness check, restrict
 itself to selected environments, and expose injectable port slots:
 
 ```js
+const path = require('node:path')
+
+const appDir = path.join(__dirname, '..', '..', 'checkout-api')
+
 const config = {
   name: 'checkout-discounts',
   description: 'Validate checkout discount behavior',
   envs: ['local', 'production'],
   repos: [{
     name: 'checkout-api',
-    localPath: '/absolute/path/to/checkout-api',
+    localPath: appDir,
     envs: ['local'],
     startCommands: [{
       name: 'api',
@@ -125,7 +129,7 @@ path-by-variant cell. It does not become covered merely because a test passed.
 | `untested` | No test maps to the requirement |
 | `path-incomplete` | At least one required happy, sad, or edge path is unclaimed |
 | `variant-incomplete` | At least one applicable path-by-variant cell is unclaimed |
-| `covered` | Every required path or applicable variant cell is claimed |
+| `covered` | Every required path, or every applicable path-by-variant cell, is claimed |
 
 When the feature has run, the ledger adds a separate **proven** view from the
 latest run. A mapped test can therefore claim coverage while its requirement

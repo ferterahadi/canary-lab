@@ -34,7 +34,7 @@ evidence, fixes the app, and continues the same run.
 
 ## Users
 
-1. **App engineer** — runs tests from the UI or CLI, reviews history, switches envsets, and sometimes repairs by hand.
+1. **App engineer** — runs existing features from the UI or drives Flight from the CLI, reviews history, switches envsets, and sometimes repairs by hand.
 2. **AI repair agent** — connects over MCP, claims runs, reads evidence, edits app code, and signals rerun or restart. Tool results and `initialize` instructions guide agents that never read the docs.
 3. **Evaluation author** — exports any terminal run. Canary Lab renders and stores the archive; wording comes from evidence (`raw`), a local agent (`localized`), or an external MCP client.
 

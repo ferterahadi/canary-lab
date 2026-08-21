@@ -91,10 +91,11 @@ rewriting it again.
 ## Requirement coverage
 
 Open **Coverage** from a suite row. The ledger computes claim-based coverage
-from requirement, path, and variant tags. If a latest run exists, it overlays a
-separate proven percentage and per-requirement proof state without changing the
-claim-based gap types or headline coverage percentage. Strictness describes the
-strongest assertion layer in each test.
+from requirement, path, and variant tags. When a latest run exists, the shared
+coverage service also computes a separate proven percentage and per-requirement
+proof state for Flight and evaluation surfaces. The Coverage headline and gap
+groups remain claim-based. Strictness describes the strongest assertion layer
+in each test.
 
 Regenerating the PRD summary preserves surviving requirement IDs. Changes to
 source docs mark the summary and dependent coverage state stale instead of
@@ -133,10 +134,10 @@ Portified worktrees are kept after reversing the overlay because they may still
 hold repair edits; manage them under **Cleanup → Worktrees**.
 
 When a captured repair makes the run green and **Settings → GitHub → Open a
-draft PR when a run heals green** is enabled, Canary Lab updates a
-feature-and-repository fix branch and opens or
-updates a draft pull request. A GitHub failure is recorded on the manifest and
-does not change the test verdict. Red or abandoned repairs are never proposed.
+draft PR when a run heals green** is enabled, Canary Lab updates a fix branch
+for the feature and product repository, then opens or updates a draft pull
+request. A GitHub failure is recorded on the manifest and does not change the
+test verdict. Red or abandoned repairs are never proposed.
 
 ### External repair
 
