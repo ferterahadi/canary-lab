@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
 
 const mocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),
@@ -6,7 +9,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('child_process', () => ({ execFileSync: mocks.execFileSync }))
 
-const { registerCanaryLabMcp, resolveMcpInvocation, isEphemeralNpxInstall } = await import('./mcp-registration')
+const { registerCanaryLabMcp, resolveMcpInvocation, isEphemeralNpxInstall, isTempInstallPath } = await import('./mcp-registration')
 
 const lookup = process.platform === 'win32' ? 'where' : 'which'
 
@@ -366,5 +369,28 @@ describe('resolveMcpInvocation', () => {
       forGui: true,
     })
     expect(resolved.env).toBeUndefined()
+  })
+})
+
+describe('isTempInstallPath', () => {
+  // The live failure: a Claude Desktop entry pointed at a demo install under the temp
+  // dir, which the next sweep deletes — leaving a dead MCP server the user never
+  // configured. os.tmpdir() is the authority so this holds on every platform.
+  it('flags an install under the OS temp dir', () => {
+    const cli = path.join(os.tmpdir(), 'canary-lab-demo-abc', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js')
+    expect(isTempInstallPath(cli)).toBe(true)
+  })
+
+  // Load-bearing on macOS: os.tmpdir() reports `/var/folders/…` while the path a real
+  // install resolves to is `/private/var/folders/…`. A raw-only prefix test returns
+  // false here, which is exactly the bug this guard exists to prevent.
+  it('flags the realpath form of the temp dir, not just the raw one', () => {
+    const real = fs.realpathSync(os.tmpdir())
+    expect(isTempInstallPath(path.join(real, 'canary-lab-smoke-x', 'smoke-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js'))).toBe(true)
+  })
+
+  it('leaves a durable install alone', () => {
+    expect(isTempInstallPath('/Users/x/Documents/canary-lab-workspace/node_modules/canary-lab/dist/scripts/cli.js')).toBe(false)
+    expect(isTempInstallPath('/usr/local/lib/node_modules/canary-lab/dist/scripts/cli.js')).toBe(false)
   })
 })

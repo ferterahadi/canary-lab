@@ -133,6 +133,11 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
       configPath: desktopConfigPath,
       execPath,
       cliPath,
+      // Pin the workspace `setup` was run in. Desktop has no cwd, so this is the
+      // only way a GUI session reaches THIS workspace when more than one server
+      // is live — and it is what makes the documented demo hand-off work from a
+      // session rooted anywhere.
+      projectRoot: workspace,
     })
     registered = true
   }

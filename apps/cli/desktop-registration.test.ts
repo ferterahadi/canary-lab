@@ -111,6 +111,49 @@ describe('registerClaudeDesktopMcp', () => {
   })
 })
 
+describe('registerClaudeDesktopMcp workspace pin', () => {
+  // Desktop is a GUI: it has no cwd, so the bridge cannot infer which workspace
+  // it belongs to. Without the pin, a Desktop session had to hope the right
+  // server happened to be the one discovery picked.
+  it('pins the workspace as CANARY_LAB_PROJECT_ROOT', () => {
+    const configPath = tmpConfig()
+    registerClaudeDesktopMcp({
+      configPath, execPath: EXEC, cliPath: CLI, projectRoot: '/work/durable', log: () => {},
+    })
+    expect(read(configPath).mcpServers.Canary_Lab.env).toEqual({
+      PATH: expect.any(String),
+      CANARY_LAB_PROJECT_ROOT: '/work/durable',
+    })
+  })
+
+  it('omits the pin when no workspace is given', () => {
+    const configPath = tmpConfig()
+    registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: CLI, log: () => {} })
+    expect(read(configPath).mcpServers.Canary_Lab.env.CANARY_LAB_PROJECT_ROOT).toBeUndefined()
+  })
+
+  // The whole point of comparing the pin: an entry aimed at a workspace that is
+  // gone must read as stale, not as "already configured".
+  it('re-points an entry pinned to a different workspace', () => {
+    const configPath = tmpConfig()
+    registerClaudeDesktopMcp({
+      configPath, execPath: EXEC, cliPath: CLI, projectRoot: '/work/old', log: () => {},
+    })
+    const result = registerClaudeDesktopMcp({
+      configPath, execPath: EXEC, cliPath: CLI, projectRoot: '/work/new', refreshOnly: true, log: () => {},
+    })
+    expect(result).toBe('configured')
+    expect(read(configPath).mcpServers.Canary_Lab.env.CANARY_LAB_PROJECT_ROOT).toBe('/work/new')
+  })
+
+  it('leaves an entry already pinned to the same workspace alone', () => {
+    const configPath = tmpConfig()
+    const args = { configPath, execPath: EXEC, cliPath: CLI, projectRoot: '/work/same', log: () => {} }
+    registerClaudeDesktopMcp(args)
+    expect(registerClaudeDesktopMcp(args)).toBe('unchanged')
+  })
+})
+
 describe('registerClaudeDesktopMcp refresh', () => {
   it('skips writing when no canary-lab entry exists', () => {
     const configPath = tmpConfig()

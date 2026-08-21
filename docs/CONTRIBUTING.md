@@ -116,11 +116,17 @@ Protocol (MCP) client's configuration.
    npx canary-lab setup --force --agent all
    ```
 
-3. Restart the desktop app and open a new session in the generated workspace.
-   A session rooted elsewhere resolves the sample folders from the wrong place.
+3. Restart the desktop app and open a new session. The session does not have to
+   be rooted in the generated workspace: the demo server records itself in
+   `~/.canary-lab/active-servers.json` like any other, and step 2 pins that
+   workspace on the Claude Desktop entry, so a client resolves it from anywhere.
 4. Confirm `Canary_Lab` appears in the session's MCP tools. In Canary Lab, open
    **Getting Started** and paste its **In your agent** command into the session.
 
 Keep the demo terminal running. Each demo command creates a new workspace, so
 repeat registration when the workspace changes. Custom MCP clients can use the
 endpoint shown by Canary Lab's **MCP** status.
+
+On exit the demo removes its own entries from `~/.canary-lab`. It does not move
+your MCP client registrations back — step 2 pointed them at the demo, and
+`npx canary-lab ui` from a durable workspace re-points them on its next boot.

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from 'fs'
+import { resolveCliPath, isTempInstallPath } from './mcp-registration'
 import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
@@ -156,8 +157,16 @@ export function refreshInstalled(target: Target, opts: AgentInstallOptions = {})
  * updated (0 when current or on error).
  */
 export function refreshAgentIntegrationsQuietly(
-  opts: { homeDir?: string; log?: (msg: string) => void } = {},
+  opts: { homeDir?: string; log?: (msg: string) => void; cliPath?: string } = {},
 ): number {
+  // Same structural guard as the MCP refreshes (isTempInstallPath): the installed
+  // skills are GLOBAL, so a `ui` booted from a demo/smoke install under the temp dir
+  // would overwrite the user's skills with whatever that throwaway tarball carried —
+  // observed live, delivering a mid-edit skill file from a dirty build tree.
+  if (isTempInstallPath(opts.cliPath ?? resolveCliPath())) {
+    opts.log?.('Skipping agent integration refresh — this install lives under the temp directory.')
+    return 0
+  }
   try {
     return refreshInstalled('all', {
       homeDir: opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME,

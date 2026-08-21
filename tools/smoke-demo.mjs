@@ -4,6 +4,7 @@ import net from 'net'
 import os from 'os'
 import path from 'path'
 import { renderInteractiveGuide } from './smoke-demo-output.mjs'
+import { pruneDemoStateFromRealHome } from './demo-home-prune.mjs'
 
 // The developer's `npx canary-lab init`.
 //
@@ -518,8 +519,28 @@ async function runSmoke(port) {
   }
 }
 
+// Undo the footprint a finished demo leaves in the user's REAL `~/.canary-lab`.
+// The reasoning lives with the helper; it is a separate module so it can be
+// unit-tested, because a bug here would edit a registry the user depends on.
+function pruneRealHomeState() {
+  const changed = pruneDemoStateFromRealHome(
+    path.join(os.homedir(), '.canary-lab'),
+    tempRoot,
+    (message) => console.warn(`    (${message})`),
+  )
+  for (const file of changed) console.log(`    Removed this demo's entry from ~/.canary-lab/${file}`)
+  // Deliberately NOT re-pointing the client MCP registrations. `setup` may have
+  // aimed Claude Desktop at this temp install, but a dev script that rewrites a
+  // desktop app's config on every exit is worse than the problem — and it is
+  // redundant: `canary-lab ui` re-asserts that entry on every boot, guarded so a
+  // temp install can never claim it back.
+  console.log('    If you ran `canary-lab setup` here, run `npx canary-lab ui` from your durable')
+  console.log('    workspace to re-point your MCP clients, then restart Claude Desktop.')
+}
+
 function cleanup() {
   if (uiChild && !uiChild.killed) uiChild.kill('SIGTERM')
+  pruneRealHomeState()
   if (keepOpen && fs.existsSync(projectDir)) return
   try {
     fs.rmSync(tempRoot, { recursive: true, force: true })

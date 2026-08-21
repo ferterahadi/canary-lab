@@ -133,6 +133,10 @@ describe('start_flight — what it sends', () => {
       repoPaths: ['/work/flight-app'],
       description: 'lending',
       feature: 'flight-app',
+      // Unasked-for and always present: an MCP caller is an interactive agent, so the
+      // thinking stages default to IT. Pinned here because the omission is what let two
+      // real flights run internally while the user expected to be handed the work.
+      stageProducer: 'external',
     })
   })
 
@@ -157,7 +161,9 @@ describe('start_flight — what it sends', () => {
 
     await call('start_flight', { feature: 'checkout', from_stage: 'run' })
 
-    expect(requests.at(-1)?.payload).toEqual({ feature: 'checkout', mode: 'jump', fromStage: 'run' })
+    // The producer still rides along; the conductor pins the STORED one on a jump, so
+    // this cannot retro-switch a flight whose earlier stages ran internally.
+    expect(requests.at(-1)?.payload).toEqual({ feature: 'checkout', mode: 'jump', fromStage: 'run', stageProducer: 'external' })
   })
 
   it('marks a redo as a redo, and carries no fromStage', async () => {
@@ -165,7 +171,7 @@ describe('start_flight — what it sends', () => {
 
     await call('start_flight', { feature: 'checkout', redo: true })
 
-    expect(requests.at(-1)?.payload).toEqual({ feature: 'checkout', mode: 'redo' })
+    expect(requests.at(-1)?.payload).toEqual({ feature: 'checkout', mode: 'redo', stageProducer: 'external' })
   })
 
   it('treats an empty repo list as no repos at all', async () => {

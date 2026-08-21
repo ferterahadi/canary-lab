@@ -223,6 +223,10 @@ describe('setup', () => {
     expect(cfg.mcpServers['Canary_Lab'].command).toBe('/usr/bin/node')
     expect(cfg.mcpServers['Canary_Lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'lifecycle'])
     expect(cfg.mcpServers['Canary_Lab'].env.PATH).toContain('/usr/bin')
+    // The workspace `setup` ran in is pinned, so a Desktop session reaches THIS
+    // workspace no matter what else is live — the documented demo hand-off
+    // depends on it, because Desktop has no cwd to infer one from.
+    expect(cfg.mcpServers['Canary_Lab'].env.CANARY_LAB_PROJECT_ROOT).toBe(workspace)
   })
 
   it('does not touch Claude Desktop when its config directory is absent', () => {

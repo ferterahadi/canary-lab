@@ -128,11 +128,14 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
           : existing.opts.agent
             ? { agent: existing.opts.agent }
             : {}),
+        // Resolved, never omitted: the MCP layer now DEFAULTS this per client, so
+        // leaving it absent would let that default spread onto a record whose
+        // earlier stages already ran internally — the two-producer evidence the
+        // comment above rules out. A pre-existing record with no stored value ran
+        // internally by definition, so that is what it keeps.
         ...(mode === 'redo'
           ? { stageProducer: args.opts.stageProducer ?? existing.opts.stageProducer }
-          : existing.opts.stageProducer
-            ? { stageProducer: existing.opts.stageProducer }
-            : {}),
+          : { stageProducer: existing.opts.stageProducer ?? 'internal' }),
       },
       status: 'running',
       pauseReason: undefined,

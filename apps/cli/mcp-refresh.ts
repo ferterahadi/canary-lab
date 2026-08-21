@@ -2,6 +2,8 @@ import fs from 'fs'
 import {
   registerCanaryLabMcp,
   registeredCliPath,
+  resolveCliPath,
+  isTempInstallPath,
   type McpRegistrationTarget,
 } from './mcp-registration'
 import {
@@ -35,6 +37,14 @@ export function refreshCanaryLabMcp(opts: RefreshOptions = {}): void {
     return
   }
 
+  // A temp install must not claim the user's global pointers — see isTempInstallPath.
+  // Checked against the path we WOULD register, so an explicit durable `cliPath`
+  // (init passes the stable node_modules one) is still allowed through.
+  if (isTempInstallPath(opts.cliPath ?? resolveCliPath())) {
+    opts.log?.('Skipping client MCP refresh — this install lives under the temp directory.')
+    return
+  }
+
   const base = {
     refreshOnly: true as const,
     force: true as const,
@@ -58,6 +68,8 @@ export interface QuietDesktopRefreshOptions {
   configPath?: string
   execPath?: string
   cliPath?: string
+  /** Workspace to pin the refreshed entry to. See registerClaudeDesktopMcp. */
+  projectRoot?: string
 }
 
 // Re-assert ONLY the Claude Desktop entry, for the `canary-lab ui` boot.
@@ -77,6 +89,10 @@ export function refreshClaudeDesktopMcpQuietly(
   // Same guard as refreshCanaryLabMcp: the tarball smoke test boots a throwaway
   // install and must never re-point the developer's live Desktop config at it.
   if (process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1') return 'skipped'
+  // A temp install must not claim the user's global pointers — see isTempInstallPath.
+  // Checked against the path we WOULD register, so an explicit durable `cliPath`
+  // (init passes the stable node_modules one) is still allowed through.
+  if (isTempInstallPath(opts.cliPath ?? resolveCliPath())) return 'skipped'
   try {
     const configPath = opts.configPath
       ?? claudeDesktopConfigPath(opts.homeDir ?? process.env.CANARY_LAB_AGENT_HOME)
@@ -87,6 +103,10 @@ export function refreshClaudeDesktopMcpQuietly(
       configPath,
       execPath: opts.execPath,
       cliPath: opts.cliPath,
+      // The booting workspace is the one to pin: this refresh runs from
+      // `canary-lab ui`, which is also what records the live server the pin
+      // resolves to. Omitting it here would strip a pin `setup` just wrote.
+      ...(opts.projectRoot ? { projectRoot: opts.projectRoot } : {}),
       // The caller reports the outcome from the return value; the writer's own
       // "already configured" line would be noise on every single boot.
       log: () => {},

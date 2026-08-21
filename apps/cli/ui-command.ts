@@ -109,7 +109,7 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
   // a cli.js the upgrade deleted — and the user gets "Server disconnected" with
   // no hint. Re-assert it here. Silent unless it actually repaired something,
   // and a repair only takes effect once Desktop is restarted, so say so.
-  const refreshDesktopMcp = opts.refreshDesktopMcp ?? (() => refreshClaudeDesktopMcpQuietly())
+  const refreshDesktopMcp = opts.refreshDesktopMcp ?? (() => refreshClaudeDesktopMcpQuietly({ projectRoot }))
   if (refreshDesktopMcp() === 'configured') {
     log('Repaired the Claude Desktop MCP entry — it pointed at a path from a previous install. Restart Claude Desktop to pick it up.')
   }

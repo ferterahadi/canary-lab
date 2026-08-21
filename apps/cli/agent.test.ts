@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { install, installOrRefresh, main, refreshInstalled } from './agent'
+import { install, installOrRefresh, main, refreshInstalled, refreshAgentIntegrationsQuietly } from './agent'
 
 describe('canary-lab agent install', () => {
   it('dry-run prints planned copies and MCP snippets without writing files', () => {
@@ -124,5 +124,45 @@ describe('canary-lab agent install', () => {
     })
     expect(exits).toEqual([1])
     expect(errors[0]).toContain('Usage: canary-lab agent install')
+  })
+})
+
+describe('refreshAgentIntegrationsQuietly temp-install guard', () => {
+  // The installed skills are GLOBAL. A `ui` booted from a demo/smoke install under the
+  // temp dir overwrote the user's ~/.claude skills with whatever that throwaway tarball
+  // carried — observed live delivering a mid-edit skill file built from a dirty tree.
+  it('installs nothing when the running install is under the temp dir', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
+    const tempCli = path.join(os.tmpdir(), 'canary-lab-demo-abc', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js')
+    const messages: string[] = []
+    try {
+      expect(refreshAgentIntegrationsQuietly({ homeDir: home, cliPath: tempCli, log: (m) => messages.push(m) })).toBe(0)
+      // Nothing written at all — not even an empty skills dir.
+      expect(fs.existsSync(path.join(home, '.claude', 'skills'))).toBe(false)
+      expect(messages.join(' ')).toContain('temp directory')
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('refreshes from a durable install path', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-home-'))
+    try {
+      // Seeded AND made stale. `refreshInstalled` skips an installed copy that already
+      // matches the packaged asset, so a pristine install refreshes zero — this test
+      // would then pass even if the guard had wrongly short-circuited. Introducing drift
+      // is what makes a non-zero count the observable proof that the refresh ran.
+      install('claude', { homeDir: home, log: () => {} })
+      const stale = path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md')
+      fs.writeFileSync(stale, 'stale content from an older version\n')
+      const n = refreshAgentIntegrationsQuietly({
+        homeDir: home,
+        cliPath: '/Users/x/Documents/canary-lab-workspace/node_modules/canary-lab/dist/scripts/cli.js',
+        log: () => {},
+      })
+      expect(n).toBeGreaterThan(0)
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true })
+    }
   })
 })

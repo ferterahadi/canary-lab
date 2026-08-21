@@ -1,6 +1,7 @@
 import { execFileSync } from 'child_process'
 import path from 'path'
 import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../web-server/src/mcp/tools'
+import { isUnderTempDir } from '../../shared/runtime/temp-path'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
 
@@ -52,11 +53,30 @@ export function isEphemeralNpxInstall(cliPath: string): boolean {
   return cliPath.split(/[\\/]/).includes('_npx')
 }
 
+// Sibling of the above, for the other class of install whose path rots: anything
+// under the OS temp dir. The getting-started demo scaffolds a temp workspace and
+// installs canary-lab into it, and the tarball smoke test does the same — so a
+// `ui` booted from one of those would write ITS path into the user's GLOBAL client
+// config. Observed live: a Claude Desktop entry aimed at a
+// `/private/var/folders/.../T/canary-lab-demo-*/` cli.js, which the next temp sweep
+// deletes and the user is left with a dead MCP server they never configured.
+//
+// Deliberately NOT the same mechanism as CANARY_LAB_SKIP_CLIENT_MCP: that env var
+// opts a KNOWN harness out and the harness has to remember to set it. This is
+// structural, so an interactive `canary-lab ui` in a demo workspace — which nobody
+// thought to guard — cannot claim global pointers either. `setup` run from a durable
+// workspace remains the supported way to move them and is unaffected.
+export function isTempInstallPath(cliPath: string): boolean {
+  return isUnderTempDir(cliPath)
+}
+
 export function resolveMcpInvocation(opts: {
   execPath: string
   cliPath: string
   forGui?: boolean
   pathEnv?: string
+  /** Workspace this registration is for. GUI clients only — see below. */
+  projectRoot?: string
 }): ResolvedMcpInvocation {
   if (isEphemeralNpxInstall(opts.cliPath)) {
     return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', DEFAULT_CANARY_LAB_MCP_PROFILE] }
@@ -69,6 +89,11 @@ export function resolveMcpInvocation(opts: {
   // often lacks the nvm/homebrew node dir, so embed an explicit PATH.
   if (opts.forGui) {
     invocation.env = { PATH: opts.pathEnv ?? defaultGuiPath(opts.execPath) }
+    // A GUI client has no meaningful cwd, so the bridge cannot infer which
+    // workspace it belongs to the way a terminal session can. Pin it. Only the
+    // GUI needs this: a CLI client resolves the enclosing workspace from its own
+    // cwd, and when neither pins one the live-server record decides.
+    if (opts.projectRoot) invocation.env.CANARY_LAB_PROJECT_ROOT = path.resolve(opts.projectRoot)
   }
   return invocation
 }

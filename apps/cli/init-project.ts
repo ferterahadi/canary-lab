@@ -112,6 +112,36 @@ const TEMPLATE_RENAMES: Record<string, string> = {
   gitignore: '.gitignore',
 }
 
+/** Commit everything the scaffold wrote. Portify runs each repo in a throwaway git
+ *  worktree, and a worktree only sees COMMITTED files — so a scaffold left uncommitted
+ *  fails every portify with a 409 ("repo has uncommitted changes"), a stage failure the
+ *  user has no way to act on. Must run AFTER `npm install`: the install writes
+ *  package-lock.json, which is tracked, so committing earlier leaves the tree dirty and
+ *  the 409 returns.
+ *
+ *  Unconditional by design. `main` refuses a non-empty target, so the repo here is
+ *  always one this command just created — there is no user history to protect. When git
+ *  is absent (or `git init` failed) `add` throws that this is not a repository and the
+ *  swallow below is the whole handling.
+ *
+ *  Identity and signing are pinned per-invocation rather than read from global config so
+ *  an unattended init cannot block on an absent `user.email` or a GPG passphrase prompt. */
+export function commitScaffold(targetDir: string): void {
+  try {
+    execFileSync('git', ['add', '-A'], { cwd: targetDir, stdio: 'ignore' })
+    execFileSync('git', [
+      '-c', 'user.name=Canary Lab',
+      '-c', 'user.email=canary-lab@localhost',
+      '-c', 'commit.gpgsign=false',
+      'commit', '-q', '-m', 'chore: scaffold Canary Lab workspace',
+    ], { cwd: targetDir, stdio: 'ignore' })
+  } catch {
+    /* Not a repo, nothing to commit, or a hook refused — the scaffold is still
+       usable, and portify reports the uncommitted-changes 409 if it mattered.
+       Not worth failing an otherwise-complete init over. */
+  }
+}
+
 export function copyDir(sourceDir: string, targetDir: string): void {
   copyDirRecursive(sourceDir, targetDir, (name) => TEMPLATE_RENAMES[name] ?? name)
 }
@@ -292,6 +322,8 @@ export async function main(
     setupOk = false
     console.log(`Canary Lab setup skipped: ${(err as Error).message}`)
   }
+
+  commitScaffold(targetDir)
 
   ok(`Canary Lab project created at ${ansiPath(targetDir)}`)
   section('Next steps')

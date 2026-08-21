@@ -256,6 +256,24 @@ describe('refreshClaudeDesktopMcpQuietly', () => {
     expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('unchanged')
   })
 
+  // The boot re-point must carry the booting workspace, or it would strip a pin
+  // `setup` had just written — the two writers would fight on every `ui` start.
+  it('pins the booting workspace on the entry it re-points', () => {
+    const configPath = tmpConfig()
+    fs.mkdirSync(path.dirname(configPath), { recursive: true })
+    fs.writeFileSync(configPath, JSON.stringify({
+      mcpServers: { 'Canary_Lab': { command: EXEC, args: ['/old/dist/scripts/cli.js', 'mcp'] } },
+    }))
+
+    const result = refreshClaudeDesktopMcpQuietly({
+      configPath, execPath: EXEC, cliPath: CLI, projectRoot: '/work/booting',
+    })
+
+    expect(result).toBe('configured')
+    const entry = JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers['Canary_Lab']
+    expect(entry.env.CANARY_LAB_PROJECT_ROOT).toBe('/work/booting')
+  })
+
   it('never adds an entry to a Desktop that was never configured', () => {
     const configPath = tmpConfig()
     fs.mkdirSync(path.dirname(configPath), { recursive: true })
@@ -316,5 +334,37 @@ describe('refreshClaudeDesktopMcpQuietly', () => {
     expect(refreshClaudeDesktopMcpQuietly({ configPath, execPath: EXEC, cliPath: CLI })).toBe('skipped')
     expect(JSON.parse(fs.readFileSync(configPath, 'utf-8')).mcpServers['Canary_Lab'].args[0])
       .toBe('/old/dist/scripts/cli.js')
+  })
+})
+
+// The gap CANARY_LAB_SKIP_CLIENT_MCP left open: that env var only protects harnesses
+// that remember to set it. An interactive `canary-lab ui` inside the getting-started
+// demo's temp workspace set nothing, and repointed the user's real client config at a
+// path that dies on the next temp sweep.
+describe('temp-install guard', () => {
+  const TEMP_CLI = path.join(os.tmpdir(), 'canary-lab-demo-abc', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js')
+
+  it('refreshCanaryLabMcp writes nothing when the install is under the temp dir', () => {
+    const messages: string[] = []
+    refreshCanaryLabMcp({ execPath: EXEC, cliPath: TEMP_CLI, log: (m) => messages.push(m) })
+    // Not "no add" — NO client process at all. A `which`/`get` probe would mean the
+    // guard sits below the detection it is supposed to short-circuit.
+    expect(mocks.execFileSync).not.toHaveBeenCalled()
+    expect(messages.join(' ')).toContain('temp directory')
+  })
+
+  it('refreshClaudeDesktopMcpQuietly skips when the install is under the temp dir', () => {
+    const desktopConfigPath = tmpConfig()
+    fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
+    fs.writeFileSync(desktopConfigPath, JSON.stringify({ mcpServers: {} }))
+    const before = fs.readFileSync(desktopConfigPath, 'utf-8')
+
+    expect(refreshClaudeDesktopMcpQuietly({ execPath: EXEC, cliPath: TEMP_CLI, configPath: desktopConfigPath })).toBe('skipped')
+    expect(fs.readFileSync(desktopConfigPath, 'utf-8')).toBe(before)
+  })
+
+  it('still refreshes a durable install', () => {
+    refreshCanaryLabMcp({ execPath: EXEC, cliPath: CLI, log: () => {} })
+    expect(mocks.execFileSync).toHaveBeenCalled()
   })
 })

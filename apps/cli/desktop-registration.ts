@@ -16,6 +16,10 @@ export interface DesktopRegistrationOptions {
   execPath?: string
   cliPath?: string
   pathEnv?: string
+  /** Workspace to pin the entry to, as CANARY_LAB_PROJECT_ROOT. Desktop has no
+   *  cwd of its own, so without it the bridge has to guess which workspace the
+   *  GUI meant. */
+  projectRoot?: string
   /** Re-point an existing entry only; never add one, and heal a stale entry
    *  without prompting. */
   refreshOnly?: boolean
@@ -74,6 +78,7 @@ export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}):
     cliPath: opts.cliPath ?? resolveCliPath(),
     forGui: true,
     pathEnv: opts.pathEnv,
+    ...(opts.projectRoot ? { projectRoot: opts.projectRoot } : {}),
   })
 
   if (opts.dryRun) {
@@ -133,10 +138,18 @@ function invocationEntry(invocation: ResolvedMcpInvocation): Record<string, unkn
 
 function sameEntry(value: unknown, desired: ResolvedMcpInvocation): boolean {
   if (!value || typeof value !== 'object') return false
-  const entry = value as { command?: unknown; args?: unknown; env?: { PATH?: unknown } }
+  const entry = value as {
+    command?: unknown
+    args?: unknown
+    env?: { PATH?: unknown; CANARY_LAB_PROJECT_ROOT?: unknown }
+  }
   return entry.command === desired.command &&
     JSON.stringify(entry.args) === JSON.stringify(desired.args) &&
-    (entry.env?.PATH ?? undefined) === (desired.env?.PATH ?? undefined)
+    (entry.env?.PATH ?? undefined) === (desired.env?.PATH ?? undefined) &&
+    // Compared so moving the pin re-points the entry instead of reading as
+    // "already configured" — a Desktop pinned to a workspace that is gone is the
+    // exact failure this pin exists to prevent.
+    (entry.env?.CANARY_LAB_PROJECT_ROOT ?? undefined) === (desired.env?.CANARY_LAB_PROJECT_ROOT ?? undefined)
 }
 
 function readConfig(configPath: string): Record<string, unknown> {

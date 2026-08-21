@@ -4,6 +4,7 @@ import os from 'os'
 import path from 'path'
 import {
   activeServersPath,
+  liveRegistryHome,
   readActiveServers,
   registerActiveServer,
   resolveActiveServer,
@@ -236,5 +237,64 @@ describe('resolveActiveServer', () => {
     ]
     const match = resolveActiveServer({ servers, cwd: '/somewhere/else', env: {} as NodeJS.ProcessEnv })
     expect(match?.port).toBe(7500)
+  })
+
+  // The failure this prevents: a demo or smoke-test workspace under the OS temp
+  // dir registers LAST, so recency alone hands every unpinned session a folder
+  // the OS may delete — which is how a flight ends up running in a throwaway
+  // workspace instead of the user's.
+  it('prefers a durable workspace over a newer temp one', () => {
+    const servers = [
+      base({ projectRoot: '/work/durable', port: 7420, updatedAt: '2026-01-01T00:00:00.000Z' }),
+      base({
+        projectRoot: path.join(os.tmpdir(), 'canary-lab-demo-x', 'demo-project'),
+        port: 50258,
+        updatedAt: '2026-03-01T00:00:00.000Z',
+      }),
+    ]
+    expect(resolveActiveServer({ servers, cwd: '/somewhere/else', env: {} as NodeJS.ProcessEnv })?.port).toBe(7420)
+  })
+
+  // But reachable beats unreachable: when the demo is the only thing running, an
+  // agent asking for it must still be able to find it.
+  it('uses a temp workspace when it is the only live server', () => {
+    const servers = [base({ projectRoot: path.join(os.tmpdir(), 'canary-lab-demo-x', 'demo-project'), port: 50258 })]
+    expect(resolveActiveServer({ servers, cwd: '/somewhere/else', env: {} as NodeJS.ProcessEnv })?.port).toBe(50258)
+  })
+
+  // An explicit pin still wins outright — a GUI client registered FOR the demo
+  // must reach it even while a durable workspace is also up.
+  it('honours an explicit pin at a temp workspace', () => {
+    const demoRoot = path.join(os.tmpdir(), 'canary-lab-demo-x', 'demo-project')
+    const servers = [
+      base({ projectRoot: '/work/durable', port: 7420, updatedAt: '2026-03-01T00:00:00.000Z' }),
+      base({ projectRoot: demoRoot, port: 50258 }),
+    ]
+    const match = resolveActiveServer({
+      servers,
+      env: { CANARY_LAB_PROJECT_ROOT: demoRoot } as NodeJS.ProcessEnv,
+    })
+    expect(match?.port).toBe(50258)
+  })
+})
+
+describe('liveRegistryHome', () => {
+  // Liveness is machine-wide on purpose: CANARY_LAB_HOME isolates the user's own
+  // state, and honouring it here is what hid the demo's server from every client
+  // that wasn't launched inside the demo folder.
+  it('ignores CANARY_LAB_HOME and uses the real home', () => {
+    expect(liveRegistryHome({ CANARY_LAB_HOME: '/tmp/isolated' } as NodeJS.ProcessEnv)).toBe(os.homedir())
+  })
+
+  it('honours an explicit live-registry override', () => {
+    expect(liveRegistryHome({ CANARY_LAB_LIVE_REGISTRY_HOME: '/tmp/sandbox' } as NodeJS.ProcessEnv)).toBe('/tmp/sandbox')
+  })
+
+  it('treats a blank override as unset', () => {
+    expect(liveRegistryHome({ CANARY_LAB_LIVE_REGISTRY_HOME: '  ' } as NodeJS.ProcessEnv)).toBe(os.homedir())
+  })
+
+  it('defaults the record path to the real home', () => {
+    expect(activeServersPath()).toBe(path.join(os.homedir(), '.canary-lab', 'active-servers.json'))
   })
 })
