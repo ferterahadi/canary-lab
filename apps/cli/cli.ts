@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// MUST stay the first import — see node-guard.ts. Every import below runs its
+// whole module graph at load, which is exactly what fails on an unsupported Node.
+import './node-guard'
 import { main as initProject } from './init-project'
 import { main as upgradeProject } from './upgrade'
 import { runUi } from './ui-command'

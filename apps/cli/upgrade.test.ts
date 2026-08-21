@@ -14,6 +14,11 @@ vi.mock('./mcp-refresh', () => ({
   findStaleCanaryLabMcp: mcpRefreshMocks.findStaleCanaryLabMcp,
 }))
 
+// Same reason: the postinstall repair now runs the browser step, and a test must
+// never shell out to `playwright install`.
+const browserMock = vi.hoisted(() => ({ main: vi.fn(async () => {}) }))
+vi.mock('./install-browsers', () => ({ main: browserMock.main }))
+
 import { extractManagedBlock, applyManagedBlock, applyGitignoreRules, main } from './upgrade'
 import { readWorkspaceRegistry } from '../../shared/runtime/workspace-registry'
 
@@ -39,6 +44,7 @@ beforeEach(() => {
   mcpRefreshMocks.refreshCanaryLabMcp.mockClear()
   mcpRefreshMocks.findStaleCanaryLabMcp.mockClear()
   mcpRefreshMocks.findStaleCanaryLabMcp.mockReturnValue([])
+  browserMock.main.mockClear()
 })
 
 const START = '<!-- managed:canary-lab:start -->'
@@ -194,6 +200,53 @@ describe("main (upgrade orchestration)", () => {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"))
     expect(pkg.scripts.postinstall).toBe("canary-lab upgrade --silent && canary-lab install-browsers")
     expect(pkg.scripts.upgrade).toBe("canary-lab upgrade")
+  })
+
+  // Repairing the hook cannot help the install that just ran it — that install
+  // used the OLD upgrade-only hook, so no browser step happened. Playwright moves
+  // with canary-lab and pins browser builds per version, so leaving it for "next
+  // time" means the first run after an upgrade fails on a binary nobody fetched.
+  it("fetches browsers itself when it had to repair the postinstall hook", async () => {
+    const root = mkProjectRoot()
+    fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+      name: "old-workspace",
+      scripts: { postinstall: "canary-lab upgrade --silent" },
+    }, null, 2) + "\n")
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main(["--silent"])
+
+    expect(browserMock.main).toHaveBeenCalledWith([], { cwd: root })
+  })
+
+  it("skips the browser step when the hook was already correct", async () => {
+    // The steady state: every ordinary `npm install` already runs the browser
+    // step from the hook itself, so doing it again here would double every one.
+    const root = mkProjectRoot()
+    fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({
+      name: "current-workspace",
+      scripts: { postinstall: "canary-lab upgrade --silent && canary-lab install-browsers" },
+    }, null, 2) + "\n")
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main(["--silent"])
+
+    expect(browserMock.main).not.toHaveBeenCalled()
+  })
+
+  it("--check reports without repairing the hook or fetching browsers", async () => {
+    const root = mkProjectRoot()
+    const pkgPath = path.join(root, "package.json")
+    fs.writeFileSync(pkgPath, JSON.stringify({ name: "p", scripts: {} }, null, 2) + "\n")
+    vi.stubEnv("CANARY_LAB_PROJECT_ROOT", root)
+    vi.spyOn(console, "log").mockImplementation(() => {})
+
+    await main(["--check"])
+
+    expect(JSON.parse(fs.readFileSync(pkgPath, "utf-8")).scripts.postinstall).toBeUndefined()
+    expect(browserMock.main).not.toHaveBeenCalled()
   })
 
   it("re-points already-configured MCP clients on upgrade", async () => {

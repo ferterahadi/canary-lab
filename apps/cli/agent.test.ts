@@ -47,6 +47,47 @@ describe('canary-lab agent install', () => {
     expect(lines.join('\n')).toContain('Updated Codex skill')
   })
 
+  it('refresh gives a client that has any skill the whole current set', () => {
+    // Reproduces the pre-1.6.0 shape exactly: one `canary-lab` skill per client
+    // and nothing else, because that release only ever shipped one. An op-wise
+    // refresh (skip every destination that does not exist) leaves it that way
+    // while reporting success, so the six skills the refreshed hub skill points
+    // at are never written — assert on the directory listing, not the count,
+    // since a count is what made that failure invisible in the first place.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-split-'))
+    for (const client of ['.codex', '.claude'] as const) {
+      const legacy = path.join(home, client, 'skills', 'canary-lab')
+      fs.mkdirSync(legacy, { recursive: true })
+      fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-1.6.0 skill')
+    }
+
+    refreshInstalled('all', { homeDir: home, log: () => {} })
+
+    const packaged = fs
+      .readdirSync(path.resolve(__dirname, '..', '..', 'agent-integrations', 'claude', 'skills'))
+      .sort()
+    expect(packaged.length).toBeGreaterThan(1)
+    expect(fs.readdirSync(path.join(home, '.claude', 'skills')).sort()).toEqual(packaged)
+    expect(fs.readdirSync(path.join(home, '.codex', 'skills')).sort()).toEqual(packaged)
+    // The plugin bundle is its own group: nothing installed it, so it stays out.
+    expect(fs.existsSync(path.join(home, '.canary-lab'))).toBe(false)
+  })
+
+  it('refresh leaves a client with nothing installed entirely alone', () => {
+    // The other half of the group rule. Widening the refresh must not turn it
+    // into an installer for a client the user never opted in on — that stays
+    // explicit via `canary-lab setup`.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-optin-'))
+    const legacy = path.join(home, '.codex', 'skills', 'canary-lab')
+    fs.mkdirSync(legacy, { recursive: true })
+    fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-1.6.0 skill')
+
+    refreshInstalled('all', { homeDir: home, log: () => {} })
+
+    expect(fs.readdirSync(path.join(home, '.codex', 'skills')).length).toBeGreaterThan(1)
+    expect(fs.existsSync(path.join(home, '.claude'))).toBe(false)
+  })
+
   it('installOrRefresh installs missing integrations and updates stale managed files', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-setup-'))
     const lines: string[] = []

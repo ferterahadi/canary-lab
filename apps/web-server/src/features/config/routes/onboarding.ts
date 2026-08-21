@@ -17,14 +17,27 @@ import type { GettingStartedSessionState, GettingStartedSessionStore } from '../
  *  the guide narrows rather than pointing somewhere that no longer exists. */
 export const SAMPLE_SUITE = 'storefront-journey'
 
-/** The name this suite shipped under before 1.6.0 renamed it for consistency with
- *  the kebab-case names a flight's plan agent produces.
- *
- *  `upgrade` deliberately never rewrites a consumer's `features/`, so a workspace
- *  scaffolded earlier still has the underscored directory. Recognising it keeps
- *  the demo working there instead of reporting the sample as deleted — which is
- *  what matching only the new name would do, silently, to every existing user. */
+/** The name this suite carried between its introduction and the 1.6.0 rename to
+ *  the kebab-case a flight's plan agent produces. Both landed inside the same
+ *  development cycle, so NO published release shipped the underscored name — this
+ *  covers pre-release workspaces only, and claiming it protects upgrading users
+ *  would be false. What a real pre-1.6.0 workspace has is PRE_1_6_SAMPLE_SUITES. */
 export const LEGACY_SAMPLE_SUITES = ['storefront_journey'] as const
+
+/** The sample suites a workspace scaffolded by 1.5.x and earlier actually carries.
+ *
+ *  Deliberately NOT aliases of the storefront demo: they are different apps with
+ *  different specs, so treating one as the demo would point every Getting Started
+ *  card at a suite that cannot do what the card promises. They are here as the one
+ *  reliable signal that this workspace PREDATES the 1.6.0 samples, which is what
+ *  separates "you deleted it" from "you never had it" — `upgrade` deliberately
+ *  never writes `features/`, so upgrading alone can never produce the demos. */
+export const PRE_1_6_SAMPLE_SUITES = [
+  'example_todo_api',
+  'broken_todo_api',
+  'flaky_orders_api',
+  'tricky_checkout_api',
+] as const
 export const SAMPLE_SUITE_REPO_DIR = 'demo-app'
 export const SAMPLE_FLIGHT_REPO_DIR = 'flight-app'
 export const WORKBENCH_SUITE = 'workflow-workbench'
@@ -119,9 +132,24 @@ export function readOnboardingSamples(
   const workbenchPresent = isDir(path.join(projectRoot, WORKBENCH_REPO_DIR)) && names.has(WORKBENCH_SUITE)
   const sampleFeature = presentSuite ?? SAMPLE_SUITE
   const workbenchFeature = WORKBENCH_SUITE
-  const unavailable = (reason: string): { internalAction: null; unavailableReason: string } => ({
+  // None of the three sample repos here, but a suite only 1.5.x and earlier
+  // scaffolded: this workspace was created before the samples existed rather
+  // than stripped of them. Both conditions are needed — the repo dirs alone
+  // cannot tell a legacy workspace from one whose samples were all deleted, and
+  // an old suite name alone survives in a 1.6.0 workspace the user added to.
+  const predatesSamples =
+    !suitePresent
+    && !flightRepoPresent
+    && !workbenchPresent
+    && PRE_1_6_SAMPLE_SUITES.some((n) => names.has(n))
+  // Telling someone their demo was "removed" names a deletion they never made and
+  // offers no way forward. Upgrading cannot add these samples, so the legacy
+  // wording has to carry the only thing that can.
+  const missingSample = (noun: string): { internalAction: null; unavailableReason: string } => ({
     internalAction: null,
-    unavailableReason: reason,
+    unavailableReason: predatesSamples
+      ? `${noun} ships with workspaces scaffolded by 1.6.0 or newer. Upgrading never adds it — run \`npx canary-lab init <folder>\` for a workspace that has it.`
+      : `${noun} was removed from this workspace.`,
   })
   const sampleAction = <T extends OnboardingWorkflowAction>(action: T): {
     internalAction: T
@@ -129,11 +157,11 @@ export function readOnboardingSamples(
   } => ({ internalAction: action, unavailableReason: null })
   const suiteAvailability = suitePresent
     ? sampleAction({ kind: 'run', feature: sampleFeature })
-    : unavailable('The storefront demo was removed from this workspace.')
+    : missingSample('The storefront demo')
   const workbenchAvailability = <T extends Exclude<OnboardingWorkflowAction, { kind: 'run' | 'flight' | 'export' }>>(action: T) =>
     workbenchPresent
       ? sampleAction(action)
-      : unavailable('The workflow workbench was removed from this workspace.')
+      : missingSample('The workflow workbench')
   const workflows: OnboardingWorkflow[] = [
     {
       id: 'run',
@@ -163,7 +191,7 @@ export function readOnboardingSamples(
       externalPrompt: `/canary-lab ${SAMPLE_FLIGHT_REPO_DIR} "${SAMPLE_FLIGHT_DESCRIPTION}"`,
       ...(flightRepoPresent
         ? sampleAction({ kind: 'flight', repoPath: flightRepo, description: SAMPLE_FLIGHT_DESCRIPTION })
-        : unavailable('The bare Flight repository was removed from this workspace.')),
+        : missingSample('The bare Flight repository')),
     },
     {
       id: 'coverage',
@@ -220,7 +248,7 @@ export function readOnboardingSamples(
       externalPrompt: `/canary-lab-export ${sampleFeature}`,
       ...(suitePresent
         ? sampleAction({ kind: 'export', feature: sampleFeature })
-        : unavailable('The storefront demo was removed from this workspace.')),
+        : missingSample('The storefront demo')),
     },
   ]
   return {

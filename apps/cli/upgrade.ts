@@ -12,6 +12,7 @@ import {
 } from './upgrade-migration'
 import { refreshInstalled as refreshInstalledAgentIntegrations } from './agent'
 import { refreshCanaryLabMcp, findStaleCanaryLabMcp } from './mcp-refresh'
+import { main as installPlaywrightBrowsers } from './install-browsers'
 import { SCAFFOLD_POSTINSTALL } from './scaffold-scripts'
 
 const MARKER_START = '<!-- managed:canary-lab:start -->'
@@ -155,6 +156,9 @@ export interface MainExtras {
    * `--force-archive` was not passed. Async to support readline prompts. */
   confirm?: (orphanCount: number) => Promise<boolean> | boolean
   agentHomeDir?: string
+  /** Injected browser step — see the postinstall-repair block in `main`. Exists
+   *  so tests can assert the repair triggers it without downloading a browser. */
+  installBrowsers?: (projectRoot: string) => Promise<void>
 }
 
 function log(msg: string, opts: UpgradeOptions): void {
@@ -296,6 +300,7 @@ export async function main(
   // 5. Ensure the postinstall hook exists — and carries the browser step, so a
   // workspace scaffolded before the two were merged picks it up here.
   const pkgJsonPath = path.join(projectRoot, 'package.json')
+  let postinstallRepaired = false
   if (fs.existsSync(pkgJsonPath)) {
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf-8'))
@@ -306,10 +311,28 @@ export async function main(
         fs.writeFileSync(pkgJsonPath, JSON.stringify(pkg, null, 2) + '\n')
         log('  Updated package.json (added postinstall hook)', opts)
         updated += 1
+        postinstallRepaired = true
       }
     } catch {
       /* don't break upgrade if package.json is malformed */
     }
+  }
+
+  // 6. A hook we just repaired is a hook that did NOT run the browser step for
+  // the install that led here — the workspace ran its old `upgrade`-only
+  // postinstall, and the repair lands too late to help it. That gap is not
+  // cosmetic: Playwright moves with canary-lab and its browser builds are pinned
+  // per version, so the install can swap 1.54 for 1.62 and leave the next run
+  // failing on a browser binary nobody downloaded. Do it now instead of waiting
+  // for an install that may not come for months.
+  //
+  // Deliberately not silenced under `--silent`: this is a multi-minute network
+  // download, and a quiet postinstall that looks hung is worse than the output.
+  // `install-browsers` honours PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD and never throws.
+  if (postinstallRepaired) {
+    const runBrowsers = extras.installBrowsers
+      ?? ((root: string) => installPlaywrightBrowsers([], { cwd: root }))
+    await runBrowsers(projectRoot)
   }
 
   // Stamp the project with the installed version so the UI can

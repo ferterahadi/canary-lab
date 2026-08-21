@@ -25,6 +25,9 @@ interface AgentOperation {
   from: string
   to: string
   label: string
+  /** Which installed unit this op belongs to. `refreshInstalled` treats a group
+   *  as one unit rather than each op on its own — see the comment there. */
+  group: 'codex' | 'claude' | 'plugin'
 }
 
 export async function main(
@@ -128,15 +131,40 @@ export function installOrRefresh(target: Target, opts: AgentInstallOptions = {})
   return changed
 }
 
+/**
+ * Bring already-installed integrations up to the running package's version.
+ *
+ * The unit is the GROUP, not the individual op: a client that has any canary-lab
+ * skill installed receives the package's whole current skill set, new members
+ * included. Skipping every destination that does not exist looks equivalent and
+ * is not — 1.6.0 split the single `canary-lab` skill into seven, so an op-wise
+ * refresh left every pre-1.6.0 user with exactly the one they already had,
+ * rewritten to 1.6.0 wording that points the agent at `canary-lab-run` and five
+ * siblings that were never written to disk. Nothing warns, because from the
+ * refresh's side every op it looked at succeeded.
+ *
+ * A client with nothing installed is still left entirely alone: opting in stays
+ * explicit via `canary-lab setup`.
+ */
 export function refreshInstalled(target: Target, opts: AgentInstallOptions = {}): number {
   const home = opts.homeDir ?? os.homedir()
   const log = opts.log ?? console.log
   const assets = resolveAgentAssetsDir()
+  const operations = buildOperations(target, home, assets)
+  const installedGroups = new Set(
+    operations.filter((op) => fs.existsSync(op.to)).map((op) => op.group),
+  )
   let updated = 0
 
-  for (const op of buildOperations(target, home, assets)) {
+  for (const op of operations) {
     if (!fs.existsSync(op.from)) throw new Error(`missing packaged asset: ${op.from}`)
-    if (!fs.existsSync(op.to)) continue
+    if (!installedGroups.has(op.group)) continue
+    if (!fs.existsSync(op.to)) {
+      copyDirRecursive(op.from, op.to)
+      log(`Installed ${op.label}: ${op.to}`)
+      updated += 1
+      continue
+    }
     if (dirsEqual(op.from, op.to)) continue
     fs.rmSync(op.to, { recursive: true, force: true })
     copyDirRecursive(op.from, op.to)
@@ -202,6 +230,7 @@ function buildOperations(target: Target, home: string, assets: string): AgentOpe
         label: `Codex skill (${skill})`,
         from: path.join(assets, 'codex', 'skills', skill),
         to: path.join(home, '.codex', 'skills', skill),
+        group: 'codex',
       })
     }
   }
@@ -211,6 +240,7 @@ function buildOperations(target: Target, home: string, assets: string): AgentOpe
         label: `Claude skill (${skill})`,
         from: path.join(assets, 'claude', 'skills', skill),
         to: path.join(home, '.claude', 'skills', skill),
+        group: 'claude',
       })
     }
   }
@@ -218,6 +248,7 @@ function buildOperations(target: Target, home: string, assets: string): AgentOpe
     label: 'Canary Lab plugin bundle',
     from: path.join(assets, 'plugin', 'canary-lab'),
     to: path.join(home, '.canary-lab', 'agent-integrations', 'canary-lab-plugin'),
+    group: 'plugin',
   })
   return operations
 }
