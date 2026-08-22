@@ -13,7 +13,7 @@ import { renderPrompt } from '../../../../shared/prompts'
 import type { CoverageLedger } from '../../../../../../../shared/coverage/types'
 import type { SpecsCoveragePass, SpecsCoverageProgress } from '../../../../../../../shared/flights/types'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps, stageJobRef } from './context'
+import { decodeSubmission, defaultSpawnAgent, featureDirFor, type FlightSpecsValidator, type FlightStageDeps, stageJobRef } from './context'
 import { agentSpawnJob } from './stage-jobs'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
@@ -456,7 +456,14 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
           }
           const stale = rejectStaleSubmit(ctx, 'specs-coverage', response)
           if (stale) return stale
-          const parsed = parseMappingSubmission(response.data)
+          // Decode before validating: a client that JSON-encodes its answer used
+          // to be rejected here for "expected object, received string" while the
+          // prd-summary hand-off two stages earlier accepted the same encoding —
+          // an external flight could not clear this step at all and had to fall
+          // back to run-internally. See decodeSubmission.
+          const decoded = decodeSubmission(response.data)
+          if (!decoded.ok) return reparkMapping(ctx, checkpoint!, decoded.error)
+          const parsed = parseMappingSubmission(decoded.data)
           if (!parsed.ok) return reparkMapping(ctx, checkpoint!, parsed.error)
           const roster = handOff.roster ?? []
           const missing = missingFromRoster(roster, parsed.submission.mappings, parsed.submission.unmappable)

@@ -194,6 +194,32 @@ export function extractJson<T>(text: string): T {
   return candidates[0] as T
 }
 
+/** Decode a checkpoint response's `data` before validating its shape.
+ *
+ *  `respond_flight_checkpoint` schemas `data` as `z.unknown()`, so a client is
+ *  free to send its answer JSON-ENCODED, and interactive MCP clients routinely
+ *  do. Every responder that skipped this step reacted differently to the SAME
+ *  submission: prd-summary decoded it, the specs-coverage mapping rejected it
+ *  outright ("expected object, received string") and re-parked forever, and
+ *  scout/scaffold read `.configSource` off a string, got `undefined`, and
+ *  silently settled as though no edit had been supplied. One home so the three
+ *  cannot disagree again.
+ *
+ *  Returns the value untouched when it is not a string: a caller that legitimately
+ *  wants free text (docs feedback, the export rewrite) is unaffected. The `ok:false`
+ *  arm exists so a caller can tell "not JSON at all" from "JSON of the wrong
+ *  shape" — the two need different messages on the re-park. */
+export function decodeSubmission(
+  data: unknown,
+): { ok: true; data: unknown } | { ok: false; error: string } {
+  if (typeof data !== 'string') return { ok: true, data }
+  try {
+    return { ok: true, data: extractJson(data) }
+  } catch {
+    return { ok: false, error: 'the submission was not parseable JSON' }
+  }
+}
+
 export class PollTimeoutError extends Error {
   constructor(what: string, timeoutMs: number, opts: { idle?: boolean } = {}) {
     super(

@@ -2,7 +2,7 @@ import path from 'path'
 import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent, stageJobRef } from './context'
+import { decodeSubmission, extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent, stageJobRef } from './context'
 import { agentSpawnJob } from './stage-jobs'
 import { externalizable, externalWorkCheckpoint } from './externalizable'
 import { agentProgressSink } from './agent-progress'
@@ -105,7 +105,10 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       const draft = stage?.checkpoint?.data as ScoutDraft | undefined
       const choice = response.choice ?? ''
       if (choice === 'approve' && draft) {
-        const edited = (response.data as Partial<ScoutDraft> | undefined)?.configSource
+        const decoded = decodeSubmission(response.data)
+        const edited = decoded.ok
+          ? (decoded.data as Partial<ScoutDraft> | undefined)?.configSource
+          : undefined
         const final: ScoutDraft = edited ? { ...draft, configSource: edited } : draft
         const invalid = validateDraft(final)
         if (invalid) return { kind: 'failed', error: invalid }
@@ -141,7 +144,9 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
           context: { repoPaths: m.repoPaths, answerShape: { configSource: 'string', envFiles: 'string[]' }, lastRejection: why },
         })
       }
-      const draft = typeof result === 'string' ? extractJson<ScoutDraft>(result) : (result as ScoutDraft | undefined)
+      const decoded = decodeSubmission(result)
+      if (!decoded.ok) return reject(decoded.error)
+      const draft = decoded.data as ScoutDraft | undefined
       if (!draft || typeof draft !== 'object') return reject('no draft was submitted')
       const settled = settleDraft({ ...draft })
       return settled.kind === 'failed' ? reject(settled.error) : settled

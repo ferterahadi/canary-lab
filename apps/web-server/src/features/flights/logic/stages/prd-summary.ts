@@ -7,7 +7,7 @@ import { writeWorkflowAgentRef } from '../../../agent-sessions/logic/agent-sessi
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import { agentSpawnJob } from './stage-jobs'
-import { extractJson, featureDirFor, type FlightStageDeps } from './context'
+import { decodeSubmission, featureDirFor, type FlightStageDeps } from './context'
 import { externalWorkCheckpoint, handsOffToClient, parkedOnExternalWork, rejectStaleSubmit } from './externalizable'
 import { agentProgressSink } from './agent-progress'
 
@@ -149,15 +149,9 @@ export function prdSummaryStage(deps: FlightStageDeps): StageAdapter {
       // A rejected submission must RE-PARK, never settle `failed` — the
       // persisted checkpointResponse would replay the same failure on every
       // resume (scout's live-flight lesson).
-      let data: unknown = response.data
-      if (typeof data === 'string') {
-        try {
-          data = extractJson(data)
-        } catch {
-          return handOff(ctx, 'the submission was not parseable JSON')
-        }
-      }
-      const parsed = parseSummarySubmission(data)
+      const decoded = decodeSubmission(response.data)
+      if (!decoded.ok) return handOff(ctx, decoded.error)
+      const parsed = parseSummarySubmission(decoded.data)
       if (!parsed.ok) return handOff(ctx, parsed.error)
       applyExternalSummary({
         featuresDir: deps.featuresDir,

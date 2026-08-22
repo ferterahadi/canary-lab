@@ -218,6 +218,33 @@ export interface InitProjectExtras {
   setupProject?: typeof setupCanaryLab
 }
 
+// Resolve the installed package's own CLI entry by READING its `bin` field, rather
+// than re-spelling the built path here. The re-spelled version said
+// `dist/scripts/cli.js` while the build emits `dist/apps/cli/cli.js`, so the
+// existence check was never satisfiable: the "stable local cli.js" branch in main()
+// was dead and every `init` fell back to the running process's path — the
+// GC-eligible `_npx` cache that branch exists to avoid, or a throwaway temp install
+// that then owned the user's global MCP pointer. Reading `bin` cannot drift from
+// where the file actually is.
+//
+// Returns null when the package, its `bin`, or the target file is missing — the
+// caller treats that the same as "not installed" and leaves registration to its
+// own fallback.
+function installedCliPath(pkgRoot: string): string | null {
+  let bin: unknown
+  try {
+    bin = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'package.json'), 'utf-8')).bin
+  } catch {
+    // Best-effort: a missing or unreadable package.json means the install did not
+    // land, which the caller already handles.
+    return null
+  }
+  const rel = typeof bin === 'string' ? bin : (bin as Record<string, unknown> | null)?.['canary-lab']
+  if (typeof rel !== 'string' || rel === '') return null
+  const abs = path.join(pkgRoot, rel)
+  return fs.existsSync(abs) ? abs : null
+}
+
 export async function main(
   args = process.argv.slice(2),
   extras: InitProjectExtras = {},
@@ -307,8 +334,8 @@ export async function main(
   // `init` was run via `npx`, is the GC-eligible `_npx` cache. A stable absolute
   // path also lets GUI (Desktop) registration embed a working node-dir PATH, so
   // a Desktop-launched server can still spawn the agent CLIs.
-  const localCli = path.join(targetDir, 'node_modules', 'canary-lab', 'dist', 'scripts', 'cli.js')
-  const setupOpts = installed && fs.existsSync(localCli)
+  const localCli = installedCliPath(path.join(targetDir, 'node_modules', 'canary-lab'))
+  const setupOpts = installed && localCli
     ? { cliPath: localCli, execPath: process.execPath }
     : {}
   const setupProject = extras.setupProject ?? setupCanaryLab

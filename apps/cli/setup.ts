@@ -6,6 +6,7 @@ import path from 'path'
 import { execFileSync } from 'child_process'
 import { installOrRefresh, type AgentInstallTarget } from './agent'
 import {
+  isTempInstallPath,
   registerCanaryLabMcp,
   resolveCliPath,
   resolveMcpInvocation,
@@ -96,7 +97,20 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
   // registers a temp `cli.js` path into the user's live client config; once the
   // temp dir is GC'd that entry dangles ("Server disconnected"). Skip-flag lets
   // the smoke test exercise scaffolding + skill install without touching them.
-  const skipClientMcp = process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1'
+  // ...and the same STRUCTURAL guard the refreshes carry (see isTempInstallPath).
+  // The env flag above only protects harnesses that remember to set it; a demo or
+  // smoke workspace scaffolded under the OS temp dir reaches `setup` through
+  // `init` without it, and the temp `cli.js` it registers dies with the next temp
+  // sweep. Observed live: a global Canary_Lab entry aimed at a
+  // `/private/var/folders/.../T/canary-lab-demo-*/` cli.js. Checked against the
+  // path we WOULD register, so `setup` from a durable workspace — the supported
+  // way to move these pointers — is unaffected.
+  const skipClientMcpReason = process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1'
+    ? 'CANARY_LAB_SKIP_CLIENT_MCP=1'
+    : isTempInstallPath(cliPath)
+      ? `this install lives under the temp directory (${cliPath})`
+      : null
+  const skipClientMcp = skipClientMcpReason !== null
 
   const target = resolveAgentTarget(args.agent, homeDir)
   if (target) {
@@ -107,7 +121,7 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
       log,
     })
     if (skipClientMcp) {
-      log('Skipping client MCP registration (CANARY_LAB_SKIP_CLIENT_MCP=1).')
+      log(`Skipping client MCP registration — ${skipClientMcpReason}.`)
     } else {
       registerMcpTargets(target, {
         dryRun: args.dryRun,

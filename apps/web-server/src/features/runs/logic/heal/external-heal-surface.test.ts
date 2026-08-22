@@ -248,6 +248,34 @@ describe('stuck-cycle escalation', () => {
     expect(context.escalation?.tactics.join(' ')).toContain('signal_run')
   })
 
+  // A worktree-isolated run boots the services from its per-run worktree, but
+  // repoBranches[] names the PRODUCT repo. An agent that edited only that path
+  // saw a byte-identical re-run and concluded its correct fix had failed — a whole
+  // heal cycle lost. The path has to be ON the context and the rule IN the
+  // procedure, so both are asserted here.
+  it('carries the per-run worktree paths and orders the edit there', () => {
+    const detail = detailFor('run-1')
+    const worktrees = { app: '/logs/runs/run-1/worktrees/app' }
+    const withWorktree: RunDetail = {
+      ...detail,
+      manifest: { ...detail.manifest, worktrees },
+    }
+    const context = buildExternalHealContext({ detail: withWorktree, logsDir, projectRoot: tmpDir })
+    expect(context.worktrees).toEqual(worktrees)
+    const steps = context.nextSteps ?? []
+    // Behind the repair rule, which stays first — an agent that stops reading
+    // early must still have seen where to edit.
+    expect(steps[0]).toContain('Fix app/service code, not tests')
+    expect(steps[1]).toContain('/logs/runs/run-1/worktrees/app')
+    expect(steps[1]).toContain('EDIT THE WORKTREE')
+  })
+
+  it('states no worktree rule for a run that boots its repos in place', () => {
+    const context = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })
+    expect(context).not.toHaveProperty('worktrees')
+    expect((context.nextSteps ?? []).join('\n')).not.toContain('EDIT THE WORKTREE')
+  })
+
   it('omits escalation when the failing set has only repeated twice (one prior attempt)', () => {
     seedJournal('run-1', 1, 'checkout fails')
     const context = buildExternalHealContext({ detail: detailFor('run-1'), logsDir, projectRoot: tmpDir })

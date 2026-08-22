@@ -269,6 +269,63 @@ describe('setup', () => {
     expect(fs.existsSync(desktopConfigPath)).toBe(false)
   })
 
+  // Structural twin of the env-flag guard above. The flag only protects a harness
+  // that remembers to set it; a demo or smoke workspace scaffolded under the OS
+  // temp dir reaches `setup` through `init` WITHOUT it, and the temp cli.js it
+  // registers into the user's global config dies with the next temp sweep. Observed
+  // live as a global Canary_Lab entry aimed at a canary-lab-demo-* temp path.
+  it('never registers a client when the install lives under the temp dir', () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    cliAvailable('claude')
+    const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
+    fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
+    const lines: string[] = []
+    const tempCli = path.join(
+      fs.realpathSync(os.tmpdir()),
+      'canary-lab-demo-x', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js',
+    )
+
+    setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
+      homeDir: home,
+      log: (line) => { lines.push(line) },
+      execPath: '/usr/bin/node',
+      cliPath: tempCli,
+      claudeDesktopConfigPath: desktopConfigPath,
+      verifyMcp: verifiedStub,
+    })
+
+    // Same split as the flag: the workspace is still set up, only the global
+    // pointers are left alone — and the reason names the temp dir, not the flag,
+    // so the log does not claim an env var the user never set.
+    expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
+    expect(lines.join('\n')).toContain('temp directory')
+    expect(lines.join('\n')).not.toContain('CANARY_LAB_SKIP_CLIENT_MCP')
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
+    expect(fs.existsSync(desktopConfigPath)).toBe(false)
+  })
+
+  // Negative control for the guard above: a DURABLE install must still register,
+  // which is the supported way to move these pointers.
+  it('still registers a client for an install outside the temp dir', () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    cliAvailable('claude')
+    const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
+    fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
+
+    setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
+      homeDir: home,
+      log: () => {},
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/apps/cli/cli.js',
+      claudeDesktopConfigPath: desktopConfigPath,
+      verifyMcp: verifiedStub,
+    })
+
+    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
+  })
+
   it('verifies the registration and warns when the command is broken', () => {
     const home = mkTmp()
     const workspace = mkWorkspace()

@@ -38,6 +38,13 @@ export interface ExternalHealContext {
   status: string
   healCycles: number
   repoBranches: RunDetail['manifest']['repoBranches']
+  // Repo name → the per-run git worktree this run actually booted that repo from,
+  // present whenever the run is worktree-isolated (every portified feature, and
+  // any run the user isolated after a collision). REQUIRED reading before an edit:
+  // `repoBranches[].path` is the PRODUCT repo, which an isolated run never reads,
+  // so an agent that patched only that path spent a whole heal cycle watching an
+  // identical failure and concluding its correct fix had not worked.
+  worktrees?: RunDetail['manifest']['worktrees']
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   counts: CompactRunCounts
@@ -79,6 +86,8 @@ export interface ExternalRunSnapshot {
   status: string
   healCycles: number
   repoBranches: RunDetail['manifest']['repoBranches']
+  /** See ExternalHealContext.worktrees — the tree this run boots, when isolated. */
+  worktrees?: RunDetail['manifest']['worktrees']
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   summary: RunDetail['summary'] | null
@@ -151,6 +160,22 @@ export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
   'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). The run_ref rerun already covers skipped + pending, so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a fresh per-run worktree and resets THIS journal to Iteration 1. Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
 ]
 
+// Where to edit, for a worktree-isolated run. Conditional because it is only true
+// for SOME runs, and a rule stated on every run is one an agent learns to skim:
+// a non-isolated run boots the product repo in place and this line would be wrong.
+//
+// Earned by a live flight: the agent fixed the right defect in the right file in
+// the product repo, re-ran, saw byte-identical output, and reasonably concluded the
+// fix was wrong. The run had booted the service from its per-run worktree the whole
+// time. Nothing in the context said so — `repoBranches[].path` pointed at the
+// product repo — so this states the path AND why the obvious one is not it.
+function worktreeEditRule(worktrees: Record<string, string>): string {
+  const targets = Object.entries(worktrees)
+    .map(([repo, root]) => `${repo} → ${root}`)
+    .join('; ')
+  return `EDIT THE WORKTREE, not the product repo: this run is isolated, and the services under test were booted from a per-run git worktree (${targets}). An edit to the product repo path in repoBranches[] is NOT read by this run, so it re-runs byte-identically and looks like your fix failed. Apply every fix under the worktree path above; the worktree is captured at teardown, so the work is not lost.`
+}
+
 // Boot-failure heal procedure: the run failed before any test ran because a
 // service wouldn't come up, so there are no failedTests to investigate — the
 // failure context is the service log. Replaces the test-failure nextSteps when
@@ -183,6 +208,16 @@ export function slimRepeatHealContext(context: ExternalHealContext): ExternalHea
   return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
 }
 
+// Splice the worktree rule in at index 1 — immediately after the repair rule,
+// which stays first because it is the product's reason to exist.
+function withWorktreeRule(
+  steps: string[],
+  worktrees: Record<string, string> | undefined,
+): string[] {
+  if (!worktrees || Object.keys(worktrees).length === 0) return steps
+  return [steps[0]!, worktreeEditRule(worktrees), ...steps.slice(1)]
+}
+
 export function buildExternalHealContext(input: BuildExternalHealContextInput): ExternalHealContext {
   const snapshot = buildExternalRunSnapshot(input)
   const runDir = runDirFor(input.logsDir, snapshot.runId)
@@ -213,6 +248,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     status: snapshot.status,
     healCycles: snapshot.healCycles,
     repoBranches: snapshot.repoBranches,
+    ...(snapshot.worktrees ? { worktrees: snapshot.worktrees } : {}),
     lifecycle: snapshot.lifecycle,
     externalHealSession: snapshot.externalHealSession,
     counts: compactCounts(snapshot.counts),
@@ -225,9 +261,15 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     ...(snapshot.healPrompt ? { healPrompt: snapshot.healPrompt } : {}),
     // A boot failure has no failedTests — the failure is the service log, so the
     // agent gets the boot-failure procedure instead of the test-triage one.
-    nextSteps: snapshot.bootFailure
-      ? [...bootFailureNextSteps(snapshot.bootFailure)]
-      : [...EXTERNAL_HEAL_NEXT_STEPS],
+    // The where-to-edit rule rides directly behind the repair rule in both
+    // procedures: it governs every edit that follows, so an agent that stops
+    // reading early has still seen it.
+    nextSteps: withWorktreeRule(
+      snapshot.bootFailure
+        ? [...bootFailureNextSteps(snapshot.bootFailure)]
+        : [...EXTERNAL_HEAL_NEXT_STEPS],
+      snapshot.worktrees,
+    ),
     ...(escalation ? { escalation } : {}),
   }
 }
@@ -269,6 +311,9 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     status: detail.manifest.status,
     healCycles: detail.manifest.healCycles,
     repoBranches: detail.manifest.repoBranches ?? [],
+    ...(detail.manifest.worktrees && Object.keys(detail.manifest.worktrees).length > 0
+      ? { worktrees: detail.manifest.worktrees }
+      : {}),
     lifecycle: detail.manifest.lifecycle ?? null,
     externalHealSession: detail.manifest.externalHealSession ?? null,
     summary: summary ?? null,

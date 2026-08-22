@@ -696,6 +696,38 @@ describe('specs-coverage mapping — external producer', () => {
     expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
   })
 
+  // The regression that made an external flight unable to clear this step at all.
+  // `data` is schema'd `z.unknown()`, so an MCP client may JSON-ENCODE its answer;
+  // the prd-summary hand-off two stages earlier decoded that, this one did not, and
+  // the identical submission re-parked here forever until the step was handed back
+  // with run-internally. Asserted through the SAME observable consequence as the
+  // object case — the tag on disk — so it cannot pass by merely not erroring.
+  it('accepts a JSON-ENCODED mapping submission, exactly as an object one', async () => {
+    const dir = fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: 'live-id',
+      data: JSON.stringify({ mappings: [{ testName: TEST_NAME, requirements: ['R1'] }] }),
+    })
+    expect(out).toMatchObject({ kind: 'done', evidence: { coveragePct: 100 } })
+    expect(fs.readFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'utf-8')).toContain('@req-R1')
+  })
+
+  it('re-parks a mapping submission that is a string but not JSON', async () => {
+    fullFeature()
+    const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))
+    setStage('specs-coverage', mappingPark())
+    const out = await specsCoverageStage(mapDeps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      token: 'live-id',
+      data: 'I mapped them all, trust me',
+    })
+    const cp = (out as { checkpoint: { data: Record<string, unknown> } }).checkpoint
+    expect(String(cp.data.lastRejection)).toContain('not parseable JSON')
+  })
+
   it('an incomplete answer re-parks the SAME ask, naming the missing tests', async () => {
     fullFeature()
     const { ctx, setStage } = ctxFor(manifest({ currentStage: 'specs-coverage' }))

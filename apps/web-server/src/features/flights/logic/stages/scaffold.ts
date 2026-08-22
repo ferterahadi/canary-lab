@@ -5,7 +5,7 @@ import { readFeatureConfig } from '../../../../shared/config-ast'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightCheckpoint } from '../types'
-import { featureDirFor, type FlightStageDeps } from './context'
+import { decodeSubmission, featureDirFor, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
 import { CHECKPOINT_OPTIONS } from '../types'
 
@@ -147,7 +147,13 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
       // response — the disk stays the single source of truth, so write it
       // through the same path the config routes use, then validate like any
       // other edit.
-      const edited = (response.data as { configSource?: string } | undefined)?.configSource
+      // Decode first: a JSON-encoded payload used to read as a bare string here,
+      // so `.configSource` came back undefined and the edit was silently dropped
+      // — the config approved was the one on disk, not the one submitted.
+      const decoded = decodeSubmission(response.data)
+      const edited = decoded.ok
+        ? (decoded.data as { configSource?: string } | undefined)?.configSource
+        : undefined
       if (typeof edited === 'string' && edited.trim() !== '') {
         fs.writeFileSync(configPath, edited)
         publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })

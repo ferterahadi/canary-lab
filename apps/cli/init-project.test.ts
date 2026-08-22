@@ -270,17 +270,65 @@ describe('main (init-project orchestration)', () => {
     expect(messages.join('\n')).not.toContain('npm run install:browsers')
   })
 
+  // The install fixture must mirror a REAL npm install — a package.json carrying
+  // the same `bin` the published package declares, and the file it points at. The
+  // earlier version of this test wrote `dist/scripts/cli.js` and asserted against
+  // that same invented path, so it passed green for a layout the build has never
+  // produced while the branch under test was permanently dead in production.
+  // `bin` here is read from the repo's own package.json for that reason.
+  const REAL_CLI_BIN = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', '..', 'package.json'), 'utf-8'),
+  ).bin['canary-lab'] as string
+
+  function fakeInstall(target: string, opts: { bin?: string; writeFile?: boolean } = {}): string {
+    const pkgRoot = path.join(target, 'node_modules', 'canary-lab')
+    const bin = opts.bin ?? REAL_CLI_BIN
+    fs.mkdirSync(pkgRoot, { recursive: true })
+    fs.writeFileSync(
+      path.join(pkgRoot, 'package.json'),
+      JSON.stringify({ name: 'canary-lab', bin: { 'canary-lab': bin } }),
+    )
+    const cli = path.join(pkgRoot, bin)
+    if (opts.writeFile !== false) {
+      fs.mkdirSync(path.dirname(cli), { recursive: true })
+      fs.writeFileSync(cli, '#!/usr/bin/env node\n')
+    }
+    return cli
+  }
+
   it('registers MCP with the stable local cli path after a successful install', async () => {
     const workspace = mkTmp()
     process.chdir(workspace)
     vi.spyOn(console, 'log').mockImplementation(() => {})
     const target = path.join(workspace, 'my-project')
-    const localCli = path.join(target, 'node_modules', 'canary-lab', 'dist', 'scripts', 'cli.js')
+    let localCli = ''
     // Simulate `npm install` materializing the local install.
     execFileSync.mockImplementation((cmd: string, args: string[]) => {
+      if (cmd === 'npm' && args[0] === 'install') localCli = fakeInstall(target)
+      return Buffer.from('')
+    })
+
+    await main(['my-project', '--package-spec', '^9.9.9'])
+
+    expect(localCli).toContain(REAL_CLI_BIN)
+    expect(setupProject).toHaveBeenCalledWith(
+      { workspace: target, agent: 'auto', dryRun: false, force: false },
+      { cliPath: localCli, execPath: process.execPath },
+    )
+  })
+
+  // Negative control for the above: the branch must key off the file the installed
+  // package's `bin` actually names. A `bin` pointing somewhere the install did not
+  // put a file is the failure mode that hid for a release — registration has to
+  // fall back rather than hand `setup` a path that does not exist.
+  it('falls back when the installed package bin names a missing file', async () => {
+    const workspace = mkTmp()
+    process.chdir(workspace)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    const target = path.join(workspace, 'my-project')
+    execFileSync.mockImplementation((cmd: string, args: string[]) => {
       if (cmd === 'npm' && args[0] === 'install') {
-        fs.mkdirSync(path.dirname(localCli), { recursive: true })
-        fs.writeFileSync(localCli, '#!/usr/bin/env node\n')
+        fakeInstall(target, { bin: 'dist/scripts/cli.js', writeFile: false })
       }
       return Buffer.from('')
     })
@@ -289,7 +337,7 @@ describe('main (init-project orchestration)', () => {
 
     expect(setupProject).toHaveBeenCalledWith(
       { workspace: target, agent: 'auto', dryRun: false, force: false },
-      { cliPath: localCli, execPath: process.execPath },
+      {},
     )
   })
 

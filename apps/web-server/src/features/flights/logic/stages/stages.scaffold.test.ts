@@ -227,6 +227,28 @@ describe('scaffold stage', () => {
     expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8')).toContain('via-mcp')
   })
 
+  // The silent half of the same `data`-encoding bug: a JSON-ENCODED payload read as
+  // a bare string, so `.configSource` was undefined and the edit was DROPPED without
+  // a word — the config approved was the one already on disk, not the one submitted.
+  // Asserted on the file content, because "it did not error" was exactly the old
+  // behaviour.
+  it('a JSON-ENCODED configSource also writes through to disk', async () => {
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const edited = VALID_CONFIG('checkout')
+      .replace('startCommands', 'startCommands /* via-encoded-mcp */')
+    const outcome = await adapter.onCheckpointResponse!(ctx, {
+      choice: 'approve',
+      data: JSON.stringify({ configSource: edited }),
+    })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { approved: true } })
+    expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8'))
+      .toContain('via-encoded-mcp')
+  })
+
   it('redraft rewinds to scout for a fresh draft', async () => {
     const adapter = scaffoldStage(deps())
     const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
