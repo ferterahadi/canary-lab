@@ -889,3 +889,30 @@ describe('a dependency is satisfied by its ARTIFACT, not by its step being ticke
       .toBe('Waiting for Test authoring & coverage.')
   })
 })
+
+describe('stageStateLine — external-work hand-off', () => {
+  it('says who holds the step, in the reader\'s own voice', () => {
+    const stage = {
+      key: 'scout',
+      status: 'waiting-for-approval',
+      checkpoint: {
+        kind: 'external-work',
+        message: 'Run this scout step in your own client, then respond with the result on `data`.',
+        options: ['submit', 'run-internally'],
+      },
+    } as FlightStage
+    // NOT the checkpoint's own message: that one is written at the agent
+    // holding the step, which is the wrong reader for this pane.
+    expect(stageStateLine(stage, flight({ stages: [stage] })))
+      .toBe('Canary handed this step to the agent that started the flight and is waiting for the result.')
+  })
+
+  it('still echoes a real checkpoint\'s question', () => {
+    const stage = {
+      key: 'env-capture',
+      status: 'waiting-for-approval',
+      checkpoint: { kind: 'missing-env', message: 'Two keys are missing.', options: ['retry', 'waive'] },
+    } as FlightStage
+    expect(stageStateLine(stage, flight({ stages: [stage] }))).toBe('Two keys are missing.')
+  })
+})

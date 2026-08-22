@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import type { ReactNode } from 'react'
 import * as api from '@/shared/api/client'
 import type { ProjectConfig } from '@/shared/api/client'
-import { Modal } from '@/shared/ui/atoms'
+import { Modal, Section } from '@/shared/ui/atoms'
+import { OPTION_ROW_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
 import { FolderPicker } from './FolderPicker'
 import { GitHubSection } from './GitHubSection'
 import { RestartPhase, RestartProgress, defaultRedirect } from './SettingsRestartProgress'
@@ -11,6 +13,72 @@ interface Props {
   onClose: () => void
   // Injected in tests; production polls the new origin then navigates the tab.
   onRedirect?: (url: string, onProgress?: (phase: RestartPhase, attempt: number) => void) => void
+}
+
+/** Section-level help: what a control does, hung under the control at the
+ *  section's own left edge. Row-level description text lives inside its row,
+ *  under that row's label — the two altitudes are the whole reason this dialog
+ *  reads as columns instead of a ragged list. */
+function Hint({ children }: { children: ReactNode }) {
+  return <div className="mt-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>{children}</div>
+}
+
+/** One settings choice, radio or checkbox.
+ *
+ *  Uses the app's shared option row — the same geometry, neutral surface and
+ *  selected-grey as the flight pickers and the heal modes — so the radio groups
+ *  and the standalone checkboxes here can't drift apart from each other or from
+ *  the rest of the app. Hover is `.cl-hover-row` (background only). It used to
+ *  be `.cl-card-hover`, which is the CARD primitive: it added a popover-scale
+ *  drop shadow and a stronger border, so moving the pointer down a flat list
+ *  lifted whichever item it happened to be over off the dialog.
+ *
+ *  The native input stays the mark: it carries the keyboard and screen-reader
+ *  behaviour of a real radio group for free, tinted to the app's accent the way
+ *  the cleanup pages tint theirs. */
+function ChoiceRow({ type, name, value, checked, onChange, label, description, testId, divider }: {
+  type: 'radio' | 'checkbox'
+  name?: string
+  value?: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label: string
+  description: string
+  testId?: string
+  /** Hairline above the row — set on every row but the first, so a group reads
+   *  as one connected list. */
+  divider?: boolean
+}) {
+  return (
+    <label
+      // Hover is gated on the resting state: the picked row's inline
+      // selected-grey outranks the hover class anyway, so asking for both said
+      // one thing twice.
+      className={`${OPTION_ROW_CLASS} ${checked ? '' : 'cl-hover-row'} ${divider ? 'border-t' : ''}`}
+      style={optionRowStyle({ selected: checked, interactive: true })}
+    >
+      <input
+        type={type}
+        {...(name ? { name } : {})}
+        {...(value ? { value } : {})}
+        {...(testId ? { 'data-testid': testId } : {})}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        // Sits on the label's line rather than the top of the paragraph, and in
+        // a 13px box — the same width the GitHub row's status dot reserves, so
+        // both label columns start on the same pixel.
+        className="mt-0.5 h-[13px] w-[13px] shrink-0"
+        style={{ accentColor: 'var(--accent)' }}
+      />
+      <span className="min-w-0 flex-1">
+        {/* Option rows across the app are 12.5/medium over a 12px muted
+            description — `text-sm` here matched the dialog title and left label
+            and description a hair apart. */}
+        <span className="block text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{label}</span>
+        <span className="mt-0.5 block text-xs" style={{ color: 'var(--text-muted)' }}>{description}</span>
+      </span>
+    </label>
+  )
 }
 
 export function SettingsModal({ onClose, onRedirect }: Props) {
@@ -109,6 +177,10 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
       onClose={onClose}
       title="Project Settings"
       ariaLabel="Project Settings"
+      // The body grows and shrinks with the port confirmation, the restart
+      // progress and the gh remediation block — without a reserved gutter the
+      // appearing scrollbar shifts every card sideways.
+      stableScrollGutter
       footer={
         <>
           {error && <span className="mr-auto text-xs" style={{ color: 'var(--danger)' }}>{error}</span>}
@@ -133,179 +205,146 @@ export function SettingsModal({ onClose, onRedirect }: Props) {
         </>
       }
     >
-        <div className="min-h-0 px-4 py-3">
+        {/* The config dialog's own layout: framed sections in a `gap-3 p-3`
+            scroller, the same shape every Advanced setup tab opens with. The
+            flat list this replaced put section labels, field controls and row
+            labels on three different left edges. */}
+        <div className="flex min-h-0 flex-col gap-3 p-3">
           {!draft ? (
-            <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            <div className="px-0.5 text-xs" style={{ color: 'var(--text-muted)' }}>
               {error ?? 'Loading…'}
             </div>
           ) : (
             <>
-              <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                Port
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  name="port"
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={portInput}
-                  onChange={(e) => setPortInput(e.target.value)}
-                  disabled={portBusy || restarting}
-                  className="cl-input w-28 px-2 py-1 text-xs"
-                  style={{ background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border-default)' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => { void submitPort(false) }}
-                  disabled={portBusy || restarting}
-                  className="cl-button px-3 py-1 text-xs"
-                >
-                  Change port
-                </button>
-              </div>
-              <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                The UI and MCP server bind this port (default {DEFAULT_PORT}). Changing it restarts Canary Lab; your MCP client may need to reconnect (restart it or toggle the connector) if it doesn&apos;t reconnect on its own.
-              </div>
-              {pendingConfirm != null && (
-                <div className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>
-                  {pendingConfirm} active run{pendingConfirm === 1 ? '' : 's'} will be aborted by the restart.{' '}
+              <Section title="Port">
+                <div className="flex items-center gap-2">
+                  <input
+                    name="port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={portInput}
+                    onChange={(e) => setPortInput(e.target.value)}
+                    disabled={portBusy || restarting}
+                    // Surface, border and focus ring all come from `.cl-input`;
+                    // the inline copy this replaced re-declared them and pinned
+                    // the field to the card's own grey.
+                    className="cl-input w-28 px-2 py-1 text-xs"
+                  />
                   <button
                     type="button"
-                    onClick={() => { void submitPort(true) }}
+                    onClick={() => { void submitPort(false) }}
                     disabled={portBusy || restarting}
-                    className="cl-button px-2 py-0.5 text-xs"
+                    className="cl-button px-3 py-1 text-xs"
                   >
-                    Restart anyway
+                    Change port
                   </button>
                 </div>
-              )}
-              {restartPhase != null && (
-                <RestartProgress
-                  phase={restartPhase}
-                  attempt={restartAttempt}
-                  fromPort={config?.port ?? DEFAULT_PORT}
-                  origin={restartOrigin}
-                />
-              )}
-              {portError && (
-                <div className="mt-1 text-xs" style={{ color: 'var(--danger)' }}>{portError}</div>
-              )}
-              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                Personal wiki
-              </div>
-              <FolderPicker
-                value={draft.personalWikiPath}
-                onChange={(p) => setDraft({ ...draft, personalWikiPath: p.trim() ? p : null })}
-                placeholder="~/Documents/wiki"
-                title="Select personal wiki folder"
-                confirmLabel="Use wiki folder"
-              />
-              <div className="mt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-                Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
-              </div>
-              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                Default agent
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {HEAL_AGENT_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.value}
-                    className="cl-card-hover flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5"
-                    style={{
-                      background: draft.healAgent === opt.value ? 'var(--bg-selected)' : 'transparent',
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="healAgent"
-                      value={opt.value}
-                      checked={draft.healAgent === opt.value}
-                      onChange={() => setDraft({ ...draft, healAgent: opt.value })}
-                      className="mt-1"
-                    />
-                    <div className="flex-1">
-                      {/* Option rows across the app are 12.5/medium over a 12px
-                          muted description — `text-sm` here matched the dialog
-                          title and left label and description a hair apart. */}
-                      <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
-                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{opt.description}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                Editor
-              </div>
-              <div className="flex flex-col gap-1.5">
-                {EDITOR_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.value}
-                    className="cl-card-hover flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5"
-                    style={{
-                      background: draft.editor === opt.value ? 'var(--bg-selected)' : 'transparent',
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name="editor"
-                      value={opt.value}
-                      checked={draft.editor === opt.value}
-                      onChange={() => setDraft({ ...draft, editor: opt.value })}
-                      className="mt-1"
-                    />
-                    <div className="flex-1">
-                      <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>{opt.label}</div>
-                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{opt.description}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
+                <Hint>
+                  The UI and MCP server bind this port (default {DEFAULT_PORT}). Changing it restarts Canary Lab; your MCP client may need to reconnect (restart it or toggle the connector) if it doesn&apos;t reconnect on its own.
+                </Hint>
+                {pendingConfirm != null && (
+                  <div className="mt-2 text-xs" style={{ color: 'var(--danger)' }}>
+                    {pendingConfirm} active run{pendingConfirm === 1 ? '' : 's'} will be aborted by the restart.{' '}
+                    <button
+                      type="button"
+                      onClick={() => { void submitPort(true) }}
+                      disabled={portBusy || restarting}
+                      className="cl-button px-2 py-0.5 text-xs"
+                    >
+                      Restart anyway
+                    </button>
+                  </div>
+                )}
+                {restartPhase != null && (
+                  <RestartProgress
+                    phase={restartPhase}
+                    attempt={restartAttempt}
+                    fromPort={config?.port ?? DEFAULT_PORT}
+                    origin={restartOrigin}
+                  />
+                )}
+                {portError && (
+                  <div className="mt-1.5 text-xs" style={{ color: 'var(--danger)' }}>{portError}</div>
+                )}
+              </Section>
 
-              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                Onboarding
-              </div>
+              <Section title="Personal wiki">
+                <FolderPicker
+                  value={draft.personalWikiPath}
+                  onChange={(p) => setDraft({ ...draft, personalWikiPath: p.trim() ? p : null })}
+                  placeholder="~/Documents/wiki"
+                  title="Select personal wiki folder"
+                  confirmLabel="Use wiki folder"
+                />
+                <Hint>
+                  Optional Karpathy-style personal wiki folder for distilled agent notes. Auto-heal receives the path and reads only relevant notes.
+                </Hint>
+              </Section>
+
+              <Section title="Default agent" bodyClassName={OPTION_ROW_SECTION_BODY}>
+                {HEAL_AGENT_OPTIONS.map((opt, index) => (
+                  <ChoiceRow
+                    key={opt.value}
+                    type="radio"
+                    name="healAgent"
+                    value={opt.value}
+                    checked={draft.healAgent === opt.value}
+                    onChange={() => setDraft({ ...draft, healAgent: opt.value })}
+                    label={opt.label}
+                    description={opt.description}
+                    divider={index > 0}
+                  />
+                ))}
+              </Section>
+
+              <Section title="Editor" bodyClassName={OPTION_ROW_SECTION_BODY}>
+                {EDITOR_OPTIONS.map((opt, index) => (
+                  <ChoiceRow
+                    key={opt.value}
+                    type="radio"
+                    name="editor"
+                    value={opt.value}
+                    checked={draft.editor === opt.value}
+                    onChange={() => setDraft({ ...draft, editor: opt.value })}
+                    label={opt.label}
+                    description={opt.description}
+                    divider={index > 0}
+                  />
+                ))}
+              </Section>
+
               {/* The same flag the Getting Started footer toggles. Mirrored here
                   so a workspace that hid the guide can switch it back on — the
                   pill is the dialog's only entry point, so without this the
                   choice would be irreversible. */}
-              <label className="cl-card-hover mb-1.5 flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5">
-                <input
+              <Section title="Onboarding" bodyClassName={OPTION_ROW_SECTION_BODY}>
+                <ChoiceRow
                   type="checkbox"
-                  data-testid="settings-show-demo"
+                  testId="settings-show-demo"
                   checked={draft.showDemo !== false}
-                  onChange={(e) => setDraft({ ...draft, showDemo: e.target.checked })}
-                  className="mt-1"
+                  onChange={(showDemo) => setDraft({ ...draft, showDemo })}
+                  label="Show Getting Started in the status bar"
+                  description="Shows the four-step starter journey, followed by the specialized workflows."
                 />
-                <div className="flex-1">
-                  <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>Show Getting Started in the status bar</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    Shows the four-step starter journey, followed by the specialized workflows.
-                  </div>
-                </div>
-              </label>
+              </Section>
 
-              <div className="mt-4 text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--text-muted)' }}>
-                GitHub
-              </div>
-              {/* Sits with GitHub rather than with the heal agent: what it
-                  controls is a push to your remote, not how the repair runs. */}
-              <label className="cl-card-hover mb-1.5 flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5">
-                <input
+              {/* Auto-PR sits with GitHub rather than with the heal agent: what
+                  it controls is a push to your remote, not how the repair runs.
+                  The connection readout is the section's second ROW, on the same
+                  geometry — as a free-standing block it hung its dot, its label
+                  and its footnote on three edges none of the rows used. */}
+              <Section title="GitHub" bodyClassName={OPTION_ROW_SECTION_BODY}>
+                <ChoiceRow
                   type="checkbox"
-                  data-testid="settings-auto-propose-pr"
+                  testId="settings-auto-propose-pr"
                   checked={draft.autoProposePr !== false}
-                  onChange={(e) => setDraft({ ...draft, autoProposePr: e.target.checked })}
-                  className="mt-1"
+                  onChange={(autoProposePr) => setDraft({ ...draft, autoProposePr })}
+                  label="Open a draft PR when a run heals green"
+                  description="One pull request per feature, force-pushed to the same branch each time so it always carries the newest fix. Nothing is pushed for a run that failed or gave up."
                 />
-                <div className="flex-1">
-                  <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>Open a draft PR when a run heals green</div>
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    One pull request per feature, force-pushed to the same branch each time so it always carries the newest fix. Nothing is pushed for a run that failed or gave up.
-                  </div>
-                </div>
-              </label>
-              <GitHubSection />
+                <GitHubSection divider />
+              </Section>
             </>
           )}
         </div>

@@ -122,6 +122,48 @@ describe('index row staleness (merge-upsert can update but never delete)', () =>
     expect(store.list().find((e) => e.flightId === manifest.flightId)!.pauseReason).toBeUndefined()
   })
 
+  it('publishes the parked checkpoint KIND on the index row, and clears it on release', async () => {
+    // The pill, picker, suites column and toasts never load a manifest, so
+    // without this they cannot tell an `external-work` hand-off (work running in
+    // the user's own agent) from a question aimed at the human.
+    const adapters = allDone()
+    adapters.scout = {
+      run: async () => ({
+        kind: 'checkpoint',
+        checkpoint: { kind: 'external-work', message: 'hand it off', options: ['submit', 'run-internally'] },
+      }),
+      onCheckpointResponse: async () => ({ kind: 'done' }),
+    }
+    const { manifest, completion } = startFlight(args(), deps(adapters))
+    await completion
+    const parked = store.list().find((e) => e.flightId === manifest.flightId)!
+    expect(parked.status).toBe('waiting-for-approval')
+    expect(parked.checkpointKind).toBe('external-work')
+
+    const released = respondToFlightCheckpoint(manifest.flightId, { choice: 'submit' }, deps(adapters))
+    await released.completion
+    // Explicitly cleared, not merely absent from the write: the index upsert is
+    // a shallow merge, so an omitted key would leave 'external-work' stuck on
+    // the row for the rest of the flight.
+    expect(store.list().find((e) => e.flightId === manifest.flightId)!.checkpointKind).toBeUndefined()
+  })
+
+  it('publishes stageProducer on the index row, for the same slim consumers', async () => {
+    // An externally driven flight is read-only in the web UI. The pill must not
+    // count it as needing input and the picker must not offer to resume it —
+    // neither of which loads a manifest to find out who is driving.
+    const external = startFlight(
+      { ...args('/repo/ext'), feature: 'ext-flight', opts: { ...OPTS, stageProducer: 'external' } },
+      deps(allDone()),
+    )
+    await external.completion
+    expect(store.list().find((e) => e.flightId === external.manifest.flightId)!.stageProducer).toBe('external')
+
+    const internal = startFlight({ ...args('/repo/int'), feature: 'int-flight' }, deps(allDone()))
+    await internal.completion
+    expect(store.list().find((e) => e.flightId === internal.manifest.flightId)!.stageProducer).toBeUndefined()
+  })
+
   it('redo clears endedAt from the INDEX row of a settled flight', async () => {
     const first = startFlight(args(), deps(allDone()))
     await first.completion

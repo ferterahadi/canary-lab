@@ -5,6 +5,8 @@ import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { DiffView } from '@/shared/ui/DiffView'
 import { useEvaluationExports } from '@/features/evaluation'
 import { checkpointOptionLabel, checkpointTitle, evaluationTaskId, STAGE_COLUMN } from './stage-meta'
+import { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../lib/external-work'
+import { StatusDot } from '@/shared/ui/atoms'
 
 /** Evaluation Report's explicit download (R15): as an `icon` on the at-a-glance
  *  card's kicker line — beside the archive it fetches — and (R71/W1, `primary`)
@@ -83,12 +85,15 @@ export function CheckpointControls({
   const [busy, setBusy] = useState(false)
   const [envText, setEnvText] = useState('')
   // portify-apply 'revise': the choice needs feedback text, so its button
-  // opens this composer instead of responding immediately.
+  // opens this composer instead of responding immediately. No read-only guard
+  // on the composer below: the only thing that opens it is an option button
+  // read-only never renders, and `readOnly` can never turn ON mid-mount (the
+  // producer is sticky, so it only clears when the flight settles).
   const [reviseOpen, setReviseOpen] = useState(false)
   const [reviseText, setReviseText] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
 
-  const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string }): void => {
+  const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string; token?: string }): void => {
     setBusy(true)
     setFailure(null)
     api.respondFlightCheckpoint(flightId, response)
@@ -102,6 +107,25 @@ export function CheckpointControls({
   const diff = typeof data.diff === 'string' ? data.diff : null
   const configError = typeof data.error === 'string' ? data.error : null
 
+  // A hand-off to the client that started the flight: work in progress, not a
+  // question. It drops every "you are the blocker" cue — amber chrome, the
+  // pause glyph, the Recommended badge — because the expected next move is the
+  // agent finishing, not a click. Its own two escape buttons went with the
+  // read-only rule below; Abort in the flight's ⋯ menu is what replaced them.
+  const externalWork = checkpoint.kind === 'external-work'
+  // Every answer on this card belongs to the MCP client driving the flight —
+  // including the hand-off's own two escape buttons, which were the last thing
+  // on the page still inviting the human to act on the agent's behalf. The
+  // question and its context stay visible (that is what a viewer wants); only
+  // the answering goes. An `external-work` checkpoint only ever occurs on an
+  // externally driven flight, so this one predicate covers both cases.
+  const readOnly = isExternallyDriven(flight)
+  // Identifies WHICH hand-off a submit answers. Without it the server's
+  // stale-submit gate rejects every check from this side and silently re-parks,
+  // so the button looked broken while doing nothing.
+  const handOffId = typeof data.handOffId === 'string' ? data.handOffId : undefined
+  const staleSubmission = data.lastRejection === 'stale_submission'
+
   // R71/W3: options render in outcome language (display map — the POSTed key
   // stays raw). The first option is the recommended default; past 3 options the
   // rest fold behind a disclosure so a fork never reads as a wall of buttons.
@@ -113,10 +137,12 @@ export function CheckpointControls({
   return (
     <section
       data-testid="checkpoint-controls"
-      className={`flex flex-col gap-2.5 rounded-lg border border-warning/45 bg-surface p-3 ${STAGE_COLUMN}`}
+      className={`flex flex-col gap-2.5 rounded-lg border bg-surface p-3 ${externalWork ? 'border-running/45' : 'border-warning/45'} ${STAGE_COLUMN}`}
     >
       <div className="flex items-center gap-2">
-        <span aria-hidden="true" className="text-warning">⏸</span>
+        {externalWork
+          ? <StatusDot state="running" className="shrink-0" />
+          : <span aria-hidden="true" className="text-warning">⏸</span>}
         <span
           data-testid="checkpoint-title"
           className="text-[12.5px] font-semibold"
@@ -125,7 +151,15 @@ export function CheckpointControls({
           {checkpointTitle(checkpoint.kind)}
         </span>
       </div>
-      <p className="text-[12px] text-secondary">{checkpoint.message}</p>
+      {/* The hand-off's `message` is written AT the agent holding the step
+          ("Run this scout step in your own client…") — the wrong reader. The
+          stage's own state line above already says what is happening here. */}
+      {!externalWork && <p className="text-[12px] text-secondary">{checkpoint.message}</p>}
+      {staleSubmission && (
+        <p data-testid="checkpoint-stale-submission" className="text-[11px] text-warning">
+          {EXTERNAL_WORK_COPY.lateResultNote}
+        </p>
+      )}
 
       {checkpoint.kind === 'config-approval' && configError && (
         <p data-testid="checkpoint-config-error" className="text-[11px] text-danger font-mono">
@@ -138,7 +172,7 @@ export function CheckpointControls({
           per-line-coloured diff block, not a plain wall of text. */}
       {diff && <DiffView diff={diff} />}
 
-      {checkpoint.kind === 'missing-env' && (
+      {checkpoint.kind === 'missing-env' && !readOnly && (
         <div className="flex flex-col gap-1.5">
           <div className="text-[11px] text-muted">
             Missing: {missing.join(', ')}
@@ -171,6 +205,12 @@ export function CheckpointControls({
         </div>
       )}
 
+      {readOnly && (
+        <p data-testid="checkpoint-read-only" className="text-[11px] text-secondary">
+          {EXTERNAL_DRIVE_COPY.checkpointLine}
+        </p>
+      )}
+      {!readOnly && (
       <div className="flex flex-wrap items-center gap-1.5">
         {visibleOptions.map((option, i) => (
           <button
@@ -178,15 +218,17 @@ export function CheckpointControls({
             type="button"
             data-testid={`checkpoint-choice-${option}`}
             disabled={busy}
-            onClick={() => (option === 'revise' ? setReviseOpen((v) => !v) : respond({ choice: option }))}
+            onClick={() => (option === 'revise'
+              ? setReviseOpen((v) => !v)
+              : respond({ choice: option, ...(option === 'submit' && handOffId ? { token: handOffId } : {}) }))}
             className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs"
             title={option}
-            style={i === 0
+            style={i === 0 && !externalWork
               ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
               : undefined}
           >
             {checkpointOptionLabel(checkpoint.kind, option)}
-            {i === 0 && (
+            {i === 0 && !externalWork && (
               /* R71/W3: the default is named, not color-only. */
               <span
                 data-testid="checkpoint-recommended"
@@ -209,6 +251,7 @@ export function CheckpointControls({
           </button>
         )}
       </div>
+      )}
 
       {reviseOpen && (
         <div className="flex flex-col gap-1.5">

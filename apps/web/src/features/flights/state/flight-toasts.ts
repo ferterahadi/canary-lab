@@ -8,7 +8,9 @@
  *
  * The rules (R68):
  *  - A flight *needs attention* iff it is waiting on the user:
- *      status === 'waiting-for-approval'  OR
+ *      status === 'waiting-for-approval' — EXCEPT an `external-work` park, which
+ *      is a hand-off to the user's own agent, i.e. work in progress, not a
+ *      question; nothing there is answerable from this side  OR
  *      status === 'paused' with a pauseReason that isn't the user's own pause
  *      and isn't a queue park.
  *  - Queued flights (pauseReason 'queued') NEVER toast — they are just waiting
@@ -22,7 +24,8 @@
  *  - An individual flight's toast is suppressed only while THAT flight's detail
  *    view is on screen; the aggregate + other flights' toasts still show.
  */
-import type { FlightIndexEntry, FlightPauseReason, FlightStatus } from '@/shared/api/client'
+import type { FlightCheckpointKind, FlightIndexEntry, FlightPauseReason, FlightStatus } from '@/shared/api/client'
+import { isExternalWorkPark, isExternallyDriven } from '../lib/external-work'
 
 export const AGGREGATE_TOAST_ID = 'flights-need-input'
 
@@ -32,6 +35,11 @@ export interface FlightAttentionInput {
   feature: string
   status: FlightStatus
   pauseReason?: FlightPauseReason
+  checkpointKind?: FlightCheckpointKind
+  /** Who drives the flight (mirrored onto the index entry). An externally
+   *  driven flight never nags: whatever it stopped on, the client that started
+   *  it is the one that answers, and this reader has no control to press. */
+  stageProducer?: 'internal' | 'external'
   currentStage?: FlightIndexEntry['currentStage']
 }
 
@@ -40,7 +48,16 @@ export interface FlightAttentionInput {
 export function flightNeedsAttention(f: {
   status: FlightStatus
   pauseReason?: FlightPauseReason
+  checkpointKind?: FlightCheckpointKind
+  stageProducer?: 'internal' | 'external'
 }): boolean {
+  // Widened from the `external-work` park alone: a flight the user's own agent
+  // is driving asks nothing of the person reading this UI whatever it stopped
+  // on. The narrower check let a `prd-source` fork — or a stage-failed pause
+  // the agent is about to resume — fire "X is waiting for you", which is the
+  // toast that made a hand-off look like a demand and a failure look final.
+  if (isExternallyDriven(f)) return false
+  if (isExternalWorkPark(f)) return false
   if (f.status === 'waiting-for-approval') return true
   if (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued') return true
   return false
@@ -48,9 +65,19 @@ export function flightNeedsAttention(f: {
 
 /** The status key we diff on. Folding pauseReason in means a flight that moves
  *  from a user pause to a stage-failed pause (both `status:'paused'`) is still
- *  seen as a transition, so it can fire its toast. */
-export function attentionKey(f: { status: FlightStatus; pauseReason?: FlightPauseReason }): string {
-  return f.pauseReason ? `${f.status}:${f.pauseReason}` : f.status
+ *  seen as a transition, so it can fire its toast.
+ *
+ *  checkpointKind folds in for the same reason, and it is load-bearing now that
+ *  a hand-off is silent: a flight moving from an `external-work` park straight
+ *  to a real question (both `waiting-for-approval`) would otherwise keep the
+ *  same key, read as unchanged, and never toast the question. */
+export function attentionKey(f: {
+  status: FlightStatus
+  pauseReason?: FlightPauseReason
+  checkpointKind?: FlightCheckpointKind
+}): string {
+  const qualifier = f.pauseReason ?? f.checkpointKind
+  return qualifier ? `${f.status}:${qualifier}` : f.status
 }
 
 /** The prev→next attention-key map used to diff one refresh against the last. */

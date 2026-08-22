@@ -174,6 +174,31 @@ describe('start_flight — what it sends', () => {
     expect(requests.at(-1)?.payload).toEqual({ feature: 'checkout', mode: 'redo', stageProducer: 'external' })
   })
 
+  // The web UI's Redo dialog has always been able to tell the entry stage what
+  // went wrong; the agent could re-run a stage but not say why. It matters most
+  // now that the UI is read-only under external drive — otherwise re-entering a
+  // step would silently lose the one piece of context that makes the retry
+  // different from the attempt that just failed.
+  it('carries a re-entry feedback note on a jump and on a redo', async () => {
+    const { call, requests } = flightHarness({ reply: startRoutes({ create: created }) })
+
+    await call('start_flight', { feature: 'checkout', from_stage: 'docs', feedback: 'it summarised the wrong repo' })
+    expect(requests.at(-1)?.payload).toMatchObject({ mode: 'jump', fromStage: 'docs', feedback: 'it summarised the wrong repo' })
+
+    await call('start_flight', { feature: 'checkout', redo: true, feedback: 'start clean' })
+    expect(requests.at(-1)?.payload).toMatchObject({ mode: 'redo', feedback: 'start clean' })
+  })
+
+  // A note with no re-entry has nowhere to go — the conductor only scopes it to
+  // an ENTRY stage — so it is dropped rather than sent and silently ignored.
+  it('drops a feedback note on a fresh start or a plain resume', async () => {
+    const { call, requests } = flightHarness({ reply: startRoutes({ create: created }) })
+
+    await call('start_flight', { repoPaths: ['/repo/shop'], description: 'checkout flow', feedback: 'ignored' })
+
+    expect(requests.at(-1)?.payload).not.toHaveProperty('feedback')
+  })
+
   it('treats an empty repo list as no repos at all', async () => {
     const { text, requests } = flightHarness({ reply: startRoutes({ create: created }) })
 
@@ -316,6 +341,85 @@ describe('get_flight — the list mode', () => {
     const { text } = flightHarness({ reply: { statusCode: 404, body: {} } })
 
     expect(await text('get_flight', { flightId: 'nope' })).toContain('flight not found: nope')
+  })
+})
+
+// A parked hand-off has no deadline by design, so the read is the only place a
+// client that took the work and vanished can be noticed. Observed live: a client
+// wrote the docs file, posted the user a status table, and ended its turn at
+// stage 5 of 11 — the flight stayed "waiting-for-approval" with six stages that
+// would never start.
+describe('get_flight — a hand-off nobody is working', () => {
+  const OLD = new Date(Date.now() - 90 * 60 * 1000).toISOString()
+  const handOff = (over: Record<string, unknown> = {}) => ({
+    ...parkedOn('external-work', { stage: 'docs', prompt: 'do the thing', handOffId: 'h-1' }, ['submit', 'run-internally']),
+    updatedAt: OLD,
+    ...over,
+  })
+
+  it('reports a hand-off no client has checked in on, and says it is still answerable', async () => {
+    const { call } = flightHarness({ reply: { statusCode: 200, body: handOff() } })
+
+    const out = await call('get_flight', { flightId: 'fl-1' })
+
+    expect(out.handOffIdle).toMatchObject({ stage: 'docs', neverPolled: true })
+    expect(String(out.next)).toContain('STALLED HAND-OFF')
+    // The reader must learn it can still submit — otherwise it restarts the stage
+    // and throws away work that is sitting on disk.
+    expect(String(out.next)).toContain('still answerable')
+    // The steering for the hand-off itself still follows the warning.
+    expect(String(out.next)).toContain('respond_flight_checkpoint')
+  })
+
+  it('goes quiet again once this client has checked in', async () => {
+    const { call } = flightHarness({ reply: { statusCode: 200, body: handOff() } })
+
+    await call('get_flight', { flightId: 'fl-1' })
+    const second = await call('get_flight', { flightId: 'fl-1' })
+
+    // The first read counted as contact, so the clock now runs from it — a client
+    // polling on the documented cadence never sees this warning.
+    expect(second.handOffIdle).toBeUndefined()
+    expect(String(second.next)).not.toContain('STALLED HAND-OFF')
+  })
+
+  it('leaves a fresh hand-off alone', async () => {
+    const { call } = flightHarness({
+      reply: { statusCode: 200, body: handOff({ updatedAt: new Date().toISOString() }) },
+    })
+
+    expect((await call('get_flight', { flightId: 'fl-1' })).handOffIdle).toBeUndefined()
+  })
+
+  // Only a hand-off can be abandoned by a client. Every other checkpoint is a
+  // QUESTION for the user, and a user taking their time is not a stall.
+  it('says nothing about a long-parked question for the user', async () => {
+    const { call } = flightHarness({
+      reply: { statusCode: 200, body: { ...parkedOn('prd-source'), updatedAt: OLD } },
+    })
+
+    expect((await call('get_flight', { flightId: 'fl-1' })).handOffIdle).toBeUndefined()
+  })
+
+  it('says nothing about a flight that is not parked at all', async () => {
+    const { call } = flightHarness({
+      reply: { statusCode: 200, body: { ...plainFlight('running'), updatedAt: OLD } },
+    })
+
+    expect((await call('get_flight', { flightId: 'fl-1' })).handOffIdle).toBeUndefined()
+  })
+
+  // The imperative that has to ride the result rather than the skill: a skill can
+  // be compacted out of a client's context halfway through the pipeline.
+  it('tells the client not to end its turn while the step is open', async () => {
+    const { call } = flightHarness({
+      reply: { statusCode: 200, body: handOff({ updatedAt: new Date().toISOString() }) },
+    })
+
+    const next = String((await call('get_flight', { flightId: 'fl-1' })).next)
+
+    expect(next).toContain('DO NOT END YOUR TURN')
+    expect(next).toContain('a status update to the user is not progress')
   })
 })
 

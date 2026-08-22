@@ -43,7 +43,10 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // GET /api/onboarding.
 // Routed because it is the workspace's first screen and a refresh mid-choice
 // should not lose it.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'draft' | 'demo'
+// `settings` is Project Settings (the features column's gear). Workspace-scoped
+// rather than feature-scoped, and rebuilt entirely from GET /api/project-config,
+// so a cold load needs nothing this tab happened to be holding.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'draft' | 'demo' | 'settings'
 
 /** The Feature-config dialog's tabs — the `tab` qualifier for `dialog=config`.
  *  Routed because entry points land on different tabs (the run detail opens
@@ -121,7 +124,7 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'draft', 'demo']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'draft', 'demo', 'settings']
 const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
 const RUN_ARRIVAL_TABS: RunArrivalTab[] = ['changes']
 

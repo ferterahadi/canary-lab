@@ -49,6 +49,8 @@ export interface WorkspaceNavigation {
   draftFor: string | null
   /** Whether the Getting Started guide is open (routed ?dialog=demo). */
   demoOpen: boolean
+  /** Whether Project Settings is open (routed ?dialog=settings). */
+  settingsOpen: boolean
   resumePlanTaskId: string | null
   portifyTarget: PortifyTarget | null
   routedDialog: RouteDialog | null
@@ -78,6 +80,8 @@ export interface WorkspaceNavigation {
   setDraftFor: (id: string | null) => void
   /** Open / close the Getting Started guide. */
   setDemoOpen: (open: boolean) => void
+  /** Open / close Project Settings. */
+  setSettingsOpen: (open: boolean) => void
   setResumePlanTaskId: (id: string | null) => void
   setPortifyTarget: (t: PortifyTarget | null) => void
   /** Open a flight's detail (null = the flights landing list). */
@@ -139,6 +143,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
   }, [])
   const [draftFor, setDraftFor] = useState<string | null>(SEED.draftFor)
   const [demoOpen, setDemoOpen] = useState<boolean>(SEED.demoOpen)
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(SEED.settingsOpen)
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
   const [portifyTarget, setPortifyTarget] = useState<PortifyTarget | null>(SEED.portifyTarget)
   const [focusTest, setFocusTest] = useState<NavState['focusTest']>(SEED.focusTest)
@@ -169,6 +174,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartNew,
     draftFor,
     demoOpen,
+    settingsOpen,
     resumePlanTaskId,
     portifyTarget,
     focusTest,
@@ -256,6 +262,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartNew,
     draftFor,
     demoOpen,
+    settingsOpen,
     resumePlanTaskId,
     portifyTarget,
     focusTest,
@@ -272,6 +279,7 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setFlightStartNew,
     setDraftFor,
     setDemoOpen,
+    setSettingsOpen,
     setResumePlanTaskId,
     setPortifyTarget,
     openFlight,

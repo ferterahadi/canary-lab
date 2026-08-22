@@ -64,12 +64,17 @@ dialog open-state to localStorage or broadcast it cross-tab.
 ?feature=checkout&dialog=config&tab=ports           → feature config, on a named tab
 ?feature=checkout&dialog=verification               → Verify-config dialog
 ?feature=checkout&dialog=flight-start               → flight stage-entry launcher (feature-scoped)
+?feature=checkout&dialog=flight-fresh               → same launcher in START-FRESH intent (R76)
 ?dialog=flight-new                                  → new-flight launcher (intent + repo picker)
+?dialog=draft&draft=dr_9                            → external authoring draft, by id
 ?dialog=demo                                        → demo chooser (needs only GET /api/onboarding)
+?dialog=settings                                    → Project Settings (needs only GET /api/project-config)
 ?view=flights&flight=fl_abc                         → flight detail (omit flight = flights list)
+?view=flights&flight=fl_abc&stage=docs              → that flight, on a named stage (omit = follow-mode)
 ```
 
-`RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new' | 'demo'`.
+`RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' |
+'flight-new' | 'draft' | 'demo' | 'settings'`.
 `flight`, `draft` and `tab` are the live id/name qualifiers, each gated to its own
 view/dialog in `persistView`/`readPersistedView`: `flight` only qualifies
 `view=flights` (absent = the flights landing list), `draft` only `dialog=draft`,

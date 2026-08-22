@@ -39,6 +39,12 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
           mode?: string
           /** Stage to start at (jump / fresh stage entry), prereq-validated. */
           fromStage?: string
+          /** "What went wrong last time" (R74), scoped to the entry stage's
+           *  agent prompt. Redo/jump only — the conductor drops it otherwise.
+           *  Reachable here (not only on `/:id/redo`) because an externally
+           *  driven flight re-enters a stage through start_flight, and without
+           *  it the agent could repeat a step but never say why. */
+          feedback?: string
           gettingStartedSource?: GettingStartedOwner
         }
       | undefined
@@ -129,6 +135,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
           opts,
           ...(body.mode ? { mode: body.mode as FlightEntryMode } : {}),
           ...(body.fromStage ? { fromStage: body.fromStage as FlightStageKey } : {}),
+          ...(body.feedback ? { feedback: body.feedback } : {}),
         },
         conductorDeps,
       )

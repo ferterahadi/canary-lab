@@ -23,6 +23,7 @@ const base: NavState = {
   flightStartNew: false,
   draftFor: null,
   demoOpen: false,
+  settingsOpen: false,
   resumePlanTaskId: null,
   portifyTarget: null,
   focusTest: null,
@@ -108,6 +109,11 @@ describe('initialNavState', () => {
   it('reopens the demo chooser from a cold load, and only from its own param', () => {
     expect(initialNavState(persisted({ dialog: 'demo' })).demoOpen).toBe(true)
     expect(initialNavState(persisted({ dialog: 'config' })).demoOpen).toBe(false)
+  })
+
+  it('reopens Project Settings from a cold load, and only from its own param', () => {
+    expect(initialNavState(persisted({ dialog: 'settings' })).settingsOpen).toBe(true)
+    expect(initialNavState(persisted({ dialog: 'config' })).settingsOpen).toBe(false)
   })
 })
 
@@ -196,6 +202,14 @@ describe('routedDialog precedence (z-order)', () => {
 
   it('verify wins when it is the only one open', () => {
     expect(routedDialog({ ...base, verifyOpen: true })).toBe('verification')
+  })
+
+  it('routes Project Settings, and ranks it under every overlay above it', () => {
+    expect(routedDialog({ ...base, settingsOpen: true })).toBe('settings')
+    // It mounts in the features column — the first column App renders — so
+    // anything else open is painting over it and owns the URL.
+    expect(routedDialog({ ...base, settingsOpen: true, verifyOpen: true })).toBe('verification')
+    expect(routedDialog({ ...base, settingsOpen: true, configFor: 'x' })).toBe('config')
   })
 })
 

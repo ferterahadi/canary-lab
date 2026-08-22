@@ -48,3 +48,19 @@ export function optionRowStyle({ selected, disabled, interactive }: {
     cursor: disabled ? 'not-allowed' : interactive ? 'pointer' : undefined,
   }
 }
+
+/** The centred variant: same insets as `OPTION_ROW_CLASS`, but the row's control
+ *  is a single element (a button, a copy field) sitting beside a label+description
+ *  block rather than a mark leading a paragraph. `items-start` would hang that
+ *  control off the top of the label column; a separate constant rather than an
+ *  `items-center` override, for the same stylesheet-order reason as the compact
+ *  variant above. */
+export const OPTION_ROW_CENTERED_CLASS = 'flex items-center gap-3 px-3.5 py-2.5 text-left'
+
+/** Body padding for a `Section` whose content is option ROWS rather than fields:
+ *  no horizontal inset, so each row's own `px-3.5` puts its label on the same
+ *  column as the section title while the selected band and the hover tint span
+ *  the card edge to edge. The vertical inset keeps the first and last row clear
+ *  of the card's rounded corners. Shared so every row-bodied section in the app
+ *  (project settings, the Getting Started detail) sits on one inset. */
+export const OPTION_ROW_SECTION_BODY = 'py-1.5'

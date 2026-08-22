@@ -13,6 +13,7 @@ export function FlightSummaryStrip({
   derived,
   onSelectStage,
   onToggleAutopilot,
+  autopilotLockedReason,
 }: {
   flight: FlightManifest
   /** R81: rendering a pseudo-manifest — suppress facts that only a real record
@@ -22,6 +23,12 @@ export function FlightSummaryStrip({
   /** R78: autopilot is a preference the user flips whenever they want, not a
    *  start-time-only option — so it reads and toggles from the facts strip. */
   onToggleAutopilot?: (next: boolean) => void
+  /** Non-null → the toggle renders inert with this as its tooltip. Set while
+   *  an MCP client is driving the flight: autopilot decides checkpoints, so
+   *  flipping it changes what that client's flight answers for itself. The
+   *  toggle stays VISIBLE because its current value is information the reader
+   *  still wants; only the flip is withheld. */
+  autopilotLockedReason?: string
 }) {
   const items: Array<{ label: string; value: string; tone?: string; stage?: FlightStageKey }> = []
 
@@ -127,10 +134,12 @@ export function FlightSummaryStrip({
             type="button"
             data-testid="flight-autopilot-toggle"
             aria-pressed={autopilotOn}
-            disabled={flight.opts.yolo}
+            disabled={flight.opts.yolo || autopilotLockedReason != null}
             onClick={() => onToggleAutopilot(!autopilotOn)}
             className="group flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] outline-none transition-shadow duration-150 focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] disabled:cursor-default"
-            title={flight.opts.yolo
+            title={autopilotLockedReason
+              ? autopilotLockedReason
+              : flight.opts.yolo
               ? 'This flight runs --yolo — every checkpoint except missing env is skipped, whatever autopilot says'
               : autopilotOn
                 ? 'Autopilot answers the checkpoints with a safe default — click to be asked at every one from now on'

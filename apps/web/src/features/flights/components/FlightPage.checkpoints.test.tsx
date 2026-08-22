@@ -199,14 +199,20 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
 }
 
 describe('checkpoint display language (R71/W3)', () => {
-  const parkedOn = (key: string, checkpoint: FlightCheckpoint) => manifest({
+  const parkedOn = (key: string, checkpoint: FlightCheckpoint, over: Record<string, unknown> = {}) => manifest({
     status: 'waiting-for-approval',
     stages: FLIGHT_STAGE_KEYS.map((k) => ({
       key: k,
       status: k === key ? ('waiting-for-approval' as const) : ('done' as const),
       ...(k === key ? { checkpoint } : {}),
     })),
+    ...over,
   })
+
+  /** A hand-off ONLY happens on an externally driven flight — the checkpoint
+   *  kind and the producer always travel together in production, so a fixture
+   *  that sets one without the other tests a state that cannot occur. */
+  const externallyDriven = { opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' } }
 
   it('renders outcome language + a Recommended tag; the POSTed key stays raw', async () => {
     mocks.getFlight.mockResolvedValue(parkedOn('similarity', {
@@ -334,6 +340,58 @@ describe('checkpoint display language (R71/W3)', () => {
     mocks.respondFlightCheckpoint.mockResolvedValue(manifest())
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-revise-submit"]')?.click() })
     expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'revise', feedback: 'use env vars, not args' })
+  })
+
+  it('an external-work hand-off reads as work in progress, with nothing to press', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('scout', {
+      kind: 'external-work',
+      message: 'Run this scout step in your own client, then respond with the result on `data`.',
+      options: ['submit', 'run-internally'],
+      data: { stage: 'scout', prompt: 'scan the repo', handOffId: 'ab12cd34' },
+    }, externallyDriven))
+    await render('fl_1')
+    const card = container.querySelector<HTMLElement>('[data-testid="checkpoint-controls"]')
+    expect(card?.className).toContain('border-running/45')
+    expect(container.querySelector('[data-testid="checkpoint-title"]')?.textContent).toBe('Your agent is working on this step')
+    // The checkpoint's own message is addressed to the agent holding the step —
+    // it never reaches the person reading the web UI.
+    expect(container.textContent).not.toContain('respond with the result on')
+    // Both escape hatches are gone: they were the last thing on the page still
+    // inviting this reader to act for the agent. Abort in the flight's ⋯ menu
+    // is what replaced them.
+    expect(container.querySelector('[data-testid="checkpoint-choice-submit"]')).toBeNull()
+    expect(container.querySelector('[data-testid="checkpoint-choice-run-internally"]')).toBeNull()
+    expect(container.querySelector('[data-testid="checkpoint-recommended"]')).toBeNull()
+    expect(container.querySelector('[data-testid="checkpoint-read-only"]')?.textContent)
+      .toBe('Your agent answers this — it is holding the question now.')
+  })
+
+  it('names a discarded late result, so a re-park is not mistaken for the first ask', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('scout', {
+      kind: 'external-work',
+      message: 'hand-off',
+      options: ['submit', 'run-internally'],
+      data: { stage: 'scout', handOffId: 'ff00ff00', lastRejection: 'stale_submission' },
+    }, externallyDriven))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="checkpoint-stale-submission"]')?.textContent)
+      .toBe('A late result from an earlier attempt was ignored. This step is still running in your agent.')
+  })
+
+  it('R74: the requirements fork goes inert when the agent owns the answer', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('docs', {
+      kind: 'prd-source', message: 'No requirement docs yet.', options: ['collect-repo-docs', 'infer-from-diff'],
+    }, externallyDriven))
+    await render('fl_1')
+    // The question still renders — a viewer wants to know what it stopped on.
+    expect(container.querySelector('[data-testid="requirements-fork"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="requirements-fork-read-only"]')).toBeTruthy()
+    for (const id of ['fork-path-manual', 'fork-path-agent']) {
+      expect(container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)?.disabled).toBe(true)
+    }
+    // Disabled cards mean `mode` never leaves null, so no path content mounts.
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-manual"]')?.click() })
+    expect(container.querySelector('[data-testid="fork-use-docs"]')).toBeNull()
   })
 
   it('R74: prd-source parks as the two-path fork — intent row, no generic checkpoint card', async () => {

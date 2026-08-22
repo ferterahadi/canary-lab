@@ -278,6 +278,15 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('demo')
   })
 
+  it('round-trips Project Settings, URL-only like every other dialog', () => {
+    persistView(view({ dialog: 'settings' }))
+    expect(window.location.search).toContain('dialog=settings')
+    expect(readPersistedView()).toEqual(view({ dialog: 'settings' }))
+    // Never mirrored to localStorage: settings open in one tab must not pop
+    // open in another.
+    expect(localStorage.getItem(KEY)).not.toContain('settings')
+  })
+
   it('R50: ignores the retired add-test / portify dialogs in stale deep links', () => {
     window.history.replaceState(null, '', '/?dialog=add-test')
     expect(readPersistedView()).toEqual(view({}))

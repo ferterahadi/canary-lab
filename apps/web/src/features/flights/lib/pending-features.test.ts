@@ -76,6 +76,27 @@ describe('derivePendingFeatures', () => {
     expect(stubs[0].pending?.flightId).toBe('a')
   })
 
+  it('carries the checkpoint kind so the column can tell a question from a hand-off', () => {
+    const [handOff] = derivePendingFeatures(
+      [flight({ feature: 'scan', status: 'waiting-for-approval', checkpointKind: 'external-work' })],
+      [],
+    )
+    expect(handOff.pending?.checkpointKind).toBe('external-work')
+    // Absent rather than undefined-valued when the flight is not parked.
+    const [running] = derivePendingFeatures([flight({ feature: 'go', status: 'running' })], [])
+    expect(running.pending && 'checkpointKind' in running.pending).toBe(false)
+  })
+
+  it('carries stageProducer, so the column knows the row is nobody here to act on', () => {
+    const [external] = derivePendingFeatures(
+      [flight({ feature: 'scan', status: 'waiting-for-approval', stageProducer: 'external' })],
+      [],
+    )
+    expect(external.pending?.stageProducer).toBe('external')
+    const [plain] = derivePendingFeatures([flight({ feature: 'go', status: 'running' })], [])
+    expect(plain.pending && 'stageProducer' in plain.pending).toBe(false)
+  })
+
   it('leaves group undefined when the flight carries none', () => {
     const stubs = derivePendingFeatures([flight({ feature: 'solo', group: undefined })], [])
     expect(stubs[0].group).toBeUndefined()

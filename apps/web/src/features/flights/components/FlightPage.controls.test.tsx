@@ -307,6 +307,117 @@ describe('flight controls (R48/R71)', () => {
     expect(container.querySelector('[data-testid="requirements-fork"]')).toBeTruthy()
   })
 
+  it('an external-work hand-off reads as running work, with no Respond and no Pause', async () => {
+    // The step is being done inside the client that started the flight — there
+    // is nothing here for this reader to answer, and nothing this side can stop.
+    // A hand-off only ever parks on an EXTERNAL flight, so the fixture carries
+    // the producer too: setting the checkpoint kind alone builds a state that
+    // cannot occur, and it was hiding which of the two the page keys off.
+    mocks.getFlight.mockResolvedValue(manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
+      status: 'waiting-for-approval',
+      currentStage: 'scout',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scout' ? ('waiting-for-approval' as const) : ('pending' as const),
+        ...(key === 'scout' ? { checkpoint: { kind: 'external-work', message: 'Run this scout step in your own client.', options: ['submit', 'run-internally'] } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    const chip = container.querySelector<HTMLElement>('[data-testid="flight-status"]')
+    expect(chip?.textContent).toContain('Running in your agent')
+    expect(chip?.getAttribute('title')).toBe('Your agent is working on this step. Canary will continue when it finishes.')
+    expect(container.querySelector('[data-testid="flight-primary-respond"]')).toBeNull()
+    const pause = container.querySelector<HTMLButtonElement>('[data-testid="flight-pause"]')
+    expect(pause?.disabled).toBe(true)
+    expect(pause?.title).toBe('Your agent is driving this flight — pause it there, not here.')
+    await act(async () => { pause?.click() })
+    expect(mocks.pauseFlight).not.toHaveBeenCalled()
+  })
+
+  it('a real checkpoint on the same status keeps Respond and a live Pause', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'waiting-for-approval',
+      currentStage: 'env-capture',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'env-capture' ? ('waiting-for-approval' as const) : ('pending' as const),
+        ...(key === 'env-capture' ? { checkpoint: { kind: 'missing-env', message: 'Keys?', options: ['retry', 'waive'] } } : {}),
+      })),
+    }))
+    await render('fl_1')
+    expect(container.querySelector<HTMLElement>('[data-testid="flight-status"]')?.textContent).toContain('Needs approval')
+    expect(container.querySelector('[data-testid="flight-primary-respond"]')).toBeTruthy()
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-pause"]')?.disabled).toBe(false)
+  })
+
+  // Read-only under external drive: the whole page, not just the parked step.
+  // The narrower hand-off rule left every real question — and every pause —
+  // still offering the human controls that belong to the agent.
+  describe('externally driven', () => {
+    const external = (over: Record<string, unknown> = {}) => manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
+      ...over,
+    })
+
+    it('drops Respond → on a real question and says where the answer goes instead', async () => {
+      mocks.getFlight.mockResolvedValue(external({
+        status: 'waiting-for-approval',
+        currentStage: 'env-capture',
+        stages: FLIGHT_STAGE_KEYS.map((key) => ({
+          key,
+          status: key === 'env-capture' ? ('waiting-for-approval' as const) : ('pending' as const),
+          ...(key === 'env-capture' ? { checkpoint: { kind: 'missing-env', message: 'Keys?', options: ['retry', 'waive'] } } : {}),
+        })),
+      }))
+      await render('fl_1')
+      expect(container.querySelector('[data-testid="flight-primary-respond"]')).toBeNull()
+      expect(container.querySelector('[data-testid="flight-externally-driven"]')?.textContent)
+        .toBe('Driven by your agent — respond from there.')
+      // The chip stops calling active work a demand.
+      expect(container.querySelector('[data-testid="flight-status"]')?.textContent).not.toContain('Needs approval')
+    })
+
+    it('leaves Pause and the checkpoint answers inert, each saying where they moved', async () => {
+      mocks.getFlight.mockResolvedValue(external({
+        status: 'waiting-for-approval',
+        currentStage: 'env-capture',
+        stages: FLIGHT_STAGE_KEYS.map((key) => ({
+          key,
+          status: key === 'env-capture' ? ('waiting-for-approval' as const) : ('pending' as const),
+          ...(key === 'env-capture' ? { checkpoint: { kind: 'missing-env', message: 'Keys?', options: ['retry', 'waive'] } } : {}),
+        })),
+      }))
+      await render('fl_1')
+      const pause = container.querySelector<HTMLButtonElement>('[data-testid="flight-pause"]')
+      expect(pause?.disabled).toBe(true)
+      expect(pause?.title).toBe('Your agent is driving this flight — pause it there, not here.')
+      await act(async () => { pause?.click() })
+      expect(mocks.pauseFlight).not.toHaveBeenCalled()
+      // No answer buttons at all — the question and its context still render.
+      expect(container.querySelector('[data-testid="checkpoint-choice-retry"]')).toBeNull()
+      expect(container.querySelector('[data-testid="checkpoint-submit-values"]')).toBeNull()
+      expect(container.querySelector('[data-testid="checkpoint-read-only"]')).toBeTruthy()
+    })
+
+    it('disables Continue on a paused flight and offers Abort as the one way out', async () => {
+      mocks.getFlight.mockResolvedValue(external({ status: 'paused', pauseReason: 'stage-failed' }))
+      await render('fl_1')
+      const cont = container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')
+      expect(cont?.disabled).toBe(true)
+      expect(cont?.title).toBe('Your agent is driving this flight — continue it there, not here.')
+      await openMenu()
+      expect(container.querySelector('[data-testid="flight-abort"]')).toBeTruthy()
+    })
+
+    it('hands the page back once the flight settles — the agent is gone', async () => {
+      mocks.getFlight.mockResolvedValue(external({ status: 'done' }))
+      await render('fl_1')
+      expect(container.querySelector('[data-testid="flight-externally-driven"]')).toBeNull()
+      expect(container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')?.disabled).toBe(false)
+    })
+  })
+
   it('R71/W1: a rejected control action surfaces on the inline error line, not silently', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'paused', pauseReason: 'user' }))
     mocks.resumeFlight.mockRejectedValue(new Error('server unreachable'))

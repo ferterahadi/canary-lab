@@ -22,6 +22,7 @@ import type {
 } from '@shared/verification'
 import type { RunProducer } from '@shared/run-mode'
 import type {
+  FlightCheckpointKind,
   FlightPauseReason,
   FlightStageKey,
   FlightStatus,
@@ -92,6 +93,13 @@ export interface FeaturePending {
   status: FlightStatus
   currentStage: FlightStageKey | null
   pauseReason?: FlightPauseReason
+  /** Which kind of stop a parked flight is on — carried so the column can tell
+   *  a question for the human from an `external-work` hand-off, where the step
+   *  is running in the user's own agent and asks nothing of this reader. */
+  checkpointKind?: FlightCheckpointKind
+  /** Who drives the flight — an externally driven one asks nothing of this
+   *  reader whatever it is parked on (see flightAwaitsUser). */
+  stageProducer?: 'internal' | 'external'
 }
 
 /** Server-derived on-disk stage artifacts (see web-server stage-evidence.ts —

@@ -109,6 +109,25 @@ describe('flight entry modes (continue / redo / jump)', () => {
     await waitForStatus(flightId, ['done'])
   })
 
+  // Reachable on the start route, not only on /:id/redo, because an externally
+  // driven flight re-enters a stage through start_flight — and without this the
+  // agent could repeat a step but never say what was wrong with the last try.
+  it('stores a re-entry feedback note sent with a redo, scoped to the entry stage', async () => {
+    app = await buildApp(allDone())
+    const first = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (first.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    const redo = await app.inject({
+      method: 'POST',
+      url: '/api/flights',
+      body: startBody({ mode: 'redo', feedback: 'it summarised the wrong repo' }),
+    })
+    expect(redo.statusCode).toBe(201)
+    expect((redo.json() as { feedback?: { stage: string; note: string } }).feedback)
+      .toEqual({ stage: 'similarity', note: 'it summarised the wrong repo' })
+  })
+
   it('rejects a jump whose prerequisites are missing, naming the first missing artifact', async () => {
     app = await buildApp(allDone())
     const jump = await app.inject({

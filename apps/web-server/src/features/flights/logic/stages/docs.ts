@@ -415,9 +415,17 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
       // mode back off the checkpoint rather than re-deriving it: the client may
       // have taken minutes, and the fork's own state has moved on.
       if (parkedOnExternalWork(ctx, 'docs')) {
-        const handOff = m.stages.find((s) => s.key === 'docs')?.checkpoint?.data as
-          | { mode?: 'collect-repo-docs' | 'infer-from-diff'; outPath?: string; outName?: string }
-          | undefined
+        // Under `data.context`, which is where externalWorkCheckpoint puts a
+        // stage's own payload (`data` itself holds the transport fields —
+        // stage, prompt, handOffId, promptPath). Reading it one level too high
+        // made outPath ALWAYS undefined, so every external docs submit fell
+        // into the no-output-path branch below and settled the stage `failed`
+        // — the "Docs extraction failed" pause. The other four hand-off stages
+        // all read `.context`; this was the odd one out, and its unit test hid
+        // it by hand-building a flat fixture the parker never writes.
+        const handOff = (m.stages.find((s) => s.key === 'docs')?.checkpoint?.data as
+          | { context?: { mode?: 'collect-repo-docs' | 'infer-from-diff'; outPath?: string; outName?: string } }
+          | undefined)?.context
         const mode = handOff?.mode ?? 'collect-repo-docs'
         if (choice === 'run-internally') {
           ctx.appendLog('[docs] client handed the step back — collecting here\n')
@@ -425,8 +433,15 @@ export function docsStage(deps: FlightStageDeps): StageAdapter {
         }
         const stale = rejectStaleSubmit(ctx, 'docs', response)
         if (stale) return stale
+        // A hand-off with no output path cannot be judged — there is no file to
+        // look for. Settling `failed` here broke the rule that an external
+        // submission always RE-PARKS: `checkpointResponse` persists, so a
+        // resume replays this same answer, fails identically, and only a full
+        // redo clears it. Re-asking is both the recovery and the correct
+        // verdict — `collect` mints a fresh hand-off with a valid outPath.
         if (!handOff?.outPath || !handOff.outName) {
-          return { kind: 'failed', error: 'external docs hand-off lost its output path' }
+          ctx.appendLog('[docs] hand-off lost its output path — re-asking with a fresh one\n')
+          return collect(ctx, mode)
         }
         // Same on-disk check the local agent's result goes through. `data` is only
         // mined for a NOTHING_FOUND reason — it never decides the verdict.

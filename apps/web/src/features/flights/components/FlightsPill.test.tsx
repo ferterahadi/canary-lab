@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightIndexEntry, PlanFeaturesTask } from '@/shared/api/client'
+import type { FlightIndexEntry, FlightStageStatus, PlanFeaturesTask } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { FlightsPill, featureActivityRows, featureChipState, groupPickerRows, resolveFeatureFlightAction } from './FlightsPill'
@@ -535,5 +535,64 @@ describe('resolveFeatureFlightAction — the Features column row shortcut', () =
     expect(resolveFeatureFlightAction('fresh', [])).toBeNull()
     // Another feature's flight must not resolve for this one.
     expect(resolveFeatureFlightAction('fresh', [flight({ feature: 'checkout' })])).toBeNull()
+  })
+})
+
+describe('external-work hand-off (a step running in the user\'s own agent)', () => {
+  const handOff = (over: Partial<FlightIndexEntry> = {}) => flight({
+    status: 'waiting-for-approval',
+    checkpointKind: 'external-work',
+    currentStage: 'scout',
+    stages: FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: (key === 'scout' ? 'waiting-for-approval' : 'pending') as FlightStageStatus,
+    })),
+    ...over,
+  })
+
+  it('reads as the running stage verb, live and ranked with running work — not "to approve"', () => {
+    const chip = featureChipState(handOff())
+    expect(chip.label).toBe('scanning')
+    expect(chip.tone).toBe('var(--running)')
+    expect(chip.live).toBe(true)
+    expect(chip.rank).toBe(1)
+    // The chip is 72px wide, so the phrase lives in the tooltip.
+    expect(chip.title).toBe('Scanning in your agent')
+  })
+
+  it('falls back to a bare "running" when no stage is recorded yet', () => {
+    const chip = featureChipState(handOff({ currentStage: null }))
+    expect(chip.label).toBe('running')
+    expect(chip.title).toBe('Running in your agent')
+  })
+
+  it('still says "to approve" for a real question wearing the same status', () => {
+    expect(featureChipState(handOff({ checkpointKind: 'missing-env' })).label).toBe('to approve')
+  })
+
+  it('keeps the pill neutral-active: counted, but never "approval needed"', () => {
+    render([handOff()])
+    expect(container.textContent).toContain('Flights · 1 active')
+    expect(container.textContent).not.toContain('approval needed')
+  })
+
+  it('a real checkpoint alongside it still turns the pill amber', () => {
+    render([handOff(), flight({ id: 'fl_2', flightId: 'fl_2', feature: 'billing', status: 'waiting-for-approval', checkpointKind: 'missing-env' })])
+    expect(container.textContent).toContain('approval needed')
+  })
+
+  it('paints the parked cell of the mini rail as running, matching its chip', () => {
+    act(() => { root.render(<FlightsPill flights={[handOff()]} onOpenFlight={vi.fn()} />) })
+    act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
+    const cell = document.body.querySelector<HTMLElement>('[data-testid="stage-mini-cell-scout"]')
+    expect(cell?.style.background).toBe('var(--running)')
+  })
+
+  it('gives the suites-column shortcut the live wash, not the blocked-on-you one', () => {
+    const action = resolveFeatureFlightAction('checkout', [handOff()])
+    expect(action?.live).toBe(true)
+    expect(action?.attention).toBe(false)
+    // A genuine question on the same status keeps the attention treatment.
+    expect(resolveFeatureFlightAction('checkout', [handOff({ checkpointKind: 'portify-apply' })])?.attention).toBe(true)
   })
 })

@@ -10,6 +10,7 @@ import {
   overlayDiffStat,
   runHistoryStats,
   serviceReadyMs,
+  presentedStageStatus,
   settledStageStatus,
   splitFilePath,
 } from './stage-metrics'
@@ -389,5 +390,18 @@ describe('settledStageStatus', () => {
     for (const status of ['pending', 'running', 'done', 'failed', 'waiting-for-approval'] as const) {
       expect(settledStageStatus({ status, evidence: { a: 1 } })).toBe(status)
     }
+  })
+})
+
+describe('presentedStageStatus', () => {
+  it('draws a stage parked on a hand-off as running — the work is under way, elsewhere', () => {
+    expect(presentedStageStatus({ status: 'waiting-for-approval', checkpoint: { kind: 'external-work' } })).toBe('running')
+  })
+
+  it('leaves a real checkpoint parked, and keeps the settled-skip rule', () => {
+    expect(presentedStageStatus({ status: 'waiting-for-approval', checkpoint: { kind: 'missing-env' } })).toBe('waiting-for-approval')
+    // No checkpoint recorded at all (an older manifest) is still a question.
+    expect(presentedStageStatus({ status: 'waiting-for-approval' })).toBe('waiting-for-approval')
+    expect(presentedStageStatus({ status: 'skipped', evidence: { captured: 1 } })).toBe('done')
   })
 })

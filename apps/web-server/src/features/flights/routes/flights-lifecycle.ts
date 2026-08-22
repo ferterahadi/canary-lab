@@ -7,6 +7,7 @@ import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightNotParkedError, FlightStageEntryError, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
+import { rejectForeignFlightDecision } from './flight-decision-origin'
 import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
 
 export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
@@ -15,6 +16,8 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   app.post<{ Params: { id: string }; Body: { response?: FlightCheckpointResponse } | undefined }>(
     '/api/flights/:id/respond',
     async (req, reply) => {
+      const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
+      if (foreign) return foreign
       const response = req.body?.response
       if (!response || typeof response !== 'object') {
         reply.code(400)
@@ -45,6 +48,8 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   )
 
   app.post<{ Params: { id: string } }>('/api/flights/:id/resume', async (req, reply) => {
+    const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
+    if (foreign) return foreign
     try {
       const { manifest } = resumeFlight(req.params.id, conductorDeps)
       return manifest
@@ -61,6 +66,8 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   // means the work is stopped rather than merely signalled. See the run adapter's
   // teardown note for why pause ends its run too.
   app.post<{ Params: { id: string } }>('/api/flights/:id/pause', async (req, reply) => {
+    const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
+    if (foreign) return foreign
     try {
       return await pauseFlight(req.params.id, conductorDeps)
     } catch (err) {
@@ -76,6 +83,8 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   app.post<{ Params: { id: string }; Body: { autopilot?: boolean } | undefined }>(
     '/api/flights/:id/autopilot',
     async (req, reply) => {
+      const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
+      if (foreign) return foreign
       if (typeof req.body?.autopilot !== 'boolean') {
         reply.code(400)
         return { error: 'autopilot must be a boolean' }
@@ -97,6 +106,8 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   app.post<{ Params: { id: string }; Body: { fromStage?: string; feedback?: string } | undefined }>(
     '/api/flights/:id/redo',
     async (req, reply) => {
+      const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
+      if (foreign) return foreign
       try {
         const { manifest } = redoFlight(req.params.id, conductorDeps, {
           fromStage: req.body?.fromStage as FlightStageKey | undefined,

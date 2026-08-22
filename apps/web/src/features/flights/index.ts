@@ -8,6 +8,10 @@ export {
   FeatureChipBadge,
   FlightStatusChip,
   FlightsPill,
+  flightAwaitsUser,
+  isExternalWorkPark,
+  isExternallyDriven,
+  presentedIndexStages,
   resolveFeatureFlightAction,
 } from './components/FlightsPill'
 export type { FeatureFlightAction } from './components/FlightsPill'

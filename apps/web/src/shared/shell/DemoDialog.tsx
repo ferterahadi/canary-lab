@@ -9,7 +9,8 @@ import type {
 } from '@/shared/api/client'
 import { CopyField } from '@/shared/ui/CopyField'
 import { Tooltip } from '@/shared/ui/Tooltip'
-import { Modal, StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { Modal, Section, StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { OPTION_ROW_CENTERED_CLASS, OPTION_ROW_SECTION_BODY, optionRowStyle } from '@/shared/ui/OptionRow'
 
 const MORE_ACTION_LABEL: Record<Exclude<OnboardingWorkflowAction['kind'], 'run' | 'flight'>, string> = {
   coverage: 'Measure coverage',
@@ -65,7 +66,7 @@ function ActionButton({ workflow, resolved }: { workflow: OnboardingWorkflow; re
         disabled={resolved.actionDisabled}
         onClick={resolved.onAction}
         style={resolved.actionDisabled ? { pointerEvents: 'none' } : undefined}
-        className="cl-button relative w-full px-3.5 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+        className="cl-button relative w-full px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
       >
         {/* Absolute so the label stays centred: a dot in the flex line would
             nudge the wording sideways the moment a demo started. */}
@@ -153,7 +154,7 @@ function resolveMore(workflow: OnboardingWorkflow, session: GettingStartedSessio
 function RailGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="pb-2">
-      <div className="cl-rubric px-4 pb-1.5">{label}</div>
+      <div className="cl-rubric px-3.5 pb-1.5">{label}</div>
       {children}
     </div>
   )
@@ -173,9 +174,13 @@ function RailRow({ workflow, selected, tone, onSelect }: {
       data-testid={`getting-started-workflow-${workflow.id}`}
       aria-current={selected}
       onClick={onSelect}
-      className="cl-hover-row flex w-full cursor-pointer items-center gap-2 px-4 py-1.5 text-left text-[11.5px]"
+      // Selection and the pointer come from the shared option-row helper — the
+      // same one the settings dialog's choice rows use. The inline `background`
+      // plus a hand-written `cursor-pointer` this replaced re-stated both by
+      // hand and was free to drift from them.
+      className={`${selected ? '' : 'cl-hover-row'} flex w-full items-center gap-2 px-3.5 py-1.5 text-left text-[11.5px]`}
       style={{
-        background: selected ? 'var(--bg-selected)' : 'transparent',
+        ...optionRowStyle({ selected, interactive: true }),
         color: selected ? 'var(--text-primary)' : 'var(--text-secondary)',
       }}
     >
@@ -189,16 +194,24 @@ function RailRow({ workflow, selected, tone, onSelect }: {
 
 function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved: Resolved }) {
   return (
-    <div data-testid="getting-started-detail" className="flex min-w-0 flex-col gap-3 px-4 py-3.5">
+    // The config dialog's scroller shape — framed sections in a `gap-3 p-3`
+    // inset, the same one every Advanced setup tab and Project Settings opens
+    // with. This pane used to be a `px-4 py-3.5` block with a hand-rolled frame
+    // inside it, so the two dialogs sat on different insets and different type.
+    <div data-testid="getting-started-detail" className="flex min-w-0 flex-col gap-3 p-3">
       {/* Reserved so switching workflows in the rail never floats the frame
           below up or down — the card stays put and only its contents change. */}
-      <div className="min-h-[68px] min-w-0">
-        <h3 className="text-[13px] font-medium" style={{ color: 'var(--text-primary)' }}>{workflow.title}</h3>
-        <p className="mt-1 text-[11.5px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{workflow.outcome}</p>
+      <div className="min-h-[84px] min-w-0 px-0.5">
+        {/* `.cl-kicker` and a 12px secondary line: the app's section-heading
+            voice over its body voice, the same pair the settings sections use.
+            The ad-hoc 13px/500 over 11.5px this replaced was a register of its
+            own that existed nowhere else. */}
+        <h3 className="cl-kicker">{workflow.title}</h3>
+        <p className="mt-1 text-xs leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{workflow.outcome}</p>
         {/* Ordered steps as a chevron chain — these are a sequence, so arrows
             say more than the bordered boxes did. Mono numerals keep the index
             reading as position rather than as prose. */}
-        <ol className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px]">
+        <ol className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
           {workflow.steps.map((step, index) => (
             <li key={step} className="flex items-center gap-1.5">
               {index > 0 && <span aria-hidden style={{ color: 'var(--border-strong)' }}>›</span>}
@@ -209,54 +222,52 @@ function Detail({ workflow, resolved }: { workflow: OnboardingWorkflow; resolved
         </ol>
       </div>
 
-      {/* Two ways to run the SAME workflow, as two rows of one frame. A button
+      {/* Two ways to run the SAME workflow, as two rows of one section. A button
           stacked over a command field read as step one then step two — the
           numbered sequence above them primes exactly that. Side-by-side cards
           said "either" but sized themselves to their contents, so a button box
           sat next to a much wider command box. Full-width rows keep the pair
           the same size and let the label column carry the difference.
 
-          Live state rides the button itself as a dot, so the card is the same
-          height whether a demo has never run, is running, or has finished. */}
-      <div>
-        <div className="cl-rubric mb-2">Two ways to run it</div>
-        <div
-          className="overflow-hidden rounded-lg border"
-          style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)', boxShadow: 'var(--shadow-panel)' }}
-        >
-          <div className="flex items-center gap-3 border-b px-3 py-2" style={{ borderColor: 'var(--border-default)' }}>
-            <div className="w-[150px] shrink-0">
-              <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>In Canary Lab</div>
-              <p className="mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>Runs in this workspace.</p>
-            </div>
-            {/* Both rows give their control the same column AND the same weight.
-                The accent-filled skin made this row win every time it was on
-                screen, which is the opposite of "either way" — an accent fill
-                next to a plain field reads as the real option beside a
-                footnote. Neutral on both sides lets the label column carry the
-                difference. */}
-            <ActionButton workflow={workflow} resolved={resolved} />
+          The frame is the shared `Section` on the shared row-body inset, so the
+          header band, border, surface and radius are the settings dialog's and
+          cannot drift from it. Live state rides the button itself as a dot, so
+          the card is the same height whether a demo has never run, is running,
+          or has finished. */}
+      <Section title="Two ways to run it" bodyClassName={OPTION_ROW_SECTION_BODY}>
+        <div className={OPTION_ROW_CENTERED_CLASS} style={optionRowStyle({ selected: false })}>
+          <div className="w-[150px] shrink-0">
+            {/* 12.5/medium over a 12px muted description — the option-row label
+                pair used by every choice row in Project Settings. */}
+            <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>In Canary Lab</div>
+            <p className="mt-0.5 text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>Runs in this workspace.</p>
           </div>
+          {/* Both rows give their control the same column AND the same weight.
+              The accent-filled skin made this row win every time it was on
+              screen, which is the opposite of "either way" — an accent fill
+              next to a plain field reads as the real option beside a footnote.
+              Neutral on both sides lets the label column carry the difference. */}
+          <ActionButton workflow={workflow} resolved={resolved} />
+        </div>
 
-          <div className="flex items-center gap-3 px-3 py-2">
-            <div className="w-[150px] shrink-0">
-              <div className="text-[11px] font-medium" style={{ color: 'var(--text-primary)' }}>In your agent</div>
-              <p className="mt-0.5 text-[10px] leading-snug" style={{ color: 'var(--text-muted)' }}>Paste it in Claude or Codex.</p>
-            </div>
-            {/* CopyField carries its own 4px top margin for stacked use; in a row
-                it would sit 4px below centre, so the wrapper cancels it. */}
-            <div className="-mt-1 min-w-0 flex-1">
-              <CopyField
-                value={workflow.externalPrompt}
-                label={`${workflow.title} command`}
-                testId={`getting-started-command-${workflow.id}`}
-                buttonTestId={`getting-started-copy-${workflow.id}`}
-                disabled={resolved.copyDisabled}
-              />
-            </div>
+        <div className={`${OPTION_ROW_CENTERED_CLASS} border-t`} style={optionRowStyle({ selected: false })}>
+          <div className="w-[150px] shrink-0">
+            <div className="text-[12.5px] font-medium" style={{ color: 'var(--text-primary)' }}>In your agent</div>
+            <p className="mt-0.5 text-xs leading-snug" style={{ color: 'var(--text-muted)' }}>Paste it in Claude or Codex.</p>
+          </div>
+          {/* CopyField carries its own 4px top margin for stacked use; in a row
+              it would sit 4px below centre, so the wrapper cancels it. */}
+          <div className="-mt-1 min-w-0 flex-1">
+            <CopyField
+              value={workflow.externalPrompt}
+              label={`${workflow.title} command`}
+              testId={`getting-started-command-${workflow.id}`}
+              buttonTestId={`getting-started-copy-${workflow.id}`}
+              disabled={resolved.copyDisabled}
+            />
           </div>
         </div>
-      </div>
+      </Section>
     </div>
   )
 }
@@ -311,12 +322,17 @@ export function DemoDialog({ open, onClose, workflows, session, actionBlockers =
       height={432}
       testId="demo-dialog"
       footer={(
-        <label className="mr-auto flex cursor-pointer items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+        <label className="mr-auto flex cursor-pointer items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+          {/* Same 13px accent-tinted native mark as every choice row in Project
+              Settings — untinted it fell back to the browser's own blue, which
+              is the one colour in this dialog that isn't ours. */}
           <input
             type="checkbox"
             data-testid="demo-show-toggle"
             checked={showDemo !== false}
             onChange={(event) => onShowDemoChange(event.target.checked)}
+            className="h-[13px] w-[13px] shrink-0"
+            style={{ accentColor: 'var(--accent)' }}
           />
           Show in the status bar
         </label>
@@ -325,7 +341,7 @@ export function DemoDialog({ open, onClose, workflows, session, actionBlockers =
       <div className="grid h-full min-h-0 grid-cols-[210px_minmax(0,1fr)]">
         <nav
           aria-label="Getting Started workflows"
-          className="min-h-0 overflow-y-auto border-r py-3.5 scrollbar-thin"
+          className="min-h-0 overflow-y-auto border-r py-3 scrollbar-thin"
           style={{ borderColor: 'var(--border-default)', background: 'var(--bg-surface)' }}
         >
           <RailGroup label="Start here">

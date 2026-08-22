@@ -402,4 +402,57 @@ describe('flights routes', () => {
       expect(body.model).toBe('claude-x')
     })
   })
+  // The guard's own truth table lives in flight-decision-origin.test.ts; these
+  // prove the WIRING — that each decision route consults it, and that the
+  // escape hatch and the read routes do not.
+  describe('externally driven flights', () => {
+    const external = (): FlightStore => {
+      const store = new FlightRunStore(tmpDir)
+      store.save({
+        flightId: 'fl_x',
+        feature: 'checkout',
+        repoPaths: [repoDir],
+        description: 'checkout flow',
+        opts: { env: 'local', yolo: false, stageProducer: 'external' },
+        status: 'paused',
+        pauseReason: 'user',
+        currentStage: 'docs',
+        stages: [],
+        createdAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      } as FlightManifest)
+      return store
+    }
+
+    it.each([
+      ['respond', { method: 'POST' as const, url: '/api/flights/fl_x/respond', body: { response: { choice: 'approve' } } }],
+      ['resume', { method: 'POST' as const, url: '/api/flights/fl_x/resume' }],
+      ['pause', { method: 'POST' as const, url: '/api/flights/fl_x/pause' }],
+      ['autopilot', { method: 'POST' as const, url: '/api/flights/fl_x/autopilot', body: { autopilot: false } }],
+      ['redo', { method: 'POST' as const, url: '/api/flights/fl_x/redo' }],
+    ])('409s a browser %s', async (_name, req) => {
+      app = await buildApp(allDone(), external())
+      const resp = await app.inject(req)
+      expect(resp.statusCode).toBe(409)
+      expect(resp.json()).toMatchObject({ type: 'flight_externally_driven' })
+    })
+
+    it('lets the MCP client resume the same flight', async () => {
+      app = await buildApp(allDone(), external())
+      const resp = await app.inject({
+        method: 'POST',
+        url: '/api/flights/fl_x/resume',
+        headers: { 'x-canary-origin': 'mcp' },
+      })
+      expect(resp.statusCode).toBe(200)
+    })
+
+    // Abort is the escape hatch when the driving client has gone away, and the
+    // read routes were never in question — a viewer has to be able to view.
+    it('leaves abort and the read routes open to the browser', async () => {
+      app = await buildApp(allDone(), external())
+      expect((await app.inject({ method: 'GET', url: '/api/flights/fl_x' })).statusCode).toBe(200)
+      expect((await app.inject({ method: 'POST', url: '/api/flights/fl_x/abort' })).statusCode).toBe(200)
+    })
+  })
 })

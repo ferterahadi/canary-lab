@@ -169,3 +169,65 @@ describe('diffFlightToasts (R68)', () => {
     expect(second).toHaveLength(0)
   })
 })
+
+describe('external-work hand-offs never nag', () => {
+  it('a hand-off is work in progress, so it raises no toast', () => {
+    expect(flightNeedsAttention({ status: 'waiting-for-approval', checkpointKind: 'external-work' })).toBe(false)
+    // Any other kind on the same status is still a question for the human.
+    expect(flightNeedsAttention({ status: 'waiting-for-approval', checkpointKind: 'coverage-stuck' })).toBe(true)
+  })
+
+  it('is left out of the seed aggregate', () => {
+    const out = diffFlightToasts(
+      null,
+      [fl({ status: 'waiting-for-approval', checkpointKind: 'external-work' })],
+      { view: 'workspace', selectedFlightId: null },
+      stageLabel,
+    )
+    expect(out).toEqual([])
+  })
+
+  it('still toasts when the SAME flight moves from a hand-off to a real question', () => {
+    // Both wear `waiting-for-approval`: without the kind in the diff key this
+    // transition reads as unchanged and the question is never surfaced.
+    const before = fl({ status: 'waiting-for-approval', checkpointKind: 'external-work', currentStage: 'scout' })
+    const after = fl({ status: 'waiting-for-approval', checkpointKind: 'missing-env', currentStage: 'scout' })
+    expect(attentionKey(before)).not.toBe(attentionKey(after))
+    const out = diffFlightToasts(
+      attentionKeyMap([before]),
+      [after],
+      { view: 'workspace', selectedFlightId: null },
+      stageLabel,
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ title: 'checkout needs input', body: 'Scout is waiting for you' })
+  })
+
+  // Widened past the hand-off. The toast that made the whole thing look broken
+  // was "Docs extraction failed — open to resume" on a flight the agent was
+  // still working: a stage-failed pause, and a real question after it, both
+  // nagging a reader with no control to press.
+  it('an externally driven flight never nags, whatever it stopped on', () => {
+    for (const f of [
+      { status: 'waiting-for-approval' as const, checkpointKind: 'prd-source' as const },
+      { status: 'waiting-for-approval' as const, checkpointKind: 'missing-env' as const },
+      { status: 'paused' as const, pauseReason: 'stage-failed' as const },
+      { status: 'paused' as const, pauseReason: 'restart' as const },
+    ]) {
+      expect(flightNeedsAttention({ ...f, stageProducer: 'external' })).toBe(false)
+      // Same stop on a flight Canary drives itself still asks for the human.
+      expect(flightNeedsAttention(f)).toBe(true)
+    }
+  })
+
+  it('nags again once the externally driven flight settles into a failure', () => {
+    // `failed` is terminal, not a stop the agent resumes — and no status the
+    // attention predicate treats as needing input, external or not.
+    expect(flightNeedsAttention({ status: 'failed', stageProducer: 'external' })).toBe(false)
+  })
+
+  it('keys a pauseReason ahead of a checkpointKind, and falls back to the bare status', () => {
+    expect(attentionKey({ status: 'paused', pauseReason: 'user', checkpointKind: 'external-work' })).toBe('paused:user')
+    expect(attentionKey({ status: 'running' })).toBe('running')
+  })
+})

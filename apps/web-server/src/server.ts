@@ -26,6 +26,7 @@ import { coverageJobStore as sharedCoverageJobStore } from './features/coverage/
 import { FlightRunStore } from './features/flights/logic/store'
 import { isActiveFlightStatus } from '../../../shared/flights/types'
 import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
+import { MCP_ORIGIN_HEADER } from './features/flights/routes/flight-decision-origin'
 import { PlanFeaturesStore } from './features/flights/logic/plan-features'
 import { DirtySpecStore } from './features/runs/logic/dirty-specs/store'
 import { startDirtySpecWatcher } from './features/runs/logic/dirty-specs/watcher'
@@ -325,6 +326,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const resp = await app.inject({
         method: o.method,
         url: o.url,
+        // Marks this as the MCP client acting, not the browser. An externally
+        // driven flight hands every decision to that client, so the lifecycle
+        // routes refuse the same calls when they arrive from the web UI — and
+        // MCP and the UI post to the identical endpoints, so without this the
+        // guard could not tell them apart. See requireFlightDecisionOrigin.
+        headers: { [MCP_ORIGIN_HEADER]: 'mcp' },
         ...(payload !== undefined ? { payload } : {}),
       })
       const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })() as unknown

@@ -6,6 +6,7 @@ import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from './StageFacts'
 import { stageLabel } from './stage-meta'
 import { settledStageStatus } from './stage-metrics'
+import { EXTERNAL_WORK_COPY } from '../lib/external-work'
 import { MERGED_LABEL, stageRowKey } from './StageRail'
 import { PORTIFY_PHASE_LINE, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
 
@@ -207,6 +208,13 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       : 'Not started yet.'
   }
   if (status === 'waiting-for-approval') {
+    // A hand-off is not a stop: the step is being worked on inside the client
+    // that started the flight. The checkpoint's own `message` is addressed to
+    // that agent ("Run this scout step in your own client…"), which is the wrong
+    // voice — and the wrong reader — for the person watching the web UI.
+    if (stage.checkpoint?.kind === 'external-work') {
+      return EXTERNAL_WORK_COPY.stateLine
+    }
     // `prd-source` renders as the RequirementsFork, which owns the whole
     // surface: it shows the verdict band (the same finding this message
     // carries) and the two path cards (the same "add docs yourself, or have an

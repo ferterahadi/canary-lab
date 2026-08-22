@@ -8,6 +8,7 @@ import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import { STAGE_BLURB, STAGE_ICON, stageRowKey, stageStatusTone } from './stage-meta'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import { EXTERNAL_DRIVE_COPY } from '../lib/external-work'
 
 /** The stages Continue → "from a step…" offers — the user-facing rail rows
  *  (merged-pair primaries), labeled the way the rail labels them. The server
@@ -46,11 +47,18 @@ export function ContinueMenu({
   flight,
   onAction,
   onStartFlight,
+  externallyDriven = false,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
   /** The "Start fresh" handoff — opens the launcher with editable inputs. */
   onStartFlight?: (feature: string, intent?: FlightLauncherIntent, fromStage?: FlightStageKey | null) => void
+  /** The flight is being driven by the MCP client that started it, so resuming
+   *  and re-entering a step are that client's calls (start_flight resumes; its
+   *  from_stage/redo + feedback re-enter a stage). Both items live behind this
+   *  one trigger, so disabling the trigger disables both — and the menu never
+   *  opens onto choices the user cannot take. */
+  externallyDriven?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -78,7 +86,9 @@ export function ContinueMenu({
         aria-haspopup={paused ? 'menu' : 'dialog'}
         aria-expanded={paused ? open : dialogOpen}
         onClick={() => (paused ? setOpen((v) => !v) : setDialogOpen(true))}
-        className="cl-button-primary px-2.5 py-1 text-xs"
+        disabled={externallyDriven}
+        title={externallyDriven ? EXTERNAL_DRIVE_COPY.continueFlight : undefined}
+        className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
       >
         Continue ▾
       </button>
@@ -329,6 +339,7 @@ export function FlightMenu({
   derived = false,
   onAction,
   onDeleted,
+  externallyDriven = false,
 }: {
   flight: FlightManifest
   /** R81: a pseudo-manifest for a feature with no flight record. The menu's one
@@ -337,6 +348,8 @@ export function FlightMenu({
   derived?: boolean
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
   onDeleted: () => void
+  /** The flight belongs to the MCP client driving it — see the Abort item. */
+  externallyDriven?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [armed, setArmed] = useState<string | null>(null)
@@ -378,6 +391,28 @@ export function FlightMenu({
   const removeFlightOnly = !derived
     && flight.stages.find((stage) => stage.key === 'scaffold')?.status === 'pending'
   const items: MenuItem[] = [
+    // The one control an externally driven flight keeps. Everything else on
+    // this page defers to the agent, but deferring ABORT would mean a client
+    // that crashed, was closed, or simply stopped answering leaves the flight
+    // parked forever with no way out from here — and its repos locked against
+    // the next flight. Aborting decides nothing on the agent's behalf; it ends
+    // a flight nobody is driving any more. Two-step confirm, like every other
+    // terminal action in this menu.
+    // Not gated on `active`: a PAUSED external flight is precisely the case
+    // that needs this — a stage failed, and the client that would have resumed
+    // it is the one that has gone quiet. `externallyDriven` is already
+    // live-only, so a settled flight never reaches here.
+    ...(externallyDriven
+      ? [{
+          key: 'abort',
+          label: 'Abort flight…',
+          confirmLabel: 'Abort — end this flight',
+          tone: 'var(--danger)',
+          title: 'End this flight for good — use it when the agent driving it has stopped responding',
+          testId: 'flight-abort',
+          fire: () => onAction(() => api.abortFlight(flight.flightId)),
+        }]
+      : []),
     ...(!active
       ? [{
           key: 'delete',

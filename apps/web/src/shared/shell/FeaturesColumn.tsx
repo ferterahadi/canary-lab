@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
 import { FeatureConfigEditor, SettingsModal } from '@/features/config'
-import { FeatureChipBadge, FlightStatusChip, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
+import { FeatureChipBadge, FlightStatusChip, flightAwaitsUser, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
 import { ChevronRightIcon } from '@/shared/ui/atoms'
@@ -42,6 +42,12 @@ interface Props {
   onStartPortify?: (feature: string) => void
   /** Reopen a past/active port-ification workflow (by id) in the wizard. */
   onOpenPortify?: (workflowId: string) => void
+  /** Project Settings is route-driven (`?dialog=settings`) when these are
+   *  supplied — controlled by App. Omitted (e.g. in unit tests) → the column
+   *  falls back to its own internal open-state. Same hybrid the runs column's
+   *  Verify dialog uses. */
+  settingsOpen?: boolean
+  onSettingsOpenChange?: (open: boolean) => void
 }
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
@@ -73,7 +79,9 @@ function featureRowRank(
   if (f.dirty?.status === 'dirty') return 1
   // A pending placeholder parked on approval needs the human — it ranks with
   // dirty; otherwise it rests with a settled feature so the column stays calm.
-  if (f.pending) return f.pending.status === 'waiting-for-approval' ? 1 : 2
+  // A hand-off to the user's own agent asks nothing of this reader, so it rests
+  // too — floating it to the top would nag about work already under way.
+  if (f.pending) return flightAwaitsUser(f.pending) ? 1 : 2
   return 2
 }
 
@@ -125,12 +133,20 @@ export function FeaturesColumn({
   versionStatus,
   onStartPortify,
   onOpenPortify,
+  settingsOpen,
+  onSettingsOpenChange,
 }: Props) {
   const { gatePromo } = useMcpPromo()
   // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
   const coverageRefreshKey = useInvalidationKey('coverage')
   const [configFor, setConfigFor] = useState<string | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Controlled when App drives it from the route; uncontrolled otherwise.
+  const [settingsOpenInternal, setSettingsOpenInternal] = useState(false)
+  const settingsDialogOpen = settingsOpen ?? settingsOpenInternal
+  const setSettingsDialogOpen = useCallback((open: boolean) => {
+    if (onSettingsOpenChange) onSettingsOpenChange(open)
+    else setSettingsOpenInternal(open)
+  }, [onSettingsOpenChange])
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
   // Fetched on mount + when the feature set changes (not polled — generating
   // state is surfaced by the status-bar pill instead, which avoids recomputing
@@ -227,7 +243,7 @@ export function FeaturesColumn({
           <VersionUpdateButton status={versionStatus ?? null} />
           <button
           type="button"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => setSettingsDialogOpen(true)}
           aria-label="Open settings"
           title="Settings"
           className="cl-icon-button h-7 w-7"
@@ -239,7 +255,7 @@ export function FeaturesColumn({
           </button>
         </div>
       </div>
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsDialogOpen && <SettingsModal onClose={() => setSettingsDialogOpen(false)} />}
 
       {configFor && (
         <FeatureConfigEditor

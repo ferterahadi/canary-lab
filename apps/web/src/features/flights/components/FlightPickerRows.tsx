@@ -9,6 +9,7 @@ import { stageRailRows, stageStatusTone } from './stage-meta'
 import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
 import { derivedFlightToken } from '../lib/derived-stages'
 import { ACTIVITY_CHIP, FeatureActivityRow, FlightStatusChip, PickerGroup, activityStages, featureActivityRows, featureChipState, groupPickerRows, preFlightChipState } from './FlightChipState'
+import { presentedIndexStages } from '../lib/external-work'
 
 /** One tiny cell per USER-VISIBLE stage (same rows as the flight detail rail —
  *  similarity hidden unless it needs a human, run+heal merged), colored by
@@ -163,7 +164,7 @@ export function PickerRow({
           title={`Open flight ${row.flight.flightId} (${row.feature})`}
         >
           <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{row.feature}</span>
-          <StageMiniRail stages={row.flight.stages ?? []} />
+          <StageMiniRail stages={presentedIndexStages(row.flight)} />
           <FlightStatusChip flight={row.flight} activity={row.activity} />
           <span aria-hidden="true" className="shrink-0 text-[12px]" style={{ color: 'var(--text-muted)' }}>→</span>
         </button>

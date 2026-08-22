@@ -3,6 +3,7 @@ import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgr
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
+import { EXTERNAL_WORK_COPY } from '../lib/external-work'
 
 export { evaluationTaskId, FactTile, FactsGrid, plural, stageFacts } from './StageFacts'
 export type { StageBandData, StageFact } from './StageFacts'
@@ -161,10 +162,12 @@ const CHECKPOINT_TITLE: Record<string, string> = {
   'portify-apply': 'Save the parallel-readiness overlay?',
   'run-failed': 'The test run did not pass',
   'export-mode': 'How should the report be built?',
-  // Not a question with a safe default — this step was handed to the MCP client
-  // that started the flight (stage_producer: "external"). The person reading the
-  // web UI is not that client, so the title says who is holding it.
-  'external-work': 'Your MCP client is doing this step',
+  // Not a question with a safe default — this step was handed to the client that
+  // started the flight (stage_producer: "external"). The person reading the web
+  // UI is not that client, so the title says who is holding it. "Your agent"
+  // rather than "your MCP client": the record stores no client kind, so the copy
+  // has to fit Claude and Codex alike, and the protocol is not the point.
+  'external-work': EXTERNAL_WORK_COPY.cardTitle,
 }
 
 const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
@@ -190,14 +193,10 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
     'accept-partial': 'Accept current coverage',
     'retry': 'Try another round of passes',
   },
-  // The web-UI reader is not the client holding this step, so neither label
-  // promises a result. "Check" re-reads what landed on disk and settles or
-  // re-parks on that evidence; taking it back is the way out of a stalled or
-  // disconnected client.
-  'external-work': {
-    'submit': 'Check what the client produced',
-    'run-internally': 'Run this step here instead',
-  },
+  // No 'external-work' entry: that kind's options are never RENDERED as
+  // buttons. Its two answers ('submit', 'run-internally') belong to the agent
+  // holding the step, and the flight it parks is read-only in this UI — see
+  // external-work.ts. Labels for buttons nobody can press are labels that rot.
   // The wire key stays 'apply' (MCP/autopilot parity) but the ACTION is a save:
   // the verified diff is persisted as the feature's overlay — nothing lands in
   // the product repos; runs apply it into per-run worktrees at boot and reverse

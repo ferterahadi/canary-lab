@@ -20,7 +20,7 @@ import { FlightStartDialog } from './features/flights/components/FlightStartDial
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
 import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
-import { resolveFeatureFlightAction } from './features/flights'
+import { presentedIndexStages, resolveFeatureFlightAction } from './features/flights'
 import { derivedFlightFeature, useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
 import type { RepoOption } from './features/flights/components/RepoMultiPicker'
@@ -73,6 +73,7 @@ export function App() {
     flightStartNew, setFlightStartNew,
     draftFor, setDraftFor,
     demoOpen, setDemoOpen,
+    settingsOpen, setSettingsOpen,
     resumePlanTaskId, setResumePlanTaskId,
     portifyTarget, setPortifyTarget,
     focusTest, runTab,
@@ -250,7 +251,10 @@ export function App() {
     const stageKey = flight?.currentStage
     if (!flight || !stageKey) return null
     if (stageKey !== 'docs' && stageKey !== 'prd-summary' && stageKey !== 'specs-coverage') return null
-    const stageStatus = flight.stages?.find((s) => s.key === stageKey)?.status ?? 'running'
+    // Presented, not raw: a stage parked on a hand-off to the user's own agent
+    // is being worked on, so the ledger says "fills in live" rather than
+    // claiming a checkpoint needs an answer nobody here can give.
+    const stageStatus = presentedIndexStages(flight).find((s) => s.key === stageKey)?.status ?? 'running'
     return { flightId: flight.flightId, stage: stageKey, stageStatus }
   }, [flights, selectedFeature])
 
@@ -402,6 +406,8 @@ export function App() {
           flightAction={flightAction}
           onStartPortify={(f) => setPortifyTarget({ kind: 'new', feature: f })}
           onOpenPortify={(workflowId) => setPortifyTarget({ kind: 'revisit', workflowId })}
+          settingsOpen={settingsOpen}
+          onSettingsOpenChange={setSettingsOpen}
         />
       ),
     },

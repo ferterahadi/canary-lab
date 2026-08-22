@@ -222,7 +222,7 @@ describe('docs — external producer', () => {
     const outPath = path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md')
     fs.mkdirSync(path.dirname(outPath), { recursive: true })
     fs.writeFileSync(outPath, '# Requirements\n- must check out\n')
-    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } })
+    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } } })
     const settled = await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', data: 'wrote it' })
     expect(settled).toMatchObject({ kind: 'done', evidence: { source: 'agent-repo-docs' } })
   })
@@ -230,7 +230,7 @@ describe('docs — external producer', () => {
   it('re-parks when the client claims success but wrote no file', async () => {
     const { ctx, setStage } = ctxFor(docsManifest())
     const outPath = path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md')
-    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } })
+    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } } })
     const cp = handOffOf(await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', data: 'all done!' }))
     // Straight back to the human fork, carrying the empty-handed verdict.
     expect(cp.kind).toBe('prd-source')
@@ -240,7 +240,7 @@ describe('docs — external producer', () => {
   it('mines a NOTHING_FOUND reason out of the client reply', async () => {
     const { ctx, setStage } = ctxFor(docsManifest())
     const outPath = path.join(featuresDir, 'checkout', 'docs', 'x.md')
-    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { mode: 'infer-from-diff', outPath, outName: 'x.md' } } })
+    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { mode: 'infer-from-diff', outPath, outName: 'x.md' } } } })
     const cp = handOffOf(await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', data: 'NOTHING_FOUND: the diff is all formatting' }))
     expect(cp.data.lastAttempt).toMatchObject({ outcome: 'empty', reason: 'the diff is all formatting' })
   })
@@ -256,26 +256,31 @@ describe('docs — external producer', () => {
     const outPath = path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md')
     fs.mkdirSync(path.dirname(outPath), { recursive: true })
     fs.writeFileSync(outPath, '# Requirements\n- must check out\n')
-    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } })
+    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } } })
     expect(await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit', ...(data === undefined ? {} : { data }) })).toMatchObject({
       kind: 'done',
       evidence: { source: 'agent-repo-docs' },
     })
   })
 
-  it('fails when the hand-off lost its output path', async () => {
-    const { ctx, setStage } = ctxFor(docsManifest())
-    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { mode: 'collect-repo-docs' } } })
-    expect(await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit' })).toMatchObject({
-      kind: 'failed',
-      error: 'external docs hand-off lost its output path',
-    })
+  // An external submission must never settle `failed`: checkpointResponse
+  // persists, so a resume replays the same answer and fails identically —
+  // unrecoverable without a full redo. A hand-off with no output path is
+  // unjudgeable, so the stage re-asks with a fresh one instead.
+  it('re-parks a fresh hand-off when the previous one lost its output path', async () => {
+    const { ctx, setStage, logs } = ctxFor(docsManifest())
+    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { mode: 'collect-repo-docs' } } } })
+    const out = await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit' })
+    expect(out).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'external-work' } })
+    const context = (out as { checkpoint: { data?: { context?: { outPath?: string } } } }).checkpoint.data?.context
+    expect(context?.outPath).toBeTruthy()
+    expect(logs.join('')).toContain('lost its output path')
   })
 
   it('collects locally when the client hands the step back', async () => {
     const { ctx, setStage, logs } = ctxFor(docsManifest())
     const outPath = path.join(featuresDir, 'checkout', 'docs', 'checkout-prd.md')
-    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } })
+    setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: { context: { mode: 'collect-repo-docs', outPath, outName: 'checkout-prd.md' } } } })
     const d = deps({
       spawnAgent: async () => { fs.mkdirSync(path.dirname(outPath), { recursive: true }); fs.writeFileSync(outPath, '# reqs\n'); return { text: 'done' } },
     })
@@ -284,10 +289,12 @@ describe('docs — external producer', () => {
   })
 
   it('defaults a hand-off with no recorded mode to the repo-docs collector', async () => {
-    const { ctx, setStage } = ctxFor(docsManifest())
+    const { ctx, setStage, logs } = ctxFor(docsManifest())
     setStage('docs', { checkpoint: { kind: 'external-work', message: 'x', data: {} } })
     const out = await docsStage(deps()).onCheckpointResponse!(ctx, { choice: 'submit' })
-    expect(out).toMatchObject({ kind: 'failed' })
+    // No outPath either, so it re-parks — and the re-ask names the default mode.
+    expect(out).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'external-work' } })
+    expect(logs.join('')).toContain('collect repo docs')
   })
 })
 

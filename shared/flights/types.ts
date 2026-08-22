@@ -383,6 +383,20 @@ export interface FlightIndexEntry {
   /** Present while status is `paused` — lets the pill/toast tell a user pause
    *  from a stage failure without fetching the full manifest. */
   pauseReason?: FlightPauseReason
+  /** Present while status is `waiting-for-approval` — which KIND of stop this
+   *  is. The slim consumers (pill, picker, suites column, toasts) never load a
+   *  manifest, and without this they cannot tell a question aimed at the human
+   *  from an `external-work` hand-off, where the work is actively running in
+   *  the MCP client that started the flight. The two need opposite treatments:
+   *  one is amber and demands a click, the other is live work in progress. */
+  checkpointKind?: FlightCheckpointKind
+  /** Mirror of `opts.stageProducer` — WHO drives this flight. An externally
+   *  driven flight is read-only in the web UI (every decision belongs to the
+   *  MCP client that started it), and the slim consumers have to know that
+   *  without loading a manifest: the pill must not count it as needing input,
+   *  the picker must not offer to resume it, and the toasts must not tell the
+   *  user a checkpoint is waiting for them. Absent = internal. */
+  stageProducer?: 'internal' | 'external'
   currentStage: FlightStageKey | null
   /** Slim per-stage status summary (feeds the UI's mini progress rail). */
   stages?: Array<{ key: FlightStageKey; status: FlightStageStatus }>

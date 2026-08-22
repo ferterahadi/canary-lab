@@ -328,6 +328,7 @@ export type {
   FlightStatus,
   FlightPauseReason,
   FlightCheckpoint,
+  FlightCheckpointKind,
   FlightCheckpointResponse,
   FlightEntryOptions,
   FlightStageEntryOption,

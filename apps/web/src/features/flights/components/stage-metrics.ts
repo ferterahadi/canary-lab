@@ -140,6 +140,22 @@ export function settledStageStatus(
   return stage.status === 'skipped' && stageHasEvidence(stage.evidence) ? 'done' : stage.status
 }
 
+/** What the USER should see this stage as — `settledStageStatus`, plus the one
+ *  case where the wire status and the truth diverge: a stage parked on an
+ *  `external-work` hand-off is not waiting on the human at all, it is being
+ *  worked on right now inside the client that started the flight. It presents
+ *  as `running`, which is what it is.
+ *
+ *  Presentation only. Nothing that ACTS on a stage may use this — the checkpoint
+ *  controls, the responder and the drill-throughs all key off the real
+ *  `stage.status`, so the step stays answerable while it reads as running. */
+export function presentedStageStatus(
+  stage: { status: FlightStageStatus; evidence?: unknown; checkpoint?: { kind?: string } },
+): FlightStageStatus {
+  if (stage.status === 'waiting-for-approval' && stage.checkpoint?.kind === 'external-work') return 'running'
+  return settledStageStatus(stage)
+}
+
 export interface OverlayDiffStat {
   files: number
   added: number

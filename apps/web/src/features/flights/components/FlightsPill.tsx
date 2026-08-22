@@ -4,10 +4,12 @@ import type { FeatureActivity } from '../state/feature-activity'
 import { StatusPill } from '@/shared/ui/StatusPill'
 import { FLIGHT_STATUS_TONE, featureActivityRows, featureChipState, preFlightChipState } from './FlightChipState'
 import { FlightsPickerDialog } from './FlightPickerRows'
+import { flightAwaitsUser } from '../lib/external-work'
 
 export { FLIGHT_STATUS_TONE, FeatureChipBadge, FlightStatusChip, activityStages, featureActivityRows, featureChipState, flightStatusLabel, groupPickerRows, preFlightChipState, resolveFeatureFlightAction } from './FlightChipState'
 export type { FeatureActivityRow, FeatureChipState, FeatureFlightAction, FeatureRef, PickerGroup } from './FlightChipState'
 export { ActivityOnlyRow, NotFlownRow, PreFlightRow, StageMiniRail } from './FlightPickerRows'
+export { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from '../lib/external-work'
 
 export function FlightsPill({
   flights,
@@ -55,7 +57,11 @@ export function FlightsPill({
   // frame shouldn't render launched/failed rows.
   const preFlightRows = preFlights.filter((t) => t.status === 'running' || t.status === 'done')
   const preFlightReview = preFlightRows.filter((t) => t.status === 'done')
-  const waiting = flights.filter((f) => f.status === 'waiting-for-approval')
+  // A flight parked on an external-work hand-off is BUSY, not blocked — the
+  // step is running in the user's own agent. It keeps its place in the active
+  // count below, but must never turn the pill amber or claim approval is
+  // needed, because there is nothing here for the reader to approve.
+  const waiting = flights.filter(flightAwaitsUser)
   // Everything alive right now, deduped by feature: active flights AND live
   // activity on the absorbed surfaces (a flight's run stage and its run count
   // once, not twice).
@@ -72,7 +78,7 @@ export function FlightsPill({
   // non-queued reason, OR a pre-flight settled and awaiting review. Independent
   // of any toast — it stays until the underlying state resolves.
   const needsAttention = preFlightReview.length > 0 || flights.some((f) =>
-    f.status === 'waiting-for-approval'
+    flightAwaitsUser(f)
     || (f.status === 'paused' && f.pauseReason !== 'user' && f.pauseReason !== 'queued'))
 
   const needsHuman = waiting.length > 0 || preFlightReview.length > 0

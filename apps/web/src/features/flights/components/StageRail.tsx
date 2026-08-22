@@ -1,6 +1,6 @@
 import type { FlightStageKey, FlightStageStatus, PrdSourceCheckpointData } from '@/shared/api/client'
 import { STAGE_LABEL, stageLabel } from './stage-meta'
-import { settledStageStatus } from './stage-metrics'
+import { presentedStageStatus } from './stage-metrics'
 
 // ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────
 // The rail is a lens for the USER, not a dump of the conductor's internals:
@@ -88,11 +88,15 @@ export function stageRailNote(stage: { key: string; checkpoint?: { data?: unknow
 }
 
 export function stageRailRows(
-  stages: Array<{ key: string; status: FlightStageStatus; evidence?: unknown; checkpoint?: { data?: unknown } }>,
+  stages: Array<{ key: string; status: FlightStageStatus; evidence?: unknown; checkpoint?: { kind?: string; data?: unknown } }>,
 ): StageRailRow[] {
   const rows: StageRailRow[] = []
   for (const raw of stages) {
-    const s = { ...raw, status: settledStageStatus(raw) }
+    // `presented`, not `settled`: a stage parked on a hand-off to the user's own
+    // agent draws as running here, so the rail (and everything downstream of it
+    // — the row icon, the auto-selected stage, the stage chip) never marks live
+    // work as a question waiting on the reader.
+    const s = { ...raw, status: presentedStageStatus(raw) }
     const key = s.key as FlightStageKey
     if (key === 'similarity') {
       if (s.status !== 'waiting-for-approval' && s.status !== 'failed') continue
@@ -103,7 +107,7 @@ export function stageRailRows(
     const companionKey = STAGE_COMPANION[key]
     if (companionKey) {
       const companionRaw = stages.find((x) => x.key === companionKey)
-      const companion = companionRaw ? { ...companionRaw, status: settledStageStatus(companionRaw) } : undefined
+      const companion = companionRaw ? { ...companionRaw, status: presentedStageStatus(companionRaw) } : undefined
       // `docs` reaches the rail through here, not the plain branch below — it
       // is the primary of the docs+prd-summary pair ("Requirements").
       rows.push({

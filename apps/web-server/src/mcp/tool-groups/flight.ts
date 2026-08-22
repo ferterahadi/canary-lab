@@ -3,6 +3,15 @@
 import { z } from 'zod'
 import path from 'path'
 import { flightStageRemedy } from '../../features/flights/logic/stage-remedy'
+import {
+  createHandOffContactLedger,
+  forgetHandOffContact,
+  handOffIdleAdvice,
+  handOffIdleMs,
+  handOffIdleReportFor,
+  hasPolled,
+  noteHandOffContact,
+} from '../handoff-idle'
 import type { FlightManifest } from '../../../../../shared/flights/types'
 import { deriveFeatureSlug } from '../../../../../shared/flights/types'
 import { fanOutAdviceFor } from '../client-surface'
@@ -63,6 +72,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       ...(waiting && checkpoint ? { checkpoint: { stage: waiting.key, ...checkpoint } } : {}),
     }
   }
+  // One ledger per server. See handoff-idle.ts for why it is in memory.
+  const handOffContact = createHandOffContactLedger()
+
   const flightNext = (view: Record<string, unknown>): string => {
     if (view.status === 'waiting-for-approval') {
       const cp = view.checkpoint as {
@@ -108,10 +120,18 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         const tokenRule = data?.handOffId
           ? `Pass token:"${data.handOffId}" on your submit — it identifies THIS hand-off. Re-call get_flight immediately before submitting (and between fan-out rounds, or roughly every 10 minutes of work): if the status is no longer waiting-for-approval, or the handOffId has changed, the user stopped or re-asked this step — discard your result and tell them instead of submitting. `
           : ''
+        // The rule that has to ride the RESULT, not the skill: a client reads this
+        // string fresh on every call, while a skill can be compacted out of its
+        // context halfway through an eleven-stage pipeline — which is exactly when
+        // this failure happens. Observed live: a client wrote the docs file, posted
+        // the user a status table, and ended its turn at stage 5 of 11. A parked
+        // hand-off has no deadline, so the flight simply stopped, reporting
+        // "waiting-for-approval" with six stages that would never start.
+        const stayRule = 'DO NOT END YOUR TURN while this step is open. The flight advances ONLY when you submit — nothing polls it, no timeout rescues it, and a status update to the user is not progress. Keep working through submit, then follow the flight to its next stage. If you truly must stop, say so to the user in the same breath and tell them the flight is parked until they re-invoke the flight skill to pick this hand-off up. '
         // Advice matched to what THIS client can do, rather than one line that
         // tells a subagent-less chat client to fan out and then reads its
         // serial behaviour as disobedience.
-        return `${rejected}This flight hands its ${String(data?.stage ?? 'stage')} step to YOU (stage_producer:"external"). ${where}, rendered exactly as Canary's own agent would receive it. ${tokenRule} ${fanOutAdviceFor(ctx.clientFacts())} Do the work with your tools now (write the files the prompt names, on the real paths it gives), then release with respond_flight_checkpoint(flightId, choice:"submit", data:<the result shape the prompt asks for>). Canary re-validates independently — the config must parse, the doc must exist on disk, submitted requirements are reconciled and re-read from the written summary, the specs must compile, a mapping must account for every roster test, a portify submit is judged on the workflow record + overlay mark, a run submit on the run\'s own terminal manifest — so a claim of success that did not land on disk re-parks or fails the stage rather than passing. If you cannot do this step (no file tools, permission refused, wrong machine), answer choice:"run-internally" and Canary's local agent takes just that step; the flight continues either way.`
+        return `${rejected}This flight hands its ${String(data?.stage ?? 'stage')} step to YOU (stage_producer:"external"). ${where}, rendered exactly as Canary's own agent would receive it. ${stayRule}${tokenRule} ${fanOutAdviceFor(ctx.clientFacts())} Do the work with your tools now (write the files the prompt names, on the real paths it gives), then release with respond_flight_checkpoint(flightId, choice:"submit", data:<the result shape the prompt asks for>). Canary re-validates independently — the config must parse, the doc must exist on disk, submitted requirements are reconciled and re-read from the written summary, the specs must compile, a mapping must account for every roster test, a portify submit is judged on the workflow record + overlay mark, a run submit on the run\'s own terminal manifest — so a claim of success that did not land on disk re-parks or fails the stage rather than passing. If you cannot do this step (no file tools, permission refused, wrong machine), answer choice:"run-internally" and Canary's local agent takes just that step; the flight continues either way.`
       }
       if (cp?.kind === 'config-approval') {
         return `${base} The feature is scaffolded — the config being approved is the REAL on-disk feature.config.cjs (checkpoint data carries a snapshot + configPath). Approve as-is, pass an edited configSource via data, or answer "redraft" to re-run the repo scan.`
@@ -158,8 +178,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       stage_producer: z.enum(['internal', 'external']).optional().describe('WHO executes the hand-off-capable stages: scout (survey the repos, draft the feature config), docs (gather/infer requirement docs), prd-summary (distill the docs into requirements), specs-coverage (author the spec files, then map them onto the requirements — two sequential hand-offs per pass), portify (the flight starts an EXTERNAL workflow and parks ONCE for the whole engagement: you drive submit_external_portify / get_portify against the given workflowId, stop at ready-to-save, and submit — never save_portify/cancel_portify, the flight owns the save decision), run/heal (the run starts in external-heal mode UNCLAIMED and the flight parks: claim_heal with your own session, loop wait_for_heal_task, fix APP code — never tests — signal_run, then submit once the run is terminal; Canary reads the verdict from the run record), and evaluation-export when the mode is localized (the DEFAULT for an external flight — the rewrite is thinking; raw stays internal and deterministic). "external" is the DEFAULT for an MCP caller — you are an interactive agent, so the thinking is yours unless you say otherwise. Pass "internal" to have Canary spawn the CLI named by `agent` on the server instead (the right choice when this client has no file tools, or the user wants a hands-off flight); a single stage can also be handed back with choice:"run-internally" on its checkpoint, so a whole-flight "internal" is rarely what you want. "external" means YOU do those steps in THIS client: each one parks the flight on an `external-work` checkpoint whose data carries the rendered prompt — do the work with your own tools and subagents, then release it with respond_flight_checkpoint(choice:"submit", data:<result>). Canary still validates every result the same way it validates its own agent\'s (the config must parse, the doc must exist on disk, the requirements are reconciled and re-read from the written summary, the specs must compile, the mapping must account for every roster test and the tags are written by Canary\'s own tag-writer before the ledger is recomputed, the portify workflow must actually be ready-to-save and the double-boot-verified overlay mark is the save predicate, the run verdict is its own terminal manifest), so the verdict stays evidence rather than your report. Answer choice:"run-internally" on any of those checkpoints to hand that one step back to Canary\'s local agent. STICKY per record for the same reason `agent` is. Pick this when you want the work done with your own context and subagents; the purely mechanical stages (similarity, scaffold, env — and the run\'s own playwright execution) have no thinking to move and are unaffected.'),
       redo: z.boolean().optional().describe('Restart the feature\'s existing flight from stage 1. WIPES every step\'s on-disk artifacts back to zero — requirement docs (user-added included), specs, envsets, portify overlay, run record, export — as if the flight never ran; warn the user first if they may still want them.'),
       from_stage: z.string().optional().describe('Start at this stage instead of stage 1 (e.g. "specs-coverage", "run"). Prerequisite artifacts are checked; rejected with the missing one named. WIPES this step\'s and every later step\'s on-disk artifacts (user-added inputs included) back to zero before re-running; earlier steps keep theirs.'),
+      feedback: z.string().optional().describe('What went wrong on the previous attempt, in the user\'s words or your own — appended to the ENTRY stage\'s agent prompt so the re-run does something different instead of repeating itself. Only meaningful with redo or from_stage; ignored on a fresh start or a resume. Send it whenever you are re-entering a stage BECAUSE something was wrong: without it the stage has no idea the last attempt was rejected.'),
     },
-  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, autopilot, agent, stage_producer, fresh, redo, from_stage }) => {
+  }, async ({ repoPaths, description, feature, env, coverage_target, base, yolo, autopilot, agent, stage_producer, fresh, redo, from_stage, feedback }) => {
     if (!deps.flightsRequest) return flightsUnavailable()
     // Repos + intent are frozen once a flight exists, so redo / from_stage /
     // resume may OMIT repoPaths/description — but then we need `feature` to
@@ -229,6 +250,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         stageProducer: stage_producer ?? 'external',
         ...(redo ? { mode: 'redo' } : from_stage ? { mode: 'jump' } : {}),
         ...(from_stage ? { fromStage: from_stage } : {}),
+        ...(feedback && (redo || from_stage) ? { feedback } : {}),
       },
     })
     const startedBody = started.body as { error?: string; type?: string; options?: string[]; existingFlightId?: string; existingStatus?: string; active?: unknown }
@@ -283,8 +305,31 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     }
   }
 
+  // Whether the open external-work hand-off has gone quiet, recording this read
+  // as client contact on the way out. Returns null for any other checkpoint kind
+  // and for a hand-off still inside its budget.
+  const handOffIdleStatus = (manifest: FlightManifest, view: Record<string, unknown>) => {
+    // `stage` is not optional: flightView builds the checkpoint as
+    // `{ stage: waiting.key, ...checkpoint }`, so a checkpoint that exists always
+    // carries one. Typing it optional here would only add an unreachable fallback.
+    const cp = view.checkpoint as { stage: string; kind?: string; data?: { handOffId?: string } } | undefined
+    if (view.status !== 'waiting-for-approval' || cp?.kind !== 'external-work') return null
+    const handOffId = cp.data?.handOffId
+    const nowMs = Date.now()
+    // A parked flight is written once and then untouched, so its updatedAt IS the
+    // moment of the park.
+    const parkedAtMs = Date.parse(manifest.updatedAt ?? '') || nowMs
+    const report = handOffIdleReportFor({
+      stage: cp.stage,
+      idleMs: handOffIdleMs(handOffContact, { flightId: manifest.flightId, handOffId, parkedAtMs, nowMs }),
+      everPolled: hasPolled(handOffContact, manifest.flightId, handOffId),
+    })
+    noteHandOffContact(handOffContact, { flightId: manifest.flightId, handOffId, nowMs })
+    return report
+  }
+
   registerTool('get_flight', {
-    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming.',
+    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming. A flight parked on an external-work hand-off that no client has checked in on for 45+ minutes also carries `handOffIdle` — the step was handed out and abandoned (usually a client that ended its turn with it open). Nothing resumes a parked hand-off on its own, and the checkpoint is still answerable, so pick the work up and submit against the same handOffId, or tell the user it is stalled.',
     inputSchema: {
       flightId: z.string().optional().describe('Omit to list all flights (slim rows).'),
     },
@@ -312,7 +357,16 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       return asJsonResult({ ...view, remedy, next: `${flightNext(view)} ${fix}`.trim() })
     }
     const agentJob = await agentJobOf(deps.flightsRequest, flightId)
-    return asJsonResult({ ...view, ...(agentJob ? { agentJob } : {}), next: flightNext(view) })
+    // Hand-off staleness is measured BEFORE this poll is recorded — otherwise the
+    // very read that should report the stall resets the clock and never can.
+    const idle = handOffIdleStatus(resp.body as FlightManifest, view)
+    const next = idle ? `${handOffIdleAdvice(idle)} ${flightNext(view)}` : flightNext(view)
+    return asJsonResult({
+      ...view,
+      ...(agentJob ? { agentJob } : {}),
+      ...(idle ? { handOffIdle: idle } : {}),
+      next,
+    })
   })
 
   // Two tools rather than one with a mode argument: pause is safe and resumable,
@@ -335,6 +389,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     if (resp.statusCode !== 200) {
       return errorResult(`pause failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
     }
+    // The hand-off is settled or the flight is stopping: drop its contact
+    // record so the ledger cannot grow across a long-lived server.
+    forgetHandOffContact(handOffContact, flightId)
     const view = flightView(resp.body)
     return asJsonResult({ ...view, next: flightNext(view) })
   })
@@ -356,6 +413,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     if (resp.statusCode !== 200) {
       return errorResult(`abort failed (${resp.statusCode}): ${String((resp.body as { error?: string }).error ?? '')}`)
     }
+    // The hand-off is settled or the flight is stopping: drop its contact
+    // record so the ledger cannot grow across a long-lived server.
+    forgetHandOffContact(handOffContact, flightId)
     const view = flightView(resp.body)
     return asJsonResult({ ...view, next: flightNext(view) })
   })
@@ -435,6 +495,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       }
       return errorResult(`respond failed (${resp.statusCode}): ${String(body.error ?? '')}`)
     }
+    // The hand-off is settled or the flight is stopping: drop its contact
+    // record so the ledger cannot grow across a long-lived server.
+    forgetHandOffContact(handOffContact, flightId)
     const view = flightView(resp.body)
     return asJsonResult({ ...view, next: flightNext(view) })
   })

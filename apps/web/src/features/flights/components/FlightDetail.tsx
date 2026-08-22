@@ -5,6 +5,7 @@ import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
+import { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../lib/external-work'
 import type { FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
@@ -237,7 +238,19 @@ export function FlightDetail({
     return <div className="flex flex-1 items-center justify-center text-xs text-muted">Loading flight…</div>
   }
 
-  const tone = FLIGHT_STATUS_TONE[flight.status]
+  // The flight is the agent's, not just the step it happens to be on. This
+  // page's earlier version keyed every external cue off the parked CHECKPOINT
+  // being a hand-off, which meant the moment such a flight stopped on a real
+  // question — a prd-source fork, a config approval — the cues vanished and it
+  // went back to demanding a click for a flight this reader does not drive.
+  // A derived pseudo-manifest has no record and no driving client.
+  const externallyDriven = !derivedFeature && isExternallyDriven(flight)
+  // What the CHIP says. A park is a park: whether the agent is holding a step
+  // it was handed or a question it has to answer, the flight is progressing
+  // inside that agent and "Needs approval" is a lie either way. Only the
+  // flight's own pauses fall through to their real labels.
+  const agentHolding = externallyDriven && flight.status === 'waiting-for-approval'
+  const tone = agentHolding ? FLIGHT_STATUS_TONE['running'] : FLIGHT_STATUS_TONE[flight.status]
   const evalStage = flight.stages.find((s) => s.key === 'evaluation-export') ?? null
   return (
     <>
@@ -275,7 +288,9 @@ export function FlightDetail({
             // R81: a derived flight was never paused or interrupted — its steps
             // were simply completed outside the conductor, so it must not
             // borrow the record-only "paused by you / a stage failed" copy.
-            title={derivedFeature
+            title={agentHolding
+              ? EXTERNAL_WORK_COPY.headerTitle
+              : derivedFeature
               ? (flight.status === 'done'
                 ? 'Every step complete — done outside the conductor, so there is no flight record'
                 : 'Steps completed outside the conductor — continue to conduct the rest')
@@ -284,13 +299,18 @@ export function FlightDetail({
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
                 : 'A stage failed — Continue retries it')
               : undefined}
-            icon={flight.status === 'running' ? <StatusDot state="running" className="shrink-0" /> : undefined}
-            label={capitalizeFirst(derivedFeature && flight.status !== 'done' ? 'idle' : flightStatusLabel(flight.status))}
+            icon={flight.status === 'running' || agentHolding ? <StatusDot state="running" className="shrink-0" /> : undefined}
+            label={agentHolding
+              ? EXTERNAL_WORK_COPY.headerLabel
+              : capitalizeFirst(derivedFeature && flight.status !== 'done' ? 'idle' : flightStatusLabel(flight.status))}
           />
         </h1>
         {/* The one primary: the state's obvious next action. Running has none —
             nothing demands a click, so nothing shouts. */}
-        {flight.status === 'waiting-for-approval' && (
+        {/* Hidden, not disabled, under external drive: a greyed "Respond →"
+            invites a click on a decision that is not the reader's to make, and
+            the banner below already says where the answer goes. */}
+        {flight.status === 'waiting-for-approval' && !externallyDriven && (
           <button
             type="button"
             data-testid="flight-primary-respond"
@@ -300,6 +320,18 @@ export function FlightDetail({
           >
             Respond →
           </button>
+        )}
+        {/* What replaces every control this flight does not own: one line
+            naming where the decisions actually happen. Disabled buttons say
+            "not here"; this says "there". */}
+        {externallyDriven && (
+          <span
+            data-testid="flight-externally-driven"
+            className="shrink-0 text-[11px] text-secondary"
+            title={EXTERNAL_DRIVE_COPY.bannerTitle}
+          >
+            {EXTERNAL_DRIVE_COPY.banner}
+          </span>
         )}
         {/* R74: one button per state. Active → Pause (immediate + honest —
             agent killed, run aborted, repo freed; every stage re-runs cleanly).
@@ -311,8 +343,18 @@ export function FlightDetail({
             type="button"
             data-testid="flight-pause"
             onClick={() => act(() => api.pauseFlight(flightId))}
-            className="cl-button px-2.5 py-1 text-xs"
-            title="Stops everything — the agent, the test run, and any repair. Continue starts this step again."
+            // Nothing here can stop work running inside the user's own agent:
+            // pausing from this side would park the flight while the agent kept
+            // going, and its result would then be discarded as stale. Kept
+            // visible and disabled rather than removed — Pause is the control a
+            // user reaches for first, and a missing button reads as a bug — but
+            // the tooltip has to name where it moved, or "disabled" is a dead
+            // end. Abort in the ⋯ menu is the way out if the agent has died.
+            disabled={externallyDriven}
+            className="cl-button px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+            title={externallyDriven
+              ? EXTERNAL_DRIVE_COPY.pause
+              : 'Stops everything — the agent, the test run, and any repair. Continue starts this step again.'}
           >
             ⏸ Pause
           </button>
@@ -349,9 +391,9 @@ export function FlightDetail({
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
             {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
-              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} />
+              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externallyDriven={externallyDriven} />
             )}
-            <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} />
+            <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externallyDriven={externallyDriven} />
           </>
         )}
         <button
@@ -382,6 +424,11 @@ export function FlightDetail({
         // R81: no record → nothing to toggle. Autopilot is chosen in the
         // launcher when this suite is actually conducted.
         onToggleAutopilot={derivedFeature ? undefined : (next) => act(() => api.setFlightAutopilot(flight.flightId, next))}
+        // Autopilot decides checkpoints — flipping it changes what the agent's
+        // flight answers for itself, so it is the agent's setting while the
+        // agent is driving. Disabled with a reason, not hidden: the toggle's
+        // VALUE is still information the reader wants.
+        autopilotLockedReason={externallyDriven ? EXTERNAL_DRIVE_COPY.autopilot : undefined}
       />
 
       <div className="flex min-h-0 flex-1">

@@ -4,6 +4,7 @@ import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
 import { STAGE_COLUMN } from './stage-meta'
 import { ForkPathCard, IntentRow, useFlightDocs } from './FlightDocsPanel'
+import { EXTERNAL_DRIVE_COPY, isExternallyDriven } from '../lib/external-work'
 
 /** Read the structured outcome of the previous collector attempt off the
  *  parked checkpoint. Absent on a first visit, and on flights parked by an
@@ -80,7 +81,15 @@ export function RequirementsFork({
   const [startedFlash, setStartedFlash] = useState<number | null>(null)
   const docs = useFlightDocs(flight.feature, refreshKey)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const disabled = busy || docs.busy
+  // The fork is an answering surface end to end — every path ends in a
+  // respond_flight_checkpoint. When the MCP client that started the flight is
+  // driving, that answer is its call, so the two path cards render inert: the
+  // reader still sees WHICH question the flight stopped on and what the last
+  // collector attempt found, but cannot pick for the agent. Disabling the cards
+  // is enough to close the whole surface — `mode` can never leave null, so no
+  // path content (drop zone, agent hints, confirm buttons) ever mounts.
+  const readOnly = isExternallyDriven(flight)
+  const disabled = busy || docs.busy || readOnly
   const { dragging, dropHandlers } = useDocDrop(disabled || mode !== 'manual', (files) => { void docs.importFiles(files) })
 
   const respond = (choice: string): void => {
@@ -104,6 +113,11 @@ export function RequirementsFork({
         <span className="text-[12.5px] font-semibold">Where should requirements come from?</span>
       </div>
       <IntentRow description={flight.description} />
+      {readOnly && (
+        <p data-testid="requirements-fork-read-only" className="text-[11px] text-secondary">
+          {EXTERNAL_DRIVE_COPY.checkpointLine}
+        </p>
+      )}
 
       <input
         ref={fileInputRef}

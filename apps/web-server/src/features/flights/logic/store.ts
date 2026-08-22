@@ -49,7 +49,7 @@ export interface FlightStore {
 }
 
 function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
-  // Clearable keys (group / pauseReason / endedAt) are ALWAYS present — as
+  // Clearable keys (group / pauseReason / checkpointKind / endedAt) are ALWAYS present — as
   // `undefined` when the manifest has none — because the index upsert is a
   // shallow merge (`{ ...oldRow, ...entry }`): a merge can overwrite a key but
   // never delete one, so omitting a cleared key would leave the previous
@@ -65,6 +65,14 @@ function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
     group: m.opts.group,
     status: m.status,
     pauseReason: m.pauseReason,
+    // Which kind of stop a parked flight is on, so the slim consumers can tell
+    // a question for the human from an `external-work` hand-off without
+    // loading the manifest. Only one stage can be parked at a time.
+    checkpointKind: m.stages.find((s) => s.status === 'waiting-for-approval')?.checkpoint?.kind,
+    // Who drives the flight, so the slim consumers can tell an externally
+    // driven flight (read-only here — every decision belongs to the MCP client
+    // that started it) from one this UI may act on.
+    stageProducer: m.opts.stageProducer,
     currentStage: m.currentStage,
     stages: m.stages.map((s) => ({ key: s.key, status: s.status })),
     updatedAt: m.updatedAt,

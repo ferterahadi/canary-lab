@@ -14,8 +14,8 @@ const guide = renderInteractiveGuide({
 describe('demo terminal guide', () => {
   it('leads with the launch details and gives each journey one action', () => {
     expect(guide).toContain('✓ Demo ready\n  Dashboard  http://127.0.0.1:7421')
-    expect(guide).toContain('1. Repair loop — diagnose a shipped Playwright suite')
-    expect(guide).toContain('2. Full Flight — create and run a suite from product intent')
+    expect(guide).toContain('1. Repair loop — heal a shipped Playwright suite')
+    expect(guide).toContain('2. Full Flight — build a suite from product intent')
     expect(guide.match(/  Action/g)).toHaveLength(2)
   })
 
@@ -26,8 +26,16 @@ describe('demo terminal guide', () => {
   })
 
   it('wraps the intent for terminal scanning', () => {
-    const intentLines = guide.split('\n').slice(guide.split('\n').indexOf('  Intent') + 1, -3)
+    const lines = guide.split('\n')
+    const start = lines.indexOf('  Intent') + 1
+    const end = lines.findIndex((line, index) => index >= start && !line.startsWith('    '))
+    const intentLines = lines.slice(start, end)
     expect(intentLines.length).toBeGreaterThan(1)
-    expect(intentLines.every((line) => line.startsWith('    ') && line.length <= 88)).toBe(true)
+    expect(intentLines.every((line) => line.length <= 88)).toBe(true)
+  })
+
+  it('tells a desktop-agent tester how to register this workspace', () => {
+    expect(guide).toContain('3. Desktop agent (optional) — drive this demo over MCP')
+    expect(guide).toContain('cd "/tmp/demo-project" && npx canary-lab setup --force --agent all')
   })
 })

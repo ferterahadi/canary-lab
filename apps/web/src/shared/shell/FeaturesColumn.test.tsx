@@ -326,6 +326,28 @@ describe('FeaturesColumn pending placeholders (R69)', () => {
     // Count chip reflects the whole batch.
     expect(container.querySelector('[data-testid="feature-group-toggle-Auth"]')?.textContent).toContain('2')
   })
+
+  it('floats a group with a real question above one whose step runs in the user\'s agent', () => {
+    // Both flights wear `waiting-for-approval`. Only the second asks anything of
+    // this reader, so only it should pull its group to the top — otherwise the
+    // column nags about work that is already under way somewhere else.
+    const parked = (name: string, group: string, checkpointKind: 'external-work' | 'missing-env') => ({
+      ...pendingFeature(name, group),
+      pending: { flightId: `fl_${name}`, status: 'waiting-for-approval' as const, currentStage: null, checkpointKind },
+    })
+    act(() => {
+      root.render(
+        <FeaturesColumn
+          features={[parked('scan', 'Alpha', 'external-work'), parked('keys', 'Beta', 'missing-env')]}
+          selectedFeature={null}
+          onSelectFeature={() => {}}
+        />,
+      )
+    })
+    const sections = [...container.querySelectorAll('[data-testid^="feature-group-toggle-"]')]
+      .map((el) => el.getAttribute('data-testid'))
+    expect(sections).toEqual(['feature-group-toggle-Beta', 'feature-group-toggle-Alpha'])
+  })
 })
 
 function featureRow(name: string): HTMLLIElement {

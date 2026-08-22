@@ -61,6 +61,9 @@ export interface NavState {
    *  workspace that has never run anything; afterwards it is reached from the
    *  status bar. The route key stays `demo` for existing deep links. */
   demoOpen: boolean
+  /** Project Settings (routed ?dialog=settings) — the features column's gear.
+   *  Workspace-scoped, so it needs no id qualifier. */
+  settingsOpen: boolean
   /** The pre-flight a pill row reopened the new-flight dialog onto. */
   resumePlanTaskId: string | null
   /** The embedded portify workflow, if open. */
@@ -106,6 +109,7 @@ export function initialNavState(persisted: PersistedView): NavState {
     flightStartNew: persisted.dialog === 'flight-new',
     draftFor: persisted.dialog === 'draft' ? persisted.draft : null,
     demoOpen: persisted.dialog === 'demo',
+    settingsOpen: persisted.dialog === 'settings',
     resumePlanTaskId: null,
     portifyTarget: null,
     focusTest: persisted.run && persisted.focusTest
@@ -124,7 +128,13 @@ export function initialNavState(persisted: PersistedView): NavState {
  *
  *  `demo` ranks BELOW flight-new deliberately: its own "Start a flight" action
  *  opens that launcher, and for the moment both are open the URL must name the
- *  launcher — the thing the user is actually looking at. */
+ *  launcher — the thing the user is actually looking at.
+ *
+ *  `settings` ranks LAST for the same reason it is listed last: it mounts inside
+ *  the features column, the first column App renders, so every other overlay in
+ *  the tree paints over it. Two of these being open at once is a corner nobody
+ *  can reach through the UI — the ordering just keeps the URL naming whatever
+ *  would actually be on top if they were. */
 export function routedDialog(state: NavState): RouteDialog | null {
   if (state.configFor) return 'config'
   if (state.draftFor) return 'draft'
@@ -132,6 +142,7 @@ export function routedDialog(state: NavState): RouteDialog | null {
   if (state.flightStartNew) return 'flight-new'
   if (state.demoOpen) return 'demo'
   if (state.verifyOpen) return 'verification'
+  if (state.settingsOpen) return 'settings'
   return null
 }
 

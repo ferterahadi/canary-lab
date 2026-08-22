@@ -6,6 +6,7 @@ import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
 import { stageLabel } from './stage-meta'
 import { derivedFlightToken } from '../lib/derived-stages'
+import { externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven } from '../lib/external-work'
 
 // Flights pill — an always-visible launcher for Flight (`canary-lab flight`)
 // progress, and (since the pill consolidation) the one live indicator for
@@ -139,8 +140,11 @@ export interface FeatureChipState {
  * THE state precedence for a feature's chip (picker + landing rows) — the
  * single place the "what does the chip say right now" transition lives:
  *
- *   1. flight parked on a checkpoint → "to approve"  (amber — the human is the
- *      blocker; outranks live activity because nothing moves until they act)
+ *   0. flight parked on an external-work hand-off → the stage verb (sky, live) —
+ *      the step is running in the user's own agent, so it is presented as work
+ *      in progress and only the tooltip says where
+ *   1. flight parked on any OTHER checkpoint → "to approve"  (amber — the human
+ *      is the blocker; outranks live activity because nothing moves until they act)
  *   2. live activity on the feature  → "running" / "healing" / "portifying" /
  *      "authoring" (narrates the absorbed surfaces (runs / portify / wizard
  *      drafts) whether the job was started by a flight stage or standalone;
@@ -166,10 +170,22 @@ export interface FeatureChipState {
  *  evidence payload) → "not flown".
  */
 export function featureChipState(
-  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason'> | null,
+  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason' | 'checkpointKind' | 'stageProducer'> | null,
   activity?: FeatureActivity,
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>,
 ): FeatureChipState {
+  // A hand-off to the client that started the flight is WORK, not a question —
+  // it reads exactly like a running flight (same verb, same sky, same pulse,
+  // same rank), and only the tooltip says where the work is happening. Checked
+  // before the checkpoint branch because it wears the same wire status.
+  // Widened past the hand-off: a park on a real QUESTION reads the same way
+  // when the agent is the one who answers it. Only the flight's own pauses
+  // (stage-failed, restart, user) fall through to the resting branches below,
+  // because those are states, not demands.
+  if (isExternalWorkPark(flight) || (flight?.status === 'waiting-for-approval' && isExternallyDriven(flight))) {
+    const verb = flight?.currentStage ? RUNNING_STAGE_CHIP[flight.currentStage] : 'running'
+    return { label: verb, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: externalWorkChipTitle(verb) }
+  }
   if (flight?.status === 'waiting-for-approval') {
     return { label: 'to approve', tone: FLIGHT_STATUS_TONE['waiting-for-approval'], live: false, rank: 0, title: 'needs approval' }
   }
@@ -269,8 +285,9 @@ export function resolveFeatureFlightAction(
     title: chip.title,
     live: chip.live,
     // Read off the flight record rather than the chip's rank, so the "blocked on
-    // the human" wash tracks the same condition featureChipState branches on.
-    attention: flight?.status === 'waiting-for-approval',
+    // the human" wash tracks the same condition featureChipState branches on —
+    // a hand-off is busy, not blocked, so it takes the sky `live` wash instead.
+    attention: flightAwaitsUser(flight),
   }
 }
 
@@ -284,7 +301,7 @@ export function FlightStatusChip({
   activity,
   derived,
 }: {
-  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason'> | null
+  flight: Pick<FlightIndexEntry, 'status' | 'currentStage' | 'pauseReason' | 'checkpointKind'> | null
   activity?: FeatureActivity
   derived?: Array<{ key: FlightStageKey; status: FlightStageStatus }>
 }) {

@@ -110,6 +110,16 @@ const FLIGHT_TOOLS = uniqueSorted([
   'start_flight',
   'stop_flight_agent',
   'write_feature_doc',
+  // The portify hand-off trio — an external flight's portify stage parks for the
+  // client, so the flight profile must be able to answer it. NOT the standalone
+  // start/save/cancel/remove/list tools: those stay portify-only.
+  'submit_external_portify',
+  'revise_external_portify',
+  'get_portify',
+  // The run/heal hand-off loop, same rule.
+  'claim_heal',
+  'wait_for_heal_task',
+  'signal_run',
 ])
 
 const PORTIFY_TOOLS = uniqueSorted([

@@ -35,5 +35,5 @@ success predicate — Canary Lab owns the verdict.
 
 - Keep the same `session_id` for the whole conversation.
 - Edit only inside the returned scratch worktree paths — never the user's checked-out product repo.
-- A FLIGHT can hand you a portify workflow via an `external-work` checkpoint carrying a `workflowId`: drive this same loop against it, but STOP at `ready-to-save` and answer the flight with `respond_flight_checkpoint(flightId, choice: "submit")` — the flight owns the save/review decision. Never `save_portify` or `cancel_portify` a flight-owned workflow.
+- A FLIGHT can hand you a portify workflow via an `external-work` checkpoint carrying a `workflowId`: drive this same loop against it, but STOP at `ready-to-save` and answer the flight with `respond_flight_checkpoint(flightId, choice: "submit")` — the flight owns the save/review decision. Never `save_portify` or `cancel_portify` a flight-owned workflow. The flight will wait on you indefinitely — a parked hand-off has no deadline — so do not end your turn with it open; after 45 minutes with no `get_flight` contact the read reports `handOffIdle` on it.
 - Save/cancel/remove are confirm-gated; pass the confirmation only when the user asked for that action.

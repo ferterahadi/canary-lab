@@ -41,6 +41,11 @@ export function derivePendingFeatures(
         status: f.status,
         currentStage: f.currentStage,
         ...(f.pauseReason ? { pauseReason: f.pauseReason } : {}),
+        ...(f.checkpointKind ? { checkpointKind: f.checkpointKind } : {}),
+        // Carried for the same reason as checkpointKind: the column sorts on
+        // "does this need a click", and a flight the user's agent drives never
+        // does — whatever it is parked on.
+        ...(f.stageProducer ? { stageProducer: f.stageProducer } : {}),
       },
     })
   }
