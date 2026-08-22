@@ -150,6 +150,25 @@ describe('start_external_evaluation_export', () => {
       runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
     })).toBe('evaluation export is available after the run finishes')
   })
+
+  it('refuses a boot session — terminal, but nothing was tested', async () => {
+    // A fresh workspace ships exactly one run: an ABORTED BOOT session with a
+    // null summary. "Terminal" alone admits it, and exporting it produces a
+    // plausible-looking but empty evaluation with no hint what went wrong.
+    const { text } = harness(runDetail({ summary: null }, { status: 'aborted', executionType: 'boot' }))
+
+    expect(await text('start_external_evaluation_export', {
+      runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
+    })).toBe('run run-1 is a boot session with no test results — run the suite first (start_run), then export that run')
+  })
+
+  it('refuses a benchmark run for the same reason', async () => {
+    const { text } = harness(runDetail({}, { status: 'passed', executionType: 'benchmark' }))
+
+    expect(await text('start_external_evaluation_export', {
+      runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
+    })).toBe('run run-1 is a benchmark session with no test results — run the suite first (start_run), then export that run')
+  })
 })
 
 describe('submit_external_evaluation_export', () => {

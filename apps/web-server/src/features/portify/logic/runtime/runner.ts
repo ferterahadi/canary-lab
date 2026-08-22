@@ -85,9 +85,13 @@ export function createPortifyRunner(deps: PortifyRunnerDeps) {
     // it, save works from its persisted capture) and still owns the feature's
     // in-place config edit — a second workflow would snapshot that PORTIFIED
     // config as its "original" and corrupt the revert chain.
-    if (deps.store.list().some((e) => e.feature === featureName && e.status === 'ready-to-save' && !active.has(e.workflowId))) {
+    const parked = deps.store.list().find((e) => e.feature === featureName && e.status === 'ready-to-save' && !active.has(e.workflowId))
+    if (parked) {
+      // Name the workflow: without the id an external client has no way to
+      // answer the review (save_portify/cancel_portify take a workflowId, and
+      // list_portify_status reports overlays, not live workflow status).
       throw Object.assign(
-        new Error(`A verified port-ification review for "${featureName}" is parked awaiting save/cancel — answer it (or cancel it) first.`),
+        new Error(`A verified port-ification review for "${featureName}" is parked awaiting save/cancel — answer it (or cancel it) first: get_portify("${parked.workflowId}"), then save_portify or cancel_portify with that workflowId.`),
         { statusCode: 409 },
       )
     }

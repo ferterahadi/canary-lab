@@ -42,6 +42,20 @@ describe('pruneDemoStateFromRealHome', () => {
     expect(read(registryDir, 'workspaces.json').workspaces.map((w: any) => w.name)).toEqual(['canary-lab-workspace'])
   })
 
+  it('drops a demo workspace recorded through a symlink-resolved path', () => {
+    const { registryDir, tempRoot } = mkDirs()
+    const realTempRoot = `${tempRoot}-real`
+    fs.mkdirSync(path.join(realTempRoot, 'demo-project'), { recursive: true })
+    fs.symlinkSync(realTempRoot, tempRoot, 'dir')
+    write(registryDir, 'workspaces.json', {
+      version: 1,
+      workspaces: [{ name: 'demo-project', path: path.join(realTempRoot, 'demo-project') }],
+    })
+
+    expect(pruneDemoStateFromRealHome(registryDir, tempRoot)).toEqual(['workspaces.json'])
+    expect(read(registryDir, 'workspaces.json').workspaces).toEqual([])
+  })
+
   // The SIGKILL path: a demo server that never got to unregister itself.
   it('drops a demo server record by projectRoot', () => {
     const { registryDir, tempRoot } = mkDirs()

@@ -95,6 +95,30 @@ describe('start_flight — locating the record before starting one', () => {
     expect(out.note).toBe('resumed the paused flight from its first open stage')
   })
 
+  it('maps a resume refused by an active Getting Started demo to the typed busy result', async () => {
+    // Resuming the demo flight re-claims the workspace demo session, so it can
+    // collide with another active demo exactly like start — the agent needs the
+    // same typed shape, not a generic "resume failed".
+    const { call } = flightHarness({
+      reply: startRoutes({
+        flights: [{ flightId: 'fl-old', feature: 'flight-app', status: 'paused' }],
+        resume: {
+          statusCode: 409,
+          body: { type: 'getting_started_busy', error: 'demo busy', active: { sessionId: 'gs-run' } },
+        },
+      }),
+    })
+
+    const out = await call('start_flight', { feature: 'flight-app' })
+
+    expect(out).toMatchObject({
+      type: 'getting_started_busy',
+      message: 'demo busy',
+      active: { sessionId: 'gs-run' },
+      next: 'Follow the active demo in its current owner; do not start another run or Flight.',
+    })
+  })
+
   it('surfaces a failed resume rather than silently starting fresh', async () => {
     const { text } = flightHarness({
       reply: startRoutes({

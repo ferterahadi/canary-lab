@@ -131,6 +131,13 @@ export const AUTHOR_TOOLS = [
   'delete_feature',
   'get_feature_repo_status',
   'checkout_feature_repo_branch',
+  // Read-only views of the coverage ledger and its source docs. Authoring "a
+  // test for the missing behavior" starts from the gap, and without these the
+  // narrowest profile that can write a spec cannot see which requirement is
+  // untested — the Getting Started "Author Tests" demo dead-ended exactly
+  // there. Writing docs/summaries/mappings stays in COVERAGE_TOOLS.
+  'get_feature_coverage',
+  'list_feature_docs',
   'start_external_draft',
   'update_external_draft_stage',
   'apply_external_draft',
@@ -168,6 +175,11 @@ export const EXPORT_TOOLS = [
 // Flight = the conducted end-to-end pipeline. write_feature_doc rides along so
 // the client can distill conversation docs at the prd-source checkpoint.
 export const FLIGHT_TOOLS = [
+  // Every shipped skill's bootstrap uses list_features as its liveness probe
+  // ("only an unknown-tool error means the server is disconnected") — flight
+  // was the one profile where that probe itself errored, misreporting a
+  // healthy server as disconnected.
+  'list_features',
   'start_flight',
   'get_flight',
   'respond_flight_checkpoint',

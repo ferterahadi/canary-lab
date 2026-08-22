@@ -8,6 +8,16 @@ const REGISTRY_FILES = [
   ['workspaces.json', 'workspaces'],
 ]
 
+function canonicalPath(target) {
+  try {
+    return fs.realpathSync(target)
+  } catch {
+    // A stale registry entry may already be gone; path.resolve still preserves
+    // the previous lexical comparison without making best-effort cleanup fail.
+    return path.resolve(target)
+  }
+}
+
 // Remove every entry in the user's REAL `~/.canary-lab` that points inside a
 // finished demo's temp root.
 //
@@ -27,7 +37,11 @@ const REGISTRY_FILES = [
 // throws: a malformed or read-only registry must not turn a demo exit into a
 // failure.
 export function pruneDemoStateFromRealHome(registryDir, tempRoot, onWarn = () => {}) {
-  const owned = path.resolve(tempRoot) + path.sep
+  // macOS exposes the same temp directory through `/var` and `/private/var`.
+  // Registry writers can record either spelling, so compare filesystem identity
+  // while the retained demo workspace still exists instead of comparing aliases.
+  const ownedRoot = canonicalPath(tempRoot)
+  const ownedPrefix = ownedRoot + path.sep
   const changed = []
   for (const [file, key] of REGISTRY_FILES) {
     const target = path.join(registryDir, file)
@@ -39,7 +53,9 @@ export function pruneDemoStateFromRealHome(registryDir, tempRoot, onWarn = () =>
       // `projectRoot` for a server record, `path` for a workspace one.
       const kept = entries.filter((entry) => {
         const location = entry?.projectRoot ?? entry?.path
-        return typeof location !== 'string' || !path.resolve(location).startsWith(owned)
+        if (typeof location !== 'string') return true
+        const canonicalLocation = canonicalPath(location)
+        return canonicalLocation !== ownedRoot && !canonicalLocation.startsWith(ownedPrefix)
       })
       if (kept.length === entries.length) continue
       fs.writeFileSync(target, `${JSON.stringify({ ...parsed, [key]: kept }, null, 2)}\n`)

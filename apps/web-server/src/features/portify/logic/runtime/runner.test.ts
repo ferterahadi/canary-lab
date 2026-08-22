@@ -370,8 +370,10 @@ describe('createPortifyRunner (integration)', () => {
 
     await reclaimOrphanedPortify(new PortifyRunStore(logsDir), logsDir, () => '2026-06-07T02:00:00.000Z')
     const fresh = makeRunner(featuresDir, logsDir)
+    // The message must NAME the parked workflow: save/cancel take a workflowId,
+    // and an external client has no other way to discover it.
     await expect(fresh.runner.startPortify({ feature: 'myfeat', agent: 'claude' }))
-      .rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining('parked awaiting save/cancel') })
+      .rejects.toMatchObject({ statusCode: 409, message: expect.stringContaining(`get_portify("${workflowId}")`) })
   })
 
   it('save() 404s for an unknown workflow and 409s when not ready', async () => {

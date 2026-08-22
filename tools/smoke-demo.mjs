@@ -55,6 +55,9 @@ const childEnv = {
   CANARY_LAB_HOME: tempRoot,
   CANARY_LAB_AGENT_HOME: tempRoot,
   CANARY_LAB_SKIP_CLIENT_MCP: '1',
+  // The wrapper owns the demo terminal's Ctrl-C. The nested UI still performs
+  // its full graceful shutdown, but must not open a competing stdin prompt.
+  CANARY_LAB_PARENT_OWNS_SHUTDOWN: '1',
   // The scaffold's postinstall downloads the Playwright browser into the
   // developer's shared cache — outside the throwaway workspace. Suppress it and
   // use whatever chromium the machine already has, which is what this script

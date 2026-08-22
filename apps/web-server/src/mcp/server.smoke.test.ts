@@ -66,10 +66,12 @@ const AUTHOR_TOOLS = uniqueSorted([
   'checkout_feature_repo_branch',
   'create_feature',
   'delete_feature',
+  'get_feature_coverage',
   'get_feature_envset_summary',
   'get_feature_repo_status',
   'get_run',
   'get_run_snapshot',
+  'list_feature_docs',
   'list_features',
   'list_runs',
   'start_external_draft',
@@ -105,6 +107,8 @@ const EXPORT_TOOLS = uniqueSorted([
 const FLIGHT_TOOLS = uniqueSorted([
   'abort_flight',
   'get_flight',
+  // The skills' bootstrap liveness probe; see FLIGHT_TOOLS in tool-profiles.ts.
+  'list_features',
   'pause_flight',
   'respond_flight_checkpoint',
   'start_flight',

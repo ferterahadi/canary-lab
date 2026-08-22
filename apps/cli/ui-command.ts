@@ -156,26 +156,34 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     await runStore.abortAllActiveOrStale()
     traceShutdown('cleanup:aborted-runs')
   }
-  const shutdown = async (code: number): Promise<void> => {
-    // Ctrl+C must always exit. If graceful teardown stalls — a service PTY that
-    // ignores SIGTERM, a socket that never drains in app.close() — this watchdog
-    // forces the process out anyway. The safety-critical envset revert runs at
-    // the top of cleanup(), so a forced exit can't leave `.env` on prod.
-    const watchdog = setTimeout(() => {
-      traceShutdown('watchdog:forced-exit')
-      log('Shutdown is taking longer than expected; forcing exit.')
-      exit(code)
-    }, opts.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS)
-    watchdog.unref?.()
-    try {
-      await cleanup()
-      traceShutdown('shutdown:closing-app')
-      try { await app.close() } catch { /* already closed or never fully opened */ }
-      traceShutdown('shutdown:closed-app')
-    } finally {
-      clearTimeout(watchdog)
-      exit(code)
-    }
+  let shutdownPromise: Promise<void> | null = null
+  const shutdown = (code: number): Promise<void> => {
+    // A parent wrapper and the terminal can deliver SIGTERM and SIGINT in the
+    // same turn. Share one teardown so the second signal cannot close the app
+    // and exit while the first cleanup is still stopping agents and runs.
+    if (shutdownPromise) return shutdownPromise
+    shutdownPromise = (async () => {
+      // Ctrl+C must always exit. If graceful teardown stalls — a service PTY that
+      // ignores SIGTERM, a socket that never drains in app.close() — this watchdog
+      // forces the process out anyway. The safety-critical envset revert runs at
+      // the top of cleanup(), so a forced exit can't leave `.env` on prod.
+      const watchdog = setTimeout(() => {
+        traceShutdown('watchdog:forced-exit')
+        log('Shutdown is taking longer than expected; forcing exit.')
+        exit(code)
+      }, opts.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS)
+      watchdog.unref?.()
+      try {
+        await cleanup()
+        traceShutdown('shutdown:closing-app')
+        try { await app.close() } catch { /* already closed or never fully opened */ }
+        traceShutdown('shutdown:closed-app')
+      } finally {
+        clearTimeout(watchdog)
+        exit(code)
+      }
+    })()
+    return shutdownPromise
   }
 
   // A Project Settings port change persists the new port server-side, then asks
@@ -190,7 +198,12 @@ export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promis
     })
   }
 
-  const confirmShutdown = opts.confirmShutdown ?? confirmShutdownFromStdin
+  // Contributor demos have a wrapper that owns the terminal and sends the stop
+  // signal. Auto-confirm there so two processes never read the same TTY.
+  const confirmShutdown = opts.confirmShutdown
+    ?? (process.env.CANARY_LAB_PARENT_OWNS_SHUTDOWN === '1'
+      ? () => Promise.resolve(true)
+      : confirmShutdownFromStdin)
   let sigintConfirmationOpen = false
   process.on('SIGINT', () => {
     if (sigintConfirmationOpen || cleanedUp) return

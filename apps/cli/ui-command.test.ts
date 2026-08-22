@@ -57,6 +57,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreProcessListeners()
+  vi.unstubAllEnvs()
   if (priorAgentHome === undefined) delete process.env.CANARY_LAB_AGENT_HOME
   else process.env.CANARY_LAB_AGENT_HOME = priorAgentHome
   if (agentHome) { fs.rmSync(agentHome, { recursive: true, force: true }); agentHome = undefined }
@@ -218,6 +219,78 @@ describe('runUi signal cleanup', () => {
     expect(revertAllEnvsets).toHaveBeenCalledOnce()
     expect(exit).toHaveBeenCalledWith(130)
     expect(messages).toContain('Shutdown is taking longer than expected; forcing exit.')
+  })
+
+  it('runs one graceful shutdown when SIGINT and SIGTERM arrive together', async () => {
+    const events: string[] = []
+    let releaseStopAgents!: () => void
+    const stopAgents = vi.fn(() => new Promise<void>((resolve) => { releaseStopAgents = resolve }))
+    const runStore = { abortAllActiveOrStale: vi.fn(async () => { events.push('abort-all') }) }
+    const app = {
+      listen: vi.fn(async () => {}),
+      close: vi.fn(async () => { events.push('close') }),
+    }
+    const exit = vi.fn((code: number) => { events.push(`exit-${code}`) })
+
+    mocks.createServer.mockResolvedValue({
+      app,
+      registry: {},
+      revertAllEnvsets: vi.fn(),
+      runStore,
+      brokers: new Map(),
+      draftBrokers: new Map(),
+    })
+
+    await runUi(['--no-open'], {
+      projectRoot: wsRoot,
+      log: () => {},
+      exit,
+      recordActiveServer: () => {},
+      clearActiveServer: () => {},
+      stopAgents,
+      confirmShutdown: async () => true,
+    })
+
+    process.emit('SIGINT')
+    await vi.waitFor(() => expect(stopAgents).toHaveBeenCalledOnce())
+    process.emit('SIGTERM')
+    releaseStopAgents()
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledOnce())
+
+    expect(runStore.abortAllActiveOrStale).toHaveBeenCalledOnce()
+    expect(app.close).toHaveBeenCalledOnce()
+    expect(exit).toHaveBeenCalledExactlyOnceWith(130)
+    expect(events).toEqual(['abort-all', 'close', 'exit-130'])
+  })
+
+  it('skips the stdin confirmation when its parent owns demo shutdown', async () => {
+    vi.stubEnv('CANARY_LAB_PARENT_OWNS_SHUTDOWN', '1')
+    const runStore = { abortAllActiveOrStale: vi.fn(async () => {}) }
+    const app = { listen: vi.fn(async () => {}), close: vi.fn(async () => {}) }
+    const exit = vi.fn()
+
+    mocks.createServer.mockResolvedValue({
+      app,
+      registry: {},
+      revertAllEnvsets: vi.fn(),
+      runStore,
+      brokers: new Map(),
+      draftBrokers: new Map(),
+    })
+
+    await runUi(['--no-open'], {
+      projectRoot: wsRoot,
+      log: () => {},
+      exit,
+      recordActiveServer: () => {},
+      clearActiveServer: () => {},
+    })
+
+    process.emit('SIGINT')
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledExactlyOnceWith(130))
+
+    expect(runStore.abortAllActiveOrStale).toHaveBeenCalledOnce()
+    expect(app.close).toHaveBeenCalledOnce()
   })
 })
 

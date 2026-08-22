@@ -121,6 +121,16 @@ describe('DemoDialog', () => {
     expect(q('demo-dialog')?.querySelector('[role="tablist"]')).toBeNull()
   })
 
+  it('gates the external command behind the same blocker as the action button', () => {
+    // "Complete Run and Heal first." is a real precondition: the pasted command
+    // would hit the same missing prerequisite in the agent, so the copy field
+    // must not stay live while the button is blocked.
+    render({ actionBlockers: { export: 'Complete Run and Heal first.' } })
+    click(q('getting-started-workflow-export'))
+    expect((q('getting-started-action-export') as HTMLButtonElement).disabled).toBe(true)
+    expect((q('getting-started-copy-export') as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('shows the exact slash command and says where to paste it', async () => {
     render()
     expect(q('getting-started-command-run')?.textContent).toContain('/canary-lab-run exact-run')

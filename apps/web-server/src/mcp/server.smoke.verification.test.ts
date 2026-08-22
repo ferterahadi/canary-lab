@@ -106,7 +106,7 @@ describe('MCP HTTP server (smoke)', () => {
       startVerification: async (feature, input) => {
         executions.push({ feature, input })
         harnessStore!.bootstrap({
-          runId: 'verify-run-1',
+          runId: `verify-run-${executions.length}`,
           executionType: 'verify',
           feature,
           env: input.playwrightEnvsetId,
@@ -121,7 +121,7 @@ describe('MCP HTTP server (smoke)', () => {
             targets: [{ id: 'api-server', name: 'api', url: 'https://api.example.com' }],
           },
         })
-        return { runId: 'verify-run-1' }
+        return { runId: `verify-run-${executions.length}` }
       },
     })
     harnessStore = runStore
@@ -186,6 +186,28 @@ describe('MCP HTTP server (smoke)', () => {
           },
         },
       ])
+
+      // The local "verify a running app" flow: bootRunId must reach the route
+      // input untouched — it is what exempts the held boot session from the
+      // active-run collision check and tears it down when verification starts.
+      const bootHandoff = await client.callTool({
+        name: 'execute_verification',
+        arguments: {
+          featureId: 'checkout',
+          playwrightEnvsetId: 'local',
+          targetUrls: { 'api-server': 'http://127.0.0.1:4600' },
+          bootRunId: 'boot-run-9',
+        },
+      })
+      expect(JSON.parse(toolText(bootHandoff))).toMatchObject({ executionId: 'verify-run-2' })
+      expect(executions[1]).toEqual({
+        feature: 'checkout',
+        input: {
+          playwrightEnvsetId: 'local',
+          targetUrls: { 'api-server': 'http://127.0.0.1:4600' },
+          bootRunId: 'boot-run-9',
+        },
+      })
 
       runStore.patchManifest('verify-run-1', {
         status: 'failed',

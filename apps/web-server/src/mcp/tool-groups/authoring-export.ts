@@ -32,6 +32,14 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     if (!isTerminalRunStatus(detail.manifest.status)) {
       return errorResult('evaluation export is available after the run finishes')
     }
+    // A boot session runs no tests and a benchmark is not a suite verdict, so
+    // neither has anything to evaluate — "terminal" alone admits both (a fresh
+    // workspace even ships an aborted boot run), and exporting one produces a
+    // plausible-looking but empty evaluation. Mirrors the GUI gate in App.tsx.
+    const executionType = detail.manifest.executionType ?? 'run'
+    if (executionType === 'boot' || executionType === 'benchmark') {
+      return errorResult(`run ${runId} is a ${executionType} session with no test results — run the suite first (start_run), then export that run`)
+    }
     // Record shape + persistence shared with the flight's export hand-off.
     const task = createExternalEvaluationExportTask({
       logsDir: deps.store.logsDir,

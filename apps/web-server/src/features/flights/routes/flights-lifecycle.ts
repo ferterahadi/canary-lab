@@ -7,7 +7,9 @@ import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightNotParkedError, FlightStageEntryError, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
-import { rejectForeignFlightDecision } from './flight-decision-origin'
+import { MCP_ORIGIN_HEADER, rejectForeignFlightDecision } from './flight-decision-origin'
+import { isGettingStartedFlightStart } from '../../config/routes/onboarding'
+import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
 
 export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
@@ -50,10 +52,33 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   app.post<{ Params: { id: string } }>('/api/flights/:id/resume', async (req, reply) => {
     const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
     if (foreign) return foreign
+    // Pausing settles the Getting Started claim (a paused flight must not hold
+    // the workspace forever), so resuming the demo flight has to RE-claim it —
+    // without this the resumed demo ran untracked and a second demo could start
+    // against the same workspace. Owner comes from the same origin header the
+    // decision guard reads; skip when this flight already holds the claim.
+    let gettingStartedSession: string | null = null
     try {
+      const record = store.get(req.params.id)
+      if (record && deps.gettingStarted && isGettingStartedFlightStart({ feature: record.feature })) {
+        const active = deps.gettingStarted.read().active
+        const alreadyOwns = active?.target?.kind === 'flight' && active.target.id === req.params.id
+        if (!alreadyOwns) {
+          const owner = req.headers[MCP_ORIGIN_HEADER] === 'mcp' ? 'external' : 'internal'
+          gettingStartedSession = deps.gettingStarted.claim('flight', owner).sessionId
+        }
+      }
       const { manifest } = resumeFlight(req.params.id, conductorDeps)
+      if (gettingStartedSession) {
+        deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })
+      }
       return manifest
     } catch (err) {
+      if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
+      if (err instanceof GettingStartedBusyError) {
+        reply.code(409)
+        return { type: err.type, error: err.message, active: err.active }
+      }
       const message = err instanceof Error ? err.message : String(err)
       reply.code(message.includes('not found') ? 404 : 409)
       return { error: message }

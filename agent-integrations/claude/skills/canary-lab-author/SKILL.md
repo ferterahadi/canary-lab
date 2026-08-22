@@ -12,6 +12,14 @@ already connected (the plugin connects with `full`), skip this step. To
 configure a connection manually: `npx canary-lab mcp --profile author` (the
 composite `lifecycle`/`full` profiles carry the same tools).
 
+## Arguments
+
+An invocation argument (`/canary-lab-author <suite>` — the Getting Started
+guide's "Author Tests" card emits exactly this shape) is the name of an
+EXISTING suite (feature) in the connected workspace. Follow the
+**extend-an-existing-feature** path below — never `create_feature` for it,
+and never rename it to dodge a collision.
+
 ## Workspace Bootstrap
 
 1. Find the LIVE server first: read `~/.canary-lab/active-servers.json`, which records `projectRoot`, `port` and `pid` for every UI that registered. A stopped server's entry LINGERS — the file is only rewritten when the next server registers — so an entry is a candidate, not proof: the health check below is what confirms it. One entry → that is your server and its `port`. Several → take the one whose `projectRoot` is the workspace the user means. None → fall back to `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`): one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`. Do NOT start from a guessed port.
@@ -22,7 +30,9 @@ composite `lifecycle`/`full` profiles carry the same tools).
 
 ## Create or Extend a Feature
 
-1. For random or new feature creation, call `create_feature` directly with a unique feature name. It creates the skeleton files and returns test-file rules, envset schema, and next-step tool hints. Do not call `list_features` just to avoid collisions; if the chosen name already exists, retry `create_feature` with a different unique name.
+1. Pick the path by what the request names:
+   - **Extending an EXISTING feature** ("author tests for <feature>", "add a test for the missing behavior"): do NOT call `create_feature` — the feature and its skeleton already exist. To choose WHAT to test, `get_feature_coverage(feature)` names the untested / path-incomplete requirements (that IS the "choose a gap" step), and `list_feature_docs(feature)` points at the requirement docs behind them. Author the new spec straight into `<workspace>/features/<feature>/e2e/`, and tag it with the requirement it covers — `test('…', { tag: ['@req-R2'] }, …)` — so the gap actually closes in the coverage ledger.
+   - **Creating a NEW feature**: call `create_feature` directly with a unique feature name. It creates the skeleton files and returns test-file rules, envset schema, and next-step tool hints. Do not call `list_features` just to avoid collisions; if the name you INVENTED already exists, retry `create_feature` with a different unique name — but never rename away from a feature the user asked for (that is the extending path above).
 2. If the user asks to preserve existing `.env`, `.env.dev`, `application.properties`, or similar repo config files, inspect the source repo enough to identify the files, then call `capture_feature_env_files`. Do not paste secret values into chat; Canary Lab returns redacted previews only. `write_envset` fills in or corrects individual envset values (it is confirm-gated).
 3. Author or edit specs under `<workspace>/features/<feature>/e2e/` — the Canary Lab WORKSPACE, not the product repo under test.
 4. Specs must import:
@@ -38,4 +48,4 @@ composite `lifecycle`/`full` profiles carry the same tools).
 
 - Keep the same `session_id` for the whole conversation.
 - Canary Lab never writes the test body for external authoring — this client does.
-- After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`).
+- After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`). **Running the new test** needs the run tools: on the plugin (`full`) or a default `lifecycle` connection `start_run` is already available — follow `canary-lab-run`. On a narrow `--profile author` connection it is NOT: don't conclude the server is broken; reconnect with `npx canary-lab mcp` (the default `lifecycle` carries both surfaces) and then run.

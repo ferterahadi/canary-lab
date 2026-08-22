@@ -145,7 +145,10 @@ function resolveMore(workflow: OnboardingWorkflow, session: GettingStartedSessio
   return {
     actionLabel: launching ? 'Starting…' : actionLabel,
     actionDisabled: blocked || launching || unavailableReason !== null || !workflow.internalAction,
-    copyDisabled: blocked || launching || workflow.unavailableReason !== null,
+    // The folded reason, not the raw field: a precondition blocker ("Complete
+    // Run and Heal first.") gates the external prompt exactly like the button —
+    // the copied command would hit the same missing prerequisite in the agent.
+    copyDisabled: blocked || launching || unavailableReason !== null,
     onAction: onLaunch,
     feedback,
   }

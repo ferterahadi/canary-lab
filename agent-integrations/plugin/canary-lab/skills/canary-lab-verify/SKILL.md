@@ -1,17 +1,25 @@
 ---
 name: canary-lab-verify
-description: Use when verifying a Canary Lab feature against a DEPLOYED environment (staging/production URL) — "verify checkout on staging", "run the saved verify config", "check the deployed app" — through the verify MCP tools (list/get/create/update_verification_config, execute_verification, get_verification_result). No local boot, no heal loop. For local run + heal use canary-lab-run; for end-to-end onboarding use canary-lab (flight).
+description: Use when verifying a Canary Lab feature against a RUNNING target — a deployed environment ("verify checkout on staging", "run the saved verify config", "check the deployed app") or a locally booted app ("verify a running app", the Getting Started demo) — through the verify MCP tools (list/get/create/update_verification_config, boot_services, execute_verification, get_verification_result). No heal loop. For run + heal use canary-lab-run; for end-to-end onboarding use canary-lab (flight).
 type: skill
 ---
 
-# Canary Lab — Deployed-Environment Verification
+# Canary Lab — Environment Verification
 
 These tools arrive via the Canary Lab MCP server. If this client is already
 connected (the plugin connects with `full`), skip this step. To configure a
 connection manually: `npx canary-lab mcp --profile verify` (the composite
 `lifecycle`/`full` profiles carry the same tools). Verification runs the
-feature's Playwright specs against a saved environment config (remote URLs)
-— services are NOT booted locally and there is no heal loop.
+feature's Playwright specs against target URLs — a deployed environment
+(saved config, remote URLs) or a local app you first bring up with
+`boot_services`. There is no heal loop either way.
+
+## Arguments
+
+An invocation argument (`/canary-lab-verify <suite>` — the Getting Started
+guide's "Verify a Running App" card emits exactly this shape) is a suite
+(feature) name in the connected workspace. Use it directly, and for that
+demo follow the **Local app** flow below: boot the app, then verify it.
 
 ## Workspace Bootstrap
 
@@ -22,11 +30,19 @@ feature's Playwright specs against a saved environment config (remote URLs)
 
 ## Verification Loop
 
-1. `list_verification_configs` (optionally filtered by feature) shows the saved configs; `get_verification_config` reads one. In the UI, "Playwright" names which env file the specs run with and "Services" names the health-check targets — keep those domain labels when relaying.
+**Local app** ("verify a running app" — the target is this workspace's own app, not a remote URL):
+
+1. `boot_services(feature)` boots the app's services and HOLDS them (no tests yet). Note the returned `runId` — it is the `bootRunId` everything below needs.
+2. Poll `get_run(bootRunId)` until every `manifest.services[]` entry is `status: "ready"` (a `failed`/`timeout` service means the app itself won't start — report it; `abort_run` tears the boot down). Build `targetUrls` from the services: one entry per service, keyed by service name, valued with the **origin** of its `healthUrl` (scheme + host + port, no path).
+3. `execute_verification(feature, { targetUrls, playwrightEnvsetId: "local", bootRunId })`. Passing `bootRunId` is required — without it the held boot session itself trips the active-run collision check (409 "Another execution is running"); with it, Canary tears the boot down as the verification starts. Then continue at the polling step below.
+
+**Deployed environment** (staging/production URLs):
+
+1. `list_verification_configs` (optionally filtered by feature) shows the saved configs; `get_verification_config` reads one. In the UI, "Playwright" names which env file the specs run with and "Services" names the health-check targets — keep those domain labels when relaying. A config whose URLs contain `replace.invalid` is a scaffolded placeholder — never execute it as-is; update it with real URLs first (or use the Local app flow above).
 2. Create or adjust a config with `create_verification_config` / `update_verification_config` — a config binds a feature to a target environment (base URLs, env set, health-check expectations). Ask the user for the target URLs rather than inventing them.
 3. `execute_verification` starts the verification run. `featureId` is required; pass either a saved `configId`, or ad-hoc `targetUrls` + `playwrightEnvsetId`. It returns an `executionId`.
-4. Poll `get_verification_result(executionId)` for the outcome; if it is still running, wait ~10s and call it again — stop once it reaches a terminal status. Report the result's `status`, and on failure the pass/fail counts in the result (`diagnostics.summary` / `diagnostics.failedTests` — there is no `counts` field on a verify result). There is no heal claim here — a failure is a finding to report (and possibly a `canary-lab-run` follow-up locally), not something to fix against the deployed environment.
-5. `boot_services` / `abort_run` exist in this profile for held boot sessions when a config needs a locally booted dependency — use them only when the config genuinely requires it, and only abort with the user's confirmation.
+
+**Both flows end the same way**: poll `get_verification_result(executionId)` for the outcome; if it is still running, wait ~10s and call it again — stop once it reaches a terminal status. Report the result's `status`, and on failure the pass/fail counts in the result (`diagnostics.summary` / `diagnostics.failedTests` — there is no `counts` field on a verify result). There is no heal claim here — a failure is a finding to report (and possibly a `canary-lab-run` follow-up locally), not something to fix against the target environment. Only `abort_run` a held boot session with the user's confirmation (the `bootRunId` hand-off above tears it down automatically).
 
 ## Guardrails
 

@@ -26,17 +26,31 @@ actually passed in the latest run (omitted when no run is recorded).
 3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up.
 4. A healthy `/mcp/health` means these tools are live even when they look absent from this session. A tool search that indexes only deferred tools says nothing about loaded ones — call `list_features` directly before concluding anything. Only an unknown-tool error means the server is really not connected: ask the user to reconnect, then retry. **Never** drive `/mcp` with a hand-written HTTP/JSON-RPC client (curl included; the health check above is the only direct HTTP use): a hand-rolled client bypasses the connection's client detection, so the Canary Lab UI mis-brands the session, and it loses the session and reconnect handling these tools rely on.
 
+## Arguments
+
+An invocation argument (`/canary-lab-coverage <suite>` — the Getting Started
+guide's "Measure Coverage" card emits exactly this shape) is a suite
+(feature) name in the connected workspace — go straight to its ledger.
+
 ## Coverage Loop
 
-Coverage needs a real source doc to ground on. If `get_feature_coverage` is
-**blocked** (`state.coverage: "blocked"`), read its `next:` field and follow
-it — don't present a menu. When `next` reports no source doc ("Setup
-needed", `sourceDocCount: 0`), **ask the user to attach or paste the
-PRD/spec in the chat** — never invent one or pull an external file. Drop
-source docs (specs, tickets, notes) into the feature with `write_feature_doc`
-first.
+**Start by reading the ledger, not by regenerating it**: call
+`get_feature_coverage(feature)` first and branch on `state`:
 
-**Step 1 — PRD summary** (author it YOURSELF; no local agent):
+- `state.summary: "fresh"` → **skip Step 1 entirely.** The shipped/stored
+  summary is current; re-running it is not just wasted work — a re-run that
+  fails to echo the previous requirement ids mints fresh ones and orphans
+  every existing `@req-*` tag, flipping covered requirements to untested.
+  Go to Step 2 (or, if the mapping is also fresh, just report the ledger).
+- `state.summary` `stale`/`absent` → run Step 1 (echo the previous ids!).
+- `state.coverage: "blocked"` → read the ledger's `next:` field and follow
+  it — don't present a menu. When `next` reports no source doc ("Setup
+  needed", `sourceDocCount: 0`), **ask the user to attach or paste the
+  PRD/spec in the chat** — never invent one or pull an external file. Drop
+  source docs (specs, tickets, notes) into the feature with
+  `write_feature_doc` first.
+
+**Step 1 — PRD summary** (only when stale/absent; author it YOURSELF; no local agent):
 
 1. `start_external_summary(feature)` → returns a `jobId`, the source-doc
    paths, the previous requirement ids to PRESERVE, and a `prompt`.

@@ -18,17 +18,67 @@ function allDone(): StageAdapters {
   }])) as StageAdapters
 }
 
-async function appWith(gettingStarted: GettingStartedSessionStore) {
+async function appWith(gettingStarted: GettingStartedSessionStore, adapters: StageAdapters = allDone()) {
   const app = Fastify({ logger: false })
   await app.register(flightsRoutes, {
     featuresDir: path.join(tmpDir, 'features'),
     logsDir: path.join(tmpDir, 'logs'),
     projectRoot: tmpDir,
-    adapters: allDone(),
+    adapters,
     gettingStarted,
   })
   return app
 }
+
+/** Adapters whose first stage parks a checkpoint, so the flight stays active
+ *  (waiting-for-approval) long enough to be paused and resumed. */
+function parking(): StageAdapters {
+  const adapters = allDone()
+  adapters.scout = {
+    run: async () => ({ kind: 'checkpoint' as const, checkpoint: { kind: 'config-approval', message: 'approve?' } }),
+    onCheckpointResponse: async () => ({ kind: 'done' as const }),
+    teardown: () => null,
+  }
+  return adapters
+}
+
+async function waitForStatus(app: Awaited<ReturnType<typeof appWith>>, flightId: string, statuses: string[]): Promise<void> {
+  const deadline = Date.now() + 3000
+  for (;;) {
+    const manifest = (await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })).json() as { status?: string }
+    if (statuses.includes(String(manifest.status))) return
+    if (Date.now() > deadline) throw new Error(`flight never reached ${statuses.join('/')}: ${String(manifest.status)}`)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+function mkRepo(name: string): string {
+  const dir = path.join(tmpDir, name)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+/** Start a flight and wait for its first checkpoint to park (requires the
+ *  `parking()` adapters), returning the flightId ready to pause/resume. */
+async function startParkedFlight(
+  app: Awaited<ReturnType<typeof appWith>>,
+  input: { feature: string; repoPath: string; gettingStartedSource?: 'internal' | 'external' },
+): Promise<string> {
+  const response = await app.inject({
+    method: 'POST', url: '/api/flights',
+    payload: {
+      feature: input.feature, repoPaths: [input.repoPath], description: 'lending',
+      ...(input.gettingStartedSource ? { gettingStartedSource: input.gettingStartedSource } : {}),
+    },
+  })
+  expect(response.statusCode).toBe(201)
+  const flightId = response.json<{ flightId: string }>().flightId
+  await waitForStatus(app, flightId, ['waiting-for-approval'])
+  return flightId
+}
+
+const startParkedDemoFlight = (app: Awaited<ReturnType<typeof appWith>>) =>
+  startParkedFlight(app, { feature: 'flight-app', repoPath: repoDir, gettingStartedSource: 'internal' })
 
 beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-flight-demo-')))
@@ -89,6 +139,114 @@ describe('Getting Started flight admission', () => {
     // Swallowing this would leave the demo permanently unclaimable while
     // reporting success, so it must surface rather than degrade.
     expect(response.statusCode).toBe(500)
+  })
+
+  it('re-claims the demo session when the Getting Started flight is resumed', async () => {
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockReturnValueOnce({ sessionId: 'gs-resume' })
+    const attach = vi.fn()
+    const read = vi.fn(() => ({ active: null, completed: {} }))
+    const app = await appWith({ claim, attach, abandon: vi.fn(), read } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+
+    expect((await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })).statusCode).toBe(200)
+    const resumed = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })
+
+    expect(resumed.statusCode).toBe(200)
+    // Pausing settled the claim; without the re-claim the resumed demo runs
+    // untracked and a second demo can start against the same workspace.
+    expect(claim).toHaveBeenNthCalledWith(2, 'flight', 'internal')
+    expect(attach).toHaveBeenNthCalledWith(2, 'gs-resume', { kind: 'flight', id: flightId })
+  })
+
+  it('claims the resume as external when it arrives from the MCP client', async () => {
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockReturnValueOnce({ sessionId: 'gs-resume' })
+    const app = await appWith({
+      claim, attach: vi.fn(), abandon: vi.fn(), read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+    const resumed = await app.inject({
+      method: 'POST', url: `/api/flights/${flightId}/resume`, headers: { 'x-canary-origin': 'mcp' },
+    })
+
+    expect(resumed.statusCode).toBe(200)
+    expect(claim).toHaveBeenNthCalledWith(2, 'flight', 'external')
+  })
+
+  it('refuses the resume with the typed conflict while another demo owns the workspace', async () => {
+    const otherDemo = {
+      sessionId: 'gs-run', workflow: 'run' as const, owner: 'internal' as const,
+      target: { kind: 'run' as const, id: 'run-live' }, startedAt: 'a', updatedAt: 'a',
+    }
+    const claim = vi.fn()
+      .mockImplementationOnce(() => ({ sessionId: 'gs-start' }))
+      .mockImplementationOnce(() => { throw new GettingStartedBusyError(otherDemo) })
+    const app = await appWith({
+      claim, attach: vi.fn(), abandon: vi.fn(), read: () => ({ active: otherDemo, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+    const resumed = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })
+
+    expect(resumed.statusCode).toBe(409)
+    expect(resumed.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+  })
+
+  it('releases the re-claim when the resume itself is refused', async () => {
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockReturnValueOnce({ sessionId: 'gs-resume' })
+    const abandon = vi.fn()
+    const app = await appWith({
+      claim, attach: vi.fn(), abandon, read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+
+    // Finish the flight: a done flight still matches the demo feature, so the
+    // resume claims first and must release when resumeFlight refuses.
+    await app.inject({
+      method: 'POST', url: `/api/flights/${flightId}/respond`,
+      payload: { response: { choice: 'approve' } },
+    })
+    await waitForStatus(app, flightId, ['done'])
+    const resumed = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })
+
+    expect(resumed.statusCode).toBe(409)
+    expect(abandon).toHaveBeenCalledWith('gs-resume')
+  })
+
+  it('skips the re-claim when the session already owns this flight, and for non-demo flights', async () => {
+    const claim = vi.fn(() => ({ sessionId: 'gs-start' }))
+    const app = await appWith({
+      claim,
+      attach: vi.fn(),
+      abandon: vi.fn(),
+      read: vi.fn(() => ({
+        active: {
+          sessionId: 'gs-start', workflow: 'flight' as const, owner: 'internal' as const,
+          target: { kind: 'flight' as const, id: ownedFlightId }, startedAt: 'a', updatedAt: 'a',
+        },
+        completed: {},
+      })),
+    } as unknown as GettingStartedSessionStore, parking())
+    const ownedFlightId = await startParkedDemoFlight(app)
+    claim.mockClear()
+
+    await app.inject({ method: 'POST', url: `/api/flights/${ownedFlightId}/pause` })
+    expect((await app.inject({ method: 'POST', url: `/api/flights/${ownedFlightId}/resume` })).statusCode).toBe(200)
+    expect(claim).not.toHaveBeenCalled()
+
+    // A non-demo feature never touches the session, active or not.
+    const other = await startParkedFlight(app, { feature: 'checkout', repoPath: mkRepo('checkout-repo') })
+    await app.inject({ method: 'POST', url: `/api/flights/${other}/pause` })
+    expect((await app.inject({ method: 'POST', url: `/api/flights/${other}/resume` })).statusCode).toBe(200)
+    expect(claim).not.toHaveBeenCalled()
   })
 
   it('releases the claim when the flight itself refuses to start', async () => {

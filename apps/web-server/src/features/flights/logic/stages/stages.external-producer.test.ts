@@ -146,6 +146,19 @@ describe('scout — external producer', () => {
     expect((cp.data.context as { lastRejection: string }).lastRejection).toBe('no draft was submitted')
   })
 
+  it('re-parks a submission that is not JSON at all, naming the decode failure', async () => {
+    // "Not JSON" and "JSON of the wrong shape" need different messages on the
+    // re-park — this pins the decode-failure arm, not the shape-validation one.
+    const { ctx, setStage } = ctxFor(manifest())
+    setStage('scout', { checkpoint: { kind: 'external-work', message: 'x' } })
+    const cp = handOffOf(await scoutStage(deps()).onCheckpointResponse!(ctx, {
+      choice: 'submit',
+      data: 'here is my draft, plain prose with no JSON anywhere',
+    }))
+    expect(cp.kind).toBe('external-work')
+    expect((cp.data.context as { lastRejection: string }).lastRejection).toBe('the submission was not parseable JSON')
+  })
+
   it('a re-park keeps the flight advanceable — the next, valid submit settles it', async () => {
     const { ctx, setStage } = ctxFor(manifest())
     setStage('scout', { checkpoint: { kind: 'external-work', message: 'x' } })

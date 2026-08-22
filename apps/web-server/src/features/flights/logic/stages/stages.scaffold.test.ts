@@ -249,6 +249,20 @@ describe('scaffold stage', () => {
       .toContain('via-encoded-mcp')
   })
 
+  it('an undecodable data payload drops the edit and approves the disk config', async () => {
+    // The decode-failure arm: a plain-prose payload carries no configSource, so
+    // nothing is written through and the config approved is the one on disk.
+    const adapter = scaffoldStage(deps())
+    const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))
+    const parked = await adapter.run(ctx)
+    if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    setStage('scaffold', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
+    const before = fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8')
+    const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve', data: 'plain prose, no JSON anywhere' })
+    expect(outcome).toMatchObject({ kind: 'done', evidence: { approved: true } })
+    expect(fs.readFileSync(path.join(featuresDir, 'checkout', 'feature.config.cjs'), 'utf-8')).toBe(before)
+  })
+
   it('redraft rewinds to scout for a fresh draft', async () => {
     const adapter = scaffoldStage(deps())
     const { ctx, setStage } = ctxFor(withScoutEvidence(manifest(), VALID_CONFIG()))

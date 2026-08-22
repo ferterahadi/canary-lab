@@ -167,20 +167,22 @@ export function registerReadTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('execute_verification', {
-    description: 'Execute Verify for a deployed environment. This never starts local services and never starts healing.',
+    description: 'Execute Verify against target URLs — a deployed environment, or a local app you already booted with boot_services (pass that boot runId as bootRunId; the boot session is torn down when the verification run starts). This never boots services itself and never starts healing. Without bootRunId, any active run — a held boot session included — is a 409 collision.',
     inputSchema: {
       featureId: z.string().describe('Feature name.'),
       configId: z.string().optional().describe('Saved verification config id.'),
-      targetUrls: z.record(z.string(), z.string()).optional().describe('Target URLs keyed by verification target id.'),
-      playwrightEnvsetId: z.string().optional().describe('Playwright envset to apply for verification.'),
+      targetUrls: z.record(z.string(), z.string()).optional().describe('Target URLs keyed by verification target id. For a local boot_services session, derive each from get_run(bootRunId): the origin of manifest.services[].healthUrl.'),
+      playwrightEnvsetId: z.string().optional().describe('Playwright envset to apply for verification (e.g. "local" when verifying a boot_services session).'),
+      bootRunId: z.string().optional().describe('Active boot_services runId for this feature. Exempts that session from the active-run collision check and stops it once verification starts.'),
     },
-  }, async ({ featureId, configId, targetUrls, playwrightEnvsetId }) => {
+  }, async ({ featureId, configId, targetUrls, playwrightEnvsetId, bootRunId }) => {
     if (!deps.startVerification) return errorResult('startVerification dependency is not configured')
     try {
       const started = await deps.startVerification(featureId, {
         ...(configId ? { configId } : {}),
         ...(targetUrls ? { targetUrls } : {}),
         ...(playwrightEnvsetId ? { playwrightEnvsetId } : {}),
+        ...(bootRunId ? { bootRunId } : {}),
       })
       const detail = deps.store.get(started.runId)
       if (!detail) {

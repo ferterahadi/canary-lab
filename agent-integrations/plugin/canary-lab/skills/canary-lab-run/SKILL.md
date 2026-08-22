@@ -12,6 +12,12 @@ already connected (the plugin connects with `full`), skip this step. To
 configure a connection manually: `npx canary-lab mcp --profile repair` (the
 composite `lifecycle`/`full` profiles carry the same tools).
 
+## Arguments
+
+An invocation argument (`/canary-lab-run <suite>` — the Getting Started
+guide's "Repair a Broken Suite" card emits exactly this shape) is a suite
+(feature) name in the connected workspace: pass it to `start_run` directly.
+
 ## Workspace Bootstrap
 
 1. Find the LIVE server first: read `~/.canary-lab/active-servers.json`, which records `projectRoot`, `port` and `pid` for every UI that registered. A stopped server's entry LINGERS — the file is only rewritten when the next server registers — so an entry is a candidate, not proof: the health check below is what confirms it. One entry → that is your server and its `port`. Several → take the one whose `projectRoot` is the workspace the user means. None → fall back to `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`): one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`. Do NOT start from a guessed port.

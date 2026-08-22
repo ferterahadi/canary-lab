@@ -211,7 +211,18 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     }
     if (latest && latest.status === 'paused' && !fresh && !redo && !from_stage) {
       const resumed = await deps.flightsRequest({ method: 'POST', url: `/api/flights/${encodeURIComponent(latest.flightId)}/resume` })
-      if (resumed.statusCode !== 200) return errorResult(`resume failed (${resumed.statusCode}): ${String((resumed.body as { error?: string }).error ?? '')}`)
+      const resumedBody = resumed.body as { error?: string; type?: string; active?: unknown }
+      // Resuming the Getting Started demo flight re-claims the workspace demo
+      // session, so it can collide with another active demo exactly like start.
+      if (resumed.statusCode === 409 && resumedBody.type === 'getting_started_busy') {
+        return asJsonResult({
+          type: 'getting_started_busy',
+          active: resumedBody.active,
+          message: resumedBody.error,
+          next: 'Follow the active demo in its current owner; do not start another run or Flight.',
+        })
+      }
+      if (resumed.statusCode !== 200) return errorResult(`resume failed (${resumed.statusCode}): ${String(resumedBody.error ?? '')}`)
       const view = flightView(resumed.body)
       return asJsonResult({ ...view, note: 'resumed the paused flight from its first open stage', next: flightNext(view) })
     }

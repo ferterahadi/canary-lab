@@ -116,7 +116,9 @@ export interface CanaryLabMcpDeps {
   ) => Promise<{ runId: string; mode?: 'remaining' }>
   startVerification?: (
     feature: string,
-    input: ResolveVerificationInput,
+    // bootRunId rides alongside the resolve input: the REST route consumes it
+    // for the collision exemption + boot teardown before resolving the rest.
+    input: ResolveVerificationInput & { bootRunId?: string },
   ) => Promise<{ runId: string }>
   /** PUT /api/features/:name/envsets/:env/:slot — overwrites a slot file's
    *  parsed entries. Provided as a dep so MCP `write_envset` can reuse the

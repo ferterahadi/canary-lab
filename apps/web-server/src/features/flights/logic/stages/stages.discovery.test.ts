@@ -402,6 +402,16 @@ describe('scout stage', () => {
       expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining('checkout-edited') } })
     })
 
+    it('approve with an undecodable data payload keeps the stored draft', async () => {
+      // decode failure on the legacy release path is not an error: the edit is
+      // simply absent, so the parked draft settles unchanged rather than a
+      // string payload being read as `.configSource === undefined`.
+      const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
+      const { ctx } = legacyParked(VALID_CONFIG())
+      const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'approve', data: 'plain prose, no JSON anywhere' })
+      expect(outcome).toMatchObject({ kind: 'done', evidence: { configSource: expect.stringContaining('module.exports') } })
+    })
+
     it('approve fails when the user-edited configSource does not parse', async () => {
       const adapter = scoutStage(deps({ spawnAgent: async () => ({ text: draftJson(VALID_CONFIG()) }) }))
       const { ctx } = legacyParked(VALID_CONFIG())

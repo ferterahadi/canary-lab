@@ -44,12 +44,22 @@ families (`canary-lab`, `-run`, `-verify`, `-author`, `-coverage`, `-portify`,
 | 3 | Shipped run-loop skills | `canary-lab-run/SKILL.md` in all three channels (locate them with the grep) | The full external loop: claim → wait → fix → signal |
 | 4 | Other shipped skill families | `canary-lab{,-verify,-author,-coverage,-portify,-export}/SKILL.md` | Touch only when the changed semantic is theirs — grep decides |
 
-Channel differences to preserve when editing #3/#4:
+Channel differences to preserve when editing #3/#4 (re-measured 2026-08-22 —
+the convention EVOLVED; an older version of this section claimed codex files
+had their own frontmatter, which is no longer true):
 
-- **codex** — Codex-addressed `description` wording; no `type: skill` field (Claude-only).
-  A whole-file copy from the Claude version clobbers this.
-- **plugin** — deliberately condensed: keep run-loop steps, guardrails, and pass-count
-  rules; drop authoring/export detail. Don't paste the full Claude skill in.
+- **codex** — the `SKILL.md` is a **byte-identical copy** of the Claude one,
+  `type: skill` frontmatter included. Codex-specific addressing lives in the
+  sibling `agents/openai.yaml` (only the codex channel has it) — never touch
+  that file when syncing a semantic. Procedure: edit the Claude file, then
+  copy it over the codex one (`cp`), keeping `agents/openai.yaml` in place.
+- **plugin** — near-parity, NOT a rewrite: it matches the Claude file except
+  a condensed bootstrap "tools look missing" sentence (every skill) and a
+  condensed PR section (`canary-lab-run` only). Apply the same edit to the
+  plugin file; never paste the whole Claude file over it — that clobbers the
+  condensed lines.
+- Key phrases are pinned across all three mirrors by `apps/cli/agent.test.ts`
+  ("instructs agents to verify fixes with signal_run…") — run it after syncing.
 - Neither skill passes `client_kind` — the bridge auto-detects it from the connection.
 
 ## Semantics that must agree everywhere
@@ -103,5 +113,5 @@ Channel differences to preserve when editing #3/#4:
 | Working from a hardcoded surface list (this doc's old "three SKILL.md files") | You edit the umbrella `canary-lab` skill while the run loop in `canary-lab-run` stays stale — the exact drift this skill exists to prevent |
 | Updating instructions but not tool results (or vice versa) | Skill-less clients follow results, skill-carrying clients follow prose — they diverge |
 | Rewording the repair rule "for clarity" | It's a guardrail, not copy. Weakened wording is how "fix the app" quietly becomes "make it green" |
-| Copying the Claude skill verbatim into the plugin skill | Plugin skill balloons; the condensation was intentional |
-| Copying the Claude skill file verbatim over the codex one | Bodies match, but the frontmatter differs (Codex-addressed description; `type: skill` is Claude-only) |
+| Copying the Claude skill verbatim into the plugin skill | Clobbers the plugin's deliberately condensed lines (bootstrap sentence; run's PR section) |
+| Hand-editing the codex `SKILL.md` independently | It must stay a byte copy of the Claude file — edit Claude, then `cp`; codex identity lives in `agents/openai.yaml`, not the frontmatter |
