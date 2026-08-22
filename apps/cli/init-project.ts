@@ -142,6 +142,42 @@ export function commitScaffold(targetDir: string): void {
   }
 }
 
+/** The sample product repos the scaffold lays down beside `features/`. */
+const SAMPLE_REPO_DIRS = ['demo-app', 'flight-app', 'workflow-app'] as const
+
+/** Make each shipped sample app its own committed git repository — that is what
+ *  Canary Lab points at: a repo, not a subdirectory of the workspace. The demo
+ *  harness (tools/smoke-demo.mjs) always did this after `init`, so the demo's
+ *  flights and portify runs cut their worktrees from the small sample repo while
+ *  a real user's were cut from the whole workspace repo — the one divergence
+ *  between `demo` and `init` that must not exist.
+ *
+ *  Runs AFTER commitScaffold on purpose: the workspace commit tracks the sample
+ *  files first (the exact order the demo harness produced live), so nesting the
+ *  .git here changes which repo owns future edits without rewriting history.
+ *  Same swallow-per-repo rationale as commitScaffold. */
+export function commitSampleRepos(targetDir: string): void {
+  for (const dir of SAMPLE_REPO_DIRS) {
+    const repoDir = path.join(targetDir, dir)
+    if (!fs.existsSync(repoDir)) continue
+    try {
+      if (!fs.existsSync(path.join(repoDir, '.git'))) {
+        execFileSync('git', ['init', '-q'], { cwd: repoDir, stdio: 'ignore' })
+      }
+      execFileSync('git', ['add', '-A'], { cwd: repoDir, stdio: 'ignore' })
+      execFileSync('git', [
+        '-c', 'user.name=Canary Lab',
+        '-c', 'user.email=canary-lab@localhost',
+        '-c', 'commit.gpgsign=false',
+        'commit', '-q', '-m', `chore: ${dir} sample baseline`,
+      ], { cwd: repoDir, stdio: 'ignore' })
+    } catch {
+      /* Same trade as commitScaffold: an uncommitted sample still runs; the
+         dirty-repo preflights name the problem if it ever matters. */
+    }
+  }
+}
+
 export function copyDir(sourceDir: string, targetDir: string): void {
   copyDirRecursive(sourceDir, targetDir, (name) => TEMPLATE_RENAMES[name] ?? name)
 }
@@ -351,6 +387,7 @@ export async function main(
   }
 
   commitScaffold(targetDir)
+  commitSampleRepos(targetDir)
 
   ok(`Canary Lab project created at ${ansiPath(targetDir)}`)
   section('Next steps')

@@ -8,7 +8,7 @@ import path from 'path'
 // (vi.mock is per-file), and a mocked git can only prove the argv we passed — not
 // that the repo it produced is one portify's worktrees can actually read. The
 // invariant under test is a property of real git, so this file uses real git.
-import { commitScaffold } from './init-project'
+import { commitSampleRepos, commitScaffold } from './init-project'
 
 const tmpDirs: string[] = []
 function mkTmp(): string {
@@ -73,5 +73,52 @@ describe('commitScaffold (real git)', () => {
 
     expect(() => commitScaffold(dir)).not.toThrow()
     expect(fs.existsSync(path.join(dir, '.git'))).toBe(false)
+  })
+})
+
+describe('commitSampleRepos (real git)', () => {
+  // The demo/`init` divergence this closes: the demo harness git-inited each
+  // sample app after init while a real user's stayed a workspace subdirectory,
+  // so the demo's flight/portify worktrees were cut from the small sample repo
+  // and a user's from the whole workspace repo. The samples must come out as
+  // their own committed, clean repos — from `init` itself.
+  it('turns each present sample dir into its own committed clean repo', () => {
+    const dir = mkTmp()
+    execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' })
+    for (const sample of ['demo-app', 'flight-app', 'workflow-app']) {
+      fs.mkdirSync(path.join(dir, sample))
+      fs.writeFileSync(path.join(dir, sample, 'server.ts'), 'export {}\n')
+    }
+    commitScaffold(dir)
+
+    commitSampleRepos(dir)
+
+    for (const sample of ['demo-app', 'flight-app', 'workflow-app']) {
+      const repo = path.join(dir, sample)
+      // Its own repo — not the workspace's: the .git must live inside the sample.
+      expect(fs.existsSync(path.join(repo, '.git'))).toBe(true)
+      expect(execFileSync('git', ['status', '--porcelain'], { cwd: repo }).toString()).toBe('')
+      const log = execFileSync('git', ['log', '--oneline'], { cwd: repo }).toString().trim()
+      expect(log.split('\n')).toHaveLength(1)
+      expect(log).toContain(`${sample} sample baseline`)
+    }
+  })
+
+  it('skips absent samples and re-runs as a no-op on already-committed ones', () => {
+    const dir = mkTmp()
+    // Only one of the three samples exists — a workspace whose user deleted the
+    // others must not fail or resurrect them.
+    fs.mkdirSync(path.join(dir, 'flight-app'))
+    fs.writeFileSync(path.join(dir, 'flight-app', 'server.ts'), 'export {}\n')
+
+    commitSampleRepos(dir)
+    // Second run: nothing to commit — the empty-commit failure lands in the
+    // swallow arm rather than surfacing, exactly like commitScaffold.
+    expect(() => commitSampleRepos(dir)).not.toThrow()
+
+    expect(fs.existsSync(path.join(dir, 'demo-app'))).toBe(false)
+    expect(fs.existsSync(path.join(dir, 'workflow-app'))).toBe(false)
+    const log = execFileSync('git', ['log', '--oneline'], { cwd: path.join(dir, 'flight-app') }).toString().trim()
+    expect(log.split('\n')).toHaveLength(1)
   })
 })

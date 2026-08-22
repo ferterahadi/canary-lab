@@ -303,8 +303,15 @@ const repairSteps = [
 
 // Each shipped sample app becomes its own product git repository, because that
 // is what Canary Lab points at: a repo, not a subdirectory of the workspace.
+// `canary-lab init` now does this itself (commitSampleRepos), so on a current
+// tarball this is a no-op; it stays as the safety net for `--no-build` runs
+// against a pre-fix tarball — which is why it must skip cleanly (an empty
+// `git commit` exits 1) instead of assuming there is something to commit.
 function commitProductRepo(dir, message) {
   if (!fs.existsSync(path.join(dir, '.git'))) run('git', ['init', '-q'], dir)
+  const clean = String(run('git', ['status', '--porcelain'], dir, { quiet: true }).stdout ?? '').trim() === ''
+  const committed = run('git', ['rev-parse', '--verify', '-q', 'HEAD'], dir, { quiet: true, allowFailure: true }).status === 0
+  if (clean && committed) return
   run('git', ['add', '-A'], dir)
   run('git', [
     '-c', 'user.email=demo@canary-lab.local',
