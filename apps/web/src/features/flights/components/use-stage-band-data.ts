@@ -3,7 +3,7 @@ import * as api from '@/shared/api/client'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { usePortify, usePortifyWorkflow } from '@/features/portify'
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
+import type { CoverageLedger, EvaluationExportTask, FeatureDocsListing, RunDetail } from '@/shared/api/types'
 import { asRecord } from './FeatureSetupPanel'
 import { evidenceOf, portifyWorkflowId, str } from './stage-meta'
 import type { StageBandData } from './StageFacts'
@@ -58,6 +58,7 @@ export function useStageBandData(
     'coverage',
     needsLedger ? feature : null,
     (f) => api.getFeatureCoverage(f),
+    { cache: 'ledger' },
   )
 
   // Keyed on the run id when the stage recorded one, else on the feature (the
@@ -77,6 +78,7 @@ export function useStageBandData(
       const runId = bootRunId ?? await latestBootRunId(feature)
       return runId ? await api.getRunDetail(runId) : null
     },
+    { cache: 'boot-proof' },
   )
 
   // The workflow id is pinned at stage START (the stage's first setProgress), so
@@ -114,6 +116,7 @@ export function useStageBandData(
     'repos',
     needsConfig ? feature : null,
     async (f) => configCounts((await api.getFeatureConfigDoc(f)).parsed.value),
+    { cache: 'config-counts' },
   )
 
   // `coverage` is the live trigger: the `_prd-summary` artifacts are written by
@@ -121,21 +124,23 @@ export function useStageBandData(
   // showing the first half's tiles, and their write publishes `coverage-changed`.
   // Fetched once, this listing stayed at the pre-distillation snapshot and
   // "Distilled to" was missing until the user reloaded.
-  const { value: docSizes, loading: docsLoading } = useLiveResource<DocSizes>(
+  //
+  // The FULL listing is kept (not just the byte sums the tiles read) and rides
+  // out on `docsListing`, because the docs panel and the requirements fork show
+  // the same files — each used to fetch it again on the same event.
+  const { value: docsListing, loading: docsLoading } = useLiveResource<FeatureDocsListing>(
     'coverage',
     needsDocs ? feature : null,
-    async (f) => {
-      // Split source from generated: the `_prd-summary` artifacts are this
-      // stage's OUTPUT, so counting them as "tokens read" would inflate the
-      // input with what the input produced. Their size is the denominator of
-      // the distillation ratio instead.
-      const listing = await api.listFeatureDocs(f)
-      const sum = (generated: boolean): number => listing.docs
-        .filter((d) => d.generated === generated)
-        .reduce((total, d) => total + d.sizeBytes, 0)
-      return { source: sum(false), summary: sum(true) }
-    },
+    (f) => api.listFeatureDocs(f),
+    { cache: 'docs-listing' },
   )
+  // Split source from generated: the `_prd-summary` artifacts are this stage's
+  // OUTPUT, so counting them as "tokens read" would inflate the input with what
+  // the input produced. Their size is the denominator of the distillation ratio.
+  const docSum = (generated: boolean): number => (docsListing?.docs ?? [])
+    .filter((d) => d.generated === generated)
+    .reduce((total, d) => total + d.sizeBytes, 0)
+  const docSizes: DocSizes | null = docsListing ? { source: docSum(false), summary: docSum(true) } : null
 
   return {
     // A FIRST resolve only. `loading` is also true during a refetch, and the
@@ -152,6 +157,7 @@ export function useStageBandData(
     boot,
     portify: livePortify ?? null,
     config,
+    docsListing,
     // A zero total means "no docs", which drops the tile rather than showing 0.
     docBytes: docSizes && docSizes.source > 0 ? docSizes.source : null,
     summaryBytes: docSizes && docSizes.summary > 0 ? docSizes.summary : null,

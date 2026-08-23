@@ -109,6 +109,26 @@ describe('SummaryReporter', () => {
     })
   })
 
+  it('names a pass that needed a retry, so "every test passed" surfaces can caveat the flake', () => {
+    const reporter = new SummaryReporter()
+    // First attempt fails, the retry passes — Playwright reports both through
+    // onTestEnd, and the last attempt wins the results list. Without the
+    // passedOnRetry marker the summary would be indistinguishable from a
+    // clean first-attempt pass.
+    reporter.onTestEnd(
+      mkTest('Flaky checkout', '/a.spec.ts', 5),
+      mkResult({ status: 'failed', retry: 0, error: { message: 'boom' } }),
+    )
+    reporter.onTestEnd(mkTest('Flaky checkout', '/a.spec.ts', 5), mkResult({ status: 'passed', retry: 1 }))
+    reporter.onTestEnd(mkTest('Clean pass', '/a.spec.ts', 9), mkResult({ status: 'passed', retry: 0 }))
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.passedNames).toEqual(['test-case-flaky-checkout', 'test-case-clean-pass'])
+    expect(out.passedOnRetry).toEqual(['test-case-flaky-checkout'])
+    expect(out.mergedFromPriorExecution).toBeUndefined()
+  })
+
   it('persists the Playwright suite inventory before any test has finished', () => {
     const reporter = new SummaryReporter()
 

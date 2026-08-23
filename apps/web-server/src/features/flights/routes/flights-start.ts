@@ -70,14 +70,16 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
       reply.code(400)
       return { error: 'repoPaths must be a string array' }
     }
+    // These two are the validators a person can actually reach from the
+    // launcher, so they read as instructions, not field-and-type prose.
     if (!hasMode && repoPaths.length === 0) {
       reply.code(400)
-      return { error: 'repoPaths (non-empty string array) is required' }
+      return { error: 'Pick at least one repo folder first.' }
     }
     const description = typeof body.description === 'string' ? body.description.trim() : ''
     if (!hasMode && description === '') {
       reply.code(400)
-      return { error: 'description is required' }
+      return { error: 'Say what this flight should test first.' }
     }
     if (typeof body.feature !== 'string' || body.feature.trim() === '') {
       reply.code(400)
@@ -86,7 +88,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     const coverageTarget = body.coverageTarget ?? 100
     if (typeof coverageTarget !== 'number' || coverageTarget < 0 || coverageTarget > 100) {
       reply.code(400)
-      return { error: 'coverageTarget must be a number between 0 and 100' }
+      return { error: 'Coverage target must be a number between 0 and 100.' }
     }
 
     // Realpath the repo set: it is the single-flight key, so two spellings of

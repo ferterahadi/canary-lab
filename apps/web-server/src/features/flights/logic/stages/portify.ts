@@ -160,9 +160,9 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     checkpoint: {
       kind: 'portify-apply',
       message:
-        `${note ? `${note}\n\n` : ''}Portify verified these edits with a concurrent double-boot. Save them as "${feature}"'s overlay? ` +
-        `Nothing lands in your repos — runs apply the overlay into a throwaway per-run worktree at boot and reverse it at teardown. ` +
-        `Request changes to send feedback back to the agent for another edit + re-verify pass. Declining discards the edits and SKIPS parallel readiness — the feature stays serial (runs go one at a time) and a later flight can retry.`,
+        `${note ? `${note}\n\n` : ''}Canary started two copies of the app side by side and both came up. Save these port changes for "${feature}"? ` +
+        `Nothing goes into your repos — each run applies the changes to a scratch copy and undoes them afterwards. ` +
+        `Request changes to send the agent feedback for another pass. Decline and the changes are thrown away — runs stay one at a time, and a later flight can try again.`,
       options: [...CHECKPOINT_OPTIONS['portify-apply']],
       data: { workflowId, diff },
     },
@@ -180,7 +180,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     // lead the checkpoint with that verdict so "Save" isn't a dead button.
     const failedVerify = view.verification && view.verification.ok === false
     const note = failedVerify
-      ? `The revised edits FAILED the double-boot re-verify${view.verification?.failureDetail ? ` — ${firstLine(view.verification.failureDetail)}` : ''}. Saving is blocked until a revise passes; request changes again or discard.`
+      ? `The revised changes failed the side-by-side check${view.verification?.failureDetail ? ` — ${firstLine(view.verification.failureDetail)}` : ''}. Saving stays blocked until a revision passes — request changes again, or decline.`
       : undefined
     return applyCheckpoint(ctx.manifest().feature, workflowId, view.diff, note)
   }
@@ -278,15 +278,17 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     checkpoint: {
       kind: 'portify-gate',
       message:
-        `Make "${feature}" parallel-ready? An agent rewrites its port wiring in a throwaway worktree and proves it with a ` +
-        `concurrent double-boot — heavy stacks can take 30-60+ minutes. If a sibling feature already portified the same app, ` +
-        `its overlay is reused and verified FIRST (the agent only runs if that fails). Skipping keeps the feature serial — ` +
-        `runs go one at a time — and a later flight can ask again.`,
+        `Make "${feature}" safe to run two at a time? An agent changes how each service picks its port, in a scratch copy of ` +
+        `your repos, then proves it by starting two copies of the app side by side — a big app can take 30-60+ minutes. If ` +
+        `another suite already did this work for the same app, Canary reuses and re-checks it first (the agent only runs when ` +
+        `that fails). Skip it and runs go one at a time — a later flight can ask again.`,
       options: [...CHECKPOINT_OPTIONS['portify-gate']],
     },
   })
 
-  const SKIP_REASON = 'parallel readiness skipped — the feature stays serial (runs go one at a time). A later flight or the Features-page portify can retry.'
+  // No leading "skipped": the client renders this as `Skipped — ${reason}`, so
+  // a reason that repeats the word printed it twice in one sentence.
+  const SKIP_REASON = 'runs stay one at a time. A later flight can try again.'
 
   return {
     // The background workflow, from the id the stage pins as progress the moment
@@ -301,7 +303,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
     async run(ctx) {
       const m = ctx.manifest()
       if (overlayExists(featureDirFor(deps, m.feature))) {
-        return { kind: 'skipped', reason: 'already portified (double-boot verified by a prior flight/portify)' }
+        return { kind: 'skipped', reason: 'already done — a previous flight proved this app can run two at a time' }
       }
 
       // Re-adopt a review parked across a server restart: reclaim keeps a
@@ -422,7 +424,7 @@ export function portifyStage(deps: FlightStageDeps): StageAdapter {
         // The feature simply stays serial (exactly its pre-portify state; runs
         // still work on the real path, one at a time), and with no overlay
         // mark the next flight/redo attempts portify again.
-        return { kind: 'skipped', reason: 'declined — edits discarded; the feature stays serial (not concurrency-ready). A later flight or the Features-page portify can retry.' }
+        return { kind: 'skipped', reason: 'you declined — the changes were thrown away and runs stay one at a time. A later flight can try again.' }
       }
       return { kind: 'checkpoint', checkpoint: stage!.checkpoint! }
     },

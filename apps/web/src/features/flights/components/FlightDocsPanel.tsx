@@ -19,17 +19,28 @@ import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Ske
 // Continue → from a step → Requirements.
 
 /** Doc CRUD over a feature's docs/ folder — one loader shared by the fork's
- *  manual path and the resting panel (same REST the coverage rail uses). */
-export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: () => void) {
-  const [listing, setListing] = useState<FeatureDocsListing | null>(null)
+ *  manual path and the resting panel (same REST the coverage rail uses).
+ *
+ *  `external` hands the hook a listing the CALLER already owns (the stage
+ *  band's fetch, which the docs stage always performs for its byte tiles) —
+ *  without it, the band and this hook each fetched the same listing on the
+ *  same `coverage-changed` event, two identical round trips per event for the
+ *  whole docs/prd-summary stage. With an external listing the hook never
+ *  fetches: mutations publish `coverage-changed` server-side, so the owner's
+ *  refetch delivers the post-mutation listing. */
+export function useFlightDocs(feature: string, refreshKey?: number, onChanged?: () => void, external?: FeatureDocsListing | null) {
+  const [fetched, setFetched] = useState<FeatureDocsListing | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const owned = external === undefined
+  const listing = owned ? fetched : external
 
   const load = useCallback((keepError = false) => {
+    if (!owned) return
     api.listFeatureDocs(feature)
-      .then((data) => { setListing(data); if (!keepError) setError(null) })
+      .then((data) => { setFetched(data); if (!keepError) setError(null) })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-  }, [feature])
+  }, [feature, owned])
   useEffect(() => { load() }, [load, refreshKey])
 
   const importFiles = useCallback(async (files: FileList) => {
@@ -87,6 +98,7 @@ export function FlightDocsPanel({
   summaryStage,
   requirementCount,
   awaiting,
+  listing,
 }: {
   feature: string
   /** Stage settled done — requirements approved, the doc set is frozen. */
@@ -104,8 +116,10 @@ export function FlightDocsPanel({
   /** R83: the stage hasn't settled — an empty half renders as its skeleton
    *  rather than as a flat "none" sentence, which reads as a finding. */
   awaiting?: AwaitingState
+  /** The listing the stage band already fetched — see useFlightDocs. */
+  listing?: FeatureDocsListing | null
 }) {
-  const docs = useFlightDocs(feature, refreshKey)
+  const docs = useFlightDocs(feature, refreshKey, undefined, listing)
   const liveLine = summaryStage ? agentActivityLine(summaryStage) : null
   const showDistilled = summaryStatus !== undefined && summaryStatus !== 'pending'
   return (
@@ -150,7 +164,7 @@ export function FlightDocsPanel({
         )}
         {approved && (
           <p className="mt-2 text-[10.5px] text-muted">
-            To change these, use Continue → from a step → Requirements — later results are discarded from that point.
+            To change these, use Continue → From a step… → Requirements. Everything after that step is redone.
           </p>
         )}
         {docs.error && <div className="mt-2 text-[11px] text-danger">{docs.error}</div>}
@@ -164,7 +178,7 @@ export function FlightDocsPanel({
         <div className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE} data-testid="flight-distilled-panel">
           <div className="flex items-center gap-2">
             <div className={PANEL_KICKER_CLASS}>
-              {requirementCount != null ? `Distilled requirements · ${requirementCount}` : 'Distilled requirements'}
+              {requirementCount != null ? `Requirements found · ${requirementCount}` : 'Requirements found'}
             </div>
             <div className="flex-1" />
             {summaryStatus && (
@@ -204,10 +218,10 @@ export function FlightDocsPanel({
                   // agent spends inside one block — a pointer to nothing. It
                   // survives only as the pre-first-snapshot fallback, without
                   // the promise it could not keep.
-                  ? (liveLine ?? 'Distilling the source docs into requirements…')
+                  ? (liveLine ?? 'Turning the docs into requirements…')
                   : summaryStatus === 'failed'
-                    ? 'Distillation failed before writing a summary — see Activity below.'
-                    : 'No summary artifact on disk.'}
+                    ? 'It failed before writing a summary — see Activity below.'
+                    : 'No summary yet'}
               </div>
               {/* No raw answer tail. The character count above is already the
                   sign of life this card needs, and it is OUR copy; the tail was
@@ -232,7 +246,7 @@ export function IntentRow({ description }: { description: string }) {
       data-testid="fork-intent"
       onClick={() => setOpen(!open)}
       className="flex w-full cursor-pointer items-center gap-2 rounded border border-line bg-transparent px-2.5 py-1.5 text-left"
-      title={open ? 'Fold the intent' : 'View the full intent'}
+      title={open ? 'Hide the full intent' : 'Show the full intent'}
     >
       <span className="cl-rubric shrink-0">
         Intent
@@ -246,7 +260,7 @@ export function IntentRow({ description }: { description: string }) {
         {description}
       </span>
       <span className="shrink-0 text-[10.5px] text-accent">
-        {open ? 'Fold' : 'View'}
+        {open ? 'Hide' : 'Show'}
       </span>
     </button>
   )

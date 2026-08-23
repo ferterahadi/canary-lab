@@ -201,8 +201,36 @@ describe('SummaryReporter', () => {
       passed: 2,
       passedNames: ['test-case-happy-path', 'test-case-sad-path'],
       passedIds: [expect.any(String)],
+      // The happy-path pass is still the PRIOR execution's result, so the
+      // summary must say its outcomes span more than one run.
+      mergedFromPriorExecution: true,
       failed: [],
     })
+  })
+
+  it('carries a prior passed-on-retry marker through a merge, so a flaky pass never launders into a clean one', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 2,
+        passed: 2,
+        passedNames: ['test-case-flaky-pass', 'test-case-clean-pass'],
+        // The empty string and the number are hand-edit damage: only the real
+        // name may survive into the merged marker.
+        passedOnRetry: ['test-case-flaky-pass', '', 17],
+        failed: [],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    expect(out.passedOnRetry).toEqual(['test-case-flaky-pass'])
+    expect(out.mergedFromPriorExecution).toBe(true)
   })
 
   it('does not merge an existing summary during a full-suite run', () => {
@@ -280,11 +308,36 @@ describe('SummaryReporter', () => {
       total: 3,
       passed: 1,
       passedNames: ['test-case-existing-pass'],
+      mergedFromPriorExecution: true,
       failed: [
         { name: 'test-case-bad-error', logFiles: [] },
         { name: 'test-case-good-error', error: { message: 'boom', snippet: 'line' }, logFiles: ['a.log'] },
       ],
     })
+  })
+
+  it('drops the merged-execution flag once every seeded result has been re-run in this execution', () => {
+    process.env.CANARY_LAB_TARGETED_RERUN = '1'
+    fs.mkdirSync(LOGS_DIR, { recursive: true })
+    fs.writeFileSync(
+      path.join(LOGS_DIR, 'e2e-summary.json'),
+      JSON.stringify({
+        complete: false,
+        total: 1,
+        passed: 0,
+        passedNames: [],
+        failed: [{ name: 'test-case-sad-path', error: { message: 'old fail' }, location: '/specs/sad.spec.ts:9' }],
+      }),
+    )
+
+    const reporter = new SummaryReporter()
+    reporter.onTestEnd(mkTest('Sad path', '/specs/sad.spec.ts', 9), mkResult({ status: 'passed' }))
+    reporter.onEnd({} as any)
+
+    const out = readSummary()
+    // Every result is now this execution's own observation — one clean run.
+    expect(out.mergedFromPriorExecution).toBeUndefined()
+    expect(out.passedNames).toEqual(['test-case-sad-path'])
   })
 
   it('seeds knownTests from an existing summary, filtering bad entries and merging duplicates', () => {

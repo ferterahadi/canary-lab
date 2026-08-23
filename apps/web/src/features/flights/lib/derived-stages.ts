@@ -111,8 +111,16 @@ export function buildDerivedManifest(
   prefill?: { repoPaths?: string[]; description?: string; env?: string; evidence?: Partial<Record<FlightStageKey, Record<string, unknown>>> },
 ): FlightManifest {
   const allDone = stages.every((s) => s.status === 'done')
+  // The summary strip's RUN reads `runVerdict` — a conducted-flight field a
+  // derived record never had, so the strip stayed blank beside a green run one
+  // click below. The probed run evidence carries the same verdict; lift it.
+  const probedRunStatus = (prefill?.evidence?.run as { status?: unknown } | undefined)?.status
+  const runVerdict = probedRunStatus === 'passed' || probedRunStatus === 'failed' || probedRunStatus === 'aborted'
+    ? probedRunStatus
+    : undefined
   return {
     flightId: derivedFlightToken(feature),
+    ...(runVerdict ? { runVerdict } : {}),
     feature,
     repoPaths: prefill?.repoPaths ?? [],
     // The feature config's own description — the entry prefill falls through to

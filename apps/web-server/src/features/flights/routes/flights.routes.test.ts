@@ -159,6 +159,38 @@ describe('flights routes', () => {
     expect(dup.json()).toMatchObject({ type: 'flight_conflict', existingFlightId: flightId })
   })
 
+  it('fills a missing runVerdict from settled run-stage evidence, and drops a REPORT link whose archive is gone', async () => {
+    const store = new FlightRunStore(tmpDir)
+    const adapters = allDone()
+    // A run stage settled by evidence (external work / older records) writes no
+    // top-level runVerdict — the strip's RUN must still read the verdict.
+    adapters.run = { run: async () => ({ kind: 'done', evidence: { runId: 'r1', status: 'passed' } }) }
+    app = await buildApp(adapters, store)
+    const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+    const flightId = (started.json() as { flightId: string }).flightId
+    await waitForStatus(flightId, ['done'])
+
+    // The stored record has no runVerdict (stub adapters never set it) and a
+    // links path pointing at a deleted archive.
+    const manifest = store.get(flightId)!
+    expect(manifest.runVerdict).toBeUndefined()
+    store.save({ ...manifest, links: { evaluationZip: path.join(tmpDir, 'gone.zip') } })
+
+    const resp = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
+    const body = resp.json() as { runVerdict?: string; links?: { evaluationZip?: string } }
+    expect(body.runVerdict).toBe('passed')
+    expect(body.links?.evaluationZip).toBeUndefined()
+    // Read-time only: the stored link survives, so a re-created archive returns.
+    expect(store.get(flightId)!.links?.evaluationZip).toBe(path.join(tmpDir, 'gone.zip'))
+
+    // An archive that exists keeps its link.
+    fs.writeFileSync(path.join(tmpDir, 'still-here.zip'), 'zip')
+    store.save({ ...store.get(flightId)!, links: { evaluationZip: path.join(tmpDir, 'still-here.zip') } })
+    const again = await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })
+    expect((again.json() as { links?: { evaluationZip?: string } }).links?.evaluationZip)
+      .toBe(path.join(tmpDir, 'still-here.zip'))
+  })
+
   it('404s an unknown flight', async () => {
     app = await buildApp(allDone())
     const resp = await app.inject({ method: 'GET', url: '/api/flights/fl_nope' })
@@ -196,7 +228,7 @@ describe('flights routes', () => {
     app = await buildApp(allDone())
     const resp = await app.inject({ method: 'POST', url: '/api/flights' })
     expect(resp.statusCode).toBe(400)
-    expect(resp.json()).toMatchObject({ error: 'repoPaths (non-empty string array) is required' })
+    expect(resp.json()).toMatchObject({ error: 'Pick at least one repo folder first.' })
   })
 
   it('rethrows a non-conflict error raised while starting a flight', async () => {

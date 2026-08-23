@@ -228,8 +228,10 @@ export interface TestCoverage {
   /** Static coverage strength, graded from the test's own assertions (strength.ts). */
   strength?: TestStrength
   /** Outcome of this test in the feature's LATEST recorded run. Absent when the
-   *  feature has no run yet or the test didn't run (new/renamed/skipped). */
-  lastRun?: { runId: string; passed: boolean }
+   *  feature has no run yet or the test didn't run (new/renamed/skipped).
+   *  `retried` marks a pass that needed a Playwright retry — flaky within the
+   *  run, so a caller reporting "every test passed" can say so honestly. */
+  lastRun?: { runId: string; passed: boolean; retried?: boolean }
 }
 
 export interface RequirementCoverage {
@@ -303,6 +305,12 @@ export interface CoverageLedger {
   provenPct?: number
   /** The run the `proven` axis was joined against. Absent when none exists. */
   provenRunId?: string
+  /** True when that run's summary was seeded from a prior execution (a targeted
+   *  heal rerun merges the untouched results forward), so the `lastRun` outcomes
+   *  span several partial executions rather than one clean run. Reporting
+   *  surfaces caveat "every test passed" with this — the tests never all passed
+   *  together in one execution. Absent when no run was joined. */
+  provenSpansExecutions?: boolean
   /** Requirement ids annotated on tests but absent from the PRD (drift signal). */
   orphanRequirementIds: string[]
   /** Test names with no requirement linkage — the annotate-pass works this set. */

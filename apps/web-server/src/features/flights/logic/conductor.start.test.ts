@@ -412,7 +412,7 @@ describe('checkpoints', () => {
     const { manifest, completion } = startFlight(args(), deps(allDone()))
     await completion
     expect(() => respondToFlightCheckpoint(manifest.flightId, { choice: 'x' }, deps(allDone()))).toThrow(
-      /not waiting for approval/,
+      /no longer waiting for an answer/,
     )
   })
 

@@ -24,11 +24,22 @@ export const GAP_META: Record<GapType, { label: string; abbr: string; color: str
 // Per-test coverage strength — graded off the strongest stack layer a test's
 // assertions touch (tier classifier), independent of runs. A four-step ramp on
 // the system hues: rose weakest → amber → blue → green strong.
+//
+// The titles are the ONE definition of the four words, shared with the flight
+// band's Test depth tooltip (STRENGTH_TIER_HELP below) — plain outcomes, not
+// the internal Tier 1-4 numbering, which appeared nowhere else in the product.
+export const STRENGTH_TIER_HELP: Record<TestStrength, string> = {
+  strong: 'a real browser or an outside system confirmed the effect',
+  solid: "the app's own API or a check on its UI said it worked",
+  basic: 'internal state changed — a database row or fixture',
+  shallow: "only the app's own log says so (or nothing gradeable was found)",
+}
+
 export const STRENGTH_META: Record<TestStrength, { label: string; color: string; title: string }> = {
-  strong: { label: 'Strong', color: 'var(--success)', title: 'Tier 4 — a real external destination / browser confirmed the effect' },
-  solid: { label: 'Solid', color: 'var(--accent)', title: 'Tier 3 — an app/internal API or UI assertion reported success' },
-  basic: { label: 'Basic', color: 'var(--warning)', title: 'Tier 2 — internal state changed (DB row / fixture)' },
-  shallow: { label: 'Shallow', color: 'var(--danger)', title: 'Tier 1 — only the app’s own log / self-report (or no classifiable depth)' },
+  strong: { label: 'Strong', color: 'var(--success)', title: `Strong — ${STRENGTH_TIER_HELP.strong}` },
+  solid: { label: 'Solid', color: 'var(--accent)', title: `Solid — ${STRENGTH_TIER_HELP.solid}` },
+  basic: { label: 'Basic', color: 'var(--warning)', title: `Basic — ${STRENGTH_TIER_HELP.basic}` },
+  shallow: { label: 'Shallow', color: 'var(--danger)', title: `Shallow — ${STRENGTH_TIER_HELP.shallow}` },
 }
 
 // Worst-first: the weakest tests sort to the front of the filter.
@@ -36,7 +47,7 @@ export const STRENGTH_ORDER: TestStrength[] = ['shallow', 'basic', 'solid', 'str
 
 // Plain-language gloss for the `@path-*` tags on a test card (tooltip only — the
 // tag itself stays terse). These mirror a requirement's declared happy/sad/edge.
-export const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'unhappy (sad)', edge: 'edge-case' }
+export const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure', edge: 'edge-case' }
 
 // Requirements list is ordered worst-first (uncovered → partial → covered) so the
 // gaps that need work sit at the top — the whole point of the ledger.
@@ -444,15 +455,15 @@ export function TestCardSkeleton({ index }: { index: number }) {
       }}
     >
       <div className="flex items-center gap-2">
-        <span className="clcov-skel" style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0 }} />
-        <span className="clcov-skel" style={{ width: 22, height: 16, borderRadius: 5 }} />
-        <span className="clcov-skel" style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length], height: 13 }} />
-        <span className="clcov-skel" style={{ marginLeft: 'auto', width: 84, height: 10 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 22, height: 16, borderRadius: 5 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: SKEL_NAME_W[index % SKEL_NAME_W.length], height: 13 }} />
+        <span className="clcov-skel cl-skeleton" style={{ marginLeft: 'auto', width: 84, height: 10 }} />
       </div>
       <div className="flex items-center gap-1.5" style={{ marginTop: 7 }}>
-        <span className="clcov-skel" style={{ width: 56, height: 15 }} />
-        <span className="clcov-skel" style={{ width: 42, height: 15 }} />
-        <span className="clcov-skel" style={{ width: 68, height: 15 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 56, height: 15 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 42, height: 15 }} />
+        <span className="clcov-skel cl-skeleton" style={{ width: 68, height: 15 }} />
       </div>
     </div>
   )

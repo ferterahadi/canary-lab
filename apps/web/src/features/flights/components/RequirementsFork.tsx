@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
+import type { FeatureDocsListing, FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
 import { STAGE_COLUMN } from './stage-meta'
 import { ForkPathCard, IntentRow, useFlightDocs } from './FlightDocsPanel'
@@ -19,7 +19,7 @@ export function prdSourceAttempt(flight: FlightManifest): PrdSourceAttempt | nul
 /** Headline for the verdict band — states what the agent DID, so the row reads
  *  as a finding rather than as an error the user caused. */
 export function attemptHeadline(attempt: PrdSourceAttempt): string {
-  if (attempt.outcome === 'no-diff') return 'No diff vs base · nothing to infer from'
+  if (attempt.outcome === 'no-diff') return 'Nothing changed vs. the base branch — nothing to work from'
   if (attempt.outcome === 'no-output') return 'Agent ran · produced no document'
   return attempt.mode === 'infer-from-diff'
     ? 'Agent read the diff · found nothing'
@@ -59,12 +59,15 @@ export function RequirementsFork({
   flight,
   refreshKey,
   onResponded,
+  listing,
 }: {
   flightId: string
   flight: FlightManifest
   /** Bumped on coverage-changed so out-of-band doc writes show live. */
   refreshKey?: number
   onResponded: () => void
+  /** The listing the stage band already fetched — see useFlightDocs. */
+  listing?: FeatureDocsListing | null
 }) {
   const [mode, setMode] = useState<'manual' | 'agent' | null>(null)
   /** Agent hint is *staged*, not fired — picking a card must never spawn the
@@ -79,7 +82,7 @@ export function RequirementsFork({
    *  fades on its own (cl-flash-fade). The token forces a remount so a repeat
    *  press restarts the animation even if the previous flash hasn't finished. */
   const [startedFlash, setStartedFlash] = useState<number | null>(null)
-  const docs = useFlightDocs(flight.feature, refreshKey)
+  const docs = useFlightDocs(flight.feature, refreshKey, undefined, listing)
   const fileInputRef = useRef<HTMLInputElement>(null)
   // The fork is an answering surface end to end — every path ends in a
   // respond_flight_checkpoint. When the MCP client that started the flight is
@@ -144,7 +147,7 @@ export function RequirementsFork({
         <ForkPathCard
           testId="fork-path-manual"
           title="I'll add docs myself"
-          blurb="Drop PRD, spec, or ticket files. No agent runs."
+          blurb="Drop in a product brief, spec, or ticket. No agent runs."
           recommended={lastAttempt !== null}
           selected={mode === 'manual'}
           dimmed={mode === 'agent'}
@@ -156,7 +159,7 @@ export function RequirementsFork({
           title="Let the agent find them"
           blurb={lastAttempt
             ? 'Retry with feedback, or point it at different repos.'
-            : 'An agent gathers requirements guided by your intent.'}
+            : 'An agent goes looking, using what you asked for above.'}
           recommended={lastAttempt === null}
           note={lastAttempt ? (lastAttempt.outcome === 'no-diff' ? 'No diff' : 'Tried · empty') : undefined}
           selected={mode === 'agent'}
@@ -203,9 +206,9 @@ export function RequirementsFork({
               disabled={disabled || docs.sourceDocs.length === 0}
               onClick={() => respond('continue')}
               className="cl-button-primary px-2.5 py-1 text-xs"
-              title={docs.sourceDocs.length === 0 ? 'Add at least one doc first' : 'Approve these docs and distill the requirements'}
+              title={docs.sourceDocs.length === 0 ? 'Add at least one doc first' : 'Approve these docs and turn them into requirements'}
             >
-              Use these docs → distill requirements
+              Use these docs
             </button>
           </div>
         </>
@@ -214,7 +217,7 @@ export function RequirementsFork({
       {mode === 'agent' && (
         <>
           <div className="cl-rubric">
-            How should the agent look?
+            Where should the agent look?
           </div>
           <div className="flex flex-wrap gap-2.5">
             <ForkPathCard
@@ -229,7 +232,7 @@ export function RequirementsFork({
             <ForkPathCard
               testId="fork-hint-infer-from-diff"
               title="Infer from the git diff"
-              blurb="The agent cross-checks the branch diff vs base against the intent."
+              blurb="The agent reads what changed on this branch and matches it to what you asked for."
               selected={hint === 'infer-from-diff'}
               dimmed={hint === 'collect-repo-docs'}
               disabled={disabled}
@@ -244,7 +247,7 @@ export function RequirementsFork({
                 className="cl-flash-fade text-[11px] font-medium text-accent"
                 onAnimationEnd={() => setStartedFlash(null)}
               >
-                Agent started — output streams in the activity band below
+                Agent started — its output shows under Activity below
               </span>
             )}
             <button
@@ -257,9 +260,9 @@ export function RequirementsFork({
                 setStartedFlash(Date.now())
               }}
               className="cl-button-primary px-2.5 py-1 text-xs"
-              title={hint === null ? 'Pick how the agent should look first' : 'Start the agent with this approach'}
+              title={hint === null ? 'Pick where it should look first' : 'Start the agent with this approach'}
             >
-              {busy ? 'Starting…' : 'Gather with agent'}
+              {busy ? 'Starting…' : 'Let the agent gather them'}
             </button>
           </div>
         </>

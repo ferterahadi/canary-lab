@@ -119,6 +119,47 @@ vi.mock('@/features/portify/state/PortifyContext', () => ({
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
 }))
 
+// TestRunPanel reads the run detail + the run index off the shared runs store
+// (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
+// over the SAME api mocks the panel-local fetches used to consume — fixtures
+// keep working unchanged.
+vi.mock('@/features/runs/state/RunsContext', async () => {
+  const React = await import('react')
+  return {
+    useRun: (runId?: string | null) => {
+      const [detail, setDetail] = React.useState<unknown>(undefined)
+      React.useEffect(() => {
+        let alive = true
+        if (runId) mocks.getRunDetail(runId).then((d: unknown) => { if (alive) setDetail(d) }).catch(() => {})
+        return () => { alive = false }
+      }, [runId])
+      return { detail, status: undefined, transient: null, displayStatus: undefined, error: null }
+    },
+    useRuns: () => {
+      const [runs, setRuns] = React.useState<unknown[]>([])
+      React.useEffect(() => {
+        let alive = true
+        mocks.listRuns({}).then((r: unknown[]) => { if (alive) setRuns(r) }).catch(() => {})
+        return () => { alive = false }
+      }, [])
+      return {
+        runs,
+        connection: 'live',
+        transients: {},
+        errors: {},
+        refresh: vi.fn(),
+        startRun: vi.fn(),
+        startVerification: vi.fn(),
+        abort: vi.fn(),
+        delete: vi.fn(),
+        pauseHeal: vi.fn(),
+        cancelHeal: vi.fn(),
+        clearError: vi.fn(),
+      }
+    },
+  }
+})
+
 import { FlightPage } from './FlightPage'
 import type { EvaluationExportTask } from '@/shared/api/types'
 
@@ -234,7 +275,7 @@ describe('trailer model (R14–R18)', () => {
     // state, and 5 is a ceiling the loop usually never reaches.
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).not.toContain('2 of 5')
     expect(container.querySelector('[data-testid="specs-pass-1"]')?.textContent).toContain('40% covered · 3 gaps open')
-    expect(container.querySelector('[data-testid="specs-pass-live"]')?.textContent).toContain('authoring tests')
+    expect(container.querySelector('[data-testid="specs-pass-live"]')?.textContent).toContain('writing tests')
     // R87: the ceiling is the kicker's chip, and the passes still ahead are NOT
     // rows — as rows they read as three rounds already scheduled.
     expect(container.querySelector('[data-testid="specs-pass-count"]')?.textContent).toBe('2 / 5 max')
@@ -377,7 +418,9 @@ describe('trailer model (R14–R18)', () => {
     }))
     await render('fl_1')
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Creating the suite in the workspace…')
-    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('Generating')
+    // "Running", not "Generating" — the label sits on every running stage, and
+    // a repo scan or a Playwright run generates nothing.
+    expect(container.querySelector('[data-testid="stage-status-chip"]')?.textContent).toContain('Running')
     // Advanced setup only appears once the config is APPROVED (scaffold done).
     expect(container.querySelector('[data-testid="feature-setup-advanced"]')).toBeNull()
   })
@@ -401,7 +444,7 @@ describe('trailer model (R14–R18)', () => {
     // needed" beside two more sentences saying the same thing.
     const portifyFacts = container.querySelector('[data-testid="stage-facts"]')?.textContent ?? ''
     expect(portifyFacts).toContain('Files edited')
-    expect(portifyFacts).toContain('already injectable')
+    expect(portifyFacts).toContain('already swappable')
     expect(container.textContent).not.toContain('"workflowId"')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
@@ -597,7 +640,7 @@ describe('trailer model (R14–R18)', () => {
               // here would pass while the real screen fell back to the verdict.
               checkpoint: {
                 kind: 'run-failed',
-                message: 'Run run-9 ended failed after 1 heal cycle(s).',
+                message: 'Run run-9 failed after 1 repair cycle.',
                 options: ['rerun', 'export-as-is'],
                 data: { runId: 'run-9', status: 'failed', healCycles: 1, counts: { passed: 2, total: 23, failed: 4 } },
               },
@@ -736,7 +779,7 @@ describe('trailer model (R14–R18)', () => {
     await openExportStage({ taskId: 'task-9' })
     const row = container.querySelector('[data-testid="report-row-task-9"]')
     expect(row?.textContent).toContain('rewrite agent exited')
-    expect(row?.textContent).toContain('no archive')
+    expect(row?.textContent).toContain('no file yet')
     expect(row?.querySelector('[data-testid="download-report-task-9"]')).toBeNull()
   })
 })
@@ -798,12 +841,14 @@ describe('R83 — every stage pane wears the settled layout, with placeholders f
     expect(container.querySelector('[data-testid="repo-card-shop"] svg')).toBeNull()
   })
 
-  it('a running stage sweeps its placeholders and marks each repo row live', async () => {
+  it('a running stage keeps static dashes — the tiles never sweep — and marks each repo row live', async () => {
     mocks.getFlight.mockResolvedValue(scoutFlight('running'))
     await openScout()
     const facts = container.querySelector('[data-testid="stage-facts"]')
     expect(facts?.querySelectorAll('[data-testid="fact-awaiting"]')).toHaveLength(2)
-    expect(facts?.querySelectorAll('.cl-skeleton')).toHaveLength(2)
+    // A bar where a figure goes reads as a measurement; the repo row and the
+    // pane badge already say the stage is live.
+    expect(facts?.querySelectorAll('.cl-skeleton')).toHaveLength(0)
     expect(container.querySelector('[data-testid="repo-card-shop"] .bg-running')).not.toBeNull()
   })
 
@@ -876,7 +921,7 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
 
   it('Test authoring: the composition card and the pass timeline both hold their places', async () => {
     await open('specs-coverage')
-    expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')?.textContent).toContain('Composition')
+    expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')?.textContent).toContain('What the tests cover')
     expect(container.querySelector('[data-testid="specs-pass-skeleton"]')?.textContent).toContain('Passes')
   })
 
@@ -981,7 +1026,7 @@ describe('R83 — every stage keeps its settled layout, card for card', () => {
     // Not the stand-in tile: `Coverage gaps` must not occupy the `Requirements`
     // slot for one frame and be relabelled in the next.
     expect(facts?.textContent).not.toContain('Coverage gaps')
-    expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')?.textContent).toContain('Composition')
+    expect(container.querySelector('[data-testid="coverage-composition-skeleton"]')?.textContent).toContain('What the tests cover')
 
     // Frame 2 — every figure lands in the slot its placeholder held, and the
     // Passes card below it has not moved.
@@ -1059,7 +1104,7 @@ describe('Parallel readiness follows the workflow live', () => {
     // manifest and the open page re-renders off it.
     mocks.portifyWorkflow.mockReturnValue(verified)
     await push()
-    expect(container.querySelector('[data-testid="double-boot-panel"]')?.textContent).toContain('Instance A')
+    expect(container.querySelector('[data-testid="double-boot-panel"]')?.textContent).toContain('Copy A')
     expect(container.querySelector('[data-testid="double-boot-panel"]')?.textContent).toContain(':4002')
     expect(container.querySelector('[data-testid="overlay-panel"]')?.textContent).toContain('build.gradle')
   })
@@ -1111,8 +1156,8 @@ describe('Parallel readiness follows the workflow live', () => {
     // The awaited proof is the real two rows — the count and the names are known
     // before the ports are, and they are what make it the height of the card it
     // becomes.
-    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Instance A')
-    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Instance B')
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Copy A')
+    expect(container.querySelector('[data-testid="double-boot-skeleton"]')?.textContent).toContain('Copy B')
 
     // Came back with nothing: the hold ends rather than promising a proof that
     // is never coming.

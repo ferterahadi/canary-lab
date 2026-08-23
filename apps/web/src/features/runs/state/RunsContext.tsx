@@ -392,21 +392,32 @@ export function useGlobalActiveRun(): UseGlobalActiveRunResult {
 // Every run that occupies resources or a queue slot right now: running,
 // healing, or queued. Concurrent runs are allowed, so this can hold several.
 // Drives the top-right runs control + its badge count.
+//
+// Memoized on `state.runs`, not recomputed per render: consumers put the
+// returned array in dep arrays (`useFeatureActivity` memoizes on it), and a
+// fresh `.filter()` identity every render silently defeated every one of those
+// memos — the exact unstable-dep pattern behind the 3877ms workspace-load
+// incident.
 export function useActiveRuns(): { runs: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
-  const runs = state.runs.filter((r) => isActiveRunStatus(r.status) || r.status === 'queued')
-  return { runs, count: runs.length }
+  return useMemo(() => {
+    const runs = state.runs.filter((r) => isActiveRunStatus(r.status) || r.status === 'queued')
+    return { runs, count: runs.length }
+  }, [state.runs])
 }
 
 // Boot-only sessions that are currently live (booting or held). These are
 // surfaced in the global Services pill, NOT the Runs list — a boot is not a
 // test run. `executionType === 'boot'` is the discriminator.
+// Same memo rationale as useActiveRuns above.
 export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
-  const sessions = state.runs.filter(
-    (r) => r.executionType === 'boot' && (isActiveRunStatus(r.status) || r.status === 'queued'),
-  )
-  return { sessions, count: sessions.length }
+  return useMemo(() => {
+    const sessions = state.runs.filter(
+      (r) => r.executionType === 'boot' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+    )
+    return { sessions, count: sessions.length }
+  }, [state.runs])
 }
 
 // Deployed-env verification runs that are live right now (record-only, no

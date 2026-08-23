@@ -136,7 +136,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
     }
     if (task.status !== 'done') {
       reply.code(409)
-      return { error: `plan task is ${task.status} — only a settled proposal can launch` }
+      return { error: task.status === 'running' ? 'Planning is still running — wait for the proposal before launching.' : `Planning ${task.status} — nothing to launch.` }
     }
     const body = req.body ?? {}
     const raw = Array.isArray(body.features) ? body.features : []
@@ -150,13 +150,13 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
       const description = String(f?.description ?? '').trim()
       if (!name || name === 'feature' || !description) {
         reply.code(400)
-        return { error: 'every feature needs a slug name and a description' }
+        return { error: 'Every suite needs a name and a description.' }
       }
       features.push({ name, description, ...(f?.group ? { group: deriveFeatureSlug(String(f.group)) } : {}) })
     }
     if (new Set(features.map((f) => f.name)).size !== features.length) {
       reply.code(400)
-      return { error: 'feature names must be unique' }
+      return { error: 'Suite names must be unique.' }
     }
     // The shared helper settles name collisions BEFORE anything is created — a
     // partial launch (2 of 5 flights minted) would be worse than a rejection.
@@ -177,7 +177,7 @@ export async function registerFlightPlanRoutes(app: FastifyInstance, deps: Fligh
     if (!outcome.launched) {
       reply.code(409)
       return {
-        error: `feature name(s) already in use: ${outcome.conflicts.join(', ')} — rename them in the proposal`,
+        error: `These suite names are already taken: ${outcome.conflicts.join(', ')} — rename them in the proposal.`,
         type: 'feature_name_conflicts',
         conflicts: outcome.conflicts,
       }

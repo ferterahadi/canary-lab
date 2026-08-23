@@ -214,7 +214,7 @@ describe('run + heal stages', () => {
 
     if (parked.kind !== 'checkpoint') throw new Error('expected run-failed checkpoint')
     expect(parked.checkpoint.message).toContain('Gave up after 4 cycles — the same test kept failing.')
-    expect(parked.checkpoint.message).toContain('ended failed after 4 heal cycle(s).')
+    expect(parked.checkpoint.message).toContain('failed after 4 repair cycles.')
   })
 
   it('yolo exports a failed run as-is without parking', async () => {
@@ -228,7 +228,7 @@ describe('run + heal stages', () => {
     const healed = await healStage(deps({ inject: runInject('passed', 2) })).run(ctxFor(withRun).ctx)
     expect(healed).toMatchObject({ kind: 'done', evidence: { healCycles: 2 } })
     const clean = await healStage(deps({ inject: runInject('passed', 0) })).run(ctxFor(withRun).ctx)
-    expect(clean).toMatchObject({ kind: 'skipped', reason: 'run needed no heal' })
+    expect(clean).toMatchObject({ kind: 'skipped', reason: 'nothing needed repairing' })
   })
 
   it('heal skips when the flight has no run to mirror', async () => {
@@ -240,7 +240,7 @@ describe('run + heal stages', () => {
     const inject = makeInject(() => ({ statusCode: 200, body: { manifest: { status: 'passed', services: [] } } }))
     const withRun = manifest({ links: { runId: 'run-1' } })
     const outcome = await healStage(deps({ inject })).run(ctxFor(withRun).ctx)
-    expect(outcome).toMatchObject({ kind: 'skipped', reason: 'run needed no heal' })
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: 'nothing needed repairing' })
   })
 
   it('heal skips when the linked run has no manifest', async () => {

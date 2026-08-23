@@ -1341,6 +1341,9 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .cl-pulse { animation: none; }
+  /* The running dot's state is also carried by its hue and the label beside
+     it, so the pulse is decoration and follows the user's motion setting. */
+  .cl-status-dot--running { animation: none; }
 }
 
 /* Dialog header. */

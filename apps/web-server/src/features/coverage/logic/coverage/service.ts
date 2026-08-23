@@ -153,7 +153,12 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
     feature: args.feature,
     requirements,
     tests,
-    ...(outcomes ? { provenRunId: outcomes.runId } : {}),
+    ...(outcomes
+      ? {
+          provenRunId: outcomes.runId,
+          ...(outcomes.spansExecutions ? { provenSpansExecutions: true } : {}),
+        }
+      : {}),
   })
   const ledger = applyTestStrength(breadth, assertions)
 

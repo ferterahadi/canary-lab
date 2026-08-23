@@ -50,7 +50,7 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
       }
       if (!manifest && !config) {
         reply.code(404)
-        return { error: `feature not set up: ${feature} (no flight record and no feature.config)` }
+        return { error: `"${feature}" isn't set up yet — no flight has run and the suite has no settings.` }
       }
 
       // R81: a stage is unlocked by EVIDENCE, not by the existence of a flight
@@ -134,14 +134,38 @@ export async function registerFlightReadRoutes(app: FastifyInstance, deps: Fligh
     // workspace instead of rendering blank — same read-time derivation the
     // /remedy route uses, and nothing is written back. Recorded evidence always
     // wins; a stage with none costs the probes and no more.
+    const stages = withWorkspaceEvidence(
+      { featuresDir: deps.featuresDir, logsDir: deps.logsDir },
+      manifest.feature,
+      manifest.stages,
+      manifest.opts.env,
+    )
+    // The header strip's RUN reads `runVerdict`, written only by a conducted run
+    // stage — a record whose run stage settled by evidence (external work, older
+    // records) showed no RUN next to a green run one click below. Same
+    // fill-the-gap rule as stage evidence: only when the stored field is absent
+    // AND the stage actually settled, and never written back.
+    const run = stages.find((s) => s.key === 'run')
+    const runEv = run && (run.status === 'done' || run.status === 'skipped')
+      ? (run.evidence as { status?: unknown } | undefined)
+      : undefined
+    const probedVerdict = runEv?.status === 'passed' || runEv?.status === 'failed' || runEv?.status === 'aborted'
+      ? runEv.status
+      : undefined
+    // REPORT existence is checked at read time: `links.evaluationZip` is a
+    // persisted absolute path, and "REPORT ready" over a deleted archive is a
+    // claim the download button immediately disproves. The stored link is left
+    // alone — re-exporting restores it.
+    let links = manifest.links
+    if (links?.evaluationZip && !fs.existsSync(links.evaluationZip)) {
+      const { evaluationZip: _gone, ...rest } = links
+      links = rest
+    }
     return {
       ...manifest,
-      stages: withWorkspaceEvidence(
-        { featuresDir: deps.featuresDir, logsDir: deps.logsDir },
-        manifest.feature,
-        manifest.stages,
-        manifest.opts.env,
-      ),
+      ...(manifest.runVerdict === undefined && probedVerdict !== undefined ? { runVerdict: probedVerdict } : {}),
+      ...(links !== manifest.links ? { links } : {}),
+      stages,
     }
   })
 

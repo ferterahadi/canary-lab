@@ -28,7 +28,7 @@ export function PlanningView({
       <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
         {failed
           ? 'Planning failed — you can still start one flight for the whole intent.'
-          : 'Judging whether this intent is one feature or several…'}
+          : 'Working out whether this is one suite or several…'}
       </div>
       {failed && task?.error && (
         <div data-testid="flight-plan-error" className="rounded border px-2.5 py-2 text-[11.5px]" style={{ borderColor: 'color-mix(in srgb, var(--danger) 40%, var(--border-default))', color: 'var(--danger)' }}>
@@ -117,7 +117,7 @@ export function ProposalView({
   return (
     <div className="flex flex-col gap-2.5" data-testid="flight-proposal-view">
       <div className="text-[12px]" style={{ color: 'var(--text-secondary)' }}>
-        The intent breaks down into {n} feature{n === 1 ? '' : 's'} — each gets its own flight and test suite.
+        This breaks down into {n} suite{n === 1 ? '' : 's'} — each gets its own flight.
       </div>
 
       {/* R69 follow-up: the shared group applies to EVERY card, so it heads the
@@ -139,8 +139,8 @@ export function ProposalView({
         </label>
         <div className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
           {sharedGroup.trim()
-            ? `Houses these ${n} features under one accordion.`
-            : 'Optionally house these features under one accordion.'}
+            ? `Groups these ${n} suites together in the list.`
+            : 'Optionally group these suites together in the list.'}
         </div>
       </div>
 

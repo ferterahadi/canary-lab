@@ -1,21 +1,52 @@
-import { useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { Suspense, lazy, memo, useState } from 'react'
 import type { AgentSessionEvent, SubagentThread } from '@/shared/api/client'
+
+// The markdown stack (react-markdown + remark-gfm → micromark) is the heaviest
+// dependency in the bundle and only agent prose needs it — loaded lazily so a
+// cold page paint never waits on it. The Suspense fallback renders the raw
+// text, so a row is readable during the one-time chunk load.
+const LazyReactMarkdown = lazy(async () => {
+  const [{ default: ReactMarkdown }, { default: remarkGfm }] = await Promise.all([
+    import('react-markdown'),
+    import('remark-gfm'),
+  ])
+  // Module-scope plugin identity, not an inline `[remarkGfm]` literal:
+  // react-markdown re-parses the whole remark→rehype pipeline whenever the
+  // plugin array's IDENTITY changes, so a per-render literal defeated every
+  // cache it has. With the timeline appending one event per WS frame over an
+  // unwindowed list, that was O(rows × markdown parse) per incoming event.
+  const plugins = [remarkGfm]
+  return {
+    default: function MarkdownText({ text }: { text: string }) {
+      return <ReactMarkdown remarkPlugins={plugins}>{text}</ReactMarkdown>
+    },
+  }
+})
+
+function MarkdownBody({ text }: { text: string }) {
+  return (
+    <Suspense fallback={<pre className="agentts-mdfallback">{text}</pre>}>
+      <LazyReactMarkdown text={text} />
+    </Suspense>
+  )
+}
 
 // ─── Timeline rows ───────────────────────────────────────────────────────────
 // Each event is a node on a single vertical rail: a typed marker (role/tool
 // glyph) + its content. Tool calls/results collapse to one mono line and
 // disclose their full payload; prose reads as a clean transcript.
 
-export function EventRow({ event, subagents }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]> }) {
+// memo: events are append-only — a new WS frame appends one event object and
+// never mutates the earlier ones, so every existing row bails out on identity
+// and an append re-renders one row instead of the whole transcript.
+export const EventRow = memo(function EventRow({ event, subagents }: { event: AgentSessionEvent; subagents?: Map<string, SubagentThread[]> }) {
   return (
     <li className="agentts-row" data-kind={event.kind}>
       <NodeMarker event={event} />
       <EventBody event={event} subagents={subagents} />
     </li>
   )
-}
+})
 
 /** A run of consecutive conductor lines sharing one `[TAG]` (untagged lines
  *  group under `tag: undefined`). Exact repeats inside the run collapse to one
@@ -219,13 +250,15 @@ export function ProseBody({ label, text, timestamp }: { label: string; text: str
 // bullets, inline code). Render it as such; tool payloads stay raw <pre>.
 // react-markdown does not emit raw HTML by default, so untrusted-ish agent
 // output can't inject markup.
-export function Markdown({ text }: { text: string }) {
+// memo on `text`: prose rows are immutable once streamed, so a parent
+// re-render must not re-run the markdown pipeline for every row again.
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
     <div className="agentts-prose agentts-md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <MarkdownBody text={text} />
     </div>
   )
-}
+})
 
 export const CLAMP_3: React.CSSProperties = {
   display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
@@ -261,7 +294,7 @@ export function ThinkingBody({ text, timestamp }: { text: string; timestamp: str
         <span>Thinking</span>
         <Timestamp value={timestamp} />
       </button>
-      {expanded && <div className="agentts-thinkbody agentts-md">{text && <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>}</div>}
+      {expanded && <div className="agentts-thinkbody agentts-md">{text && <MarkdownBody text={text} />}</div>}
     </div>
   )
 }

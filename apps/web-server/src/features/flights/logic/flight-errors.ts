@@ -27,7 +27,7 @@ export function stampSystemLine(chunk: string, iso: string): string {
 export class FlightConflictError extends Error {
   readonly statusCode = 409
   constructor(public readonly repoPaths: string[], public readonly existingFlightId: string) {
-    super(`a flight is already active for ${repoPaths.join(', ')} (${existingFlightId})`)
+    super(`A flight is already running on ${repoPaths.join(', ')} (${existingFlightId}) — open it, or stop it first.`)
     this.name = 'FlightConflictError'
   }
 }
@@ -47,9 +47,11 @@ export class FlightExistsError extends Error {
     public readonly existingFlightId: string,
     public readonly existingStatus: FlightManifest['status'],
   ) {
+    // "continue" / "redo" / "jump" are the literal mode values a caller passes
+    // back, so the sentence keeps them verbatim while reading as a sentence.
     super(
-      `feature "${feature}" already has a flight record (${existingFlightId}, ${existingStatus}) — ` +
-        `choose continue (resume where it left off), redo (restart from stage 1), or jump (start at a chosen stage)`,
+      `Suite "${feature}" already has a flight (${existingFlightId}, ${existingStatus}) — ` +
+        `continue it where it left off, redo it from the beginning, or jump to a chosen step.`,
     )
     this.name = 'FlightExistsError'
   }
@@ -72,7 +74,7 @@ export class FlightNotParkedError extends Error {
     public readonly status: FlightManifest['status'],
     public readonly pauseReason?: string,
   ) {
-    super(`flight ${flightId} is ${status}, not waiting for approval`)
+    super(`Flight ${flightId} is ${status} — it is no longer waiting for an answer.`)
     this.name = 'FlightNotParkedError'
   }
 }
@@ -97,8 +99,8 @@ export class FlightFrozenError extends Error {
   readonly statusCode = 409
   constructor(public readonly feature: string, what: 'repos' | 'intent') {
     super(
-      `${what === 'repos' ? 'repo list' : 'intent'} is frozen for feature "${feature}" while re-entering mid-pipeline — ` +
-        `restart from the beginning (mode "redo") to change it, or delete the flight`,
+      `The ${what === 'repos' ? 'repos' : 'intent'} of suite "${feature}" can't change while restarting part-way — ` +
+        `earlier steps already used them. Redo the flight from the beginning to change them, or delete it.`,
     )
     this.name = 'FlightFrozenError'
   }

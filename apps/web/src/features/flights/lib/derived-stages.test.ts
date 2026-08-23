@@ -151,6 +151,22 @@ describe('derived flight tokens (R81)', () => {
     expect(m.opts.env).toBe('staging')
   })
 
+  // The summary strip's RUN item reads `runVerdict` — a conducted-flight field a
+  // derived record never had — so the strip stayed blank beside a green run one
+  // click below. The probed run evidence carries the same verdict; it is lifted.
+  it('lifts a probed run verdict onto the pseudo-manifest, and only a real verdict', () => {
+    const done = FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const }))
+    for (const status of ['passed', 'failed', 'aborted'] as const) {
+      expect(buildDerivedManifest('go-smoke', done, { evidence: { run: { status } } }).runVerdict).toBe(status)
+    }
+    // 'running' is not a verdict, and junk from a hand-edited record is not one
+    // either — the strip must stay blank rather than invent an outcome.
+    expect(buildDerivedManifest('go-smoke', done, { evidence: { run: { status: 'running' } } }).runVerdict).toBeUndefined()
+    expect(buildDerivedManifest('go-smoke', done, { evidence: { run: { status: 7 } } }).runVerdict).toBeUndefined()
+    expect(buildDerivedManifest('go-smoke', done, { evidence: {} }).runVerdict).toBeUndefined()
+    expect(buildDerivedManifest('go-smoke', done).runVerdict).toBeUndefined()
+  })
+
   // The entry prefill falls through to the feature config's own description, so
   // the Repo scan panel's "Intent · what to test" reads the suite's purpose
   // instead of rendering its heading over an empty line.

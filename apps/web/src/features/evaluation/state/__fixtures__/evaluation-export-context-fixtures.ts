@@ -1,5 +1,5 @@
 import type { EvaluationExportTask } from '@/shared/api/types'
-import { EvaluationExportProvider, useEvaluationExports } from '../EvaluationExportContext'
+import { EvaluationExportProvider, useEvaluationExportLogs, useEvaluationExports } from '../EvaluationExportContext'
 import { FakeWebSocket } from '../EvaluationExportContext.test'
 
 export function workspaceSocket(): FakeWebSocket {
@@ -19,8 +19,12 @@ export function taskSocket(taskId: string): FakeWebSocket {
   return socket
 }
 
-export function Probe({ captured }: { captured: { value: ReturnType<typeof useEvaluationExports> | null } }) {
-  captured.value = useEvaluationExports()
+// Captures BOTH contexts (tasks/actions + the split-out log stream) so the
+// provider tests keep asserting logs through one probe.
+export function Probe({ captured }: {
+  captured: { value: (ReturnType<typeof useEvaluationExports> & { logsByTaskId: Record<string, string> }) | null }
+}) {
+  captured.value = { ...useEvaluationExports(), logsByTaskId: useEvaluationExportLogs() }
   return null
 }
 

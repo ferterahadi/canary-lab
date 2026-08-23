@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import * as api from '@/shared/api/client'
-import type { HealEnd, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
+import { useMemo } from 'react'
+import type { HealEnd, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
-import { RunRow } from '@/features/runs'
+import { RunRow, useRun, useRuns } from '@/features/runs'
 import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
 import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
@@ -32,8 +31,10 @@ import { formatDuration } from '@/shared/lib/format'
 // card every other checkpoint kind gets, below this panel, so a flight's
 // questions all look and sit the same. What remains here is evidence.
 //
-// It is the SINGLE poller for the run stage (one 5s interval: run detail + the
-// feature's runs list).
+// Data comes from the shared runs store (`useRun` / `useRuns`): `/ws/runs`
+// already pushes the run detail and the index live, so the panel's old 5s
+// interval re-downloaded the app's biggest payload (full playback events) to
+// read a handful of summary fields the store was holding all along.
 
 /** The cap the repair count is reported against — mirrors the server's
  *  AUTO_HEAL_MAX_CYCLES (heal-cycle.ts). Presentation only. */
@@ -61,7 +62,8 @@ export function TestRunPanel({
   /** Absent until the stage HAS a run — the hero then renders as its own
    *  skeleton (R83) rather than the stage pane going blank. */
   runId?: string
-  /** A run for this feature is active right now — drives the poll cadence. */
+  /** A run for this feature is active right now — gates the live controls and
+   *  the "still running" reading of a verdictless run. */
   live: boolean
   evidence: RunStageEvidence
   /** Open a run on the run detail. `target.test` is a failed entry's `name` — the
@@ -73,23 +75,8 @@ export function TestRunPanel({
    *  their place as placeholders instead of collapsing the pane. */
   awaiting?: AwaitingState
 }) {
-  const [detail, setDetail] = useState<RunDetail | null>(null)
-  const [runs, setRuns] = useState<RunIndexEntry[]>([])
-
-  // One poller for the whole run stage — the run detail and the feature's run
-  // list on a single interval. Gentle 5s cadence while anything is live; a
-  // single load once settled.
-  useEffect(() => {
-    let alive = true
-    const load = (): void => {
-      if (runId) api.getRunDetail(runId).then((d) => { if (alive) setDetail(d) }).catch(() => {})
-      api.listRuns({ feature }).then((r) => { if (alive) setRuns(r) }).catch(() => {})
-    }
-    load()
-    if (!live) return () => { alive = false }
-    const id = setInterval(load, 5000)
-    return () => { alive = false; clearInterval(id) }
-  }, [runId, feature, live])
+  const { detail } = useRun(runId)
+  const { runs } = useRuns()
 
   const manifest = detail?.manifest
   const summary = detail?.summary
@@ -100,8 +87,8 @@ export function TestRunPanel({
   // The feature's real test runs, newest first (boot/benchmark/verify are
   // plumbing, not test runs). The current run's ordinal reads off this list.
   const featureRuns = useMemo(
-    () => runs.filter((r) => r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify'),
-    [runs],
+    () => runs.filter((r) => r.feature === feature && r.executionType !== 'boot' && r.executionType !== 'benchmark' && r.executionType !== 'verify'),
+    [runs, feature],
   )
   const idx = runId ? featureRuns.findIndex((r) => r.runId === runId) : -1
   const ordinal = idx >= 0 ? featureRuns.length - idx : null
@@ -138,10 +125,11 @@ export function TestRunPanel({
   return (
     <div className={`flex flex-col gap-3 ${STAGE_COLUMN}`} data-testid="test-run">
       {/* The band belongs HERE rather than in `stageFacts`, because this panel
-          already polls the feature's run list — resolving it a second time in the
-          band-data hook would be two requests for one answer. It reports the
-          HISTORY (how many runs, how they ended, how long they take); the hero
-          below reports the latest run. Different scopes, so no number repeats. */}
+          already reads the feature's run list off the shared store — resolving
+          it a second time in the band-data hook would be two owners for one
+          answer. It reports the HISTORY (how many runs, how they ended, how
+          long they take); the hero below reports the latest run. Different
+          scopes, so no number repeats. */}
       <FactsGrid facts={runHistoryFacts(featureRuns, awaiting)} awaiting={awaiting} />
 
       <PanelCard kicker="Latest run" testId="test-run-hero">
@@ -562,10 +550,10 @@ function RunControls({
  *  repairing over MCP) — client · state · cycle, since Canary has no transcript
  *  to embed. Mirrors the wording the old activity-rail `[external]` row used. */
 function externalHealNote(session: RunDetail['manifest']['externalHealSession']): string {
-  if (!session) return 'Repaired by an external client. Full transcript on the run detail.'
+  if (!session) return 'Repaired by your own agent. The full record is on the run page.'
   const who = clientLabel(session.clientKind, 'an external client')
   const cycle = session.cycleCount > 0 ? ` · repair cycle ${session.cycleCount}` : ''
-  return `Repaired by ${who} — ${session.status}${cycle}. Full transcript on the run detail.`
+  return `Repaired by ${who} — ${session.status}${cycle}. The full record is on the run page.`
 }
 
 /** Short, stable run reference for the identity line — the trailing token of

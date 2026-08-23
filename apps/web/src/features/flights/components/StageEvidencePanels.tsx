@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { PortifyBootInstance, PortifyManifest } from '@/shared/api/client'
-import type { CoverageLedger, EvaluationExportTask, RunDetail, ServiceManifestEntry, TestCoverage, TestStrength } from '@/shared/api/types'
+import type { CoverageLedger, EvaluationExportTask, GapType, RunDetail, ServiceManifestEntry, TestCoverage, TestStrength } from '@/shared/api/types'
 import { useEvaluationExports } from '@/features/evaluation'
 import { GAP_META, SEG_ORDER, STRENGTH_META, STRENGTH_ORDER, countFor } from '@/features/coverage'
 import { PanelCard } from '@/shared/ui/PanelCard'
@@ -153,7 +153,8 @@ export function DoubleBootPanel({ portify, awaiting }: { portify: PortifyManifes
                 /* 0.55rem is `.cl-status-dot`'s own size — the bead has the knob
                    for exactly this, so the two indicators sit on one axis. */
                 : awaiting && <SkeletonBead awaiting={awaiting} size={8.8} />}
-              <span className="w-[76px] shrink-0">Instance {String.fromCharCode(65 + i)}</span>
+              {/* "Copy", not "Instance": every other line on this card says copy. */}
+              <span className="w-[76px] shrink-0">Copy {String.fromCharCode(65 + i)}</span>
               {instance
                 ? (
                   <span className="min-w-0 flex-1 truncate text-[11px] text-secondary" style={{ fontFamily: 'var(--font-mono)' }}>
@@ -209,7 +210,10 @@ export function OverlayPanel({ portify, awaiting }: { portify: PortifyManifest |
           <div key={group.group ?? '·'} className="mb-1.5 last:mb-0">
             {group.group && (
               <div className="pb-0.5 text-[11px] text-secondary" data-testid={`overlay-group-${group.group}`}>
-                {group.group}
+                {/* CONFIG_GROUP is a WIRE literal (the diff header the capture
+                    writes), so it maps to product words at render — "feature"
+                    never reaches the screen. */}
+                {group.group === CONFIG_GROUP ? 'suite settings' : group.group}
               </div>
             )}
             <ul className={`m-0 flex list-none flex-col p-0 ${group.group ? 'pl-3' : ''}`}>
@@ -292,8 +296,8 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
   const strengthOf = (t: TestCoverage): TestStrength => t.strength ?? 'shallow'
   return (
     <StageColumn>
-      <PanelCard kicker="Composition" testId={composed ? 'coverage-composition' : 'coverage-composition-skeleton'}>
-        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+      <PanelCard kicker="What the tests cover" testId={composed ? 'coverage-composition' : 'coverage-composition-skeleton'}>
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))' }}>
           <CompositionGroup
             testId="composition-strength"
             awaiting={composed ? undefined : awaiting}
@@ -317,6 +321,10 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
             rows={SEG_ORDER.map((g) => ({
               key: g,
               label: GAP_META[g].label,
+              // Same hover treatment the depth rows get: "Path gap" and
+              // "Variant gap" are this card's own shorthand, so each row says
+              // what it means without sending the reader to the ledger.
+              title: GAP_TITLE[g],
               color: GAP_META[g].color,
               count: composed ? countFor(composed, g) : null,
             }))}
@@ -331,6 +339,15 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
       </PanelCard>
     </StageColumn>
   )
+}
+
+/** Plain-language hover meaning for each gap bucket — "Path gap" and "Variant
+ *  gap" are legend shorthand a first-timer cannot decode from the words alone. */
+const GAP_TITLE: Record<GapType, string> = {
+  covered: 'Every declared path of the requirement is claimed by a test',
+  'path-incomplete': 'Some of its declared paths (happy/sad/edge) have no test yet',
+  'variant-incomplete': 'Tested for some variants (e.g. one channel) but not all of them',
+  untested: 'No test claims this requirement at all',
 }
 
 interface CompositionRow {
@@ -392,15 +409,20 @@ function CompositionGroup({ heading, rows, testId, awaiting }: {
 
 /** This flight's report: the deliverable, named as the user will receive it, with
  *  the one download for it. The band above measures what the report SAYS; this
- *  says what it IS and hands it over. */
-export function EvaluationDeliverablePanel({ task, awaiting }: { task: EvaluationExportTask | null; awaiting?: AwaitingState }) {
+ *  says what it IS and hands it over.
+ *
+ *  `probed` = the task was found by the read-time workspace probe (newest
+ *  completed export for the feature, whatever produced it), so the kicker says
+ *  "latest" rather than claiming the flight built it. */
+export function EvaluationDeliverablePanel({ task, awaiting, probed }: { task: EvaluationExportTask | null; awaiting?: AwaitingState; probed?: boolean }) {
+  const kicker = probed ? 'Latest report for this suite' : "This flight's report"
   if (!task) {
-    return awaiting ? <StageColumn><SkeletonPanel kicker="This flight's report" awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /></StageColumn> : null
+    return awaiting ? <StageColumn><SkeletonPanel kicker={kicker} awaiting={awaiting} testId="evaluation-deliverable-skeleton" rows={2} /></StageColumn> : null
   }
   const filename = evaluationArchiveFilename(task.feature, task.runId)
   return (
     <StageColumn>
-      <PanelCard kicker="This flight's report" testId="evaluation-deliverable">
+      <PanelCard kicker={kicker} testId="evaluation-deliverable">
         <dl className="m-0 grid gap-x-3 gap-y-1 text-[12px]" style={{ gridTemplateColumns: 'auto 1fr' }}>
           <dt className="cl-rubric self-center">From run</dt>
           <dd className="m-0 min-w-0 truncate" style={{ fontFamily: 'var(--font-mono)' }}>{task.runId}</dd>
@@ -441,11 +463,15 @@ export function AllReportsPanel({
   feature,
   pinnedTaskId,
   awaiting,
+  probed,
 }: {
   feature: string
   /** The task THIS flight's stage produced, badged in the list. */
   pinnedTaskId?: string
   awaiting?: AwaitingState
+  /** The pinned id came from the workspace probe, not the flight's own record —
+   *  badge it "latest", never "this flight" (see EvaluationDeliverablePanel). */
+  probed?: boolean
 }) {
   const { tasks } = useEvaluationExports()
   // The provider already holds every task in the workspace, newest-first, and
@@ -469,7 +495,7 @@ export function AllReportsPanel({
                   {/* The flight's own row is marked, not decorated: the status dot
                       is this row's only colour, so the marker stays a quiet label. */}
                   {task.taskId === pinnedTaskId && (
-                    <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-muted">this flight</span>
+                    <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wide text-muted">{probed ? 'latest' : 'this flight'}</span>
                   )}
                 </div>
                 {/* How the report was built is metadata, not a badge — it reads on
@@ -478,15 +504,15 @@ export function AllReportsPanel({
                   {task.status === 'failed'
                     /* A failed export has no archive; saying so beats a dead
                        button, and the reason is the only useful thing left. */
-                    ? (task.error ?? 'export failed')
-                    : [task.mode === 'localized' ? 'agent-written' : 'from the run', archiveContents(task), timeAgo(task.updatedAt)]
+                    ? (task.error ?? 'the report could not be built')
+                    : [task.mode === 'localized' ? 'written by an agent' : 'built from the run', archiveContents(task), timeAgo(task.updatedAt)]
                         .filter(Boolean)
                         .join(' · ')}
                 </div>
               </div>
               {task.downloadReady
                 ? <ArchiveDownloadButton task={task} />
-                : <span className="shrink-0 pr-1 text-[10.5px] text-muted">{task.status === 'running' ? 'building…' : 'no archive'}</span>}
+                : <span className="shrink-0 pr-1 text-[10.5px] text-muted">{task.status === 'running' ? 'building…' : 'no file yet'}</span>}
             </li>
           ))}
         </ul>
@@ -523,7 +549,7 @@ function ArchiveDownloadButton({ task, label }: { task: EvaluationExportTask; la
 }
 
 function builtBy(task: EvaluationExportTask): string {
-  const how = task.mode === 'localized' ? 'an agent wrote it' : 'built from the run'
+  const how = task.mode === 'localized' ? 'written by an agent' : 'built from the run'
   const who = task.producer === 'external' ? 'your own client' : task.sessionRef?.agent
   return who ? `${how} · ${who}` : how
 }

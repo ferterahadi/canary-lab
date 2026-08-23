@@ -108,7 +108,11 @@ export class FlightRunStore implements FlightStore {
           pauseReason: 'restart' as const,
           updatedAt: now,
           stages: m.stages.map((s) =>
-            s.status === 'running' ? { ...s, status: 'pending' as const } : s,
+            // `activeSince` is cleared WITHOUT banking: the server died at some
+            // unknowable point, so `now - activeSince` would count the downtime
+            // as stage work. Losing the pre-crash segment undercounts; banking
+            // it here could overcount by hours. Undercounting never lies upward.
+            s.status === 'running' ? { ...s, status: 'pending' as const, activeSince: undefined } : s,
           ),
           error: m.error ?? 'Interrupted by server restart — resume with `canary-lab flight`',
         }),
@@ -129,7 +133,9 @@ export class FlightRunStore implements FlightStore {
       const stages = manifest.stages.map((stage) => {
         if (stage.status !== 'running' && stage.status !== 'waiting-for-approval') return stage
         repaired = true
-        return { ...stage, status: 'pending' as const, checkpoint: undefined }
+        // Same no-banking rule as the restart reconcile above: whenever this
+        // stage actually stopped, it wasn't now.
+        return { ...stage, status: 'pending' as const, checkpoint: undefined, activeSince: undefined }
       })
       if (repaired) this.store.save({ ...manifest, stages })
     }

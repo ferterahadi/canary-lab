@@ -5,6 +5,7 @@ import { type FlightStore } from '../logic/store'
 import { FlightConflictError, startFlight, enqueueFlight, type FlightConductorDeps } from '../logic/conductor'
 import { STAGE_DEPENDS_ON, type FlightManifest, type FlightOptions, type FlightStageKey } from '../logic/types'
 import { type PlannedFeature } from '../../../../../../shared/flights/types'
+import { flightStageLabel } from '../../../../../../shared/flights/stage-labels'
 import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import { findBootProof, hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
 import { listRuns } from '../../runs/logic/run-store'
@@ -70,17 +71,21 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
     const featureDir = path.join(featuresDir, feature)
 
     if (fromStage === 'heal') {
-      return 'cannot start at "heal" — heal is driven by the run stage; use --from-stage run'
+      return `Auto-repair runs as part of ${flightStageLabel('run')} — start from ${flightStageLabel('run')} instead.`
     }
 
     /** The on-disk artifact each producing stage leaves behind, with the message
      *  naming what is missing and where to start instead. Keyed by the stage that
-     *  PRODUCES the artifact, so the reason always points at a real entry point. */
-    const PRODUCED: Partial<Record<FlightStageKey, { present: () => boolean; missing: string; startFrom: string }>> = {
+     *  PRODUCES the artifact, so the reason always points at a real entry point.
+     *
+     *  These strings render as GUI row sub-lines at the exact moment the user is
+     *  blocked — rail labels and plain outcomes, never raw stage keys, file
+     *  paths, CLI flags, or the word "feature" (product copy says "suite"). */
+    const PRODUCED: Partial<Record<FlightStageKey, { present: () => boolean; missing: string; startFrom: FlightStageKey }>> = {
       'scaffold': {
         present: () => fs.existsSync(path.join(featureDir, 'feature.config.cjs')),
-        missing: `feature "${feature}" has no feature.config.cjs (scaffold prerequisite)`,
-        startFrom: 'scout/scaffold',
+        missing: `suite "${feature}" hasn't been set up yet`,
+        startFrom: 'scout',
       },
       'env-capture': {
         // What this stage actually produces is a PROVEN BOOT; the envset is the
@@ -88,22 +93,22 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
         // none. Requiring the envset alone made a jump past this stage
         // impossible for such a feature even after it had booted many times.
         present: () => hasCapturedEnvset(featureDir, env) || (logsDir !== undefined && findBootProof(logsDir, feature) !== null),
-        missing: `feature "${feature}" has never booted and has no captured envset at envsets/${env}/ (env-capture prerequisite)`,
+        missing: 'the app has never started for this suite and no settings have been saved yet',
         startFrom: 'env-capture',
       },
       'prd-summary': {
         present: () => hasPrdSummary(featureDir),
-        missing: 'no PRD summary at docs/_prd-summary.json (prd-summary prerequisite)',
+        missing: 'no requirements have been written yet',
         startFrom: 'docs',
       },
       'specs-coverage': {
         present: () => hasAuthoredSpecs(featureDir),
-        missing: 'no specs under e2e/ (specs-coverage prerequisite)',
+        missing: 'no tests have been written yet',
         startFrom: 'specs-coverage',
       },
       'run': {
         present: () => Boolean(args.existing?.links?.runId) || standalonePassedRun(logsDir, feature) !== null,
-        missing: 'no passed run for this feature yet (run prerequisite)',
+        missing: 'this suite has no passing run yet',
         startFrom: 'run',
       },
     }
@@ -115,7 +120,7 @@ export function buildStageEntryValidator(featuresDir: string, logsDir?: string) 
     for (const producer of STAGE_DEPENDS_ON[fromStage]) {
       const artifact = PRODUCED[producer]
       if (artifact && !artifact.present()) {
-        return `cannot start at "${fromStage}": ${artifact.missing} — start from ${artifact.startFrom} instead`
+        return `Can't start at ${flightStageLabel(fromStage)}: ${artifact.missing} — start from ${flightStageLabel(artifact.startFrom)} instead.`
       }
     }
     return null

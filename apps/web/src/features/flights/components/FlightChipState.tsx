@@ -69,11 +69,11 @@ export function preFlightChipState(
  *  Every kind states its tone rather than defaulting: an optional field with one
  *  exception is a fallback arm nothing exercises. */
 export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: string; tone: string }> = {
-  'healing': { label: 'healing', title: 'Repair agent working on the failing tests', tone: 'var(--warning)' },
+  'healing': { label: 'repairing', title: 'A repair agent is fixing the app so the failing tests pass', tone: 'var(--warning)' },
   'running': { label: 'running', title: 'Test run in progress', tone: FLIGHT_STATUS_TONE['running'] },
-  'exporting': { label: 'exporting', title: 'Evaluation export in progress', tone: FLIGHT_STATUS_TONE['running'] },
-  'portifying': { label: 'portifying', title: 'Port-ification in progress', tone: FLIGHT_STATUS_TONE['running'] },
-  'authoring': { label: 'authoring', title: 'Authoring test specs', tone: FLIGHT_STATUS_TONE['running'] },
+  'exporting': { label: 'exporting', title: 'Building the evaluation report', tone: FLIGHT_STATUS_TONE['running'] },
+  'portifying': { label: 'port setup', title: 'Making the suite safe to run two at a time', tone: FLIGHT_STATUS_TONE['running'] },
+  'authoring': { label: 'writing', title: 'Writing tests', tone: FLIGHT_STATUS_TONE['running'] },
 }
 
 /** Short chip verb for a RUNNING flight, keyed by the stage the conductor is on
@@ -87,24 +87,24 @@ export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: 
  *  added without deciding what its chip says.
  *
  *  Verbs, not the stage titles, because that is this vocabulary's grammar
- *  (running / healing / portifying); the full title reaches the tooltip via
+ *  (running / repairing / port setup); the full title reaches the tooltip via
  *  `stageLabel`. The four that overlap ACTIVITY_CHIP reuse ITS verb, so a job
  *  reads identically whether a flight stage or a standalone action started it.
  *
  *  Kept short deliberately: the chip is fixed at 72px (see FeatureChipBadge), so
- *  nothing here may exceed the width of the pinned widest labels — "to approve"
- *  and "portifying", both 10 characters. */
+ *  nothing here may exceed the width of the pinned widest labels — "to approve",
+ *  "port setup" and "condensing", all 10 characters. */
 export const RUNNING_STAGE_CHIP: Record<FlightStageKey, string> = {
   'similarity': 'checking',
   'scout': 'scanning',
   'scaffold': 'setting up',
   'env-capture': 'capturing',
   'docs': 'reading',
-  'prd-summary': 'distilling',
-  'specs-coverage': 'authoring',
-  'portify': 'portifying',
+  'prd-summary': 'condensing',
+  'specs-coverage': 'writing',
+  'portify': 'port setup',
   'run': 'running',
-  'heal': 'healing',
+  'heal': 'repairing',
   'evaluation-export': 'exporting',
 }
 
@@ -145,7 +145,7 @@ export interface FeatureChipState {
  *      in progress and only the tooltip says where
  *   1. flight parked on any OTHER checkpoint → "to approve"  (amber — the human
  *      is the blocker; outranks live activity because nothing moves until they act)
- *   2. live activity on the feature  → "running" / "healing" / "portifying" /
+ *   2. live activity on the feature  → "running" / "repairing" / "port setup" /
  *      "authoring" (narrates the absorbed surfaces (runs / portify / wizard
  *      drafts) whether the job was started by a flight stage or standalone;
  *      sky, except the amber "healing" — see ACTIVITY_CHIP)
@@ -187,7 +187,7 @@ export function featureChipState(
     return { label: verb, tone: FLIGHT_STATUS_TONE['running'], live: true, rank: 1, title: externalWorkChipTitle(verb) }
   }
   if (flight?.status === 'waiting-for-approval') {
-    return { label: 'to approve', tone: FLIGHT_STATUS_TONE['waiting-for-approval'], live: false, rank: 0, title: 'needs approval' }
+    return { label: 'to approve', tone: FLIGHT_STATUS_TONE['waiting-for-approval'], live: false, rank: 0, title: 'Waiting on your answer' }
   }
   // A queued sibling needs no attention — muted, and it sinks below every
   // resting state (only never-flown ranks lower). Checked before live activity
@@ -206,7 +206,7 @@ export function featureChipState(
     // "Done" means the WHOLE pipeline — a partial rail (or a caller passing a
     // subset) must never read as a finished flight.
     if (derived && derived.length >= FLIGHT_STAGE_KEYS.length && derived.every((s) => s.status === 'done')) {
-      return { label: 'done', tone: FLIGHT_STATUS_TONE['done'], live: false, rank: 5, title: 'every step complete — flown outside the conductor' }
+      return { label: 'done', tone: FLIGHT_STATUS_TONE['done'], live: false, rank: 5, title: "every step is done — finished outside Canary's own pipeline" }
     }
     if (derived?.some((s) => s.status !== 'pending')) {
       return { label: 'idle', tone: 'var(--text-secondary)', live: false, rank: 5.8, title: 'part-way through — open to continue from the next step' }

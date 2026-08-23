@@ -24,8 +24,8 @@ afterEach(() => {
 
 /** Renders the hook and exposes the bus so a test can bump a topic the way the
  *  workspace-event handler does. */
-function Probe({ id, fetcher }: { id: string | null; fetcher: (key: string) => Promise<string | null> }) {
-  const { value, loading } = useLiveResource('coverage', id, fetcher)
+function Probe({ id, fetcher, cache }: { id: string | null; fetcher: (key: string) => Promise<string | null>; cache?: string }) {
+  const { value, loading } = useLiveResource('coverage', id, fetcher, cache !== undefined ? { cache } : {})
   const { invalidate } = useInvalidation()
   return (
     <div>
@@ -36,7 +36,7 @@ function Probe({ id, fetcher }: { id: string | null; fetcher: (key: string) => P
   )
 }
 
-async function render(props: { id: string | null; fetcher: (key: string) => Promise<string | null> }) {
+async function render(props: { id: string | null; fetcher: (key: string) => Promise<string | null>; cache?: string }) {
   await act(async () => {
     root.render(<InvalidationProvider><Probe {...props} /></InvalidationProvider>)
   })
@@ -140,6 +140,54 @@ describe('useLiveResource', () => {
     await render({ id: 'checkout', fetcher: async () => { calls += 1; return 'x' } })
     await render({ id: 'checkout', fetcher: async () => { calls += 1; return 'x' } })
     expect(calls).toBe(1)
+  })
+
+  it('a tagged remount paints the last resolved value immediately, then the fresh fetch replaces it', async () => {
+    // The flight rail remounts its stage pane on every row click — a revisit
+    // must read stale-then-fresh, not skeleton-then-fresh. Cache is OPT-IN
+    // via a resource tag (two resources can share topic + key).
+    await render({ id: 'revisit-key', fetcher: async () => 'first read', cache: 'probe' })
+    expect(read('value')).toBe('first read')
+
+    let release: ((v: string) => void) | null = null
+    const slow = () => new Promise<string>((resolve) => { release = resolve })
+    // A new element `key` forces a REAL remount (a plain re-render would keep
+    // the state and prove nothing about the seed).
+    await act(async () => {
+      root.render(<InvalidationProvider><Probe key="remounted" id="revisit-key" fetcher={slow} cache="probe" /></InvalidationProvider>)
+    })
+    expect(read('value')).toBe('first read')
+    expect(read('loading')).toBe('loading')
+    await act(async () => { release?.('second read') })
+    expect(read('value')).toBe('second read')
+  })
+
+  it('a key CHANGE paints that key’s cached value (or nothing) at once — never the old key’s figures', async () => {
+    const fetcher = async (key: string) => `value:${key}`
+    await render({ id: 'key-a', fetcher, cache: 'probe' })
+    expect(read('value')).toBe('value:key-a')
+
+    // Uncached key: the old value clears immediately while the fetch runs.
+    let release: ((v: string) => void) | null = null
+    const slow = () => new Promise<string>((resolve) => { release = resolve })
+    await act(async () => {
+      root.render(<InvalidationProvider><Probe id="key-b-uncached" fetcher={slow} cache="probe" /></InvalidationProvider>)
+    })
+    expect(read('value')).toBe('—')
+    await act(async () => { release?.('value:key-b-uncached') })
+
+    // Back to the cached key: its figures return without waiting for the fetch.
+    await act(async () => {
+      root.render(<InvalidationProvider><Probe id="key-a" fetcher={slow} cache="probe" /></InvalidationProvider>)
+    })
+    expect(read('value')).toBe('value:key-a')
+
+    // An UNTAGGED call site never caches and never seeds — a fresh mount of the
+    // same key starts empty.
+    await act(async () => {
+      root.render(<InvalidationProvider><Probe key="untagged" id="key-a" fetcher={slow} /></InvalidationProvider>)
+    })
+    expect(read('value')).toBe('—')
   })
 
   it('reports loading across a refetch so a caller can hold its skeleton', async () => {

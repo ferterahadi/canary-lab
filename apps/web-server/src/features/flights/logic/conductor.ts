@@ -3,7 +3,7 @@ import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightCheckpointResponse,
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError } from './flight-errors'
-import { FlightEntryMode, StageAdapters, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
+import { FlightEntryMode, StageAdapters, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
 
 export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
 
@@ -153,6 +153,9 @@ export function startFlight(args: StartFlightArgs, deps: FlightConductorDeps): S
       // within the same tick and a deliberate redo looks exactly like a resume.
       askAtStage: args.fromStage ?? FLIGHT_STAGE_KEYS[0],
       updatedAt: now(),
+      // The record survives a redo/jump but the work begins again — ELAPSED off
+      // the original start would report a week-old redo as a week-long flight.
+      startedAt: now(),
       endedAt: undefined,
       error: undefined,
       runVerdict: undefined,
@@ -296,7 +299,11 @@ export async function pauseFlight(flightId: string, deps: FlightConductorDeps): 
     stages: current.stages.map((s) =>
       s.key === openStage?.key
         ? {
-            ...s,
+            // Close the work clock: the pause ends the stage's live segment,
+            // and the time parked must not count as stage work. A stage paused
+            // while parked at a checkpoint was already banked at the park —
+            // bankStageActivity is a no-op there.
+            ...bankStageActivity(s, now()),
             status: 'pending' as const,
             checkpoint: undefined,
             // An answer the stage was EXECUTING when paused survives — resume

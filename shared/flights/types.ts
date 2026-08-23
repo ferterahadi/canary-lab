@@ -220,8 +220,22 @@ export interface FlightStageRemedy {
 export interface FlightStage {
   key: FlightStageKey
   status: FlightStageStatus
+  /** When the stage FIRST started. Never re-stamped on resume — a truthy value
+   *  on a `pending` stage is the "interrupted mid-run" marker. Durations do NOT
+   *  read this (see `activeMs`): the span startedAt→endedAt includes pauses and
+   *  checkpoint waits, which is wall clock, not work. */
   startedAt?: string
   endedAt?: string
+  /** Milliseconds of actual stage work, banked segment by segment as the stage
+   *  leaves `running` (checkpoint park, pause, settle). The UI reports THIS as
+   *  the stage's duration — a flight parked overnight on a question must not
+   *  show a nine-hour step. Absent on records from before the field existed;
+   *  readers fall back to the startedAt→endedAt span. */
+  activeMs?: number
+  /** Start of the live segment now accruing — stamped when the stage enters
+   *  `running`, cleared whenever the segment is banked into `activeMs`. Its
+   *  presence is what makes double-banking impossible. */
+  activeSince?: string
   /** Harness-computed proof the stage settled on (boot summary, coverage
    *  ledger snapshot, archive path…) — never agent-asserted. */
   evidence?: unknown
@@ -344,6 +358,13 @@ export interface FlightManifest {
   currentStage: FlightStageKey | null
   stages: FlightStage[]
   createdAt: string
+  /** When work actually began: stamped by the drive loop's first pass, and
+   *  re-stamped by a redo/jump. Distinct from `createdAt`, which is the
+   *  record's identity — a queued flight is created long before it starts, and
+   *  a redone flight keeps its record but begins again, so ELAPSED off
+   *  `createdAt` absorbed sibling runtimes and week-old redos. Readers fall
+   *  back to `createdAt` for records from before the field existed. */
+  startedAt?: string
   updatedAt: string
   endedAt?: string
   error?: string

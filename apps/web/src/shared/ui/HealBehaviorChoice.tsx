@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { plural } from '@shared/lib/plural'
 import { healDisplayValue, healEnabled } from '@/shared/lib/heal-threshold'
 import { NumberInput } from './FormFields'
 import { OPTION_ROW_COMPACT_CLASS, optionRowStyle } from './OptionRow'
@@ -25,7 +26,7 @@ import { OPTION_ROW_COMPACT_CLASS, optionRowStyle } from './OptionRow'
 /** The mechanism behind the field, for the surface's own hover affordance. One
  *  home so the flight digest and the General tab can't drift apart on it. */
 export const HEAL_BEHAVIOR_INFO =
-  'Each new Playwright spawn starts with --max-failures=N. A change made while tests are already running applies to the next rerun or restart, not the current process.'
+  'Each test run starts with this failure limit. Changing it mid-run takes effect on the next run, not the one already going.'
 
 export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix = 'setup-heal', className = '', lockedTitle }: {
   /** `feature.config.cjs`'s `healOnFailureThreshold`; absent = on at the default. */
@@ -51,7 +52,7 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <div
         role={editable ? 'radiogroup' : undefined}
-        aria-label="Heal behavior"
+        aria-label="Auto-repair"
         title={editable ? undefined : lockedTitle}
         className="flex flex-col"
       >
@@ -62,7 +63,7 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
           onPick={() => onChange(count)}
           label={editable ? (
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-              Stop &amp; heal after
+              Stop &amp; repair after
               {/* A disabled <button>/<input> swallows the click instead of
                   bubbling it, so on the unpicked row the stepper — the widest,
                   most clickable-looking thing in it — would be a dead zone that
@@ -77,10 +78,10 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
                   onChange={onChange}
                 />
               </span>
-              failure(s)
+              {count === 1 ? 'failure' : 'failures'}
             </span>
           ) : (
-            `Stop & heal after ${count} failure(s)`
+            `Stop & repair after ${plural(count, 'failure')}`
           )}
         />
         <HealModeRow
@@ -89,7 +90,7 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
           editable={editable}
           onPick={() => onChange(0)}
           divider
-          label="Run the whole suite, then heal"
+          label="Run the whole suite, then repair"
         />
       </div>
     </div>

@@ -2,7 +2,7 @@ import { FLIGHT_STAGE_KEYS, type FlightCheckpoint, type FlightCheckpointResponse
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { FlightConductorDeps, abortFlight, drainQueuedFlights, pauseFlight, resumeFlight } from './conductor'
 import { stampSystemLine } from './flight-errors'
-import { StageContext, StageOutcome, buildStageContext, driveControllers, firstOpenStageIndex } from './flight-stages'
+import { StageContext, StageOutcome, bankStageActivity, buildStageContext, driveControllers, firstOpenStageIndex } from './flight-stages'
 
 /** R71/W4: checkpoint kind → its safe defaults, best first. The first entry
  *  that is actually among the checkpoint's options wins, so a kind whose option
@@ -74,7 +74,14 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
     const next: FlightManifest = {
       ...m,
       updatedAt: now(),
-      stages: m.stages.map((s) => (s.key === key ? { ...s, ...patch } : s)),
+      stages: m.stages.map((s) => {
+        if (s.key !== key) return s
+        // Any status patch that takes the stage out of `running` (settle,
+        // checkpoint park) closes its live work segment — banked here so no
+        // exit path can forget it. Progress-only patches leave the clock alone.
+        const base = patch.status && patch.status !== 'running' ? bankStageActivity(s, now()) : s
+        return { ...base, ...patch }
+      }),
     }
     save(next)
     return next
@@ -95,6 +102,13 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
   driveControllers.set(flightId, controller)
 
   try {
+    // ELAPSED starts when work does. A queued flight is created parked and can
+    // sit behind its siblings for their whole runtime; stamping here (first
+    // drive pass) instead of at creation keeps that wait out of the number.
+    {
+      const m0 = read()
+      if (!m0.startedAt) save({ ...m0, startedAt: now(), updatedAt: now() })
+    }
     for (;;) {
       let m = read()
       // Aborted/paused out from under us (abortFlight/pauseFlight between stages).
@@ -115,7 +129,13 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
         currentStage: stage.key,
         updatedAt: now(),
         stages: m.stages.map((s, i) =>
-          i === idx ? { ...s, status: 'running' as const, startedAt: s.startedAt ?? now() } : s,
+          // `activeSince` starts (or keeps) the work clock: preserved when a
+          // segment is already accruing — an auto-answered checkpoint re-enters
+          // here with the clock still live, and re-stamping would drop the
+          // pre-answer work from the stage's duration.
+          i === idx
+            ? { ...s, status: 'running' as const, startedAt: s.startedAt ?? now(), activeSince: s.activeSince ?? now() }
+            : s,
         ),
       }
       save(m)
@@ -198,7 +218,7 @@ export async function drive(flightId: string, deps: FlightConductorDeps, opts: D
           stages: cur.stages.map((s, i) => {
             if (i === idx) {
               return {
-                ...s,
+                ...bankStageActivity(s, now()),
                 status: 'done' as const,
                 endedAt: now(),
                 ...(jump.evidence !== undefined ? { evidence: jump.evidence } : {}),

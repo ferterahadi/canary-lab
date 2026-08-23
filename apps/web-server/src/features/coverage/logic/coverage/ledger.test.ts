@@ -320,9 +320,23 @@ describe('computeCoverageLedger — proven axis (latest-run join)', () => {
     const ledger = computeCoverageLedger({ feature: 'f', requirements, tests })
     expect(ledger.provenPct).toBeUndefined()
     expect(ledger.provenRunId).toBeUndefined()
+    expect(ledger.provenSpansExecutions).toBeUndefined()
     expect(ledger.totals.proven).toBeUndefined()
     expect(ledger.requirements[0].proven).toBeUndefined()
     expect(ledger.requirements[0].pathCoverage[0].proven).toBeUndefined()
+  })
+
+  it('carries the merged-execution flag onto the ledger, and only when set', () => {
+    const requirements = [req('R1', ['happy'])]
+    const tests: CoverageTestInput[] = [
+      { name: 't', requirements: ['R1'], pathTypes: ['happy'], lastRun: { runId: 'r9', passed: true, retried: true } },
+    ]
+    const spanning = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9', provenSpansExecutions: true })
+    expect(spanning.provenSpansExecutions).toBe(true)
+    // The per-test retry marker rides `lastRun` through untouched.
+    expect(spanning.tests[0].lastRun).toEqual({ runId: 'r9', passed: true, retried: true })
+    const clean = computeCoverageLedger({ feature: 'f', requirements, tests, provenRunId: 'r9' })
+    expect(clean.provenSpansExecutions).toBeUndefined()
   })
 
   it('marks a covered requirement proven when every path is claimed by a passing test', () => {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
-import { formatDuration, num, specsCoverageProgress, stageStatusTone, type StageFact } from './stage-meta'
+import { capitalizeFirst } from '@/shared/lib/format'
+import { formatDuration, num, specsCoverageProgress, stageLabel, stageStatusTone, type StageFact } from './stage-meta'
 import { asRecord } from './StageDetail'
 
 /** The header's summary strip (R61, R71/W5): the flight's headline numbers —
@@ -30,7 +31,7 @@ export function FlightSummaryStrip({
    *  still wants; only the flip is withheld. */
   autopilotLockedReason?: string
 }) {
-  const items: Array<{ label: string; value: string; tone?: string; stage?: FlightStageKey }> = []
+  const items: Array<{ label: string; value: string; tone?: string; stage?: FlightStageKey; title?: string }> = []
 
   // R71/W5: the one state where you'd watch the clock used to be the one state
   // that hid it — tick locally while the flight runs.
@@ -41,9 +42,14 @@ export function FlightSummaryStrip({
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
   }, [live])
-  const elapsed = formatDuration(flight.createdAt, flight.endedAt ?? (live ? new Date(now).toISOString() : flight.updatedAt))
+  // `startedAt` is when work began: a queued flight is created long before it
+  // starts, and a redo re-stamps it — `createdAt` alone reported the siblings'
+  // whole runtime (or a week-old original start) as this flight's ELAPSED.
+  const elapsed = formatDuration(flight.startedAt ?? flight.createdAt, flight.endedAt ?? (live ? new Date(now).toISOString() : flight.updatedAt))
   if (elapsed) {
-    items.push({ label: flight.endedAt ? 'Elapsed' : 'Elapsed so far', value: elapsed })
+    // One label in both states: the switch to 'Elapsed so far' resized the
+    // six-item strip every time a flight settled.
+    items.push({ label: 'Elapsed', value: elapsed })
   }
 
   // R79: which CLI conducts this flight's stage agents — read-only (chosen at
@@ -51,7 +57,15 @@ export function FlightSummaryStrip({
   // always knows without a control they can't change here. R81: a derived
   // flight has no conductor and no stored choice, so naming one would be a
   // fabrication — the agent is picked in the launcher if it's ever conducted.
-  if (!derived) items.push({ label: 'Agent', value: flight.opts.agent ?? 'claude' })
+  if (!derived) {
+    const agent = flight.opts.agent ?? 'claude'
+    items.push({
+      label: 'Agent',
+      // Title-cased product name, not the raw config slug.
+      value: agent === 'codex' ? 'Codex' : 'Claude',
+      title: "The coding agent conducting this flight's steps — chosen at start, fixed for the record",
+    })
+  }
 
   // Coverage came only from the authoring LOOP's pass records, which just one
   // population ever has: a flight that conducted specs-coverage itself. A
@@ -72,13 +86,18 @@ export function FlightSummaryStrip({
       // statement — every requirement claimed by some spec.
       tone: (lastMapped ? lastMapped.gapsOpen === 0 : coveragePct >= 100) ? 'var(--success)' : 'var(--warning)',
       stage: 'specs-coverage',
+      // This figure is the flight's record; the stage tiles read the LIVE
+      // ledger, which moves the moment a requirement or test changes. Saying so
+      // here keeps the two from reading as a contradiction when they differ.
+      title: 'Measured when this flight ran — the stage shows the live coverage',
     })
   }
 
   if (flight.runVerdict) {
     items.push({
       label: 'Run',
-      value: flight.runVerdict,
+      // Capitalized outcome, not the raw wire value.
+      value: capitalizeFirst(flight.runVerdict),
       tone: flight.runVerdict === 'passed' ? 'var(--success)' : flight.runVerdict === 'failed' ? 'var(--danger)' : 'var(--text-muted)',
       stage: 'run',
     })
@@ -86,9 +105,15 @@ export function FlightSummaryStrip({
 
   const docsEv = asRecord(flight.stages.find((s) => s.key === 'docs')?.evidence)
   const docs = Array.isArray(docsEv?.docs) ? docsEv.docs.length : 0
-  if (docs > 0) items.push({ label: 'Docs', value: String(docs), stage: 'docs' })
+  if (docs > 0) items.push({ label: 'Docs', value: String(docs), stage: 'docs', title: 'Requirement documents the flight collected' })
 
-  if (flight.links?.evaluationZip) items.push({ label: 'Report', value: 'ready', tone: 'var(--success)', stage: 'evaluation-export' })
+  // The conducted-flight link, or the export-stage evidence a probed/derived
+  // record carries — a downloadable report on the stage below must not read as
+  // "no report" up here.
+  const exportEv = asRecord(flight.stages.find((s) => s.key === 'evaluation-export')?.evidence)
+  if (flight.links?.evaluationZip || typeof exportEv?.taskId === 'string') {
+    items.push({ label: 'Report', value: 'ready', tone: 'var(--success)', stage: 'evaluation-export' })
+  }
 
   const autopilotOn = flight.opts.autopilot !== false
   const autopilotActive = autopilotOn && !flight.opts.yolo
@@ -96,9 +121,11 @@ export function FlightSummaryStrip({
   return (
     <div
       data-testid="flight-summary-strip"
-      className="flex flex-wrap items-center gap-x-5 gap-y-1 border-b px-4 py-1.5 border-line"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-1.5 border-line"
     >
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+      {/* gap-x-4 (16px): the closest to the app's 8-12px rhythm that still
+          separates label-value pairs with no divider between them. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {items.map((item) => {
           const body = (
             <>
@@ -117,7 +144,7 @@ export function FlightSummaryStrip({
               data-testid={`strip-${item.stage}`}
               onClick={() => onSelectStage(item.stage!)}
               className="flex items-baseline gap-1.5 rounded text-[11px] underline-offset-2 transition-colors hover:underline"
-              title={`Jump to ${stageRailLabelFor(item.stage)}`}
+              title={item.title ? `${item.title} · jump to ${stageRailLabelFor(item.stage)}` : `Jump to ${stageRailLabelFor(item.stage)}`}
             >
               {body}
             </button>
@@ -140,10 +167,10 @@ export function FlightSummaryStrip({
             title={autopilotLockedReason
               ? autopilotLockedReason
               : flight.opts.yolo
-              ? 'This flight runs --yolo — every checkpoint except missing env is skipped, whatever autopilot says'
+              ? 'This flight skips every question except missing settings, whatever Autopilot says'
               : autopilotOn
-                ? 'Autopilot answers the checkpoints with a safe default — click to be asked at every one from now on'
-                : 'Every checkpoint parks for you — click to let the safe defaults answer again'}
+                ? 'Autopilot picks the safe answer for you — click to be asked at every question instead'
+                : 'Every question waits for you — click to let Autopilot answer the safe ones'}
           >
             <span className="cl-rubric">
               Autopilot
@@ -170,10 +197,13 @@ export function FlightSummaryStrip({
 }
 
 /** The rail row label a strip jump lands on (merged-pair aware). */
+/** The merged rail-row name a strip item jumps to. `docs` folds into the
+ *  Requirements row; everything else reads the shared label map, so a future
+ *  strip item can never tooltip as "Jump to Evaluation report" by falling
+ *  through a hardwired ternary. */
 export function stageRailLabelFor(key: FlightStageKey): string {
-  if (key === 'run') return 'Test Run'
   if (key === 'docs') return 'Requirements'
-  return key === 'specs-coverage' ? 'Test authoring & coverage' : 'Evaluation Report'
+  return stageLabel(key)
 }
 
 /** Distill the parsed feature.config + playwright.config into fact rows. Pure

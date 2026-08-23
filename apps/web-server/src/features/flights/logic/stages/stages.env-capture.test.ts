@@ -201,6 +201,18 @@ describe('env-capture stage', () => {
     const m = withScout(manifest({ opts: { env: 'local', coverageTarget: 100, yolo: true } }), [missing])
     const outcome = await envCaptureStage(deps()).run(ctxFor(m).ctx)
     expect(outcome).toMatchObject({ kind: 'checkpoint', checkpoint: { kind: 'missing-env', data: { missing: [missing] } } })
+    if (outcome.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect(outcome.checkpoint.message).toContain('1 settings file the app needs is missing')
+  })
+
+  it('pluralizes the missing-env message when more than one file is gone', async () => {
+    createFeatureSkeleton({ projectRoot: tmpDir, featuresDir, feature: 'checkout', envs: ['local'] })
+    const missing = [path.join(repoDir, '.env'), path.join(repoDir, '.env.local')]
+    const m = withScout(manifest(), missing)
+    const outcome = await envCaptureStage(deps()).run(ctxFor(m).ctx)
+    if (outcome.kind !== 'checkpoint') throw new Error('expected checkpoint')
+    expect(outcome.checkpoint.message).toContain('2 settings files the app needs are missing')
+    expect(outcome.checkpoint.data).toEqual({ missing })
   })
 
   it('materializes user-supplied values at the missing path, then captures and boots', async () => {

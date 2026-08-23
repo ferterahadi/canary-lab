@@ -70,10 +70,11 @@ export const COVERAGE_CSS = `
 .clcov-reqtag{appearance:none;cursor:pointer;transition:filter .12s}
 .clcov-reqtag:hover{filter:brightness(1.18)}
 .clcov-reqtag:focus-visible{outline:none;box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent)}
-.clcov-skel{display:inline-block;border-radius:var(--radius-sm);background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base));position:relative;overflow:hidden}
-.clcov-skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--text-muted) 22%,transparent),transparent);animation:clcov-skel-sweep 1.3s ease-in-out infinite}
-@keyframes clcov-skel-sweep{100%{transform:translateX(100%)}}
-@media (prefers-reduced-motion:reduce){.clcov-skel::after{animation:none}}
+.clcov-skel{display:inline-block;border-radius:var(--radius-sm);background:color-mix(in srgb,var(--text-muted) 16%,var(--bg-base))}
+/* One loading language: the sweep is the shared .cl-skeleton animation
+   (styles.css) layered over this card's own fill — the ledger used to carry a
+   second keyframe set at a different speed, so the app had two competing
+   skeleton vocabularies. The shared class brings its own reduced-motion guard. */
 /* Click-to-expand cards: a quiet caret leads the header; the row is the hit target. */
 .clcov-disclose{cursor:pointer;outline:none;border-radius:var(--radius-md);margin:-2px -4px;padding:2px 4px;transition:background .12s}
 .clcov-disclose:hover{background:var(--bg-hover)}

@@ -253,8 +253,11 @@ export function splitFilePath(p: string): { dir: string; base: string } {
 }
 
 export interface StrengthCounts extends Record<TestStrength, number> {
-  /** Tests the grader never scored. Its own bucket: folding these into
-   *  `shallow` would report an unmeasured test as a weak one. */
+  /** Tests carrying no strength grade at all. Only reachable for a ledger built
+   *  WITHOUT the grader (`applyTestStrength` always assigns a tier — a test
+   *  with no classifiable assertion is graded `shallow` by definition, see
+   *  strength.ts). Kept as its own bucket so such a ledger never reports an
+   *  unmeasured test as a weak one. */
   ungraded: number
 }
 
@@ -271,6 +274,9 @@ export interface StrengthCounts extends Record<TestStrength, number> {
 export interface ProofSpecs {
   mapped: number
   passed: number
+  /** Of `passed`, how many needed a Playwright retry — flaky within the run.
+   *  Counted so the band never reports a retried pass as a clean one. */
+  passedOnRetry: number
   failed: number
   /** Mapped specs the joined run recorded no outcome for — new, renamed, or
    *  never reached. Its own bucket: a spec that never ran did not fail. */
@@ -296,27 +302,37 @@ export interface LedgerEvidence {
   testCount: number
   strength: StrengthCounts
   specs: ProofSpecs
+  /** The joined run's summary merged results forward from a prior execution (a
+   *  targeted heal rerun), so the outcomes above span several partial runs —
+   *  the passes never all happened in one execution. */
+  spansExecutions: boolean
 }
 
 /** Reshape the coverage ledger into what the Evaluation Report band shows.
  *  Every figure is read off the ledger the engine computed — nothing here is
  *  recalculated, so the band, the ledger page and `get_feature_coverage` cannot
- *  disagree. The band reports COUNTS on one denominator rather than the ledger's
- *  `coveragePct`/`provenPct` pair, which is why neither percentage is carried:
- *  two gates over the same requirements compare at a glance as `6/6` and `0/6`,
- *  where `100%` beside `0/6` made the reader convert one to see the other. */
+ *  disagree. The two REQUIREMENT gates (covered, proven) report counts on one
+ *  denominator rather than the ledger's `coveragePct`/`provenPct` pair, which
+ *  is why neither percentage is carried: `6/6` beside `0/6` compares at a
+ *  glance, where `100%` beside `0/6` made the reader convert one to see the
+ *  other. The specs split deliberately uses a DIFFERENT denominator (the mapped
+ *  tests) — it counts tests, not requirements — and its sub-line names its
+ *  population so the band's `16/16 · 15/15 · 16/16` never reads as arithmetic
+ *  gone wrong. */
 export function ledgerEvidence(ledger: CoverageLedger | null | undefined): LedgerEvidence | null {
   if (!ledger || ledger.totals.total === 0) return null
   const strength: StrengthCounts = { strong: 0, solid: 0, basic: 0, shallow: 0, ungraded: 0 }
-  const specs: ProofSpecs = { mapped: 0, passed: 0, failed: 0, neverRan: 0 }
+  const specs: ProofSpecs = { mapped: 0, passed: 0, passedOnRetry: 0, failed: 0, neverRan: 0 }
   for (const test of ledger.tests) {
     if (test.strength) strength[test.strength] += 1
     else strength.ungraded += 1
     if (test.requirements.length === 0) continue
     specs.mapped += 1
     if (!test.lastRun) specs.neverRan += 1
-    else if (test.lastRun.passed) specs.passed += 1
-    else specs.failed += 1
+    else if (test.lastRun.passed) {
+      specs.passed += 1
+      if (test.lastRun.retried) specs.passedOnRetry += 1
+    } else specs.failed += 1
   }
   return {
     proven: ledger.totals.proven ?? null,
@@ -326,5 +342,6 @@ export function ledgerEvidence(ledger: CoverageLedger | null | undefined): Ledge
     testCount: ledger.tests.length,
     strength,
     specs,
+    spansExecutions: ledger.provenSpansExecutions === true,
   }
 }

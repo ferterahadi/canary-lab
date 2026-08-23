@@ -5,7 +5,7 @@ import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import type { FeatureActivity } from '../state/feature-activity'
 import { Chip } from '@/shared/ui/StatusChip'
 import { Tooltip } from '@/shared/ui/Tooltip'
-import { stageRailRows, stageStatusTone } from './stage-meta'
+import { STAGE_STATUS_LABEL, stageRailRows, stageStatusTone } from './stage-meta'
 import { readGroupOpen, writeGroupOpen } from '../lib/group-open-state'
 import { derivedFlightToken } from '../lib/derived-stages'
 import { ACTIVITY_CHIP, FeatureActivityRow, FlightStatusChip, PickerGroup, activityStages, featureActivityRows, featureChipState, groupPickerRows, preFlightChipState } from './FlightChipState'
@@ -26,10 +26,17 @@ export function StageMiniRail({ stages }: { stages: Array<{ key: string; status:
   return (
     <span className="inline-flex items-center gap-[3px]" data-testid="stage-mini-rail">
       {stageRailRows(source).map((row) => (
-        <Tooltip key={row.key} label={`${row.label} — ${row.status}`}>
+        // Humanized status (the same words the stage chip uses), never the raw
+        // wire value — "needs approval", not "waiting-for-approval".
+        <Tooltip key={row.key} label={`${row.label} — ${STAGE_STATUS_LABEL[row.status]}`}>
           <span
             data-testid={`stage-mini-cell-${row.key}`}
             className="inline-block h-[8px] w-[8px] rounded-[2px]"
+            // The cells are colour-coded for sighted users; the label carries
+            // the same fact for everyone else — without it this was the one
+            // colour-only status surface in the flight UI.
+            role="img"
+            aria-label={`${row.label} — ${STAGE_STATUS_LABEL[row.status]}`}
             style={{ background: toneFor(row.status) }}
           />
         </Tooltip>
@@ -93,11 +100,11 @@ export function FlightsPickerDialog({
           </button>
         </>
       }
-      footer="Every stage verdict is computed by canary (boot passed, coverage met, run green) — the agent only proposes."
+      footer="Canary checks every step itself — the app booted, coverage was met, the run went green. The agent only suggests; Canary decides."
     >
       {rows.length === 0 && preFlightRows.length === 0 ? (
         <div className="px-4 py-10 text-center text-xs" style={{ color: 'var(--text-muted)' }}>
-          No flights yet. Start one from a terminal:
+          No flights yet. Fly a suite from its row in the features list — or start one from a terminal:
           <div className="cl-code-shell mt-2 px-2 py-1.5 text-[11px]">
             npx canary-lab flight ../your-repo "what to test"
           </div>

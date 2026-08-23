@@ -9,7 +9,7 @@ export { evaluationTaskId, FactTile, FactsGrid, plural, stageFacts } from './Sta
 export type { StageBandData, StageFact } from './StageFacts'
 export { STAGE_COMPANION, stageRailRows, stageRowKey } from './StageRail'
 export type { StageRailRow } from './StageRail'
-export { formatDuration, healEndLine, healEndShort, stageStateLine } from './StageStatusLines'
+export { formatDuration, formatStageDuration, healEndLine, healEndShort, stageStateLine, stageWorkMs } from './StageStatusLines'
 
 // One home for the flight-stage presentation vocabulary (R14/R16/R18): the
 // user-facing stage labels, the status tone/icon treatment, the shared status
@@ -17,27 +17,11 @@ export { formatDuration, healEndLine, healEndShort, stageStateLine } from './Sta
 // trailer column leads with. Stage KEYS stay canonical in the store/MCP/CLI —
 // only the display layer speaks outcome language.
 
-/** Stage key → what the stage does for the user (outcome, not implementation).
- *  similarity/scout/env-capture named per the R18 feedback table; scaffold and
- *  portify describe their verified function (create the feature in the
- *  workspace / make services port-injectable for concurrent runs). */
-export const STAGE_LABEL: Record<FlightStageKey, string> = {
-  'similarity': 'Existing suite found',
-  'scout': 'Repo scan',
-  'scaffold': 'Suite setup',
-  'env-capture': 'Environment snapshot',
-  'docs': 'Docs extraction',
-  'prd-summary': 'Requirements summary',
-  'specs-coverage': 'Test authoring & coverage',
-  'portify': 'Parallel readiness',
-  'run': 'Test Run',
-  'heal': 'Auto-repair',
-  'evaluation-export': 'Evaluation Report',
-}
-
-export function stageLabel(key: string): string {
-  return (STAGE_LABEL as Record<string, string>)[key] ?? key
-}
+/** Stage key → user-facing label. Moved to shared/flights/stage-labels.ts so
+ *  the server's own user-facing messages (stage-entry rejections) speak the
+ *  same names the rail shows instead of raw stage keys; re-exported here so the
+ *  flight components keep their one import home. */
+export { FLIGHT_STAGE_LABEL as STAGE_LABEL, flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
 
 /** The stage pane's card column. Every panel, facts grid, error/paused card and
  *  the Test Run hero share it, so a stage reads as ONE column of like blocks
@@ -117,9 +101,11 @@ export const STAGE_ICON: Record<FlightStageStatus, string> = {
   'skipped': '↷',
 }
 
-const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
+export const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
   'pending': 'pending',
-  'running': 'generating',
+  // "running", not "generating": this label sits on EVERY running stage, and a
+  // repo scan, a boot check or a live Playwright run generates nothing.
+  'running': 'running',
   'waiting-for-approval': 'needs approval',
   'done': 'done',
   'failed': 'failed',
@@ -154,12 +140,12 @@ export function StageStatusChip({ status }: { status: FlightStageStatus }) {
 
 const CHECKPOINT_TITLE: Record<string, string> = {
   'similarity-choice': 'Existing suite found — what should this flight do?',
-  'config-approval': 'Approve the drafted config?',
-  'missing-env': 'Environment values needed',
+  'config-approval': 'Does this setup look right?',
+  'missing-env': 'Some settings are missing',
   'prd-source': 'Where should requirements come from?',
   'coverage-stuck': 'Coverage stopped short of the target',
-  'portify-gate': 'Run parallel readiness?',
-  'portify-apply': 'Save the parallel-readiness overlay?',
+  'portify-gate': 'Make this suite safe to run twice at once?',
+  'portify-apply': 'Save these port changes?',
   'run-failed': 'The test run did not pass',
   'export-mode': 'How should the report be built?',
   // Not a question with a safe default — this step was handed to the client that
@@ -177,21 +163,21 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
     'new': 'Start a fresh suite',
   },
   'config-approval': {
-    'approve': 'Approve config',
-    'redraft': 'Redraft from a fresh scan',
+    'approve': 'Looks right',
+    'redraft': 'Scan again and redo it',
   },
   'missing-env': {
     'retry': 'Re-check the files',
     'waive': 'Capture only what exists',
   },
   'prd-source': {
-    'continue': 'Use the docs present',
+    'continue': 'Use the docs I\'ve added',
     'collect-repo-docs': 'Collect docs from the repos',
     'infer-from-diff': 'Infer from the git diff',
   },
   'coverage-stuck': {
-    'accept-partial': 'Accept current coverage',
-    'retry': 'Try another round of passes',
+    'accept-partial': 'Accept this coverage',
+    'retry': 'Try another pass',
   },
   // No 'external-work' entry: that kind's options are never RENDERED as
   // buttons. Its two answers ('submit', 'run-internally') belong to the agent
@@ -204,8 +190,8 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   // The upfront ask, before any agent/double-boot cost is spent. Autopilot
   // answers 'run'; a human can bail here instead of 45 minutes later.
   'portify-gate': {
-    'run': 'Make it parallel-ready',
-    'skip': 'Skip parallel readiness (stay serial)',
+    'run': 'Yes — make it parallel-ready',
+    'skip': 'Skip it (runs go one at a time)',
   },
   // decision reads the same everywhere. 'revise' sends feedback back to the
   // agent for another edit + re-verify pass (the checkpoint re-parks with the
@@ -213,17 +199,17 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
   // flight proceeds without parallel readiness (declining is a decision, not
   // a failure; a later flight retries).
   'portify-apply': {
-    'apply': 'Save the overlay',
+    'apply': 'Save the port changes',
     'revise': 'Request changes',
-    'cancel': 'Skip parallel readiness (discard the edits)',
+    'cancel': 'Skip it (throw the changes away)',
   },
   'run-failed': {
     'rerun': 'Start a new run',
-    'export-as-is': 'Export the report as-is',
+    'export-as-is': 'Build the report anyway',
   },
   'export-mode': {
-    'raw': 'Fast report from evidence',
-    'localized': 'Agent-rewritten reasoning (slower)',
+    'raw': 'Straight from the numbers (fast)',
+    'localized': 'Written up by an agent (slower)',
   },
 }
 

@@ -170,6 +170,9 @@ describe('SummaryReporter', () => {
       complete: false,
       total: 3,
       passed: 1,
+      // 'still-broken' and the happy pass survive as seeded prior-execution
+      // statuses, so the merged marker must be set.
+      mergedFromPriorExecution: true,
       passedNames: ['test-case-happy-path'],
       failed: [
         {

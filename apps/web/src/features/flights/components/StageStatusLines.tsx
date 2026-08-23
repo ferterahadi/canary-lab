@@ -21,7 +21,7 @@ export const HEAL_CAUSE_PHRASE: Record<NonNullable<HealEnd['agentCause']>, strin
   'auth': 'not signed in',
   'rate-limit': 'rate-limited',
   'crash': 'agent crashed',
-  'trust-prompt': 'waiting on the CLI trust prompt',
+  'trust-prompt': 'waiting for you to approve it in the terminal',
   'approval-prompt': 'waiting on a CLI approval prompt',
   'unknown': '',
 }
@@ -39,7 +39,7 @@ export function healEndLine(healEnd: HealEnd | undefined): string | null {
     case 'max-cycles': return 'Auto-repair stopped — it hit the cycle limit without passing.'
     case 'no-progress': return 'Auto-repair stopped — repeated tries got nowhere.'
     case 'cancelled': return 'Auto-repair was stopped before the tests passed.'
-    case 'foreign-abort': return 'Auto-repair stopped — another Canary Lab server marked this run finished while it was still repairing.'
+    case 'foreign-abort': return 'Auto-repair stopped — another Canary window took over this run.'
     default: return null
   }
 }
@@ -67,11 +67,45 @@ export function formatDuration(startedAt?: string, endedAt?: string): string | n
   if (!startedAt || !endedAt) return null
   const ms = Date.parse(endedAt) - Date.parse(startedAt)
   if (!Number.isFinite(ms) || ms < 0) return null
+  return formatMs(ms)
+}
+
+function formatMs(ms: number): string {
   const s = Math.round(ms / 1000)
   if (s < 60) return `${s}s`
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
   return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+}
+
+/** Milliseconds of actual work a stage did. Reads the banked work clock
+ *  (`activeMs`, accumulated segment by segment as the stage leaves `running`)
+ *  so a step parked overnight on a checkpoint reports its 90 seconds of work,
+ *  not nine wall-clock hours. Records from before the clock existed carry only
+ *  the startedAt→endedAt span — all the evidence there is, so it stands. */
+export function stageWorkMs(stage: Pick<FlightStage, 'startedAt' | 'endedAt' | 'activeMs' | 'activeSince'> | undefined): number | null {
+  if (!stage) return null
+  if (stage.activeMs != null || stage.activeSince) {
+    const live = stage.activeSince ? Math.max(0, Date.now() - Date.parse(stage.activeSince)) : 0
+    return (stage.activeMs ?? 0) + live
+  }
+  if (!stage.startedAt || !stage.endedAt) return null
+  const ms = Date.parse(stage.endedAt) - Date.parse(stage.startedAt)
+  return Number.isFinite(ms) && ms >= 0 ? ms : null
+}
+
+/** A merged rail row's duration: the primary's work plus its folded
+ *  companion's (run→heal, scaffold→env-capture, docs→prd-summary — R61). The
+ *  two run back to back, so the sum is the pair's honest total where the old
+ *  first-start→last-end span silently included any wait between them. */
+export function formatStageDuration(
+  primary?: Pick<FlightStage, 'startedAt' | 'endedAt' | 'activeMs' | 'activeSince'>,
+  folded?: Pick<FlightStage, 'startedAt' | 'endedAt' | 'activeMs' | 'activeSince'>,
+): string | null {
+  const a = stageWorkMs(primary)
+  const b = stageWorkMs(folded)
+  if (a == null && b == null) return null
+  return formatMs((a ?? 0) + (b ?? 0))
 }
 
 /** `skipReason` is a mixed field: the conductor writes prose for evidence-based
@@ -81,7 +115,10 @@ export function formatDuration(startedAt?: string, endedAt?: string): string | n
 export function skippedLine(reason: string | undefined): string {
   if (!reason) return 'Skipped.'
   if (reason === 'stage-entry') return 'Skipped — this flight started at a later step.'
-  return `Skipped — ${reason}.`
+  // Records written before 1.6.0 carry a reason that already opens with
+  // "parallel readiness skipped — ", which printed the word twice here.
+  const bare = reason.replace(/^parallel readiness skipped — /, '')
+  return `Skipped — ${bare.replace(/\.$/, '')}.`
 }
 
 /** "Where are we" — one plain-language line per stage per status (R16 Q1).
@@ -118,7 +155,26 @@ export function runOutcomeLine(stage: FlightStage, flight: FlightManifest, compa
   }
   const runStatus = str(ev, 'status') ?? flight.runVerdict
   const runId = str(ev, 'runId') ?? flight.links?.runId
-  return `Run ${runId ?? ''}${runStatus ? ` ${runStatus}` : ''}`.trim() + '.'
+  // Guard the double-blank: with neither an id nor a status this printed "Run ."
+  if (!runId && !runStatus) return 'Run finished.'
+  return `Run${runId ? ` ${runId}` : ''}${runStatus ? ` — ${runStatus}` : ''}.`
+}
+
+/** The docs evidence's `source` enum in plain words — raw values like
+ *  `repo-docs` and `agent-diff` are wire vocabulary, not sentences. An unknown
+ *  value renders nothing rather than leaking. */
+function docSourceLabel(source: string | null | undefined): string | null {
+  if (!source) return null
+  const labels: Record<string, string> = {
+    'repo-docs': 'found in the repos',
+    'agent-repo-docs': 'collected from the repos by an agent',
+    'agent-diff': 'worked out from the branch changes',
+    'description-only': 'from the intent alone',
+    'intent-linked': 'the files named in the intent',
+    'existing': 'already in the suite',
+    'user-confirmed': 'the docs you added',
+  }
+  return labels[source] ?? null
 }
 
 /** Sentence for a step whose artifacts were probed from the workspace but which
@@ -143,7 +199,7 @@ export function agentActivityLine(stage: FlightStage): string | null {
   if (!activity) return null
   switch (activity.phase) {
     case 'requesting': return 'Waiting for the model to reply…'
-    case 'thinking': return `Thinking — ${formatCount(activity.thinkingTokens)} tokens of reasoning so far…`
+    case 'thinking': return `Thinking — still working (${formatCount(activity.thinkingTokens)} tokens so far)…`
     case 'tool': return `Running ${activity.tool}…`
     case 'writing': return `Writing the answer — ${formatCount(activity.chars)} characters so far…`
   }
@@ -253,8 +309,8 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     const cev = (companion?.evidence ?? {}) as Record<string, unknown>
     const count = num(cev, 'requirementCount')
     const docs = Array.isArray(ev.docs) ? ev.docs.length : null
-    const source = str(ev, 'source')
-    return `${count != null ? `${count} requirement${count === 1 ? '' : 's'}` : 'Requirements'} distilled${docs != null ? ` from ${docs} doc${docs === 1 ? '' : 's'}` : ''}${source ? ` (${source})` : ''}.`
+    const source = docSourceLabel(str(ev, 'source'))
+    return `${count != null ? `${count} requirement${count === 1 ? '' : 's'}` : 'Requirements'} written${docs != null ? ` from ${docs} doc${docs === 1 ? '' : 's'}` : ''}${source ? ` (${source})` : ''}.`
   }
 
   // A running stage with a live agent snapshot says what the agent is doing
@@ -302,8 +358,8 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
     case 'docs': {
       if (running) return 'Collecting the documents…'
       const docs = Array.isArray(ev.docs) ? ev.docs.length : null
-      const source = str(ev, 'source')
-      return `Documents collected${docs != null ? ` (${docs})` : ''}${source ? ` from ${source}` : ''}.`
+      const source = docSourceLabel(str(ev, 'source'))
+      return `Collected ${docs != null ? `${docs} document${docs === 1 ? '' : 's'}` : 'the documents'}${source ? ` — ${source}` : ''}.`
     }
     case 'prd-summary': {
       if (running) return 'Turning the documents into requirements…'
@@ -356,7 +412,7 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       }
       return ev.edits
         ? 'Ports can be swapped now — two copies started side by side.'
-        : 'Ports could already be swapped — two copies started side by side.'
+        : 'Ports were already swappable — two copies started side by side.'
     }
     case 'run': {
       if (running) return 'Tests are running…'

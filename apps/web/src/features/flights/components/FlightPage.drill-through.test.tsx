@@ -119,6 +119,47 @@ vi.mock('@/features/portify/state/PortifyContext', () => ({
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
 }))
 
+// TestRunPanel reads the run detail + the run index off the shared runs store
+// (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
+// over the SAME api mocks the panel-local fetches used to consume — fixtures
+// keep working unchanged.
+vi.mock('@/features/runs/state/RunsContext', async () => {
+  const React = await import('react')
+  return {
+    useRun: (runId?: string | null) => {
+      const [detail, setDetail] = React.useState<unknown>(undefined)
+      React.useEffect(() => {
+        let alive = true
+        if (runId) mocks.getRunDetail(runId).then((d: unknown) => { if (alive) setDetail(d) }).catch(() => {})
+        return () => { alive = false }
+      }, [runId])
+      return { detail, status: undefined, transient: null, displayStatus: undefined, error: null }
+    },
+    useRuns: () => {
+      const [runs, setRuns] = React.useState<unknown[]>([])
+      React.useEffect(() => {
+        let alive = true
+        mocks.listRuns({}).then((r: unknown[]) => { if (alive) setRuns(r) }).catch(() => {})
+        return () => { alive = false }
+      }, [])
+      return {
+        runs,
+        connection: 'live',
+        transients: {},
+        errors: {},
+        refresh: vi.fn(),
+        startRun: vi.fn(),
+        startVerification: vi.fn(),
+        abort: vi.fn(),
+        delete: vi.fn(),
+        pauseHeal: vi.fn(),
+        cancelHeal: vi.fn(),
+        clearError: vi.fn(),
+      }
+    },
+  }
+})
+
 import { FlightPage } from './FlightPage'
 
 ;
@@ -229,7 +270,7 @@ describe('stage summary + drill-through (R6)', () => {
     })
     // No counts in this stage's evidence (older flight) → falls back to naming
     // the verdict rather than inventing a score.
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Run run-9 passed.')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe('Run run-9 — passed.')
     const drill = container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-run"]')
     // R82: the drill names WHICH run it opens, now that previous runs list below.
     expect(drill?.textContent).toContain('Latest run')
@@ -414,8 +455,8 @@ describe('stage summary + drill-through (R6)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
-    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('already be swapped')
-    expect(container.querySelector('[data-testid="stage-drill-portify"]')?.textContent).toBe('Open ports config →')
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toContain('already swappable')
+    expect(container.querySelector('[data-testid="stage-drill-portify"]')?.textContent).toBe('Open port settings →')
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-drill-portify"]')?.click()
     })
@@ -519,10 +560,10 @@ describe('trailer model (R14–R18)', () => {
     expect(container.querySelector('[data-testid="stage-rail-portify"]')?.textContent).toContain('Parallel readiness')
     expect(container.querySelector('[data-testid="stage-rail-scaffold"]')?.textContent).toContain('Suite setup')
     expect(container.querySelector('[data-testid="stage-rail-docs"]')?.textContent).toContain('Requirements')
-    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Evaluation Report')
+    expect(container.querySelector('[data-testid="stage-rail-evaluation-export"]')?.textContent).toContain('Evaluation report')
     // Run + heal are one user step; similarity never shows unless it needs a
     // human; the pair companions (env-capture, prd-summary) fold into their rows.
-    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('Test Run')
+    expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('Test run')
     expect(container.querySelector('[data-testid="stage-rail-heal"]')).toBeNull()
     expect(container.querySelector('[data-testid="stage-rail-similarity"]')).toBeNull()
     expect(container.querySelector('[data-testid="stage-rail-env-capture"]')).toBeNull()

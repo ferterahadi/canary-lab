@@ -20,6 +20,10 @@ export interface TestEntry {
   location?: string
   locations?: string[]
   retry?: number
+  /** Carried forward from a prior execution's summary by targeted-rerun seeding,
+   *  not observed in this one. Never written to disk — it exists so the final
+   *  summary can say whether its outcomes span more than one execution. */
+  seeded?: boolean
   logFiles?: string[]
   /** Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
    *  error message + snippet. Populated by enrichment; the in-JSON `error`

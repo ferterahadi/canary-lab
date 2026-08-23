@@ -237,8 +237,8 @@ export function FeatureSetupPanel({
       {cfg && (
         <div data-testid="setup-heal-card" className={PANEL_CARD_CLASS} style={PANEL_CARD_STYLE}>
           <div className="mb-1.5 flex items-center gap-1.5">
-            <span className={PANEL_KICKER_CLASS}>Heal behavior</span>
-            <InfoMark label="Heal behavior" info={HEAL_BEHAVIOR_INFO} />
+            <span className={PANEL_KICKER_CLASS}>Auto-repair</span>
+            <InfoMark label="Auto-repair" info={HEAL_BEHAVIOR_INFO} />
           </div>
           <HealBehaviorChoice
             threshold={healThreshold}

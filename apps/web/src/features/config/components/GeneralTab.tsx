@@ -100,7 +100,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
               the selected band then spans the section edge-to-edge, with the
               labels still under the section title. */}
           <Section
-            title={<span className="inline-flex items-center gap-1.5">Heal behavior<HintIcon hint={HEAL_BEHAVIOR_INFO} /></span>}
+            title={<span className="inline-flex items-center gap-1.5">Auto-repair<HintIcon hint={HEAL_BEHAVIOR_INFO} /></span>}
             bodyClassName="px-0.5 py-1.5"
           >
             <HealBehaviorChoice

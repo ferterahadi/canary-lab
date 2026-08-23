@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { FeaturesColumn } from './shared/shell/FeaturesColumn'
 import { TestCasesColumn } from './shared/shell/TestCasesColumn'
 import { RunsColumn } from './features/runs/components/RunsColumn'
@@ -13,9 +13,12 @@ import { CollisionConfirmDialog } from './features/runs/components/CollisionConf
 import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
 import { PortifyWizard } from './features/portify/components/PortifyWizard'
 import { DraftDialog } from './features/wizard/components/DraftDialog'
-import { LogCleanupPage } from './features/cleanup/components/LogCleanupPage'
-import { CoverageLedgerPage } from './features/coverage/components/CoverageLedgerPage'
-import { FlightPage } from './features/flights/components/FlightPage'
+// The three routed full-screen views load lazily: none of them is needed for
+// the workspace's first paint, and together (the flight detail tree above all)
+// they were a large slice of the single main chunk every cold load downloaded.
+const LogCleanupPage = lazy(() => import('./features/cleanup/components/LogCleanupPage').then((m) => ({ default: m.LogCleanupPage })))
+const CoverageLedgerPage = lazy(() => import('./features/coverage/components/CoverageLedgerPage').then((m) => ({ default: m.CoverageLedgerPage })))
+const FlightPage = lazy(() => import('./features/flights/components/FlightPage').then((m) => ({ default: m.FlightPage })))
 import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
@@ -528,6 +531,9 @@ export function App() {
         onReturnToFlight={openFlight}
       />
       <div className="min-h-0 flex-1">
+        {/* One-time chunk load for a lazy view — a quiet line on the app's own
+            canvas, gone in well under a second on a local server. */}
+        <Suspense fallback={<div className="flex h-full items-center justify-center text-xs text-muted">Loading…</div>}>
         {view === 'cleanup'
           ? <LogCleanupPage
               onClose={() => setView('workspace')}
@@ -555,6 +561,9 @@ export function App() {
               // one — an active flight then advances from the push instead of
               // the detail view polling for it.
               liveFlight={flightDetails[selectedFlightId] ?? null}
+              // The index row seeds the header/strip/rail on a cold open of a
+              // settled flight (which the push channel never snapshots).
+              indexEntry={flights.find((f) => f.flightId === selectedFlightId) ?? null}
               activity={featureActivity}
               derivedStages={derivedStages}
               // Select the feature too: the config dialog is qualified by the
@@ -582,6 +591,7 @@ export function App() {
               onStartFlight={(feature, intent, fromStage) => { setSelectedFeature(feature); setFlightStartFor(feature, intent, fromStage) }}
             />
           : <ResizablePanels panels={panels} />}
+        </Suspense>
       </div>
       <ToastHost toasts={toasts} onDismiss={dismissToast} />
       <DemoDialog

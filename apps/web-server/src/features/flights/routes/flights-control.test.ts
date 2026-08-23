@@ -356,7 +356,7 @@ describe('flights routes', () => {
 
     expect(resp.statusCode).toBe(400)
     expect(resp.json()).toMatchObject({ type: 'stage_entry_rejected' })
-    expect(resp.json().error).toMatch(/evaluation-export/)
+    expect(resp.json().error).toMatch(/Evaluation report/)
   })
 
   describe('agent-session', () => {

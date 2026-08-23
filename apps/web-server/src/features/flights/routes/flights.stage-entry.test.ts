@@ -55,7 +55,7 @@ function useRealIndex(rows: RunIndexEntry[]): void {
   })
 }
 
-const ASK_FOR_RUN = /no passed run for this feature yet/
+const ASK_FOR_RUN = /no passing run yet/
 
 beforeEach(() => {
   tmpDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-stage-entry-')))
@@ -110,7 +110,7 @@ describe('buildStageEntryValidator — env-capture accepts a proven boot', () =>
   it('refuses when the feature has neither captured nor booted', () => {
     fs.rmSync(path.join(featuresDir, FEATURE, 'envsets'), { recursive: true, force: true })
     useRealIndex([])
-    expect(entry(buildStageEntryValidator(featuresDir, logsDir))).toMatch(/has never booted and has no captured envset/)
+    expect(entry(buildStageEntryValidator(featuresDir, logsDir))).toMatch(/never started for this suite/)
   })
 })
 

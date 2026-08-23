@@ -1,4 +1,5 @@
 import { isTerminalRunStatus } from '../../../../../../../shared/run-state'
+import { plural } from '../../../../../../../shared/lib/plural'
 import { runCounts } from '../../../runs/logic/run-detail'
 import type { RunSummary } from '../../../runs/logic/run-store'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
@@ -75,7 +76,7 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
 
     if (status === 'passed') return { kind: 'done', evidence }
     if (m.opts.yolo) {
-      ctx.appendLog(`[run] ${status} after ${manifest!.healCycles} heal cycle(s) — yolo exports as-is\n`)
+      ctx.appendLog(`[run] ${status} after ${plural(manifest!.healCycles, 'repair cycle')} — yolo exports as-is\n`)
       return { kind: 'done', evidence }
     }
     const whyLine = healEnd?.message ? ` ${healEnd.message}` : ''
@@ -83,7 +84,9 @@ export function runStage(deps: FlightStageDeps): StageAdapter {
       kind: 'checkpoint',
       checkpoint: {
         kind: 'run-failed',
-        message: `Run ${runId} ended ${status} after ${manifest!.healCycles} heal cycle(s).${whyLine} Rerun it, or export the evaluation as-is (status preserved)?`,
+        // "repair", not "heal": the UI's own tile above this checkpoint says
+        // "Repair cycles", and one subsystem gets one name.
+        message: `Run ${runId} ${status} after ${plural(manifest!.healCycles, 'repair cycle')}.${whyLine} Start a new run, or build the report as it stands?`,
         options: [...CHECKPOINT_OPTIONS['run-failed']],
         data: evidence,
       },
@@ -300,7 +303,7 @@ export function healStage(deps: FlightStageDeps): StageAdapter {
       const manifest = await readManifest(deps, runId)
       if (!manifest) return { kind: 'skipped', reason: `run ${runId} has no manifest` }
       if ((manifest.healCycles ?? 0) === 0) {
-        return { kind: 'skipped', reason: 'run needed no heal' }
+        return { kind: 'skipped', reason: 'nothing needed repairing' }
       }
       return {
         kind: 'done',

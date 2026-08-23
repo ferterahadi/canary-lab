@@ -198,7 +198,7 @@ describe('CoverageCompositionPanel', () => {
     // not measurements — and it buys the exact geometry.
     await act(async () => { root.render(<CoverageCompositionPanel ledger={null} awaiting="live" />) })
     const card = container.querySelector('[data-testid="coverage-composition-skeleton"]')
-    expect(card?.textContent).toContain('Composition')
+    expect(card?.textContent).toContain('What the tests cover')
     // Both groups, in the settled order, without the population counts they
     // cannot yet know.
     expect(container.querySelector('[data-testid="composition-strength"]')?.textContent).toContain('Test depth')
@@ -276,8 +276,8 @@ describe('row-list cards hold their row geometry while awaited', () => {
     const held = rowsOf('double-boot-skeleton')
     expect(held).toHaveLength(2)
     // The real text is what gives the row its height, so no floor is needed here.
-    expect(held[0]?.textContent).toContain('Instance A')
-    expect(held[1]?.textContent).toContain('Instance B')
+    expect(held[0]?.textContent).toContain('Copy A')
+    expect(held[1]?.textContent).toContain('Copy B')
     expect(held[0]?.querySelector('[data-testid="skeleton-bar"]')).not.toBeNull()
 
     await act(async () => { root.render(<DoubleBootPanel portify={null} />) })

@@ -91,12 +91,14 @@ export function FlightsPill({
 
   const tooltip = activeCount > 0
     ? [
-        ...preFlightRows.map((t) => `pre-flight: ${preFlightChipState(t).title}`),
+        ...preFlightRows.map((t) => `planning: ${preFlightChipState(t).title}`),
         ...featureActivityRows(flights, activity)
           .filter((r) => attention.has(r.feature))
           .map((r) => `${r.feature}: ${featureChipState(r.flight, r.activity).title}`),
       ].join('\n')
-    : 'Flight — one command from bare repo to evaluated run'
+    // The picker's own tagline, verbatim — the pill and the panel it opens must
+    // not describe the same thing in two different sentences.
+    : 'One command from a bare repo to a green, covered, evaluated run.'
 
   return (
     <div className="shrink-0" data-testid="flights-pill">

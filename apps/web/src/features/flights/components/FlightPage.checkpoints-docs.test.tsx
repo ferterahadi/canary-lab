@@ -18,6 +18,47 @@ vi.mock('@/features/portify/state/PortifyContext', () => ({
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
 }))
 
+// TestRunPanel reads the run detail + the run index off the shared runs store
+// (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
+// over the SAME api mocks the panel-local fetches used to consume — fixtures
+// keep working unchanged.
+vi.mock('@/features/runs/state/RunsContext', async () => {
+  const React = await import('react')
+  return {
+    useRun: (runId?: string | null) => {
+      const [detail, setDetail] = React.useState<unknown>(undefined)
+      React.useEffect(() => {
+        let alive = true
+        if (runId) mocks.getRunDetail(runId).then((d: unknown) => { if (alive) setDetail(d) }).catch(() => {})
+        return () => { alive = false }
+      }, [runId])
+      return { detail, status: undefined, transient: null, displayStatus: undefined, error: null }
+    },
+    useRuns: () => {
+      const [runs, setRuns] = React.useState<unknown[]>([])
+      React.useEffect(() => {
+        let alive = true
+        mocks.listRuns({}).then((r: unknown[]) => { if (alive) setRuns(r) }).catch(() => {})
+        return () => { alive = false }
+      }, [])
+      return {
+        runs,
+        connection: 'live',
+        transients: {},
+        errors: {},
+        refresh: vi.fn(),
+        startRun: vi.fn(),
+        startVerification: vi.fn(),
+        abort: vi.fn(),
+        delete: vi.fn(),
+        pauseHeal: vi.fn(),
+        cancelHeal: vi.fn(),
+        clearError: vi.fn(),
+      }
+    },
+  }
+})
+
 import { FlightPage } from './FlightPage'
 
 ;
@@ -216,12 +257,12 @@ describe('checkpoint display language (R71/W3)', () => {
     await render('fl_1')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-agent"]')?.click() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-hint-collect-repo-docs"]')?.click() })
-    expect(container.querySelector('[data-testid="fork-start-agent"]')?.textContent).toBe('Gather with agent')
+    expect(container.querySelector('[data-testid="fork-start-agent"]')?.textContent).toBe('Let the agent gather them')
     expect(container.querySelector('[data-testid="fork-start-agent-flash"]')).toBeNull()
 
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.click() })
     const flash = container.querySelector('[data-testid="fork-start-agent-flash"]')
-    expect(flash?.textContent).toBe('Agent started — output streams in the activity band below')
+    expect(flash?.textContent).toBe('Agent started — its output shows under Activity below')
     // ONE confirmation only: the old persistent "Starting the agent…" line is gone.
     expect(container.textContent).not.toContain('Starting the agent')
 
@@ -231,7 +272,7 @@ describe('checkpoint display language (R71/W3)', () => {
 
     // A repeat press re-triggers the flash rather than leaving it gone.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.click() })
-    expect(container.querySelector('[data-testid="fork-start-agent-flash"]')?.textContent).toBe('Agent started — output streams in the activity band below')
+    expect(container.querySelector('[data-testid="fork-start-agent-flash"]')?.textContent).toBe('Agent started — its output shows under Activity below')
   })
 
   it('R74: the start button itself shows the working state while the respond is in flight', async () => {
@@ -251,7 +292,7 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(button?.disabled).toBe(true)
 
     await act(async () => { resolveRespond?.(manifest()) })
-    expect(container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.textContent).toBe('Gather with agent')
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="fork-start-agent"]')?.textContent).toBe('Let the agent gather them')
   })
 
   it('R74: manual path with docs present releases via continue', async () => {
@@ -294,7 +335,7 @@ describe('checkpoint display language (R71/W3)', () => {
     await render('fl_1')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
     expect(container.querySelector('[data-testid="docs-locked-chip"]')?.textContent).toContain('Locked')
-    expect(container.querySelector('[data-testid="flight-docs-panel"]')?.textContent).toContain('Continue → from a step')
+    expect(container.querySelector('[data-testid="flight-docs-panel"]')?.textContent).toContain('Continue → From a step')
     expect(container.querySelector('[data-testid="doc-pill-checkout-prd.md"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="remove-doc-checkout-prd.md"]')).toBeNull()
     expect(container.querySelector('[data-testid="flight-doc-add-files"]')).toBeNull()
@@ -327,7 +368,7 @@ describe('checkpoint display language (R71/W3)', () => {
 
     // The stage's OUTPUT is visible and openable, not just a status chip.
     const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
-    expect(distilled?.textContent).toContain('Distilled requirements · 6')
+    expect(distilled?.textContent).toContain('Requirements found · 6')
     expect(distilled?.querySelector('[data-testid="doc-pill-_prd-summary.md"]')).toBeTruthy()
     // The generated artifact stays OUT of the source-docs card — one card per half.
     const sourceCard = container.querySelector('[data-testid="flight-docs-panel"] > div')
@@ -363,7 +404,7 @@ describe('checkpoint display language (R71/W3)', () => {
     await render('fl_1', { onOpenCoverage: vi.fn() })
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-docs"]')?.click() })
     const distilled = container.querySelector('[data-testid="flight-distilled-panel"]')
-    expect(distilled?.textContent).toContain('Distilling the source docs')
+    expect(distilled?.textContent).toContain('Turning the docs into requirements')
     // No count yet, and no drill to a ledger that has nothing in it — the docs
     // row is already `done` here, so only the folded summary can gate it.
     expect(distilled?.textContent).not.toContain('·')

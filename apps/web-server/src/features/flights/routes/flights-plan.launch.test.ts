@@ -240,6 +240,43 @@ describe('plan-features (R54)', () => {
     }
   })
 
+  it('launch answers 409 with wait-for-the-proposal copy while planning is still running', async () => {
+    const gateBox: { gate: (() => void) | null } = { gate: null }
+    app = await buildApp(allDone(), undefined, async () => {
+      await new Promise<void>((resolve) => { gateBox.gate = resolve })
+      return { text: planText([{ name: 'one', description: 'test one' }, { name: 'two', description: 'test two' }]) }
+    })
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/flights/plan-features',
+      body: { repoPaths: [repoDir], description: 'test everything in this repo' },
+    })
+    expect(res.statusCode).toBe(202)
+    const { taskId } = res.json() as { taskId: string }
+
+    const launched = await app.inject({
+      method: 'POST',
+      url: `/api/flights/plan-features/${taskId}/launch`,
+      body: { features: [{ name: 'one', description: 'test one' }] },
+    })
+    expect(launched.statusCode).toBe(409)
+    expect((launched.json() as { error: string }).error).toContain('still running — wait for the proposal')
+
+    // Let the parked agent finish so teardown never races a dangling promise.
+    const deadline = Date.now() + 3000
+    while (gateBox.gate === null) {
+      if (Date.now() > deadline) throw new Error('plan agent never started')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    gateBox.gate()
+    for (;;) {
+      const poll = await app.inject({ method: 'GET', url: `/api/flights/plan-features/${taskId}` })
+      if ((poll.json() as PlanFeaturesTask).status !== 'running') break
+      if (Date.now() > deadline) throw new Error('plan task never settled')
+      await new Promise((r) => setTimeout(r, 10))
+    }
+  })
+
   it('launch rejects name collisions with existing features/flights up front', async () => {
     app = await buildApp(allDone(), undefined, agentReturning(planText([
       { name: 'checkout', description: 'test checkout' },
@@ -379,7 +416,7 @@ describe('plan-features (R54)', () => {
         body: { features: [{ description: 'has a description, no name field' }] },
       })
       expect(noNameKey.statusCode).toBe(400)
-      expect(noNameKey.json()).toMatchObject({ error: 'every feature needs a slug name and a description' })
+      expect(noNameKey.json()).toMatchObject({ error: 'Every suite needs a name and a description.' })
 
       const noName = await app.inject({
         method: 'POST',
@@ -387,7 +424,7 @@ describe('plan-features (R54)', () => {
         body: { features: [{ name: '', description: 'has a description' }] },
       })
       expect(noName.statusCode).toBe(400)
-      expect(noName.json()).toMatchObject({ error: 'every feature needs a slug name and a description' })
+      expect(noName.json()).toMatchObject({ error: 'Every suite needs a name and a description.' })
 
       const noDescription = await app.inject({
         method: 'POST',
@@ -395,7 +432,7 @@ describe('plan-features (R54)', () => {
         body: { features: [{ name: 'named-thing' }] },
       })
       expect(noDescription.statusCode).toBe(400)
-      expect(noDescription.json()).toMatchObject({ error: 'every feature needs a slug name and a description' })
+      expect(noDescription.json()).toMatchObject({ error: 'Every suite needs a name and a description.' })
     })
 
     it('400s duplicate feature names in the launch body', async () => {
@@ -415,7 +452,7 @@ describe('plan-features (R54)', () => {
         },
       })
       expect(resp.statusCode).toBe(400)
-      expect(resp.json()).toMatchObject({ error: 'feature names must be unique' })
+      expect(resp.json()).toMatchObject({ error: 'Suite names must be unique.' })
     })
 
     it('carries a group through to the launched flight opts', async () => {

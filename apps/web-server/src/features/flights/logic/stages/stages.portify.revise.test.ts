@@ -231,7 +231,7 @@ describe('portify stage', () => {
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'revise', feedback: 'bad idea' })
     expect(outcome).toMatchObject({
       kind: 'checkpoint',
-      checkpoint: { message: expect.stringContaining('FAILED the double-boot re-verify — port 3000 still bound') },
+      checkpoint: { message: expect.stringContaining('failed the side-by-side check — port 3000 still bound') },
     })
   })
 
@@ -293,7 +293,7 @@ describe('portify stage', () => {
 
     expect(outcome).toMatchObject({
       kind: 'checkpoint',
-      checkpoint: { message: expect.stringContaining('FAILED the double-boot re-verify. Saving is blocked') },
+      checkpoint: { message: expect.stringContaining('failed the side-by-side check. Saving stays blocked') },
     })
   })
 
@@ -403,7 +403,7 @@ describe('portify stage', () => {
     if (gate.kind !== 'checkpoint') throw new Error('unreachable')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: gate.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'skip' })
-    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('parallel readiness skipped') })
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('runs stay one at a time') })
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
   })
 

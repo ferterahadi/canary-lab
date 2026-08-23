@@ -3,7 +3,7 @@ import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightManifest } from './
 import { publishWorkspaceEvent } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
 import { FlightExistsError } from './flight-errors'
-import { defaultFlightId, driveControllers, freshStages, interruptStage } from './flight-stages'
+import { bankStageActivity, defaultFlightId, driveControllers, freshStages, interruptStage } from './flight-stages'
 import { agentJobStore } from '../../agent-sessions/logic/agent-jobs/store'
 import { FlightConductorDeps, StartFlightArgs, resumeFlight } from './conductor'
 
@@ -120,7 +120,11 @@ export async function abortFlight(flightId: string, deps: FlightConductorDeps): 
     // Same open-stage settle as pause: a terminal record must not keep a live
     // checkpoint — the UI would render an answerable ask that can only 409.
     stages: current.stages.map((s) =>
-      s.key === openStage?.key ? { ...s, status: 'pending' as const, checkpoint: undefined } : s,
+      // Same clock close as pause — an aborted stage's banked work is still the
+      // honest record of what it did before the stop.
+      s.key === openStage?.key
+        ? { ...bankStageActivity(s, now()), status: 'pending' as const, checkpoint: undefined }
+        : s,
     ),
   }
   store.save(manifest)

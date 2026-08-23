@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '@/shared/api/client'
 import type { EvaluationExportTask } from '@/shared/api/types'
-import { EvaluationExportProvider, useEvaluationExports } from './EvaluationExportContext'
+import { EvaluationExportProvider, useEvaluationExportLogs, useEvaluationExports } from './EvaluationExportContext'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -191,5 +191,18 @@ describe('EvaluationExportProvider', () => {
         root.render(<OutsideProviderProbe />)
       })
     }).toThrow('useEvaluationExports must be used inside EvaluationExportProvider')
+  })
+
+  it('the logs hook rides its own context and throws outside the provider too', () => {
+    function OutsideProviderLogsProbe() {
+      useEvaluationExportLogs()
+      return null
+    }
+
+    expect(() => {
+      act(() => {
+        root.render(<OutsideProviderLogsProbe />)
+      })
+    }).toThrow('useEvaluationExportLogs must be used inside EvaluationExportProvider')
   })
 })

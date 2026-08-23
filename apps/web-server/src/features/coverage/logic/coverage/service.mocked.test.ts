@@ -432,6 +432,37 @@ describe('computeFeatureCoverage — proven axis (readLatestRunOutcomes join)', 
     const t = ledger.tests.find((t) => t.name === 'shared')
     expect(t?.lastRun).toEqual({ runId: 'r1', passed: true })
     expect(ledger.requirements[0].proven).toBe(true)
+    // A single clean execution carries no merged-execution flag.
+    expect(ledger.provenSpansExecutions).toBeUndefined()
+  })
+
+  it('threads the retry marker and the merged-execution flag from the summary onto the ledger', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    fs.mkdirSync(path.join(logsDir, 'runs', 'r1'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'index.json'),
+      JSON.stringify([{ runId: 'r1', feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }]),
+    )
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'r1', 'e2e-summary.json'),
+      JSON.stringify({
+        passedNames: ['test-case-shared'],
+        passedOnRetry: ['test-case-shared'],
+        mergedFromPriorExecution: true,
+        failed: [],
+      }),
+    )
+
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    const t = ledger.tests.find((t) => t.name === 'shared')
+    expect(t?.lastRun).toEqual({ runId: 'r1', passed: true, retried: true })
+    expect(ledger.provenSpansExecutions).toBe(true)
   })
 
   it('leaves lastRun unset for a test the run never touched (lastRun undefined branch)', async () => {

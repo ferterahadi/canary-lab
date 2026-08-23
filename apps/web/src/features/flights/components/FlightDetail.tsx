@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { FlightEntryOptions, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
+import type { FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
@@ -9,7 +9,7 @@ import { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../
 import type { FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatDuration, stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
+import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
 import { stageStateLine } from './StageStatusLines'
 import {
   buildDerivedManifest,
@@ -60,6 +60,7 @@ export function FlightDetail({
   drill,
   stage: routedStage,
   onSelectStage,
+  indexEntry,
 }: {
   flightId: string
   refreshKey: number
@@ -85,6 +86,13 @@ export function FlightDetail({
    *  it standalone. */
   stage?: FlightStageKey | null
   onSelectStage?: (stage: FlightStageKey | null) => void
+  /** The flight's row from the `/ws/flights` index, when the caller holds it.
+   *  A settled flight is not snapshotted on the push channel, so a cold open
+   *  used to blank the WHOLE page behind "Loading flight…" until REST resolved
+   *  — while the index already carried the feature, status and every stage's
+   *  status. The seed renders the header, strip and rail immediately; only the
+   *  stage pane waits for the manifest. */
+  indexEntry?: FlightIndexEntry | null
 }) {
   // R81 — derived mode: `flightId` is a `feature:<name>` token, so there is no
   // record to GET. The rail comes from live workspace evidence and everything
@@ -135,7 +143,30 @@ export function FlightDetail({
     () => (derivedFeature && derivedRail ? buildDerivedManifest(derivedFeature, derivedRail, derivedPrefill ?? undefined) : null),
     [derivedFeature, derivedRail, derivedPrefill],
   )
-  const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched))
+  // The index-entry seed: enough manifest to paint the header, strip and rail
+  // on a cold open (see the `indexEntry` prop). `seeded` gates everything the
+  // index genuinely cannot answer — fabricated `opts` must not render as facts.
+  const seed = useMemo<FlightManifest | null>(() => {
+    if (!indexEntry || indexEntry.flightId !== flightId) return null
+    return {
+      flightId: indexEntry.flightId,
+      feature: indexEntry.feature,
+      repoPaths: indexEntry.repoPaths ?? [],
+      description: '',
+      // `stageProducer` is real index data and gates the read-only treatment of
+      // an externally driven flight — the rest are placeholders `seeded` hides.
+      opts: { env: 'local', coverageTarget: 100, yolo: false, ...(indexEntry.stageProducer ? { stageProducer: indexEntry.stageProducer } : {}) },
+      status: indexEntry.status,
+      ...(indexEntry.pauseReason ? { pauseReason: indexEntry.pauseReason } : {}),
+      currentStage: indexEntry.currentStage,
+      stages: (indexEntry.stages ?? []).map((s) => ({ key: s.key, status: s.status })),
+      createdAt: indexEntry.createdAt,
+      updatedAt: indexEntry.updatedAt,
+      ...(indexEntry.endedAt ? { endedAt: indexEntry.endedAt } : {}),
+    }
+  }, [indexEntry, flightId])
+  const flight = derivedManifest ?? (derivedFeature ? null : (liveFlight ?? fetched ?? seed))
+  const seeded = !derivedManifest && !derivedFeature && !liveFlight && !fetched && seed != null
   /** The stage a "Continue" would enter at — first one without evidence. */
   const derivedEntry = derivedRail ? derivedEntryStage(derivedRail) : null
 
@@ -229,7 +260,7 @@ export function FlightDetail({
   if (error && !flight) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 text-xs text-muted">
-        <div>Flight {flightId} could not be loaded: {error}</div>
+        <div>Couldn't open this flight. {error}</div>
         <button type="button" onClick={onBackToList} className="cl-button px-2.5 py-1 text-xs">All flights</button>
       </div>
     )
@@ -292,12 +323,12 @@ export function FlightDetail({
               ? EXTERNAL_WORK_COPY.headerTitle
               : derivedFeature
               ? (flight.status === 'done'
-                ? 'Every step complete — done outside the conductor, so there is no flight record'
-                : 'Steps completed outside the conductor — continue to conduct the rest')
+                ? "Every step is done. It was finished outside Canary's own pipeline, so there is no flight history to show"
+                : 'Some steps were done outside Canary — Continue runs the rest here')
               : flight.status === 'paused'
               ? (flight.pauseReason === 'user' ? 'Paused by you — Continue resumes it'
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
-                : 'A stage failed — Continue retries it')
+                : 'A step failed — Continue retries it')
               : undefined}
             icon={flight.status === 'running' || agentHolding ? <StatusDot state="running" className="shrink-0" /> : undefined}
             label={agentHolding
@@ -378,7 +409,7 @@ export function FlightDetail({
               onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
               className="cl-button-primary px-2.5 py-1 text-xs"
               title={derivedEntry
-                ? `Conduct this suite from ${stageLabel(derivedEntry)} — the steps already done are kept`
+                ? `Continue this suite from ${stageLabel(derivedEntry)} — finished steps are kept`
                 : 'Every step is done — start a fresh flight to fly it again'}
             >
               {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
@@ -413,17 +444,21 @@ export function FlightDetail({
           className="flex items-center gap-2 border-b px-4 py-1.5 text-[11px] border-line text-danger"
         >
           <span className="min-w-0 flex-1 truncate" title={actionError}>{actionError}</span>
-          <button type="button" onClick={() => setActionError(null)} className="cl-button shrink-0 px-2 py-0.5 text-[10.5px]">Dismiss</button>
+          <button type="button" onClick={() => setActionError(null)} className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[10.5px]">Dismiss</button>
         </div>
       )}
 
       <FlightSummaryStrip
         flight={flight}
-        derived={derivedFeature != null}
+        // `seeded` rides the derived flag: the seed's `opts` are fabricated
+        // defaults, so the Agent item (which reads them) must not render until
+        // the real manifest lands.
+        derived={derivedFeature != null || seeded}
         onSelectStage={setSelectedStage}
         // R81: no record → nothing to toggle. Autopilot is chosen in the
-        // launcher when this suite is actually conducted.
-        onToggleAutopilot={derivedFeature ? undefined : (next) => act(() => api.setFlightAutopilot(flight.flightId, next))}
+        // launcher when this suite is actually conducted. A seed doesn't know
+        // the stored value, so the toggle waits for the manifest too.
+        onToggleAutopilot={derivedFeature || seeded ? undefined : (next) => act(() => api.setFlightAutopilot(flight.flightId, next))}
         // Autopilot decides checkpoints — flipping it changes what the agent's
         // flight answers for itself, so it is the agent's setting while the
         // agent is driving. Disabled with a reason, not hidden: the toggle's
@@ -433,7 +468,7 @@ export function FlightDetail({
 
       <div className="flex min-h-0 flex-1">
         <nav
-          aria-label="Flight stages"
+          aria-label="Flight steps"
           className="flex w-[240px] shrink-0 flex-col gap-0.5 overflow-auto border-r border-line p-2 scrollbar-thin"
           style={{ scrollbarGutter: 'stable' }}
         >
@@ -446,21 +481,23 @@ export function FlightDetail({
               parks the selection. Enabled in both — clicking while already
               following is a harmless no-op. */}
           <div className="flex h-6 items-center justify-between px-2">
+            {/* "Steps", not "Stages": every tooltip and card in the pane says
+                "step" — one word for one thing. */}
             <span className="cl-rubric leading-none">
-              Stages
+              Steps
             </span>
             <button
               type="button"
               data-testid={selectedStage === null ? 'rail-following' : 'rail-resume-follow'}
               aria-pressed={selectedStage === null}
               onClick={() => setSelectedStage(null)}
-              className="cl-button flex items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none"
+              className="cl-button flex min-h-6 items-center gap-1 px-1.5 py-0.5 text-[10px] leading-none"
               style={selectedStage === null
                 ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))', background: 'var(--bg-selected)' }
                 : undefined}
               title={selectedStage === null
-                ? 'Selection follows the stage that needs eyes'
-                : 'Return to auto-selecting the stage that needs eyes'}
+                ? 'Following whichever step needs you'
+                : 'Go back to following the step that needs you'}
             >
               <span aria-hidden="true" className="text-[9px]" style={selectedStage !== null ? { color: 'var(--accent)' } : undefined}>
                 {selectedStage === null ? '●' : '↺'}
@@ -471,11 +508,12 @@ export function FlightDetail({
           {railRows.map((s) => {
             const selected = s.key === stageKey
             const t = stageStatusTone(s.status)
-            // A merged row's wall-clock spans its primary + folded companion
-            // (run→heal, scaffold→env-capture, docs→prd-summary) — R61.
+            // A merged row's duration sums its primary + folded companion
+            // (run→heal, scaffold→env-capture, docs→prd-summary) — R61. Work
+            // time, not wall clock: checkpoint parks and pauses don't count.
             const primary = flight.stages.find((st) => st.key === s.key)
             const folded = flight.stages.find((st) => st.key === STAGE_COMPANION[s.key])
-            const duration = formatDuration(primary?.startedAt, folded?.endedAt ?? primary?.endedAt)
+            const duration = formatStageDuration(primary, folded)
             // R84: the stage panel no longer paints its "where are we" sentence —
             // it rides here instead, under the static blurb, so hovering a rail
             // row still answers both "what is this step" and "what's it done".
@@ -520,7 +558,13 @@ export function FlightDetail({
 
         <main className="flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
           {!stage || !row ? (
-            <div className="text-xs text-muted">Pick a stage.</div>
+            // The residual hole behind `autoStage`: a record whose rail hasn't
+            // resolved yet (an index-entry seed, a manifest with no stages).
+            // Padded like every other pane state, and it says what's happening
+            // instead of issuing an instruction the rail can't satisfy.
+            <div className="p-3 text-xs text-muted">
+              {seeded ? 'Loading the flight’s steps…' : 'Pick a step from the list on the left.'}
+            </div>
           ) : (
             <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
           )}
@@ -559,11 +603,11 @@ export function stageDrillThrough(
   // source docs are approved, and offering a ledger then opens an empty one.
   if (stage.key === 'docs' && drill.onOpenCoverage && companion?.status === 'done') {
     const open = drill.onOpenCoverage
-    return { label: 'Open coverage ledger →', onClick: () => open(flight.feature) }
+    return { label: 'Open test coverage →', onClick: () => open(flight.feature) }
   }
   if (stage.key === 'specs-coverage' && drill.onOpenCoverage && stage.status !== 'pending') {
     const open = drill.onOpenCoverage
-    return { label: 'Open coverage ledger →', onClick: () => open(flight.feature) }
+    return { label: 'Open test coverage →', onClick: () => open(flight.feature) }
   }
   // Parallel readiness drills to the feature's Ports tab — the resting surface
   // that OWNS injectability: the saved overlay (diff + double-boot proof), the
@@ -576,7 +620,7 @@ export function stageDrillThrough(
   // parked. `pending` alone isn't "never ran": an interrupted stage reverts to
   // pending and keeps its startedAt, and that's exactly when you want the tab.
   if (stage.key === 'portify' && onOpenConfig && (stage.status !== 'pending' || stage.startedAt != null)) {
-    return { label: 'Open ports config →', onClick: () => onOpenConfig(flight.feature, 'ports') }
+    return { label: 'Open port settings →', onClick: () => onOpenConfig(flight.feature, 'ports') }
   }
   return null
 }

@@ -36,6 +36,10 @@ class SummaryReporter implements Reporter {
   // `result.attachments` and consumed in `onEnd` to drive trace-summary
   // extraction (async, parallel) before the final heal-index write.
   private tracePathsByName = new Map<string, string>()
+  // Names that passed only on a retry in the PRIOR execution's summary (targeted
+  // rerun seeding drops per-entry retry numbers, so the honesty marker has to be
+  // carried separately or a flaky pass launders into a clean one on merge).
+  private priorPassedOnRetry = new Set<string>()
 
   constructor() {
     if (this.mergeExistingSummary) this.seedFromExistingSummary()
@@ -327,12 +331,23 @@ class SummaryReporter implements Reporter {
     const passedIds = passedResults.flatMap((r) => r.id ? [r.id] : [])
     const skippedIds = skippedResults.flatMap((r) => r.id ? [r.id] : [])
     const includeKnownTests = this.sawSuiteInventory
+    // Honesty markers for downstream reporting (the coverage ledger's proven
+    // axis, the flight's "Tests that passed" tile): a pass that needed a retry
+    // is flaky, and a summary still carrying seeded prior-execution results
+    // never saw all its passes in one run. Both are facts of THIS summary, so
+    // they live here rather than being re-derived by readers.
+    const passedOnRetry = passedResults
+      .filter((r) => (typeof r.retry === 'number' && r.retry > 0) || this.priorPassedOnRetry.has(r.name))
+      .map((r) => r.name)
+    const spansExecutions = this.results.some((r) => r.seeded)
     const summary = {
       complete,
       total: includeKnownTests ? this.knownTests.length : this.results.length,
       passed: passedResults.length,
       passedNames: passedResults.map((r) => r.name),
       ...(passedIds.length ? { passedIds } : {}),
+      ...(passedOnRetry.length ? { passedOnRetry } : {}),
+      ...(spansExecutions ? { mergedFromPriorExecution: true } : {}),
       ...(includeKnownTests ? { knownTests: this.knownTests } : {}),
       ...(skippedResults.length
         ? {
@@ -386,6 +401,9 @@ class SummaryReporter implements Reporter {
     if (!parsed || typeof parsed !== 'object') return
 
     const seen = new Set<string>()
+    for (const name of Array.isArray(parsed.passedOnRetry) ? parsed.passedOnRetry : []) {
+      if (typeof name === 'string' && name) this.priorPassedOnRetry.add(name)
+    }
     const passedNames = Array.isArray(parsed.passedNames) ? parsed.passedNames : []
     const passedIds = Array.isArray(parsed.passedIds) ? parsed.passedIds : []
     for (const [index, name] of passedNames.entries()) {
@@ -394,7 +412,7 @@ class SummaryReporter implements Reporter {
       const key = id ?? name
       if (seen.has(key)) continue
       seen.add(key)
-      this.results.push({ ...(id ? { id } : {}), name, status: 'passed', passed: true })
+      this.results.push({ ...(id ? { id } : {}), name, status: 'passed', passed: true, seeded: true })
     }
 
     const skippedNames = Array.isArray(parsed.skippedNames) ? parsed.skippedNames : []
@@ -405,7 +423,7 @@ class SummaryReporter implements Reporter {
       const key = id ?? name
       if (seen.has(key)) continue
       seen.add(key)
-      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false })
+      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false, seeded: true })
     }
 
     const failed = Array.isArray(parsed.failed) ? parsed.failed : []
@@ -428,6 +446,7 @@ class SummaryReporter implements Reporter {
         name,
         status: 'failed',
         passed: false,
+        seeded: true,
         ...(isErrorShape(entry.error) ? { error: entry.error } : {}),
         ...(typeof entry.durationMs === 'number' ? { durationMs: entry.durationMs } : {}),
         ...(typeof entry.location === 'string' ? { location: entry.location } : {}),

@@ -66,7 +66,9 @@ export function DownloadEvaluationAction({
       className={`${primary ? 'cl-button-primary' : 'cl-button'} shrink-0 px-2.5 py-1 text-xs`}
       style={primary ? undefined : { color: failed ? 'var(--danger)' : 'var(--success)' }}
     >
-      {failed ? 'Download failed — retry' : primary ? '⬇ Download report' : '⬇ Download evaluation (.zip)'}
+      {/* One label for one file: the header, this card and the reports list all
+          say "report". */}
+      {failed ? 'Download failed — retry' : '⬇ Download report'}
     </button>
   )
 }
@@ -146,7 +148,6 @@ export function CheckpointControls({
         <span
           data-testid="checkpoint-title"
           className="text-[12.5px] font-semibold"
-          title={checkpoint.kind}
         >
           {checkpointTitle(checkpoint.kind)}
         </span>
@@ -200,7 +201,7 @@ export function CheckpointControls({
             }}
             className="cl-button self-start px-2.5 py-1 text-xs"
           >
-            Submit values
+            Save these settings
           </button>
         </div>
       )}
@@ -222,7 +223,6 @@ export function CheckpointControls({
               ? setReviseOpen((v) => !v)
               : respond({ choice: option, ...(option === 'submit' && handOffId ? { token: handOffId } : {}) }))}
             className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs"
-            title={option}
             style={i === 0 && !externalWork
               ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
               : undefined}
@@ -259,7 +259,7 @@ export function CheckpointControls({
             data-testid="checkpoint-revise-feedback"
             value={reviseText}
             onChange={(e) => setReviseText(e.target.value)}
-            placeholder="What should the agent change? The edits get another double-boot check."
+            placeholder="What should the agent change? It starts two copies again to re-check."
             spellCheck={false}
             rows={3}
             className="cl-input w-full p-2 text-[11px] font-mono"

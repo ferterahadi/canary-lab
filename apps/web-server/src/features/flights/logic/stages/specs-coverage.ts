@@ -383,7 +383,10 @@ export function specsCoverageStage(deps: FlightStageDeps): StageAdapter {
         kind: 'checkpoint',
         checkpoint: {
           kind: 'coverage-stuck',
-          message: `After ${MAX_ITERATIONS} authoring rounds coverage is ${ledger.coveragePct}% (target ${prep.target}%). Accept the remaining gaps or run another round.`,
+          // "passes", not "authoring rounds": the Passes card beside this
+          // checkpoint and the live state line both count the same loop in
+          // passes — one loop, one word.
+          message: `After ${MAX_ITERATIONS} passes, coverage is ${ledger.coveragePct}% (target ${prep.target}%). Accept the gaps that are left, or try another pass.`,
           options: [...CHECKPOINT_OPTIONS['coverage-stuck']],
           data: ledgerEvidence(ledger),
         },

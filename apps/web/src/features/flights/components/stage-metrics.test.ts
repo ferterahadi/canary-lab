@@ -332,9 +332,23 @@ describe('ledgerEvidence', () => {
         { name: 't5', requirements: [], pathTypes: [], lastRun: { runId: 'run-9', passed: true } },
       ],
     }))
-    expect(evidence?.specs).toEqual({ mapped: 4, passed: 2, failed: 1, neverRan: 1 })
+    expect(evidence?.specs).toEqual({ mapped: 4, passed: 2, passedOnRetry: 0, failed: 1, neverRan: 1 })
     // The strength buckets still see every spec — depth is not a proof question.
     expect(evidence?.testCount).toBe(5)
+  })
+
+  it('counts a retried pass as a pass AND as a flake, and carries the merged-execution flag', () => {
+    const evidence = ledgerEvidence(ledger({
+      provenSpansExecutions: true,
+      tests: [
+        { name: 't1', requirements: ['R1'], pathTypes: [], lastRun: { runId: 'run-9', passed: true } },
+        { name: 't2', requirements: ['R1'], pathTypes: [], lastRun: { runId: 'run-9', passed: true, retried: true } },
+      ],
+    }))
+    expect(evidence?.specs).toEqual({ mapped: 2, passed: 2, passedOnRetry: 1, failed: 0, neverRan: 0 })
+    expect(evidence?.spansExecutions).toBe(true)
+    // Absent on the ledger → a single clean execution, not unknown.
+    expect(ledgerEvidence(ledger())?.spansExecutions).toBe(false)
   })
 
   it('returns null for a feature with no requirements at all', () => {

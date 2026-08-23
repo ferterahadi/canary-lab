@@ -37,6 +37,9 @@ export const TIMELINE_CSS = `
 .agentts-label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600}
 .agentts-time{color:var(--text-muted);font-family:var(--font-mono);font-size:8.5px;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .agentts-prose{color:var(--text-primary);font-size:12.5px;line-height:1.55;white-space:pre-wrap;word-break:break-word;margin-top:2px}
+/* Raw text shown for the one moment the lazily-loaded markdown parser is still
+   arriving — same face and measure as the prose it becomes, so nothing jumps. */
+.agentts-mdfallback{margin:0;font:inherit;color:inherit;white-space:pre-wrap;word-break:break-word}
 .agentts-morebtn{margin-top:4px;background:none;border:none;cursor:pointer;color:var(--accent);font-size:11px;padding:0;font-weight:500}
 .agentts-tool{margin-top:2px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:color-mix(in srgb,var(--bg-elevated) 55%,transparent);overflow:hidden;transition:border-color .15s ease,background .15s ease}
 .agentts-tool:hover{background:color-mix(in srgb,var(--bg-elevated) 85%,transparent)}

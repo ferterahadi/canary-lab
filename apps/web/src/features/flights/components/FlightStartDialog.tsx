@@ -47,7 +47,7 @@ const PICKABLE: FlightStageKey[] = [
  *  (mode `redo`), so they can't read as two different things. */
 export const START_FRESH_LABEL = 'Start fresh — from the beginning'
 
-export const START_FRESH_BLURB = 'Change intent or repos; discards every stage result.'
+export const START_FRESH_BLURB = 'Change what it tests or which repos. Every finished step is redone.'
 
 function rowLabel(key: FlightStageKey): string {
   return key === 'similarity' ? START_FRESH_LABEL : STAGE_LABEL[key]
@@ -227,7 +227,7 @@ export function FlightStartDialog({
           <span className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{stepCount} steps, fully automated</span>
           {(newFlight || freshMode) && (
             <span className="ml-auto text-[10.5px]" style={{ color: 'var(--text-secondary)' }}>
-              {freshMode ? 'every step re-runs' : 'step entry unlocks after the first flight'}
+              {freshMode ? 'every step re-runs' : 'start from any step after the first flight'}
             </span>
           )}
         </button>
@@ -333,7 +333,7 @@ export function FlightStartDialog({
         freshMode
           ? 'Change what this suite tests. It re-flies from the beginning.'
           : hasRecord
-            ? 'Re-fly this suite — pick where the pipeline restarts.'
+            ? 'Re-fly this suite — pick which step it restarts from.'
             : 'One command from a bare repo to a green, covered, evaluated run.'
       }
       width={620}
@@ -435,14 +435,14 @@ export function FlightStartDialog({
                     value={description}
                     onChange={setDescription}
                     minRows={hasRecord ? 3 : 5}
-                    placeholder="e.g. the checkout flow end to end — refer to ~/Documents/prd.md"
+                    placeholder="e.g. the checkout flow end to end — see ~/Documents/checkout-brief.md"
                   />
                 )}
                 {hasRecord && !freshMode && (
                   <div className="mt-1.5 text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
                     {editableInputs
                       ? 'Prefilled from the last flight — editable because you’re starting from the beginning.'
-                      : 'Locked while re-entering mid-pipeline (earlier steps used these inputs) — pick "Start fresh — from the beginning" below to change them.'}
+                      : 'Locked, because earlier steps already used these. Pick "Start fresh — from the beginning" below to change them.'}
                   </div>
                 )}
                 {freshMode && (
@@ -485,7 +485,7 @@ export function FlightStartDialog({
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-[12px] font-medium">Autopilot</span>
                 <span className="text-[10.5px] leading-snug" style={{ color: 'var(--text-secondary)' }}>
-                  Answers the safe checkpoints. Still stops for missing secrets or a name clash.
+                  Answers the safe questions for you. Still stops for missing secrets or a name clash.
                 </span>
               </span>
               <Toggle testId="flight-autopilot-checkbox" value={autopilot} onChange={setAutopilot} />
@@ -494,10 +494,10 @@ export function FlightStartDialog({
             {hasRecord && (
               <div data-testid="flight-start-reset-note" className="text-[10.5px]" style={{ color: 'var(--text-muted)' }}>
                 {freshMode
-                  ? 'The last attempt is wiped first — docs, specs, envset, run, export.'
+                  ? 'The last attempt is wiped first — docs, tests, saved settings, run and report.'
                   : picked === 'continue'
                     ? 'Continue picks up from the last state — nothing is wiped.'
-                    : 'Restarting from a step wipes that step\'s and every later step\'s artifacts (docs, specs, envset, run, export); earlier steps keep theirs.'}
+                    : 'Restarting from a step throws away its results and everything after it — docs, tests, saved settings, run and report. Earlier steps are kept.'}
               </div>
             )}
 

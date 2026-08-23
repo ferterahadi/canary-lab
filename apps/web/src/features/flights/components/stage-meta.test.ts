@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort } from './stage-meta'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { evaluationTaskId, portifyWorkflowId, stageStateLine, stageFacts, healEndLine, healEndShort, formatStageDuration, stageWorkMs } from './stage-meta'
 import { agentActivityLine } from './StageStatusLines'
 
 import type { FlightManifest, FlightStage } from '@/shared/api/client'
@@ -47,8 +47,8 @@ describe('live agent activity — the running stage reports what the agent is do
 
   it('replaces the generic running sentence with the thinking token count', () => {
     const stage = running({ phase: 'thinking', thinkingTokens: 3900, chars: 0, tail: '' })
-    expect(agentActivityLine(stage)).toBe('Thinking — 3,900 tokens of reasoning so far…')
-    expect(stageStateLine(stage, flight({ stages: [stage] }))).toBe('Thinking — 3,900 tokens of reasoning so far…')
+    expect(agentActivityLine(stage)).toBe('Thinking — still working (3,900 tokens so far)…')
+    expect(stageStateLine(stage, flight({ stages: [stage] }))).toBe('Thinking — still working (3,900 tokens so far)…')
   })
 
   it('reports the answer growing, which is the signal a frozen screen could not give', () => {
@@ -86,7 +86,7 @@ describe('live agent activity — the running stage reports what the agent is do
     expect(facts.map((f) => f.label)).toEqual(['Requirements'])
     expect(facts.every((f) => f.awaiting)).toBe(true)
     // The fact itself is not lost — it is the state line's subject.
-    expect(agentActivityLine(stage)).toBe('Thinking — 1,250 tokens of reasoning so far…')
+    expect(agentActivityLine(stage)).toBe('Thinking — still working (1,250 tokens so far)…')
   })
 })
 
@@ -128,7 +128,7 @@ describe('stageStateLine — pending copy (R78 pause mid-step)', () => {
     ] as FlightStage[]
     expect(stageStateLine(stage, flight({ stages: withRun, status: 'running' }))).toBe('Not started yet.')
     const noRun = withRun.map((s) => (s.key === 'run' ? { ...s, status: 'pending' as const } : s))
-    expect(stageStateLine(stage, flight({ stages: noRun }))).toBe('Waiting for Test Run.')
+    expect(stageStateLine(stage, flight({ stages: noRun }))).toBe('Waiting for Test run.')
   })
 
   it('an INTERRUPTED pending stage (startedAt set) says the step was interrupted, not waiting', () => {
@@ -203,7 +203,7 @@ describe('healEndLine / healEndShort (R80)', () => {
     // The repair was healthy; a second server booting on the same logs dir
     // marked the run finished under it. Attributing that to the user (or to the
     // agent giving up) would point the reader at the wrong cause entirely.
-    expect(healEndLine(he({ reason: 'foreign-abort', message: '' }))).toMatch(/another Canary Lab server/i)
+    expect(healEndLine(he({ reason: 'foreign-abort', message: '' }))).toMatch(/another Canary window/i)
     expect(healEndShort(he({ reason: 'foreign-abort' }))).toBe('stopped — record taken over')
   })
 })
@@ -219,7 +219,6 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     const facts = stageFacts(stage, flight())
     const cov = facts.find((f) => f.label === 'Requirements covered')
     expect(cov).toMatchObject({ value: '40%', big: true, tone: 'warn' })
-    expect(cov?.bar).toBeCloseTo(0.4)
     // The band is the settled label set in every state: the loop's position is
     // the passes card's subject, and the gap count is not a settled tile.
     expect(facts.map((f) => f.label)).toEqual(['Requirements covered', 'Requirements', 'Tests written'])
@@ -235,10 +234,10 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       progress: { pass: 1, maxPasses: 5, phase: 'authoring', coveragePct: 0, target: 100, gapsOpen: 18, passes: [] },
       evidence: {},
     } as unknown as FlightStage
-    // `meter` rides along because the settled tile carries a coverage bar: the
-    // slot is reserved so the figure and its bar land together.
+    // No `meter`: the settled tile is a bare percentage now that the
+    // single-fraction bars are gone, so no slot is reserved under it.
     expect(stageFacts(authoring, flight()).find((f) => f.label === 'Requirements covered'))
-      .toEqual({ label: 'Requirements covered', value: '', awaiting: true, meter: true })
+      .toEqual({ label: 'Requirements covered', value: '', awaiting: true })
 
     // A 0% a pass actually MEASURED is a real verdict and still reports.
     const measuredZero = {
@@ -259,7 +258,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       evidence: { coveragePct: 100, gaps: [] },
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
-    expect(facts.find((f) => f.label === 'Requirements covered')).toMatchObject({ value: '100%', big: true, tone: 'good', bar: 1 })
+    expect(facts.find((f) => f.label === 'Requirements covered')).toMatchObject({ value: '100%', big: true, tone: 'good' })
     const gaps = facts.find((f) => f.label === 'Coverage gaps')
     expect(gaps).toMatchObject({ value: '0', big: true, tone: 'good' })
     expect(gaps?.sub).toBeUndefined()
@@ -443,7 +442,7 @@ describe('stageFacts — Suite setup env tile', () => {
     const companion = { key: 'env-capture', status: 'done', evidence: { captured: 3 } } as unknown as FlightStage
     const facts = stageFacts(scaffold, withScout(3), companion)
     expect(facts.find((f) => f.label === 'Env files')).toMatchObject({
-      value: '3/3', big: true, tone: 'good', bar: 1, sub: 'all the app asked for',
+      value: '3/3', big: true, tone: 'good', sub: 'all the app asked for',
     })
     expect(facts.find((f) => f.label === 'Env keys captured')).toBeUndefined()
   })
@@ -490,7 +489,7 @@ describe('portify facts — natively injectable suites (no overlay, no workflow)
     const stage = { key: 'portify', status: 'done', evidence: { declaredInjectable: 3, serviceCount: 3 } } as FlightStage
     const facts = stageFacts(stage, flight({ stages: [stage] }))
     const injectable = facts.find((f) => f.label === 'Services injectable')
-    expect(injectable).toMatchObject({ value: '3/3', sub: 'declared in the config' })
+    expect(injectable).toMatchObject({ value: '3/3', sub: "set in this suite's settings" })
     // The verified hue is reserved for a real double boot. A declaration that
     // borrowed it would report config as proof.
     expect(injectable?.tone).toBeUndefined()
@@ -712,18 +711,20 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     // same denominator the conclusion uses — not the `100% claimed` jargon this
     // replaced, which asked the reader to convert a percentage to compare it.
     expect(facts.find((f) => f.label === 'Requirements with tests'))
-      .toMatchObject({ value: '6/6', tone: 'good', sub: 'every part has a test' })
-    // "Spec depth", not "Evidence strength" — the composition card one stage up
-    // puts that exact word on this exact distribution.
+      .toMatchObject({ value: '6/6', tone: 'good', sub: 'every path has a test' })
+    // The headline is the BEST tier the suite reached, not a hardwired
+    // "N strong": the strong tier needs a non-local URL, so a localhost suite
+    // led with a permanent "0 strong" — a structural ceiling presented as the
+    // finding. The sub lists the rest of the distribution.
     expect(facts.find((f) => f.label === 'Test depth'))
-      .toMatchObject({ value: '0 strong', sub: '1 solid · 2 shallow' })
+      .toMatchObject({ value: '1 solid', sub: '2 shallow' })
     expect(facts.find((f) => f.label === 'Tests that passed'))
       .toMatchObject({ value: '1/3', tone: 'warn', sub: '1 failed · 1 never ran' })
     // Gate two. Its sub carries the RULE, which is the only thing the three tiles
     // to the left cannot show: one spec passed, yet nothing is proven, because a
     // requirement needs every path of it backed by a pass.
     expect(facts.find((f) => f.label === 'Requirements proven'))
-      .toMatchObject({ value: '0/6', tone: 'warn', sub: 'every part needs a test that passed' })
+      .toMatchObject({ value: '0/6', tone: 'warn', sub: 'each path needs a test that passed' })
     expect(facts.some((f) => f.value.includes('KB'))).toBe(false)
   })
 
@@ -735,7 +736,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
       }),
     })
     expect(facts.find((f) => f.label === 'Requirements with tests'))
-      .toMatchObject({ value: '4/6', tone: 'warn', sub: '2 still have gaps' })
+      .toMatchObject({ value: '4/6', tone: 'warn', sub: '2 not fully covered' })
     // One short reads "has", not "have" — a band that says "1 still have gaps"
     // reads as a bug in the number rather than a fact about the suite.
     const one = stageFacts(stage, flight(), undefined, {
@@ -744,7 +745,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
         totals: { total: 6, covered: 5, pathIncomplete: 1, variantIncomplete: 0, untested: 0, orphanTests: 0, proven: 0 },
       }),
     })
-    expect(one.find((f) => f.label === 'Requirements with tests')?.sub).toBe('1 still has a gap')
+    expect(one.find((f) => f.label === 'Requirements with tests')?.sub).toBe('1 not fully covered')
   })
 
   it('names the unmapped specs, so the run tile is not read as the whole suite', () => {
@@ -772,7 +773,7 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
       ledger: joined({ provenRunId: '2026-07-04T1130-q881' }),
     })
     expect(facts.find((f) => f.label === 'Requirements proven')?.sub)
-      .toBe('proven on run 2026-07-04T1130-q881, not this one')
+      .toBe('measured on run 2026-07-04T1130-q881, not this one')
     // Said once. The specs tile reads the same join and does not repeat the caveat.
     expect(facts.find((f) => f.label === 'Tests that passed')?.sub).toBe('1 failed · 1 never ran')
   })
@@ -804,7 +805,24 @@ describe('stageFacts — the Evaluation Report band reconciles the coverage stag
     expect(facts.find((f) => f.label === 'Requirements proven'))
       .toMatchObject({ value: '6/6', tone: 'good', sub: 'every requirement had a test that passed' })
     expect(facts.find((f) => f.label === 'Tests that passed'))
-      .toMatchObject({ value: '1/1', tone: 'good', sub: 'every test passed' })
+      .toMatchObject({ value: '1/1', tone: 'good', sub: 'every labelled test passed' })
+  })
+
+  it('a retried pass and a merged summary displace "every test passed" — a flake is not a clean sweep', () => {
+    const facts = stageFacts(stage, flight(), undefined, {
+      evalTask: task,
+      ledger: joined({
+        totals: { total: 6, covered: 6, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0, proven: 6 },
+        provenPct: 100,
+        provenSpansExecutions: true,
+        tests: [
+          { name: 't1', requirements: ['R1'], pathTypes: [], strength: 'solid', lastRun: { runId: '2026-07-01T0245-o456', passed: true, retried: true } },
+          { name: 't2', requirements: ['R2'], pathTypes: [], strength: 'solid', lastRun: { runId: '2026-07-01T0245-o456', passed: true } },
+        ],
+      }),
+    })
+    expect(facts.find((f) => f.label === 'Tests that passed'))
+      .toMatchObject({ value: '2/2', sub: '1 passed on a retry · across partial runs' })
   })
 })
 
@@ -914,5 +932,51 @@ describe('stageStateLine — external-work hand-off', () => {
       checkpoint: { kind: 'missing-env', message: 'Two keys are missing.', options: ['retry', 'waive'] },
     } as FlightStage
     expect(stageStateLine(stage, flight({ stages: [stage] }))).toBe('Two keys are missing.')
+  })
+})
+
+describe('stageWorkMs / formatStageDuration — the work clock', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('prefers the banked work clock over the wall-clock span', () => {
+    // Nine wall-clock hours (overnight checkpoint park), 90s of banked work.
+    expect(stageWorkMs({
+      startedAt: '2026-01-01T00:00:00Z',
+      endedAt: '2026-01-01T09:00:00Z',
+      activeMs: 90_000,
+    })).toBe(90_000)
+  })
+
+  it('adds the live segment while the clock is running', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(Date.parse('2026-01-01T00:01:00Z'))
+    expect(stageWorkMs({ activeMs: 30_000, activeSince: '2026-01-01T00:00:40Z' })).toBe(50_000)
+    // A live segment alone (first running stretch, nothing banked yet) counts too.
+    expect(stageWorkMs({ activeSince: '2026-01-01T00:00:55Z' })).toBe(5_000)
+    // A clock skew putting activeSince in the future never yields negative work.
+    expect(stageWorkMs({ activeMs: 1_000, activeSince: '2026-01-01T00:02:00Z' })).toBe(1_000)
+  })
+
+  it('falls back to the startedAt→endedAt span for records from before the clock existed', () => {
+    expect(stageWorkMs({ startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:00:27Z' })).toBe(27_000)
+    expect(stageWorkMs({ startedAt: '2026-01-01T00:00:00Z' })).toBeNull()
+    expect(stageWorkMs({})).toBeNull()
+    expect(stageWorkMs(undefined)).toBeNull()
+    // A malformed stamp is unknown, not zero.
+    expect(stageWorkMs({ startedAt: 'not-a-date', endedAt: '2026-01-01T00:00:27Z' })).toBeNull()
+    // An end before the start (clock skew) is unknown, not negative.
+    expect(stageWorkMs({ startedAt: '2026-01-01T00:01:00Z', endedAt: '2026-01-01T00:00:00Z' })).toBeNull()
+  })
+
+  it('sums a merged pair and renders one compact duration', () => {
+    expect(formatStageDuration(
+      { activeMs: 30_000 },
+      { activeMs: 40_000 },
+    )).toBe('1m 10s')
+    // One half missing entirely → the other stands alone.
+    expect(formatStageDuration({ activeMs: 4_000 }, undefined)).toBe('4s')
+    expect(formatStageDuration(undefined, { activeMs: 4_000 })).toBe('4s')
+    expect(formatStageDuration(undefined, undefined)).toBeNull()
+    expect(formatStageDuration({}, {})).toBeNull()
   })
 })

@@ -40,7 +40,7 @@ interface ParsedFailure {
   fullLoc?: string
 }
 
-const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'unhappy (sad)', edge: 'edge-case' }
+const PATH_DESC: Record<string, string> = { happy: 'happy', sad: 'failure', edge: 'edge-case' }
 
 export function FailingTests({
   failing,
@@ -152,7 +152,7 @@ function TagChip({ tag }: { tag: TestTag }) {
       className={`rounded border px-1.5 py-px font-mono text-[10px] ${req ? 'border-accent/30 text-primary' : 'border-line text-muted'}`}
       title={tag.kind === 'path'
         ? `Exercises the ${PATH_DESC[tag.value] ?? tag.value} path`
-        : tag.kind === 'req' ? `Covers requirement ${tag.value}` : `Variant ${tag.value}`}
+        : tag.kind === 'req' ? `Covers requirement ${tag.value}` : `Only tested for: ${tag.value}`}
     >
       @{tag.kind}-{tag.value}
     </span>

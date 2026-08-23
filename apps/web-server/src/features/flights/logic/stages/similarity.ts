@@ -48,11 +48,11 @@ function findMatch(deps: FlightStageDeps, repoPaths: string[]): { match: Match |
 function applyChoice(ctx: StageContext, match: Match, choice: string): StageOutcome {
   if (choice === 'rerun') {
     ctx.patchFlight({ feature: match.feature })
-    return { kind: 'jump', to: 'run', skipReason: `rerun of existing feature ${match.feature}`, evidence: { match, choice } }
+    return { kind: 'jump', to: 'run', skipReason: `re-running the existing suite "${match.feature}"`, evidence: { match, choice } }
   }
   if (choice === 'enhance') {
     ctx.patchFlight({ feature: match.feature })
-    return { kind: 'jump', to: 'docs', skipReason: `enhancing existing feature ${match.feature}`, evidence: { match, choice } }
+    return { kind: 'jump', to: 'docs', skipReason: `updating the existing suite "${match.feature}"`, evidence: { match, choice } }
   }
   // 'new' — proceed fresh; scaffold picks a non-colliding feature name.
   return { kind: 'done', evidence: { match, choice: 'new' } }
@@ -82,7 +82,7 @@ export function similarityStage(deps: FlightStageDeps): StageAdapter {
         kind: 'checkpoint',
         checkpoint: {
           kind: 'similarity-choice',
-          message: `Feature "${match.feature}" already targets ${match.repo} ("${match.description}"). Rerun it, enhance it with this flight's docs/specs delta, or create a new feature?`,
+          message: `A suite called "${match.feature}" already tests ${match.repo} ("${match.description}"). Re-run it, update it with this flight's new docs and tests, or start a fresh suite?`,
           options: [...CHECKPOINT_OPTIONS['similarity-choice']],
           data: { match },
         },

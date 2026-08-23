@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { plural } from '../../../../../../../shared/lib/plural'
 import { captureFeatureEnvFiles } from '../../../config/logic/feature-authoring'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { RunManifest } from '../../../runs/logic/runtime/manifest'
@@ -171,7 +172,7 @@ export function envCaptureStage(deps: FlightStageDeps): StageAdapter {
           kind: 'checkpoint',
           checkpoint: {
             kind: 'missing-env',
-            message: `${missing.length} env file(s) the app reads do not exist. Provide values (they are written to the missing path, then captured), waive them, or create the files and retry. Canary never guesses secrets.`,
+            message: `${plural(missing.length, 'settings file')} the app needs ${missing.length === 1 ? 'is' : 'are'} missing. Paste the values below (Canary writes the file and saves a copy), skip them, or create the files yourself and re-check. Canary never guesses secrets.`,
             options: [...CHECKPOINT_OPTIONS['missing-env']],
             data: { missing },
           },

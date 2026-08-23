@@ -119,6 +119,47 @@ vi.mock('@/features/portify/state/PortifyContext', () => ({
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
 }))
 
+// TestRunPanel reads the run detail + the run index off the shared runs store
+// (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
+// over the SAME api mocks the panel-local fetches used to consume — fixtures
+// keep working unchanged.
+vi.mock('@/features/runs/state/RunsContext', async () => {
+  const React = await import('react')
+  return {
+    useRun: (runId?: string | null) => {
+      const [detail, setDetail] = React.useState<unknown>(undefined)
+      React.useEffect(() => {
+        let alive = true
+        if (runId) mocks.getRunDetail(runId).then((d: unknown) => { if (alive) setDetail(d) }).catch(() => {})
+        return () => { alive = false }
+      }, [runId])
+      return { detail, status: undefined, transient: null, displayStatus: undefined, error: null }
+    },
+    useRuns: () => {
+      const [runs, setRuns] = React.useState<unknown[]>([])
+      React.useEffect(() => {
+        let alive = true
+        mocks.listRuns({}).then((r: unknown[]) => { if (alive) setRuns(r) }).catch(() => {})
+        return () => { alive = false }
+      }, [])
+      return {
+        runs,
+        connection: 'live',
+        transients: {},
+        errors: {},
+        refresh: vi.fn(),
+        startRun: vi.fn(),
+        startVerification: vi.fn(),
+        abort: vi.fn(),
+        delete: vi.fn(),
+        pauseHeal: vi.fn(),
+        cancelHeal: vi.fn(),
+        clearError: vi.fn(),
+      }
+    },
+  }
+})
+
 import { FlightPage } from './FlightPage'
 
 ;
@@ -221,7 +262,7 @@ describe('summary strip (R71/W5)', () => {
     }))
     await render('fl_1')
     // R71/W5 regression: elapsed used to hide exactly while running.
-    expect(container.querySelector('[data-testid="strip-elapsed"]')?.textContent).toContain('Elapsed so far')
+    expect(container.querySelector('[data-testid="strip-elapsed"]')?.textContent).toContain('Elapsed')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="strip-run"]')?.click() })
     expect(container.querySelector('[data-testid="stage-rail-run"]')?.getAttribute('aria-current')).toBe('true')
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="strip-docs"]')?.click() })
@@ -233,11 +274,11 @@ describe('summary strip (R71/W5)', () => {
     await render('fl_1')
     const strip = () => container.querySelector('[data-testid="flight-summary-strip"]')?.textContent ?? ''
     expect(strip().toLowerCase()).toContain('agent')
-    expect(strip()).toContain('claude')
+    expect(strip()).toContain('Claude')
 
     mocks.getFlight.mockResolvedValue(manifest({ status: 'running', opts: { env: 'local', coverageTarget: 100, yolo: false, agent: 'codex' } }))
     await render('fl_1')
-    expect(container.querySelector('[data-testid="flight-summary-strip"]')?.textContent).toContain('codex')
+    expect(container.querySelector('[data-testid="flight-summary-strip"]')?.textContent).toContain('Codex')
   })
 
   it('the paused status chip explains WHO paused it (pauseReason tooltip)', async () => {
@@ -366,7 +407,7 @@ describe('detail redesign (R53–R68)', () => {
     const strip = container.querySelector('[data-testid="flight-summary-strip"]')?.textContent ?? ''
     expect(strip).toContain('2m 14s')
     expect(strip).toContain('94%')
-    expect(strip).toContain('passed')
+    expect(strip).toContain('Passed')
     expect(strip).toContain('3')
     expect(strip).toContain('ready')
   })
@@ -472,7 +513,7 @@ describe('detail redesign (R53–R68)', () => {
     })
     const asv = container.querySelector('[data-testid="stage-activity"] [data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-kind')).toBe('portify')
-    expect(asv?.getAttribute('data-empty-title')).toBe('No transcript on record')
+    expect(asv?.getAttribute('data-empty-title')).toBe('Nothing to replay here')
   })
 
   it('R66: a live agent stage renders the activity expanded, collapsible via the always-present toggle', async () => {
@@ -549,5 +590,36 @@ describe('detail redesign (R53–R68)', () => {
     await render('fl_1')
     // The merged run row spans run start → heal end (70s).
     expect(container.querySelector('[data-testid="stage-rail-run"]')?.textContent).toContain('1m 10s')
+  })
+
+  it('rail durations read the banked work clock, not the wall-clock span across a checkpoint wait', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        // Nine wall-clock hours (parked overnight on a checkpoint), 108s of work.
+        ...(key === 'docs' ? { startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T09:00:00Z', activeMs: 90_000 } : {}),
+        ...(key === 'prd-summary' ? { startedAt: '2026-01-01T09:00:00Z', endedAt: '2026-01-01T09:00:18Z', activeMs: 18_000 } : {}),
+      })),
+    }))
+    await render('fl_1')
+    expect(container.querySelector('[data-testid="stage-rail-docs"]')?.textContent).toContain('1m 48s')
+    expect(container.querySelector('[data-testid="stage-rail-docs"]')?.textContent).not.toContain('9h')
+  })
+
+  it('ELAPSED starts at flight.startedAt when present — a queued or redone flight, not its record age', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      // Created at enqueue, started 45 minutes later when the queue drained.
+      createdAt: '2026-01-01T00:00:00Z',
+      startedAt: '2026-01-01T00:45:00Z',
+      endedAt: '2026-01-01T00:55:00Z',
+    }))
+    await render('fl_1')
+    const elapsed = container.querySelector('[data-testid="strip-elapsed"]')?.textContent
+    expect(elapsed).toContain('10m 00s')
   })
 })

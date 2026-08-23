@@ -14,6 +14,7 @@ export {
   useActiveBootSessions,
   useActiveRuns,
   useActiveVerifyRuns,
+  useRun,
   useRuns,
 } from './state/RunsContext'
 export { sourceLineForBodyLine } from './utils/editor-location'

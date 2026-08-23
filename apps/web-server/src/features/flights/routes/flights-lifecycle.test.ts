@@ -138,7 +138,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     expect(jump.statusCode).toBe(400)
     const body = jump.json() as { type: string; error: string }
     expect(body.type).toBe('stage_entry_rejected')
-    expect(body.error).toMatch(/feature\.config\.cjs/)
+    expect(body.error).toMatch(/hasn.t been set up yet/)
   })
 
   it('accepts a jump whose on-disk prerequisites exist (fresh feature, stage-entry skips recorded)', async () => {
@@ -167,7 +167,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     app = await buildApp(allDone())
     const jump = await app.inject({ method: 'POST', url: '/api/flights', body: startBody({ fromStage: 'heal' }) })
     expect(jump.statusCode).toBe(400)
-    expect((jump.json() as { error: string }).error).toMatch(/use --from-stage run/)
+    expect((jump.json() as { error: string }).error).toMatch(/start from Test run instead/)
   })
 
   // A stage is gated on what it READS, never on list position. The run stage
@@ -200,7 +200,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     expect(jump.statusCode).toBe(400)
     const body = jump.json() as { type: string; error: string }
     expect(body.type).toBe('stage_entry_rejected')
-    expect(body.error).toMatch(/no specs under e2e\//)
+    expect(body.error).toMatch(/no tests have been written yet/)
   })
 
   // The archive is built from the run record, so a settled run is the ONLY thing
@@ -233,7 +233,7 @@ describe('flight entry modes (continue / redo / jump)', () => {
     expect(jump.statusCode).toBe(400)
     const body = jump.json() as { type: string; error: string }
     expect(body.type).toBe('stage_entry_rejected')
-    expect(body.error).toMatch(/run prerequisite/)
+    expect(body.error).toMatch(/no passing run yet/)
   })
 
   it('accepts a jump to env-capture with only the scaffold prerequisite met', async () => {

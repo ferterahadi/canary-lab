@@ -322,6 +322,9 @@ describe('SummaryReporter', () => {
       complete: true,
       total: 3,
       passed: 1,
+      // Every entry here was seeded from the prior execution and nothing re-ran,
+      // so the summary must declare itself merged.
+      mergedFromPriorExecution: true,
       passedNames: ['test-case-passed-once'],
       skipped: 1,
       skippedNames: ['test-case-skipped-once'],

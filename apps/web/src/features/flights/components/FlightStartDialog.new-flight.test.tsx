@@ -167,7 +167,7 @@ describe('FlightStartDialog — new-flight mode (R40/R41)', () => {
       expect(rowEl.textContent).toContain(STAGE_BLURB[key])
     }
     // The uniform first-flight lock is stated once, on the section header.
-    expect(byTestId('flight-steps-toggle')?.textContent).toContain('unlocks after the first flight')
+    expect(byTestId('flight-steps-toggle')?.textContent).toContain('start from any step after the first flight')
   })
 
   it('R54: submit plans first — the breakdown agent owns the dialog; closing keeps it in the background', async () => {

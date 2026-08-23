@@ -168,7 +168,7 @@ describe('portify stage', () => {
   it('skips only when the portified mark already exists', async () => {
     markPortified()
     const outcome = await portifyStage(deps()).run(ctxFor(manifest()).ctx)
-    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('already portified') })
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('already done') })
   })
 
   it('zero-edit fast path: saves without a checkpoint and verifies the mark', async () => {
@@ -386,7 +386,7 @@ describe('portify stage', () => {
     if (parked.kind !== 'checkpoint') throw new Error('expected checkpoint')
     setStage('portify', { status: 'waiting-for-approval', checkpoint: parked.checkpoint })
     const outcome = await adapter.onCheckpointResponse!(ctx, { choice: 'cancel' })
-    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('not concurrency-ready') })
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('you declined') })
   })
 
   it('checkpoint response: cancel SKIPS the stage (flight proceeds without parallel readiness) and calls the cancel endpoint', async () => {
@@ -407,7 +407,7 @@ describe('portify stage', () => {
     // Declining is a decision, not a failure — a failed stage was a dead end
     // (the only retry re-ran the same workflow the user just rejected). The
     // stage skips; the feature stays serial; the next flight retries portify.
-    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('not concurrency-ready') })
+    expect(outcome).toMatchObject({ kind: 'skipped', reason: expect.stringContaining('you declined') })
     expect(calls.some((c) => c.url.endsWith('/cancel'))).toBe(true)
   })
 

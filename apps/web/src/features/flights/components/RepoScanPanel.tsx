@@ -79,7 +79,9 @@ export function RepoScanPanel({
               type="button"
               data-testid="flight-inputs-change"
               onClick={onChangeInputs}
-              className="text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent"
+              // The negative margin grows the HIT area to ~24px without moving
+              // the text — a bare 14px link was the pane's smallest target.
+              className="-my-1.5 py-1.5 text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent"
               title="Change what this flight tests — reopens intent and repos prefilled, then re-flies from the start"
             >
               Change…

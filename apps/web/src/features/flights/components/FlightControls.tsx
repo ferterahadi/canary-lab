@@ -108,7 +108,7 @@ export function ContinueMenu({
               {resumeTarget ? `▶ Resume at ${resumeTarget}` : '▶ Resume'}
             </span>
             <span className="block text-[10.5px] text-muted">
-              Keeps every finished step; retries the first unfinished one
+              Keeps every finished step and retries the first unfinished one
             </span>
           </button>
           <button
@@ -120,7 +120,7 @@ export function ContinueMenu({
           >
             <span className="block text-xs font-medium">↻ From a step…</span>
             <span className="block text-[10.5px] text-muted">
-              Re-run a stage, optionally telling the agent what went wrong
+              Re-run a step — you can tell the agent what went wrong
             </span>
           </button>
         </div>
@@ -183,7 +183,7 @@ export function RedoFlightDialog({
       onClose={onClose}
       width={560}
       title="Re-run from a step"
-      description="Pick where the flight re-enters. Results from that step on are discarded; artifacts on disk are kept."
+      description="Pick where the flight restarts. Results from that step on are thrown away; files already written stay."
       footer={
         <div className="flex items-center justify-end gap-2">
           <button type="button" onClick={onClose} className="cl-button px-3 py-1.5 text-xs">
@@ -321,7 +321,7 @@ export function RedoFlightDialog({
             data-testid="flight-redo-feedback"
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
-            placeholder="e.g. the collected docs were about the wrong subsystem"
+            placeholder="e.g. it collected docs for the wrong part of the app"
             rows={2}
             className="cl-input w-full px-2.5 py-2 text-[11.5px]"
           />
@@ -420,7 +420,7 @@ export function FlightMenu({
           tone: 'var(--danger)',
           title: removeFlightOnly
             ? 'Remove this flight record — it stopped before a suite was created'
-            : 'Delete this suite — its folder (config, tests, envsets, docs) AND its flight history',
+            : 'Delete this suite — its folder (settings, tests, saved env values, docs) and its whole flight history',
           testId: 'flight-delete',
           fire: () => setDeleteOpen(true),
         }]

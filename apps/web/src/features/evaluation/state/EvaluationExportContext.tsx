@@ -6,7 +6,6 @@ import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/ty
 
 interface EvaluationExportContextValue {
   tasks: EvaluationExportTask[]
-  logsByTaskId: Record<string, string>
   startExport: (runId: string, mode: EvaluationExportMode) => Promise<EvaluationExportTask>
   taskForRun: (runId: string) => EvaluationExportTask | null
   taskById: (taskId: string) => EvaluationExportTask | null
@@ -18,6 +17,14 @@ interface EvaluationExportContextValue {
 }
 
 const EvaluationExportContext = createContext<EvaluationExportContextValue | null>(null)
+
+// The log stream is its OWN context (same split invalidation.tsx documents): a
+// localized export appends a chunk per agent event, and while `logsByTaskId`
+// sat in the main value every one of those chunks re-rendered every
+// `useEvaluationExports` consumer — StageDetail, the flight's report panels,
+// the derived-stage hooks — at agent-output frequency. Only the log viewer
+// subscribes here.
+const EvaluationExportLogsContext = createContext<Record<string, string> | null>(null)
 
 export interface EvaluationExportProviderProps {
   children: ReactNode
@@ -223,18 +230,19 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
 
   const value = useMemo<EvaluationExportContextValue>(() => ({
     tasks,
-    logsByTaskId,
     startExport,
     taskForRun,
     taskById,
     watchTask,
     downloadTask,
     dismissTask,
-  }), [dismissTask, downloadTask, logsByTaskId, startExport, taskById, taskForRun, tasks, watchTask])
+  }), [dismissTask, downloadTask, startExport, taskById, taskForRun, tasks, watchTask])
 
   return (
     <EvaluationExportContext.Provider value={value}>
-      {children}
+      <EvaluationExportLogsContext.Provider value={logsByTaskId}>
+        {children}
+      </EvaluationExportLogsContext.Provider>
     </EvaluationExportContext.Provider>
   )
 }
@@ -242,5 +250,13 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
 export function useEvaluationExports(): EvaluationExportContextValue {
   const value = useContext(EvaluationExportContext)
   if (!value) throw new Error('useEvaluationExports must be used inside EvaluationExportProvider')
+  return value
+}
+
+/** The per-task log text, appended chunk by chunk while an export runs. Its own
+ *  hook so only the log viewer re-renders per chunk — see the context comment. */
+export function useEvaluationExportLogs(): Record<string, string> {
+  const value = useContext(EvaluationExportLogsContext)
+  if (!value) throw new Error('useEvaluationExportLogs must be used inside EvaluationExportProvider')
   return value
 }

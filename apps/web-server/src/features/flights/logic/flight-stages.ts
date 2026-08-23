@@ -292,6 +292,22 @@ export function stagesForJump(
   })
 }
 
+/** Bank the stage's live work segment into `activeMs` and stop the clock.
+ *  Called at every exit from `running` (checkpoint park, pause, abort, settle)
+ *  so a stage's reported duration is work, not wall clock — the segment
+ *  boundaries are what keep an overnight checkpoint wait out of the number.
+ *  No-op without an `activeSince`, which is what makes double-banking (pause
+ *  after park, settle after pause) impossible. */
+export function bankStageActivity(stage: FlightStage, nowIso: string): FlightStage {
+  if (!stage.activeSince) return stage
+  const segment = Date.parse(nowIso) - Date.parse(stage.activeSince)
+  return {
+    ...stage,
+    activeMs: (stage.activeMs ?? 0) + Math.max(0, segment),
+    activeSince: undefined,
+  }
+}
+
 export function firstOpenStageIndex(m: FlightManifest): number {
   return m.stages.findIndex((s) => s.status !== 'done' && s.status !== 'skipped')
 }

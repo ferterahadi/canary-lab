@@ -49,17 +49,40 @@ export interface LiveResource<T> {
  * inline arrow; it is read through a ref, so a new closure each render does not
  * re-trigger anything.
  */
+// Last resolved value per (cache tag, key) — module-level so a REMOUNT paints
+// stale-then-fresh instead of skeleton-then-fresh. The flight rail remounts its
+// stage pane on every row click (`key={stage.key}`), and without this every
+// revisit to an already-read stage re-showed placeholders while the same ledger
+// / docs listing / config was fetched again. Only seeds the first paint; the
+// fetch still runs and replaces it, and an invalidation still refetches.
+// Unbounded on purpose: entries are small (parsed JSON the pane already held)
+// and the key space is the workspace's features/runs, not user input.
+const lastResolved = new Map<string, unknown>()
+
 export function useLiveResource<T>(
   topic: InvalidationTopic,
   key: string | null,
   fetcher: (key: string) => Promise<T | null>,
-  opts: { scope?: string } = {},
+  opts: {
+    scope?: string
+    /** Opt IN to the stale-then-fresh remount cache with a tag naming WHAT is
+     *  fetched (e.g. `'ledger'`). Explicit because the topic alone cannot key
+     *  it: two resources legitimately share a topic and a key (the ledger and
+     *  the docs listing both live on `coverage` + the feature name), and an
+     *  inferred key would hand one resource the other's value. Omit for a
+     *  resource that must never paint stale. */
+    cache?: string
+  } = {},
 ): LiveResource<T> {
-  const [value, setValue] = useState<T | null>(null)
+  const cacheKey = opts.cache !== undefined && key !== null ? `${opts.cache}:${key}` : null
+  const [value, setValue] = useState<T | null>(() => (
+    cacheKey !== null ? (lastResolved.get(cacheKey) as T | undefined) ?? null : null
+  ))
   const [loading, setLoading] = useState(false)
   const version = useInvalidationKey(topic, opts.scope)
   const fetcherRef = useRef(fetcher)
   fetcherRef.current = fetcher
+  const cacheTag = opts.cache
 
   useEffect(() => {
     if (key === null) {
@@ -68,12 +91,21 @@ export function useLiveResource<T>(
       return
     }
     let alive = true
+    // A key CHANGE (not a remount) paints the new key's cached value — or
+    // nothing — immediately, so the pane never shows one stage's figures under
+    // another stage's labels while the fetch is in flight.
+    setValue(cacheTag !== undefined ? (lastResolved.get(`${cacheTag}:${key}`) as T | undefined) ?? null : null)
     setLoading(true)
     fetcherRef.current(key)
-      .then((next) => { if (alive) setValue(next ?? null) })
+      .then((next) => {
+        if (cacheTag !== undefined) lastResolved.set(`${cacheTag}:${key}`, next ?? null)
+        if (alive) setValue(next ?? null)
+      })
       .catch(() => { if (alive) setValue(null) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
+    // `cacheTag` is constant per call site (a literal), so it needs no dep.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, version])
 
   return { value, loading }

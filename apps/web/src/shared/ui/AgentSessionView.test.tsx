@@ -23,20 +23,25 @@ describe('Markdown (agent session prose)', () => {
     container.remove()
   })
 
-  const render = (text: string): void => {
-    act(() => root.render(<Markdown text={text} />))
+  const render = async (text: string): Promise<void> => {
+    // Markdown loads its parser lazily now — poll the fallback away, because a
+    // real module load takes macrotasks, not one microtask flush.
+    await act(async () => root.render(<Markdown text={text} />))
+    for (let i = 0; i < 50 && container.querySelector('.agentts-mdfallback'); i += 1) {
+      await act(async () => { await new Promise((r) => setTimeout(r, 5)) })
+    }
   }
 
-  it('renders GFM tables as a real <table>', () => {
-    render('| Construct | Action |\n| --- | --- |\n| listener | portified |')
+  it('renders GFM tables as a real <table>', async () => {
+    await render('| Construct | Action |\n| --- | --- |\n| listener | portified |')
     const table = container.querySelector('table')
     expect(table).not.toBeNull()
     expect(container.querySelectorAll('th')).toHaveLength(2)
     expect(container.querySelector('td')?.textContent).toBe('listener')
   })
 
-  it('renders headings, bold, and inline code as elements (not raw syntax)', () => {
-    render('## Findings\n\nThe **only** listener uses `process.env.PORT`.')
+  it('renders headings, bold, and inline code as elements (not raw syntax)', async () => {
+    await render('## Findings\n\nThe **only** listener uses `process.env.PORT`.')
     expect(container.querySelector('h2')?.textContent).toBe('Findings')
     expect(container.querySelector('strong')?.textContent).toBe('only')
     expect(container.querySelector('code')?.textContent).toBe('process.env.PORT')
@@ -45,8 +50,8 @@ describe('Markdown (agent session prose)', () => {
     expect(container.textContent).not.toContain('**')
   })
 
-  it('does not render raw HTML embedded in the markdown', () => {
-    render('Hello <img src=x onerror="alert(1)"> world')
+  it('does not render raw HTML embedded in the markdown', async () => {
+    await render('Hello <img src=x onerror="alert(1)"> world')
     expect(container.querySelector('img')).toBeNull()
   })
 })

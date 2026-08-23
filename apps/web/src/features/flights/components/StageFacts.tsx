@@ -3,7 +3,7 @@ import type { FlightManifest, FlightStage, FlightStageKey, PortifyBootInstance, 
 import type { CoverageLedger, EvaluationExportTask, RunDetail } from '@/shared/api/types'
 import { evaluationArchiveFilename, formatBytes, formatDuration } from '@/shared/lib/format'
 import { PanelCard } from '@/shared/ui/PanelCard'
-import { SkeletonBar, type AwaitingState } from '@/shared/ui/Skeleton'
+import { type AwaitingState } from '@/shared/ui/Skeleton'
 import { Tooltip, TOOLTIP_ANCHOR_ATTR } from '@/shared/ui/Tooltip'
 import { STAGE_COLUMN, evidenceOf, num, specsCoverageProgress, str } from './stage-meta'
 import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, overlayDiffStat, stageHasEvidence, type LedgerEvidence, type StrengthCounts } from './stage-metrics'
@@ -23,7 +23,7 @@ export interface StageFact {
    *  placeholder. */
   awaiting?: true
   /** Reserve the meter slot under an awaited figure, because the settled tile
-   *  for this label carries a `bar` or `segments`. Only ever set by
+   *  for this label carries a `segments` distribution. Only ever set by
    *  `awaitingFact`, from `METERED_FACT_LABELS`. */
   meter?: true
   tone?: 'good' | 'warn' | 'bad'
@@ -34,15 +34,17 @@ export interface StageFact {
   /** Render the value as a large metric number. Numeric/scalar facts only —
    *  sentence and path values stay in the quiet body size. */
   big?: boolean
-  /** A segmented stepper under a `big` value: `[current, total]` (pass N of M). */
-  stepper?: [number, number]
-  /** A 0–1 progress bar under a `big` value (fraction toward the target). */
-  bar?: number
   /** A proportional multi-segment bar under a `big` value, for a count that
    *  splits into named parts (passed/failed/aborted, strong/solid/basic/shallow).
    *  One bar shows the whole distribution, where a single fraction could only
    *  show the leading part — and the sub-line then names the parts. Zero-value
-   *  segments are dropped, so a clean split doesn't render slivers. */
+   *  segments are dropped, so a clean split doesn't render slivers.
+   *
+   *  Deliberately the ONLY meter kind: the single-fraction `bar` was removed —
+   *  it restated the `N/M` value directly above it, one instance was hardwired
+   *  full (`bar: 1`), and the coverage tile's bar measured a different fraction
+   *  (progress-to-target) than the percentage it sat under. A distribution is
+   *  the one thing the number alone cannot show. */
   segments?: FactSegment[]
   /** The measured second line — a breakdown the data produced (`4 failed · 17
    *  never ran`). Omitted when there is nothing measured to say, in which case
@@ -89,9 +91,8 @@ export function FactSegments({ segments }: { segments: FactSegment[] }) {
   )
 }
 
-export function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
-}
+import { plural } from '@shared/lib/plural'
+export { plural }
 
 /** Everything a band needs that the flight record does NOT hold. Resolved once
  *  per visible stage by `useStageBandData` and passed in, so `stageFacts` stays
@@ -117,6 +118,9 @@ export interface StageBandData {
   portify?: PortifyManifest | null
   /** Counts read off the on-disk feature config. */
   config?: { services: number; portSlots: number } | null
+  /** The docs stage's full listing — the docs panel and the requirements fork
+   *  render from it so the band's fetch is the only one. */
+  docsListing?: FeatureDocsListing | null
   /** Total bytes of the requirement docs the stage collected. */
   docBytes?: number | null
   /** Bytes of the generated `_prd-summary` artifacts — the distilled output the
@@ -154,7 +158,6 @@ export function bootCheckFacts(envEv: Record<string, unknown>): StageFact[] {
   ]
 }
 
-export const MAX_LIST_FACTS = 5
 
 /** The export task behind an Evaluation Report stage. Recorded evidence and the
  *  read-time probe both carry the id; `links` is the resume path's only carrier
@@ -195,22 +198,16 @@ function stageSettled(stage: FlightStage): boolean {
   return stage.status === 'done' || stage.status === 'skipped'
 }
 
-/** The awaited labels whose SETTLED tile carries a meter under its figure — a
- *  `bar` or a `segments` distribution. Both render as the same 11px block, and a
- *  placeholder that omitted it made the whole band 11px short: a tile grid row is
- *  as tall as its tallest tile, so one metered tile settling grew every tile
- *  beside it. Held as a list because it is genuinely mixed — `Boot time`,
- *  `Requirements` and `Files edited` are bare counts, and reserving a meter under
- *  those would leave permanent dead space in the settled band instead. */
+/** The awaited labels whose SETTLED tile carries a `segments` distribution
+ *  under its figure. A placeholder that omitted the meter made the whole band
+ *  11px short: a tile grid row is as tall as its tallest tile, so one metered
+ *  tile settling grew every tile beside it. Two labels only, now that the
+ *  single-fraction bars are gone (see `StageFact.segments`) — every other tile
+ *  is a bare figure, and reserving a meter under those would leave permanent
+ *  dead space in the settled band instead. */
 const METERED_FACT_LABELS = new Set([
-  'Services booted',
-  'Env files',
-  'Requirements covered',
-  'Services injectable',
-  'Requirements with tests',
   'Test depth',
-  'Tests that passed',
-  'Requirements proven',
+  'Succeeded',
 ])
 
 /** A tile whose value the stage hasn't produced yet. The empty `value` is never
@@ -346,7 +343,6 @@ function measuredStageFacts(
               label: 'Services booted',
               value: `${booted}/${services.length}`,
               big: true as const,
-              bar: booted / services.length,
               tone: booted === services.length ? 'good' as const : 'bad' as const,
             }]
           : []),
@@ -355,7 +351,7 @@ function measuredStageFacts(
               label: 'Boot time',
               value: formatDuration(bootMs),
               big: true as const,
-              sub: 'every run waits this first',
+              sub: 'every run waits this long first',
             }]
           : []),
         ...envFileFacts(flight, capturedFiles),
@@ -373,7 +369,16 @@ function measuredStageFacts(
       // read left to right in the order the work happened: how many docs went
       // in, how many requirements came out, and how much text that took in and
       // left behind.
-      const docs = Array.isArray(ev.docs) ? (ev.docs as unknown[]).filter((d): d is string => typeof d === 'string') : []
+      const recordedDocs = Array.isArray(ev.docs) ? (ev.docs as unknown[]).filter((d): d is string => typeof d === 'string') : []
+      // Prefer the LIVE listing's source-doc count: the recorded evidence is a
+      // point-in-time snapshot while the byte sub-line beside it is live, and a
+      // doc added or deleted after the flight made one tile describe two
+      // different states of the workspace. The evidence stands in when the
+      // listing hasn't resolved (or the band wasn't given one) — and when the
+      // listing is EMPTY: the flight read those docs whether or not they still
+      // exist, so a later cleanup must not erase the record of what went in.
+      const liveDocs = band.docsListing?.docs.filter((d) => !d.generated)
+      const docs = liveDocs?.length ? liveDocs : recordedDocs
       const count = num(cev, 'requirementCount')
       // Tokens is an ESTIMATE (four chars each), so it renders with a `≈` and
       // never claims to be the measured figure the byte count is.
@@ -480,7 +485,6 @@ function measuredStageFacts(
               label: 'Requirements covered',
               value: `${pct}%`,
               big: true as const,
-              bar: target > 0 ? pct / target : pct >= 100 ? 1 : 0,
               tone: pct >= target ? 'good' as const : 'warn' as const,
             }]
           : []),
@@ -553,8 +557,8 @@ function measuredStageFacts(
         // as a verdict this evidence cannot support. The empty proof tile is the
         // point — it says which half is missing instead of hiding it.
         return [
-          { label: 'Services injectable', value: `${declared}/${declaredOf}`, big: true, bar: declared / declaredOf, sub: 'declared in the config' },
-          { label: 'Instances proven', value: '—', sub: 'no double boot on record' },
+          { label: 'Services injectable', value: `${declared}/${declaredOf}`, big: true, sub: "set in this suite's settings" },
+          { label: 'Instances proven', value: '—', sub: 'nothing has started two copies yet' },
         ]
       }
       if (typeof ev.workflowId !== 'string') return []
@@ -574,7 +578,6 @@ function measuredStageFacts(
               label: 'Services injectable',
               value: `${repos}/${repos}`,
               big: true as const,
-              bar: 1,
               tone: 'good' as const,
             }]
           : []),
@@ -585,7 +588,7 @@ function measuredStageFacts(
               big: true as const,
               sub: `+${diff.added} −${diff.removed} lines`,
             }]
-          : [{ label: 'Files edited', value: ev.edits ? '—' : '0', big: true as const, ...(ev.edits ? {} : { tone: 'good' as const, sub: 'already injectable' }) }]),
+          : [{ label: 'Files edited', value: ev.edits ? '—' : '0', big: true as const, ...(ev.edits ? {} : { tone: 'good' as const, sub: 'ports were already swappable' }) }]),
         ...(instances.length > 0
           ? [{
               label: 'Instances proven',
@@ -649,24 +652,25 @@ function measuredStageFacts(
               label: 'Requirements with tests',
               value: `${led.covered}/${led.total}`,
               big: true as const,
-              // No divide-by-zero guard: `ledgerEvidence` returns null for a
-              // feature with no requirements, so `total` is at least 1 here.
-              bar: led.covered / led.total,
               tone: led.covered === led.total ? 'good' as const : 'warn' as const,
               sub: claimedSub(led),
             }]
           : []),
         ...(led && led.strength.strong + led.strength.solid + led.strength.basic + led.strength.shallow > 0
-          ? [{
-              label: 'Test depth',
-              value: `${led.strength.strong} strong`,
-              big: true as const,
-              // The whole distribution, strongest to weakest: a suite that is
-              // 2 strong and 16 shallow reads very differently from one that is
-              // 2 strong and 2 shallow, and the headline number alone hides it.
-              segments: strengthSegments(led.strength),
-              sub: strengthBreakdown(led.strength),
-            }]
+          ? [(() => {
+              const head = strengthHeadline(led.strength)
+              return {
+                label: 'Test depth',
+                value: head.value,
+                big: true as const,
+                // The whole distribution, strongest to weakest: a suite that is
+                // 2 strong and 16 shallow reads very differently from one that
+                // is 2 strong and 2 shallow, and the headline number alone
+                // hides it.
+                segments: strengthSegments(led.strength),
+                sub: strengthBreakdown(led.strength, head.tier),
+              }
+            })()]
           : []),
         // What the run did with the specs that can carry proof. Gated on the
         // proven axis existing: with no run joined, every mapped spec would
@@ -681,7 +685,6 @@ function measuredStageFacts(
               label: 'Tests that passed',
               value: `${led.specs.passed}/${led.specs.mapped}`,
               big: true as const,
-              bar: led.specs.passed / led.specs.mapped,
               tone: led.specs.passed === led.specs.mapped ? 'good' as const : 'warn' as const,
               sub: passedSub(led),
             }]
@@ -693,7 +696,6 @@ function measuredStageFacts(
               label: 'Requirements proven',
               value: `${led.proven}/${led.total}`,
               big: true as const,
-              bar: led.proven / led.total,
               tone: led.proven === led.total ? 'good' as const : 'warn' as const,
               sub: provenSub(led, reportRunId),
             }]
@@ -715,8 +717,8 @@ function measuredStageFacts(
  *  and the incomplete case says how many fell short of it. */
 function claimedSub(led: LedgerEvidence): string {
   const gaps = led.total - led.covered
-  if (gaps <= 0) return 'every part has a test'
-  return `${gaps} still ${gaps === 1 ? 'has a gap' : 'have gaps'}`
+  if (gaps <= 0) return 'every path has a test'
+  return `${gaps} not fully covered`
 }
 
 /** What became of the specs that can carry proof. Empty buckets drop out, and a
@@ -726,15 +728,28 @@ function claimedSub(led: LedgerEvidence): string {
  *  The unmapped count is named whenever there is one: this tile's denominator
  *  counts only specs annotated to a requirement, so a suite with unannotated
  *  specs would otherwise read as a smaller suite than it is. It is the one place
- *  the band can say so without a fifth tile. */
+ *  the band can say so without a fifth tile.
+ *
+ *  Two honesty caveats displace the clean-sweep line when they apply: a pass
+ *  that needed a Playwright retry is a flake, not a clean pass, and a summary
+ *  merged forward across partial heal reruns never saw all its passes in one
+ *  execution. Both come off the run's own summary (never re-derived here), and
+ *  "every test passed" without them would be the exact rounding-up this band
+ *  exists to prevent. */
 function passedSub(led: LedgerEvidence): string {
   const { specs } = led
   const parts = [
     ...(specs.failed > 0 ? [`${specs.failed} failed`] : []),
     ...(specs.neverRan > 0 ? [`${specs.neverRan} never ran`] : []),
+    ...(specs.passedOnRetry > 0 ? [`${specs.passedOnRetry} passed on a retry`] : []),
     ...(led.testCount > specs.mapped ? [`${led.testCount - specs.mapped} unlabelled`] : []),
   ]
-  return parts.length > 0 ? parts.join(' · ') : 'every test passed'
+  // "labelled" names the tile's population even on a clean sweep — the
+  // denominator is the requirement-labelled tests, not the whole suite, and
+  // beside two requirement-counting tiles an unnamed 15/15 read as arithmetic
+  // gone wrong.
+  const line = parts.length > 0 ? parts.join(' · ') : 'every labelled test passed'
+  return led.spansExecutions ? `${line} · across partial runs` : line
 }
 
 /** The conclusion tile's sub-line — the RULE that turns the three tiles to its
@@ -755,10 +770,10 @@ function passedSub(led: LedgerEvidence): string {
 // so the signature says so rather than the caller coercing one into the other.
 function provenSub(led: LedgerEvidence, reportRunId: string | null | undefined): string {
   if (led.provenRunId != null && reportRunId != null && led.provenRunId !== reportRunId) {
-    return `proven on run ${led.provenRunId}, not this one`
+    return `measured on run ${led.provenRunId}, not this one`
   }
   if (led.proven != null && led.proven === led.total) return 'every requirement had a test that passed'
-  return 'every part needs a test that passed'
+  return 'each path needs a test that passed'
 }
 
 /** The Evaluation Report's pre-band fallback: name the deliverable when there
@@ -814,7 +829,6 @@ function envFileFacts(flight: FlightManifest, captured: number | null): StageFac
     label: 'Env files',
     value: `${captured}/${declared}`,
     big: true,
-    bar: Math.min(1, captured / declared),
     tone: complete ? 'good' : 'bad',
     sub: complete ? 'all the app asked for' : `${declared - captured} skipped or missing`,
   }]
@@ -853,18 +867,27 @@ function strengthSegments(strength: StrengthCounts): FactSegment[] {
   ]
 }
 
+const STRENGTH_TIERS = ['strong', 'solid', 'basic', 'shallow', 'ungraded'] as const
+
+/** The depth tile's headline: the count of the BEST tier the suite actually
+ *  reached. It used to be hardwired to `N strong` — but the strong tier needs a
+ *  non-local URL (strength.ts), so every localhost suite led with a permanent
+ *  "0 strong", a zero presented as the finding when it is a structural ceiling.
+ *  Leading with the best achieved tier reports what the suite IS. */
+function strengthHeadline(strength: StrengthCounts): { value: string; tier: (typeof STRENGTH_TIERS)[number] } {
+  const tier = STRENGTH_TIERS.find((t) => strength[t] > 0) ?? 'ungraded'
+  return { value: `${strength[tier]} ${tier}`, tier }
+}
+
 /** The strength buckets below the headline, strongest first, omitting empty
- *  ones. `strong` is absent by design: the only caller leads with "4 strong" as
- *  its value, so repeating it here would print the same figure twice. Ungraded
- *  tests are named as ungraded rather than folded into the weakest bucket — an
+ *  ones and the headline's own bucket (the only caller leads with it as the
+ *  value, so repeating it would print the same figure twice). Ungraded tests
+ *  are named as ungraded rather than folded into the weakest bucket — an
  *  unmeasured test is not a shallow one. */
-function strengthBreakdown(strength: StrengthCounts): string | undefined {
-  const parts = [
-    ...(strength.solid > 0 ? [`${strength.solid} solid`] : []),
-    ...(strength.basic > 0 ? [`${strength.basic} basic`] : []),
-    ...(strength.shallow > 0 ? [`${strength.shallow} shallow`] : []),
-    ...(strength.ungraded > 0 ? [`${strength.ungraded} ungraded`] : []),
-  ]
+function strengthBreakdown(strength: StrengthCounts, omit: (typeof STRENGTH_TIERS)[number]): string | undefined {
+  const parts = STRENGTH_TIERS
+    .filter((t) => t !== omit && strength[t] > 0)
+    .map((t) => `${strength[t]} ${t}`)
   return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
@@ -903,14 +926,11 @@ export const FACT_HELP: Record<string, string> = {
   'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
-  'Authoring pass': 'Canary writes tests, checks what they cover, then writes more — until it hits the target.',
   'Requirements covered': 'Counted from labels in the test files. Nothing was run, so every test could still be failing.',
   'Coverage gaps': 'Requirements with no test yet, or only part of one. The next pass goes after these.',
   'Tests written': 'Tests labelled with a requirement. Unlabelled tests still run, they just are not counted here.',
   // Parallel readiness
   'Parallel': 'Can two runs of this suite start at once without fighting over a port? Checked once.',
-  'Attempt': 'The agent edits, starts two copies to check, and tries again if either fails.',
-  'Phase': 'What the agent is doing now — reading, editing, or starting two copies to check.',
   'Services injectable': 'The service reads its port from settings instead of having it fixed in the code.',
   'Files edited': 'Changes Canary made so ports can be swapped. Kept as a patch you can undo.',
   'Instances proven': 'Two copies of the app ran at once and both answered. That is the real proof.',
@@ -921,9 +941,13 @@ export const FACT_HELP: Record<string, string> = {
   'Repair cycles': 'One cycle: tests fail, an agent fixes the app, the tests run again. It never edits the test.',
   // Evaluation report
   'Requirements with tests': 'Counted from labels in the test files. Nothing was run to check they work.',
-  'Test depth': 'How much a test really checks. Shallow means it clicks around without checking the result.',
+  // All four tiers defined where the words are shown — the same definitions the
+  // Composition card's hover titles carry (STRENGTH_TIER_HELP). The strong tier
+  // needs a non-local URL, so a local-only suite genuinely tops out at solid;
+  // saying so keeps its ceiling from reading as a defect.
+  'Test depth': 'How much each test really checks. Strong — a real browser or outside system confirmed it. Solid — the app’s own API or UI said so. Basic — a database row changed. Shallow — only the app’s own log. Strong needs a non-local URL, so a local-only suite tops out at solid.',
   'Tests that passed': 'Only tests labelled with a requirement. They are the only ones that can prove anything.',
-  'Requirements proven': 'What the numbers on the left add up to. A test has to exist and pass.',
+  'Requirements proven': 'A test has to exist and pass for every declared path. Depth is reported separately — a shallow pass still proves.',
   'From run': 'The test run this report came from.',
   'Report': 'From the run: the numbers straight off it. Agent-written: an agent put them into words.',
   'Archive': 'The zip you download — the evidence, the run’s results, and the report.',
@@ -934,25 +958,36 @@ export const FACT_HELP: Record<string, string> = {
  *  it says what the figure is FOR, where the tooltip says how it is counted.
  *
  *  Deliberately absent for the identity tiles (`From run`, `Archive`, `Report`)
- *  and the sentence-valued ones (`Matches`, `Parallel`, `Boot check`): their
- *  value already reads as a phrase, and a gloss under a filename is noise. */
+ *  and the sentence-valued ones (`Matches`, `Parallel`): their value already
+ *  reads as a phrase, and a gloss under a filename is noise.
+ *
+ *  Every label in `AWAITED_FACT_LABELS` MUST have an entry: the gloss is what
+ *  keeps a row of placeholder tiles the same height (the equal-height invariant
+ *  on `StageFact.sub`), and a hole here is a band whose tiles sit at three
+ *  different heights while the stage works. `Boot check` is sentence-valued but
+ *  awaited, so it carries one for exactly that reason. */
 export const FACT_GLOSS: Record<string, string> = {
   'Repos scanned': 'you picked these at the start',
   'Services found': 'every run starts all of them',
   'Port slots drafted': 'so two runs never clash',
   'Services booted': 'checked on a test start',
+  'Boot time': 'every run waits this long first',
+  'Env files': 'the app’s startup settings',
+  'Boot check': 'did every service answer',
   'Source docs': 'where the requirements came from',
   'Requirements inferred': 'things the app must do',
+  'Distilled to': 'the short version agents read',
   'Test depth': 'how much each test checks',
   'Requirements': 'what the documents asked for',
-  'Authoring pass': 'write, check, write again',
-  'Requirements covered': 'a test claims it, nothing ran yet',
+  'Requirements covered': 'a test claims it — nothing has run yet',
   'Coverage gaps': 'no test covers these yet',
   'Tests written': 'written for the requirements',
-  'Attempt': 'retries until both copies start',
-  'Phase': 'what the agent is doing now',
   'Services injectable': 'each gets its port from the run',
   'Files edited': 'fixed ports swapped out',
+  'Instances proven': 'two copies ran at once',
+  'Requirements with tests': 'claimed by a test’s label',
+  'Tests that passed': 'in the run this report reads',
+  'Requirements proven': 'a passing test backs every path',
   'Runs performed': 'this suite’s whole history',
   'Succeeded': 'every test passed',
   'Avg duration': 'finished runs only',
@@ -965,88 +1000,48 @@ export const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
   bad: 'var(--danger)',
 }
 
-/** A segmented pass stepper under a `big` value: done segments quiet, the
- *  current one lit sky, the rest hairline — so the remaining passes are visible
- *  as empty track, not inferred from the number. */
-export function FactStepper({ current, total }: { current: number; total: number }) {
-  return (
-    <div className="mt-2 flex gap-1" aria-hidden>
-      {Array.from({ length: total }, (_, i) => (
-        <span
-          key={i}
-          className="h-[3px] flex-1 rounded-full"
-          style={{
-            background:
-              i < current - 1 ? 'var(--text-secondary)' : i === current - 1 ? 'var(--accent-strong)' : 'var(--border-strong)',
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
 /** The stand-in for a figure the stage hasn't produced (R83). Sized to the
  *  22px metric line it replaces, so the tile keeps its height and the value
  *  lands in place instead of pushing the card down when the stage settles.
  *
- *  R86: only a LIVE tile gets a bar — a bar is the promise of a figure, and a
- *  parked or failed stage is making no such promise. Those show the dash a
- *  reader already knows as "no value", hued to say which: muted while the slot
- *  is merely held open, `--danger` once the step stopped short of filling it.
- *  The fill, not the animation, carries the difference, because the headless
- *  preview forces reduced-motion and the sweep is the first thing it loses. */
+ *  Always the dash a reader already knows as "no value" — never a skeleton bar
+ *  or a sweep. A bar where a figure goes reads as a measurement, and a live
+ *  pane already announces itself through its status badge, so animating every
+ *  tile adds motion without information. Hue says how the slot emptied:
+ *  muted while it is merely held open, `--danger` once the step stopped short
+ *  of filling it. */
 export function FactPlaceholder({ awaiting }: { awaiting: AwaitingState }) {
   return (
     <div
       className="mt-1 flex h-[22px] items-center"
       data-testid="fact-awaiting"
       data-awaiting={awaiting}
+      // role="img": an aria-label on a role-less generic div is ignored by most
+      // assistive tech, so the placeholder's meaning never actually reached a
+      // screen reader.
+      role="img"
       aria-label={awaiting === 'failed' ? 'not measured — the step failed' : 'not measured yet'}
     >
-      {awaiting === 'live'
-        /* Capped, not a flat 62%: a tile stretches to fill the grid, and a bar
-           that stretches with it reads as a sentence where a figure goes. The
-           cap keeps the placeholder the width of the number it stands in for. */
-        ? <SkeletonBar awaiting="live" width="min(62%, 76px)" />
-        : (
-          <span
-            className="text-[22px] font-normal leading-none"
-            style={{ color: awaiting === 'failed' ? 'var(--danger)' : 'var(--text-muted)' }}
-          >
-            —
-          </span>
-        )}
+      <span
+        className="text-[22px] font-normal leading-none"
+        style={{ color: awaiting === 'failed' ? 'var(--danger)' : 'var(--text-muted)' }}
+      >
+        —
+      </span>
     </div>
   )
 }
 
-/** The meter slot, held open. Geometrically identical to `FactBar` and
- *  `FactSegments` — the two things that land here — so the figure and its meter
- *  arrive together without the tile changing height.
+/** The meter slot, held open. Geometrically identical to `FactSegments` — the
+ *  one thing that lands here — so the figure and its distribution arrive
+ *  together without the tile changing height.
  *
- *  Deliberately an empty TRACK and not a zero-width fill: a meter drawn at 0%
- *  states a measurement nobody made, which is the same reason the authoring band
- *  suppresses an unmeasured "0%". The bare track is the idiom the composition
- *  card already uses for a distribution with nothing in it yet. */
+ *  Invisible on purpose: it reserves the meter's height, but painting a track
+ *  would draw a bar that states a measurement nobody made — the same reason the
+ *  authoring band suppresses an unmeasured "0%". Only the height is the point;
+ *  the paint waits for real segments. */
 function FactMeterTrack() {
-  return (
-    <div
-      className="mt-2 h-[3px] rounded-full"
-      style={{ background: 'var(--border-strong)' }}
-      data-testid="fact-meter-track"
-      aria-hidden
-    />
-  )
-}
-
-/** A thin progress bar under a `big` value — coverage filling toward target. */
-export function FactBar({ frac, color }: { frac: number; color: string }) {
-  const pct = Math.max(0, Math.min(1, Number.isFinite(frac) ? frac : 0)) * 100
-  return (
-    <div className="mt-2 h-[3px] overflow-hidden rounded-full" style={{ background: 'var(--border-strong)' }} aria-hidden>
-      <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
-    </div>
-  )
+  return <div className="invisible mt-2 h-[3px]" data-testid="fact-meter-track" aria-hidden />
 }
 
 /** The mark that says an explanation exists. Half-opacity at rest so a band of
@@ -1063,7 +1058,7 @@ function FactHelpMark() {
     <span
       aria-hidden="true"
       {...{ [TOOLTIP_ANCHOR_ATTR]: '' }}
-      className="flex h-3 w-3 flex-none items-center justify-center rounded-full border text-[8.5px] leading-none opacity-45 transition-opacity duration-150 group-hover/fact:opacity-100"
+      className="flex h-3 w-3 flex-none items-center justify-center rounded-full border text-[8.5px] leading-none opacity-70 transition-opacity duration-150 group-hover/fact:opacity-100 group-focus-within/fact:opacity-100"
       style={{ borderColor: 'currentColor' }}
     >
       ?
@@ -1122,11 +1117,8 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
         <>
           <div className="mt-1 flex items-baseline gap-1 leading-none">
             <span className="text-[22px] font-medium" style={{ color: toneColor ?? 'var(--text-primary)' }}>{f.value}</span>
-            {f.stepper ? <span className="text-[12px] text-muted">{` of ${f.stepper[1]}`}</span> : null}
           </div>
-          {f.stepper ? <FactStepper current={f.stepper[0]} total={f.stepper[1]} /> : null}
           {f.segments ? <FactSegments segments={f.segments} /> : null}
-          {f.bar != null && !f.segments ? <FactBar frac={f.bar} color={toneColor ?? 'var(--accent)'} /> : null}
         </>
       ) : (
         <div

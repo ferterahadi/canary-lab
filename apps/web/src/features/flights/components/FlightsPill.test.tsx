@@ -154,7 +154,7 @@ describe('FlightsPill', () => {
     const activity = new Map<string, FeatureActivity>([['checkout', { kind: 'authoring', draftId: 'd1' }]])
     act(() => { root.render(<FlightsPill flights={[flight({ status: 'done' })]} activity={activity} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
-    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Authoring')
+    expect(document.body.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Writing')
   })
 
   it('a healing run reads "Healing" in amber, not the flight\'s generic "running"', () => {
@@ -162,7 +162,7 @@ describe('FlightsPill', () => {
     act(() => { root.render(<FlightsPill flights={[flight({ status: 'running', currentStage: 'run' })]} activity={activity} onOpenFlight={vi.fn()} />) })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="flights-pill"] button')?.click() })
     const chip = document.body.querySelector<HTMLElement>('[data-testid="flight-status-chip"]')
-    expect(chip?.textContent).toBe('Healing')
+    expect(chip?.textContent).toBe('Repairing')
     // Amber, matching the run detail header and the suites column's healing wash —
     // the same state must not read sky here and amber there.
     expect(chip?.style.color).toContain('var(--warning)')
@@ -194,7 +194,7 @@ describe('FlightsPill', () => {
     expect(row).toBeTruthy()
     // R39: no "no flight" text — the live progress chip carries the state.
     expect(row?.textContent).not.toContain('no flight')
-    expect(row?.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Portifying')
+    expect(row?.querySelector('[data-testid="flight-status-chip"]')?.textContent).toBe('Port setup')
     // R56: a synthesized mini rail shows WHERE in the pipeline the live job
     // sits — the mapped stage (portify) renders in the sky "running" tone,
     // every other stage stays pending (grey). No fake 'done' squares.
@@ -354,8 +354,8 @@ describe('FlightsPill — every feature 1:1 (R49)', () => {
     // these were the ones that used to report nothing.
     expect(featureChipState({ status: 'running', currentStage: 'scout', pauseReason: undefined }).label).toBe('scanning')
     expect(featureChipState({ status: 'running', currentStage: 'scaffold', pauseReason: undefined }).label).toBe('setting up')
-    expect(featureChipState({ status: 'running', currentStage: 'prd-summary', pauseReason: undefined }).label).toBe('distilling')
-    expect(featureChipState({ status: 'running', currentStage: 'specs-coverage', pauseReason: undefined }).label).toBe('authoring')
+    expect(featureChipState({ status: 'running', currentStage: 'prd-summary', pauseReason: undefined }).label).toBe('condensing')
+    expect(featureChipState({ status: 'running', currentStage: 'specs-coverage', pauseReason: undefined }).label).toBe('writing')
     expect(featureChipState({ status: 'running', currentStage: 'run', pauseReason: undefined }).label).toBe('running')
     // The only bare "running" left: launched, no stage recorded yet.
     expect(featureChipState({ status: 'running', currentStage: null, pauseReason: undefined }).label).toBe('running')
@@ -465,7 +465,7 @@ describe('resolveFeatureFlightAction — the Features column row shortcut', () =
       flightId: 'fl_9',
       tone: 'var(--warning)',
       label: 'to approve',
-      title: 'needs approval',
+      title: 'Waiting on your answer',
       // Parked on a checkpoint: nothing is executing, but the row still earns the
       // heavier "blocked on you" wash in the suites column.
       live: false,
@@ -522,7 +522,7 @@ describe('resolveFeatureFlightAction — the Features column row shortcut', () =
       [flight({ flightId: 'fl_9', feature: 'checkout', status: 'running', currentStage: 'run' })],
       { kind: 'healing', runId: 'r1' },
     )
-    expect(action?.label).toBe('healing')
+    expect(action?.label).toBe('repairing')
     expect(action?.tone).toBe('var(--warning)')
     // Busy, not blocked: the row keeps the live wash and no attention treatment.
     expect(action?.live).toBe(true)

@@ -45,6 +45,7 @@ export function listLineFromTitlePath(raw: readonly unknown[]): string | undefin
 export interface ExistingSummary {
   passedNames?: unknown
   passedIds?: unknown
+  passedOnRetry?: unknown
   skippedNames?: unknown
   skippedIds?: unknown
   failed?: unknown

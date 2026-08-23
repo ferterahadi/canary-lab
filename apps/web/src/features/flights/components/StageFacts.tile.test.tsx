@@ -37,12 +37,15 @@ function render(fact: StageFact) {
   return container.querySelector<HTMLDivElement>('[data-testid="fact-tile"]')!
 }
 
-describe('FactPlaceholder — a bar is a promise, a dash is not (R86)', () => {
+describe('FactPlaceholder — always a dash, never a bar or a sweep', () => {
   const slot = (tile: HTMLElement) => tile.querySelector<HTMLElement>('[data-testid="fact-awaiting"]')!
   const fact: StageFact = { label: 'Requirements inferred', value: '', awaiting: true }
 
-  it('gives only a live tile a bar', () => {
-    expect(slot(renderWith(fact, 'live')).querySelector('[data-testid="skeleton-bar"]')).not.toBeNull()
+  it('shows the same static dash on a live tile — no skeleton bar, no animation', () => {
+    const live = slot(renderWith(fact, 'live'))
+    expect(live.querySelector('[data-testid="skeleton-bar"]')).toBeNull()
+    expect(live.textContent).toBe('—')
+    expect(live.querySelector<HTMLElement>('span')?.style.color).toBe('var(--text-muted)')
   })
 
   it('shows a dash while parked, hued to say the slot is merely held open', () => {
@@ -70,10 +73,11 @@ describe('FactPlaceholder — a bar is a promise, a dash is not (R86)', () => {
     const metered = renderWith({ label: 'Requirements covered', value: '', awaiting: true, meter: true }, 'live')
     const track = metered.querySelector<HTMLElement>('[data-testid="fact-meter-track"]')
     expect(track).not.toBeNull()
-    // The same geometry FactBar and FactSegments occupy — and an empty TRACK, not
-    // a meter drawn at 0%, which would state a measurement nobody made.
+    // The same geometry FactSegments occupies — but invisible: it reserves the
+    // height, and painting it would draw a bar for a measurement nobody made.
     expect(track?.className).toContain('h-[3px]')
     expect(track?.className).toContain('mt-2')
+    expect(track?.className).toContain('invisible')
     expect(track?.querySelector('div')).toBeNull()
     // A bare count settles without one, so reserving the slot there would leave
     // permanent dead space in the settled band.

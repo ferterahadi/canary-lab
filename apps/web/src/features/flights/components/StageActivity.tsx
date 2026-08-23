@@ -158,7 +158,7 @@ export function truncate(text: string, max: number): string {
 
 /** What the live pass is doing right now, spelled out under its row. */
 export function specsPhaseSub(phase: SpecsCoverageProgressT['phase'], gapsOpen: number): string {
-  if (phase === 'authoring') return `writing specs to close the ${gapsOpen} open gap${gapsOpen === 1 ? '' : 's'}`
+  if (phase === 'authoring') return `writing tests to close the ${gapsOpen} open gap${gapsOpen === 1 ? '' : 's'}`
   if (phase === 'validating') return 'validating the authored specs'
   return 'mapping the specs against the requirements'
 }
@@ -185,7 +185,9 @@ export function SpecsPassTimeline({ progress, live, failed }: {
   failed: boolean
 }) {
   const phaseLabel =
-    progress.phase === 'authoring' ? 'authoring tests' : progress.phase === 'validating' ? 'validating specs' : 'mapping coverage'
+    // The same three phase words the state line above uses — one loop, one
+    // vocabulary ("tests", never "specs", in product copy).
+    progress.phase === 'authoring' ? 'writing tests' : progress.phase === 'validating' ? 'checking the new tests compile' : 'matching tests to requirements'
   if (!live && progress.passes.length === 0) return null
   // An older flight's progress may carry no ceiling at all — then the chip
   // reports position alone rather than inventing a denominator.

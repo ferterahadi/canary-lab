@@ -44,7 +44,7 @@ describe('FeatureSetupPanel — heal behavior card', () => {
 
     const card = container.querySelector('[data-testid="setup-heal-card"]')
     expect(card).toBeTruthy()
-    expect(card?.textContent).toContain('Heal behavior')
+    expect(card?.textContent).toContain('Auto-repair')
     expect(mode('stop')?.getAttribute('aria-checked')).toBe('true')
     expect(mode('full')?.getAttribute('aria-checked')).toBe('false')
     expect(threshold()?.value).toBe('2')
@@ -126,7 +126,7 @@ describe('FeatureSetupPanel — heal behavior card', () => {
     await mount({ healOnFailureThreshold: 3 }, { editable: false })
 
     const card = container.querySelector('[data-testid="setup-heal-card"]')
-    expect(card?.textContent).toContain('Stop & heal after 3 failure(s)')
+    expect(card?.textContent).toContain('Stop & repair after 3 failures')
     expect(card?.querySelector('[role="radio"]')).toBeNull()
     expect(threshold()).toBeNull()
   })
@@ -134,7 +134,7 @@ describe('FeatureSetupPanel — heal behavior card', () => {
   it('mid-run with healing off still names the mode that IS in force', async () => {
     await mount({ healOnFailureThreshold: 0 }, { editable: false })
     const card = container.querySelector('[data-testid="setup-heal-card"]')
-    expect(card?.textContent).toContain('Run the whole suite, then heal')
+    expect(card?.textContent).toContain('Run the whole suite, then repair')
     expect(card?.querySelector('[role="radio"]')).toBeNull()
   })
 

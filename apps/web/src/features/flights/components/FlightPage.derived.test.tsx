@@ -119,6 +119,47 @@ vi.mock('@/features/portify/state/PortifyContext', () => ({
   usePortifyWorkflow: (id?: string | null) => mocks.portifyWorkflow(id),
 }))
 
+// TestRunPanel reads the run detail + the run index off the shared runs store
+// (useRun/useRuns); the real provider needs live sockets, so stub the two hooks
+// over the SAME api mocks the panel-local fetches used to consume — fixtures
+// keep working unchanged.
+vi.mock('@/features/runs/state/RunsContext', async () => {
+  const React = await import('react')
+  return {
+    useRun: (runId?: string | null) => {
+      const [detail, setDetail] = React.useState<unknown>(undefined)
+      React.useEffect(() => {
+        let alive = true
+        if (runId) mocks.getRunDetail(runId).then((d: unknown) => { if (alive) setDetail(d) }).catch(() => {})
+        return () => { alive = false }
+      }, [runId])
+      return { detail, status: undefined, transient: null, displayStatus: undefined, error: null }
+    },
+    useRuns: () => {
+      const [runs, setRuns] = React.useState<unknown[]>([])
+      React.useEffect(() => {
+        let alive = true
+        mocks.listRuns({}).then((r: unknown[]) => { if (alive) setRuns(r) }).catch(() => {})
+        return () => { alive = false }
+      }, [])
+      return {
+        runs,
+        connection: 'live',
+        transients: {},
+        errors: {},
+        refresh: vi.fn(),
+        startRun: vi.fn(),
+        startVerification: vi.fn(),
+        abort: vi.fn(),
+        delete: vi.fn(),
+        pauseHeal: vi.fn(),
+        cancelHeal: vi.fn(),
+        clearError: vi.fn(),
+      }
+    },
+  }
+})
+
 import { FlightPage } from './FlightPage'
 
 ;

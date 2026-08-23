@@ -87,7 +87,7 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
             type="button"
             data-testid="stage-error-open-log"
             onClick={() => { api.openEditor({ file: errorDetail.logPath }).catch(() => {}) }}
-            className="cl-button shrink-0 px-2 py-0.5 text-[11px] text-accent"
+            className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px] text-accent"
           >
             Open full service log
           </button>

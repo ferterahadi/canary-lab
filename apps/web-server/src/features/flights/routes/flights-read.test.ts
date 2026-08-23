@@ -181,13 +181,13 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     // the validator, not a record check.
     for (const key of ['specs-coverage', 'portify', 'run'] as const) {
       expect(stageOf(body, key)).toMatchObject({ allowed: false })
-      expect(stageOf(body, key).reason).toMatch(/env-capture prerequisite/)
+      expect(stageOf(body, key).reason).toMatch(/start from Settings snapshot instead/)
       expect(stageOf(body, key).reason).not.toMatch(/first flight/)
     }
     // The export builds its archive from the run record, so its blocker is the
     // absent run — never someone else's missing artifact.
     expect(stageOf(body, 'evaluation-export')).toMatchObject({ allowed: false })
-    expect(stageOf(body, 'evaluation-export').reason).toMatch(/run prerequisite/)
+    expect(stageOf(body, 'evaluation-export').reason).toMatch(/no passing run yet/)
   })
 
   it('unlocks a stage for a never-flown feature once its evidence is on disk — R81', async () => {
@@ -233,7 +233,7 @@ describe('flight entry options (GET /api/flights/entry)', () => {
     expect(stageOf(body, 'run').allowed).toBe(true)
     // No runId recorded on the flight links (stub adapters) → export blocked.
     expect(stageOf(body, 'evaluation-export').allowed).toBe(false)
-    expect(stageOf(body, 'evaluation-export').reason).toMatch(/no passed run/)
+    expect(stageOf(body, 'evaluation-export').reason).toMatch(/no passing run yet/)
   })
 
   it('flags an active flight (attach, don’t start) and continue for a paused one', async () => {

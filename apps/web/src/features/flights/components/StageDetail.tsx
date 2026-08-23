@@ -42,8 +42,8 @@ export { AgentBlock, SpecsPassTimeline, StageActivity, specsPhaseSub, truncate }
  *  at all — so the generic "nothing ran here" would contradict the proof panels
  *  directly above the rail. */
 const PORTIFY_NO_TRANSCRIPT = {
-  title: 'No transcript on record',
-  body: 'The port work is kept as evidence, not as a replay — the side-by-side boot and the port changes above are what it produced.',
+  title: 'Nothing to replay here',
+  body: 'What the port work produced is the side-by-side boot and the port changes above.',
 }
 
 export function StageDetail({
@@ -203,7 +203,7 @@ export function StageDetail({
                gate below; only editable once the flight is idle. */
             disabled={flight.status === 'running'}
             onClick={() => onOpenConfig(flight.feature)}
-            className="cl-button shrink-0 px-2 py-0.5 text-[11px]"
+            className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px]"
             title={flight.status === 'running'
               ? 'Advanced setup is locked while the flight is running'
               : undefined}
@@ -216,7 +216,7 @@ export function StageDetail({
             type="button"
             data-testid={`stage-drill-${stage.key}`}
             onClick={drillThrough.onClick}
-            className="cl-button shrink-0 px-2 py-0.5 text-[11px] text-accent"
+            className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px] text-accent"
           >
             {drillThrough.label}
           </button>
@@ -318,6 +318,7 @@ export function StageDetail({
             flight={flight}
             refreshKey={docsRefreshKey}
             onResponded={onResponded}
+            listing={band.docsListing}
           />
         ) : (
           <FlightDocsPanel
@@ -325,6 +326,7 @@ export function StageDetail({
             awaiting={awaiting}
             approved={stage.status === 'done'}
             refreshKey={docsRefreshKey}
+            listing={band.docsListing}
             summaryStatus={companion?.status}
             summaryStage={companion ?? undefined}
             requirementCount={
@@ -393,12 +395,20 @@ export function StageDetail({
       {/* Evaluation Report: this flight's deliverable, then every archive ever
           built for the suite — the stage is where reports are collected, not just
           where the newest one is announced. */}
-      {stage.key === 'evaluation-export' && (
-        <>
-          <EvaluationDeliverablePanel task={band.evalTask ?? null} awaiting={awaiting} />
-          <AllReportsPanel feature={flight.feature} pinnedTaskId={evalTaskId} awaiting={awaiting} />
-        </>
-      )}
+      {stage.key === 'evaluation-export' && (() => {
+        // A workspace-probed task id is the feature's NEWEST completed export,
+        // whatever produced it (a manual export from the coverage page
+        // included) — calling that "this flight's report" attributes another
+        // surface's work to the flight. The recorded path (stage evidence
+        // written at settle, or the flight's own links) keeps the claim.
+        const probed = stage.evidenceSource === 'workspace' && !flight.links?.evaluationTaskId
+        return (
+          <>
+            <EvaluationDeliverablePanel task={band.evalTask ?? null} awaiting={awaiting} probed={probed} />
+            <AllReportsPanel feature={flight.feature} pinnedTaskId={evalTaskId} awaiting={awaiting} probed={probed} />
+          </>
+        )
+      })()}
 
       {(row.status === 'failed' && error) && (
         <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} />
