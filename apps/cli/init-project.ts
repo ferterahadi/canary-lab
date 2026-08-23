@@ -152,11 +152,15 @@ const SAMPLE_REPO_DIRS = ['demo-app', 'flight-app', 'workflow-app'] as const
  *  a real user's were cut from the whole workspace repo — the one divergence
  *  between `demo` and `init` that must not exist.
  *
- *  Runs AFTER commitScaffold on purpose: the workspace commit tracks the sample
- *  files first (the exact order the demo harness produced live), so nesting the
- *  .git here changes which repo owns future edits without rewriting history.
- *  Same swallow-per-repo rationale as commitScaffold. */
+ *  Runs AFTER commitScaffold on purpose: if nesting a sample's .git fails, the
+ *  workspace commit still tracks its files, so every git surface keeps working
+ *  against the workspace repo (worktrees cut at the git toplevel). Each sample
+ *  that DOES nest is then handed off — untracked and ignored in the workspace
+ *  repo — because leaving it tracked by both meant every heal edit inside a
+ *  sample showed up as phantom workspace dirt. Same swallow-per-repo rationale
+ *  as commitScaffold. */
 export function commitSampleRepos(targetDir: string): void {
+  const nested: string[] = []
   for (const dir of SAMPLE_REPO_DIRS) {
     const repoDir = path.join(targetDir, dir)
     if (!fs.existsSync(repoDir)) continue
@@ -171,10 +175,48 @@ export function commitSampleRepos(targetDir: string): void {
         '-c', 'commit.gpgsign=false',
         'commit', '-q', '-m', `chore: ${dir} sample baseline`,
       ], { cwd: repoDir, stdio: 'ignore' })
+      nested.push(dir)
     } catch {
       /* Same trade as commitScaffold: an uncommitted sample still runs; the
          dirty-repo preflights name the problem if it ever matters. */
     }
+  }
+  if (nested.length === 0) return
+  // Hand the nested samples off: drop them from the workspace index and ignore
+  // them, so a sample edit dirties only its own repo. `--cached` keeps the
+  // files; the gitignore append is guarded so a re-run never stacks duplicate
+  // lines. Each step swallows on its own so a mid-list failure still reaches
+  // the commit — staged-but-uncommitted hand-offs would leave the workspace
+  // tree dirty, the exact state commitScaffold exists to prevent.
+  try {
+    const gitignore = path.join(targetDir, '.gitignore')
+    const existing = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf-8') : ''
+    const lines = nested.map((dir) => `/${dir}/`).filter((line) => !existing.split('\n').includes(line))
+    if (lines.length > 0) {
+      fs.writeFileSync(gitignore, `${existing.replace(/\n*$/, '\n')}${lines.join('\n')}\n`)
+    }
+  } catch {
+    /* Unwritable .gitignore — the rm --cached below still stops the tracking. */
+  }
+  for (const dir of nested) {
+    try {
+      execFileSync('git', ['rm', '-r', '-q', '--cached', dir], { cwd: targetDir, stdio: 'ignore' })
+    } catch {
+      /* No workspace repo, or this sample was never tracked (already handed
+         off on a previous run) — nothing to untrack. */
+    }
+  }
+  try {
+    execFileSync('git', ['add', '.gitignore'], { cwd: targetDir, stdio: 'ignore' })
+    execFileSync('git', [
+      '-c', 'user.name=Canary Lab',
+      '-c', 'user.email=canary-lab@localhost',
+      '-c', 'commit.gpgsign=false',
+      'commit', '-q', '-m', 'chore: hand sample apps to their own repositories',
+    ], { cwd: targetDir, stdio: 'ignore' })
+  } catch {
+    /* No workspace repo, or nothing was staged (re-run) — the double-tracking
+       this cleans up is cosmetic, never blocking. */
   }
 }
 
@@ -378,7 +420,9 @@ export async function main(
   let setupOk = true
   try {
     setupProject(
-      { workspace: targetDir, agent: 'auto', dryRun: false, force: false },
+      // implicit: an init-driven setup in a temp workspace (demo, smoke test)
+      // must not claim the user's global MCP pointers — see setup.ts.
+      { workspace: targetDir, agent: 'auto', dryRun: false, force: false, implicit: true },
       setupOpts,
     )
   } catch (err) {

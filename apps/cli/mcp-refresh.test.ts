@@ -364,7 +364,10 @@ describe('temp-install guard', () => {
   })
 
   it('still refreshes a durable install', () => {
-    refreshCanaryLabMcp({ execPath: EXEC, cliPath: CLI, log: () => {} })
+    // claudeDesktopConfigPath MUST be overridden: execFileSync is mocked but fs
+    // is real, so without it the Desktop branch resolves the developer's actual
+    // claude_desktop_config.json and overwrites it with these fixtures.
+    refreshCanaryLabMcp({ execPath: EXEC, cliPath: CLI, claudeDesktopConfigPath: tmpConfig(), log: () => {} })
     expect(mocks.execFileSync).toHaveBeenCalled()
   })
 })

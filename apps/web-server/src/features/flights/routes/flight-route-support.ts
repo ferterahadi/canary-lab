@@ -9,6 +9,9 @@ import { type PlanAutoLaunchOutcome } from '../logic/plan-features'
 import { findBootProof, hasAuthoredSpecs, hasCapturedEnvset, hasPrdSummary } from '../logic/stage-evidence'
 import { listRuns } from '../../runs/logic/run-store'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { isGettingStartedFlightStart } from '../../config/routes/onboarding'
+import { MCP_ORIGIN_HEADER } from './flight-decision-origin'
+import { type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 // Flight REST surface — the same store/conductor the MCP flight tools
 // drive (dual-surface parity). Start is non-blocking: it validates input,
@@ -33,6 +36,27 @@ function standalonePassedRun(logsDir: string | undefined, feature: string) {
   } catch {
     return null
   }
+}
+
+/** Re-claim the Getting Started session for the demo flight when it is set
+ *  moving again — resume, redo, or a mode-carrying start. Pausing settles the
+ *  claim (a paused flight must not hold the workspace forever), so every
+ *  re-entry path has to claim it back; without this the resumed demo runs
+ *  untracked and a second demo can start against the same workspace. Owner
+ *  comes from the same origin header the decision guard reads. Returns null
+ *  when this is not the demo flight, no store is wired, or the flight already
+ *  holds the claim; propagates GettingStartedBusyError for the route to map. */
+export function reclaimGettingStartedFlight(
+  gettingStarted: GettingStartedSessionStore | undefined,
+  headers: Record<string, unknown>,
+  match: { feature: string; repoPaths?: string[] },
+  flightId: string | null,
+): string | null {
+  if (!gettingStarted || !isGettingStartedFlightStart(match)) return null
+  const active = gettingStarted.read().active
+  if (flightId && active?.target?.kind === 'flight' && active.target.id === flightId) return null
+  const owner = headers[MCP_ORIGIN_HEADER] === 'mcp' ? 'external' : 'internal'
+  return gettingStarted.claim('flight', owner).sessionId
 }
 
 export function buildStageEntryValidator(featuresDir: string, logsDir?: string) {

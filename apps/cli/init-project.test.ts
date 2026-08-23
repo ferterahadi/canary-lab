@@ -248,7 +248,7 @@ describe('main (init-project orchestration)', () => {
     // npm `install` was mocked, so node_modules/canary-lab never materialized →
     // setup runs without a cliPath override.
     expect(setupProject).toHaveBeenCalledExactlyOnceWith(
-      { workspace: target, agent: 'auto', dryRun: false, force: false },
+      { workspace: target, agent: 'auto', dryRun: false, force: false, implicit: true },
       {},
     )
   })
@@ -263,7 +263,7 @@ describe('main (init-project orchestration)', () => {
 
     expect(execFileSync.mock.calls.filter((c) => c[0] === 'npm')).toEqual([])
     expect(setupProject).toHaveBeenCalledWith(
-      { workspace: path.join(workspace, 'my-project'), agent: 'auto', dryRun: false, force: false },
+      { workspace: path.join(workspace, 'my-project'), agent: 'auto', dryRun: false, force: false, implicit: true },
       {},
     )
     expect(messages.join('\n')).toContain('npm install')
@@ -312,7 +312,7 @@ describe('main (init-project orchestration)', () => {
 
     expect(localCli).toContain(REAL_CLI_BIN)
     expect(setupProject).toHaveBeenCalledWith(
-      { workspace: target, agent: 'auto', dryRun: false, force: false },
+      { workspace: target, agent: 'auto', dryRun: false, force: false, implicit: true },
       { cliPath: localCli, execPath: process.execPath },
     )
   })
@@ -336,7 +336,7 @@ describe('main (init-project orchestration)', () => {
     await main(['my-project', '--package-spec', '^9.9.9'])
 
     expect(setupProject).toHaveBeenCalledWith(
-      { workspace: target, agent: 'auto', dryRun: false, force: false },
+      { workspace: target, agent: 'auto', dryRun: false, force: false, implicit: true },
       {},
     )
   })

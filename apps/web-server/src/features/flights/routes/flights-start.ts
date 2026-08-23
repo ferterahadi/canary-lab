@@ -8,7 +8,7 @@ import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
-import { expandHome } from './flight-route-support'
+import { expandHome, reclaimGettingStartedFlight } from './flight-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
 
 export async function registerFlightStartRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
@@ -119,6 +119,23 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     if (body.gettingStartedSource && deps.gettingStarted) {
       try {
         gettingStartedSession = deps.gettingStarted.claim('flight', body.gettingStartedSource).sessionId
+      } catch (err) {
+        if (!(err instanceof GettingStartedBusyError)) throw err
+        reply.code(409)
+        return { type: err.type, error: err.message, active: err.active }
+      }
+    } else if (hasMode && deps.gettingStarted) {
+      // A mode-carrying start (continue/redo/jump) re-enters an existing record,
+      // and no client sends gettingStartedSource on those — so the demo flight
+      // has to be recognized and re-claimed here the same way resume does. The
+      // stored record supplies repoPaths when the body omitted them.
+      try {
+        const existing = store.latestForFeature(body.feature.trim())
+        gettingStartedSession = reclaimGettingStartedFlight(
+          deps.gettingStarted, req.headers,
+          { feature: body.feature.trim(), repoPaths: resolved.length > 0 ? resolved : existing?.repoPaths },
+          existing?.flightId ?? null,
+        )
       } catch (err) {
         if (!(err instanceof GettingStartedBusyError)) throw err
         reply.code(409)

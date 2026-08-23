@@ -249,6 +249,164 @@ describe('Getting Started flight admission', () => {
     expect(claim).not.toHaveBeenCalled()
   })
 
+  it('re-claims the demo session on redo — "Start over" must not run untracked', async () => {
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockReturnValueOnce({ sessionId: 'gs-redo' })
+    const attach = vi.fn()
+    const app = await appWith({
+      claim, attach, abandon: vi.fn(), read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+    const redone = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo` })
+
+    expect(redone.statusCode).toBe(201)
+    expect(claim).toHaveBeenNthCalledWith(2, 'flight', 'internal')
+    expect(attach).toHaveBeenNthCalledWith(2, 'gs-redo', {
+      kind: 'flight', id: redone.json<{ flightId: string }>().flightId,
+    })
+  })
+
+  it('redo releases its re-claim when stage entry is refused, and maps the busy conflict', async () => {
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockReturnValueOnce({ sessionId: 'gs-redo' })
+    const abandon = vi.fn()
+    const app = await appWith({
+      claim, attach: vi.fn(), abandon, read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+
+    // No portify prerequisites exist on disk, so the entry validator refuses —
+    // the claim taken just before must be released with it.
+    const refused = await app.inject({
+      method: 'POST', url: `/api/flights/${flightId}/redo`, payload: { fromStage: 'portify' },
+    })
+    expect(refused.statusCode).toBe(400)
+    expect(refused.json()).toMatchObject({ type: 'stage_entry_rejected' })
+    expect(abandon).toHaveBeenCalledWith('gs-redo')
+
+    // While another demo owns the workspace, redo surfaces the same typed
+    // conflict the other admission paths use.
+    const otherDemo = {
+      sessionId: 'gs-run', workflow: 'run' as const, owner: 'internal' as const,
+      target: { kind: 'run' as const, id: 'run-live' }, startedAt: 'a', updatedAt: 'a',
+    }
+    claim.mockImplementationOnce(() => { throw new GettingStartedBusyError(otherDemo) })
+    const busy = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/redo` })
+    expect(busy.statusCode).toBe(409)
+    expect(busy.json()).toMatchObject({ type: 'getting_started_busy' })
+  })
+
+  it('matches the demo by repo basename on resume, so a de-conflicted feature name still re-claims', async () => {
+    // Scaffold de-conflicts a colliding feature to `flight-app-2`; the record's
+    // repoPaths still name the sample repo, and that is what the matcher reads.
+    const claim = vi.fn(() => ({ sessionId: 'gs-resume' }))
+    const attach = vi.fn()
+    const app = await appWith({
+      claim, attach, abandon: vi.fn(), read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedFlight(app, { feature: 'flight-app-2', repoPath: repoDir })
+
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+    expect((await app.inject({ method: 'POST', url: `/api/flights/${flightId}/resume` })).statusCode).toBe(200)
+
+    expect(claim).toHaveBeenCalledWith('flight', 'internal')
+    expect(attach).toHaveBeenCalledWith('gs-resume', { kind: 'flight', id: flightId })
+  })
+
+  it('re-claims on a mode-carrying start — no client sends gettingStartedSource on continue', async () => {
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockReturnValueOnce({ sessionId: 'gs-continue' })
+    const attach = vi.fn()
+    const app = await appWith({
+      claim, attach, abandon: vi.fn(), read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+
+    // Repos/description omitted (frozen on the record): the stored record must
+    // supply the repoPaths the matcher reads.
+    const resumed = await app.inject({
+      method: 'POST', url: '/api/flights', payload: { feature: 'flight-app', mode: 'continue' },
+    })
+
+    expect(resumed.statusCode).toBe(201)
+    expect(claim).toHaveBeenNthCalledWith(2, 'flight', 'internal')
+    expect(attach).toHaveBeenNthCalledWith(2, 'gs-continue', { kind: 'flight', id: flightId })
+  })
+
+  it('re-claims a mode-carrying jump that repeats the frozen repo set', async () => {
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockReturnValueOnce({ sessionId: 'gs-jump' })
+    const app = await appWith({
+      claim, attach: vi.fn(), abandon: vi.fn(), read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+
+    // Repos sent this time (matching the frozen set): the matcher must read the
+    // body's repoPaths rather than requiring the stored record's.
+    const jumped = await app.inject({
+      method: 'POST', url: '/api/flights',
+      payload: { feature: 'flight-app', mode: 'jump', fromStage: 'scout', repoPaths: [repoDir] },
+    })
+
+    expect(jumped.statusCode).toBe(201)
+    expect(claim).toHaveBeenNthCalledWith(2, 'flight', 'internal')
+  })
+
+  it('releases the mode-carrying claim when no record exists to re-enter', async () => {
+    // `continue` on a feature with no flight record: the demo matcher fires on
+    // the feature name alone (no stored repoPaths to consult), the conductor
+    // refuses, and the claim must be released with the refusal.
+    const claim = vi.fn(() => ({ sessionId: 'gs-ghost' }))
+    const abandon = vi.fn()
+    const app = await appWith({
+      claim, attach: vi.fn(), abandon, read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+
+    const refused = await app.inject({
+      method: 'POST', url: '/api/flights', payload: { feature: 'flight-app', mode: 'continue' },
+    })
+
+    expect(refused.statusCode).toBe(400)
+    expect(claim).toHaveBeenCalledWith('flight', 'internal')
+    expect(abandon).toHaveBeenCalledWith('gs-ghost')
+  })
+
+  it('maps the busy conflict and propagates other claim failures on a mode-carrying start', async () => {
+    const otherDemo = {
+      sessionId: 'gs-run', workflow: 'run' as const, owner: 'internal' as const,
+      target: { kind: 'run' as const, id: 'run-live' }, startedAt: 'a', updatedAt: 'a',
+    }
+    const claim = vi.fn()
+      .mockReturnValueOnce({ sessionId: 'gs-start' })
+      .mockImplementationOnce(() => { throw new GettingStartedBusyError(otherDemo) })
+      .mockImplementationOnce(() => { throw new Error('session.json is not writable') })
+    const app = await appWith({
+      claim, attach: vi.fn(), abandon: vi.fn(), read: () => ({ active: null, completed: {} }),
+    } as unknown as GettingStartedSessionStore, parking())
+    const flightId = await startParkedDemoFlight(app)
+    await app.inject({ method: 'POST', url: `/api/flights/${flightId}/pause` })
+
+    const busy = await app.inject({
+      method: 'POST', url: '/api/flights', payload: { feature: 'flight-app', mode: 'continue' },
+    })
+    expect(busy.statusCode).toBe(409)
+    expect(busy.json()).toMatchObject({ type: 'getting_started_busy', active: { sessionId: 'gs-run' } })
+
+    const broken = await app.inject({
+      method: 'POST', url: '/api/flights', payload: { feature: 'flight-app', mode: 'continue' },
+    })
+    expect(broken.statusCode).toBe(500)
+  })
+
   it('releases the claim when the flight itself refuses to start', async () => {
     const abandon = vi.fn()
     const app = await appWith({

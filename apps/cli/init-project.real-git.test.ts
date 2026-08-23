@@ -102,6 +102,17 @@ describe('commitSampleRepos (real git)', () => {
       expect(log.split('\n')).toHaveLength(1)
       expect(log).toContain(`${sample} sample baseline`)
     }
+    // Handed off, not double-tracked: commitScaffold committed the sample files
+    // into the workspace repo first, and leaving them tracked there meant every
+    // heal edit inside a sample dirtied the workspace too. The workspace must
+    // end clean, no longer tracking the samples, with each ignored.
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: dir }).toString()).toBe('')
+    const tracked = execFileSync('git', ['ls-files'], { cwd: dir }).toString()
+    expect(tracked).not.toContain('demo-app/')
+    const gitignore = fs.readFileSync(path.join(dir, '.gitignore'), 'utf-8')
+    for (const sample of ['demo-app', 'flight-app', 'workflow-app']) {
+      expect(gitignore).toContain(`/${sample}/`)
+    }
   })
 
   it('skips absent samples and re-runs as a no-op on already-committed ones', () => {

@@ -36,7 +36,7 @@ import {
   resolveWorkflowAgentRef,
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
-import { GettingStartedSessionStore } from './features/config/logic/getting-started-session'
+import { GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
 import { isGettingStartedFlightStart, isGettingStartedRunFeature } from './features/config/routes/onboarding'
 import type { ServerContext } from './server-context'
 import { UpdateJobStore } from './features/version/logic/update-job'
@@ -160,7 +160,10 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   const gettingStarted = new GettingStartedSessionStore(logsDir, {
     run: (runId) => runStore.get(runId)?.manifest.status ?? null,
     flight: (flightId) => flightStore.get(flightId)?.status ?? null,
-    isRunActive: isActiveRunStatus,
+    // NOT bare isActiveRunStatus: a queued demo run is still the demo's target
+    // (see isGettingStartedRunActive) — the bare predicate settled it as
+    // "completed: queued" and dropped the one-demo lock mid-run.
+    isRunActive: isGettingStartedRunActive,
     isFlightActive: isActiveFlightStatus,
   }, () => workspaceEvents.publish({ type: 'getting-started-changed' }))
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the

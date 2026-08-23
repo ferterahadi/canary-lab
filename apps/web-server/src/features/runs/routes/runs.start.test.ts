@@ -376,6 +376,11 @@ describe('POST /api/runs', () => {
     expect(body.type).toBe('repo_collision_requires_choice')
     expect(body.conflictingRunId).toBe('other-1')
     expect(body.options).toEqual(['worktree', 'queue'])
+    // Two audiences, two fields: the GUI lifts only `error` into Error.message
+    // (without it this 409 rendered as literally "HTTP 409"), while agents get
+    // the isolation re-send instructions in `message`.
+    expect(body.error).toContain('using the same app')
+    expect(body.message).toContain('isolation:"worktree"')
   })
 
   it('returns 202 + queueReason when the factory queues the run, threading isolation', async () => {

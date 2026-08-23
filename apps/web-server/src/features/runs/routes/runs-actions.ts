@@ -135,6 +135,10 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
           conflictingFeature: outcome.conflictingFeature,
           repoPaths: outcome.repoPaths,
           options: ['worktree', 'queue'] as const,
+          // `error` is what the GUI shows (the client only lifts `error` into
+          // Error.message, so without it this 409 rendered as literally
+          // "HTTP 409"); `message` keeps the agent-facing re-send instructions.
+          error: `Another run (${outcome.conflictingFeature}) is using the same app. Wait for it to finish, then try again.`,
           message: `Another run (${outcome.conflictingFeature}) is using the same app. Re-send with isolation:"worktree" to run it isolated, or isolation:"queue" to wait until that run finishes.`,
         }
       }

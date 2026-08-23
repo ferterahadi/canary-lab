@@ -7,8 +7,8 @@ import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
 import { FlightNotParkedError, FlightStageEntryError, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
-import { MCP_ORIGIN_HEADER, rejectForeignFlightDecision } from './flight-decision-origin'
-import { isGettingStartedFlightStart } from '../../config/routes/onboarding'
+import { rejectForeignFlightDecision } from './flight-decision-origin'
+import { reclaimGettingStartedFlight } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
 import { type FlightCheckpointResponse, type FlightStageKey } from '../logic/types'
 
@@ -52,21 +52,17 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
   app.post<{ Params: { id: string } }>('/api/flights/:id/resume', async (req, reply) => {
     const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
     if (foreign) return foreign
-    // Pausing settles the Getting Started claim (a paused flight must not hold
-    // the workspace forever), so resuming the demo flight has to RE-claim it —
-    // without this the resumed demo ran untracked and a second demo could start
-    // against the same workspace. Owner comes from the same origin header the
-    // decision guard reads; skip when this flight already holds the claim.
+    // Re-claim the Getting Started session (see reclaimGettingStartedFlight).
+    // repoPaths ride along so a de-conflicted feature name (flight-app-2) still
+    // matches on the repo basename.
     let gettingStartedSession: string | null = null
     try {
       const record = store.get(req.params.id)
-      if (record && deps.gettingStarted && isGettingStartedFlightStart({ feature: record.feature })) {
-        const active = deps.gettingStarted.read().active
-        const alreadyOwns = active?.target?.kind === 'flight' && active.target.id === req.params.id
-        if (!alreadyOwns) {
-          const owner = req.headers[MCP_ORIGIN_HEADER] === 'mcp' ? 'external' : 'internal'
-          gettingStartedSession = deps.gettingStarted.claim('flight', owner).sessionId
-        }
+      if (record) {
+        gettingStartedSession = reclaimGettingStartedFlight(
+          deps.gettingStarted, req.headers,
+          { feature: record.feature, repoPaths: record.repoPaths }, req.params.id,
+        )
       }
       const { manifest } = resumeFlight(req.params.id, conductorDeps)
       if (gettingStartedSession) {
@@ -133,14 +129,33 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
     async (req, reply) => {
       const foreign = rejectForeignFlightDecision(req, reply, () => store.get(req.params.id))
       if (foreign) return foreign
+      // Redo sets a settled demo flight moving again exactly like resume does,
+      // so it re-claims the Getting Started session the same way — without
+      // this a "Start over" ran the demo untracked.
+      let gettingStartedSession: string | null = null
       try {
+        const record = store.get(req.params.id)
+        if (record) {
+          gettingStartedSession = reclaimGettingStartedFlight(
+            deps.gettingStarted, req.headers,
+            { feature: record.feature, repoPaths: record.repoPaths }, req.params.id,
+          )
+        }
         const { manifest } = redoFlight(req.params.id, conductorDeps, {
           fromStage: req.body?.fromStage as FlightStageKey | undefined,
           feedback: req.body?.feedback,
         })
+        if (gettingStartedSession) {
+          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'flight', id: manifest.flightId })
+        }
         reply.code(201)
         return manifest
       } catch (err) {
+        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
+        if (err instanceof GettingStartedBusyError) {
+          reply.code(409)
+          return { type: err.type, error: err.message, active: err.active }
+        }
         if (err instanceof FlightStageEntryError) {
           reply.code(400)
           return { error: err.message, type: 'stage_entry_rejected' }

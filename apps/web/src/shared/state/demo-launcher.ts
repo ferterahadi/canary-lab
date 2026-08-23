@@ -26,10 +26,13 @@ import { useInvalidationKey } from './invalidation'
 
 const SEEN_KEY = 'canary-lab:demo-seen'
 
-export type DemoFlightActionKind = 'coverage' | 'export' | 'author' | 'portify'
+// 'coverage' is deliberately NOT here: the specs-coverage stage authors specs
+// toward the target, which would close the workbench's intentional R2 gap the
+// Coverage demo exists to expose — that demo runs the standalone mapping job
+// instead (see App.handleDemoAction).
+export type DemoFlightActionKind = 'export' | 'author' | 'portify'
 
 export const DEMO_FLIGHT_STAGE: Record<DemoFlightActionKind, FlightStageKey> = {
-  coverage: 'specs-coverage',
   export: 'evaluation-export',
   author: 'specs-coverage',
   portify: 'portify',
@@ -49,9 +52,15 @@ export function demoFlightLaunch(
 ): DemoFlightLaunch {
   if (entry.active && entry.flight) return { kind: 'open', flightId: entry.flight.flightId }
   if (entry.flight) {
+    // Paused → resume, never jump: the R78 jump wipe resets the entry stage and
+    // everything after it, which on a paused specs-coverage flight silently
+    // deleted every spec — the shipped one included. Only a settled record
+    // re-enters via jump (where the wipe IS the point: re-demo does real work).
     return {
       kind: 'start',
-      body: { feature, mode: 'jump', fromStage: stage, autopilot: true },
+      body: entry.canContinue
+        ? { feature, mode: 'continue', autopilot: true }
+        : { feature, mode: 'jump', fromStage: stage, autopilot: true },
     }
   }
   return {

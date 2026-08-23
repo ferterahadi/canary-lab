@@ -274,7 +274,8 @@ describe('setup', () => {
   // temp dir reaches `setup` through `init` WITHOUT it, and the temp cli.js it
   // registers into the user's global config dies with the next temp sweep. Observed
   // live as a global Canary_Lab entry aimed at a canary-lab-demo-* temp path.
-  it('never registers a client when the install lives under the temp dir', () => {
+  // Implicit runs only: an explicit `setup` in a temp workspace registers (below).
+  it('never registers a client when an implicit setup runs under the temp dir', () => {
     const home = mkTmp()
     const workspace = mkWorkspace()
     cliAvailable('claude')
@@ -286,7 +287,7 @@ describe('setup', () => {
       'canary-lab-demo-x', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js',
     )
 
-    setup({ workspace, agent: 'claude', dryRun: false, force: false }, {
+    setup({ workspace, agent: 'claude', dryRun: false, force: false, implicit: true }, {
       homeDir: home,
       log: (line) => { lines.push(line) },
       execPath: '/usr/bin/node',
@@ -303,6 +304,66 @@ describe('setup', () => {
     expect(lines.join('\n')).not.toContain('CANARY_LAB_SKIP_CLIENT_MCP')
     expect(mocks.execFileSync).not.toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
     expect(fs.existsSync(desktopConfigPath)).toBe(false)
+  })
+
+  // The getting-started demo prints "cd <temp workspace> && npx canary-lab setup
+  // --force" as THE way to drive it from a desktop agent. A user who types that
+  // has stated exactly what they want, so the structural guard must not turn the
+  // instruction into a silent no-op — the entry registers, with a warning that it
+  // dies with the workspace.
+  it('registers a client for an explicit setup under the temp dir, and warns the entry rots', () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    cliAvailable('claude')
+    const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
+    fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
+    const lines: string[] = []
+    const tempCli = path.join(
+      fs.realpathSync(os.tmpdir()),
+      'canary-lab-demo-x', 'demo-project', 'node_modules', 'canary-lab', 'dist', 'apps', 'cli', 'cli.js',
+    )
+
+    setup({ workspace, agent: 'claude', dryRun: false, force: true }, {
+      homeDir: home,
+      log: (line) => { lines.push(line) },
+      execPath: '/usr/bin/node',
+      cliPath: tempCli,
+      claudeDesktopConfigPath: desktopConfigPath,
+      verifyMcp: verifiedStub,
+    })
+
+    expect(mocks.execFileSync).toHaveBeenCalledWith(
+      'claude',
+      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', tempCli, 'mcp', '--profile', 'lifecycle'],
+      { stdio: 'ignore' },
+    )
+    const desktop = JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8')).mcpServers['Canary_Lab']
+    expect(desktop.args[0]).toBe(tempCli)
+    // The pin is what routes a Desktop session to THIS demo workspace.
+    expect(desktop.env.CANARY_LAB_PROJECT_ROOT).toBe(workspace)
+    expect(lines.join('\n')).toContain('dies with it')
+  })
+
+  // Implicit + durable: a normal `init` in a real folder must still register —
+  // the guard keys on the temp path, not on who called setup.
+  it('registers a client for an implicit setup outside the temp dir', () => {
+    const home = mkTmp()
+    const workspace = mkWorkspace()
+    cliAvailable('claude')
+    const desktopConfigPath = path.join(mkTmp(), 'Claude', 'claude_desktop_config.json')
+    fs.mkdirSync(path.dirname(desktopConfigPath), { recursive: true })
+
+    setup({ workspace, agent: 'claude', dryRun: false, force: false, implicit: true }, {
+      homeDir: home,
+      log: () => {},
+      execPath: '/usr/bin/node',
+      cliPath: '/opt/canary-lab/dist/apps/cli/cli.js',
+      claudeDesktopConfigPath: desktopConfigPath,
+      verifyMcp: verifiedStub,
+    })
+
+    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
+    expect(fs.existsSync(desktopConfigPath)).toBe(true)
   })
 
   // Negative control for the guard above: a DURABLE install must still register,

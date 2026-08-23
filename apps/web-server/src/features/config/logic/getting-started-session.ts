@@ -1,5 +1,6 @@
 import fs from 'fs'
 import path from 'path'
+import { isActiveRunStatus, isQueuedRunStatus } from '../../../../../../shared/run-state'
 
 export type GettingStartedWorkflow = 'run' | 'flight'
 export type GettingStartedOwner = 'internal' | 'external'
@@ -35,6 +36,15 @@ export interface GettingStartedStatusResolver {
   flight(flightId: string): string | null
   isRunActive(status: string): boolean
   isFlightActive(status: string): boolean
+}
+
+/** The run-side liveness predicate for the resolver. `isActiveRunStatus` alone
+ *  (running || healing) is NOT enough here: the resource budget can queue a
+ *  start the caller never asked to park, and a queued demo run is still the
+ *  demo — settling it would record a nonsense "completed: queued" and drop the
+ *  one-demo-at-a-time lock while the run is still on its way. */
+export function isGettingStartedRunActive(status: string): boolean {
+  return isActiveRunStatus(status) || isQueuedRunStatus(status)
 }
 
 export class GettingStartedBusyError extends Error {

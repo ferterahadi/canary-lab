@@ -48,6 +48,12 @@ export interface ParsedArgs {
   agent: SetupAgentTarget
   dryRun: boolean
   force: boolean
+  /** Set by programmatic callers (`init`), never by the CLI parser. The
+   *  temp-install guard below only binds implicit runs: a user who TYPES
+   *  `npx canary-lab setup` in a temp workspace (the getting-started demo's
+   *  printed hand-off) has stated exactly what they want, and skipping would
+   *  make that instruction a silent no-op. */
+  implicit?: boolean
 }
 
 export async function main(
@@ -97,20 +103,25 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
   // registers a temp `cli.js` path into the user's live client config; once the
   // temp dir is GC'd that entry dangles ("Server disconnected"). Skip-flag lets
   // the smoke test exercise scaffolding + skill install without touching them.
-  // ...and the same STRUCTURAL guard the refreshes carry (see isTempInstallPath).
-  // The env flag above only protects harnesses that remember to set it; a demo or
-  // smoke workspace scaffolded under the OS temp dir reaches `setup` through
-  // `init` without it, and the temp `cli.js` it registers dies with the next temp
-  // sweep. Observed live: a global Canary_Lab entry aimed at a
-  // `/private/var/folders/.../T/canary-lab-demo-*/` cli.js. Checked against the
-  // path we WOULD register, so `setup` from a durable workspace — the supported
-  // way to move these pointers — is unaffected.
+  // ...and the same STRUCTURAL guard the refreshes carry (see isTempInstallPath) —
+  // but only for IMPLICIT runs. The env flag above only protects harnesses that
+  // remember to set it; a demo or smoke workspace scaffolded under the OS temp dir
+  // reaches `setup` through `init` without it, and the temp `cli.js` it registers
+  // dies with the next temp sweep. Observed live: a global Canary_Lab entry aimed
+  // at a `/private/var/folders/.../T/canary-lab-demo-*/` cli.js. An EXPLICIT
+  // `npx canary-lab setup` in a temp workspace is different: the demo's printed
+  // hand-off tells the user to run exactly that, so it must register (the entry
+  // still rots with the workspace — warned below, and the stale-path check plus
+  // the `ui`-boot/upgrade heals catch it afterwards).
   const skipClientMcpReason = process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1'
     ? 'CANARY_LAB_SKIP_CLIENT_MCP=1'
-    : isTempInstallPath(cliPath)
+    : args.implicit && isTempInstallPath(cliPath)
       ? `this install lives under the temp directory (${cliPath})`
       : null
   const skipClientMcp = skipClientMcpReason !== null
+  if (!skipClientMcp && isTempInstallPath(cliPath)) {
+    log('Note: this install lives under the temp directory — the registration dies with it. Re-run setup when you move to a new workspace.')
+  }
 
   const target = resolveAgentTarget(args.agent, homeDir)
   if (target) {

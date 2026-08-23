@@ -119,6 +119,10 @@ function resolveCore(workflow: OnboardingWorkflow, session: GettingStartedSessio
     tone: 'running',
     text: `Running · Continue in the ${active.target ? targetLabel(active.target) : 'progress'} page.`,
   }
+  // A paused flight settles the claim but is NOT a completion to the user —
+  // "Completed · Last result: paused." read as a contradiction on the demo's
+  // most likely mid-tour state.
+  else if (completion?.status === 'paused') feedback = { tone: 'done', text: 'Paused · Continue from the Flight page.' }
   else if (completion) feedback = { tone: 'done', text: `Completed · Last result: ${completion.status}.` }
 
   return {

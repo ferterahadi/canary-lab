@@ -219,6 +219,26 @@ describe('DemoDialog', () => {
     expect(onOpenTarget).toHaveBeenCalledWith({ kind: 'flight', id: 'fl-done' })
   })
 
+  it('words a paused flight as paused, never as a completion', () => {
+    // Pausing settles the claim, so a paused demo lands in `completed` — but
+    // "Completed · Last result: paused." read as a contradiction on the demo's
+    // most likely mid-tour state.
+    render({
+      session: {
+        active: null,
+        completed: {
+          flight: {
+            workflow: 'flight', owner: 'internal', target: { kind: 'flight', id: 'fl-paused' },
+            status: 'paused', startedAt: 'a', endedAt: 'b',
+          },
+        },
+      },
+    })
+    click(q('getting-started-workflow-flight'))
+    expect(q('getting-started-detail')?.textContent).toContain('Paused · Continue from the Flight page.')
+    expect(q('getting-started-detail')?.textContent).not.toContain('Completed')
+  })
+
   it('states the run on the button as a dot, with the wording on hover', () => {
     render({
       session: {

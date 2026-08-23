@@ -96,6 +96,19 @@ describe('applyFlightStageRemedy', () => {
     expect(execFileSync('git', ['log', '-1', '--format=%s'], { cwd: a }).toString().trim()).toBe('canary-lab: wip')
   })
 
+  it('commit works with no git identity configured — like init, the remedy is unattended', async () => {
+    const a = dirtyRepo('remedy-commit-noid-')
+    // Empty strings shadow any real global identity for this repo only, the
+    // state a machine that never ran `git config --global user.email` is in.
+    execFileSync('git', ['config', 'user.email', ''], { cwd: a, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.name', ''], { cwd: a, stdio: 'ignore' })
+
+    const result = await applyFlightStageRemedy(manifestWith([a], DIRTY_ERROR), 'commit')
+
+    expect(result.cleaned).toEqual([a])
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: a }).toString().trim()).toBe('')
+  })
+
   // A feature repo is often a SUBDIRECTORY of a much larger git root — the
   // demo storefront's services sit beside `features/` in one workspace repo.
   // Both the remedy's own count and portify's gate are scoped with `-- .`, so

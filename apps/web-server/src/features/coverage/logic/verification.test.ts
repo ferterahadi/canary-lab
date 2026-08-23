@@ -342,6 +342,58 @@ describe('verification configs', () => {
     expect(resolved.playwrightEnv).toEqual({})
   })
 
+  it('publishes a loopback target port under the run-stage CANARY_PORT key', () => {
+    // Specs authored by the specs-coverage loop resolve their base URL from
+    // CANARY_PORT_<slot>, not the envset URL var — the Verify demo booted the
+    // app on a dynamic port, injected only GATEWAY_URL, and the authored spec
+    // fell back to its static port against a dead socket (ECONNREFUSED).
+    // Verification must speak both conventions for loopback targets.
+    writeEnvset('production', 'GATEWAY_URL=https://api.example.com\n')
+
+    const resolved = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'http://localhost:58390' },
+    })
+
+    expect(resolved.playwrightEnv).toEqual({
+      GATEWAY_URL: 'http://localhost:58390',
+      CANARY_PORT_api_server: '58390',
+    })
+
+    // All three loopback spellings qualify — a boot's healthUrl can carry any.
+    for (const host of ['127.0.0.1', '[::1]']) {
+      const alt = resolveVerificationRun(feature(), {
+        playwrightEnvsetId: 'production',
+        targetUrls: { 'api-server': `http://${host}:4600` },
+      })
+      expect(alt.playwrightEnv.CANARY_PORT_api_server).toBe('4600')
+    }
+  })
+
+  it('never maps a deployed or portless target onto CANARY_PORT', () => {
+    // CANARY_PORT's contract is http://localhost:<port> — publishing a staging
+    // port would point a CANARY_PORT-style spec AWAY from the verified host.
+    writeEnvset('production', 'GATEWAY_URL=https://api.example.com\n')
+
+    const deployed = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'https://staging.example.com:8443' },
+    })
+    expect(deployed.playwrightEnv).toEqual({ GATEWAY_URL: 'https://staging.example.com:8443' })
+
+    const portless = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'http://localhost' },
+    })
+    expect(portless.playwrightEnv).toEqual({ GATEWAY_URL: 'http://localhost' })
+
+    const unparsable = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'not a url' },
+    })
+    expect(unparsable.playwrightEnv).toEqual({ GATEWAY_URL: 'not a url' })
+  })
+
   it('uses the first feature env as the verification envset fallback', () => {
     writeEnvset('local', 'GATEWAY_URL=https://local.example.com\n')
 

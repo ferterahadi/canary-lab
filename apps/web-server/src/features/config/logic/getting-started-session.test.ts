@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   GettingStartedBusyError,
   GettingStartedSessionStore,
+  isGettingStartedRunActive,
   type GettingStartedStatusResolver,
 } from './getting-started-session'
 
@@ -204,5 +205,24 @@ describe('GettingStartedSessionStore', () => {
     fs.writeFileSync(sessionFile(), JSON.stringify({ active: null }), 'utf8')
 
     expect(store().read()).toEqual({ active: null, completed: {} })
+  })
+})
+
+describe('isGettingStartedRunActive', () => {
+  // This is the predicate server.ts wires as the resolver's isRunActive. The
+  // fake resolvers above already count 'queued' as active — this pins the REAL
+  // wiring to the same intent, so the prod/test mismatch that settled a queued
+  // demo as "completed: queued" (dropping the one-demo lock mid-run) cannot
+  // come back.
+  it('counts a queued run as still active — the budget can park a start unasked', () => {
+    expect(isGettingStartedRunActive('queued')).toBe(true)
+    expect(isGettingStartedRunActive('running')).toBe(true)
+    expect(isGettingStartedRunActive('healing')).toBe(true)
+  })
+
+  it('lets terminal statuses settle', () => {
+    for (const status of ['passed', 'failed', 'aborted']) {
+      expect(isGettingStartedRunActive(status)).toBe(false)
+    }
   })
 })

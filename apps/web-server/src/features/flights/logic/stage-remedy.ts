@@ -57,14 +57,21 @@ export async function applyFlightStageRemedy(
     // pathspec, `add -A` / `stash push -u` run from any subdirectory take the
     // entire root — so a button reading "2 modified" would commit or stash
     // every unrelated dirty file in the workspace.
-    const argvs = action === 'stash'
-      ? [['stash', 'push', '-u', '-m', `canary-lab: pre-flight stash (${manifest.flightId})`, '--', '.']]
-      : [['add', '-A', '--', '.'], ['commit', '-m', 'canary-lab: wip', '--', '.']]
-    for (const argv of argvs) {
+    // Identity/signing pinned like init's own commits: a first-time demo user
+    // plausibly has no global user.email, and an unattended remedy must not
+    // fail on git's identity error or block on a GPG prompt. Each argv carries
+    // its subcommand label so the error can name it past the `-c` pins.
+    const argvs: Array<[string, string[]]> = action === 'stash'
+      ? [['stash', ['stash', 'push', '-u', '-m', `canary-lab: pre-flight stash (${manifest.flightId})`, '--', '.']]]
+      : [
+          ['add', ['add', '-A', '--', '.']],
+          ['commit', ['-c', 'user.name=Canary Lab', '-c', 'user.email=canary-lab@localhost', '-c', 'commit.gpgsign=false', 'commit', '-m', 'canary-lab: wip', '--', '.']],
+        ]
+    for (const [label, argv] of argvs) {
       const r = await runGit(repo.path, argv)
       if (r.code !== 0) {
         throw Object.assign(
-          new Error(`git ${argv[0]} failed in "${repo.name}": ${(r.stderr || r.stdout).trim()}`),
+          new Error(`git ${label} failed in "${repo.name}": ${(r.stderr || r.stdout).trim()}`),
           { statusCode: 500 },
         )
       }

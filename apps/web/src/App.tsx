@@ -33,7 +33,11 @@ import { resolveActivityTarget } from './shared/state/nav-state'
 import * as api from './shared/api/client'
 import type { GettingStartedTarget, OnboardingWorkflowAction } from './shared/api/client'
 
-const VERIFY_DEMO_BOOT_ATTEMPTS = 120
+// Covers the server's own 60s service-health deadline with headroom: the
+// workbench app boots via `npx tsx`, and a cold npx cache can push the first
+// boot past 30s — a shorter client cap here killed boots the server would
+// still have brought up (a retry then "worked" only because the cache was warm).
+const VERIFY_DEMO_BOOT_ATTEMPTS = 280
 const VERIFY_DEMO_BOOT_POLL_MS = 250
 
 async function waitForBootTargets(runId: string): Promise<Record<string, string>> {
@@ -296,10 +300,14 @@ export function App() {
   const demoExportRun = useMemo(() => {
     const feature = demo.workflows.find((workflow) => workflow.id === 'export')?.internalAction
     if (!feature || feature.kind !== 'export') return null
+    // Mirrors the server's standalonePassedRun gate exactly — 'verify' included:
+    // a passed verification cleared the blocker here while the stage-entry
+    // validator still rejected it, an enabled button whose click 400s.
     return allRuns.find((run) =>
       run.feature === feature.feature
       && run.executionType !== 'boot'
       && run.executionType !== 'benchmark'
+      && run.executionType !== 'verify'
       && run.status === 'passed') ?? null
   }, [allRuns, demo.workflows])
 
@@ -323,7 +331,25 @@ export function App() {
       openFlight(manifest.flightId)
       return
     }
-    if (action.kind === 'coverage' || action.kind === 'export' || action.kind === 'author' || action.kind === 'portify') {
+    if (action.kind === 'coverage') {
+      // NOT the specs-coverage flight stage: that stage is an author-to-target
+      // loop, so routing "Measure Coverage" through it wrote the missing R2 spec
+      // itself — closing the intentional gap the card promises to expose (and
+      // leaving the Author demo nothing to do). The standalone mapping job reads
+      // the shipped PRD summary and only reports.
+      try {
+        await api.startCoverageJob(action.feature, 'coverage')
+      } catch (error) {
+        // Already mapping (started from another tab/agent) — the ledger page
+        // attaches to the running job on mount, so just go look at it.
+        if (!(error instanceof api.ApiError && error.status === 409)) throw error
+      }
+      setSelectedFeature(action.feature)
+      setDemoOpen(false)
+      navigateToCoverage(action.feature)
+      return
+    }
+    if (action.kind === 'export' || action.kind === 'author' || action.kind === 'portify') {
       const stage = DEMO_FLIGHT_STAGE[action.kind]
       const entry = await api.getFlightEntryOptions(action.feature)
       const launch = demoFlightLaunch(action.feature, stage, entry)
@@ -353,7 +379,7 @@ export function App() {
       }
       return
     }
-  }, [navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature, startVerificationAction])
+  }, [navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature, startVerificationAction])
 
   const openDemoTarget = useCallback((target: GettingStartedTarget): void => {
     setDemoOpen(false)

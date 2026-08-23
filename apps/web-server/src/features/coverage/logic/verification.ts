@@ -11,6 +11,7 @@ import type {
 } from '../../../../../../shared/verification'
 import type { PlaywrightArtifactGroup, RunDetail, RunSummaryFailedEntry } from '../../runs/logic/run-store'
 import { normalizeStartCommand, resolveHealthProbe } from '../../../shared/launcher-startup'
+import { testPortEnvKey } from '../../runs/logic/runtime/run-service-boot'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 interface VerificationConfigFile {
@@ -177,6 +178,23 @@ export function resolveVerificationRun(
   const playwrightEnv: Record<string, string> = {}
   for (const target of targets) {
     if (target.envVar && target.url) playwrightEnv[target.envVar] = target.url
+    // Specs written by the authoring loop resolve their base URL from the
+    // run-stage port convention (CANARY_PORT_<slot>) rather than the envset's
+    // URL var, so a verification that only injects the URL var never reaches
+    // them — the spec falls back to its static port while the booted app sits
+    // on a dynamic one. Publish the same port under the same key so both spec
+    // conventions see the real target. Loopback-only: for a deployed target
+    // the CANARY_PORT contract (http://localhost:<port>) would point AWAY
+    // from the verified host.
+    if (target.url) {
+      try {
+        const url = new URL(target.url)
+        const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+        if (loopback && url.port) playwrightEnv[testPortEnvKey(target.id)] = url.port
+      } catch {
+        /* An unparsable URL already fails the run visibly at request time. */
+      }
+    }
   }
   return {
     ...(config ? { config } : {}),

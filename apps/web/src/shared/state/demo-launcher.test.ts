@@ -55,8 +55,9 @@ const flightEntry = (over: Partial<FlightEntryOptions> = {}): FlightEntryOptions
 
 describe('Getting Started Flight destinations', () => {
   it('maps each specialized workflow to its Flight tab', () => {
+    // 'coverage' is deliberately absent: routing it through specs-coverage
+    // authored the missing spec instead of reporting the gap (see App).
     expect(DEMO_FLIGHT_STAGE).toEqual({
-      coverage: 'specs-coverage',
       export: 'evaluation-export',
       author: 'specs-coverage',
       portify: 'portify',
@@ -78,9 +79,27 @@ describe('Getting Started Flight destinations', () => {
     })
   })
 
-  it('jumps an existing paused Flight to the requested stage', () => {
+  it('resumes a paused Flight instead of jumping — the jump wipe deleted its specs', () => {
+    // R78: jump wipes the entry stage and everything after it, which on a
+    // paused specs-coverage flight discarded every spec, the shipped one
+    // included. A paused record must come back via resume (never wipes).
     const entry = flightEntry({
+      canContinue: true,
       flight: { flightId: 'fl_1', status: 'paused', stages: [] },
+    })
+    expect(demoFlightLaunch('workflow-workbench', 'evaluation-export', entry)).toEqual({
+      kind: 'start',
+      body: {
+        feature: 'workflow-workbench',
+        mode: 'continue',
+        autopilot: true,
+      },
+    })
+  })
+
+  it('jumps a settled Flight to the requested stage — a re-demo redoes real work', () => {
+    const entry = flightEntry({
+      flight: { flightId: 'fl_1', status: 'completed', stages: [] },
     })
     expect(demoFlightLaunch('workflow-workbench', 'evaluation-export', entry)).toEqual({
       kind: 'start',
