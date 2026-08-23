@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { FACT_GLOSS, FACT_HELP, FactTile, type StageFact } from './StageFacts'
+import { awaitingFact, FACT_GLOSS, FACT_HELP, FactTile, type StageFact } from './StageFacts'
 import type { AwaitingState } from '@/shared/ui/Skeleton'
 
 // The three lines every tile owes: label (+ the `?` that says an explanation
@@ -67,20 +67,12 @@ describe('FactPlaceholder — always a dash, never a bar or a sweep', () => {
     }
   })
 
-  it('holds the meter slot only for a tile that settles WITH a meter', () => {
-    // A tile grid row is as tall as its tallest tile, so one metered tile
-    // settling used to grow every tile beside it by the bar's 11px.
-    const metered = renderWith({ label: 'Requirements covered', value: '', awaiting: true, meter: true }, 'live')
-    const track = metered.querySelector<HTMLElement>('[data-testid="fact-meter-track"]')
-    expect(track).not.toBeNull()
-    // The same geometry FactSegments occupies — but invisible: it reserves the
-    // height, and painting it would draw a bar for a measurement nobody made.
-    expect(track?.className).toContain('h-[3px]')
-    expect(track?.className).toContain('mt-2')
-    expect(track?.className).toContain('invisible')
-    expect(track?.querySelector('div')).toBeNull()
-    // A bare count settles without one, so reserving the slot there would leave
-    // permanent dead space in the settled band.
+  it('never reserves a meter slot — the row grows once when real segments land', () => {
+    // The invisible spacer that used to hold the segments meter's height pushed
+    // that one tile's gloss 11px below its neighbours' for the whole wait; the
+    // one-time row growth on settle is the lesser cost.
+    const metered = renderWith(awaitingFact('Test depth'), 'live')
+    expect(metered.querySelector('[data-testid="fact-meter-track"]')).toBeNull()
     expect(renderWith(fact, 'live').querySelector('[data-testid="fact-meter-track"]')).toBeNull()
   })
 })

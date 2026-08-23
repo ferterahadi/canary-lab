@@ -16,16 +16,12 @@ import { bootDurationMs, distinctRepoPaths, estimateTokens, ledgerEvidence, over
 export interface StageFact {
   label: string
   value: string
-  /** The stage has not produced this value yet — the tile renders a placeholder
-   *  in place of the figure, shaped by the pane's `AwaitingState` (a sweeping bar
-   *  while live, a dash once parked or failed). Only ever set by `awaitingFact`,
+  /** The stage has not produced this value yet — the tile renders a static dash
+   *  in place of the figure (never a bar or a sweep; the pane's status badge
+   *  already says whether the stage is live). Only ever set by `awaitingFact`,
    *  so no site can hand-write a tile that carries both a value and a
    *  placeholder. */
   awaiting?: true
-  /** Reserve the meter slot under an awaited figure, because the settled tile
-   *  for this label carries a `segments` distribution. Only ever set by
-   *  `awaitingFact`, from `METERED_FACT_LABELS`. */
-  meter?: true
   tone?: 'good' | 'warn' | 'bad'
   /** Render the value in the mono face (paths, filenames, commands). */
   mono?: boolean
@@ -198,22 +194,16 @@ function stageSettled(stage: FlightStage): boolean {
   return stage.status === 'done' || stage.status === 'skipped'
 }
 
-/** The awaited labels whose SETTLED tile carries a `segments` distribution
- *  under its figure. A placeholder that omitted the meter made the whole band
- *  11px short: a tile grid row is as tall as its tallest tile, so one metered
- *  tile settling grew every tile beside it. Two labels only, now that the
- *  single-fraction bars are gone (see `StageFact.segments`) — every other tile
- *  is a bare figure, and reserving a meter under those would leave permanent
- *  dead space in the settled band instead. */
-const METERED_FACT_LABELS = new Set([
-  'Test depth',
-  'Succeeded',
-])
-
 /** A tile whose value the stage hasn't produced yet. The empty `value` is never
- *  read — `FactTile` branches on `awaiting` before it looks at one. */
+ *  read — `FactTile` branches on `awaiting` before it looks at one.
+ *
+ *  No meter slot is reserved for the labels that settle WITH a `segments`
+ *  distribution: an invisible spacer pushed that one tile's gloss 11px below
+ *  its neighbours' for the whole wait, a visible track drew a bar for a
+ *  measurement nobody made, and the alternative — the row growing once when
+ *  real segments land — is a single shift at the moment new content arrives. */
 export function awaitingFact(label: string): StageFact {
-  return { label, value: '', awaiting: true, ...(METERED_FACT_LABELS.has(label) ? { meter: true as const } : {}) }
+  return { label, value: '', awaiting: true }
 }
 
 /** Fill the tiles the stage will have but hasn't measured yet (R83), so a
@@ -1032,18 +1022,6 @@ export function FactPlaceholder({ awaiting }: { awaiting: AwaitingState }) {
   )
 }
 
-/** The meter slot, held open. Geometrically identical to `FactSegments` — the
- *  one thing that lands here — so the figure and its distribution arrive
- *  together without the tile changing height.
- *
- *  Invisible on purpose: it reserves the meter's height, but painting a track
- *  would draw a bar that states a measurement nobody made — the same reason the
- *  authoring band suppresses an unmeasured "0%". Only the height is the point;
- *  the paint waits for real segments. */
-function FactMeterTrack() {
-  return <div className="invisible mt-2 h-[3px]" data-testid="fact-meter-track" aria-hidden />
-}
-
 /** The mark that says an explanation exists. Half-opacity at rest so a band of
  *  four tiles does not read as four punctuation marks, and full when the pointer
  *  is anywhere on the tile — the same moment the tooltip it advertises appears.
@@ -1109,10 +1087,7 @@ export function FactTile({ fact: f, awaiting = 'idle' }: {
       </div>
       {help ? <span className="sr-only">{help}</span> : null}
       {f.awaiting ? (
-        <>
-          <FactPlaceholder awaiting={awaiting} />
-          {f.meter ? <FactMeterTrack /> : null}
-        </>
+        <FactPlaceholder awaiting={awaiting} />
       ) : f.big ? (
         <>
           <div className="mt-1 flex items-baseline gap-1 leading-none">
