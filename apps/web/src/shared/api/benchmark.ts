@@ -8,7 +8,7 @@ import {
   type SabotageSkillSummary,
 } from '@/features/benchmark'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
-import type { AgentSessionResponse } from './agent-sessions'
+import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export function listBenchmarks(opts?: ClientOptions): Promise<BenchmarkIndexEntry[]> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -113,19 +113,21 @@ export function clearBenchmarkWorktrees(
 }
 
 
+/** 404 → an `AgentSessionAbsence` with the server's reason; the route also
+ *  answers 200 `null` when the benchmark has no locatable session log yet. */
 export async function getBenchmarkAgentSession(
   id: string,
   opts?: ClientOptions,
-): Promise<AgentSessionResponse | null> {
+): Promise<AgentSessionResponse | AgentSessionAbsence | null> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
-    return await request<AgentSessionResponse>(
+    return await request<AgentSessionResponse | null>(
       `${baseUrl}/api/benchmarks/${encodeURIComponent(id)}/agent-session`,
       { method: 'GET' },
       fetchImpl,
     )
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null
+    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
     throw err
   }
 }

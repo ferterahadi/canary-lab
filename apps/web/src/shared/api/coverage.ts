@@ -10,7 +10,7 @@ import type {
   PrdSummary,
 } from './types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
-import type { AgentSessionResponse } from './agent-sessions'
+import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export function getFeatureCoverage(feature: string, opts?: ClientOptions): Promise<CoverageLedger> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
@@ -137,27 +137,31 @@ export function getCoverageJob(jobId: string, opts?: ClientOptions): Promise<Cov
   )
 }
 
+/** 404 (unknown job) → an `AgentSessionAbsence`; the route also answers 200
+ *  `null` while the job's session log isn't locatable on disk yet. */
 export async function getCoverageAgentSession(
   jobId: string,
   opts?: ClientOptions,
-): Promise<AgentSessionResponse | null> {
+): Promise<AgentSessionResponse | AgentSessionAbsence | null> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
-    return await request<AgentSessionResponse>(
+    return await request<AgentSessionResponse | null>(
       `${baseUrl}/api/coverage/jobs/${encodeURIComponent(jobId)}/agent-session`,
       { method: 'GET' },
       fetchImpl,
     )
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null
+    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
     throw err
   }
 }
 
+/** 404 → an `AgentSessionAbsence` with the server's reason (a raw export has
+ *  no agent session, ever — it reports `no-session-ref`). */
 export async function getEvaluationAgentSession(
   taskId: string,
   opts?: ClientOptions,
-): Promise<AgentSessionResponse | null> {
+): Promise<AgentSessionResponse | AgentSessionAbsence> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
     return await request<AgentSessionResponse>(
@@ -166,7 +170,7 @@ export async function getEvaluationAgentSession(
       fetchImpl,
     )
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null
+    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
     throw err
   }
 }

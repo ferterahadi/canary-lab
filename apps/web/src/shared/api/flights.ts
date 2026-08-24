@@ -11,7 +11,7 @@ import type {
   PlanFeaturesTask as PlanFeaturesTaskT,
 } from '@shared/flights/types'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
-import type { AgentSessionResponse } from './agent-sessions'
+import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 /** Stage-entry menu for one feature: latest flight record, per-stage
  *  allowed/blocked verdicts (server-computed), and the start-form prefill. */
@@ -210,12 +210,14 @@ export function linkFeatureDocPath(
 }
 
 /** Snapshot of a flight stage's agent session (stage = sidecar dir name:
- *  scout, prd-summary, specs-1, coverage-1). 404 → null (no agent ran). */
+ *  scout, prd-summary, specs-1, coverage-1). 404 → an `AgentSessionAbsence`
+ *  (`no-session`: no agent ever ran for the stage — refs are pinned at spawn,
+ *  so a missing sidecar is definitive, not a not-yet-flushed log). */
 export async function getFlightAgentSession(
   flightId: string,
   stage: string,
   opts?: ClientOptions,
-): Promise<AgentSessionResponse | null> {
+): Promise<AgentSessionResponse | AgentSessionAbsence> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
     return await request<AgentSessionResponse>(
@@ -224,7 +226,7 @@ export async function getFlightAgentSession(
       fetchImpl,
     )
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null
+    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
     throw err
   }
 }
@@ -283,11 +285,12 @@ export function launchPlannedFeatures(
   )
 }
 
-/** Snapshot of the breakdown agent's session. 404 → null (not spawned yet). */
+/** Snapshot of the breakdown agent's session. 404 → an `AgentSessionAbsence`
+ *  (`no-session`: not spawned yet). */
 export async function getFlightPlanAgentSession(
   taskId: string,
   opts?: ClientOptions,
-): Promise<AgentSessionResponse | null> {
+): Promise<AgentSessionResponse | AgentSessionAbsence> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
     return await request<AgentSessionResponse>(
@@ -296,7 +299,7 @@ export async function getFlightPlanAgentSession(
       fetchImpl,
     )
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null
+    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
     throw err
   }
 }

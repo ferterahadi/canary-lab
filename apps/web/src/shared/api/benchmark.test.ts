@@ -55,9 +55,9 @@ describe('benchmark api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/benchmarks/b1/agent-session', { method: 'GET' })
   })
 
-  it('getBenchmarkAgentSession returns null on 404', async () => {
+  it('getBenchmarkAgentSession maps 404 to an absence carrying the reason', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { reason: 'no-session' }))
-    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+    await expect(getBenchmarkAgentSession('b1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ absent: true, reason: 'no-session' })
   })
 
   it('openBenchmarkWorktree POSTs the target to the open-worktree endpoint', async () => {

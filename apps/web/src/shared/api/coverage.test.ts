@@ -151,10 +151,10 @@ describe('coverage api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/coverage/jobs/job1/agent-session', { method: 'GET' })
   })
 
-  it('getCoverageAgentSession returns null on 404', async () => {
+  it('getCoverageAgentSession maps 404 to an absence (reason-less body → null reason)', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found' }))
     const result = await getCoverageAgentSession('job1', { fetchImpl })
-    expect(result).toBeNull()
+    expect(result).toEqual({ absent: true, reason: null })
   })
 
   it('getCoverageAgentSession rethrows non-404 errors', async () => {
@@ -176,10 +176,10 @@ describe('coverage api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/evaluation-exports/task%2F1/agent-session', { method: 'GET' })
   })
 
-  it('getEvaluationAgentSession returns null on 404', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found' }))
+  it('getEvaluationAgentSession maps 404 to an absence carrying the reason', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found', reason: 'no-session-ref' }))
     const result = await getEvaluationAgentSession('task1', { fetchImpl })
-    expect(result).toBeNull()
+    expect(result).toEqual({ absent: true, reason: 'no-session-ref' })
   })
 
   it('getEvaluationAgentSession rethrows non-404 errors', async () => {

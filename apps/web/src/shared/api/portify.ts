@@ -3,7 +3,7 @@
 
 import type { ClientKind, RunProducer } from '@shared/run-mode'
 import { ApiError, defaultOpts, request, type ClientOptions } from './internal'
-import type { AgentSessionResponse } from './agent-sessions'
+import { agentSessionAbsence, type AgentSessionAbsence, type AgentSessionResponse } from './agent-sessions'
 
 export type PortifyStatus =
   | 'planning' | 'editing' | 'verifying' | 'ready-to-save' | 'saved'
@@ -128,10 +128,12 @@ export function removePortify(workflowId: string, opts?: ClientOptions): Promise
   )
 }
 
+/** 404 → an `AgentSessionAbsence` (`no-session`: the workflow never recorded
+ *  an agent session). */
 export async function getPortifyAgentSession(
   workflowId: string,
   opts?: ClientOptions,
-): Promise<AgentSessionResponse | null> {
+): Promise<AgentSessionResponse | AgentSessionAbsence> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   try {
     return await request<AgentSessionResponse>(
@@ -140,7 +142,7 @@ export async function getPortifyAgentSession(
       fetchImpl,
     )
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null
+    if (err instanceof ApiError && err.status === 404) return agentSessionAbsence(err)
     throw err
   }
 }

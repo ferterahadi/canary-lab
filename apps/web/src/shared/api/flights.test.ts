@@ -109,9 +109,9 @@ describe('flights api', () => {
     )
   })
 
-  it('getFlightAgentSession returns null on 404 (no agent ran)', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found' }))
-    await expect(getFlightAgentSession('fl_1', 'scout', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+  it('getFlightAgentSession maps 404 to an absence (no agent ran)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found', reason: 'no-session' }))
+    await expect(getFlightAgentSession('fl_1', 'scout', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ absent: true, reason: 'no-session' })
   })
 
   it('getFlightAgentSession rethrows non-404 errors', async () => {
@@ -249,9 +249,9 @@ describe('flights api', () => {
     )
   })
 
-  it('getFlightPlanAgentSession returns null on 404 (not spawned yet)', async () => {
-    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found' }))
-    await expect(getFlightPlanAgentSession('t1', { baseUrl: 'http://x', fetchImpl })).resolves.toBeNull()
+  it('getFlightPlanAgentSession maps 404 to an absence (not spawned yet)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(fail(404, { error: 'not found', reason: 'no-session' }))
+    await expect(getFlightPlanAgentSession('t1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual({ absent: true, reason: 'no-session' })
   })
 
   it('getFlightPlanAgentSession rethrows non-404 errors', async () => {

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
+import { isAgentSessionAbsence } from '@/shared/api/client'
+import type { AgentSessionAbsence, AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 import { formatElapsedSeconds } from '@/shared/lib/format'
 import { EventRow, SystemRow, groupSystemLines, shortSession } from './AgentSessionRows'
@@ -119,10 +120,11 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
     if (!source) { setLoading(false); return }
     setLoading(true)
 
-    const applySnapshot = (snapshot: AgentSessionResponse | null): void => {
+    const applySnapshot = (snapshot: AgentSessionResponse | AgentSessionAbsence | null): void => {
       if (cancelled) return
-      if (!snapshot) {
-        // No log yet on disk. Keep waiting if live; otherwise show empty state.
+      if (!snapshot || isAgentSessionAbsence(snapshot)) {
+        // No log yet on disk, or a definitive "never recorded". Keep waiting if
+        // live; otherwise show the empty state.
         setState({ agent: null, sessionId: '', events: [], subagents: new Map() })
         return
       }
@@ -136,7 +138,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
       })
     }
 
-    const fetchSnapshot = async (): Promise<AgentSessionResponse | null> => {
+    const fetchSnapshot = async (): Promise<AgentSessionResponse | AgentSessionAbsence | null> => {
       if (source.kind === 'run') return api.getAgentSession(source.runId)
       if (source.kind === 'benchmark') return api.getBenchmarkAgentSession(source.benchmarkId)
       if (source.kind === 'portify') return api.getPortifyAgentSession(source.workflowId)
@@ -153,10 +155,26 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
     // moments later. Retry a few times before believing the absence. Bounded on
     // purpose: the `pollUntilFound` mode this replaces waited indefinitely and
     // turned a genuinely absent log into a permanent spinner.
-    const fetchHistorySnapshot = async (): Promise<AgentSessionResponse | null> => {
+    //
+    // Only retry absences that can actually resolve. `session-log-missing`
+    // (a ref exists, the CLI's file hasn't landed) is that race for every
+    // source; a run's `no-session-ref` is too, because the ref file is written
+    // by heal-loop cleanup and can trail the terminal status. Every other
+    // absence — `no-session`, `run-not-found`, `task-not-found` — is the server
+    // saying "nothing was ever recorded", and retrying it held the pane on
+    // "Loading session…" for the full back-off on every agentless stage open
+    // (the shipped demo's derived flights hit this on every stage).
+    const absenceCanResolve = (a: AgentSessionAbsence): boolean =>
+      a.reason === 'session-log-missing' || (source.kind === 'run' && a.reason === 'no-session-ref')
+    const fetchHistorySnapshot = async (): Promise<AgentSessionResponse | AgentSessionAbsence | null> => {
       let snapshot = await fetchSnapshot()
       for (const delayMs of HISTORY_RETRY_DELAYS_MS) {
-        if (cancelled || (snapshot && snapshot.events.length > 0)) return snapshot
+        if (cancelled) return snapshot
+        if (isAgentSessionAbsence(snapshot)) {
+          if (!absenceCanResolve(snapshot)) return snapshot
+        } else if (snapshot && snapshot.events.length > 0) {
+          return snapshot
+        }
         await new Promise((resolve) => setTimeout(resolve, delayMs))
         if (cancelled) return snapshot
         snapshot = await fetchSnapshot()
@@ -172,7 +190,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
         if (!source.live) return
         // Open the live WS. The server replays events from the start of the
         // file, so dedupe by index relative to the snapshot length.
-        let snapshotLen = snapshot?.events.length ?? 0
+        let snapshotLen = snapshot && !isAgentSessionAbsence(snapshot) ? snapshot.events.length : 0
         let seenFromWs = 0
         conn = connectAgentSessionStream({
           source: source.kind === 'run'

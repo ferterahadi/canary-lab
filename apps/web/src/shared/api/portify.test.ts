@@ -53,13 +53,13 @@ describe('portify api', () => {
     expect(fetchImpl).toHaveBeenCalledWith('http://x/api/portify/w1', { method: 'DELETE' })
   })
 
-  it('getPortifyAgentSession returns the session on 200 and null on 404', async () => {
+  it('getPortifyAgentSession returns the session on 200 and an absence on 404', async () => {
     const session = { agent: 'claude', sessionId: 's', events: [] }
     const okFetch = vi.fn().mockResolvedValue(ok(session))
     await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl: okFetch })).resolves.toEqual(session)
     expect(okFetch).toHaveBeenCalledWith('http://x/api/portify/w1/agent-session', { method: 'GET' })
     const notFound = vi.fn().mockResolvedValue(fail(404, { reason: 'no-session' }))
-    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl: notFound })).resolves.toBeNull()
+    await expect(getPortifyAgentSession('w1', { baseUrl: 'http://x', fetchImpl: notFound })).resolves.toEqual({ absent: true, reason: 'no-session' })
   })
 
   it('getPortifyAgentSession rethrows non-404 errors', async () => {

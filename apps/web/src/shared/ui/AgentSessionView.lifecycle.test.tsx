@@ -7,11 +7,17 @@ import { AgentSessionView, pendingWork } from './AgentSessionView'
 
 const mocks = vi.hoisted(() => ({
   getAgentSession: vi.fn(),
+  getFlightAgentSession: vi.fn(),
   connectAgentSessionStream: vi.fn(() => ({ close: vi.fn() })),
 }))
 
-vi.mock('@/shared/api/client', () => ({
+vi.mock('@/shared/api/client', async (importOriginal) => ({
+  // Keep the real `isAgentSessionAbsence` — the view discriminates fetch
+  // results with it, and a stubbed guard would decouple these tests from the
+  // actual absence contract.
+  ...(await importOriginal<typeof import('@/shared/api/client')>()),
   getAgentSession: mocks.getAgentSession,
+  getFlightAgentSession: mocks.getFlightAgentSession,
 }))
 
 vi.mock('@/shared/api/agent-session-socket', () => ({
@@ -160,6 +166,16 @@ describe('AgentSessionView lifecycle presentation', () => {
     expect(container.querySelector('[data-testid="agent-session-live-tail"]')).not.toBeNull()
   })
 
+  it('treats a live-mode absence like an empty snapshot and still opens the tail', async () => {
+    // Live mode never blocks on the absence — the WS handles "not on disk yet"
+    // server-side, so the pane waits with the stream open instead of erroring.
+    mocks.getAgentSession.mockResolvedValueOnce({ absent: true, reason: 'session-log-missing' })
+    await render(true)
+
+    expect(container.textContent).toContain("Waiting for the agent's first output")
+    expect(mocks.connectAgentSessionStream).toHaveBeenCalledOnce()
+  })
+
   describe('history snapshot retry', () => {
     // A run whose status has just gone terminal can beat the agent CLI's final
     // flush of the session log to disk. History mode has no WS to tail, so that
@@ -194,6 +210,74 @@ describe('AgentSessionView lifecycle presentation', () => {
       await render(false)
 
       expect(mocks.getAgentSession).toHaveBeenCalledTimes(1)
+    })
+
+    it('shows the empty state immediately on a definitive absence — no retries', async () => {
+      // The server said "nothing was ever recorded" (`no-session`); burning the
+      // full ~9.5s back-off on it held every agentless stage open on "Loading
+      // session…" — the shipped demo's derived flights hit this on every open.
+      vi.useFakeTimers()
+      mocks.getFlightAgentSession.mockResolvedValue({ absent: true, reason: 'no-session' })
+
+      await act(async () => {
+        root.render(<AgentSessionView source={{ kind: 'flight', flightId: 'fl_1', stage: 'coverage-1', live: false }} />)
+      })
+
+      expect(mocks.getFlightAgentSession).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('No agent session was recorded')
+      vi.useRealTimers()
+    })
+
+    it('still retries a transient absence (session-log-missing) until the log lands', async () => {
+      // A ref exists but the CLI's file hasn't hit disk yet — the exact race
+      // the retry was built for, now expressed as a reasoned absence.
+      vi.useFakeTimers()
+      mocks.getAgentSession.mockReset()
+      mocks.getAgentSession
+        .mockResolvedValueOnce({ absent: true, reason: 'session-log-missing' })
+        .mockResolvedValue(settled)
+
+      await act(async () => {
+        root.render(<AgentSessionView source={{ kind: 'run', runId: 'run-1', live: false }} />)
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_500) })
+
+      expect(mocks.getAgentSession).toHaveBeenCalledTimes(2)
+      expect(container.textContent).toContain('Landed late')
+      vi.useRealTimers()
+    })
+
+    it("retries a run's no-session-ref — the ref file trails the terminal status", async () => {
+      vi.useFakeTimers()
+      mocks.getAgentSession.mockReset()
+      mocks.getAgentSession
+        .mockResolvedValueOnce({ absent: true, reason: 'no-session-ref' })
+        .mockResolvedValue(settled)
+
+      await act(async () => {
+        root.render(<AgentSessionView source={{ kind: 'run', runId: 'run-1', live: false }} />)
+      })
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_500) })
+
+      expect(mocks.getAgentSession).toHaveBeenCalledTimes(2)
+      expect(container.textContent).toContain('Landed late')
+      vi.useRealTimers()
+    })
+
+    it("treats a run's run-not-found as definitive — kind alone doesn't grant a retry", async () => {
+      // Negative control for the run-scoped exception: only `no-session-ref`
+      // can lag on a run; an unknown run id can't resolve by waiting.
+      vi.useFakeTimers()
+      mocks.getAgentSession.mockReset()
+      mocks.getAgentSession.mockResolvedValue({ absent: true, reason: 'run-not-found' })
+
+      await act(async () => {
+        root.render(<AgentSessionView source={{ kind: 'run', runId: 'run-gone', live: false }} />)
+      })
+
+      expect(mocks.getAgentSession).toHaveBeenCalledTimes(1)
+      expect(container.textContent).toContain('No agent session was recorded')
+      vi.useRealTimers()
     })
 
     it('gives up after the bounded back-off rather than spinning forever', async () => {
