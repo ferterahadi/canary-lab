@@ -2,12 +2,12 @@
 // unattended repair.
 //
 // Claude Code asks "Is this a project you created or one you trust?" the first
-// time it opens a directory interactively. Measured on claude 2.1.220:
+// time it opens a directory interactively. Measured on claude 2.1.241:
 //
 //   - The answer is stored as `projects["<abs path>"].hasTrustDialogAccepted`
 //     in the CLI's global config JSON.
-//   - Trust INHERITS from any already-trusted ancestor, at any depth. A fresh
-//     `<trusted>/logs/runs/<id>` opens straight into the REPL.
+//   - Trust is checked for the exact interactive cwd. A trusted project root
+//     does not cover a fresh `<project>/logs/runs/<id>` directory.
 //   - The prompt only appears on an interactive TTY. `claude -p` skips it
 //     entirely (its own `--help` says so), which is why every headless agent
 //     canary spawns has always been fine.
@@ -19,10 +19,9 @@
 // the cycle burns its full idle window before reporting "no code changes were
 // made" — which reads as "the agent tried and failed" when it never started.
 //
-// Granting trust for the PROJECT ROOT once fixes every future run by
-// inheritance, and is the smallest honest claim we can make on the user's
-// behalf: they launched `canary-lab ui` from that directory. It is NOT a
-// permission bypass — the REPL still asks before each tool call.
+// Granting trust for the exact RUN DIRECTORY before the spawn fixes that run
+// and is narrower than trusting the whole project. It is NOT a permission
+// bypass — the REPL still asks before each tool call.
 
 import fs from 'fs'
 import os from 'os'
@@ -43,7 +42,7 @@ export function claudeGlobalConfigFile(homeDir: string = os.homedir()): string {
 }
 
 export type TrustOutcome =
-  /** An ancestor (or the directory itself) was already trusted — no write. */
+  /** The exact directory was already trusted — no write. */
   | 'already-trusted'
   /** We added the entry; the next interactive claude here won't prompt. */
   | 'granted'
@@ -52,7 +51,7 @@ export type TrustOutcome =
 
 export interface TrustResult {
   outcome: TrustOutcome
-  /** The path that carries the trust — the ancestor we found, or the one we wrote. */
+  /** The exact trusted path we found or wrote. */
   trustedPath?: string
   /** Why an `unavailable` outcome happened, for the run transcript. */
   reason?: string
@@ -73,20 +72,6 @@ function realpathOrSelf(p: string): string {
   try { return fs.realpathSync(p) } catch { return path.resolve(p) }
 }
 
-// Every directory from `dir` up to the filesystem root, `dir` first. Claude
-// resolves symlinks before keying its config (the entry for a `/var/...` temp
-// workspace reads `/private/var/...`), so callers pass a realpath.
-function ancestorsOf(dir: string): string[] {
-  const out: string[] = []
-  let cur = path.resolve(dir)
-  for (;;) {
-    out.push(cur)
-    const parent = path.dirname(cur)
-    if (parent === cur) return out
-    cur = parent
-  }
-}
-
 function readConfig(file: string): ClaudeConfigShape | null {
   try {
     const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'))
@@ -97,10 +82,10 @@ function readConfig(file: string): ClaudeConfigShape | null {
 }
 
 /**
- * Is `dir` already covered by claude's folder trust — itself or via any
- * trusted ancestor? Returns the covering path, or null.
+ * Is this exact directory already trusted by Claude Code? Claude resolves
+ * symlinks before keying the config, so match against the real path.
  */
-export function claudeTrustCoveringPath(
+export function claudeTrustedPath(
   dir: string,
   opts: { configFile?: string; homeDir?: string } = {},
 ): string | null {
@@ -109,17 +94,15 @@ export function claudeTrustCoveringPath(
   const config = readConfig(file)
   const projects = config?.projects
   if (!projects) return null
-  for (const candidate of ancestorsOf(realpathOrSelf(dir))) {
-    if (projects[candidate]?.hasTrustDialogAccepted === true) return candidate
-  }
-  return null
+  const exact = realpathOrSelf(dir)
+  return projects[exact]?.hasTrustDialogAccepted === true ? exact : null
 }
 
 /**
- * Make sure an interactive `claude` started anywhere under `workspaceRoot`
- * opens without the folder-trust prompt.
+ * Make sure an interactive `claude` started in `workspaceRoot` opens without
+ * the folder-trust prompt.
  *
- * No-ops when an ancestor already covers it. Otherwise adds
+ * No-ops when that exact path is already trusted. Otherwise adds
  * `hasTrustDialogAccepted: true` for `workspaceRoot` alone, preserving every
  * other key in the file, via a same-directory temp file + rename so a crash
  * mid-write can't truncate the user's config.
@@ -140,8 +123,8 @@ export function ensureClaudeWorkspaceTrusted(
     return { outcome: 'unavailable', reason: `refusing to trust ${root} — too broad to claim on the user's behalf` }
   }
 
-  const covering = claudeTrustCoveringPath(root, { configFile: file, homeDir })
-  if (covering) return { outcome: 'already-trusted', trustedPath: covering }
+  const trusted = claudeTrustedPath(root, { configFile: file, homeDir })
+  if (trusted) return { outcome: 'already-trusted', trustedPath: trusted }
 
   const config = readConfig(file)
   if (!config) {

@@ -1,6 +1,6 @@
 ---
 name: canary-lab-verify
-description: Use when verifying a Canary Lab feature against a RUNNING target — a deployed environment ("verify checkout on staging", "run the saved verify config", "check the deployed app") or a locally booted app ("verify a running app", the Getting Started demo) — through the verify MCP tools (list/get/create/update_verification_config, boot_services, execute_verification, get_verification_result). No heal loop. For run + heal use canary-lab-run; for end-to-end onboarding use canary-lab (flight).
+description: Use when verifying a Canary Lab feature against a RUNNING target — a deployed environment ("verify checkout on staging", "run the saved verify config", "check the deployed app") or a locally booted app ("verify a running app") — through the verify MCP tools (list/get/create/update_verification_config, boot_services, execute_verification, get_verification_result). No heal loop. For run + heal use canary-lab-run; for end-to-end onboarding use canary-lab (flight).
 type: skill
 ---
 
@@ -37,10 +37,9 @@ feature's Playwright specs against target URLs — a deployed environment
 
 ## Arguments
 
-An invocation argument (`/canary-lab-verify <suite>` — the Getting Started
-guide's "Verify a Running App" card emits exactly this shape) is a suite
-(feature) name in the connected workspace. Use it directly, and for that
-demo follow the **Local app** flow below: boot the app, then verify it.
+An invocation argument (`/canary-lab-verify <suite>`) is a suite (feature) name
+in the connected workspace. Use it directly, then choose the **Local app** or
+**Deployed environment** flow below from the target the user named.
 
 ## Workspace Bootstrap
 

@@ -16,7 +16,7 @@ const MORE_ACTION_LABEL: Record<Exclude<OnboardingWorkflowAction['kind'], 'run' 
   coverage: 'Measure coverage',
   author: 'Author test',
   portify: 'Enable parallel runs',
-  verify: 'Start app and verify',
+  heal: 'Run and heal',
   export: 'Export evaluation',
 }
 
@@ -41,6 +41,8 @@ const WORKFLOW_WAIT_LABEL: Record<string, string> = {
   coverage: 'Measure Coverage',
   author: 'Author Tests',
   portify: 'Enable Parallel Runs',
+  heal: 'Run and Heal a Feature',
+  // A pre-upgrade active session can still carry the retired key.
   verify: 'Verify a Running App',
   export: 'Export an Evaluation',
 }

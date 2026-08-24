@@ -11,6 +11,7 @@ import { type RepoBranchMismatch } from '../../../shared/git-repo'
 import type { ExecutionType } from '../../../../../../shared/verification'
 import { ExternalHealAgentRequest, findActiveRunForFeature, parseExternalHealAgent } from './runs-route-support'
 import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
+import type { GettingStartedRunWorkflow } from '../../config/routes/onboarding'
 
 export { compareActiveRuns } from './runs-route-support'
 export type { ExternalHealAgentRequest } from './runs-route-support'
@@ -28,6 +29,7 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
       // revert env. Defaults to a normal test run.
       mode?: 'test' | 'boot'
       gettingStartedSource?: GettingStartedOwner
+      gettingStartedWorkflow?: GettingStartedRunWorkflow
     }
   }>('/api/runs', async (req, reply) => {
     const feature = req.body?.feature
@@ -67,10 +69,16 @@ export async function registerRunActionRoutes(app: FastifyInstance, deps: RunsRo
     // The caller's own claimable:false survives (never the reverse — policy
     // suppression cannot be overridden upward). See parseExternalHealAgent.
     const externalRunReq = healAgent ? { ...healAgent, claimable: !claimSuppressed && healAgent.claimable !== false } : undefined
+    const requestedDemoWorkflow = req.body?.gettingStartedWorkflow
+    if (requestedDemoWorkflow !== undefined && requestedDemoWorkflow !== 'run' && requestedDemoWorkflow !== 'heal') {
+      reply.code(400)
+      return { error: "gettingStartedWorkflow must be 'run' or 'heal'" }
+    }
     let gettingStartedSession: string | null = null
     if (req.body?.gettingStartedSource && deps.gettingStarted) {
       try {
-        gettingStartedSession = deps.gettingStarted.claim('run', req.body.gettingStartedSource).sessionId
+        gettingStartedSession = deps.gettingStarted
+          .claim(requestedDemoWorkflow ?? 'run', req.body.gettingStartedSource).sessionId
       } catch (err) {
         if (!(err instanceof GettingStartedBusyError)) throw err
         reply.code(409)

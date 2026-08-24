@@ -43,8 +43,19 @@ export const SAMPLE_FLIGHT_REPO_DIR = 'flight-app'
 export const WORKBENCH_SUITE = 'workflow-workbench'
 export const WORKBENCH_REPO_DIR = 'workflow-app'
 
+export type GettingStartedRunWorkflow = 'run' | 'heal'
+
+/** A normal run started through MCP has no card id in its tool arguments, so
+ *  the shipped fixture names are the stable attribution boundary. Storefront
+ *  owns the starter repair card; the workbench owns the later run/heal card. */
+export function gettingStartedRunWorkflow(feature: string): GettingStartedRunWorkflow | null {
+  if (feature === SAMPLE_SUITE || LEGACY_SAMPLE_SUITES.some((name) => name === feature)) return 'run'
+  if (feature === WORKBENCH_SUITE) return 'heal'
+  return null
+}
+
 export function isGettingStartedRunFeature(feature: string): boolean {
-  return feature === SAMPLE_SUITE || LEGACY_SAMPLE_SUITES.some((name) => name === feature)
+  return gettingStartedRunWorkflow(feature) !== null
 }
 
 export function isGettingStartedFlightStart(payload: Record<string, unknown> | undefined): boolean {
@@ -66,7 +77,7 @@ export type OnboardingWorkflowId =
   | 'coverage'
   | 'export'
   | 'author'
-  | 'verify'
+  | 'heal'
   | 'portify'
 
 export type OnboardingWorkflowAction =
@@ -75,7 +86,7 @@ export type OnboardingWorkflowAction =
   | { kind: 'coverage'; feature: string }
   | { kind: 'export'; feature: string }
   | { kind: 'author'; feature: string }
-  | { kind: 'verify'; feature: string }
+  | { kind: 'heal'; feature: string }
   | { kind: 'portify'; feature: string }
 
 export interface OnboardingWorkflow {
@@ -158,7 +169,7 @@ export function readOnboardingSamples(
   const suiteAvailability = suitePresent
     ? sampleAction({ kind: 'run', feature: sampleFeature })
     : missingSample('The storefront demo')
-  const workbenchAvailability = <T extends Exclude<OnboardingWorkflowAction, { kind: 'run' | 'flight' | 'export' }>>(action: T) =>
+  const workbenchAvailability = <T extends Exclude<OnboardingWorkflowAction, { kind: 'run' | 'flight' }>>(action: T) =>
     workbenchPresent
       ? sampleAction(action)
       : missingSample('The workflow workbench')
@@ -227,15 +238,15 @@ export function readOnboardingSamples(
       ...workbenchAvailability({ kind: 'portify', feature: workbenchFeature }),
     },
     {
-      id: 'verify',
+      id: 'heal',
       group: 'more',
       order: 4,
-      title: 'Verify a Running App',
-      outcome: 'Start the demo app and rerun its existing suite.',
-      steps: ['Start the app', 'Run the suite', 'Show pass or fail'],
-      skill: '/canary-lab-verify',
-      externalPrompt: `/canary-lab-verify ${workbenchFeature}`,
-      ...workbenchAvailability({ kind: 'verify', feature: workbenchFeature }),
+      title: 'Run and Heal a Feature',
+      outcome: 'Complete a normal test run that can be exported as an evaluation.',
+      steps: ['Run the suite', 'Heal failures', 'Finish passing'],
+      skill: '/canary-lab-run',
+      externalPrompt: `/canary-lab-run ${workbenchFeature}`,
+      ...workbenchAvailability({ kind: 'heal', feature: workbenchFeature }),
     },
     {
       id: 'export',
@@ -245,10 +256,8 @@ export function readOnboardingSamples(
       outcome: 'Turn a completed run into a reviewable evaluation.',
       steps: ['Collect results', 'Add repair evidence', 'Create evaluation'],
       skill: '/canary-lab-export',
-      externalPrompt: `/canary-lab-export ${sampleFeature}`,
-      ...(suitePresent
-        ? sampleAction({ kind: 'export', feature: sampleFeature })
-        : missingSample('The storefront demo')),
+      externalPrompt: `/canary-lab-export ${workbenchFeature}`,
+      ...workbenchAvailability({ kind: 'export', feature: workbenchFeature }),
     },
   ]
   return {

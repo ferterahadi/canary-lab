@@ -274,18 +274,28 @@ describe('MCP HTTP server (smoke)', () => {
         },
       })
       const submittedBody = JSON.parse(toolText(submittedExport))
+      const expectedArchivePath = path.join(
+        logsDir,
+        'evaluation-exports',
+        exportBody.task.taskId,
+        'export.zip',
+      )
       expect(submittedBody).toMatchObject({
         status: 'completed',
         downloadReady: true,
+        archivePath: expectedArchivePath,
+        reportInsideArchive: 'evaluation.html',
         // The submit result now carries a chat-ready digest the agent relays.
         evaluation: {
           summary: 'Externally reviewed checkout wording rendered by Canary Lab.',
           cases: [expect.objectContaining({ title: expect.any(String), confidence: expect.any(String) })],
         },
       })
-      // nextSteps steer the agent to surface the result, not just point at the UI.
+      // nextSteps steer the agent to surface both the digest and the local file,
+      // not make the user download a zip Canary has already written.
       expect(submittedBody.nextSteps.some((step: string) => step.includes('Present this evaluation'))).toBe(true)
-      expect(submittedBody.nextSteps.some((step: string) => step.includes('download_evaluation_export'))).toBe(true)
+      expect(submittedBody.nextSteps.some((step: string) => step.includes('Give the user archivePath'))).toBe(true)
+      expect(submittedBody.nextSteps.join(' ')).not.toContain('npx canary-lab export download')
       const fetchedExport = await client.callTool({
         name: 'get_evaluation_export',
         arguments: { taskId: exportBody.task.taskId },
@@ -294,6 +304,8 @@ describe('MCP HTTP server (smoke)', () => {
         producer: 'external',
         status: 'completed',
         downloadReady: true,
+        archivePath: expectedArchivePath,
+        reportInsideArchive: 'evaluation.html',
       })
       const download = await client.callTool({
         name: 'download_evaluation_export',
@@ -301,6 +313,10 @@ describe('MCP HTTP server (smoke)', () => {
       })
       const downloadBody = JSON.parse(toolText(download))
       expect(downloadBody.filename).toMatch(/checkout_flow-author-eval-run\.zip$/)
+      expect(downloadBody).toMatchObject({
+        archivePath: expectedArchivePath,
+        reportInsideArchive: 'evaluation.html',
+      })
       const archiveText = Buffer.from(downloadBody.archiveBase64, 'base64').toString('latin1')
       expect(archiveText).toContain('evaluation.html')
       expect(archiveText).not.toContain('evaluation.md')

@@ -82,6 +82,24 @@ describe('runs api', () => {
     })
   })
 
+  it('startRun identifies which normal-run demo card owns the claim', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rh' }, 201))
+    await startRun('workflow-workbench', {
+      fetchImpl,
+      gettingStartedSource: 'internal',
+      gettingStartedWorkflow: 'heal',
+    })
+    expect(fetchImpl).toHaveBeenCalledWith('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        feature: 'workflow-workbench',
+        gettingStartedSource: 'internal',
+        gettingStartedWorkflow: 'heal',
+      }),
+    })
+  })
+
   it('startRun omits mode for a normal test run', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(ok({ runId: 'rt' }, 201))
     await startRun('feat-x', { fetchImpl, mode: 'test' })

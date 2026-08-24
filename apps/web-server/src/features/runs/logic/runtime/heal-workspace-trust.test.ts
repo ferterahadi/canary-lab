@@ -12,12 +12,14 @@ import type { RunContext } from './run-context'
 
 let dir: string
 let workspace: string
+let runDir: string
 
 /** Only the fields the trust seam reads, plus a chunk sink for the transcript. */
 function mkCtx(over: Partial<RunContext> = {}) {
   const chunks: string[] = []
   const ctx = {
     projectRoot: workspace,
+    runDir,
     emit: (_event: string, payload: { chunk: string }) => { chunks.push(payload.chunk) },
     ...over,
   } as unknown as RunContext
@@ -27,7 +29,8 @@ function mkCtx(over: Partial<RunContext> = {}) {
 beforeEach(() => {
   dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-heal-trust-')))
   workspace = path.join(dir, 'workspace')
-  fs.mkdirSync(workspace, { recursive: true })
+  runDir = path.join(workspace, 'logs', 'runs', 'r1')
+  fs.mkdirSync(runDir, { recursive: true })
   // Point the resolver at the temp config rather than the developer's real one.
   process.env.CLAUDE_CONFIG_DIR = dir
 })
@@ -43,23 +46,23 @@ const writeConfig = (config: unknown) =>
 const readConfig = () => JSON.parse(fs.readFileSync(path.join(dir, '.claude.json'), 'utf-8'))
 
 describe('ensureHealWorkspaceTrusted', () => {
-  it('trusts the project root — not the run directory — so every later run inherits it', () => {
+  it('trusts the exact run directory because current Claude does not inherit root trust', () => {
     writeConfig({ projects: {} })
     const { ctx } = mkCtx()
     ensureHealWorkspaceTrusted(ctx)
-    expect(Object.keys(readConfig().projects)).toEqual([workspace])
+    expect(Object.keys(readConfig().projects)).toEqual([runDir])
   })
 
   it('says what it did, and that tool approval is unchanged', () => {
     writeConfig({ projects: {} })
     const { ctx, chunks } = mkCtx()
     ensureHealWorkspaceTrusted(ctx)
-    expect(chunks.join('')).toContain(workspace)
+    expect(chunks.join('')).toContain(runDir)
     expect(chunks.join('')).toContain('Tool approval is unchanged')
   })
 
   it('stays silent when trust was already in place', () => {
-    writeConfig({ projects: { [workspace]: { hasTrustDialogAccepted: true } } })
+    writeConfig({ projects: { [runDir]: { hasTrustDialogAccepted: true } } })
     const { ctx, chunks } = mkCtx()
     ensureHealWorkspaceTrusted(ctx)
     expect(chunks).toEqual([])

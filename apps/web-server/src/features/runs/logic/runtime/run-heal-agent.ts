@@ -143,9 +143,9 @@ export function healWorkspaceTrustRoot(ctx: RunContext): string | undefined {
 }
 
 /**
- * Grant the claude CLI folder trust over the project root so the heal pty
- * opens straight into the REPL. Trust inherits down, so one entry covers every
- * future run directory (see agent-workspace-trust.ts for the measured rules).
+ * Grant the claude CLI folder trust over this run's exact directory so the
+ * heal pty opens straight into the REPL. Current Claude Code versions do not
+ * inherit this trust from the project root (see agent-workspace-trust.ts).
  *
  * This grants NO tool permissions — the REPL still asks before each call. Set
  * `CANARY_LAB_NO_WORKSPACE_TRUST=1` to leave the prompt in place and answer it
@@ -158,7 +158,7 @@ export function healWorkspaceTrustRoot(ctx: RunContext): string | undefined {
 export function ensureHealWorkspaceTrusted(ctx: RunContext): void {
   const workspaceRoot = healWorkspaceTrustRoot(ctx)
   if (!workspaceRoot) return
-  const result = ensureClaudeWorkspaceTrusted(workspaceRoot)
+  const result = ensureClaudeWorkspaceTrusted(ctx.runDir)
   if (result.outcome === 'granted') {
     emitAgentSystemMessage(
       ctx,
@@ -549,10 +549,9 @@ export function spawnHealAgentRepl(ctx: RunContext): PtyHandle {
     throw err
   }
 
-  // Claude Code prompts "Is this a project you trust?" for any interactive cwd
-  // with no trusted ancestor, and the run directory is new every run. Nobody is
-  // there to answer it under autopilot, so the cycle would burn its whole idle
-  // window and report "no code changes were made". Settle it before the spawn.
+  // Claude Code prompts "Is this a project you trust?" for a new interactive
+  // cwd even when its project root is trusted. Nobody is there to answer under
+  // autopilot, so settle trust for this exact run directory before the spawn.
   if (cfg.agent === 'claude') ensureHealWorkspaceTrusted(ctx)
 
   let pty: PtyHandle

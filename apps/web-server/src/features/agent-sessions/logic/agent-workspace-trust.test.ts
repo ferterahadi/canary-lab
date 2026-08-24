@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import {
   claudeGlobalConfigFile,
-  claudeTrustCoveringPath,
+  claudeTrustedPath,
   ensureClaudeWorkspaceTrusted,
 } from './agent-workspace-trust'
 
@@ -50,72 +50,72 @@ describe('claudeGlobalConfigFile', () => {
   })
 })
 
-describe('claudeTrustCoveringPath', () => {
+describe('claudeTrustedPath', () => {
   const runDir = () => path.join(workspace, 'logs', 'runs', 'r1')
 
   it('returns null when the config file does not exist', () => {
-    expect(claudeTrustCoveringPath(runDir(), { configFile, homeDir: dir })).toBeNull()
+    expect(claudeTrustedPath(runDir(), { configFile, homeDir: dir })).toBeNull()
   })
 
   it('returns null when the config parses to a non-object', () => {
     fs.writeFileSync(configFile, '42')
-    expect(claudeTrustCoveringPath(runDir(), { configFile, homeDir: dir })).toBeNull()
+    expect(claudeTrustedPath(runDir(), { configFile, homeDir: dir })).toBeNull()
   })
 
   it('returns null when the config has no projects map', () => {
     write({ numStartups: 3 })
-    expect(claudeTrustCoveringPath(runDir(), { configFile, homeDir: dir })).toBeNull()
+    expect(claudeTrustedPath(runDir(), { configFile, homeDir: dir })).toBeNull()
   })
 
-  it('finds trust on an ancestor several levels up — this is why one entry covers every run', () => {
+  it('does not treat a trusted ancestor as trust for a fresh run directory', () => {
     write({ projects: { [workspace]: { hasTrustDialogAccepted: true } } })
-    expect(claudeTrustCoveringPath(runDir(), { configFile, homeDir: dir })).toBe(workspace)
+    expect(claudeTrustedPath(runDir(), { configFile, homeDir: dir })).toBeNull()
   })
 
   it('finds trust on the directory itself', () => {
     write({ projects: { [runDir()]: { hasTrustDialogAccepted: true } } })
-    expect(claudeTrustCoveringPath(runDir(), { configFile, homeDir: dir })).toBe(runDir())
+    expect(claudeTrustedPath(runDir(), { configFile, homeDir: dir })).toBe(runDir())
   })
 
   it('does not count an entry that exists but was declined', () => {
     write({ projects: { [workspace]: { hasTrustDialogAccepted: false } } })
-    expect(claudeTrustCoveringPath(runDir(), { configFile, homeDir: dir })).toBeNull()
+    expect(claudeTrustedPath(runDir(), { configFile, homeDir: dir })).toBeNull()
   })
 
   it('resolves symlinks — claude keys its config on the real path', () => {
     const link = path.join(dir, 'link-to-workspace')
     fs.symlinkSync(workspace, link)
     write({ projects: { [workspace]: { hasTrustDialogAccepted: true } } })
-    expect(claudeTrustCoveringPath(path.join(link, 'logs'), { configFile, homeDir: dir })).toBe(workspace)
+    expect(claudeTrustedPath(link, { configFile, homeDir: dir })).toBe(workspace)
   })
 
   it('falls back to the resolved path when the directory does not exist yet', () => {
     write({ projects: { [workspace]: { hasTrustDialogAccepted: true } } })
     const missing = path.join(workspace, 'logs', 'runs', 'never-created')
-    expect(claudeTrustCoveringPath(missing, { configFile, homeDir: dir })).toBe(workspace)
+    expect(claudeTrustedPath(missing, { configFile, homeDir: dir })).toBeNull()
   })
 
   it('reads the default config location when none is passed', () => {
     process.env.CLAUDE_CONFIG_DIR = dir
     write({ projects: { [workspace]: { hasTrustDialogAccepted: true } } })
-    expect(claudeTrustCoveringPath(workspace, { homeDir: dir })).toBe(workspace)
+    expect(claudeTrustedPath(workspace, { homeDir: dir })).toBe(workspace)
   })
 
   it('falls back to the real home dir when neither option is passed', () => {
     write({ projects: { [workspace]: { hasTrustDialogAccepted: true } } })
     // An explicit configFile makes the lookup deterministic; homeDir is left to
     // default so the `os.homedir()` arm is the one under test.
-    expect(claudeTrustCoveringPath(workspace, { configFile })).toBe(workspace)
+    expect(claudeTrustedPath(workspace, { configFile })).toBe(workspace)
   })
 })
 
 describe('ensureClaudeWorkspaceTrusted', () => {
-  it('no-ops when an ancestor is already trusted', () => {
-    write({ projects: { [dir]: { hasTrustDialogAccepted: true } } })
+  it('no-ops when the exact directory is already trusted', () => {
+    write({ projects: { [workspace]: { hasTrustDialogAccepted: true } } })
     const before = fs.readFileSync(configFile, 'utf-8')
     expect(ensureClaudeWorkspaceTrusted(workspace, { configFile, homeDir: dir })).toEqual({
       outcome: 'already-trusted',
-      trustedPath: dir,
+      trustedPath: workspace,
     })
     expect(fs.readFileSync(configFile, 'utf-8')).toBe(before)
   })

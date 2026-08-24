@@ -37,7 +37,7 @@ import {
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
 import { GettingStartedBusyError, GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
-import { WORKBENCH_SUITE, isGettingStartedFlightStart, isGettingStartedRunFeature } from './features/config/routes/onboarding'
+import { WORKBENCH_SUITE, gettingStartedRunWorkflow, isGettingStartedFlightStart } from './features/config/routes/onboarding'
 import type { ServerContext } from './server-context'
 import { UpdateJobStore } from './features/version/logic/update-job'
 import { VersionState } from './features/version/logic/version-state'
@@ -378,6 +378,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       return { statusCode: resp.statusCode, body }
     },
 	    startRun: async (feature, env, healAgent, isolation, executionType) => {
+	      const demoWorkflow = executionType === 'boot' ? null : gettingStartedRunWorkflow(feature)
 	      const resp = await app.inject({
 	        method: 'POST',
 	        url: '/api/runs',
@@ -387,8 +388,8 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
             ...(healAgent ? { healAgent } : {}),
             ...(isolation ? { isolation } : {}),
             ...(executionType === 'boot' ? { mode: 'boot' } : {}),
-            ...((executionType !== 'boot' && isGettingStartedRunFeature(feature))
-              ? { gettingStartedSource: 'external' }
+            ...(demoWorkflow
+              ? { gettingStartedSource: 'external', gettingStartedWorkflow: demoWorkflow }
               : {}),
           },
 	      })
@@ -432,12 +433,7 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const resp = await app.inject({
         method: 'POST',
         url: `/api/features/${encodeURIComponent(feature)}/verifications`,
-        // Same demo attribution the startRun injector applies: verifying the
-        // workbench suite from an external client IS the Verify demo, so the
-        // route claims the Getting Started session for it.
-        payload: feature === WORKBENCH_SUITE
-          ? { ...input, gettingStartedSource: 'external' }
-          : input,
+        payload: input,
       })
       if (resp.statusCode !== 200 && resp.statusCode !== 201) {
         const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
@@ -485,14 +481,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
     // The Getting Started claim for the MCP tools that create their work
     // records through logic calls rather than REST (draft, coverage job,
-    // portify workflow, export task — the run/flight/verify tools go through
+    // portify workflow, export task — the run/flight tools go through
     // app.inject, where the routes claim). The feature-matching lives here so
     // the MCP layer never has to know which suites are the demo fixtures.
     gettingStartedDemo: {
       claim: (workflow, feature) => {
-        const isDemo = workflow === 'export'
-          ? isGettingStartedRunFeature(feature)
-          : feature === WORKBENCH_SUITE
+        const isDemo = feature === WORKBENCH_SUITE
         if (!isDemo) return null
         try {
           return { kind: 'claimed', sessionId: gettingStarted.claim(workflow, 'external').sessionId }

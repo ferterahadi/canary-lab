@@ -11,14 +11,16 @@ export type GettingStartedWorkflow =
   | 'coverage'
   | 'author'
   | 'portify'
+  | 'heal'
+  // Retained only so an in-flight/pre-upgrade session.json remains readable.
   | 'verify'
   | 'export'
 export type GettingStartedOwner = 'internal' | 'external'
 /** What a claim is linked to. `run`/`flight` predate the widening and stay
  *  featureless (persisted session.json records exist in that shape); the newer
  *  kinds carry `feature` because their open-target navigation is feature-first
- *  (the coverage ledger, the suite's flight page pinned to a stage). A `verify`
- *  demo's target is its verification run, so it reuses kind 'run'. */
+ *  (the coverage ledger, the suite's flight page pinned to a stage). Both
+ *  normal-run cards, plus a legacy `verify` record, reuse kind 'run'. */
 export type GettingStartedTarget =
   | { kind: 'run'; id: string }
   | { kind: 'flight'; id: string }

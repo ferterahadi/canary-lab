@@ -1,17 +1,45 @@
 // MCP tools — the externally-authored evaluation export lifecycle.
 // Split out of authoring.ts.
+import fs from 'fs'
+import path from 'path'
 import { z } from 'zod'
 import {
   deleteEvaluationExportTask,
+  evaluationExportTaskPaths,
   evaluationExportTaskView,
   listEvaluationExportTasks,
   readEvaluationExportTask,
   readEvaluationExportZip,
+  type EvaluationExportTaskRecord,
+  type EvaluationExportTaskView,
 } from '../../features/evaluation/logic/evaluation-export-store'
 import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../features/evaluation/logic/external-evaluation-export'
 import { applyEvaluationTextSlotRewrite, buildTestReviewPacket, deterministicEvaluationRewrite, normalizeEvaluationRewrite, type EvaluationRewrite } from '../../features/evaluation/logic/test-review-export'
 import { isTerminalRunStatus } from '../../../../../shared/run-state'
 import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult, gettingStartedBusyResult } from '../tool-support'
+
+type EvaluationExportToolView = EvaluationExportTaskView & {
+  archivePath?: string
+  reportInsideArchive?: 'evaluation.html'
+}
+
+/** MCP clients run on the same machine as this server, so a completed export's
+ *  existing zip is a better hand-off than asking the user to download a second
+ *  copy. Only advertise a path that exists; a hand-deleted archive still reads
+ *  as completed history, but it is no longer something the user can open. */
+function evaluationExportToolView(logsDir: string, task: EvaluationExportTaskRecord): EvaluationExportToolView {
+  const view = evaluationExportTaskView(task)
+  if (!task.downloadReady) return view
+  // Stored task ids pass the store's validator before reaching this helper, so
+  // the safe path builder cannot reject this id.
+  const paths = evaluationExportTaskPaths(logsDir, task.taskId)!
+  if (!fs.existsSync(paths.zipPath)) return view
+  return {
+    ...view,
+    archivePath: path.resolve(paths.zipPath),
+    reportInsideArchive: 'evaluation.html',
+  }
+}
 
 export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -110,11 +138,11 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
       })
       if (!completed.ok) return errorResult(completed.error)
       return asJsonResult({
-        ...evaluationExportTaskView(completed.task),
+        ...evaluationExportToolView(deps.store.logsDir, completed.task),
         // Compact, chat-ready digest of the rendered evaluation so the agent can
         // relay the result in the conversation instead of only pointing at the
-        // UI. Kept small (titles + verdicts, not full flow steps); the full
-        // rendered evaluation.html ships via download_evaluation_export.
+        // UI. Kept small (titles + verdicts, not full flow steps); archivePath
+        // points at the already-rendered evaluation.html zip on this machine.
         evaluation: {
           featureTitle: normalizedRewrite.featureTitle ?? completed.task.feature,
           summary: normalizedRewrite.summary,
@@ -122,7 +150,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
         },
         nextSteps: [
           'Present this evaluation to the user in chat — the featureTitle, the summary, and the per-case title + confidence verdicts. Do not just say it is available in the UI.',
-          'download_evaluation_export returns the full rendered evaluation.html archive if the user wants the file.',
+          'Give the user archivePath as the exact local file location now. The archive already exists; do not send a separate download command.',
         ],
       })
     } catch (err) {
@@ -135,7 +163,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     inputSchema: { runId: z.string().optional() },
   }, async ({ runId }) => {
     const tasks = listEvaluationExportTasks(deps.store.logsDir, runId ? { runId } : {})
-    return asToonResult(tasks.map(evaluationExportTaskView))
+    return asToonResult(tasks.map((task) => evaluationExportToolView(deps.store.logsDir, task)))
   })
 
   registerTool('get_evaluation_export', {
@@ -144,19 +172,22 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   }, async ({ taskId }) => {
     const task = readEvaluationExportTask(deps.store.logsDir, taskId)
     if (!task) return errorResult(`evaluation export task not found: ${taskId}`)
-    return asJsonResult(evaluationExportTaskView(task))
+    return asJsonResult(evaluationExportToolView(deps.store.logsDir, task))
   })
 
   registerTool('download_evaluation_export', {
-    description: 'Return a completed evaluation export archive as base64 for MCP clients.',
+    description: 'Return a completed evaluation export archive path plus base64 for clients that cannot access the server filesystem.',
     inputSchema: { taskId: z.string() },
   }, async ({ taskId }) => {
     const task = readEvaluationExportTask(deps.store.logsDir, taskId)
     if (!task) return errorResult(`evaluation export task not found: ${taskId}`)
     const zip = task.status === 'completed' ? readEvaluationExportZip(deps.store.logsDir, taskId) : null
     if (!zip) return errorResult('evaluation export is not ready')
+    const taskView = evaluationExportToolView(deps.store.logsDir, task)
     return asJsonResult({
-      task: evaluationExportTaskView(task),
+      task: taskView,
+      archivePath: taskView.archivePath,
+      reportInsideArchive: taskView.reportInsideArchive,
       filename: `${task.archiveBase}.zip`,
       archiveBase64: zip.toString('base64'),
     })

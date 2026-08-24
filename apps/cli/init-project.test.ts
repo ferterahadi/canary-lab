@@ -188,6 +188,9 @@ describe('main (init-project orchestration)', () => {
     expect(fs.existsSync(path.join(target, 'workflow-app', 'server.ts'))).toBe(true)
     expect(fs.existsSync(path.join(target, 'features', 'workflow-workbench', 'feature.config.cjs'))).toBe(true)
     expect(fs.existsSync(path.join(target, 'features', 'workflow-workbench', 'e2e', 'workflow.spec.ts'))).toBe(true)
+    expect(
+      fs.readFileSync(path.join(target, 'features', 'workflow-workbench', 'playwright.config.ts'), 'utf-8'),
+    ).toContain('loadFeatureEnv(__dirname)')
     expect(fs.existsSync(path.join(target, 'features', 'workflow-workbench', 'docs', '_prd-summary.json'))).toBe(true)
     const verification = JSON.parse(
       fs.readFileSync(path.join(target, 'features', 'workflow-workbench', 'verification.configs.json'), 'utf-8'),

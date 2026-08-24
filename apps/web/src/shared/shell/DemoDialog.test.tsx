@@ -20,7 +20,7 @@ const WORKFLOWS: OnboardingWorkflow[] = [
   ['coverage', 'more', 1, 'Measure Coverage', '/canary-lab-coverage'],
   ['author', 'more', 2, 'Author Tests', '/canary-lab-author'],
   ['portify', 'more', 3, 'Enable Parallel Runs', '/canary-lab-portify'],
-  ['verify', 'more', 4, 'Verify a Running App', '/canary-lab-verify'],
+  ['heal', 'more', 4, 'Run and Heal a Feature', '/canary-lab-run'],
   ['export', 'more', 5, 'Export an Evaluation', '/canary-lab-export'],
 ].map(([id, group, order, title, skill]) => ({
   id: id as OnboardingWorkflowId,
@@ -33,7 +33,7 @@ const WORKFLOWS: OnboardingWorkflow[] = [
   externalPrompt: `${skill} exact-${id}`,
   internalAction: id === 'flight'
     ? { kind: 'flight', repoPath: '/w/flight-app', description: 'lending' }
-    : { kind: id, feature: id === 'run' || id === 'export' ? 'storefront-journey' : 'workflow-workbench' } as OnboardingWorkflowAction,
+    : { kind: id, feature: id === 'run' ? 'storefront-journey' : 'workflow-workbench' } as OnboardingWorkflowAction,
   unavailableReason: null,
 }))
 
@@ -111,7 +111,7 @@ describe('DemoDialog', () => {
 
   it('lists every workflow in the rail and opens on the first starter', () => {
     render()
-    for (const id of ['run', 'flight', 'coverage', 'author', 'portify', 'verify', 'export']) {
+    for (const id of ['run', 'flight', 'coverage', 'author', 'portify', 'heal', 'export']) {
       expect(q(`getting-started-workflow-${id}`)).not.toBeNull()
     }
     expect(q('getting-started-detail')?.textContent).toContain('Repair a broken suite')
@@ -150,6 +150,15 @@ describe('DemoDialog', () => {
     expect(q('getting-started-action-run')?.className).not.toContain('cl-button-primary')
     expect(q('getting-started-copy-run')?.className).not.toContain('cl-button-primary')
     expect(q('getting-started-action-run')?.className).toContain('cl-button')
+  })
+
+  it('launches Run and Heal as a normal workbench run', () => {
+    const onInternalAction = vi.fn()
+    render({ onInternalAction })
+    click(q('getting-started-workflow-heal'))
+    expect(q('getting-started-command-heal')?.textContent).toContain('/canary-lab-run exact-heal')
+    click(q('getting-started-action-heal'))
+    expect(onInternalAction).toHaveBeenCalledWith({ kind: 'heal', feature: 'workflow-workbench' })
   })
 
   it('swaps the pane to any secondary workflow picked in the rail', () => {

@@ -128,6 +128,45 @@ describe('POST /api/runs', () => {
     expect(attach).toHaveBeenCalledWith('gs-1', { kind: 'run', id: 'run-demo' })
   })
 
+  it('attributes the later normal run to the Run and Heal card', async () => {
+    writeFeature('foo')
+    const claim = vi.fn(() => ({ sessionId: 'gs-heal' }))
+    const attach = vi.fn()
+    const gettingStarted = { claim, attach, abandon: vi.fn() } as unknown as GettingStartedSessionStore
+    const { app } = await build({
+      startRun: async () => ({ kind: 'started', orch: makeStub('run-heal') }),
+      gettingStarted,
+    })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        gettingStartedSource: 'internal',
+        gettingStartedWorkflow: 'heal',
+      },
+    })
+    expect(res.statusCode).toBe(201)
+    expect(claim).toHaveBeenCalledWith('heal', 'internal')
+    expect(attach).toHaveBeenCalledWith('gs-heal', { kind: 'run', id: 'run-heal' })
+  })
+
+  it('rejects an unknown Getting Started run workflow', async () => {
+    writeFeature('foo')
+    const startRun = vi.fn()
+    const { app } = await build({ startRun })
+    const res = await app.inject({
+      method: 'POST', url: '/api/runs',
+      payload: {
+        feature: 'foo',
+        gettingStartedSource: 'internal',
+        gettingStartedWorkflow: 'verify',
+      },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: "gettingStartedWorkflow must be 'run' or 'heal'" })
+    expect(startRun).not.toHaveBeenCalled()
+  })
+
   it('returns a typed busy result without starting a competing demo run', async () => {
     writeFeature('foo')
     const active = {

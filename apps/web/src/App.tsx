@@ -35,32 +35,6 @@ import { resolveActivityTarget } from './shared/state/nav-state'
 import * as api from './shared/api/client'
 import type { GettingStartedTarget, OnboardingWorkflowAction } from './shared/api/client'
 
-// Covers the server's own 60s service-health deadline with headroom: the
-// workbench app boots via `npx tsx`, and a cold npx cache can push the first
-// boot past 30s — a shorter client cap here killed boots the server would
-// still have brought up (a retry then "worked" only because the cache was warm).
-const VERIFY_DEMO_BOOT_ATTEMPTS = 280
-const VERIFY_DEMO_BOOT_POLL_MS = 250
-
-async function waitForBootTargets(runId: string): Promise<Record<string, string>> {
-  for (let attempt = 0; attempt < VERIFY_DEMO_BOOT_ATTEMPTS; attempt += 1) {
-    const detail = await api.getRunDetail(runId)
-    const { manifest } = detail
-    if (manifest.status === 'failed' || manifest.status === 'aborted') {
-      throw new Error('The demo app could not start. Open Services for its boot log.')
-    }
-    const services = manifest.services ?? []
-    if (services.length > 0 && services.every((service) => service.status === 'ready' && service.healthUrl)) {
-      return Object.fromEntries(services.map((service) => [
-        service.name,
-        new URL(service.healthUrl!).origin,
-      ]))
-    }
-    await new Promise((resolve) => setTimeout(resolve, VERIFY_DEMO_BOOT_POLL_MS))
-  }
-  throw new Error('The demo app did not become ready in time. Open Services for its boot log.')
-}
-
 export function App() {
   const [specTotalTests, setSpecTotalTests] = useState(0)
   // Navigation — view / feature / run / flight + the routed dialogs, plus URL
@@ -300,9 +274,8 @@ export function App() {
   const demoExportRun = useMemo(() => {
     const feature = demo.workflows.find((workflow) => workflow.id === 'export')?.internalAction
     if (!feature || feature.kind !== 'export') return null
-    // Mirrors the server's standalonePassedRun gate exactly — 'verify' included:
-    // a passed verification cleared the blocker here while the stage-entry
-    // validator still rejected it, an enabled button whose click 400s.
+    // Mirrors the server's standalonePassedRun gate exactly. A boot, benchmark,
+    // or observational verification is not the normal run Export requires.
     return allRuns.find((run) =>
       run.feature === feature.feature
       && run.executionType !== 'boot'
@@ -312,8 +285,11 @@ export function App() {
   }, [allRuns, demo.workflows])
 
   const handleDemoAction = useCallback(async (action: OnboardingWorkflowAction): Promise<void> => {
-    if (action.kind === 'run') {
-      const { runId } = await api.startRun(action.feature, { gettingStartedSource: 'internal' })
+    if (action.kind === 'run' || action.kind === 'heal') {
+      const { runId } = await api.startRun(action.feature, {
+        gettingStartedSource: 'internal',
+        gettingStartedWorkflow: action.kind,
+      })
       setSelectedFeature(action.feature)
       setDemoOpen(false)
       navigateToRun(action.feature, runId)
@@ -362,25 +338,7 @@ export function App() {
       setFlightStage(stage)
       return
     }
-    if (action.kind === 'verify') {
-      const { runId: bootRunId } = await api.startRun(action.feature, { mode: 'boot' })
-      try {
-        const targetUrls = await waitForBootTargets(bootRunId)
-        const verificationRunId = await startVerificationAction(action.feature, {
-          targetUrls,
-          playwrightEnvsetId: 'local',
-          bootRunId,
-          gettingStartedSource: 'internal',
-        })
-        setDemoOpen(false)
-        navigateToRun(action.feature, verificationRunId)
-      } catch (error) {
-        await api.stopRun(bootRunId).catch(() => undefined)
-        throw error
-      }
-      return
-    }
-  }, [navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature, startVerificationAction])
+  }, [navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature])
 
   const openDemoTarget = useCallback((target: GettingStartedTarget): void => {
     setDemoOpen(false)

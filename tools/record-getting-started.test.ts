@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   demoCheckpointChoice,
   isSuccessfulDemoStage,
-  needsPassedRunForExport,
   parseArgs,
   workflowsToRecord,
 } from './record-getting-started.mjs'
@@ -13,30 +12,30 @@ const catalog = [
   { id: 'coverage', title: 'Coverage', internalAction: { kind: 'coverage', feature: 'workflow-workbench' }, unavailableReason: null },
   { id: 'author', title: 'Author', internalAction: { kind: 'author', feature: 'workflow-workbench' }, unavailableReason: null },
   { id: 'portify', title: 'Portify', internalAction: { kind: 'portify', feature: 'workflow-workbench' }, unavailableReason: null },
-  { id: 'verify', title: 'Verify', internalAction: { kind: 'verify', feature: 'workflow-workbench' }, unavailableReason: null },
-  { id: 'export', title: 'Export', internalAction: { kind: 'export', feature: 'storefront-journey' }, unavailableReason: null },
+  { id: 'heal', title: 'Run and Heal', internalAction: { kind: 'heal', feature: 'workflow-workbench' }, unavailableReason: null },
+  { id: 'export', title: 'Export', internalAction: { kind: 'export', feature: 'workflow-workbench' }, unavailableReason: null },
 ]
 
 describe('Getting Started recorder', () => {
   it('normalizes the server URL and accepts recording controls', () => {
     expect(parseArgs([
       '--url', 'http://127.0.0.1:61377/?dialog=demo',
-      '--workflow', 'verify',
+      '--workflow', 'heal',
       '--linger', '0',
       '--headed',
       '--no-cleanup',
     ])).toMatchObject({
       url: 'http://127.0.0.1:61377',
-      workflow: 'verify',
+      workflow: 'heal',
       lingerMs: 0,
       headed: true,
       cleanup: false,
     })
   })
 
-  it('records every server-owned workflow once with Repair before Export', () => {
+  it('records the workbench sequence with Run and Heal immediately before Export', () => {
     expect(workflowsToRecord(catalog, 'all').map((workflow) => workflow.id)).toEqual([
-      'verify', 'portify', 'author', 'run', 'export', 'flight', 'coverage',
+      'coverage', 'author', 'portify', 'heal', 'export', 'run', 'flight',
     ])
   })
 
@@ -49,16 +48,6 @@ describe('Getting Started recorder', () => {
   it('rejects an unknown workflow id', () => {
     expect(() => parseArgs(['--url', 'http://127.0.0.1:7421', '--workflow', 'unknown']))
       .toThrow('--workflow must be all or one of')
-  })
-
-  it('waits for Repair only when Export has no passed product run yet', () => {
-    expect(needsPassedRunForExport(catalog, [])).toBe(true)
-    expect(needsPassedRunForExport(catalog, [
-      { feature: 'storefront-journey', executionType: 'run', status: 'passed' },
-    ])).toBe(false)
-    expect(needsPassedRunForExport(catalog, [
-      { feature: 'storefront-journey', executionType: 'boot', status: 'passed' },
-    ])).toBe(true)
   })
 
   it('drives the successful choices for the two completion demos', () => {

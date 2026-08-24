@@ -215,7 +215,14 @@ describe('submit_external_evaluation_export', () => {
       rewrite: { featureTitle: 'Checkout', summary: 'One scenario passed.', cases: [CASE] },
     })
 
-    expect(out).toMatchObject({ taskId, status: 'completed', downloadReady: true })
+    const archivePath = evaluationExportTaskPaths(logsDir, taskId)!.zipPath
+    expect(out).toMatchObject({
+      taskId,
+      status: 'completed',
+      downloadReady: true,
+      archivePath,
+      reportInsideArchive: 'evaluation.html',
+    })
     // The digest is what the agent relays in chat, so it carries the authored
     // wording rather than a pointer at the UI.
     expect(out.evaluation).toEqual({
@@ -224,7 +231,9 @@ describe('submit_external_evaluation_export', () => {
       cases: [{ title: 'Shopper pays', confidence: 'High' }],
     })
     expect(String(out.nextSteps)).toContain('Present this evaluation to the user in chat')
-    const zip = fs.readFileSync(evaluationExportTaskPaths(logsDir, taskId)!.zipPath, 'utf8')
+    expect(String(out.nextSteps)).toContain('Give the user archivePath as the exact local file location')
+    expect(String(out.nextSteps)).not.toContain('npx canary-lab export download')
+    const zip = fs.readFileSync(archivePath, 'utf8')
     expect(zip).toContain('One scenario passed.')
   })
 
@@ -421,14 +430,21 @@ describe('submit_external_evaluation_export', () => {
 describe('list_evaluation_exports', () => {
   it('lists tasks as a TOON table and filters to one run', async () => {
     const other = runDetail({ runId: 'run-2' }, { runId: 'run-2' })
-    await startTask()
+    const completedTaskId = await startTask()
     await startTask(other)
-    const { text } = harness()
+    const { call, text } = harness()
+    await call('submit_external_evaluation_export', {
+      taskId: completedTaskId, rewrite: { summary: 'One scenario passed.', cases: [CASE] },
+    })
 
     const all = decode(await text('list_evaluation_exports')) as Array<Record<string, string>>
     const scoped = decode(await text('list_evaluation_exports', { runId: 'run-2' })) as Array<Record<string, string>>
 
     expect(all.map((row) => row.runId).sort()).toEqual(['run-1', 'run-2'])
+    expect(all.find((row) => row.taskId === completedTaskId)).toMatchObject({
+      archivePath: evaluationExportTaskPaths(logsDir, completedTaskId)!.zipPath,
+      reportInsideArchive: 'evaluation.html',
+    })
     expect(scoped.map((row) => row.runId)).toEqual(['run-2'])
   })
 })
@@ -438,8 +454,33 @@ describe('get_evaluation_export', () => {
     const taskId = await startTask()
     const { call } = harness()
 
-    expect(await call('get_evaluation_export', { taskId }))
-      .toMatchObject({ taskId, runId: 'run-1', producer: 'external', status: 'running' })
+    const task = await call('get_evaluation_export', { taskId })
+    expect(task).toMatchObject({ taskId, runId: 'run-1', producer: 'external', status: 'running' })
+    expect(task).not.toHaveProperty('archivePath')
+  })
+
+  it('returns the exact existing archive path after completion', async () => {
+    const taskId = await startTask()
+    const { call } = harness()
+    await call('submit_external_evaluation_export', {
+      taskId, rewrite: { summary: 'One scenario passed.', cases: [CASE] },
+    })
+
+    expect(await call('get_evaluation_export', { taskId })).toMatchObject({
+      archivePath: evaluationExportTaskPaths(logsDir, taskId)!.zipPath,
+      reportInsideArchive: 'evaluation.html',
+    })
+  })
+
+  it('does not advertise an archive path after the zip was removed', async () => {
+    const taskId = await startTask()
+    const { call } = harness()
+    await call('submit_external_evaluation_export', {
+      taskId, rewrite: { summary: 'One scenario passed.', cases: [CASE] },
+    })
+    fs.unlinkSync(evaluationExportTaskPaths(logsDir, taskId)!.zipPath)
+
+    expect(await call('get_evaluation_export', { taskId })).not.toHaveProperty('archivePath')
   })
 
   it('reports an unknown task by name', async () => {
@@ -461,6 +502,14 @@ describe('download_evaluation_export', () => {
     const out = await call('download_evaluation_export', { taskId })
 
     expect(out.filename).toBe('canary-lab-evaluation-checkout-run-1.zip')
+    expect(out).toMatchObject({
+      archivePath: evaluationExportTaskPaths(logsDir, taskId)!.zipPath,
+      reportInsideArchive: 'evaluation.html',
+      task: {
+        archivePath: evaluationExportTaskPaths(logsDir, taskId)!.zipPath,
+        reportInsideArchive: 'evaluation.html',
+      },
+    })
     expect(Buffer.from(String(out.archiveBase64), 'base64').toString('utf8')).toContain('One scenario passed.')
   })
 

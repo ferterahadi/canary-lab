@@ -14,6 +14,7 @@ import {
   SAMPLE_SUITE_REPO_DIR,
   WORKBENCH_REPO_DIR,
   WORKBENCH_SUITE,
+  gettingStartedRunWorkflow,
   isGettingStartedFlightStart,
   isGettingStartedRunFeature,
 } from './onboarding'
@@ -78,7 +79,7 @@ describe('readOnboardingSamples', () => {
       { id: 'coverage', group: 'more', order: 1 },
       { id: 'author', group: 'more', order: 2 },
       { id: 'portify', group: 'more', order: 3 },
-      { id: 'verify', group: 'more', order: 4 },
+      { id: 'heal', group: 'more', order: 4 },
       { id: 'export', group: 'more', order: 5 },
     ])
     expect(workflows.every((workflow) => workflow.internalAction !== null)).toBe(true)
@@ -90,6 +91,15 @@ describe('readOnboardingSamples', () => {
     // the intent — an agent that has to invent "what to test" tests something else.
     expect(workflows.find((workflow) => workflow.id === 'flight')?.externalPrompt)
       .toBe(`/canary-lab flight-app "${SAMPLE_FLIGHT_DESCRIPTION}"`)
+    expect(workflows.find((workflow) => workflow.id === 'heal')).toMatchObject({
+      skill: '/canary-lab-run',
+      externalPrompt: `/canary-lab-run ${WORKBENCH_SUITE}`,
+      internalAction: { kind: 'heal', feature: WORKBENCH_SUITE },
+    })
+    expect(workflows.find((workflow) => workflow.id === 'export')).toMatchObject({
+      externalPrompt: `/canary-lab-export ${WORKBENCH_SUITE}`,
+      internalAction: { kind: 'export', feature: WORKBENCH_SUITE },
+    })
   })
 
   // The samples are explicitly disposable. Nothing is remembered, so deleting
@@ -186,7 +196,11 @@ describe('external demo recognition', () => {
   it('recognizes the shipped run names without tagging ordinary features', () => {
     expect(isGettingStartedRunFeature(SAMPLE_SUITE)).toBe(true)
     expect(isGettingStartedRunFeature(LEGACY_SAMPLE_SUITES[0])).toBe(true)
+    expect(isGettingStartedRunFeature(WORKBENCH_SUITE)).toBe(true)
     expect(isGettingStartedRunFeature('checkout')).toBe(false)
+    expect(gettingStartedRunWorkflow(SAMPLE_SUITE)).toBe('run')
+    expect(gettingStartedRunWorkflow(WORKBENCH_SUITE)).toBe('heal')
+    expect(gettingStartedRunWorkflow('checkout')).toBeNull()
   })
 
   it('recognizes Full Flight by its short feature or resolved repo path', () => {

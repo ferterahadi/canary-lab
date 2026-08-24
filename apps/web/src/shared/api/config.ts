@@ -327,7 +327,7 @@ export interface ProjectConfig {
   port?: number
 }
 
-export type OnboardingWorkflowId = 'run' | 'flight' | 'coverage' | 'export' | 'author' | 'verify' | 'portify'
+export type OnboardingWorkflowId = 'run' | 'flight' | 'coverage' | 'export' | 'author' | 'heal' | 'portify'
 
 export type OnboardingWorkflowAction =
   | { kind: 'run'; feature: string }
@@ -335,7 +335,7 @@ export type OnboardingWorkflowAction =
   | { kind: 'coverage'; feature: string }
   | { kind: 'export'; feature: string }
   | { kind: 'author'; feature: string }
-  | { kind: 'verify'; feature: string }
+  | { kind: 'heal'; feature: string }
   | { kind: 'portify'; feature: string }
 
 export interface OnboardingWorkflow {
@@ -351,9 +351,9 @@ export interface OnboardingWorkflow {
   unavailableReason: string | null
 }
 
-/** Mirrors the server union (config/logic/getting-started-session.ts) — one
- *  key per Getting Started card, the two starters plus the five workflows. */
-export type GettingStartedWorkflow = 'run' | 'flight' | 'coverage' | 'author' | 'portify' | 'verify' | 'export'
+/** Mirrors the server union (config/logic/getting-started-session.ts). `verify`
+ *  remains readable for session files written before that card became `heal`. */
+export type GettingStartedWorkflow = 'run' | 'flight' | 'coverage' | 'author' | 'portify' | 'heal' | 'export' | 'verify'
 export type GettingStartedOwner = 'internal' | 'external'
 /** run/flight are featureless (pre-widening persisted records); the newer
  *  kinds carry `feature` because their open-target navigation is feature-first. */

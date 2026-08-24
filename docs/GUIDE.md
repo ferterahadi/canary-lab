@@ -296,7 +296,8 @@ The names below are exact `command` values inside `exec.arguments`; for example,
 5. Run and repair locally with the `repair` profile, or execute an observational
    deployed check with `verify`.
 6. Export a terminal run through `start_external_evaluation_export` and
-   `submit_external_evaluation_export`.
+   `submit_external_evaluation_export`; its `archivePath` is the exact local zip
+   to hand to the user (`evaluation.html` is inside it).
 
 Use a leaf profile when a client needs only one part of the lifecycle. Use
 `full` when the same connection also needs Portify. The UI stores these external

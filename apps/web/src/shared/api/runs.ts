@@ -96,7 +96,13 @@ export function pinFeatureBranchesToCurrent(
 
 export function startRun(
   feature: string,
-  opts?: ClientOptions & { env?: string; isolation?: 'worktree' | 'queue'; mode?: 'test' | 'boot'; gettingStartedSource?: 'internal' | 'external' },
+  opts?: ClientOptions & {
+    env?: string
+    isolation?: 'worktree' | 'queue'
+    mode?: 'test' | 'boot'
+    gettingStartedSource?: 'internal' | 'external'
+    gettingStartedWorkflow?: 'run' | 'heal'
+  },
 ): Promise<{ runId: string }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { feature }
@@ -104,6 +110,7 @@ export function startRun(
   if (opts?.isolation) body.isolation = opts.isolation
   if (opts?.mode === 'boot') body.mode = 'boot'
   if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
+  if (opts?.gettingStartedWorkflow) body.gettingStartedWorkflow = opts.gettingStartedWorkflow
   return request<{ runId: string }>(
     `${baseUrl}/api/runs`,
     {

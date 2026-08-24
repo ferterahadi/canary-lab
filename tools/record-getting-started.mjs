@@ -4,9 +4,9 @@ import process from 'process'
 import { fileURLToPath } from 'url'
 import { chromium } from 'playwright'
 
-// Export needs a passed storefront run. The all-workflows recording waits for
-// Repair to pass before opening Export's Flight stage.
-const WORKFLOW_ORDER = ['verify', 'portify', 'author', 'run', 'export', 'flight', 'coverage']
+// The five "More workflows" form one workbench sequence. Run and Heal must
+// finish before Export so the stage-entry gate sees the run just demonstrated.
+const WORKFLOW_ORDER = ['coverage', 'author', 'portify', 'heal', 'export', 'run', 'flight']
 const KNOWN_WORKFLOWS = new Set(WORKFLOW_ORDER)
 const DEFAULT_OUTPUT = path.resolve('output', 'playwright', 'getting-started')
 const RUN_PASS_TIMEOUT_MS = 15 * 60 * 1000
@@ -30,8 +30,8 @@ Options:
   --no-cleanup         Leave started runs, Flights, and background tasks active
   --help               Show this help
 
-Use a disposable workspace for --workflow all. The recorder waits for Repair to
-pass so Export can enter its server-validated Flight stage.`
+Use a disposable workspace for --workflow all. The recorder waits for Run and
+Heal to pass so Export can enter its server-validated Flight stage.`
 }
 
 export function parseArgs(argv) {
@@ -80,16 +80,6 @@ export function workflowsToRecord(catalog, requested) {
     }
     return workflow
   })
-}
-
-export function needsPassedRunForExport(workflows, runs) {
-  const action = workflows.find((workflow) => workflow.id === 'export')?.internalAction
-  if (!action || action.kind !== 'export') return false
-  return !runs.some((run) =>
-    run.feature === action.feature
-    && run.executionType !== 'boot'
-    && run.executionType !== 'benchmark'
-    && run.status === 'passed')
 }
 
 export function demoCheckpointChoice(workflowId, checkpointKind) {
@@ -146,20 +136,6 @@ function lastPost(posts, pattern) {
 }
 
 async function waitForDestination(page, workflowId, posts) {
-  if (workflowId === 'verify') {
-    await page.getByTestId('demo-dialog').waitFor({ state: 'hidden', timeout: 90_000 })
-    const deadline = Date.now() + 30_000
-    let runId = null
-    while (Date.now() < deadline && !runId) {
-      await posts.settle()
-      runId = lastPost(posts.entries, /^\/api\/features\/[^/]+\/verifications$/)?.body?.runId ?? null
-      if (!runId) await new Promise((resolve) => setTimeout(resolve, 100))
-    }
-    if (!runId) throw new Error('Verify closed Getting Started without returning a verification run id')
-    await page.waitForURL((url) => url.searchParams.get('run') === runId, { timeout: 30_000 })
-    await page.locator('[data-testid="run-status-indicator"]').first().waitFor({ state: 'visible' })
-    return
-  }
   const flightStage = {
     coverage: 'specs-coverage',
     author: 'specs-coverage',
@@ -242,13 +218,13 @@ async function waitForDemoSessionToSettle(baseUrl) {
   throw new Error('Getting Started session stayed active after cleanup')
 }
 
-async function cleanUpLaunch(baseUrl, workflowId, posts, options) {
+async function cleanUpLaunch(baseUrl, workflowId, posts) {
+  if (workflowId === 'heal') {
+    await waitForDemoSessionToSettle(baseUrl)
+    return 'kept passed run for Export'
+  }
   if (workflowId === 'run') {
     const started = lastPost(posts, /^\/api\/runs$/)?.body
-    if (options.awaitPassedRun && started?.runId) {
-      await waitForDemoSessionToSettle(baseUrl)
-      return 'kept passed run for Export'
-    }
     if (started?.runId) await api(baseUrl, `/api/runs/${encodeURIComponent(started.runId)}/abort`, { method: 'POST' })
     await waitForDemoSessionToSettle(baseUrl)
     return 'aborted run'
@@ -263,14 +239,6 @@ async function cleanUpLaunch(baseUrl, workflowId, posts, options) {
     }
     if (workflowId === 'flight') await waitForDemoSessionToSettle(baseUrl)
     return 'paused Flight'
-  }
-  if (workflowId === 'verify') {
-    const ids = posts
-      .filter((entry) => /^\/api\/(runs|features\/[^/]+\/verifications)$/.test(new URL(entry.url).pathname))
-      .map((entry) => entry.body?.runId)
-      .filter(Boolean)
-    await Promise.all(ids.map((id) => api(baseUrl, `/api/runs/${encodeURIComponent(id)}/abort`, { method: 'POST' }).catch(() => null)))
-    return `aborted ${ids.length} verification run${ids.length === 1 ? '' : 's'}`
   }
   return 'no cleanup needed'
 }
@@ -302,23 +270,16 @@ async function recordWorkflow(browser, baseUrl, outputDir, workflow, options) {
     await waitForDestination(page, workflow.id, posts)
     await posts.settle()
     await waitForDemoStageCompletion(page, baseUrl, workflow.id)
-    if (workflow.id === 'run' && options.awaitPassedRun) {
+    if (workflow.id === 'heal') {
       const started = lastPost(posts.entries, /^\/api\/runs$/)?.body
-      if (!started?.runId) throw new Error('Repair did not return a run id')
-      await waitForPassedRun(baseUrl, started.runId)
-      await page.locator('[data-testid="run-status-indicator"][data-status="passed"]').first()
-        .waitFor({ state: 'visible', timeout: 30_000 })
-    }
-    if (workflow.id === 'verify') {
-      const runId = lastPost(posts.entries, /^\/api\/features\/[^/]+\/verifications$/)?.body?.runId
-      if (!runId) throw new Error('Verify did not return a run id')
-      await waitForPassedRun(baseUrl, runId, 'Verification')
+      if (!started?.runId) throw new Error('Run and Heal did not return a run id')
+      await waitForPassedRun(baseUrl, started.runId, 'Run and Heal')
       await page.locator('[data-testid="run-status-indicator"][data-status="passed"]').first()
         .waitFor({ state: 'visible', timeout: 30_000 })
     }
     await page.waitForTimeout(options.lingerMs)
     const cleanup = options.cleanup
-      ? await cleanUpLaunch(baseUrl, workflow.id, posts.entries, options)
+      ? await cleanUpLaunch(baseUrl, workflow.id, posts.entries)
       : 'disabled'
     return { id: workflow.id, title: workflow.title, url: page.url(), cleanup, pageErrors: errors }
   } finally {
@@ -337,8 +298,6 @@ export async function main(argv = process.argv.slice(2)) {
   fs.mkdirSync(options.output, { recursive: true })
   const onboarding = await api(options.url, '/api/onboarding')
   const workflows = workflowsToRecord(onboarding.workflows, options.workflow)
-  const runs = options.workflow === 'all' ? await api(options.url, '/api/runs') : []
-  options.awaitPassedRun = options.workflow === 'all' && needsPassedRunForExport(workflows, runs)
   const browser = await chromium.launch({ headless: !options.headed, slowMo: 180 })
   const results = []
 
