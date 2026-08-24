@@ -8,8 +8,7 @@ import { registerMcpRoutes } from './server'
 import { createRegistry, RunStore } from '../features/runs/logic/run-store'
 import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,

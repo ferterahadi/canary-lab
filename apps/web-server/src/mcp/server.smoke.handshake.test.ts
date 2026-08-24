@@ -6,8 +6,7 @@ import Fastify from 'fastify'
 import { createServer } from '../server'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import { runDirFor } from '../features/runs/logic/runtime/run-paths'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,

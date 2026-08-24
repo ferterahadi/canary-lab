@@ -1,6 +1,6 @@
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+import type { JSONRPCMessage } from '@modelcontextprotocol/server'
+import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { type CanaryLabMcpProfile } from '../web-server/src/mcp/tools'
 import { DEFAULT_MCP_PROFILE, McpCommandOptions, resolveDefaultMcpUrl, stripProfile } from './mcp'
 import { inferMcpClientKind } from './mcp-client-kind'
@@ -46,10 +46,10 @@ export async function bridge(url: string, opts: McpCommandOptions = {}): Promise
 
   const createHttp = opts.createHttpTransport
     ?? ((target: string) =>
-      new StreamableHTTPClientTransport(new URL(target), { fetch: fetchFn }) as unknown as BridgeTransport)
+      new StreamableHTTPClientTransport(new URL(target), { fetch: fetchFn }))
   const stdio: BridgeTransport = opts.createStdioTransport
     ? opts.createStdioTransport()
-    : (new StdioServerTransport(opts.stdin, opts.stdout) as unknown as BridgeTransport)
+    : new StdioServerTransport(opts.stdin, opts.stdout)
 
   // When reconnecting, re-resolve the target. An explicit --url pins the same
   // server; otherwise re-read the live-server record so a switched port (or

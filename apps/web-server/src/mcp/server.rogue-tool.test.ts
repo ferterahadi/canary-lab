@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import path from 'path'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { McpServer } from '@modelcontextprotocol/server'
 import { createServer } from '../server'
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import {

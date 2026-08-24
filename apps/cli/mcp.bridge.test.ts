@@ -16,8 +16,7 @@ import {
   resolveUiProjectRootForMcpAutostart,
   type BridgeTransport,
 } from './mcp'
-
-import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
+import type { JSONRPCMessage } from '@modelcontextprotocol/server'
 
 class BufferWritable extends Writable {
   chunks: string[] = []

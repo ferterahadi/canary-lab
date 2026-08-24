@@ -5,11 +5,7 @@ import path from 'path'
 import { createServer } from '../server'
 
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { decode } from '@toon-format/toon'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the

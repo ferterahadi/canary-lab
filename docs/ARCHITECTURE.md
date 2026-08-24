@@ -524,6 +524,10 @@ link, or the per-repo reason there is none.
   `canary-lab ui`. Health: `GET /mcp/health?profile=<p>`. The port is configured in
   `canary-lab.config.json` (`port` field) in the workspace directory — read it
   dynamically rather than assuming a fixed value (default 7421 if unset).
+- The server speaks MCP `2026-07-28` through the v2 per-request handler. It also
+  keeps the sessionful 2025 handler behind the same endpoint so older clients can
+  initialize and reconnect without a flag. The SDK classifies each request from
+  its protocol envelope; both paths build tools from the same profile factory.
 - **Profiles** pick the tool subset via `?profile=`. There are seven workflow profiles and two composed profiles: `repair` (heal loop), `verify` (verification configs), `author`
   (feature/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
@@ -550,11 +554,12 @@ link, or the per-repo reason there is none.
   with no second edit. Adding/moving a tool does still require updating the mirror
   arrays in `mcp/server.smoke.test.ts` — see the
   [invariants table](#keep-in-sync-invariants) and the `cl_add-mcp-tool` skill.
-- Each MCP session gets its own transport (`mcp/server.ts`) — a singleton would
-  reject the 2nd client with `-32600 Server already initialized`.
+- Each legacy MCP session gets its own transport (`mcp/server.ts`) — a singleton
+  would reject the 2nd client with `-32600 Server already initialized`. Modern
+  MCP requests are stateless and do not enter that session map.
 - Destructive tools gate on `confirm: z.literal(true)` in their input schema
   (e.g. `abort_run`, `write_envset`).
-- **Steering skill-less clients**: external clients act on the `initialize`
+- **Steering skill-less clients**: external clients act on the initialize/discovery
   instructions + tool *results*, not the Canary Lab skill. The server sends
   profile-aware `instructions` (`INSTRUCTIONS_BY_PROFILE`, `mcp/server.ts`); `repair`
   carries the External Run Loop. `start_run`/`signal_run` results add

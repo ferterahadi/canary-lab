@@ -1,8 +1,7 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { randomUUID } from 'crypto'
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js'
+import { NodeStreamableHTTPServerTransport, toNodeHandler, toWebRequest } from '@modelcontextprotocol/node'
+import { createMcpHandler, isInitializeRequest, isLegacyRequest, McpServer } from '@modelcontextprotocol/server'
 import type { RunStore } from '../features/runs/logic/run-store'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import {
@@ -15,16 +14,15 @@ import {
 } from './tools'
 import { classifyMcpClient } from './client-surface'
 import { isClientKind, type ClientKind } from '../../../../shared/run-mode'
+import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../../../shared/mcp-protocol'
 
-// Singleton MCP server mounted on the existing Fastify instance at `/mcp`.
-// Uses the streamable HTTP transport so Claude / Codex clients (Desktop or
-// CLI) and other MCP clients (mcp-inspector, custom scripts) can connect over
-// plain HTTP at localhost:7421/mcp.
+// MCP endpoint mounted on the existing Fastify instance at `/mcp`. Uses
+// streamable HTTP so Claude / Codex clients (Desktop or CLI) and other MCP
+// clients (mcp-inspector, custom scripts) can connect over plain HTTP.
 //
 // The implementation is intentionally thin: every tool is a wrapper around an
 // existing REST endpoint or internal helper. The MCP server doesn't own
-// state — RunStore + ExternalHealBroker do. Notifications + resources are a
-// follow-up; v1 ships tools only.
+// state — RunStore + ExternalHealBroker do. The published surface is tools only.
 
 export interface McpRouteDeps extends CanaryLabMcpDeps {
   store: RunStore
@@ -39,7 +37,7 @@ export interface McpRouteDeps extends CanaryLabMcpDeps {
 
 const SERVER_INFO = { name: 'canary-lab', version: '1.0.0', title: 'Canary Lab' }
 
-// Sent to MCP clients in the `initialize` result so external agents that do
+// Sent to MCP clients through initialize/discovery so external agents that do
 // not carry the Canary Lab skill still learn the run/heal/author loops. The
 // repair text is load-bearing: without it, result-driven clients invent their
 // own get_run_snapshot poll loop instead of blocking on wait_for_heal_task,
@@ -121,7 +119,7 @@ export async function registerMcpRoutes(
   // rejects every later initialize with -32600 "Server already
   // initialized", so a singleton would cap us at one MCP client per
   // Fastify boot. Keyed by the session id the transport mints on init.
-  const transports = new Map<string, StreamableHTTPServerTransport>()
+  const transports = new Map<string, NodeStreamableHTTPServerTransport>()
 
   // The session's McpServer, kept alongside its transport. Previously it was
   // constructed in newSession and dropped on the floor, so nothing could reach
@@ -138,13 +136,39 @@ export async function registerMcpRoutes(
     CANARY_LAB_MCP_PROFILES.map((profile) => [profile, countToolsForProfile(deps, profile)]),
   ) as Record<CanaryLabMcpProfile, number>
 
+  const buildServer = (
+    profile: CanaryLabMcpProfile,
+    defaultClientKind: ClientKind | undefined,
+  ): McpServer => {
+    const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
+    registerCanaryLabTools(mcp, deps, { profile, defaultClientKind })
+    return mcp
+  }
+
+  // MCP 2026-07-28 is stateless: every request carries its protocol revision,
+  // client identity and capabilities. Keep the existing sessionful host below
+  // for 2025 clients, while this strict entry owns every modern-enveloped
+  // request. One tool factory backs both paths so their profiles cannot drift.
+  const modernHandler = createMcpHandler(({ requestInfo }) => {
+    const context = contextFromUrl(requestInfo?.url ?? '/mcp')
+    if (!context.ok) throw new Error(context.error)
+    return buildServer(context.profile, context.clientKind)
+  }, {
+    legacy: 'reject',
+    onerror: (err) => app.log.error({ err }, 'MCP 2026 handler rejected a request'),
+  })
+  const handleModern = toNodeHandler(modernHandler, {
+    onerror: (err) => app.log.error({ err }, 'MCP 2026 Node adapter failed'),
+  })
+  app.addHook('onClose', async () => modernHandler.close())
+
   const newSession = async (
     profile: CanaryLabMcpProfile,
     // undefined = the connect URL carried no client_kind; the session then
     // brands itself from the initialize handshake (see registerCanaryLabTools).
     defaultClientKind: ClientKind | undefined,
-  ): Promise<StreamableHTTPServerTransport> => {
-    const transport = new StreamableHTTPServerTransport({
+  ): Promise<NodeStreamableHTTPServerTransport> => {
+    const transport = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
         transports.set(id, transport)
@@ -170,8 +194,7 @@ export async function registerMcpRoutes(
         sessionServers.delete(id)
       }
     }
-    const mcp = new McpServer(SERVER_INFO, { instructions: INSTRUCTIONS_BY_PROFILE[profile] })
-    registerCanaryLabTools(mcp, deps, { profile, defaultClientKind })
+    const mcp = buildServer(profile, defaultClientKind)
     await mcp.connect(transport)
     return transport
   }
@@ -181,6 +204,24 @@ export async function registerMcpRoutes(
   // POST (client→server message), and DELETE (close session).
   const handle = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     try {
+      // Use the SDK's classifier rather than duplicating its envelope rules.
+      // Passing Fastify's parsed body keeps the raw Node stream untouched for
+      // the adapter that serves the selected modern request immediately after.
+      const webRequest = await toWebRequest(req.raw, req.body)
+      if (!await isLegacyRequest(webRequest, req.body)) {
+        const context = contextFromUrl(req.url)
+        if (!context.ok) {
+          reply.code(400).send({
+            jsonrpc: '2.0',
+            error: { code: -32602, message: context.error },
+            id: null,
+          })
+          return
+        }
+        await handleModern(req.raw, reply.raw, req.body)
+        return
+      }
+
       // Fastify types every header as `string | string[]`, but Node's parser
       // only hands back an array for `set-cookie`: a repeated Mcp-Session-Id
       // arrives already comma-joined, and that joined value simply matches no
@@ -188,7 +229,7 @@ export async function registerMcpRoutes(
       // instead of leaving an array arm no request can reach.
       const sessionId = req.headers['mcp-session-id']?.toString()
 
-      let transport: StreamableHTTPServerTransport
+      let transport: NodeStreamableHTTPServerTransport
       if (sessionId) {
         const existing = transports.get(sessionId)
         if (!existing) {
@@ -252,6 +293,7 @@ export async function registerMcpRoutes(
       ok: true,
       server: SERVER_INFO,
       profile: context.profile,
+      protocolVersion: CANARY_LAB_MCP_PROTOCOL_VERSION,
       // A bare health probe has no initialize handshake to brand itself from,
       // so an absent param reports the same 'other' a kind-less session used
       // to get; real sessions resolve the fallback per call instead.

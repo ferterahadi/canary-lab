@@ -1,6 +1,5 @@
 import { Readable, Writable } from 'stream'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { runAsScript } from './run-as-script'
 import { refreshAgentIntegrationsQuietly } from './agent'
 import {
@@ -17,6 +16,7 @@ import {
 import { DEFAULT_PORT, loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
 import { BridgeTransport, bridge, requiredToolsForProfile } from './mcp-bridge'
 import { inferMcpClientKind } from './mcp-client-kind'
+import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../shared/mcp-protocol'
 import { ensureMcpServerReachable, healthUrlFor, resolveUiProjectRootForMcpAutostart, urlWithContext } from './mcp-reachability'
 
 export { REINIT_ID, bridge } from './mcp-bridge'
@@ -142,7 +142,12 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
 
     const client = new Client(
       { name: 'canary-lab-mcp-doctor', version: '0.0.1' },
-      { capabilities: {} },
+      {
+        capabilities: {},
+        // Pin rather than auto-fallback: doctor is the release probe, so a
+        // green result must prove the newest wire protocol actually works.
+        versionNegotiation: { mode: { pin: CANARY_LAB_MCP_PROTOCOL_VERSION } },
+      },
     )
     const transport = new StreamableHTTPClientTransport(new URL(profileUrl), { fetch: fetchFn })
     try {
@@ -155,6 +160,7 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
         }
       }
       stdout.write(`Canary Lab MCP is reachable at ${url}\n`)
+      stdout.write(`Protocol: ${CANARY_LAB_MCP_PROTOCOL_VERSION}\n`)
       stdout.write(`Profile: ${profile}\n`)
       stdout.write(`Required tools: ${requiredToolsForProfile(profile).join(', ')}\n`)
       stdout.write(`Tools: ${names.length} listed (${healthBody.toolCount ?? 'unknown'} registered)\n`)

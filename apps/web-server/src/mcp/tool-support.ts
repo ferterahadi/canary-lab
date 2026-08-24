@@ -5,9 +5,8 @@
 // it without importing tools.ts back — tools.ts imports the groups, so anything
 // they share has to live below both of them.
 
+import type { McpServer, CallToolResult } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunDetail } from '../features/runs/logic/run-store'
 import type { ClientKind } from '../../../../shared/run-mode'
 import type { SummaryState } from '../../../../shared/coverage/types'

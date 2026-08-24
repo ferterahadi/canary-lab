@@ -7,8 +7,7 @@ import { registerMcpRoutes } from './server'
 import { createRegistry, RunStore } from '../features/runs/logic/run-store'
 import { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'
 import { runDirFor } from '../features/runs/logic/runtime/run-paths'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 // The SDK's callTool() return type is a union of the normal tool-result shape
 // and a legacy/task shape that only carries an index signature; TS collapses

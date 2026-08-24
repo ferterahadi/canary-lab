@@ -5,8 +5,8 @@
 // it without importing tools.ts back — tools.ts imports the groups, so anything
 // they share has to live below both of them.
 
+import type { CallToolResult } from '@modelcontextprotocol/server'
 import { z } from 'zod'
-import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { RunStore } from '../features/runs/logic/run-store'
 import type { RunDetail } from '../features/runs/logic/run-store'
 import type { ExternalHealBroker } from '../features/runs/logic/heal/external-heal-broker'

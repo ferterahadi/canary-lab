@@ -5,7 +5,7 @@
 // several profiles at once, so a per-profile file would mean either duplicate
 // registrations or inventing a primary owner. Profile membership is data — the
 // arrays in ./tool-support.ts — not file layout.
-import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import type { McpServer } from '@modelcontextprotocol/server'
 import {
   CLIENT_KIND,
   DEFAULT_CANARY_LAB_MCP_PROFILE,
