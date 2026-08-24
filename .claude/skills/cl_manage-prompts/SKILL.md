@@ -1,17 +1,15 @@
 ---
 name: cl_manage-prompts
-description: Use when adding, editing, or moving an LLM prompt an agent spawn sends (heal, wizard, portify, coverage/PRD, flights) — every prompt is a template file under apps/web-server/prompts/, never an inline string in a .ts file.
+description: Use when adding, editing, or moving an agent prompt or MCP initialize instruction — every instruction source is a Markdown file under apps/web-server/prompts/, never an inline string in a .ts file.
 ---
 
 # Managing Canary Lab's LLM Prompts
 
-Not for MCP `initialize` instructions (`REPAIR_INSTRUCTIONS` etc. in
-`mcp/server.ts`) or tool `description:` fields (`mcp/tool-groups/`) — those belong to
-`cl_sync-agent-surfaces` / `cl_add-mcp-tool`.
-
-Every prompt canary sends to a spawned agent (claude/codex) lives as a flat file
-in `apps/web-server/prompts/` — never as a template literal or string constant
-buried in a `.ts` file. One home, one loader:
+Every prompt Canary sends to a spawned agent (Claude/Codex), plus every static
+MCP `initialize` instruction source, lives as a flat file in
+`apps/web-server/prompts/` — never as a template literal or string constant
+buried in a `.ts` file. MCP files use the `mcp-*-instructions.md` naming pattern;
+their profile composition stays in `mcp/server.ts`. One home, one loader:
 [`apps/web-server/src/shared/prompts.ts`](../../../apps/web-server/src/shared/prompts.ts).
 
 ## Why prompts get their own folder
@@ -28,8 +26,9 @@ buried in a `.ts` file. One home, one loader:
 
 ## Adding a new prompt
 
-1. Write the prompt as `apps/web-server/prompts/<name>.md`, with `{{placeholder}}`
-   slots for the parts the caller fills in at runtime.
+1. Write the text as `apps/web-server/prompts/<name>.md`. Use `{{placeholder}}`
+   slots only for parts a spawned-agent caller fills at runtime; MCP initialize
+   instructions are static files loaded as-is.
 2. If the agent must return structured output validated against a JSON schema
    (codex's `--output-schema`), add a sibling `apps/web-server/prompts/<name>.schema.json`
    (see `coverage-annotate.schema.json`, `prd-summary.schema.json`,
@@ -47,6 +46,8 @@ buried in a `.ts` file. One home, one loader:
      two steps split apart, for callers that accept an injected raw template
      string for tests (`buildPlanPrompt({ template: '...' })`) or that resolve
      the path dynamically (`opts.promptPath ?? DEFAULT_PATH`).
+   - Static MCP instructions use `loadPromptTemplate(promptPath(name))`, then
+     `INSTRUCTIONS_BY_PROFILE` composes the workflow profiles in `mcp/server.ts`.
 4. Never `fs.readFileSync` a prompt file directly, and never hand-roll another
    `{{key}}` regex — that's exactly the duplication this module replaced (six
    near-identical copies before the 2026-07 consolidation).
@@ -96,7 +97,6 @@ word of it** — just by dropping a placeholder. Rules:
 
 | Lives here instead | Why it's a different thing |
 | --- | --- |
-| `apps/web-server/src/mcp/server.ts` — `REPAIR_INSTRUCTIONS`, `AUTHOR_INSTRUCTIONS`, etc. | MCP **protocol** instructions returned from `initialize` — part of the server's versioned API surface, not a per-spawn agent prompt. See `cl_sync-agent-surfaces`. |
 | `apps/web-server/src/mcp/tool-groups/` — tool `description:` fields | MCP tool schema metadata, not text sent to steer an agent's task. |
 | `templates/project/` | Scaffold files copied into a user's *workspace* (feature configs, sample specs) — ships via the same build step, but it's product output, not a prompt. See `cl_add-sample-feature`. |
 | `.claude/skills/**/SKILL.md` | Claude Code skill definitions for contributors working on canary-lab itself, not agent-spawn prompts. |
@@ -113,7 +113,7 @@ with the package).
 
 | Mistake | Consequence |
 | --- | --- |
-| Inlining a new agent prompt as a template literal in a `.ts` file | Works, but breaks the one-home rule — the next contributor won't think to look in `prompts/`, and it silently escapes the build's asset-copy step |
+| Inlining a new agent prompt or MCP instruction as a template literal in a `.ts` file | Works, but breaks the one-home rule — the next contributor won't think to look in `prompts/`, and it silently escapes the build's asset-copy step |
 | Hand-rolling a new `{{key}}` substitution regex | Recreates the exact duplication this module consolidated; extend `renderPromptTemplate` instead if it's missing a capability |
 | Assuming a solo-placeholder line is *always* droppable when empty | Only true for a **known** key; an unrecognized placeholder is deliberately kept (verified via `apps/web-server/src/shared/prompts.test.ts`) |
 | Forgetting `npm run smoke:pack` after adding/renaming a `.md`/`.schema.json` file | `prepare-assets.mjs`'s copy step is only proven by the tarball smoke test, same as `templates/` |

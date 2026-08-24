@@ -22,6 +22,7 @@ describe('demo terminal guide', () => {
   it('keeps the tester in control and preserves the workspace', () => {
     expect(guide).toContain('Nothing has run yet. You control both journeys.')
     expect(guide).toContain('Press Ctrl-C to stop Canary Lab; the workspace is retained.')
+    expect(guide).toContain('After stopping, run `npm run demo:clean` from the source checkout to remove retained demos.')
     expect(guide).toContain('  Workspace  /tmp/demo-project')
   })
 

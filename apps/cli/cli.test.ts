@@ -44,7 +44,7 @@ describe('printUsage', () => {
     expect(out).toContain('canary-lab setup')
     expect(out).toContain('canary-lab ui')
     expect(out).toContain('canary-lab mcp')
-    expect(out).toContain('--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full')
+    expect(out).toContain('--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full|compact')
     expect(out).not.toContain('canary-lab agent install')
     expect(out).toContain('canary-lab new feature <name>')
     expect(out).not.toContain('canary-lab new-feature')

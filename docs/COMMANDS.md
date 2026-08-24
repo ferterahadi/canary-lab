@@ -7,8 +7,8 @@ npx canary-lab flight <repo-path...> "<what to test>" [--feature <name>] [--env 
 npx canary-lab init <folder> [--package-spec <spec>] [--port <port>] [--no-install]
 npx canary-lab setup [--workspace <path>] [--agent auto|codex|claude|all] [--dry-run] [--force]
 npx canary-lab ui
-npx canary-lab mcp [--url <url>] [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full] [--client-kind <kind>]
-npx canary-lab mcp doctor [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full]
+npx canary-lab mcp [--url <url>] [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full|compact] [--client-kind <kind>]
+npx canary-lab mcp doctor [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full|compact]
 npx canary-lab new feature <name> --description "..."
 npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
@@ -35,13 +35,30 @@ The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_chec
 
 - `init` creates the workspace, installs dependencies and Chromium, and registers agent tools. Use `--no-install` for CI or offline setup.
 - `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
-- `setup` refreshes agent registration with the `full` profile so every installed focused skill, including Portify, has its tools. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
+- `setup` refreshes agent registration with the `compact` profile. It exposes one always-loaded `exec` tool that dispatches every installed skill, including Portify. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
 - `boot` starts a feature's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
-- `mcp` connects an AI client to the UI server. The default `lifecycle` profile covers authoring through export. Use a narrower profile when possible, `portify` for port injection, or `full` for every tool.
+- `mcp` connects an AI client to the UI server. A bare command defaults to the direct `lifecycle` profile. Setup-installed clients use `compact`; focused profiles and `full` remain available for direct-tool debugging and rollback.
 - `new feature` creates a feature deterministically. `env` applies or restores an envset.
 - `upgrade` refreshes managed workspace files and skills. It does not upgrade the npm dependency.
 
-## Requirement Coverage (MCP, `coverage`/`lifecycle`/`full` profiles)
+## Compact MCP invocation
+
+Setup-installed clients list one public tool, `exec`. Pass the exact atomic tool
+name as `command` and keep its inputs in the structured `arguments` object:
+
+```json
+{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}
+```
+
+That is the feature-scoped shape; commands with different inputs use the
+argument fields returned by `describe_tool`.
+
+`list_tools`, `search_tools`, and `describe_tool` are internal discovery
+commands reached through the same `exec` shape. Do not prefix commands with
+verbs such as `learn` or `call`. The `full` profile still exposes all 63 atomic
+tools directly if a client needs the old surface.
+
+## Requirement Coverage (MCP, `compact` or direct `coverage`/`lifecycle`/`full` profiles)
 
 MCP and the UI use the same coverage computation:
 
@@ -53,6 +70,9 @@ MCP and the UI use the same coverage computation:
 Tests link to requirements through Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }`. Legacy `@requirement` and `@path` comments still work. Coverage tools map existing tests; Flight's authoring stage can create tests for uncovered requirements. See [FEATURES](FEATURES.md#requirement-coverage).
 
 ## Trigger-surface parity (skill / MCP / REST / UI)
+
+The profile column names the focused direct-tool profile. The setup-installed
+`compact` profile reaches every listed atomic tool through `exec`.
 
 Major capabilities share stores, so work started on one surface appears on the others:
 

@@ -528,28 +528,35 @@ link, or the per-repo reason there is none.
   keeps the sessionful 2025 handler behind the same endpoint so older clients can
   initialize and reconnect without a flag. The SDK classifies each request from
   its protocol envelope; both paths build tools from the same profile factory.
-- **Profiles** pick the tool subset via `?profile=`. There are seven workflow profiles and two composed profiles: `repair` (heal loop), `verify` (verification configs), `author`
+- **Profiles** pick the tool surface via `?profile=`. There are seven workflow profiles, two composed direct-tool profiles, and one compact dispatcher profile: `repair` (heal loop), `verify` (verification configs), `author`
   (feature/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
   workflow), then `lifecycle` (**the bare-server default**: repair + verify + author + coverage +
-  export + flight, no portify) and `full` (lifecycle + portify). `setup` registers
-  clients with `full` because it installs every focused skill. `coverage`, `export`
+  export + flight, no portify), `full` (lifecycle + portify), and `compact` (one
+  always-loaded `exec` tool dispatching all 63 atomic handlers). `setup` registers
+  clients with `compact`; `full` remains the direct-tool rollback/debug surface. `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional
   `?client_kind=claude|codex|other|...` (the `*-pty` kinds are set by the runner, not passed by clients).
-- Tools live in `apps/web-server/src/mcp/tool-groups/` — one module per domain
+- Atomic tools live in `apps/web-server/src/mcp/tool-groups/` — one module per domain
   section (`reads`, `authoring`, `run-lifecycle`, `heal-flow`), each a thin wrapper
   over existing REST routes/helpers. `start_run`/`write_envset`/etc. reuse handlers
   via `app.inject()`; don't duplicate orchestrator logic. Author-profile tools call
   `apps/web-server/src/features/config/logic/feature-authoring.ts` directly.
-  `tools.ts` itself only builds the profile gate and calls the four registrars.
+  `tool-registry.ts` captures each group registration once as a schema + handler
+  definition. `tools.ts` exposes selected definitions directly or registers
+  `exec-tool.ts`, which validates with the original Zod schema and calls the same
+  handler. Its `list_tools`, `search_tools`, and `describe_tool` commands expose
+  bounded registry metadata without becoming separate public tools. It never
+  duplicates coverage math, verdicts, or confirmation gates.
   The grouping is **by domain, not by profile**. Tools may belong to several profiles, so `tool-profiles.ts` owns membership; file layout does not.
 - Profile membership = the `REPAIR_TOOLS`/`VERIFY_TOOLS`/`AUTHOR_TOOLS`/`COVERAGE_TOOLS`/
   `EXPORT_TOOLS`/`FLIGHT_TOOLS`/`PORTIFY_TOOLS` arrays, which live in
   **`mcp/tool-profiles.ts`** and reach the rest of the layer re-exported through
   `tool-support.ts`. `LIFECYCLE_TOOLS` auto-dedupes the union of all six non-portify
   arrays + `FULL_ONLY_TOOLS` (`get_run_actions`, `claim_heal`, `release_heal`);
-  `FULL_TOOLS` is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`. Because both are computed
+  `FULL_TOOLS` is `LIFECYCLE_TOOLS` + `PORTIFY_TOOLS`, while `COMPACT_TOOLS`
+  contains only the public `exec` dispatcher. Because both composed direct-tool profiles are computed
   unions, adding a tool to any workflow array surfaces it in the composed profiles
   with no second edit. Adding/moving a tool does still require updating the mirror
   arrays in `mcp/server.smoke.test.ts` — see the
@@ -560,8 +567,9 @@ link, or the per-repo reason there is none.
 - Destructive tools gate on `confirm: z.literal(true)` in their input schema
   (e.g. `abort_run`, `write_envset`).
 - **Steering skill-less clients**: external clients act on the initialize/discovery
-  instructions + tool *results*, not the Canary Lab skill. The server sends
-  profile-aware `instructions` (`INSTRUCTIONS_BY_PROFILE`, `mcp/server.ts`); `repair`
+  instructions + tool *results*, not the Canary Lab skill. The source text lives in
+  `apps/web-server/prompts/mcp-*-instructions.md`; `mcp/server.ts` loads and composes it
+  into `INSTRUCTIONS_BY_PROFILE`. The `repair`
   carries the External Run Loop. `start_run`/`signal_run` results add
   `nextSteps: ['wait_for_heal_task']` (`healWaitNext`, `mcp/heal-task-wait.ts`) so a
   result-driven agent blocks on `wait_for_heal_task` instead of polling
@@ -578,7 +586,8 @@ link, or the per-repo reason there is none.
   run just opened.
 - **Feature docs convention**: feature-scoped prose (distilled sessions, plans,
   notes) lives at `features/<name>/docs/<slug>.md`. The `write_feature_doc` MCP tool
-  (`coverage` / `flight` / `lifecycle` / `full` profiles — **not** `author`) is the only
+  (`coverage` / `flight` / `lifecycle` / `full` direct profiles, or dispatched through
+  `compact` — **not** the direct `author` profile) is the only
   sanctioned writer — create-or-replace, markdown only, path-traversal hardened, with
   `link_path` to symlink a local file in place instead of copying it. The draft-apply
   path rejects non-spec files, so docs do NOT go through it.
@@ -716,9 +725,9 @@ procedure.
 | Invariant | Files involved | Enforced by | Owning skill |
 | --- | --- | --- | --- |
 | MCP tool ↔ profile membership | `apps/web-server/src/mcp/tool-profiles.ts` workflow arrays and composed unions ↔ mirror arrays in `apps/web-server/src/mcp/server.smoke.test.ts` | `npx vitest run apps/web-server/src/mcp/server.smoke.test.ts` | `cl_add-mcp-tool` |
-| Run-loop semantics across agent surfaces | `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/src/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/heal-task-wait.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | nothing automated — discipline only | `cl_sync-agent-surfaces` |
+| Run-loop semantics across agent surfaces | MCP instruction sources (`apps/web-server/prompts/mcp-*-instructions.md`) composed by `INSTRUCTIONS_BY_PROFILE` (`apps/web-server/src/mcp/server.ts`) ↔ result steering (`healWaitNext`, `bootSessionValue` in `mcp/heal-task-wait.ts`) ↔ the shipped run-loop skills — **enumerate them, don't assume** (`find agent-integrations -name SKILL.md`; the loop lives in `canary-lab-run/`, not the umbrella `canary-lab/`) | prompt-loading + guardrail tests; cross-surface wording remains discipline | `cl_sync-agent-surfaces` |
 | Boot-session / collision / queue / claim semantics | `start_run` + `wait_for_heal_task` result shapes (`mcp/tool-groups/`) ↔ instructions ↔ the same discovered skill set | partial: tool unit tests | `cl_sync-agent-surfaces` |
-| **Repair rule + honest counts on every agent surface** | `MODE_COPY` (`runs/logic/runtime/auto-heal.ts`) ↔ `REPAIR_INSTRUCTIONS` (`mcp/server.ts`) ↔ `EXTERNAL_HEAL_NEXT_STEPS` (`runs/logic/heal/external-heal-surface.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "fix app/service code, not tests, unless provably wrong"; counts from `statusLine`, never `total - failed`. **Presence in `instructions` is not delivery**: the Claude Code CLI truncates a server's `instructions` at 2048 chars, so a rule must sit inside that window OR ride a tool result (results and tool descriptions are not truncated). The pass-count rule and the test-failure repair rule ride the heal result for exactly this reason. | `mcp/repair-guardrail.test.ts` (asserts POSITION, not just presence) + `auto-heal.test.ts` | `cl_run-evidence-invariants` |
+| **Repair rule + honest counts on every agent surface** | `MODE_COPY` (`runs/logic/runtime/auto-heal.ts`) ↔ `mcp-repair-instructions.md` loaded as `REPAIR_INSTRUCTIONS` (`mcp/server.ts`) ↔ `EXTERNAL_HEAL_NEXT_STEPS` (`runs/logic/heal/external-heal-surface.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "fix app/service code, not tests, unless provably wrong"; counts from `statusLine`, never `total - failed`. **Presence in `instructions` is not delivery**: the Claude Code CLI truncates a server's `instructions` at 2048 chars, so a rule must sit inside that window OR ride a tool result (results and tool descriptions are not truncated). The pass-count rule and the test-failure repair rule ride the heal result for exactly this reason. | `mcp/repair-guardrail.test.ts` (asserts POSITION, not just presence) + `auto-heal.test.ts` | `cl_run-evidence-invariants` |
 | Auto-PR on a healed green run | `shouldAutoPropose` gate (`runs/logic/pr/auto-propose.ts`) ↔ `autoProposePr` default + parse (`runs/logic/runtime/launcher/project-config.ts`) + write validator (`config/routes/project-config.ts`) ↔ `RunPrAttempt` / `proposedPrs` on the manifest (`shared/run-state.ts`) ↔ the `fix` block on the `passed` result (`healFixOutcome`, `mcp/heal-task-wait.ts`) ↔ every shipped `canary-lab-run/SKILL.md` — "the run opens the draft PR; the agent reports it and opens none of its own". The rule is **not** in `REPAIR_INSTRUCTIONS`, so it reaches skill-less clients through the tool result alone: loosen the gate and the result text has to move with it, or an agent pushes a duplicate branch onto the one the run just opened. | `pr/auto-propose.test.ts` (gate + manifest writes) + `mcp/heal-fix-outcome.test.ts` (result shape); the skill prose is discipline only | `cl_sync-agent-surfaces` |
 | Read-only agent spawns keep both arms in step | the codex arm's `--sandbox read-only` ↔ the claude arm's `readOnly: true` (`buildClaudeAgenticArgs` → `--tools Read,Glob,Grep`, `agent-sessions/logic/agent-process.ts`) at all three read-only spawns: `coverage/logic/coverage/prd-summary.ts`, `coverage/logic/coverage/annotate-engine.ts`, `evaluation/logic/test-review/rewrite-agent.ts`. Headless agents must bypass permission prompts — `-p` has nobody to answer one — so the bound has to be a capability allowlist, not an approval; `--tools` and `--disallowedTools` are both evaluated ahead of the bypass. The resolver prefers claude, so an unflagged claude arm is the one that actually runs. **Still open:** the write-capable unattended spawns (flight `scout`/`docs`/`specs-coverage`, portify, benchmark sabotage) hold full filesystem and network reach for their whole window. | `agent-sessions/logic/agent-read-only-parity.test.ts` (fails when either arm drops its flag) | `cl_reuse-shared-logic` |
 | Heal workspace trust ↔ the folder-trust prompt | `healWorkspaceTrustRoot` + `ensureHealWorkspaceTrusted` (`runs/logic/runtime/run-heal-agent.ts`) ↔ Claude's persistent seed (`agent-sessions/logic/agent-workspace-trust.ts`) ↔ Codex's invocation-scoped whole-map `projects={...}` override plus `--disable hooks` (`runs/logic/runtime/heal-agent-spawn.ts`) ↔ the `trust-prompt` fingerprint (`runs/logic/runtime/heal-failure-classifier.ts`) ↔ `agentCause` (`shared/run-state.ts`) ↔ `healAgentCauseSuffix` + `HEAL_CAUSE_PHRASE` (`apps/web/.../StageStatusLines.tsx`). The heal REPL is the only agent spawned on an interactive TTY, so it is the only spawn either CLI's folder-trust prompt can stop. Claude trust inherits from the project root; Codex receives the same root only for that invocation, does not mutate `config.toml`, and cannot run unreviewed hooks. `CANARY_LAB_NO_WORKSPACE_TRUST=1` disables both paths. If trust setup ever stops running, the classifier keeps the stall from reading as "the agent tried and failed". | `agent-workspace-trust.test.ts` + `heal-workspace-trust.test.ts` + Codex command tests in `auto-heal.test.ts` + the real-tail cases in `heal-failure-classifier.test.ts` | `cl_locate-agent-session-logs` |

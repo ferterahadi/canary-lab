@@ -26,15 +26,33 @@ import {
 // Off during boot: `registerMcpRoutes` counts tools for every profile up front,
 // so a rogue registration at that point would fail createServer itself and never
 // reach the request path this suite is about.
-const rogue = vi.hoisted(() => ({ enabled: false, name: 'unassigned_probe' }))
+const rogue = vi.hoisted(() => ({
+  mode: 'off' as 'off' | 'unassigned' | 'duplicate' | 'missing',
+  name: 'unassigned_probe',
+}))
 
 vi.mock('./tool-groups/reads', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./tool-groups/reads')>()
   return {
     registerReadTools: (ctx: Parameters<typeof actual.registerReadTools>[0]) => {
-      actual.registerReadTools(ctx)
-      if (rogue.enabled) {
+      if (rogue.mode === 'missing') {
+        actual.registerReadTools({
+          ...ctx,
+          registerTool: ((name: string, config: unknown, handler: unknown) => {
+            if (name !== 'list_features') {
+              const register = ctx.registerTool as unknown as (name: string, config: unknown, handler: unknown) => void
+              register(name, config, handler)
+            }
+          }) as typeof ctx.registerTool,
+        })
+      } else {
+        actual.registerReadTools(ctx)
+      }
+      if (rogue.mode === 'unassigned') {
         ctx.registerTool(rogue.name, { description: 'a tool no profile claims' }, async () => ({ content: [] }))
+      }
+      if (rogue.mode === 'duplicate') {
+        ctx.registerTool('list_features', { inputSchema: {} }, async () => ({ content: [] }))
       }
     },
   }
@@ -70,13 +88,28 @@ describe('MCP tool registration guard', () => {
   })
 
   it('refuses to register a tool no profile array claims', () => {
-    rogue.enabled = true
+    rogue.mode = 'unassigned'
     try {
       const mcp = new McpServer({ name: 'canary-lab', version: '1.0.0' })
       expect(() => registerCanaryLabTools(mcp, inertDeps, { profile: 'repair' }))
         .toThrow(`MCP tool is not assigned to a profile: ${rogue.name}`)
     } finally {
-      rogue.enabled = false
+      rogue.mode = 'off'
+    }
+  })
+
+  it('refuses duplicate registrations and missing assigned tools', () => {
+    const mcp = new McpServer({ name: 'canary-lab', version: '1.0.0' })
+    try {
+      rogue.mode = 'duplicate'
+      expect(() => registerCanaryLabTools(mcp, inertDeps, { profile: 'repair' }))
+        .toThrow('MCP tool is registered more than once: list_features')
+
+      rogue.mode = 'missing'
+      expect(() => registerCanaryLabTools(mcp, inertDeps, { profile: 'repair' }))
+        .toThrow('MCP tools are assigned but not registered: list_features')
+    } finally {
+      rogue.mode = 'off'
     }
   })
 
@@ -85,7 +118,7 @@ describe('MCP tool registration guard', () => {
     try {
       // Boot first, then break registration: the failure has to happen while
       // handling the initialize request, not while mounting the route.
-      rogue.enabled = true
+      rogue.mode = 'unassigned'
       const res = await app.inject({
         method: 'POST',
         url: '/mcp',
@@ -107,11 +140,11 @@ describe('MCP tool registration guard', () => {
       })
       // The half-built session is not left in the map for the next request to
       // find — nothing was registered, so there is nothing to route to.
-      rogue.enabled = false
+      rogue.mode = 'off'
       const probe = await app.inject({ method: 'GET', url: '/mcp/health' })
       expect((probe.json() as { activeSessions: number }).activeSessions).toBe(0)
     } finally {
-      rogue.enabled = false
+      rogue.mode = 'off'
       await app.close()
     }
   })

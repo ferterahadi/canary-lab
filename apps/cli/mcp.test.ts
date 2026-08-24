@@ -74,6 +74,7 @@ describe('canary-lab mcp', () => {
     ['verify', 'execute_verification'],
     ['author', 'create_feature'],
     ['full', 'execute_verification'],
+    ['compact', 'exec'],
   ] as const)('doctor verifies the %s profile', async (profile, requiredTool) => {
     const projectRoot = path.resolve(__dirname, '..', '..', 'templates', 'project')
     const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
@@ -84,6 +85,9 @@ describe('canary-lab mcp', () => {
       await expect(doctor(`${address}/mcp`, { stdout, stderr, profile })).resolves.toBe(true)
       expect(stdout.text()).toContain(`Profile: ${profile}`)
       expect(stdout.text()).toContain(requiredTool)
+      if (profile === 'compact') {
+        expect(stdout.text()).toContain('Command probe: get_feature_coverage discovered')
+      }
       expect(stderr.text()).toBe('')
     } finally {
       await app.close()

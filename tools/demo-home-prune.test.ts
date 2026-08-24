@@ -85,6 +85,26 @@ describe('pruneDemoStateFromRealHome', () => {
     expect(pruneDemoStateFromRealHome(registryDir, tempRoot)).toEqual(['active-servers.json', 'workspaces.json'])
   })
 
+  it('keeps a retained workspace registration while dropping its server record', () => {
+    const { registryDir, tempRoot } = mkDirs()
+    write(registryDir, 'active-servers.json', {
+      version: 1,
+      servers: [{ projectRoot: path.join(tempRoot, 'demo-project'), port: 1, pid: 1, updatedAt: 'z' }],
+    })
+    write(registryDir, 'workspaces.json', {
+      version: 1,
+      workspaces: [{ name: 'demo-project', path: path.join(tempRoot, 'demo-project') }],
+    })
+
+    expect(pruneDemoStateFromRealHome(
+      registryDir,
+      tempRoot,
+      undefined,
+      { preserveWorkspaceRegistration: true },
+    )).toEqual(['active-servers.json'])
+    expect(read(registryDir, 'workspaces.json').workspaces).toHaveLength(1)
+  })
+
   it('rewrites nothing when no entry belongs to the demo', () => {
     const { registryDir, tempRoot } = mkDirs()
     write(registryDir, 'workspaces.json', { version: 1, workspaces: [{ name: 'a', path: '/work/a' }] })

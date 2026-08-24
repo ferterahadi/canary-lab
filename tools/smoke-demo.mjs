@@ -5,6 +5,7 @@ import os from 'os'
 import path from 'path'
 import { renderInteractiveGuide } from './smoke-demo-output.mjs'
 import { pruneDemoStateFromRealHome } from './demo-home-prune.mjs'
+import { createDemoRoot } from './demo-workspace.mjs'
 
 // The developer's `npx canary-lab init`.
 //
@@ -22,7 +23,7 @@ import { pruneDemoStateFromRealHome } from './demo-home-prune.mjs'
 //
 // Deliberately NOT at parity with a user's `init`: workspace registration, the
 // browser download, agent-skill install and MCP client registration are all
-// suppressed below, because they write outside the throwaway workspace. Those
+// suppressed below, because they write outside the isolated demo state. Those
 // keep unit coverage; `smoke:pack` suppresses them for the same reason.
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
@@ -36,8 +37,10 @@ const requestedAgent = agentArg >= 0 ? argv[agentArg + 1] : 'auto'
 const featureName = 'storefront-journey'
 const demoIntent = 'Test the library lending contracts. Borrowing an available book reduces its available copies by one. Returning an open loan marks it returned and restores the previous count. Borrowing when all copies are on loan returns 409 without changing inventory. A Wizard of Earthsea has one copy. Unknown-book and unknown-loan 404s are fixture support, not requirements.'
 
-const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'canary-lab-demo-'))
-const projectDir = path.join(tempRoot, 'demo-project')
+// Interactive demos are inspectable workspaces, so keep them somewhere visible
+// and durable. The automated smoke journey remains disposable OS-temp state.
+const demoRoot = createDemoRoot({ persistent: interactive })
+const projectDir = path.join(demoRoot, 'demo-project')
 const appDir = path.join(projectDir, 'demo-app')
 const flightAppDir = path.join(projectDir, 'flight-app')
 const workflowAppDir = path.join(projectDir, 'workflow-app')
@@ -52,14 +55,14 @@ const childEnv = {
   ...(interactive ? { npm_config_loglevel: 'error' } : {}),
   // Demo state must never disturb another Canary Lab workspace or rewrite the
   // developer's real MCP client registrations.
-  CANARY_LAB_HOME: tempRoot,
-  CANARY_LAB_AGENT_HOME: tempRoot,
+  CANARY_LAB_HOME: demoRoot,
+  CANARY_LAB_AGENT_HOME: demoRoot,
   CANARY_LAB_SKIP_CLIENT_MCP: '1',
   // The wrapper owns the demo terminal's Ctrl-C. The nested UI still performs
   // its full graceful shutdown, but must not open a competing stdin prompt.
   CANARY_LAB_PARENT_OWNS_SHUTDOWN: '1',
   // The scaffold's postinstall downloads the Playwright browser into the
-  // developer's shared cache — outside the throwaway workspace. Suppress it and
+  // developer's shared cache — outside the isolated workspace. Suppress it and
   // use whatever chromium the machine already has, which is what this script
   // has always done.
   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
@@ -332,19 +335,19 @@ async function provision() {
     // `npm pack` runs the package's prepack hook, which already performs the
     // full build. Running build separately doubles demo startup time.
     setupTask('Building and packing this checkout', 'Package ready', () => (
-      run('npm', ['pack', '--pack-destination', tempRoot], repoRoot, { quiet: interactive })
+      run('npm', ['pack', '--pack-destination', demoRoot], repoRoot, { quiet: interactive })
     ))
-    const tarball = fs.readdirSync(tempRoot).find((entry) => entry.endsWith('.tgz'))
+    const tarball = fs.readdirSync(demoRoot).find((entry) => entry.endsWith('.tgz'))
     if (!tarball) throw new Error('npm pack did not produce a tarball')
-    tarballPath = path.join(tempRoot, tarball)
+    tarballPath = path.join(demoRoot, tarball)
   }
 
-  run('npm', ['init', '-y'], tempRoot, { quiet: true })
+  run('npm', ['init', '-y'], demoRoot, { quiet: true })
   setupTask('Installing Canary Lab locally', 'Canary Lab installed', () => (
-    run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], tempRoot, { quiet: interactive })
+    run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`], demoRoot, { quiet: interactive })
   ))
   setupTask('Creating the demo project', 'Demo project created', () => (
-    run('npx', ['canary-lab', 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], tempRoot, { quiet: interactive })
+    run('npx', ['canary-lab', 'init', 'demo-project', '--package-spec', `file:${tarballPath}`, '--no-install'], demoRoot, { quiet: interactive })
   ))
   setupTask('Installing project dependencies', 'Dependencies installed', () => (
     run('npm', ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'], projectDir, { quiet: interactive })
@@ -529,23 +532,19 @@ async function runSmoke(port) {
   }
 }
 
-// Undo the footprint a finished demo leaves in the user's REAL `~/.canary-lab`.
-// The reasoning lives with the helper; it is a separate module so it can be
-// unit-tested, because a bug here would edit a registry the user depends on.
+// Remove the finished server's live record from the user's REAL
+// `~/.canary-lab`. Disposable smoke runs also drop their workspace record;
+// interactive demos keep it because their workspace is retained.
 function pruneRealHomeState() {
   const changed = pruneDemoStateFromRealHome(
     path.join(os.homedir(), '.canary-lab'),
-    tempRoot,
+    demoRoot,
     (message) => console.warn(`    (${message})`),
+    { preserveWorkspaceRegistration: interactive },
   )
   for (const file of changed) console.log(`    Removed this demo's entry from ~/.canary-lab/${file}`)
-  // Deliberately NOT re-pointing the client MCP registrations. `setup` may have
-  // aimed Claude Desktop at this temp install, but a dev script that rewrites a
-  // desktop app's config on every exit is worse than the problem — and it is
-  // redundant: `canary-lab ui` re-asserts that entry on every boot, guarded so a
-  // temp install can never claim it back.
-  console.log('    If you ran `canary-lab setup` here, run `npx canary-lab ui` from your durable')
-  console.log('    workspace to re-point your MCP clients, then restart Claude Desktop.')
+  // Client MCP registrations are intentionally left alone. An interactive
+  // demo now points at a retained install; automated smoke runs suppress setup.
 }
 
 function cleanup() {
@@ -553,9 +552,9 @@ function cleanup() {
   pruneRealHomeState()
   if (keepOpen && fs.existsSync(projectDir)) return
   try {
-    fs.rmSync(tempRoot, { recursive: true, force: true })
+    fs.rmSync(demoRoot, { recursive: true, force: true })
   } catch (error) {
-    console.warn(`    (could not remove ${tempRoot}: ${error.message})`)
+    console.warn(`    (could not remove ${demoRoot}: ${error.message})`)
   }
 }
 

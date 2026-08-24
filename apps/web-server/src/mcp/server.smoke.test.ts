@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 
 import path from 'path'
+import type { FastifyInstance } from 'fastify'
 
 import { createServer } from '../server'
+import { mcpErrorLogger, mcpRequestUrl } from './server'
 
 import type { PtyFactory } from '../features/runs/logic/runtime/pty-spawner'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { decode } from '@toon-format/toon'
+import { CANARY_LAB_MCP_PROTOCOL_VERSION } from '../../../../shared/mcp-protocol'
 
 // Smoke test for the MCP HTTP server. Boots Canary Lab against the
 // templates/project tree, connects a real MCP client over streamable HTTP,
@@ -192,16 +195,32 @@ function toolText(result: ToolCallResult): string {
   return first?.text ?? ''
 }
 
-async function connectClient(address: string, pathAndQuery = '/mcp'): Promise<Client> {
+async function connectClient(address: string, pathAndQuery = '/mcp', modern = false): Promise<Client> {
   const client = new Client(
     { name: 'canary-lab-smoke', version: '0.0.1' },
-    { capabilities: {} },
+    {
+      capabilities: {},
+      ...(modern
+        ? { versionNegotiation: { mode: { pin: CANARY_LAB_MCP_PROTOCOL_VERSION } } as const }
+        : {}),
+    },
   )
   await client.connect(new StreamableHTTPClientTransport(new URL(pathAndQuery, address)))
   return client
 }
 
 describe('MCP HTTP server (smoke)', () => {
+  it('normalizes absent modern-request URLs and reports adapter errors through Fastify', () => {
+    expect(mcpRequestUrl(undefined)).toBe('/mcp')
+    expect(mcpRequestUrl({ url: '/mcp?profile=compact' })).toBe('/mcp?profile=compact')
+
+    const error = vi.fn()
+    const log = { error } as unknown as FastifyInstance['log']
+    const cause = new Error('broken adapter')
+    mcpErrorLogger({ log }, 'adapter failed')(cause)
+    expect(error).toHaveBeenCalledWith({ err: cause }, 'adapter failed')
+  })
+
   // These E2E tests exercise claim flows across interactive client kinds
   // (codex, 'other' auto-claims), which the default denylist policy allows.
   // Pin the default block list explicitly so an ambient override can't leak in;
@@ -246,6 +265,14 @@ describe('MCP HTTP server (smoke)', () => {
       expect((full.json() as { profile: string; toolCount: number })).toMatchObject({
         profile: 'full',
         toolCount: FULL_TOOLS.length,
+      })
+
+      const compact = await app.inject({ method: 'GET', url: '/mcp/health?profile=compact' })
+      expect(compact.statusCode).toBe(200)
+      expect(compact.json()).toMatchObject({
+        profile: 'compact',
+        toolCount: 1,
+        tools: ['exec'],
       })
 
       const verify = await app.inject({ method: 'GET', url: '/mcp/health?profile=verify' })
@@ -334,6 +361,13 @@ describe('MCP HTTP server (smoke)', () => {
         jsonrpc: '2.0',
         error: { message: 'invalid MCP profile: nope' },
       })
+
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      // The negotiating client deliberately collapses the server's 400 body
+      // into its pin-mode failure; the important assertion is that the modern
+      // path refuses to negotiate on an invalid profile.
+      await expect(connectClient(address, '/mcp?profile=nope', true))
+        .rejects.toThrow(/Version negotiation failed/)
     } finally {
       await app.close()
     }
@@ -406,6 +440,62 @@ describe('MCP HTTP server (smoke)', () => {
       expect(tools.tools.map((t) => t.name).sort()).toEqual(FULL_TOOLS)
     } finally {
       if (client) await client.close().catch(() => undefined)
+      await app.close()
+    }
+  })
+
+  it('exposes one always-loaded exec tool and dispatches discovery plus coverage commands', async () => {
+    const projectRoot = path.resolve(__dirname, '..', '..', '..', '..', 'templates', 'project')
+    const { app } = await createServer({ projectRoot, ptyFactory: inertPtyFactory })
+    let compactClient: Client | null = null
+    let directClient: Client | null = null
+    try {
+      const address = await app.listen({ port: 0, host: '127.0.0.1' })
+      compactClient = await connectClient(address, '/mcp?profile=compact', true)
+      directClient = await connectClient(address, '/mcp?profile=coverage')
+
+      const tools = await compactClient.listTools()
+      expect(tools.tools.map((tool) => tool.name)).toEqual(['exec'])
+      expect(tools.tools[0]?._meta).toMatchObject({ 'anthropic/alwaysLoad': true })
+
+      const search = await compactClient.callTool({
+        name: 'exec',
+        arguments: { command: 'search_tools', arguments: { query: 'get_feature_coverage' } },
+      })
+      const searchResult = JSON.parse(toolText(search)) as { matches: Array<{ command: string }> }
+      expect(searchResult.matches).toContainEqual(expect.objectContaining({ command: 'get_feature_coverage' }))
+
+      const describeResult = await compactClient.callTool({
+        name: 'exec',
+        arguments: { command: 'describe_tool', arguments: { command: 'get_feature_coverage' } },
+      })
+      expect(JSON.parse(toolText(describeResult))).toMatchObject({
+        command: 'get_feature_coverage',
+        inputSchema: { required: ['feature'] },
+      })
+
+      const compactFeatures = await compactClient.callTool({
+        name: 'exec',
+        arguments: { command: 'list_features', arguments: {} },
+      })
+      const directFeatures = await directClient.callTool({ name: 'list_features', arguments: {} })
+      expect(toolText(compactFeatures)).toBe(toolText(directFeatures))
+
+      const coverage = await compactClient.callTool({
+        name: 'exec',
+        arguments: { command: 'get_feature_coverage', arguments: { feature: 'workflow-workbench' } },
+      })
+      expect(JSON.parse(toolText(coverage))).toMatchObject({ feature: 'workflow-workbench' })
+
+      const refusedAbort = await compactClient.callTool({
+        name: 'exec',
+        arguments: { command: 'abort_run', arguments: { runId: 'not-running' } },
+      })
+      expect((refusedAbort as { isError?: boolean }).isError).toBe(true)
+      expect(toolText(refusedAbort)).toContain('confirm')
+    } finally {
+      if (compactClient) await compactClient.close().catch(() => undefined)
+      if (directClient) await directClient.close().catch(() => undefined)
       await app.close()
     }
   })

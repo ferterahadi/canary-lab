@@ -6,11 +6,32 @@ type: skill
 
 # Canary Lab — Feature Authoring
 
+## MCP Invocation
+
+Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
+rendered as `mcp__Canary_Lab__exec`). Every
+Canary Lab tool name below is the exact `command` value, not a separate public
+tool. For a feature-scoped command, replace both placeholders in this shape:
+
+```json
+{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}
+```
+
+This is the envelope shape, not every command's complete schema. Add the
+fields that command declares inside `arguments`; call `describe_tool` when a
+field is uncertain.
+
+Never invent a wrapper verb such as `learn` or `call`, embed JSON in a command
+string, or turn arguments into flags. Keep fields such as `confirm: true` inside
+`arguments`. Use `list_tools`, `search_tools`, or `describe_tool` as the
+`command` when discovery is needed. A deliberately selected focused or `full`
+profile still exposes atomic tools for debugging; the setup-installed path is
+`compact` + `exec`.
+
 This client writes the specs; Canary Lab is the control plane and artifact
 store. These tools arrive via the Canary Lab MCP server. If this client is
-already connected (the plugin connects with `full`), skip this step. To
-configure a connection manually: `npx canary-lab mcp --profile author` (the
-composite `lifecycle`/`full` profiles carry the same tools).
+already connected (the plugin connects with `compact`), skip this step. To
+configure the same connection manually: `npx canary-lab mcp --profile compact`.
 
 ## Arguments
 
@@ -26,7 +47,7 @@ and never rename it to dodge a collision.
 2. Then CONFIRM it is the right server: `curl -s http://127.0.0.1:<port>/mcp/health` and check that `projectRoot` is the workspace you intended. A healthy response does **not** settle the question on its own — a stale UI left behind by a demo or a tarball smoke test answers a port just as convincingly as the right one, and that is how a flight ends up running in someone's throwaway workspace. `projectRoot` matches what you intended → continue and tell the user which workspace. It names a DIFFERENT workspace → this is the wrong server; go back to step 1 rather than adopting it. It is under a temp directory (`/tmp`, `/private/var/folders`, `%TEMP%`) → never auto-select it; those are throwaway demo workspaces, so use one only when the user names it explicitly. Only when no live server serves the workspace you want does one need starting.
 3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up.
 4. Do not reflexively call `list_features` or `list_runs` after health. For random or new feature creation, call `create_feature` directly with a unique feature name; use `list_features` only to discover or choose an existing feature.
-5. A healthy `/mcp/health` means these tools are live even when they look absent from this session. A tool search that indexes only deferred tools says nothing about loaded ones — call `list_features` directly before concluding anything. Only an unknown-tool error means the server is really not connected: ask the user to reconnect, then retry. **Never** drive `/mcp` with a hand-written HTTP/JSON-RPC client (curl included; the health check above is the only direct HTTP use): a hand-rolled client bypasses the connection's client detection, so the Canary Lab UI mis-brands the session, and it loses the session and reconnect handling these tools rely on.
+5. A healthy `/mcp/health` means the server is live. On the setup-installed `compact` profile, atomic names such as `get_feature_coverage` are deliberately absent from `tools/list`; only `exec` is public. Call `exec` with `{"command":"list_tools","arguments":{}}` before concluding the connection is missing. Only an unknown-tool error for `exec` means this session is not connected — ask the user to run `npx canary-lab setup --force` and reconnect/restart the client, then retry. Never drive `/mcp` with a hand-written HTTP/JSON-RPC client (curl included; the health check above is the only direct HTTP use): a custom client bypasses client detection and reconnect handling.
 
 ## Create or Extend a Feature
 
@@ -48,4 +69,4 @@ and never rename it to dodge a collision.
 
 - Keep the same `session_id` for the whole conversation.
 - Canary Lab never writes the test body for external authoring — this client does.
-- After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`). **Running the new test** needs the run tools: on the plugin (`full`) or a default `lifecycle` connection `start_run` is already available — follow `canary-lab-run`. On a narrow `--profile author` connection it is NOT: don't conclude the server is broken; reconnect with `npx canary-lab mcp` (the default `lifecycle` carries both surfaces) and then run.
+- After authoring, the natural next steps live in sibling skills: map coverage (`canary-lab-coverage`), run + heal (`canary-lab-run`), export the evaluation (`canary-lab-export`). **Running the new test** needs `start_run`: on the setup/plugin `compact` connection, invoke it as the `exec` command and follow `canary-lab-run`. On an intentionally narrow direct `--profile author` connection it is unavailable; reconnect with `npx canary-lab mcp --profile compact` and then run.

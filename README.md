@@ -132,7 +132,7 @@ scan → create suite → collect requirements → author tests → prepare port
 | Run + heal + proof | drive the loop, export manually | stages; the flight ends with the evaluation archive on disk |
 | Human steps | ~10, expert knowledge required | 1 command + approve checkpoints (`--yolo` skips all but missing secrets) |
 
-Running `flight` again resumes existing work instead of duplicating it. Watch it under **Flights** or use the MCP tool `start_flight`.
+Running `flight` again resumes existing work instead of duplicating it. Watch it under **Flights** or invoke the MCP `exec` tool with `start_flight` as its exact `command`.
 
 Contributors can launch that exact tour from this source checkout with:
 
@@ -140,7 +140,7 @@ Contributors can launch that exact tour from this source checkout with:
 npm run demo -- --agent codex
 ```
 
-`npm run demo` packs the source, creates a workspace, and opens the shipped UI with repair and Flight demos ready.
+`npm run demo` packs the source, creates a retained workspace in the current user's `Canary Lab Demos` folder (`~/Canary Lab Demos/` on macOS/Linux and `%USERPROFILE%\Canary Lab Demos\` on Windows), and opens the shipped UI with repair and Flight demos ready. After stopping the demo, run `npm run demo:clean` to remove retained demos, or `npm run demo:clean -- --older-than 7` to remove only demos at least seven days old. Cleanup skips any demo still named by the live-server or workspace registry so it cannot strand an MCP client on a deleted install. Re-point MCP clients from a non-demo workspace before using `npm run demo:clean -- --force` on registered demos.
 
 `flight` creates the workspace if none exists. To set one up yourself:
 
@@ -163,7 +163,7 @@ npx canary-lab ui
 
 The UI and MCP server share one port, `7421` by default. Choose another during setup with `npx canary-lab init my-lab --port 8200`, or change it later in Project Settings. The `ui --port` option is not supported.
 
-Restart your agent after setup so it discovers the Canary Lab tools. If they don't appear, run `npx canary-lab setup --force` and start a fresh session.
+Restart your agent after setup so it discovers the always-loaded Canary Lab `exec` tool. Atomic operations are command values inside it, not separate public tools. If `exec` does not appear, run `npx canary-lab setup --force` and start a fresh session.
 
 ## What Canary Lab Owns
 

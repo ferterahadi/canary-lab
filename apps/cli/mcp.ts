@@ -159,10 +159,26 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
           throw new Error(`${required} is missing from tools/list`)
         }
       }
+      if (profile === 'compact') {
+        const discovery = await client.callTool({
+          name: 'exec',
+          arguments: {
+            command: 'search_tools',
+            arguments: { query: 'get_feature_coverage' },
+          },
+        })
+        const parsed = JSON.parse(toolResultText(discovery)) as {
+          matches?: Array<{ command?: unknown }>
+        }
+        if (!parsed.matches?.some((match) => match.command === 'get_feature_coverage')) {
+          throw new Error('exec search_tools could not discover get_feature_coverage')
+        }
+      }
       stdout.write(`Canary Lab MCP is reachable at ${url}\n`)
       stdout.write(`Protocol: ${CANARY_LAB_MCP_PROTOCOL_VERSION}\n`)
       stdout.write(`Profile: ${profile}\n`)
       stdout.write(`Required tools: ${requiredToolsForProfile(profile).join(', ')}\n`)
+      if (profile === 'compact') stdout.write('Command probe: get_feature_coverage discovered\n')
       stdout.write(`Tools: ${names.length} listed (${healthBody.toolCount ?? 'unknown'} registered)\n`)
       return true
     } finally {
@@ -173,6 +189,15 @@ export async function doctor(url: string, opts: McpCommandOptions = {}): Promise
     stderr.write(`Start the UI first: canary-lab ui\n`)
     return false
   }
+}
+
+function toolResultText(result: Awaited<ReturnType<Client['callTool']>>): string {
+  const content = (result as { content?: unknown }).content
+  const first = Array.isArray(content) ? content[0] as { type?: unknown; text?: unknown } | undefined : undefined
+  if (first?.type !== 'text' || typeof first.text !== 'string') {
+    throw new Error('exec search_tools returned no text result')
+  }
+  return first.text
 }
 
 // Port-agnostic: any localhost /mcp endpoint is treated as the auto-resolved

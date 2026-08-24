@@ -11,7 +11,8 @@ describe('canary-lab agent install', () => {
     install('all', { homeDir: home, dryRun: true, log: (line) => lines.push(line) })
 
     expect(lines.join('\n')).toContain('[dry-run] copy Codex skill')
-    expect(lines.join('\n')).toContain('npx -y canary-lab mcp --profile full')
+    expect(lines.join('\n')).toContain('npx -y canary-lab mcp --profile compact')
+    expect(lines.join('\n')).toContain('"alwaysLoad": true')
     expect(fs.existsSync(path.join(home, '.codex'))).toBe(false)
   })
 
@@ -110,6 +111,33 @@ describe('canary-lab agent install', () => {
       path.join(assets, 'plugin', 'canary-lab', 'skills', skill, 'SKILL.md'),
     ]
 
+    const skillNames = fs.readdirSync(path.join(assets, 'claude', 'skills')).sort()
+    expect(skillNames).toEqual([
+      'canary-lab',
+      'canary-lab-author',
+      'canary-lab-coverage',
+      'canary-lab-export',
+      'canary-lab-portify',
+      'canary-lab-run',
+      'canary-lab-verify',
+    ])
+    const allSkillPaths = skillNames.flatMap(mirrors)
+    expect(allSkillPaths).toHaveLength(21)
+    for (const skillPath of allSkillPaths) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('mcp__Canary_Lab__exec')
+      expect(body).toContain('exact `command` value')
+      expect(body).toContain(
+        '{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}',
+      )
+      expect(body).toContain("This is the envelope shape, not every command's complete schema")
+      expect(body).toContain('only `exec` is public')
+      expect(body).not.toContain('plugin connects with `full`')
+    }
+    for (const skill of skillNames) {
+      expect(fs.readFileSync(mirrors(skill)[0])).toEqual(fs.readFileSync(mirrors(skill)[1]))
+    }
+
     // The run/heal loop rules live in the canary-lab-run skill since the split.
     for (const skillPath of mirrors('canary-lab-run')) {
       const body = fs.readFileSync(skillPath, 'utf-8')
@@ -144,6 +172,8 @@ describe('canary-lab agent install', () => {
       expect(body).toContain('call `start_external_coverage` even')
       expect(body).toContain('when `state.coverage` is `"fresh"`')
       expect(body).toContain("Starting that job is what makes the external agent's ownership")
+      expect(body).toContain('`start_external_coverage(feature, session_id)`')
+      expect(body).toContain('you MUST call\n`get_feature_coverage(feature)` before reporting')
     }
 
     // The flight entry point keeps the full bootstrap (incl. the --port note).

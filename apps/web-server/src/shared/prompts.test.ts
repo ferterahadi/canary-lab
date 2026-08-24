@@ -30,6 +30,25 @@ describe('loadPromptTemplate', () => {
   it('throws a descriptive error when the file is missing', () => {
     expect(() => loadPromptTemplate(path.join(tmp, 'missing.md'))).toThrow(/Prompt template not found/)
   })
+
+  it.each([
+    'mcp-repair-instructions.md',
+    'mcp-verify-instructions.md',
+    'mcp-author-instructions.md',
+    'mcp-coverage-instructions.md',
+    'mcp-export-instructions.md',
+    'mcp-flight-instructions.md',
+    'mcp-portify-instructions.md',
+    'mcp-compact-instructions.md',
+  ])('ships the static MCP instruction source %s', (file) => {
+    expect(loadPromptTemplate(promptPath(file))).not.toBe('')
+  })
+
+  it('teaches the compact dispatcher with a schema shape, not a sample feature', () => {
+    const prompt = loadPromptTemplate(promptPath('mcp-compact-instructions.md'))
+    expect(prompt).toContain('{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}')
+    expect(prompt).not.toContain('workflow-workbench')
+  })
 })
 
 describe('renderPromptTemplate', () => {

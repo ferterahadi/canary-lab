@@ -83,6 +83,7 @@ a prerequisite for every unit-test iteration.
 | `npm run smoke:pack` | Packed install, scaffold, exports, templates, or prompts |
 | `npm run smoke:demo` | LLM-free storefront repair cascade |
 | `npm run demo -- --agent codex` | Inspectable demo workspace and full Flight routes |
+| `npm run demo:clean` | Remove stopped, unregistered workspaces under `~/Canary Lab Demos/` |
 
 Before opening a pull request, always run the structural gates:
 
@@ -103,8 +104,10 @@ and lifecycle claims with the implementation during review.
 
 ## Test the demo from a desktop agent
 
-`npm run demo` starts a demo workspace but does not rewrite a Model Context
-Protocol (MCP) client's configuration.
+`npm run demo` starts a retained workspace in the current user's
+`Canary Lab Demos` folder (`~/Canary Lab Demos/` on macOS/Linux and
+`%USERPROFILE%\Canary Lab Demos\` on Windows), but does not rewrite a Model
+Context Protocol (MCP) client's configuration.
 
 1. Run `npm run demo -- --agent codex`, keep the terminal open, and copy the
    printed **Workspace** path.
@@ -120,7 +123,7 @@ Protocol (MCP) client's configuration.
    be rooted in the generated workspace: the demo server records itself in
    `~/.canary-lab/active-servers.json` like any other, and step 2 pins that
    workspace on the Claude Desktop entry, so a client resolves it from anywhere.
-4. Confirm `Canary_Lab` appears in the session's MCP tools. In Canary Lab, open
+4. Confirm the `Canary_Lab` `exec` tool appears in the session's MCP tools. In Canary Lab, open
    **Getting Started** and paste its **In your agent** command into the session.
 
 Keep the demo terminal running. Each demo command creates a new workspace, so

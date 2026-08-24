@@ -193,7 +193,8 @@ describe('submit_external_summary', () => {
     expect(out.requirementCount).toBe(1)
     expect(out.written).toContain(path.join('docs', '_prd-summary.json'))
     expect(out.nextSteps).toEqual(['start_external_coverage'])
-    expect(out.next).toContain('start_external_coverage("checkout")')
+    expect(out.next).toContain('start_external_coverage with feature "checkout"')
+    expect(out.next).toContain('same stable session_id')
     // Canary mints the id — the client never renumbers the spine.
     const summary = JSON.parse(fs.readFileSync(path.join(dir, 'docs', '_prd-summary.json'), 'utf-8')) as {
       requirements: Array<{ id: string; title: string }>
@@ -251,6 +252,8 @@ describe('start_external_coverage', () => {
 
     expect(out.status).toBe('needs-summary')
     expect(out.next).toContain('start_external_summary')
+    expect(out.next).toContain('stable session_id')
+    expect(out.next).toContain('same session_id')
     expect(out).not.toHaveProperty('jobId')
     expect(fs.existsSync(path.join(logsDir, 'coverage-jobs'))).toBe(false)
   })

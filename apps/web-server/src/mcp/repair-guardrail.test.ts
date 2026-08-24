@@ -67,7 +67,7 @@ describe('repair guardrail — MCP instructions', () => {
   // Any profile that can drive a heal loop must carry the rule. `repair` is the
   // dedicated one; `lifecycle`/`full` compose it in, so a broken composition
   // (dropping REPAIR_INSTRUCTIONS from the concatenation) fails here too.
-  const healProfiles = ['repair', 'lifecycle', 'full'] as const
+  const healProfiles = ['repair', 'lifecycle', 'full', 'compact'] as const
 
   it.each(healProfiles)('%s instructions tell the agent to fix app code, not tests', (profile) => {
     const text = INSTRUCTIONS_BY_PROFILE[profile]
@@ -98,7 +98,7 @@ describe('repair guardrail — delivery, not just presence', () => {
   /** What the Claude Code CLI keeps of a server's `instructions`. */
   const DELIVERED_WINDOW = 2048
 
-  const healProfiles = ['repair', 'lifecycle', 'full'] as const
+  const healProfiles = ['repair', 'lifecycle', 'full', 'compact'] as const
 
   it.each(healProfiles)('%s delivers the repair rule inside the un-truncated window', (profile) => {
     const at = INSTRUCTIONS_BY_PROFILE[profile].indexOf('app/service code')

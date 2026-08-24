@@ -32,12 +32,11 @@ const SERVER_NAME = 'Canary_Lab'
 // the publishable package name, not the display key.
 const PACKAGE_NAME = 'canary-lab'
 
-/** `setup` installs every focused skill, so the connection it registers must
- *  carry every matching workflow. Keep this separate from the bare MCP
- *  server's lean `lifecycle` default: manual clients can still opt into a
- *  narrow surface, while a setup-installed `/canary-lab-portify` never lands
- *  on a connection that withholds its start/save tools. */
-export const REGISTERED_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'full'
+/** `setup` installs every focused skill, so it registers the one-tool compact
+ *  surface whose `exec` dispatcher can reach every atomic workflow. Keep this
+ *  separate from the bare MCP server's direct `lifecycle` default: manual
+ *  clients can still select focused or full debugging surfaces. */
+export const REGISTERED_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'compact'
 
 // Older builds registered the server under this key. `setup`/`upgrade` migrate
 // any such entry to SERVER_NAME so existing users pick up the rename
@@ -61,9 +60,9 @@ export function isEphemeralNpxInstall(cliPath: string): boolean {
 }
 
 // Sibling of the above, for the other class of install whose path rots: anything
-// under the OS temp dir. The getting-started demo scaffolds a temp workspace and
-// installs canary-lab into it, and the tarball smoke test does the same — so a
-// `ui` booted from one of those would write ITS path into the user's GLOBAL client
+// under the OS temp dir. Older demo releases and the tarball smoke test install
+// canary-lab there, so a `ui` booted from one would write ITS path into the
+// user's GLOBAL client
 // config. Observed live: a Claude Desktop entry aimed at a
 // `/private/var/folders/.../T/canary-lab-demo-*/` cli.js, which the next temp sweep
 // deletes and the user is left with a dead MCP server they never configured.
@@ -231,9 +230,15 @@ function commandAvailable(command: string): boolean {
 
 function addArgsFor(target: McpRegistrationTarget, invocation: ResolvedMcpInvocation): string[] {
   const tail = ['--', invocation.command, ...invocation.args]
-  return target === 'codex'
-    ? ['mcp', 'add', SERVER_NAME, ...tail]
-    : ['mcp', 'add', '--scope', 'user', SERVER_NAME, ...tail]
+  if (target === 'codex') return ['mcp', 'add', SERVER_NAME, ...tail]
+  const config = {
+    type: 'stdio',
+    command: invocation.command,
+    args: invocation.args,
+    ...(invocation.env ? { env: invocation.env } : {}),
+    alwaysLoad: true,
+  }
+  return ['mcp', 'add-json', '--scope', 'user', SERVER_NAME, JSON.stringify(config)]
 }
 
 function removeArgsFor(target: McpRegistrationTarget): string[] {

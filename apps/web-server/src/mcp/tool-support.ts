@@ -19,8 +19,8 @@ import type { FeatureAuthoringContext } from '../features/config/logic/feature-a
 
 export { BOOT_SESSION_MESSAGE, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_WINDOW_MS, bootSessionValue, classifyWaitForHealTask, dirtyTestsWarning, healWaitNext, isActiveBootRun, stillWaitingValue, waitForHealTask } from './heal-task-wait'
 export type { DirtyTestsWarning, WaitForHealTaskResult, WaitForHealTaskValue } from './heal-task-wait'
-export { AUTHOR_TOOLS, CANARY_LAB_MCP_PROFILES, COVERAGE_TOOLS, DEFAULT_CANARY_LAB_MCP_PROFILE, EXPORT_TOOLS, FLIGHT_TOOLS, FULL_ONLY_TOOLS, FULL_TOOLS, LIFECYCLE_TOOLS, PORTIFY_TOOLS, REPAIR_TOOLS, TOOLS_BY_PROFILE, VERIFY_TOOLS, isCanaryLabMcpProfile, normalizeCanaryLabMcpProfile, toolsForCanaryLabMcpProfile } from './tool-profiles'
-export type { CanaryLabMcpProfile, CanaryLabMcpToolName, CanaryLabMcpToolOptions } from './tool-profiles'
+export { AUTHOR_TOOLS, CANARY_LAB_MCP_PROFILES, COMPACT_TOOLS, COVERAGE_TOOLS, DEFAULT_CANARY_LAB_MCP_PROFILE, EXEC_TOOL_NAME, EXPORT_TOOLS, FLIGHT_TOOLS, FULL_ONLY_TOOLS, FULL_TOOLS, LIFECYCLE_TOOLS, PORTIFY_TOOLS, REPAIR_TOOLS, TOOLS_BY_PROFILE, VERIFY_TOOLS, isCanaryLabMcpProfile, normalizeCanaryLabMcpProfile, toolsForCanaryLabMcpProfile } from './tool-profiles'
+export type { CanaryLabMcpExecCallEvent, CanaryLabMcpExecCommand, CanaryLabMcpExposedToolName, CanaryLabMcpProfile, CanaryLabMcpToolName, CanaryLabMcpToolOptions } from './tool-profiles'
 export { coverageMappingInput, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, summaryRequirementInput, variantDimensionInput } from './tool-schemas'
 export type { CanaryLabMcpDeps, McpStartRunOutcome } from './tool-schemas'
 
@@ -55,13 +55,13 @@ export function coverageBlockedNext(feature: string, summary: SummaryState, sour
     return `A summary/coverage job is already running for "${feature}" (single-flight). Wait for it to finish, then get_feature_coverage("${feature}").`
   }
   if (summary === 'stale') {
-    return `PRD summary for "${feature}" is stale (see state.drift.changedDocs). YOU refresh it: start_external_summary("${feature}"), read the source docs in the returned prompt, submit_external_summary (ids preserved), then start_external_coverage("${feature}") + submit_external_coverage to remap.`
+    return `PRD summary for "${feature}" is stale (see state.drift.changedDocs). YOU refresh it: call start_external_summary with feature "${feature}" and a stable session_id, read the source docs in the returned prompt, submit_external_summary (ids preserved), then call start_external_coverage with the same session_id and submit_external_coverage to remap.`
   }
   // summary 'absent'
   if (sourceDocCount === 0) {
-    return `No source doc on file for "${feature}", so there is nothing to ground coverage on. ASK THE USER to attach or paste the PRD/spec in the chat (do NOT invent one or pull an external file). Once they provide it, write_feature_doc("${feature}", "<name>.md", <content>) then start_external_summary("${feature}") — read the docs yourself and submit_external_summary.`
+    return `No source doc on file for "${feature}", so there is nothing to ground coverage on. ASK THE USER to attach or paste the PRD/spec in the chat (do NOT invent one or pull an external file). Once they provide it, write_feature_doc("${feature}", "<name>.md", <content>), then call start_external_summary with feature "${feature}" and a stable session_id — read the docs yourself and submit_external_summary.`
   }
-  return `Source docs exist for "${feature}" but no PRD summary yet. YOU author it: start_external_summary("${feature}"), read the source docs in the returned prompt, submit_external_summary, then start_external_coverage("${feature}") + submit_external_coverage to map tests → requirements.`
+  return `Source docs exist for "${feature}" but no PRD summary yet. YOU author it: call start_external_summary with feature "${feature}" and a stable session_id, read the source docs in the returned prompt, submit_external_summary, then call start_external_coverage with the same session_id and submit_external_coverage to map tests → requirements.`
 }
 
 /**

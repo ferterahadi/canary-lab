@@ -40,6 +40,22 @@ function cliAvailable(command: string): void {
   })
 }
 
+function claudeAddJsonArgs(command: string, cliPath: string): string[] {
+  return [
+    'mcp',
+    'add-json',
+    '--scope',
+    'user',
+    'Canary_Lab',
+    JSON.stringify({
+      type: 'stdio',
+      command,
+      args: [cliPath, 'mcp', '--profile', 'compact'],
+      alwaysLoad: true,
+    }),
+  ]
+}
+
 beforeEach(() => {
   mocks.execFileSync.mockReset()
   mocks.execFileSync.mockImplementation(() => {
@@ -146,7 +162,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.codex', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'compact'],
       { stdio: 'ignore' },
     )
   })
@@ -167,7 +183,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      claudeAddJsonArgs('/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js'),
       { stdio: 'ignore' },
     )
   })
@@ -194,12 +210,12 @@ describe('setup', () => {
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'codex',
-      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      ['mcp', 'add', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'compact'],
       { stdio: 'ignore' },
     )
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'],
+      claudeAddJsonArgs('/usr/bin/node', '/opt/canary-lab/dist/scripts/cli.js'),
       { stdio: 'ignore' },
     )
   })
@@ -221,7 +237,8 @@ describe('setup', () => {
 
     const cfg = JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8'))
     expect(cfg.mcpServers['Canary_Lab'].command).toBe('/usr/bin/node')
-    expect(cfg.mcpServers['Canary_Lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'full'])
+    expect(cfg.mcpServers['Canary_Lab'].args).toEqual(['/opt/canary-lab/dist/scripts/cli.js', 'mcp', '--profile', 'compact'])
+    expect(cfg.mcpServers['Canary_Lab'].alwaysLoad).toBe(true)
     expect(cfg.mcpServers['Canary_Lab'].env.PATH).toContain('/usr/bin')
     // The workspace `setup` ran in is pinned, so a Desktop session reaches THIS
     // workspace no matter what else is live — the documented demo hand-off
@@ -265,7 +282,7 @@ describe('setup', () => {
     // Scaffolding still happens — only the live-client MCP registration is skipped.
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(lines.join('\n')).toContain('Skipping client MCP registration')
-    expect(mocks.execFileSync).not.toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('claude', expect.arrayContaining(['add-json']), expect.anything())
     expect(fs.existsSync(desktopConfigPath)).toBe(false)
   })
 
@@ -302,7 +319,7 @@ describe('setup', () => {
     expect(fs.existsSync(path.join(home, '.claude', 'skills', 'canary-lab', 'SKILL.md'))).toBe(true)
     expect(lines.join('\n')).toContain('temp directory')
     expect(lines.join('\n')).not.toContain('CANARY_LAB_SKIP_CLIENT_MCP')
-    expect(mocks.execFileSync).not.toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
+    expect(mocks.execFileSync).not.toHaveBeenCalledWith('claude', expect.arrayContaining(['add-json']), expect.anything())
     expect(fs.existsSync(desktopConfigPath)).toBe(false)
   })
 
@@ -334,7 +351,7 @@ describe('setup', () => {
 
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', '/usr/bin/node', tempCli, 'mcp', '--profile', 'full'],
+      claudeAddJsonArgs('/usr/bin/node', tempCli),
       { stdio: 'ignore' },
     )
     const desktop = JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8')).mcpServers['Canary_Lab']
@@ -362,7 +379,7 @@ describe('setup', () => {
       verifyMcp: verifiedStub,
     })
 
-    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
+    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', expect.arrayContaining(['add-json']), expect.anything())
     expect(fs.existsSync(desktopConfigPath)).toBe(true)
   })
 
@@ -384,7 +401,7 @@ describe('setup', () => {
       verifyMcp: verifiedStub,
     })
 
-    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', expect.arrayContaining(['add']), expect.anything())
+    expect(mocks.execFileSync).toHaveBeenCalledWith('claude', expect.arrayContaining(['add-json']), expect.anything())
   })
 
   it('verifies the registration and warns when the command is broken', () => {

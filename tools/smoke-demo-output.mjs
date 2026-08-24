@@ -54,5 +54,6 @@ export function renderInteractiveGuide({
     '',
     'Nothing has run yet. You control both journeys.',
     'Press Ctrl-C to stop Canary Lab; the workspace is retained.',
+    'After stopping, run `npm run demo:clean` from the source checkout to remove retained demos.',
   ].join('\n')
 }

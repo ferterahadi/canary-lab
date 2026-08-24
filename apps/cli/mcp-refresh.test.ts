@@ -39,6 +39,22 @@ afterEach(() => {
 const EXEC = '/usr/bin/node'
 const CLI = '/opt/canary-lab/dist/scripts/cli.js'
 
+function claudeAddJsonArgs(): string[] {
+  return [
+    'mcp',
+    'add-json',
+    '--scope',
+    'user',
+    'Canary_Lab',
+    JSON.stringify({
+      type: 'stdio',
+      command: EXEC,
+      args: [CLI, 'mcp', '--profile', 'compact'],
+      alwaysLoad: true,
+    }),
+  ]
+}
+
 describe('refreshCanaryLabMcp', () => {
   it('heals a legacy Claude CLI config and a stale Desktop entry, leaving an absent Codex untouched', () => {
     const lookup = process.platform === 'win32' ? 'where' : 'which'
@@ -68,10 +84,12 @@ describe('refreshCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'Canary_Lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', EXEC, CLI, 'mcp', '--profile', 'full'],
+      claudeAddJsonArgs(),
       { stdio: 'ignore' },
     )
-    expect(JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8')).mcpServers['Canary_Lab'].command).toBe(EXEC)
+    const refreshedDesktop = JSON.parse(fs.readFileSync(desktopConfigPath, 'utf-8')).mcpServers['Canary_Lab']
+    expect(refreshedDesktop.command).toBe(EXEC)
+    expect(refreshedDesktop.alwaysLoad).toBe(true)
   })
 
   it('migrates legacy canary-lab entries to Canary_Lab on upgrade (CLI + Desktop)', () => {
@@ -98,7 +116,7 @@ describe('refreshCanaryLabMcp', () => {
     expect(mocks.execFileSync).toHaveBeenCalledWith('claude', ['mcp', 'remove', 'canary-lab', '-s', 'user'], { stdio: 'ignore' })
     expect(mocks.execFileSync).toHaveBeenCalledWith(
       'claude',
-      ['mcp', 'add', '--scope', 'user', 'Canary_Lab', '--', EXEC, CLI, 'mcp', '--profile', 'full'],
+      claudeAddJsonArgs(),
       { stdio: 'ignore' },
     )
     // Desktop: legacy key gone, new key written.

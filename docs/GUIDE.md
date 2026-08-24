@@ -100,7 +100,7 @@ in each test.
 Regenerating the PRD summary preserves surviving requirement IDs. Changes to
 source docs mark the summary and dependent coverage state stale instead of
 silently reusing old mappings. See [FEATURES](FEATURES.md#requirement-coverage)
-for the tag contract and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-coveragelifecyclefull-profiles)
+for the tag contract and [COMMANDS](COMMANDS.md#requirement-coverage-mcp-compact-or-direct-coveragelifecyclefull-profiles)
 for MCP tools.
 
 ## Repair a failed run
@@ -158,9 +158,10 @@ Fix application or service code. Never delete, skip, weaken, or loosen a test to
 turn the run green. Signal once per repair cycle, with the hypothesis and change
 description, then wait on the same run again.
 
-If MCP tools are missing from a new client session, run
-`npx canary-lab setup --force`, reconnect the client, and start a fresh session.
-Tool discovery is session-scoped.
+Setup-installed sessions intentionally expose one MCP tool: `exec`. Atomic names
+such as `get_feature_coverage` are command values and do not appear as public
+tools. If `exec` itself is missing, run `npx canary-lab setup --force`, reconnect
+or restart the client, and start a fresh session. Tool discovery is session-scoped.
 
 ### Local auto-heal
 
@@ -272,12 +273,16 @@ queue. This planning surface is not available through the CLI or MCP.
 
 ## External authoring workflow
 
-The bare MCP server's default `lifecycle` profile combines six workflows—repair,
-verify, author, coverage, export, and Flight—while leaving specialized Portify
-tools out. `setup` registers clients with `full` because it installs every
-focused skill, including Portify.
+The bare MCP server's default `lifecycle` profile combines six direct-tool
+workflows—repair, verify, author, coverage, export, and Flight—while leaving
+specialized Portify tools out. `setup` registers clients with `compact`: one
+always-loaded `exec` tool dispatches all 63 atomic commands, including Portify.
+Focused direct profiles and `full` remain available for debugging and rollback.
 A client can use the following standalone flow without asking Canary Lab to
 author the content:
+
+The names below are exact `command` values inside `exec.arguments`; for example,
+`{"command":"create_feature","arguments":{...}}`.
 
 1. `create_feature` writes the feature config, Playwright config, and envset
    skeleton.

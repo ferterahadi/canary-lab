@@ -1,10 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 
-// Every LLM prompt canary spawns lives in `apps/web-server/prompts/` as a flat
-// `.md` template with `{{placeholder}}` slots (optionally paired with a
-// `.schema.json` for structured output). This module is the one place that
-// resolves that directory and does the load + substitute — see
+// Every packaged agent prompt and MCP instruction source lives in
+// `apps/web-server/prompts/` as a flat `.md` file. Spawn prompts may carry
+// `{{placeholder}}` slots (optionally paired with a `.schema.json` for
+// structured output); MCP instructions are static. This module is the one place
+// that resolves that directory and does the load + substitute — see
 // `.claude/skills/cl_manage-prompts` for the convention new prompts follow.
 export const PROMPTS_DIR = path.resolve(__dirname, '../../prompts')
 

@@ -48,7 +48,8 @@ describe('registerClaudeDesktopMcp', () => {
     expect(cfg.preferences).toEqual({ a: 1 })
     expect(cfg.coworkUserFilesPath).toBe('/x')
     expect(cfg.mcpServers['Canary_Lab'].command).toBe(EXEC)
-    expect(cfg.mcpServers['Canary_Lab'].args).toEqual([CLI, 'mcp', '--profile', 'full'])
+    expect(cfg.mcpServers['Canary_Lab'].args).toEqual([CLI, 'mcp', '--profile', 'compact'])
+    expect(cfg.mcpServers['Canary_Lab'].alwaysLoad).toBe(true)
     expect(cfg.mcpServers['Canary_Lab'].env.PATH).toContain('/usr/bin')
     expect(lines).toContain('Claude Desktop MCP configured')
   })
@@ -106,7 +107,8 @@ describe('registerClaudeDesktopMcp', () => {
     registerClaudeDesktopMcp({ configPath, execPath: EXEC, cliPath: EPHEMERAL_CLI, log: () => {} })
     expect(read(configPath).mcpServers['Canary_Lab']).toEqual({
       command: 'npx',
-      args: ['-y', 'canary-lab@latest', 'mcp', '--profile', 'full'],
+      args: ['-y', 'canary-lab@latest', 'mcp', '--profile', 'compact'],
+      alwaysLoad: true,
     })
   })
 })
@@ -258,7 +260,12 @@ describe('registerClaudeDesktopMcp result', () => {
 
   it('reports configured when only a legacy key had to be migrated', () => {
     const configPath = tmpConfig()
-    const entry = { command: EXEC, args: [CLI, 'mcp', '--profile', 'full'], env: { PATH: '/usr/bin:/bin' } }
+    const entry = {
+      command: EXEC,
+      args: [CLI, 'mcp', '--profile', 'compact'],
+      env: { PATH: '/usr/bin:/bin' },
+      alwaysLoad: true,
+    }
     // New key already correct; the legacy duplicate is the only thing to remove.
     write(configPath, { mcpServers: { 'canary-lab': { command: 'npx', args: [] }, 'Canary_Lab': entry } })
 

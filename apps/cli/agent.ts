@@ -92,6 +92,7 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
       'Canary_Lab': {
         command: 'npx',
         args: ['-y', 'canary-lab', 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE],
+        alwaysLoad: true,
       },
     },
   }, null, 2))

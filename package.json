@@ -86,6 +86,7 @@
     "smoke:pack": "node tools/smoke-pack.mjs",
     "smoke:demo": "node tools/smoke-demo.mjs",
     "demo": "node tools/smoke-demo.mjs --interactive",
+    "demo:clean": "node tools/clean-demo-workspaces.mjs",
     "record:getting-started": "node tools/record-getting-started.mjs",
     "publish:package": "node tools/publish-package.mjs",
     "changelog": "node tools/generate-changelog.mjs",

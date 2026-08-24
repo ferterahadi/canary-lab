@@ -50,8 +50,8 @@ export interface ParsedArgs {
   force: boolean
   /** Set by programmatic callers (`init`), never by the CLI parser. The
    *  temp-install guard below only binds implicit runs: a user who TYPES
-   *  `npx canary-lab setup` in a temp workspace (the getting-started demo's
-   *  printed hand-off) has stated exactly what they want, and skipping would
+   *  `npx canary-lab setup` in a temp workspace has stated exactly what they
+   *  want, and skipping would
    *  make that instruction a silent no-op. */
   implicit?: boolean
 }
@@ -109,8 +109,8 @@ export function setup(args: ParsedArgs, opts: SetupOptions = {}): void {
   // reaches `setup` through `init` without it, and the temp `cli.js` it registers
   // dies with the next temp sweep. Observed live: a global Canary_Lab entry aimed
   // at a `/private/var/folders/.../T/canary-lab-demo-*/` cli.js. An EXPLICIT
-  // `npx canary-lab setup` in a temp workspace is different: the demo's printed
-  // hand-off tells the user to run exactly that, so it must register (the entry
+  // `npx canary-lab setup` in a temp workspace is different: the user ran that
+  // command explicitly, so it must register (the entry
   // still rots with the workspace — warned below, and the stale-path check plus
   // the `ui`-boot/upgrade heals catch it afterwards).
   const skipClientMcpReason = process.env.CANARY_LAB_SKIP_CLIENT_MCP === '1'

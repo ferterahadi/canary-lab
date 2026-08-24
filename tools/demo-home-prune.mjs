@@ -19,9 +19,9 @@ function canonicalPath(target) {
 }
 
 // Remove every entry in the user's REAL `~/.canary-lab` that points inside a
-// finished demo's temp root.
+// finished demo's root.
 //
-// The demo runs its children under CANARY_LAB_HOME=<tempRoot> so its own state
+// The demo runs its children under CANARY_LAB_HOME=<demoRoot> so its own state
 // stays out of the real home. Two things still land there, and neither is the
 // demo overstepping:
 //   • The live-server record is machine-wide on purpose (see active-servers.ts),
@@ -29,21 +29,27 @@ function canonicalPath(target) {
 //     unregisters itself on a clean exit; this is the belt-and-braces path for a
 //     SIGKILL, which would otherwise leave a dead entry behind.
 //   • CONTRIBUTING's `canary-lab setup --force --agent all` is run BY HAND, in a
-//     normal shell with no isolation env, so it registers the temp workspace in
-//     the real registry. That entry outlives the demo and — while the folder is
-//     still on disk — is the newest thing a client resolves to.
+//     normal shell with no isolation env, so it registers the workspace in the
+//     real registry. Old disposable demos need that entry removed; retained
+//     interactive demos deliberately keep it.
 //
 // Returns the files it actually changed, so the caller can report them. Never
 // throws: a malformed or read-only registry must not turn a demo exit into a
 // failure.
-export function pruneDemoStateFromRealHome(registryDir, tempRoot, onWarn = () => {}) {
+export function pruneDemoStateFromRealHome(
+  registryDir,
+  demoRoot,
+  onWarn = () => {},
+  { preserveWorkspaceRegistration = false } = {},
+) {
   // macOS exposes the same temp directory through `/var` and `/private/var`.
   // Registry writers can record either spelling, so compare filesystem identity
   // while the retained demo workspace still exists instead of comparing aliases.
-  const ownedRoot = canonicalPath(tempRoot)
+  const ownedRoot = canonicalPath(demoRoot)
   const ownedPrefix = ownedRoot + path.sep
   const changed = []
   for (const [file, key] of REGISTRY_FILES) {
+    if (file === 'workspaces.json' && preserveWorkspaceRegistration) continue
     const target = path.join(registryDir, file)
     if (!fs.existsSync(target)) continue
     try {

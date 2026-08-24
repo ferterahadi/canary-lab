@@ -54,7 +54,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         return asJsonResult({
           status: 'needs-docs',
           feature,
-          next: `No source doc on file for "${feature}". ASK THE USER to attach or paste the PRD/spec (do NOT invent one or pull an external file), then write_feature_doc("${feature}", "<name>.md", <content>) and call start_external_summary again.`,
+          next: `No source doc on file for "${feature}". ASK THE USER to attach or paste the PRD/spec (do NOT invent one or pull an external file), then write_feature_doc("${feature}", "<name>.md", <content>) and call start_external_summary again with feature "${feature}" and the same stable session_id.`,
         })
       }
       if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'coverage-job', id: res.manifest.jobId, feature })
@@ -101,7 +101,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         requirementCount: result.summary.requirements.length,
         written: result.written,
         nextSteps: ['start_external_coverage'],
-        next: `Wrote the PRD summary (${result.summary.requirements.length} requirement(s)). Call start_external_coverage("${manifest.feature}") to map tests → requirements.`,
+        next: `Wrote the PRD summary (${result.summary.requirements.length} requirement(s)). Call start_external_coverage with feature "${manifest.feature}" and the same stable session_id to map tests → requirements.`,
       })
     } catch (err) {
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
@@ -144,7 +144,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         return asJsonResult({
           status: 'needs-summary',
           feature,
-          next: `No PRD summary for "${feature}". Call start_external_summary first (read the docs, submit_external_summary), then start_external_coverage again.`,
+          next: `No PRD summary for "${feature}". Call start_external_summary with feature "${feature}" and a stable session_id first (read the docs, submit_external_summary), then call start_external_coverage with that same session_id.`,
         })
       }
       if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'coverage-job', id: res.manifest.jobId, feature })

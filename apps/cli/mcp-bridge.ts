@@ -216,6 +216,7 @@ export async function forwardMessage(
 }
 
 export function requiredToolsForProfile(profile: CanaryLabMcpProfile): string[] {
+  if (profile === 'compact') return ['exec']
   if (profile === 'author') return ['create_feature', 'start_external_draft']
   if (profile === 'coverage') return ['start_external_summary', 'start_external_coverage', 'get_feature_coverage']
   if (profile === 'export') return ['start_external_evaluation_export']

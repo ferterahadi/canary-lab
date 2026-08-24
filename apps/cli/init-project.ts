@@ -420,7 +420,8 @@ export async function main(
   let setupOk = true
   try {
     setupProject(
-      // implicit: an init-driven setup in a temp workspace (demo, smoke test)
+      // implicit: an init-driven setup in a temp workspace (smoke test or a
+      // user-created disposable workspace)
       // must not claim the user's global MCP pointers — see setup.ts.
       { workspace: targetDir, agent: 'auto', dryRun: false, force: false, implicit: true },
       setupOpts,

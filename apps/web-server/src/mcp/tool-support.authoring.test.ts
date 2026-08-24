@@ -65,7 +65,8 @@ describe('coverageBlockedNext', () => {
   it('routes a stale summary through a refresh before remapping', () => {
     const next = coverageBlockedNext('checkout', 'stale', 3)
 
-    expect(next).toContain('start_external_summary("checkout")')
+    expect(next).toContain('start_external_summary with feature "checkout" and a stable session_id')
+    expect(next).toContain('start_external_coverage with the same session_id')
     expect(next).toContain('submit_external_coverage')
     expect(next).not.toMatch(/ASK THE USER/)
   })
@@ -79,13 +80,14 @@ describe('coverageBlockedNext', () => {
     expect(next).toMatch(/ASK THE USER/)
     expect(next).toContain('do NOT invent one or pull an external file')
     expect(next).toContain('write_feature_doc("checkout"')
+    expect(next).toContain('a stable session_id')
   })
 
   it('has the agent author the summary itself once source docs exist', () => {
     const next = coverageBlockedNext('checkout', 'absent', 2)
 
     expect(next).toContain('YOU author it')
-    expect(next).toContain('start_external_summary("checkout")')
+    expect(next).toContain('start_external_summary with feature "checkout" and a stable session_id')
     // No human step here: the material to ground the summary is already on file.
     expect(next).not.toMatch(/ASK THE USER/)
   })

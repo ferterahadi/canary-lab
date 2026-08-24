@@ -1,12 +1,12 @@
 import type { ClientKind } from '../../../../shared/run-mode'
 
-export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'coverage', 'export', 'flight', 'portify', 'lifecycle', 'full'] as const
+export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'coverage', 'export', 'flight', 'portify', 'lifecycle', 'full', 'compact'] as const
 
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
 // The default profile when a client connects without an explicit one (bare
 // `canary-lab mcp` or a profile-less /mcp request). Setup-installed Desktop/CLI
-// clients explicitly request `full`; `lifecycle` is the lean end-to-end surface (repair +
+// clients explicitly request `compact`; `lifecycle` is the lean end-to-end surface (repair +
 // verify + author + coverage + export + flight) minus the STANDALONE portify
 // management tools — starting a portify workflow from scratch, saving or
 // cancelling one, removing a portification, listing status. Those stay opt-in
@@ -81,6 +81,22 @@ export type CanaryLabMcpToolName =
   | 'cancel_portify'
   | 'remove_portification'
   | 'list_portify_status'
+
+export const EXEC_TOOL_NAME = 'exec' as const
+export type CanaryLabMcpExposedToolName = CanaryLabMcpToolName | typeof EXEC_TOOL_NAME
+export type CanaryLabMcpExecCommand =
+  | CanaryLabMcpToolName
+  | 'list_tools'
+  | 'search_tools'
+  | 'describe_tool'
+  | 'unknown'
+
+export interface CanaryLabMcpExecCallEvent {
+  command: CanaryLabMcpExecCommand
+  durationMs: number
+  success: boolean
+  validationError?: boolean
+}
 
 export const REPAIR_TOOLS = [
   'list_features',
@@ -272,7 +288,9 @@ export const FULL_TOOLS: readonly CanaryLabMcpToolName[] = Array.from(
   ]),
 )
 
-export const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpToolName[]> = {
+export const COMPACT_TOOLS = [EXEC_TOOL_NAME] as const satisfies readonly CanaryLabMcpExposedToolName[]
+
+export const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcpExposedToolName[]> = {
   repair: REPAIR_TOOLS,
   verify: VERIFY_TOOLS,
   author: AUTHOR_TOOLS,
@@ -282,6 +300,7 @@ export const TOOLS_BY_PROFILE: Record<CanaryLabMcpProfile, readonly CanaryLabMcp
   portify: PORTIFY_TOOLS,
   lifecycle: LIFECYCLE_TOOLS,
   full: FULL_TOOLS,
+  compact: COMPACT_TOOLS,
 }
 
 export function isCanaryLabMcpProfile(value: string | undefined): value is CanaryLabMcpProfile {
@@ -293,7 +312,7 @@ export function normalizeCanaryLabMcpProfile(value: string | undefined): CanaryL
   return isCanaryLabMcpProfile(value) ? value : null
 }
 
-export function toolsForCanaryLabMcpProfile(profile: CanaryLabMcpProfile): readonly CanaryLabMcpToolName[] {
+export function toolsForCanaryLabMcpProfile(profile: CanaryLabMcpProfile): readonly CanaryLabMcpExposedToolName[] {
   return TOOLS_BY_PROFILE[profile]
 }
 
@@ -303,4 +322,7 @@ export interface CanaryLabMcpToolOptions {
    *  none — tool calls then brand themselves from the initialize handshake
    *  (clientKindFromFacts), which never yields a claim-suppressing *-pty kind. */
   defaultClientKind?: ClientKind
+  /** Compact-profile telemetry records only the selected command and outcome;
+   *  argument values never leave the dispatcher. */
+  onExecCall?: (event: CanaryLabMcpExecCallEvent) => void
 }

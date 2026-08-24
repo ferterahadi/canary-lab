@@ -132,8 +132,8 @@ export function registerClaudeDesktopMcp(opts: DesktopRegistrationOptions = {}):
 
 function invocationEntry(invocation: ResolvedMcpInvocation): Record<string, unknown> {
   return invocation.env
-    ? { command: invocation.command, args: invocation.args, env: invocation.env }
-    : { command: invocation.command, args: invocation.args }
+    ? { command: invocation.command, args: invocation.args, env: invocation.env, alwaysLoad: true }
+    : { command: invocation.command, args: invocation.args, alwaysLoad: true }
 }
 
 function sameEntry(value: unknown, desired: ResolvedMcpInvocation): boolean {
@@ -141,10 +141,12 @@ function sameEntry(value: unknown, desired: ResolvedMcpInvocation): boolean {
   const entry = value as {
     command?: unknown
     args?: unknown
+    alwaysLoad?: unknown
     env?: { PATH?: unknown; CANARY_LAB_PROJECT_ROOT?: unknown }
   }
   return entry.command === desired.command &&
     JSON.stringify(entry.args) === JSON.stringify(desired.args) &&
+    entry.alwaysLoad === true &&
     (entry.env?.PATH ?? undefined) === (desired.env?.PATH ?? undefined) &&
     // Compared so moving the pin re-points the entry instead of reading as
     // "already configured" — a Desktop pinned to a workspace that is gone is the

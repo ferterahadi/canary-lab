@@ -156,6 +156,14 @@ const installedPackagePaths = [
   'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.schema.json',
   'node_modules/canary-lab/dist/apps/web-server/prompts/fix-commit-message.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/fix-commit-message.schema.json',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-repair-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-verify-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-author-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-coverage-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-export-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-flight-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-portify-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-compact-instructions.md',
 ]
 
 for (const relPath of scaffoldPaths) {
