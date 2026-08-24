@@ -297,14 +297,17 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
   return (
     <StageColumn>
       <PanelCard kicker="What the tests cover" testId={composed ? 'coverage-composition' : 'coverage-composition-skeleton'}>
-        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))' }}>
+        {/* gap-x-6 / gap-y-4: at the old uniform 12px the two distributions ran
+            together into one wall of dots, side by side AND stacked. */}
+        <div className="mt-1 grid gap-x-6 gap-y-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(260px, 100%), 1fr))' }}>
           <CompositionGroup
             testId="composition-strength"
             awaiting={composed ? undefined : awaiting}
             // "Depth", not "strength": the heading has to say what the buckets
-            // measure, and depth is what a tier ramp is. Its count is dropped
+            // measure, and depth is what a tier ramp is. The count is dropped
             // while awaited — the population is exactly what isn't known yet.
-            heading={composed ? `Test depth · ${plural(tests.length, 'test')}` : 'Test depth'}
+            heading="Test depth"
+            count={composed ? plural(tests.length, 'test') : null}
             rows={STRENGTH_ORDER.map((s) => ({
               key: s,
               label: STRENGTH_META[s].label,
@@ -317,7 +320,8 @@ export function CoverageCompositionPanel({ ledger, awaiting }: { ledger: Coverag
           <CompositionGroup
             testId="composition-gaps"
             awaiting={composed ? undefined : awaiting}
-            heading={composed ? `Requirement coverage · ${plural(composed.totals.total, 'requirement')}` : 'Requirement coverage'}
+            heading="Requirement coverage"
+            count={composed ? plural(composed.totals.total, 'requirement') : null}
             rows={SEG_ORDER.map((g) => ({
               key: g,
               label: GAP_META[g].label,
@@ -361,9 +365,27 @@ interface CompositionRow {
 }
 
 /** One distribution: a proportional bar, then a row per bucket. The bar drops its
- *  empty segments (a zero-width sliver is noise); the rows keep theirs, dimmed. */
-function CompositionGroup({ heading, rows, testId, awaiting }: {
+ *  empty segments (a zero-width sliver is noise); the rows keep theirs, dimmed.
+ *
+ *  The heading is `.cl-frame-heading` (sans 12.5/600 primary) and NOT the card's
+ *  own `.cl-rubric` kicker. Both groups used to be titled in the very same mono
+ *  10px caps muted voice as "What the tests cover" directly above them, which
+ *  left the card with no title at all — three identical caps lines, none of them
+ *  ranking the others. Changing the VOICE (mono caps → sans sentence case)
+ *  separates the two levels without shouting: the kicker stays the quiet slab
+ *  label every sibling stage card wears, and the two distributions become the
+ *  headings a reader's eye lands on.
+ *
+ *  The population count leaves the title and moves to the RIGHT edge in the quiet
+ *  rubric voice, where it sits directly above the column of per-bucket figures it
+ *  is the sum of — so "3 tests" over 0/0/3/0 reads as a total rather than as more
+ *  title. That alignment is also why the figures are `text-right`: 10 and 2 have
+ *  to share a units place or the column goes ragged. */
+function CompositionGroup({ heading, count, rows, testId, awaiting }: {
   heading: string
+  /** The distribution's population ("3 tests"). `null` while awaited: it is the
+   *  one thing not yet measured, so it is the one thing the placeholder omits. */
+  count: string | null
   rows: CompositionRow[]
   testId: string
   awaiting?: AwaitingState
@@ -371,7 +393,10 @@ function CompositionGroup({ heading, rows, testId, awaiting }: {
   const total = rows.reduce((sum, r) => sum + (r.count ?? 0), 0)
   return (
     <div data-testid={testId}>
-      <div className="cl-rubric pb-1.5">{heading}</div>
+      <div className="flex items-baseline justify-between gap-2 pb-1.5">
+        <h4 className="cl-frame-heading m-0 min-w-0 truncate">{heading}</h4>
+        {count && <span className="cl-rubric shrink-0 tabular-nums">{count}</span>}
+      </div>
       <div className="mb-2 flex h-[3px] gap-[2px]" aria-hidden>
         {total === 0
           ? <span className="flex-1 rounded-full" style={{ background: 'var(--border-strong)' }} />
@@ -394,7 +419,7 @@ function CompositionGroup({ heading, rows, testId, awaiting }: {
                 aria-hidden
               />
               <dt className={quiet ? 'text-muted' : 'text-secondary'} {...(r.title ? { title: r.title } : {})}>{r.label}</dt>
-              <dd className={`m-0 tabular-nums ${quiet ? 'text-muted' : ''}`}>
+              <dd className={`m-0 text-right tabular-nums ${quiet ? 'text-muted' : ''}`}>
                 {r.count == null && awaiting
                   ? <SkeletonBar awaiting={awaiting} width="14px" height={7} className="translate-y-[-2px]" />
                   : r.count}

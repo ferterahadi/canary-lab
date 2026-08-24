@@ -274,6 +274,10 @@ export interface RunIndexEntry {
    *  without opening one manifest per run. Absent on pre-existing entries and
    *  on runs that never healed. */
   healCycles?: number
+  /** The compact index also carries who owns repair work. Flight Activity
+   *  cold-loads terminal runs from this index, while full manifests are sent
+   *  only for active runs. */
+  healMode?: RunManifest['healMode']
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>

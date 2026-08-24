@@ -60,6 +60,20 @@ describe('listRuns', () => {
     expect(byId.gone).toBeUndefined()
   })
 
+  it('backfills external repair ownership from a legacy index row', () => {
+    writeRunsIndex(tmpDir, [
+      { runId: 'external', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'passed' },
+    ])
+    const dir = runDirFor(tmpDir, 'external')
+    fs.mkdirSync(dir, { recursive: true })
+    writeManifest(path.join(dir, 'manifest.json'), {
+      runId: 'external', feature: 'foo', startedAt: '2026-01-01T00:00:00Z',
+      status: 'passed', healCycles: 1, healMode: 'external', services: [],
+    })
+
+    expect(listRuns(tmpDir)[0]).toMatchObject({ healCycles: 1, healMode: 'external' })
+  })
+
   it('leaves an already-mirrored healCycles alone instead of re-reading the manifest', () => {
     writeRunsIndex(tmpDir, [
       { runId: 'a', feature: 'foo', startedAt: '2026-01-01T00:00:00Z', status: 'failed', healCycles: 2 },

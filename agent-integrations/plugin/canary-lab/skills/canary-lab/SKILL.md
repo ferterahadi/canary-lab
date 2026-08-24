@@ -70,7 +70,7 @@ If `start_flight` returns `type: "getting_started_busy"`, a Getting Started demo
 7. **When the user says stop, stop it — do not just stop polling.** `pause_flight(flightId)` is the resumable stop: it ends the flight's live work (the stage's spawned agent, its test run including a repair in progress, a portify workflow, an export) and returns only once that work is actually stopped, keeping every stage's evidence — a later `start_flight` on the same repos resumes from the first open stage. `abort_flight(flightId, confirm: true)` is terminal: same teardown, no resume, and a queued sibling on the same repo(s) may start once the repos free. Prefer pause unless they want the flight abandoned. A verified portify review awaiting an answer survives a pause deliberately. Abandoning a flight by simply ceasing to `get_flight` leaves the whole pipeline running. `stop_flight_agent(flightId, confirm: true)` is the narrow option: it kills only the agent the CURRENT stage is running. Be honest with the user about what that does — the flight is waiting on that stage, so the attempt FAILS and the flight parks `stage-failed`; it does not carry on. What it buys over a pause is that the test run and the export are left alone, the stage keeps its error instead of resetting to not-started, and a queued sibling flight on the same repo(s) is released. Reach for it when one agent is misbehaving and everything else should stay up; reach for `pause_flight` when the user wants the flight held.
 8. On `done`, `links.evaluationZip` is the deliverable — point the user at opening the evaluation export (video playback where the tests drive a browser, plus the per-test reasoning in `evaluation.html`) as their immediate next step. Reviewing that export IS the core Canary Lab loop, not an optional extra.
 
-A flight can be STARTED from the CLI (`npx canary-lab flight <repo...> "<what to test>"`), the web UI (Flights pill), or this MCP surface — one store, so progress shows everywhere. But a flight is driven by whoever started it: one you start over MCP defaults to `stage_producer: "external"`, and the web UI is then **read-only** for it. Its Respond, Pause, Continue and autopilot controls are disabled and point back at you; only Abort stays live, for when this session dies. So never tell the user to answer a checkpoint, pause, or resume from the UI — they cannot, and a flight you stop driving just sits parked.
+A flight can be STARTED from the CLI (`npx canary-lab flight <repo...> "<what to test>"`), the web UI (Flights pill), or this MCP surface — one store, so progress shows everywhere. But a flight is driven by whoever started it: one you start over MCP defaults to `stage_producer: "external"`, and the web UI is then **read-only** for it. Its Respond, Pause, Continue and autopilot controls are disabled and point back at you; Abort stays live for when this session dies. During an `external-work` hand-off the UI also offers **Request takeover**: that does not race you with a local agent — it records the request and waits for you to release this one step. So never tell the user to answer, pause, or resume from the UI; the takeover handshake is the one supported transfer.
 
 ## Doing the stage work yourself
 
@@ -129,6 +129,14 @@ preserved).
   discarded server-side and the step re-parks with
   `data.lastRejection: "stale_submission"` — work you did after that point was
   never going to count.
+- **A takeover request means stop and release, never submit.** If a re-check
+  carries `checkpoint.data.takeoverRequestedAt`, or a submit returns
+  `type: "takeover_requested"`, stop this work plus any subagents/processes you
+  started. Tell the user which files you already changed if they need to review
+  them, then acknowledge with
+  `respond_flight_checkpoint(flightId, choice: "run-internally")`. Canary starts
+  its local agent only after that acknowledgement. The UI can force takeover if
+  this session is gone; a later response from you is then rejected.
 - **A parked hand-off has no deadline — so do NOT end your turn while one is open.** The flight advances only when you submit: nothing polls it, no timeout rescues it, and a status update to the user is not progress. Keep working through the submit, then follow the flight to its next stage. A read that finds a hand-off with no client contact for 45+ minutes carries `handOffIdle` — that is a step somebody took and abandoned; it is still answerable against the same `handOffId`, so pick it up or tell the user the flight is stalled. If you must stop, say so in the same breath and tell them the flight stays parked until they re-invoke this skill.
 - A `type: "flight_stopped"` result means the flight is no longer waiting on you.
   Discard what you were about to submit, do not retry it, and do not resume the
@@ -162,6 +170,7 @@ waiting.
 | --- | --- |
 | `running` | Wait ~20s, re-call `get_flight`. |
 | `waiting-for-approval` | Respond via `respond_flight_checkpoint`. |
+| `waiting-for-approval` + `checkpoint.data.takeoverRequestedAt` | Stop external work and release with `choice: "run-internally"`; do not submit. |
 | `paused`, `pauseReason: "queued"` | Narrate as waiting — do NOT resume it. |
 | `paused`, other `pauseReason` | Re-call `start_flight` (OMIT `repoPaths` + `description`) to resume. |
 | `paused` + `remedy` in the result | A stage is blocked by uncommitted repo changes. Help the user clean each listed repo — `git stash push -u` (undoable) or commit — then `start_flight` resumes and the stage retries. |

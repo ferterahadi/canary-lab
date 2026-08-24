@@ -217,11 +217,11 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       evidence: { gaps: [{ gap: 'untested' }, { gap: 'untested' }, { gap: 'path-incomplete' }] },
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
-    const cov = facts.find((f) => f.label === 'Requirements covered')
+    const cov = facts.find((f) => f.label === 'Claimed coverage')
     expect(cov).toMatchObject({ value: '40%', big: true, tone: 'warn' })
     // The band is the settled label set in every state: the loop's position is
     // the passes card's subject, and the gap count is not a settled tile.
-    expect(facts.map((f) => f.label)).toEqual(['Requirements covered', 'Requirements', 'Tests written'])
+    expect(facts.map((f) => f.label)).toEqual(['Claimed coverage', 'Requirements', 'Tests written'])
   })
 
   it('a zero no mapping has produced is not a measurement — the tile waits instead of reporting 0%', () => {
@@ -236,8 +236,8 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     } as unknown as FlightStage
     // No `meter`: the settled tile is a bare percentage now that the
     // single-fraction bars are gone, so no slot is reserved under it.
-    expect(stageFacts(authoring, flight()).find((f) => f.label === 'Requirements covered'))
-      .toEqual({ label: 'Requirements covered', value: '', awaiting: true })
+    expect(stageFacts(authoring, flight()).find((f) => f.label === 'Claimed coverage'))
+      .toEqual({ label: 'Claimed coverage', value: '', awaiting: true })
 
     // A 0% a pass actually MEASURED is a real verdict and still reports.
     const measuredZero = {
@@ -246,7 +246,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       progress: { pass: 2, maxPasses: 5, phase: 'authoring', coveragePct: 0, target: 100, gapsOpen: 18, passes: [{ pass: 1, coveragePct: 0 }] },
       evidence: {},
     } as unknown as FlightStage
-    expect(stageFacts(measuredZero, flight()).find((f) => f.label === 'Requirements covered'))
+    expect(stageFacts(measuredZero, flight()).find((f) => f.label === 'Claimed coverage'))
       .toMatchObject({ value: '0%', big: true, tone: 'warn' })
   })
 
@@ -258,7 +258,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
       evidence: { coveragePct: 100, gaps: [] },
     } as unknown as FlightStage
     const facts = stageFacts(stage, flight())
-    expect(facts.find((f) => f.label === 'Requirements covered')).toMatchObject({ value: '100%', big: true, tone: 'good' })
+    expect(facts.find((f) => f.label === 'Claimed coverage')).toMatchObject({ value: '100%', big: true, tone: 'good' })
     const gaps = facts.find((f) => f.label === 'Coverage gaps')
     expect(gaps).toMatchObject({ value: '0', big: true, tone: 'good' })
     expect(gaps?.sub).toBeUndefined()
@@ -319,7 +319,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
         ],
       }),
     })
-    expect(facts.map((f) => f.label)).toEqual(['Requirements covered', 'Requirements', 'Tests written'])
+    expect(facts.map((f) => f.label)).toEqual(['Claimed coverage', 'Requirements', 'Tests written'])
     const specs = facts.find((f) => f.label === 'Tests written')
     expect(specs).toMatchObject({ value: '2', big: true })
     // Depth and the orphan count both live on the composition card now, so the
@@ -338,8 +338,8 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
     const facts = stageFacts(stage, flight(), undefined, { pending: true })
     // The whole settled shape, in order: the tile the flight record already
     // answers carries its figure, the two the ledger owes hold their slots.
-    expect(facts.map((f) => f.label)).toEqual(['Requirements covered', 'Requirements', 'Tests written'])
-    expect(facts.find((f) => f.label === 'Requirements covered')).toMatchObject({ value: '100%' })
+    expect(facts.map((f) => f.label)).toEqual(['Claimed coverage', 'Requirements', 'Tests written'])
+    expect(facts.find((f) => f.label === 'Claimed coverage')).toMatchObject({ value: '100%' })
     expect(facts.find((f) => f.label === 'Requirements')).toEqual({ label: 'Requirements', value: '', awaiting: true })
     expect(facts.find((f) => f.label === 'Tests written')).toEqual({ label: 'Tests written', value: '', awaiting: true })
     // And the stand-in the stage falls back to without a ledger does NOT take a
@@ -350,7 +350,7 @@ describe('stageFacts — specs-coverage metric tiles (R77)', () => {
   it('reserves the meter slot only on the awaited tile that settles with a bar', () => {
     const stage = { key: 'specs-coverage', status: 'done', evidence: { coveragePct: 100, gaps: [] } } as unknown as FlightStage
     const facts = stageFacts(stage, flight(), undefined, { pending: true })
-    // `Requirements covered` settles with a coverage bar; the two counts beside
+    // `Claimed coverage` settles with a coverage bar; the two counts beside
     // it settle bare, and a reserved slot under those would be dead space.
     expect(facts.find((f) => f.label === 'Requirements')?.meter).toBeUndefined()
     expect(facts.find((f) => f.label === 'Tests written')?.meter).toBeUndefined()
@@ -568,7 +568,7 @@ describe('stageStateLine — read-time (workspace-probed) evidence never asserts
       evidenceSource: 'workspace',
     } as FlightStage
     const line = stageStateLine(stage, flight({ stages: [stage] }))
-    expect(line).toBe('Tests written, coverage at 36% — 5 of 14 requirements covered.')
+    expect(line).toBe('Tests written. Claimed coverage is 36% — 5 of 14 requirements claimed. Nothing has run yet.')
     expect(line).not.toMatch(/target met/)
   })
 
@@ -867,8 +867,34 @@ describe('probed coverage with no requirements is undefined, not zero', () => {
       evidenceSource: 'workspace',
     } as FlightStage
     expect(stageStateLine(withReqs, flight({ stages: [withReqs] })))
-      .toBe('Tests written, coverage at 35.7% — 5 of 14 requirements covered.')
-    expect(stageFacts(withReqs, flight())[0]).toMatchObject({ label: 'Requirements covered', value: '35.7%' })
+      .toBe('Tests written. Claimed coverage is 35.7% — 5 of 14 requirements claimed. Nothing has run yet.')
+    expect(stageFacts(withReqs, flight())[0]).toMatchObject({ label: 'Claimed coverage', value: '35.7%' })
+  })
+})
+
+describe('probed coverage before mapping', () => {
+  const notMapped = {
+    key: 'specs-coverage',
+    status: 'pending',
+    evidence: {
+      coveragePct: 0,
+      mappingState: 'absent',
+      requirementCount: 2,
+      testsWritten: 1,
+      covered: 0,
+      total: 2,
+    },
+    evidenceSource: 'workspace',
+  } as FlightStage
+
+  it('keeps authored tests visible without presenting a measured 0%', () => {
+    expect(stageStateLine(notMapped, flight({ stages: [notMapped] })))
+      .toBe('1 test is written, but coverage mapping has not run yet.')
+    expect(stageFacts(notMapped, flight())).toEqual([
+      { label: 'Claimed coverage', value: 'Not mapped', sub: 'coverage mapping has not run' },
+      { label: 'Requirements', value: '2', big: true },
+      { label: 'Tests written', value: '1', big: true },
+    ])
   })
 })
 

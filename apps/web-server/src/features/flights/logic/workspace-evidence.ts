@@ -95,14 +95,16 @@ function prdSummaryEvidence(featureDir: string): EvidenceBlock | undefined {
   return requirementCount ? { requirementCount } : undefined
 }
 
-/** Live coverage, not the status square. The square lights when a spec FILE
- *  exists; this reports what the ledger actually computes, which is the number a
- *  "coverage target met" sentence has to be true about. */
+/** Live authoring and mapping evidence. The spec count proves tests exist; the
+ *  ledger state says whether requirement mapping ran; the percentage is only a
+ *  claim after that point. */
 function specsCoverageEvidence(deps: WorkspaceEvidenceDeps, feature: string): EvidenceBlock | undefined {
   const ledger = computeFeatureCoverage({ featuresDir: deps.featuresDir, logsDir: deps.logsDir, feature })
   return {
     coveragePct: ledger.coveragePct,
+    mappingState: ledger.state?.coverage,
     requirementCount: ledger.requirements.length,
+    testsWritten: ledger.tests.length,
     covered: ledger.totals.covered,
     total: ledger.totals.total,
   }

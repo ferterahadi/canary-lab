@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import * as api from '@/shared/api/client'
-import type { FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
+import type { ExternalWorkCheckpointData, FlightCheckpoint, FlightManifest, FlightStage } from '@/shared/api/client'
 import { evaluationArchiveFilename } from '@/shared/lib/format'
 import { DiffView } from '@/shared/ui/DiffView'
 import { useEvaluationExports } from '@/features/evaluation'
 import { checkpointOptionLabel, checkpointTitle, evaluationTaskId, STAGE_COLUMN } from './stage-meta'
-import { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../lib/external-work'
-import { StatusDot } from '@/shared/ui/atoms'
+import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
+import { ConfirmModal, StatusDot } from '@/shared/ui/atoms'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 /** Evaluation Report's explicit download (R15): as an `icon` on the at-a-glance
  *  card's kicker line — beside the archive it fetches — and (R71/W1, `primary`)
@@ -87,24 +88,28 @@ export function CheckpointControls({
   const [busy, setBusy] = useState(false)
   const [envText, setEnvText] = useState('')
   // portify-apply 'revise': the choice needs feedback text, so its button
-  // opens this composer instead of responding immediately. No read-only guard
-  // on the composer below: the only thing that opens it is an option button
-  // read-only never renders, and `readOnly` can never turn ON mid-mount (the
-  // producer is sticky, so it only clears when the flight settles).
+  // opens this composer instead of responding immediately. An external owner
+  // leaves that button visible but disabled, so the composer cannot open.
   const [reviseOpen, setReviseOpen] = useState(false)
   const [reviseText, setReviseText] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
+  const [requestTakeoverOpen, setRequestTakeoverOpen] = useState(false)
+  const [forceTakeoverOpen, setForceTakeoverOpen] = useState(false)
 
-  const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string; token?: string }): void => {
+  const mutate = (call: () => Promise<unknown>): void => {
     setBusy(true)
     setFailure(null)
-    api.respondFlightCheckpoint(flightId, response)
+    call()
       .then(() => onResponded())
       .catch((err: unknown) => setFailure(err instanceof Error ? err.message : String(err)))
       .finally(() => setBusy(false))
   }
+  const respond = (response: { choice?: string; values?: Record<string, string>; data?: unknown; feedback?: string; token?: string }): void => {
+    mutate(() => api.respondFlightCheckpoint(flightId, response))
+  }
 
   const data = (checkpoint.data ?? {}) as Record<string, unknown>
+  const externalData = data as ExternalWorkCheckpointData
   const missing = Array.isArray(data.missing) ? (data.missing as string[]) : []
   const diff = typeof data.diff === 'string' ? data.diff : null
   const configError = typeof data.error === 'string' ? data.error : null
@@ -112,9 +117,12 @@ export function CheckpointControls({
   // A hand-off to the client that started the flight: work in progress, not a
   // question. It drops every "you are the blocker" cue — amber chrome, the
   // pause glyph, the Recommended badge — because the expected next move is the
-  // agent finishing, not a click. Its own two escape buttons went with the
-  // read-only rule below; Abort in the flight's ⋯ menu is what replaced them.
+  // agent finishing, not a click. Its choices remain visible below, disabled
+  // with the external-session destination like every other mutation.
   const externalWork = checkpoint.kind === 'external-work'
+  const takeoverRequestedAt = typeof externalData.takeoverRequestedAt === 'string'
+    ? externalData.takeoverRequestedAt
+    : undefined
   // Every answer on this card belongs to the MCP client driving the flight —
   // including the hand-off's own two escape buttons, which were the last thing
   // on the page still inviting the human to act on the agent's behalf. The
@@ -122,6 +130,11 @@ export function CheckpointControls({
   // the answering goes. An `external-work` checkpoint only ever occurs on an
   // externally driven flight, so this one predicate covers both cases.
   const readOnly = isExternallyDriven(flight)
+  const lockedTitle = readOnly
+    ? takeoverRequestedAt
+      ? EXTERNAL_WORK_COPY.takeover.requestedLockTitle
+      : externalMutationTooltip('flight', 'answer this checkpoint')
+    : undefined
   // Identifies WHICH hand-off a submit answers. Without it the server's
   // stale-submit gate rejects every check from this side and silently re-parks,
   // so the button looked broken while doing nothing.
@@ -137,10 +150,11 @@ export function CheckpointControls({
   const visibleOptions = folded ? options.slice(0, 1) : options
 
   return (
-    <section
+    <>
+      <section
       data-testid="checkpoint-controls"
       className={`flex flex-col gap-2.5 rounded-lg border bg-surface p-3 ${externalWork ? 'border-running/45' : 'border-warning/45'} ${STAGE_COLUMN}`}
-    >
+      >
       <div className="flex items-center gap-2">
         {externalWork
           ? <StatusDot state="running" className="shrink-0" />
@@ -155,11 +169,45 @@ export function CheckpointControls({
       {/* The hand-off's `message` is written AT the agent holding the step
           ("Run this scout step in your own client…") — the wrong reader. The
           stage's own state line above already says what is happening here. */}
-      {!externalWork && <p className="text-[12px] text-secondary">{checkpoint.message}</p>}
+      <p className="text-[12px] text-secondary">
+        {externalWork ? EXTERNAL_WORK_COPY.stateLine : checkpoint.message}
+      </p>
       {staleSubmission && (
         <p data-testid="checkpoint-stale-submission" className="text-[11px] text-warning">
           {EXTERNAL_WORK_COPY.lateResultNote}
         </p>
+      )}
+
+      {externalWork && readOnly && (
+        <div
+          data-testid="checkpoint-takeover"
+          className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-subtle px-2.5 py-2"
+        >
+          <div className="min-w-[220px] flex-1">
+            <div className="text-[11.5px] font-medium text-secondary">
+              {takeoverRequestedAt
+                ? EXTERNAL_WORK_COPY.takeover.requestedTitle
+                : EXTERNAL_WORK_COPY.takeover.availableTitle}
+            </div>
+            <div className="mt-0.5 text-[10.5px] leading-snug text-muted">
+              {takeoverRequestedAt
+                ? EXTERNAL_WORK_COPY.takeover.requestedBody
+                : EXTERNAL_WORK_COPY.takeover.availableBody}
+            </div>
+          </div>
+          <button
+            type="button"
+            data-testid={takeoverRequestedAt ? 'checkpoint-force-takeover' : 'checkpoint-request-takeover'}
+            disabled={busy}
+            onClick={() => takeoverRequestedAt ? setForceTakeoverOpen(true) : setRequestTakeoverOpen(true)}
+            className="cl-button shrink-0 px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+            style={takeoverRequestedAt ? { color: 'var(--danger)' } : undefined}
+          >
+            {takeoverRequestedAt
+              ? EXTERNAL_WORK_COPY.takeover.forceLabel
+              : EXTERNAL_WORK_COPY.takeover.requestLabel}
+          </button>
+        </div>
       )}
 
       {checkpoint.kind === 'config-approval' && configError && (
@@ -173,85 +221,90 @@ export function CheckpointControls({
           per-line-coloured diff block, not a plain wall of text. */}
       {diff && <DiffView diff={diff} />}
 
-      {checkpoint.kind === 'missing-env' && !readOnly && (
+      {checkpoint.kind === 'missing-env' && (
         <div className="flex flex-col gap-1.5">
           <div className="text-[11px] text-muted">
             Missing: {missing.join(', ')}
           </div>
-          <textarea
-            data-testid="checkpoint-env-values"
-            value={envText}
-            onChange={(e) => setEnvText(e.target.value)}
-            placeholder={'KEY=value\nANOTHER_KEY=value'}
-            spellCheck={false}
-            rows={4}
-            className="cl-input w-full p-2 text-[11px] font-mono"
-          />
-          <button
-            type="button"
-            data-testid="checkpoint-submit-values"
-            disabled={busy || !envText.trim()}
-            onClick={() => {
-              const values: Record<string, string> = {}
-              for (const line of envText.split('\n')) {
-                const eq = line.indexOf('=')
-                if (eq > 0) values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
-              }
-              respond({ values })
-            }}
-            className="cl-button self-start px-2.5 py-1 text-xs"
-          >
-            Save these settings
-          </button>
+          <DisabledControlTooltip wrapperClassName="flex w-full">
+            <textarea
+              data-testid="checkpoint-env-values"
+              value={envText}
+              onChange={(e) => setEnvText(e.target.value)}
+              placeholder={'KEY=value\nANOTHER_KEY=value'}
+              spellCheck={false}
+              rows={4}
+              disabled={readOnly}
+              title={lockedTitle}
+              className="cl-input w-full p-2 text-[11px] font-mono disabled:cursor-not-allowed disabled:opacity-45"
+            />
+          </DisabledControlTooltip>
+          <DisabledControlTooltip wrapperClassName="inline-flex self-start">
+            <button
+              type="button"
+              data-testid="checkpoint-submit-values"
+              disabled={readOnly || busy || !envText.trim()}
+              title={lockedTitle}
+              onClick={() => {
+                const values: Record<string, string> = {}
+                for (const line of envText.split('\n')) {
+                  const eq = line.indexOf('=')
+                  if (eq > 0) values[line.slice(0, eq).trim()] = line.slice(eq + 1).trim()
+                }
+                respond({ values })
+              }}
+              className="cl-button self-start px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              Save these settings
+            </button>
+          </DisabledControlTooltip>
         </div>
       )}
 
-      {readOnly && (
-        <p data-testid="checkpoint-read-only" className="text-[11px] text-secondary">
-          {EXTERNAL_DRIVE_COPY.checkpointLine}
-        </p>
-      )}
-      {!readOnly && (
       <div className="flex flex-wrap items-center gap-1.5">
         {visibleOptions.map((option, i) => (
-          <button
-            key={option}
-            type="button"
-            data-testid={`checkpoint-choice-${option}`}
-            disabled={busy}
-            onClick={() => (option === 'revise'
-              ? setReviseOpen((v) => !v)
-              : respond({ choice: option, ...(option === 'submit' && handOffId ? { token: handOffId } : {}) }))}
-            className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs"
-            style={i === 0 && !externalWork
-              ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
-              : undefined}
-          >
-            {checkpointOptionLabel(checkpoint.kind, option)}
-            {i === 0 && !externalWork && (
-              /* R71/W3: the default is named, not color-only. */
-              <span
-                data-testid="checkpoint-recommended"
-                className="cl-badge-accent"
-              >
-                Recommended
-              </span>
-            )}
-          </button>
+          <DisabledControlTooltip key={option}>
+            <button
+              type="button"
+              data-testid={`checkpoint-choice-${option}`}
+              disabled={readOnly || busy}
+              title={lockedTitle}
+              onClick={() => (option === 'revise'
+                ? setReviseOpen((v) => !v)
+                : respond({ choice: option, ...(option === 'submit' && handOffId ? { token: handOffId } : {}) }))}
+              className="cl-button inline-flex items-center gap-1.5 px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              style={i === 0 && !externalWork
+                ? { color: 'var(--accent)', borderColor: 'color-mix(in srgb, var(--accent) 45%, var(--border-default))' }
+                : undefined}
+            >
+              {checkpointOptionLabel(checkpoint.kind, option)}
+              {i === 0 && !externalWork && (
+                /* R71/W3: the default is named, not color-only. */
+                <span
+                  data-testid="checkpoint-recommended"
+                  className="cl-badge-accent"
+                >
+                  Recommended
+                </span>
+              )}
+            </button>
+          </DisabledControlTooltip>
         ))}
         {folded && (
-          <button
-            type="button"
-            data-testid="checkpoint-more-options"
-            disabled={busy}
-            onClick={() => setShowAllOptions(true)}
-            className="cl-button px-2.5 py-1 text-xs text-muted"
-          >
-            More options ▾
-          </button>
+          <DisabledControlTooltip>
+            <button
+              type="button"
+              data-testid="checkpoint-more-options"
+              disabled={readOnly || busy}
+              title={lockedTitle}
+              onClick={() => setShowAllOptions(true)}
+              className="cl-button px-2.5 py-1 text-xs text-muted disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              More options ▾
+            </button>
+          </DisabledControlTooltip>
         )}
       </div>
-      )}
 
       {reviseOpen && (
         <div className="flex flex-col gap-1.5">
@@ -277,6 +330,33 @@ export function CheckpointControls({
       )}
 
       {failure && <div className="text-[11px] text-danger">{failure}</div>}
-    </section>
+      </section>
+
+      <ConfirmModal
+        open={requestTakeoverOpen}
+        title={EXTERNAL_WORK_COPY.takeover.requestDialogTitle}
+        message={EXTERNAL_WORK_COPY.takeover.requestDialogMessage}
+        confirmLabel="Request takeover"
+        onCancel={() => setRequestTakeoverOpen(false)}
+        onConfirm={() => {
+          setRequestTakeoverOpen(false)
+          mutate(() => api.requestFlightTakeover(flightId))
+        }}
+        busy={busy}
+      />
+      <ConfirmModal
+        open={forceTakeoverOpen}
+        title={EXTERNAL_WORK_COPY.takeover.forceDialogTitle}
+        message={EXTERNAL_WORK_COPY.takeover.forceDialogMessage}
+        confirmLabel="Force takeover"
+        variant="danger"
+        onCancel={() => setForceTakeoverOpen(false)}
+        onConfirm={() => {
+          setForceTakeoverOpen(false)
+          mutate(() => api.forceFlightTakeover(flightId))
+        }}
+        busy={busy}
+      />
+    </>
   )
 }

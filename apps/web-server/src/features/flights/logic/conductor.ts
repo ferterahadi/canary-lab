@@ -1,13 +1,13 @@
 import type { FlightStore } from './store'
-import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStageKey } from './types'
+import { FLIGHT_STAGE_KEYS, isActiveFlightStatus, type ExternalWorkCheckpointData, type FlightCheckpointResponse, type FlightManifest, type FlightOptions, type FlightStage, type FlightStageKey } from './types'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { drive } from './flight-drive'
-import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError } from './flight-errors'
+import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
 import { FlightEntryMode, StageAdapters, bankStageActivity, checkStageEntry, defaultFlightId, driveControllers, firstOpenStageIndex, freshStages, interruptStage, resetStagesForRestart, sameRepoSet, stagesForJump } from './flight-stages'
 
 export { abortFlight, deleteFlight, drainQueuedFlights, enqueueFlight, removeFlightRecordsForFeature } from './flight-queue'
 
-export { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, stampSystemLine } from './flight-errors'
+export { FlightConflictError, FlightExistsError, FlightFrozenError, FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, stampSystemLine } from './flight-errors'
 
 export type { FlightEntryMode, StageAdapter, StageAdapters, StageContext, StageJob, StageOutcome } from './flight-stages'
 
@@ -403,6 +403,7 @@ export function respondToFlightCheckpoint(
   flightId: string,
   response: FlightCheckpointResponse,
   deps: FlightConductorDeps,
+  takeoverMode: 'acknowledged' | 'forced' = 'acknowledged',
 ): StartFlightResult {
   const store = deps.store
   const now = deps.now ?? (() => new Date().toISOString())
@@ -414,6 +415,24 @@ export function respondToFlightCheckpoint(
   const stage = current.stages.find((s) => s.status === 'waiting-for-approval')
   if (!stage) throw new Error(`flight ${flightId} has no stage waiting for approval`)
 
+  const checkpointData = stage.checkpoint?.data as ExternalWorkCheckpointData | undefined
+  const takeoverRequestedAt = stage.checkpoint?.kind === 'external-work'
+    && typeof checkpointData?.takeoverRequestedAt === 'string'
+      ? checkpointData.takeoverRequestedAt
+      : undefined
+  if (takeoverRequestedAt && response.choice !== 'run-internally') {
+    throw new FlightTakeoverRequestedError(flightId, takeoverRequestedAt)
+  }
+
+  const takeoverLine = takeoverRequestedAt
+    ? stampSystemLine(
+        takeoverMode === 'forced'
+          ? '[control] User forced takeover — Canary is starting this step here; late external results will be rejected.\n'
+          : '[control] The external agent released this step — Canary is taking over.\n',
+        now(),
+      )
+    : ''
+
   // Flip to running synchronously so a second respond call races into the
   // status guard above instead of double-driving the flight.
   const manifest: FlightManifest = {
@@ -421,9 +440,86 @@ export function respondToFlightCheckpoint(
     status: 'running',
     updatedAt: now(),
     stages: current.stages.map((s) =>
-      s.key === stage.key ? { ...s, status: 'running' as const, checkpointResponse: response } : s,
+      s.key === stage.key
+        ? {
+            ...s,
+            status: 'running' as const,
+            checkpointResponse: response,
+            ...(takeoverLine ? { log: (s.log ?? '') + takeoverLine } : {}),
+          }
+        : s,
     ),
   }
   store.save(manifest)
   return { manifest, completion: drive(flightId, deps, { checkpointResponse: response }) }
+}
+
+/** Ask the external client to release the CURRENT work hand-off. This only
+ *  records intent and blocks later submits; it deliberately does not start a
+ *  local agent. The external client acknowledges with `run-internally`, which
+ *  goes through respondToFlightCheckpoint above and starts the step exactly
+ *  once. */
+export function requestFlightTakeover(
+  flightId: string,
+  deps: FlightConductorDeps,
+): FlightManifest {
+  const { store } = deps
+  const now = deps.now ?? (() => new Date().toISOString())
+  const current = store.get(flightId)
+  if (!current) throw new Error(`flight not found: ${flightId}`)
+  if (current.status !== 'waiting-for-approval') {
+    throw new FlightNotParkedError(flightId, current.status, current.pauseReason)
+  }
+  const stage = current.stages.find((s) => s.status === 'waiting-for-approval')
+  if (!stage?.checkpoint || stage.checkpoint.kind !== 'external-work' || current.opts.stageProducer !== 'external') {
+    throw new Error(`Flight ${flightId} is not waiting on work from an external agent.`)
+  }
+  const checkpoint = stage.checkpoint
+  const data = checkpoint.data as ExternalWorkCheckpointData | undefined
+  if (typeof data?.takeoverRequestedAt === 'string') return current
+
+  const requestedAt = now()
+  const line = stampSystemLine(
+    '[control] User requested takeover in Canary Lab — waiting for the external agent to release this step.\n',
+    requestedAt,
+  )
+  const manifest: FlightManifest = {
+    ...current,
+    updatedAt: requestedAt,
+    stages: current.stages.map((candidate): FlightStage => candidate.key === stage.key
+      ? {
+          ...candidate,
+          log: (candidate.log ?? '') + line,
+          checkpoint: {
+            ...checkpoint,
+            data: { ...data, takeoverRequestedAt: requestedAt },
+          },
+        }
+      : candidate),
+  }
+  store.save(manifest)
+  return manifest
+}
+
+/** Emergency half of the cooperative hand-off. The UI only offers this after
+ *  a request and requires a confirmation explaining that Canary cannot stop
+ *  file writes already happening in another process. Once confirmed, consume
+ *  the same `run-internally` response an acknowledgement would have used. */
+export function forceFlightTakeover(
+  flightId: string,
+  deps: FlightConductorDeps,
+): StartFlightResult {
+  const current = deps.store.get(flightId)
+  if (!current) throw new Error(`flight not found: ${flightId}`)
+  const stage = current.stages.find((s) => s.status === 'waiting-for-approval')
+  const data = stage?.checkpoint?.data as ExternalWorkCheckpointData | undefined
+  if (
+    current.status !== 'waiting-for-approval'
+    || stage?.checkpoint?.kind !== 'external-work'
+    || current.opts.stageProducer !== 'external'
+    || typeof data?.takeoverRequestedAt !== 'string'
+  ) {
+    throw new Error(`Flight ${flightId} has no pending takeover request to force.`)
+  }
+  return respondToFlightCheckpoint(flightId, { choice: 'run-internally' }, deps, 'forced')
 }

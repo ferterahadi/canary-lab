@@ -93,6 +93,30 @@ describe('respond_flight_checkpoint — a stopped flight tells the client to sta
     expect(String(out.next)).toContain('redo:true')
   })
 
+  it('maps a takeover rejection to stop-and-release instructions', async () => {
+    const { call } = harness({
+      reply: {
+        statusCode: 409,
+        body: {
+          error: 'takeover requested',
+          type: 'flight_takeover_requested',
+          requestedAt: '2026-08-25T01:00:00.000Z',
+        },
+      },
+    })
+    const out = await call('respond_flight_checkpoint', {
+      flightId: 'fl-1', choice: 'submit', data: { x: 1 },
+    })
+    expect(out).toMatchObject({
+      type: 'takeover_requested',
+      flightId: 'fl-1',
+      requestedAt: '2026-08-25T01:00:00.000Z',
+    })
+    expect(String(out.next)).toContain('STOP your work')
+    expect(String(out.next)).toContain('choice:"run-internally"')
+    expect(String(out.next)).not.toMatch(/retry/i)
+  })
+
   it('leaves every other failure as a plain error', async () => {
     const { text } = harness({ reply: { statusCode: 404, body: { error: 'flight not found: nope' } } })
     const out = await text('respond_flight_checkpoint', { flightId: 'nope', choice: 'submit' })
@@ -169,6 +193,21 @@ describe('get_flight — steering after a stop', () => {
     expect(next.startsWith('A previous submit for this step was DISCARDED')).toBe(true)
   })
 
+  it('tells the external client to release when the user requested takeover', async () => {
+    const flight = parkedFlight({ updatedAt: '2020-01-01T00:00:00.000Z' })
+    flight.stages[0].checkpoint.data = {
+      ...flight.stages[0].checkpoint.data,
+      takeoverRequestedAt: '2026-08-25T01:00:00.000Z',
+    }
+    const { call } = harness({ reply: { statusCode: 200, body: flight } })
+    const out = await call('get_flight', { flightId: 'fl-1' })
+    expect(String(out.next)).toMatch(/^TAKEOVER REQUESTED/)
+    expect(String(out.next)).toContain('choice:"run-internally"')
+    // The request is not an abandoned hand-off. Waiting is intentional until
+    // this client releases, so the generic 45-minute idle warning is suppressed.
+    expect(out.handOffIdle).toBeUndefined()
+  })
+
   it('keeps the hand-off id when an oversized prompt is trimmed out of the view', async () => {
     // Without the id the client cannot submit at all, so it is structural — it has
     // to survive the same trim that drops the prompt.
@@ -178,11 +217,16 @@ describe('get_flight — steering after a stop', () => {
       prompt: 'x'.repeat(9 * 1024),
       promptPath: '/flights/fl-1/scout/external-task.md',
       handOffId: 'abc12345',
+      takeoverRequestedAt: '2026-08-25T01:00:00.000Z',
     }
     const { call } = harness({ reply: { statusCode: 200, body: flight } })
     const out = await call('get_flight', { flightId: 'fl-1' })
     const data = (out.checkpoint as { data: Record<string, unknown> }).data
-    expect(data).toMatchObject({ handOffId: 'abc12345', promptOmitted: true })
+    expect(data).toMatchObject({
+      handOffId: 'abc12345',
+      takeoverRequestedAt: '2026-08-25T01:00:00.000Z',
+      promptOmitted: true,
+    })
     expect(data.prompt).toBeUndefined()
   })
 })

@@ -114,6 +114,9 @@ export interface FeatureStageEvidence {
   prdSummary: boolean
   /** At least one authored spec under e2e/ (specs-coverage stage artifact). */
   specs: boolean
+  /** Requirement mapping has durable evidence. Optional for older servers,
+   *  whose payloads predate the distinction between authored and mapped. */
+  coverageMapping?: 'absent' | 'fresh' | 'stale'
   /** How far the config alone gets this feature toward booting concurrently.
    *  `'declared'` means every start command carries a port slot, so Parallel
    *  readiness has nothing left to do — no overlay required. Optional: absent

@@ -141,6 +141,7 @@ describe('GET /api/features', () => {
       booted: false,
       prdSummary: true,
       specs: true,
+      coverageMapping: 'absent',
       portInjectability: 'none',
     })
     expect(body.find((f) => f.name === 'bare')?.evidence).toEqual({
@@ -148,6 +149,7 @@ describe('GET /api/features', () => {
       booted: false,
       prdSummary: false,
       specs: false,
+      coverageMapping: 'absent',
       portInjectability: 'none',
     })
   })

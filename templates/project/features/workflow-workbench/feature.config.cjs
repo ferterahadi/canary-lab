@@ -5,8 +5,8 @@ const appDir = path.join(__dirname, '..', '..', 'workflow-app')
 const config = {
   name: 'workflow-workbench',
   description:
-    'Prove the service is healthy and greets a named user. The greeting requirement '
-    + 'is intentionally uncovered so Coverage and Author have a real gap to expose.',
+    'Prove the service is healthy and greets a named user. The health test starts '
+    + 'unmapped and the greeting test is absent, so Coverage and Author each have real work.',
   envs: ['local', 'production'],
   repos: [
     {

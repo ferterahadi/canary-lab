@@ -138,6 +138,37 @@ describe('FeatureSetupPanel — heal behavior card', () => {
     expect(card?.querySelector('[role="radio"]')).toBeNull()
   })
 
+  it('external ownership preserves the normal edit controls but disables every mutation with the hand-off tooltip', async () => {
+    vi.mocked(getPlaywrightConfig).mockResolvedValue({
+      path: '/ws/features/checkout/playwright.config.ts',
+      format: 'ts',
+      content: '',
+      parsed: { value: { workers: 2, retries: 1, use: { video: 'off', trace: 'retain-on-failure' } }, complexFields: [], source: '' },
+    })
+    const lockedTitle = 'Change suite setup from the Claude/Codex session doing the work.'
+    await mount({
+      repos: [{
+        name: 'shop',
+        localPath: '/repo/shop',
+        branch: 'main',
+        startCommands: [{ name: 'web', command: 'npm start' }],
+      }],
+      healOnFailureThreshold: 2,
+    }, { editable: false, lockedTitle })
+
+    const edit = container.querySelector<HTMLButtonElement>('[data-testid="setup-edit-shop"]')
+    const workers = container.querySelector<HTMLInputElement>('[data-testid="setup-pw-workers"]')
+    const video = container.querySelector<HTMLSelectElement>('[data-testid="setup-pw-video"]')
+    expect(edit?.disabled).toBe(true)
+    expect(edit?.title).toBe(lockedTitle)
+    expect(workers?.disabled).toBe(true)
+    expect(workers?.title).toBe(lockedTitle)
+    expect(video?.disabled).toBe(true)
+    expect(threshold()?.disabled).toBe(true)
+    expect(mode('stop')?.getAttribute('role')).toBe('radio')
+    expect(mode('stop')?.getAttribute('aria-disabled')).toBe('true')
+  })
+
   it('is absent when the feature config could not be read (a playwright-only digest)', async () => {
     vi.mocked(getFeatureConfigDoc).mockRejectedValue(new Error('no feature config'))
     vi.mocked(getPlaywrightConfig).mockResolvedValue({
@@ -166,11 +197,11 @@ function mode(which: 'stop' | 'full'): HTMLElement | null {
 
 async function mount(
   extra: Record<string, unknown> = {},
-  { editable = true }: { editable?: boolean } = {},
+  { editable = true, lockedTitle }: { editable?: boolean; lockedTitle?: string } = {},
 ): Promise<void> {
   vi.mocked(getFeatureConfigDoc).mockResolvedValue(configDoc(extra))
   await act(async () => {
-    root.render(<FeatureSetupPanel feature="checkout" editable={editable} />)
+    root.render(<FeatureSetupPanel feature="checkout" editable={editable} lockedTitle={lockedTitle} />)
   })
 }
 

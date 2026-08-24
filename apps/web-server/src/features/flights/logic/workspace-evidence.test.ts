@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import type { FlightStage } from './types'
+import { readDocsCollection } from '../../coverage/logic/coverage/docs-collection'
 import {
   fillStageEvidence,
   stageEvidenceMissing,
@@ -483,7 +484,7 @@ describe('workspaceStageEvidence — coverage, heal and export probes', () => {
           { id: 'R2', kind: 'functional', title: 'two', text: 't2', pathTypes: ['sad'], variants: [] },
         ],
         variantDimension: null,
-        docsHash: 'h',
+        docsHash: readDocsCollection(featureDir).docsHash,
         sourceDocs: [],
         generatedAt: '2026-07-01T00:00:00.000Z',
       }),
@@ -491,7 +492,12 @@ describe('workspaceStageEvidence — coverage, heal and export probes', () => {
     fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
     fs.writeFileSync(path.join(featureDir, 'e2e', 'a.spec.ts'), "test('x', () => {})\n")
     const ev = workspaceStageEvidence({ featuresDir, logsDir }, FEATURE, ['specs-coverage'])['specs-coverage']
-    expect(ev).toMatchObject({ requirementCount: 2, total: 2 })
+    expect(ev).toMatchObject({
+      mappingState: 'absent',
+      requirementCount: 2,
+      testsWritten: 1,
+      total: 2,
+    })
     expect(typeof ev!.coveragePct).toBe('number')
     expect(typeof ev!.covered).toBe('number')
   })

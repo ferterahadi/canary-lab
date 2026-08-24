@@ -58,6 +58,7 @@ describe('rejectForeignFlightDecision', () => {
     const refusal = rejectForeignFlightDecision(req, reply, () => manifest('running', 'external'))
     expect(refusal).toMatchObject({ type: 'flight_externally_driven' })
     expect(refusal?.error).toContain('driven by the agent that started it')
+    expect(refusal?.error).toContain('Request takeover')
     expect(codeSent()).toBe(409)
   })
 

@@ -12,7 +12,7 @@ import {
   hasPolled,
   noteHandOffContact,
 } from '../handoff-idle'
-import type { FlightManifest } from '../../../../../shared/flights/types'
+import type { ExternalWorkCheckpointData, FlightManifest } from '../../../../../shared/flights/types'
 import { deriveFeatureSlug } from '../../../../../shared/flights/types'
 import { fanOutAdviceFor } from '../client-surface'
 import { type ToolGroupContext, asJsonResult, errorResult } from '../tool-support'
@@ -36,7 +36,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       // so "review it in the web UI" is not an action the client can take. Keep
       // the structural fields and point at the prompt file the stage wrote, so an
       // oversized task degrades to a Read instead of becoming undoable.
-      const d = checkpoint.data as { stage?: string; promptPath?: string; context?: unknown; handOffId?: string; lastRejection?: string }
+      const d = checkpoint.data as ExternalWorkCheckpointData
       checkpoint = checkpoint.kind === 'external-work' && d.promptPath
         ? {
             ...checkpoint,
@@ -47,6 +47,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
               // at all, so it must survive the same trim that drops the prompt.
               ...(d.handOffId ? { handOffId: d.handOffId } : {}),
               ...(d.lastRejection ? { lastRejection: d.lastRejection } : {}),
+              ...(d.takeoverRequestedAt ? { takeoverRequestedAt: d.takeoverRequestedAt } : {}),
               promptOmitted: true,
               reason: 'the task prompt is over the inline budget — Read promptPath for the full task instead of expecting it inline',
               ...(d.context !== undefined && JSON.stringify(d.context).length <= FLIGHT_DATA_INLINE_BUDGET ? { context: d.context } : {}),
@@ -81,7 +82,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
         stage?: string
         kind?: string
         options?: string[]
-        data?: { lastAttempt?: { mode?: string; outcome?: string; reason?: string } }
+        data?: ExternalWorkCheckpointData & { lastAttempt?: { mode?: string; outcome?: string; reason?: string } }
       } | undefined
       const base = `Flight is parked on the ${cp?.kind ?? 'checkpoint'} checkpoint — call respond_flight_checkpoint(flightId, choice: one of ${JSON.stringify(cp?.options ?? [])}).`
       if (cp?.kind === 'prd-source') {
@@ -104,7 +105,10 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
       // rather than the profile instructions because the CLI truncates a server's
       // `instructions` at 2048 chars and the flight profile is already past it.
       if (cp?.kind === 'external-work') {
-        const data = cp.data as { stage?: string; prompt?: string; promptPath?: string; context?: unknown; handOffId?: string; lastRejection?: string } | undefined
+        const data = cp.data as ExternalWorkCheckpointData | undefined
+        if (data?.takeoverRequestedAt) {
+          return `TAKEOVER REQUESTED by the user at ${data.takeoverRequestedAt}. Stop work on this step now, including any subagents or processes you started. Do not submit your result. Release the step with respond_flight_checkpoint(flightId, choice:"run-internally"); only that acknowledgement lets Canary start its local agent. If the user forces takeover before you acknowledge, your later checkpoint response will be rejected. Files you already wrote stay on disk, so tell the user what changed before releasing if they need to review it.`
+        }
         const where = data?.promptPath && !data.prompt
           ? `Read checkpoint.data.promptPath (${data.promptPath}) for the task — it was too large to inline`
           : 'checkpoint.data.prompt is the task'
@@ -323,8 +327,9 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
     // `stage` is not optional: flightView builds the checkpoint as
     // `{ stage: waiting.key, ...checkpoint }`, so a checkpoint that exists always
     // carries one. Typing it optional here would only add an unreachable fallback.
-    const cp = view.checkpoint as { stage: string; kind?: string; data?: { handOffId?: string } } | undefined
+    const cp = view.checkpoint as { stage: string; kind?: string; data?: ExternalWorkCheckpointData } | undefined
     if (view.status !== 'waiting-for-approval' || cp?.kind !== 'external-work') return null
+    if (cp.data?.takeoverRequestedAt) return null
     const handOffId = cp.data?.handOffId
     const nowMs = Date.now()
     // A parked flight is written once and then untouched, so its updatedAt IS the
@@ -340,7 +345,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
   }
 
   registerTool('get_flight', {
-    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming. A flight parked on an external-work hand-off that no client has checked in on for 45+ minutes also carries `handOffIdle` — the step was handed out and abandoned (usually a client that ended its turn with it open). Nothing resumes a parked hand-off on its own, and the checkpoint is still answerable, so pick the work up and submit against the same handOffId, or tell the user it is stalled.',
+    description: 'Fetch one flight (stage rail + open checkpoint) by id, or list all flights when flightId is omitted. Poll this to follow a running flight; it parks on checkpoints (respond via respond_flight_checkpoint) and settles to done/paused/failed. A paused flight carries pauseReason: "queued" means it is waiting its turn behind another flight on the same repo(s) and auto-starts when that repo frees (narrate it as waiting, not stuck — do not ask the user to resume it); "user"/"stage-failed"/"restart" are the resumable pauses. When a stage failed on uncommitted repo changes the result carries `remedy` — the still-dirty repos (live git re-check) — and `next` says how to help the user stash/commit them before resuming. A flight parked on an external-work hand-off that no client has checked in on for 45+ minutes also carries `handOffIdle` — the step was handed out and abandoned (usually a client that ended its turn with it open). Nothing resumes a parked hand-off on its own. If checkpoint.data.takeoverRequestedAt is present, the user asked Canary to take this step: stop your work and acknowledge with respond_flight_checkpoint(choice:"run-internally") instead of submitting.',
     inputSchema: {
       flightId: z.string().optional().describe('Omit to list all flights (slim rows).'),
     },
@@ -470,7 +475,7 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
   })
 
   registerTool('respond_flight_checkpoint', {
-    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. A portify-gate park is the upfront parallel-readiness ask BEFORE any agent/double-boot cost: "run" starts the portify workflow (a sibling feature\'s saved overlay for the same app is reused and verified first — the agent only runs if that fails), "skip" keeps the feature serial and the flight continues. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without parallel readiness (the feature stays serial; a later flight can retry). export-mode picks the evaluation flavor: raw (fast) or localized (rewritten reasoning — on a stage_producer:"external" flight the localized rewrite is handed to YOU as an external-work checkpoint, and is the default there).',
+    description: 'Release a flight parked waiting-for-approval: pass the choice (from the checkpoint\'s options), user-supplied env values for missing-env, or an edited configSource via data for config-approval (the config is the scaffolded feature\'s REAL on-disk file — data.configSource writes through to it). Under autopilot (the default) only similarity-choice, missing-env, and re-parked checkpoints reach you; a flight started with autopilot:false parks at every checkpoint. A prd-source park is a two-path fork: supply the docs yourself (write_feature_doc with content or link_path, then respond "continue"), or have Canary\'s agent gather them guided by the flight\'s frozen intent — respond "collect-repo-docs" (copies in repo docs relevant to the intent) or "infer-from-diff" (derives requirements from the branch diff vs base); optional feedback rides a retry into the agent\'s prompt. A portify-gate park is the upfront parallel-readiness ask BEFORE any agent/double-boot cost: "run" starts the portify workflow (a sibling feature\'s saved overlay for the same app is reused and verified first — the agent only runs if that fails), "skip" keeps the feature serial and the flight continues. A portify-apply park is a verified-diff review: "apply" saves the overlay (nothing lands in the product repos), "revise" REQUIRES feedback:"<what to change>" and re-runs the agent + double-boot re-verify (the checkpoint re-parks with the new diff), "cancel" discards the edits and SKIPS the stage — the flight continues without parallel readiness (the feature stays serial; a later flight can retry). export-mode picks the evaluation flavor: raw (fast) or localized (rewritten reasoning — on a stage_producer:"external" flight the localized rewrite is handed to YOU as an external-work checkpoint, and is the default there). On external-work, checkpoint.data.takeoverRequestedAt means the user asked Canary to take this step: stop your work and respond choice:"run-internally" to release it; any submit is rejected.',
     inputSchema: {
       flightId: z.string(),
       choice: z.string().optional().describe('One of the checkpoint\'s options.'),
@@ -502,6 +507,14 @@ export function registerFlightTools(ctx: ToolGroupContext): void {
           next: body.status === 'aborted'
             ? 'This flight was ABORTED — it will not continue. Discard the work you were doing for it and do not resubmit. Tell the user it was stopped; only start_flight with redo:true begins a new attempt, and only if they ask.'
             : 'The flight is no longer waiting on you — the user stopped it, or it moved on. DISCARD the result you were about to submit and stop working on this step. Do not resubmit and do not resume the flight yourself; tell the user it was stopped. Files you already wrote stay on disk, and if they resume, a fresh hand-off re-parks with a new handOffId.',
+        })
+      }
+      if (body.type === 'flight_takeover_requested') {
+        return asJsonResult({
+          type: 'takeover_requested',
+          flightId,
+          requestedAt: (body as { requestedAt?: string }).requestedAt,
+          next: 'The user asked Canary to take this step. STOP your work now, including subagents/processes; do not submit this result or attempt another submit. Release it with respond_flight_checkpoint(flightId, choice:"run-internally"). Canary starts its local agent only after that acknowledgement. Files you already wrote stay on disk, so tell the user what changed if they need to review it.',
         })
       }
       return errorResult(`respond failed (${resp.statusCode}): ${String(body.error ?? '')}`)

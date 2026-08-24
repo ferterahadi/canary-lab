@@ -142,6 +142,14 @@ describe('FileRunStateSink', () => {
     expect(readRunsIndex(logsDir)[0].healCycles).toBe(3)
   })
 
+  it('mirrors external repair ownership into the index for terminal Activity history', () => {
+    const sink = new FileRunStateSink(logsDir)
+    sink.bootstrap(manifest({ healMode: 'external' }))
+    sink.finalize('run-1', 'passed', '2026-05-08T00:01:00.000Z', 1)
+
+    expect(readRunsIndex(logsDir)[0].healMode).toBe('external')
+  })
+
   it('flips a stale index entry terminal even when the manifest file is missing', () => {
     const sink = new FileRunStateSink(logsDir)
     // Simulate an interrupted run: an active index entry with no manifest.json

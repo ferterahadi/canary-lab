@@ -158,6 +158,7 @@ export function usePortify() {
   const ctx = usePortifyContext()
   return {
     workflows: ctx.state.workflows,
+    details: ctx.state.details,
     connection: ctx.state.connection,
     startPortify: ctx.startPortify,
     savePortify: ctx.savePortify,

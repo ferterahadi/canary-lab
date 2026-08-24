@@ -28,7 +28,7 @@ import { OPTION_ROW_COMPACT_CLASS, optionRowStyle } from './OptionRow'
 export const HEAL_BEHAVIOR_INFO =
   'Each test run starts with this failure limit. Changing it mid-run takes effect on the next run, not the one already going.'
 
-export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix = 'setup-heal', className = '', lockedTitle }: {
+export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix = 'setup-heal', className = '', lockedTitle, preserveControlsWhenLocked = false }: {
   /** `feature.config.cjs`'s `healOnFailureThreshold`; absent = on at the default. */
   threshold: number | undefined
   /** False mid-run: the rows still name both shapes, they just aren't controls. */
@@ -41,9 +41,13 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
   className?: string
   /** Why the rows aren't controls, when `editable` is false. */
   lockedTitle?: string
+  /** Keep the editable layout in place while locked. Flight Page uses this for
+   *  external ownership so internal and external modes show the same parts. */
+  preserveControlsWhenLocked?: boolean
 }) {
   const stopping = healEnabled(threshold)
   const count = healDisplayValue(threshold)
+  const controlsVisible = editable || preserveControlsWhenLocked
   return (
     // The bleed rides on the wrapper, not the radiogroup, so the trade line
     // shares the rows' left edge on BOTH surfaces — hung off the group instead,
@@ -51,7 +55,7 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
     // them in an unbled one.
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <div
-        role={editable ? 'radiogroup' : undefined}
+        role={controlsVisible ? 'radiogroup' : undefined}
         aria-label="Auto-repair"
         title={editable ? undefined : lockedTitle}
         className="flex flex-col"
@@ -60,8 +64,9 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
           testId={`${testIdPrefix}-mode-stop`}
           selected={stopping}
           editable={editable}
+          preserveControl={controlsVisible}
           onPick={() => onChange(count)}
-          label={editable ? (
+          label={controlsVisible ? (
             <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
               Stop &amp; repair after
               {/* A disabled <button>/<input> swallows the click instead of
@@ -73,7 +78,7 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
                 <NumberInput
                   min={1}
                   value={count}
-                  disabled={!stopping}
+                  disabled={!editable || !stopping}
                   testId={`${testIdPrefix}-threshold`}
                   onChange={onChange}
                 />
@@ -88,6 +93,7 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
           testId={`${testIdPrefix}-mode-full`}
           selected={!stopping}
           editable={editable}
+          preserveControl={controlsVisible}
           onPick={() => onChange(0)}
           divider
           label="Run the whole suite, then repair"
@@ -101,10 +107,11 @@ export function HealBehaviorChoice({ threshold, editable, onChange, testIdPrefix
  *  first one carries the threshold stepper, and a <button> cannot nest one;
  *  clicking anywhere in a deselected row (the disabled stepper included) picks
  *  it. */
-function HealModeRow({ testId, selected, editable, onPick, label, divider }: {
+function HealModeRow({ testId, selected, editable, preserveControl, onPick, label, divider }: {
   testId: string
   selected: boolean
   editable: boolean
+  preserveControl: boolean
   onPick: () => void
   label: ReactNode
   divider?: boolean
@@ -113,8 +120,9 @@ function HealModeRow({ testId, selected, editable, onPick, label, divider }: {
   return (
     <div
       data-testid={testId}
-      role={editable ? 'radio' : undefined}
-      aria-checked={editable ? selected : undefined}
+      role={preserveControl ? 'radio' : undefined}
+      aria-checked={preserveControl ? selected : undefined}
+      aria-disabled={preserveControl && !editable ? true : undefined}
       tabIndex={editable ? 0 : undefined}
       onClick={pick}
       onKeyDown={(e) => {

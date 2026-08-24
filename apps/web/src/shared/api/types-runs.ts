@@ -16,6 +16,9 @@ export interface RunIndexEntry {
   /** Repair cycles this run consumed, mirrored from its manifest. Absent on
    *  pre-existing entries and on runs that never healed. */
   healCycles?: number
+  /** Mirrored from the manifest so terminal external repair provenance remains
+   *  available when the run detail is not part of the WebSocket snapshot. */
+  healMode?: 'auto' | 'manual' | 'external'
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>

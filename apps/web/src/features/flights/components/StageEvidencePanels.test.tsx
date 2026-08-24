@@ -148,7 +148,10 @@ describe('CoverageCompositionPanel', () => {
   it('counts every strength bucket, worst-first, in the coverage feature\'s own labels', async () => {
     await render(MIXED)
     const group = container.querySelector('[data-testid="composition-strength"]')
-    expect(group?.textContent).toContain('Test depth · 4 tests')
+    // Two voices, two levels: the name is the frame heading, the population is
+    // the quiet rubric figure over the column it totals.
+    expect(group?.querySelector('.cl-frame-heading')?.textContent).toBe('Test depth')
+    expect(group?.querySelector('.cl-rubric')?.textContent).toBe('4 tests')
     expect(row('composition-strength', 'shallow')).toContain('Shallow1')
     expect(row('composition-strength', 'solid')).toContain('Solid2')
     expect(row('composition-strength', 'strong')).toContain('Strong1')
@@ -156,8 +159,9 @@ describe('CoverageCompositionPanel', () => {
 
   it('names each gap KIND separately — path and variant gaps decide different next tests', async () => {
     await render(MIXED)
-    expect(container.querySelector('[data-testid="composition-gaps"]')?.textContent)
-      .toContain('Requirement coverage · 10 requirements')
+    const gaps = container.querySelector('[data-testid="composition-gaps"]')
+    expect(gaps?.querySelector('.cl-frame-heading')?.textContent).toBe('Requirement coverage')
+    expect(gaps?.querySelector('.cl-rubric')?.textContent).toBe('10 requirements')
     expect(row('composition-gaps', 'covered')).toContain('Covered6')
     expect(row('composition-gaps', 'path-incomplete')).toContain('Path gap2')
     expect(row('composition-gaps', 'variant-incomplete')).toContain('Variant gap1')
@@ -201,9 +205,11 @@ describe('CoverageCompositionPanel', () => {
     expect(card?.textContent).toContain('What the tests cover')
     // Both groups, in the settled order, without the population counts they
     // cannot yet know.
-    expect(container.querySelector('[data-testid="composition-strength"]')?.textContent).toContain('Test depth')
-    expect(card?.textContent).not.toContain('Test depth ·')
-    expect(container.querySelector('[data-testid="composition-gaps"]')?.textContent).toContain('Requirement coverage')
+    const strengthGroup = container.querySelector('[data-testid="composition-strength"]')
+    expect(strengthGroup?.querySelector('.cl-frame-heading')?.textContent).toBe('Test depth')
+    expect(strengthGroup?.querySelector('.cl-rubric')).toBeNull()
+    expect(container.querySelector('[data-testid="composition-gaps"]')?.querySelector('.cl-frame-heading')?.textContent)
+      .toBe('Requirement coverage')
     // Every bucket row of the settled card is present, and each carries a
     // placeholder rather than a zero — an unmeasured bucket must not read as a
     // measured empty one.
@@ -227,8 +233,8 @@ describe('CoverageCompositionPanel', () => {
     await render(ledger({
       totals: { total: 4, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 4, orphanTests: 0 },
     }))
-    expect(container.querySelector('[data-testid="composition-strength"]')?.textContent)
-      .toContain('Test depth · 0 tests')
+    expect(container.querySelector('[data-testid="composition-strength"]')?.querySelector('.cl-rubric')?.textContent)
+      .toBe('0 tests')
     expect(row('composition-strength', 'shallow')).toContain('Shallow0')
     expect(row('composition-strength', 'strong')).toContain('Strong0')
     expect(row('composition-gaps', 'untested')).toContain('Untested4')

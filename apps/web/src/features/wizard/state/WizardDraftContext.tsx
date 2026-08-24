@@ -6,8 +6,13 @@ import type { DraftRecord } from '@/shared/api/types'
 // Live list of authoring drafts, fed by the REST list on mount and kept current
 // by workspace events. Every draft is authored by an external MCP client, so
 // this tracks records — it never starts, accepts or rejects an agent's work.
-// A live draft surfaces on the flight page's Test-authoring stage (StageExternalWork); this context only tracks the records.
+// A live draft surfaces in the Flight page's Test-authoring Activity rail; this context only tracks the records.
 interface WizardDraftContextValue {
+  /** Every persisted draft, including accepted external work. The visible
+   *  task list below intentionally hides accepted records, but Flight Activity
+   *  still needs that history to say who authored the files after the live
+   *  task disappears. */
+  records: DraftRecord[]
   drafts: DraftRecord[]
   deleteTask: (draftId: string) => Promise<void>
 }
@@ -31,17 +36,12 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
   }, [])
 
   const rememberDraft = useCallback((draft: DraftRecord): DraftRecord => {
-    if (!isVisibleWizardTask(draft)) {
-      forgetDraft(draft.draftId)
-      return draft
-    }
     setDraftsById((current) => ({ ...current, [draft.draftId]: draft }))
     return draft
-  }, [forgetDraft])
+  }, [])
 
   const reconcileDraftList = useCallback((drafts: DraftRecord[]): void => {
-    const visible = drafts.filter(isVisibleWizardTask)
-    setDraftsById(Object.fromEntries(visible.map((draft) => [draft.draftId, draft])))
+    setDraftsById(Object.fromEntries(drafts.map((draft) => [draft.draftId, draft])))
   }, [])
 
   useEffect(() => {
@@ -76,12 +76,11 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
     return () => conn?.close()
   }, [WebSocketImpl, forgetDraft, rememberDraft, wsBase])
 
-  const drafts = useMemo(
-    () => Object.values(draftsById)
-      .filter(isVisibleWizardTask)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  const records = useMemo(
+    () => Object.values(draftsById).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [draftsById],
   )
+  const drafts = useMemo(() => records.filter(isVisibleWizardTask), [records])
   // Stopping an in-flight authoring session settles the RECORD — there is no
   // local process to kill, the agent runs in the user's own client window.
   const deleteTask = useCallback(async (draftId: string): Promise<void> => {
@@ -94,9 +93,10 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
   }, [draftsById, forgetDraft])
 
   const value = useMemo<WizardDraftContextValue>(() => ({
+    records,
     drafts,
     deleteTask,
-  }), [deleteTask, drafts])
+  }), [deleteTask, drafts, records])
 
   return (
     <WizardDraftContext.Provider value={value}>

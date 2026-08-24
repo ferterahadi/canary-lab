@@ -249,6 +249,7 @@ describe('deriveFeatureEvidence', () => {
       booted: false,
       prdSummary: false,
       specs: true,
+      coverageMapping: 'absent',
       portInjectability: 'none',
     })
   })
@@ -268,7 +269,33 @@ describe('deriveFeatureEvidence', () => {
       booted: true,
       prdSummary: false,
       specs: false,
+      coverageMapping: 'absent',
       portInjectability: 'none',
     })
+  })
+
+  it('separates authored specs from fresh and stale requirement mapping', () => {
+    const docsDir = path.join(featureDir, 'docs')
+    const e2eDir = path.join(featureDir, 'e2e')
+    fs.mkdirSync(docsDir, { recursive: true })
+    fs.mkdirSync(e2eDir, { recursive: true })
+    fs.writeFileSync(path.join(docsDir, '_prd-summary.json'), JSON.stringify({ requirementsHash: 'h1', requirements: [] }))
+    fs.writeFileSync(path.join(e2eDir, 'a.spec.ts'), "test('health', async () => {})\n")
+
+    expect(deriveFeatureEvidence(featureDir).coverageMapping).toBe('absent')
+
+    fs.writeFileSync(path.join(docsDir, '_coverage-state.json'), JSON.stringify({ requirementsHash: 'h1', ranAt: '2026-08-25T00:00:00Z' }))
+    expect(deriveFeatureEvidence(featureDir).coverageMapping).toBe('fresh')
+
+    fs.writeFileSync(path.join(docsDir, '_prd-summary.json'), JSON.stringify({ requirementsHash: 'h2', requirements: [] }))
+    expect(deriveFeatureEvidence(featureDir).coverageMapping).toBe('stale')
+  })
+
+  it('preserves a manual or legacy annotation as mapping evidence', () => {
+    fs.mkdirSync(path.join(featureDir, 'docs'), { recursive: true })
+    fs.mkdirSync(path.join(featureDir, 'e2e'), { recursive: true })
+    fs.writeFileSync(path.join(featureDir, 'docs', '_prd-summary.json'), JSON.stringify({ requirementsHash: 'h1', requirements: [] }))
+    fs.writeFileSync(path.join(featureDir, 'e2e', 'a.spec.ts'), "test('health', { tag: ['@req-R1'] }, async () => {})\n")
+    expect(deriveFeatureEvidence(featureDir).coverageMapping).toBe('fresh')
   })
 })

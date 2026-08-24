@@ -79,6 +79,21 @@ export class FlightNotParkedError extends Error {
   }
 }
 
+/** An external result arrived after the user asked Canary to take the step
+ *  back. The client must stop and release with `run-internally`, never retry
+ *  the submit. Typed because this HTTP response is the first reliable channel
+ *  back to an MCP client that may have been working between tool calls. */
+export class FlightTakeoverRequestedError extends Error {
+  readonly statusCode = 409
+  constructor(
+    public readonly flightId: string,
+    public readonly requestedAt: string,
+  ) {
+    super(`The user requested takeover of flight ${flightId} at ${requestedAt}.`)
+    this.name = 'FlightTakeoverRequestedError'
+  }
+}
+
 /** A `--from-stage` entry whose prerequisites are not satisfied. The message
  *  names the missing prerequisite so the caller can fix it, not guess. */
 export class FlightStageEntryError extends Error {

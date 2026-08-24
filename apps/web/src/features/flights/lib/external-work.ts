@@ -47,6 +47,19 @@ export const EXTERNAL_WORK_COPY = {
   /** Shown when `rejectStaleSubmit` discarded a result answering a superseded
    *  hand-off — the re-park is otherwise indistinguishable from the first ask. */
   lateResultNote: 'A late result from an earlier attempt was ignored. This step is still running in your agent.',
+  takeover: {
+    availableTitle: 'Want to continue this step in Canary Lab?',
+    availableBody: 'Request a safe hand-off first. Canary will stay parked until your external agent releases the step.',
+    requestedTitle: 'Waiting for your agent to release this step',
+    requestedBody: 'Canary will start its local agent after the external agent acknowledges the hand-off.',
+    requestedLockTitle: 'Takeover requested — wait for your agent to release this step, or use Force takeover below.',
+    requestLabel: 'Request takeover…',
+    forceLabel: 'Force takeover…',
+    requestDialogTitle: 'Take over this step in Canary Lab?',
+    requestDialogMessage: 'Canary will ask your external agent to stop and release this step. It will not start local work until that agent acknowledges. If the agent is gone, you can force takeover afterwards.',
+    forceDialogTitle: 'Force takeover?',
+    forceDialogMessage: 'Canary cannot interrupt Claude or Codex between tool calls. Only force after you have stopped that agent. Canary will start this step now; if the external agent keeps editing, the same files may be changed concurrently. Late checkpoint submissions will be rejected, but file writes already made remain on disk.',
+  },
 } as const
 
 /** Tooltip for the fixed-width feature chip (picker + suites column): the chip
@@ -85,9 +98,8 @@ export function presentedIndexStages(
 //
 // The rule: an externally driven flight is READ-ONLY here. Everything that
 // answers a question or moves the pipeline belongs to the agent that started
-// it. Two things stay, because neither decides anything on the agent's behalf
-// and no MCP tool can do them: Abort (the escape hatch when a client dies) and
-// the dirty-repo remedy (the user's own repos). The server enforces the same
+// it. Read-only inspection, navigation and downloads stay available; every
+// mutation remains visible but inert. The server enforces the same ownership
 // line — see flight-decision-origin.ts — so this is presentation, not security.
 
 /** True while this flight's decisions belong to the MCP client that started
@@ -105,42 +117,24 @@ export function isExternallyDriven(
   return flight.status === 'running' || flight.status === 'waiting-for-approval' || flight.status === 'paused'
 }
 
-/** Why a control is inert, said once per control. Each line names WHERE the
- *  action lives now, because "disabled" without a destination is just a dead
- *  end — the user has a session open in another window and needs telling that
- *  is the window to use. */
-export const EXTERNAL_DRIVE_COPY = {
-  /** Header line, in place of the primary button. */
-  banner: 'Driven by your agent — respond from there.',
-  bannerTitle:
-    'This flight was started by your agent, so it makes the decisions: checkpoints, pause and resume all happen in that session. Aborting is the only control this page keeps.',
-  pause: 'Your agent is driving this flight — pause it there, not here.',
-  continueFlight: 'Your agent is driving this flight — continue it there, not here.',
-  redo: 'Your agent is driving this flight — ask it to re-run the step.',
-  autopilot: 'Your agent is driving this flight — autopilot is fixed for as long as it does.',
-  /** Replaces the answer buttons on a checkpoint card. The question and its
-   *  context still render — the reader wants to know what the flight stopped
-   *  on — but answering it is the agent's job. */
-  checkpointLine: 'Your agent answers this — it is holding the question now.',
-} as const
-
 /** Standalone external work — a skill the user invoked (author, coverage,
  *  portify, export) is working on this SUITE from their own agent session, with
- *  no flight record driving it. The same read-only rule as EXTERNAL_DRIVE_COPY
- *  — the flight page monitors, the agent acts — but its own phrasing: nothing
- *  is "driving this flight", the agent is working on the suite. The predicate
- *  is the feature's live activity (`FeatureActivity.external`), read where the
- *  page already holds it, so there is no second derivation to drift. */
-export const EXTERNAL_SUITE_COPY = {
-  /** Header line — the counterpart of EXTERNAL_DRIVE_COPY.banner. */
-  banner: 'Your agent is working on this suite — follow it below.',
-  bannerTitle:
-    'A skill you invoked is working on this suite from your own agent session. Monitor it here; act from that session. Controls unlock when it finishes.',
-  pause: 'Your agent is working on this suite — nothing here can stop that work.',
-  continueFlight: 'Your agent is working on this suite — flights can continue once it finishes.',
-  conduct: 'Your agent is working on this suite — start a flight once it finishes.',
-  delete: 'Your agent is working on this suite — deleting it now would rip the files out from under that work.',
-} as const
+ *  no flight record driving it. The flight page monitors while the agent acts.
+ *  The predicate is the feature's live activity (`FeatureActivity.external`),
+ *  read where the page already holds it, so there is no second derivation to
+ *  drift. */
+
+export type ExternalMutationOwner = 'flight' | 'suite'
+
+/** One tooltip contract for every inert mutation on Flight Page. The action is
+ *  phrased as an imperative ("pause this flight", "edit these settings") so
+ *  the result always names both WHAT moved and WHERE the user can do it. */
+export function externalMutationTooltip(owner: ExternalMutationOwner, action: string): string {
+  const subject = owner === 'flight'
+    ? 'Your agent is driving this flight'
+    : 'Your agent is working on this suite'
+  return `${subject} — ${action} from the Claude/Codex session doing the work.`
+}
 
 /** The question every "does this need a click?" surface is really asking — the
  *  pill's count, the picker's rank-0 sort, the suites column's ordering, the

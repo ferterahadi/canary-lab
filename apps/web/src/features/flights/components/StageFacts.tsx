@@ -182,7 +182,7 @@ const AWAITED_FACT_LABELS: Partial<Record<FlightStageKey, readonly string[]>> = 
   'env-capture': ['Env files', 'Boot check'],
   'docs': ['Source docs', 'Requirements inferred', 'Distilled to'],
   'prd-summary': ['Requirements'],
-  'specs-coverage': ['Requirements covered', 'Requirements', 'Tests written'],
+  'specs-coverage': ['Claimed coverage', 'Requirements', 'Tests written'],
   'portify': ['Services injectable', 'Files edited', 'Instances proven'],
   'evaluation-export': ['Requirements with tests', 'Test depth', 'Tests that passed', 'Requirements proven'],
 }
@@ -465,6 +465,27 @@ function measuredStageFacts(
         // is there were no documents to ask.
         return [{ label: 'Requirements', value: 'None yet', sub: 'no requirement docs for this suite' }]
       }
+      // An authored test is visible evidence, but its 0% ledger is not a
+      // measurement until coverage mapping runs. Keep the three settled tiles
+      // in place and name the missing event instead of presenting 0% as a
+      // completed result.
+      if (stage.evidenceSource === 'workspace' && str(ev, 'mappingState') === 'absent') {
+        const requirements = totals?.total ?? num(ev, 'total')
+        const testsWritten = band.ledger?.tests.length ?? num(ev, 'testsWritten')
+        return [
+          {
+            label: 'Claimed coverage',
+            value: 'Not mapped',
+            sub: 'coverage mapping has not run',
+          },
+          ...(requirements != null
+            ? [{ label: 'Requirements', value: String(requirements), big: true as const }]
+            : []),
+          ...(testsWritten != null
+            ? [{ label: 'Tests written', value: String(testsWritten), big: true as const }]
+            : []),
+        ]
+      }
       // No "Authoring pass N of M" tile: the loop's position is the PASSES card's
       // whole subject, one card below, where each pass carries its own verdict —
       // and M is a ceiling the loop rarely reaches, so a stepper in the band read
@@ -472,7 +493,7 @@ function measuredStageFacts(
       return [
         ...(pct != null && !unmeasured
           ? [{
-              label: 'Requirements covered',
+              label: 'Claimed coverage',
               value: `${pct}%`,
               big: true as const,
               tone: pct >= target ? 'good' as const : 'warn' as const,
@@ -497,9 +518,8 @@ function measuredStageFacts(
                 tone: gaps === 0 ? 'good' as const : 'warn' as const,
               }]
             : []),
-        // How many specs the authoring produced. Read off the ledger's mapped
-        // tests, which is the set the coverage percentage was computed over — so
-        // the two tiles describe the same population. Their DEPTH is on the
+        // How many tests the suite contains, including tests that are not mapped
+        // yet. Their DEPTH is on the
         // composition card; the spec-file count stays as the sub for a suite with
         // no requirements, which has no composition card to fall back to.
         ...(band.ledger && band.ledger.tests.length > 0
@@ -916,9 +936,9 @@ export const FACT_HELP: Record<string, string> = {
   'Requirements': 'One thing the app must do, small enough to test. Everything later is scored against these.',
   'Distilled to': 'The short summary agents read instead of the full files. Tokens are a rough estimate.',
   // Test authoring
-  'Requirements covered': 'Counted from labels in the test files. Nothing was run, so every test could still be failing.',
+  'Claimed coverage': 'Counted from requirement labels in the test files. Nothing was run, so every test could still be failing.',
   'Coverage gaps': 'Requirements with no test yet, or only part of one. The next pass goes after these.',
-  'Tests written': 'Tests labelled with a requirement. Unlabelled tests still run, they just are not counted here.',
+  'Tests written': 'All test cases found in the suite’s spec files. They can exist before coverage mapping links them to requirements.',
   // Parallel readiness
   'Parallel': 'Can two runs of this suite start at once without fighting over a port? Checked once.',
   'Services injectable': 'The service reads its port from settings instead of having it fixed in the code.',
@@ -969,9 +989,9 @@ export const FACT_GLOSS: Record<string, string> = {
   'Distilled to': 'the short version agents read',
   'Test depth': 'how much each test checks',
   'Requirements': 'what the documents asked for',
-  'Requirements covered': 'a test claims it — nothing has run yet',
+  'Claimed coverage': 'a test claims it — nothing has run yet',
   'Coverage gaps': 'no test covers these yet',
-  'Tests written': 'written for the requirements',
+  'Tests written': 'found in the suite',
   'Services injectable': 'each gets its port from the run',
   'Files edited': 'fixed ports swapped out',
   'Instances proven': 'two copies ran at once',

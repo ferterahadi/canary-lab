@@ -2,11 +2,11 @@ import { test, expect } from 'canary-lab/feature-support/log-marker-fixture'
 
 const baseUrl = process.env.WORKFLOW_URL ?? 'http://localhost:4600'
 
-test('the workflow service reports healthy', { tag: ['@req-R1', '@path-happy'] }, async ({ request }) => {
+test('the workflow service reports healthy', async ({ request }) => {
   const response = await request.get(`${baseUrl}/health`)
   expect(response.status()).toBe(200)
   await expect(response.json()).resolves.toEqual({ status: 'ok' })
 })
 
-// R2 is deliberately absent. The Author demo adds that journey; the Coverage
-// demo must report it as untested until then.
+// The health test starts deliberately unlinked so the Coverage demo can map it
+// to R1. R2 has no test at all; the Author demo adds that missing journey.

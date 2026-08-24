@@ -3,8 +3,9 @@ import * as api from '@/shared/api/client'
 import type { FeatureDocsListing, FlightManifest, PrdSourceAttempt, PrdSourceCheckpointData } from '@/shared/api/client'
 import { AddDocsTile, DocPill, DocsDropOverlay, EmptyDropzone, useDocDrop } from '@/features/coverage/components/CoverageDocsRail'
 import { STAGE_COLUMN } from './stage-meta'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { ForkPathCard, IntentRow, useFlightDocs } from './FlightDocsPanel'
-import { EXTERNAL_DRIVE_COPY, isExternallyDriven } from '../lib/external-work'
+import { externalMutationTooltip, isExternallyDriven } from '../lib/external-work'
 
 /** Read the structured outcome of the previous collector attempt off the
  *  parked checkpoint. Absent on a first visit, and on flights parked by an
@@ -92,6 +93,9 @@ export function RequirementsFork({
   // is enough to close the whole surface — `mode` can never leave null, so no
   // path content (drop zone, agent hints, confirm buttons) ever mounts.
   const readOnly = isExternallyDriven(flight)
+  const lockedTitle = readOnly
+    ? externalMutationTooltip('flight', 'choose the requirements source')
+    : undefined
   const disabled = busy || docs.busy || readOnly
   const { dragging, dropHandlers } = useDocDrop(disabled || mode !== 'manual', (files) => { void docs.importFiles(files) })
 
@@ -116,12 +120,6 @@ export function RequirementsFork({
         <span className="text-[12.5px] font-semibold">Where should requirements come from?</span>
       </div>
       <IntentRow description={flight.description} />
-      {readOnly && (
-        <p data-testid="requirements-fork-read-only" className="text-[11px] text-secondary">
-          {EXTERNAL_DRIVE_COPY.checkpointLine}
-        </p>
-      )}
-
       <input
         ref={fileInputRef}
         data-testid="flight-doc-file-input"
@@ -152,6 +150,7 @@ export function RequirementsFork({
           selected={mode === 'manual'}
           dimmed={mode === 'agent'}
           disabled={disabled}
+          disabledTitle={lockedTitle}
           onPick={() => setMode('manual')}
         />
         <ForkPathCard
@@ -165,6 +164,7 @@ export function RequirementsFork({
           selected={mode === 'agent'}
           dimmed={mode === 'manual'}
           disabled={disabled}
+          disabledTitle={lockedTitle}
           onPick={() => setMode('agent')}
         />
       </div>
@@ -200,16 +200,18 @@ export function RequirementsFork({
             </div>
           )}
           <div className="flex justify-end">
-            <button
-              type="button"
-              data-testid="fork-use-docs"
-              disabled={disabled || docs.sourceDocs.length === 0}
-              onClick={() => respond('continue')}
-              className="cl-button-primary px-2.5 py-1 text-xs"
-              title={docs.sourceDocs.length === 0 ? 'Add at least one doc first' : 'Approve these docs and turn them into requirements'}
-            >
-              Use these docs
-            </button>
+            <DisabledControlTooltip>
+              <button
+                type="button"
+                data-testid="fork-use-docs"
+                disabled={disabled || docs.sourceDocs.length === 0}
+                onClick={() => respond('continue')}
+                className="cl-button-primary px-2.5 py-1 text-xs"
+                title={lockedTitle ?? (docs.sourceDocs.length === 0 ? 'Add at least one doc first' : 'Approve these docs and turn them into requirements')}
+              >
+                Use these docs
+              </button>
+            </DisabledControlTooltip>
           </div>
         </>
       )}
@@ -227,6 +229,7 @@ export function RequirementsFork({
               selected={hint === 'collect-repo-docs'}
               dimmed={hint === 'infer-from-diff'}
               disabled={disabled}
+              disabledTitle={lockedTitle}
               onPick={() => setHint('collect-repo-docs')}
             />
             <ForkPathCard
@@ -236,6 +239,7 @@ export function RequirementsFork({
               selected={hint === 'infer-from-diff'}
               dimmed={hint === 'collect-repo-docs'}
               disabled={disabled}
+              disabledTitle={lockedTitle}
               onPick={() => setHint('infer-from-diff')}
             />
           </div>
@@ -250,20 +254,22 @@ export function RequirementsFork({
                 Agent started — its output shows under Activity below
               </span>
             )}
-            <button
-              type="button"
-              data-testid="fork-start-agent"
-              disabled={disabled || hint === null}
-              onClick={() => {
-                if (!hint) return
-                respond(hint)
-                setStartedFlash(Date.now())
-              }}
-              className="cl-button-primary px-2.5 py-1 text-xs"
-              title={hint === null ? 'Pick where it should look first' : 'Start the agent with this approach'}
-            >
-              {busy ? 'Starting…' : 'Let the agent gather them'}
-            </button>
+            <DisabledControlTooltip>
+              <button
+                type="button"
+                data-testid="fork-start-agent"
+                disabled={disabled || hint === null}
+                onClick={() => {
+                  if (!hint) return
+                  respond(hint)
+                  setStartedFlash(Date.now())
+                }}
+                className="cl-button-primary px-2.5 py-1 text-xs"
+                title={lockedTitle ?? (hint === null ? 'Pick where it should look first' : 'Start the agent with this approach')}
+              >
+                {busy ? 'Starting…' : 'Let the agent gather them'}
+              </button>
+            </DisabledControlTooltip>
           </div>
         </>
       )}

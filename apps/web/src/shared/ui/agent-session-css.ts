@@ -32,6 +32,19 @@ export const TIMELINE_CSS = `
 .agentts-systag{font-family:var(--font-mono)}
 .agentts-systext{font-family:var(--font-mono);font-size:12px;line-height:1.6;color:var(--text-secondary);word-break:break-word;white-space:pre-wrap;min-width:0}
 .agentts-sysrepeat{margin-left:6px;color:var(--text-muted)}
+.agentts-extrow{padding-bottom:10px}
+.agentts-extrow>.agentts-worknode{top:2px}
+.agentts-extnode{background:var(--bg-base)}
+.agentts-extnode svg{width:8px;height:8px}
+.agentts-extbody{display:flex;min-width:0;flex-direction:column;gap:3px}
+.agentts-exthead{display:flex;min-width:0;align-items:baseline;gap:7px;min-height:14px}
+.agentts-extlabel{font-family:var(--font-mono)}
+.agentts-extline{display:flex;min-width:0;align-items:baseline;gap:10px}
+.agentts-extmessage{min-width:0;flex:1;color:var(--text-secondary);font-size:12px;line-height:1.55;word-break:break-word}
+.agentts-extaction{flex:none;border:0;background:none;padding:0;color:var(--accent);cursor:pointer;font-family:var(--font-sans);font-size:10.5px;font-weight:500;white-space:nowrap}
+.agentts-extaction:hover,.agentts-extaction:focus-visible{color:var(--text-primary);text-decoration:underline;outline:none}
+.agentts-extaction:disabled{cursor:default;opacity:.55;text-decoration:none}
+.agentts-exterror{color:var(--danger);font-size:10.5px;line-height:1.4}
 .agentts-node svg{width:8px;height:8px}
 .agentts-rowhead{display:flex;align-items:baseline;gap:6px;min-height:14px}
 .agentts-label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-muted);font-weight:600}
@@ -127,5 +140,8 @@ export const TIMELINE_CSS = `
 .agentts-worknode::after{inset:3.5px;background:var(--running);-webkit-mask:none;mask:none}
 .agentts-pixels span{opacity:.42}
 .agentts-pixels span:first-child{opacity:.8}
+}
+@media (max-width:520px){
+.agentts-extline{align-items:flex-start;flex-direction:column;gap:4px}
 }
 `

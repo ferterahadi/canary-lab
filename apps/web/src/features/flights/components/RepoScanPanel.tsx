@@ -1,6 +1,7 @@
 import type { FlightManifest, FlightStageStatus } from '@/shared/api/client'
 import { PANEL_CARD_CLASS, PANEL_CARD_STYLE, PANEL_KICKER_CLASS as SHARED_KICKER_CLASS } from '@/shared/ui/PanelCard'
 import { StepList, StepRow, type StepState } from '@/shared/ui/StepList'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { STAGE_COLUMN } from './stage-meta'
 import { distinctRepoPaths } from './stage-metrics'
 
@@ -38,6 +39,7 @@ export function RepoScanPanel({
   status,
   envFiles = [],
   onChangeInputs,
+  mutationLockedReason,
 }: {
   flight: FlightManifest
   /** The scout stage's own status — drives each repo row's indicator. */
@@ -46,6 +48,9 @@ export function RepoScanPanel({
   /** R75: opens the launcher (prefilled, editable) — changing intent/repos is
    *  a full restart, and the launcher is its one home. */
   onChangeInputs?: () => void
+  /** External ownership keeps Change… visible but moves the mutation back to
+   *  the Claude/Codex session. */
+  mutationLockedReason?: string
 }) {
   // One card per repository, not per configured entry — several services can
   // share a source tree (see distinctRepoPaths).
@@ -75,17 +80,20 @@ export function RepoScanPanel({
           </div>
           <div className="flex-1" />
           {onChangeInputs && (
-            <button
-              type="button"
-              data-testid="flight-inputs-change"
-              onClick={onChangeInputs}
-              // The negative margin grows the HIT area to ~24px without moving
-              // the text — a bare 14px link was the pane's smallest target.
-              className="-my-1.5 py-1.5 text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent"
-              title="Change what this flight tests — reopens intent and repos prefilled, then re-flies from the start"
-            >
-              Change…
-            </button>
+            <DisabledControlTooltip>
+              <button
+                type="button"
+                data-testid="flight-inputs-change"
+                onClick={onChangeInputs}
+                disabled={mutationLockedReason != null}
+                // The negative margin grows the HIT area to ~24px without moving
+                // the text — a bare 14px link was the pane's smallest target.
+                className="-my-1.5 py-1.5 text-[10.5px] underline-offset-2 transition-colors hover:underline text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                title={mutationLockedReason ?? 'Change what this flight tests — reopens intent and repos prefilled, then re-flies from the start'}
+              >
+                Change…
+              </button>
+            </DisabledControlTooltip>
           )}
         </div>
         <h3 className="mb-1.5 text-[12.5px] font-semibold">Intent · what to test</h3>

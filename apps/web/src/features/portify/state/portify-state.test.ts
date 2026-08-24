@@ -42,6 +42,15 @@ describe('portifyReducer', () => {
     expect(s.workflows.find((w) => w.workflowId === 'w1')?.status).toBe('verifying')
   })
 
+  it('preserves external producer ownership when a manifest update rebuilds the index entry', () => {
+    const state = portifyReducer(initialPortifyState, {
+      type: 'update',
+      workflowId: 'w1',
+      manifest: m({ producer: 'external' }),
+    })
+    expect(state.workflows[0]?.producer).toBe('external')
+  })
+
   it('removed drops the workflow + its detail', () => {
     let s = portifyReducer(initialPortifyState, { type: 'update', workflowId: 'w1', manifest: m() })
     s = portifyReducer(s, { type: 'removed', workflowId: 'w1' })

@@ -6,7 +6,7 @@ import path from 'path'
 import type { FastifyInstance } from 'fastify'
 import type { FlightRouteDeps } from './flight-route-deps'
 import type { FlightRouteContext } from './flight-route-context'
-import { FlightNotParkedError, FlightStageEntryError, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
+import { FlightNotParkedError, FlightStageEntryError, FlightTakeoverRequestedError, forceFlightTakeover, requestFlightTakeover, resumeFlight, setFlightAutopilot, respondToFlightCheckpoint, pauseFlight, redoFlight, deleteFlight } from '../logic/conductor'
 import { rejectForeignFlightDecision } from './flight-decision-origin'
 import { reclaimGettingStartedFlight } from './flight-route-support'
 import { GettingStartedBusyError } from '../../config/logic/getting-started-session'
@@ -42,9 +42,51 @@ export async function registerFlightLifecycleRoutes(app: FastifyInstance, deps: 
             ...(err.pauseReason ? { pauseReason: err.pauseReason } : {}),
           }
         }
+        if (err instanceof FlightTakeoverRequestedError) {
+          reply.code(409)
+          return {
+            error: err.message,
+            type: 'flight_takeover_requested',
+            requestedAt: err.requestedAt,
+          }
+        }
         const message = err instanceof Error ? err.message : String(err)
         reply.code(message.includes('not found') ? 404 : 409)
         return { error: message }
+      }
+    },
+  )
+
+  // Cooperative external → internal hand-off. Request only records the user's
+  // intent and makes later submits fail closed; Canary starts no local work
+  // until the external client acknowledges with `run-internally`.
+  app.post<{ Params: { id: string } }>('/api/flights/:id/takeover/request', async (req, reply) => {
+    try {
+      return requestFlightTakeover(req.params.id, conductorDeps)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      reply.code(message.includes('not found') ? 404 : 409)
+      return { error: message, type: 'flight_takeover_unavailable' }
+    }
+  })
+
+  // The external client cannot be interrupted between MCP calls. Force is an
+  // explicit escape hatch only after a cooperative request, with a literal
+  // confirmation in the body so a stray POST cannot create two file writers.
+  app.post<{ Params: { id: string }; Body: { confirm?: boolean } | undefined }>(
+    '/api/flights/:id/takeover/force',
+    async (req, reply) => {
+      if (req.body?.confirm !== true) {
+        reply.code(400)
+        return { error: 'confirm must be true' }
+      }
+      try {
+        const { manifest } = forceFlightTakeover(req.params.id, conductorDeps)
+        return manifest
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        reply.code(message.includes('not found') ? 404 : 409)
+        return { error: message, type: 'flight_takeover_unavailable' }
       }
     },
   )

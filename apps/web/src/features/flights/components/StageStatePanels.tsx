@@ -5,6 +5,7 @@ import { PANEL_CARD_CLASS, PANEL_CARD_STYLE } from '@/shared/ui/PanelCard'
 import { stageLabel, STAGE_COLUMN, stageStateLine } from './stage-meta'
 import { CheckpointControls } from './CheckpointControls'
 import { truncate } from './StageDetail'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 /** R73: the one failure card every stage renders when it fails — a danger-toned
  *  twin of CheckpointControls, so a crash reads with the same weight as a
@@ -14,13 +15,15 @@ import { truncate } from './StageDetail'
  *  — one Continue, no confusion. Width is capped to line up with the repo-scan
  *  cards above (both on STAGE_COLUMN) so the stage reads as one column, not a full-bleed
  *  banner under narrow cards. */
-export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
+export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mutationLockedReason }: {
   flightId: string
   stageLabel: string
   detail: string
   /** Boot-failure evidence (service log tail + path) — rendered under the
    *  verdict so the CAUSE is on the stage, not a log-dig away. */
   errorDetail?: FlightStageErrorDetail
+  /** External ownership keeps repository remedies visible but inert. */
+  mutationLockedReason?: string
 }) {
   const logName = errorDetail?.logPath ? errorDetail.logPath.split('/').pop() : null
   // Machine-actionable fix, derived server-side at read time (live git
@@ -128,24 +131,30 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail }: {
                 ))}
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  data-testid="stage-remedy-stash"
-                  disabled={remedyBusy !== null}
-                  onClick={() => runRemedy('stash')}
-                  className="cl-button-primary px-2.5 py-1 text-xs"
-                >
-                  {remedyBusy === 'stash' ? 'Stashing…' : 'Stash and continue'}
-                </button>
-                <button
-                  type="button"
-                  data-testid="stage-remedy-commit"
-                  disabled={remedyBusy !== null}
-                  onClick={() => runRemedy('commit')}
-                  className="cl-button px-2.5 py-1 text-xs text-accent"
-                >
-                  {remedyBusy === 'commit' ? 'Committing…' : 'Commit and continue'}
-                </button>
+                <DisabledControlTooltip>
+                  <button
+                    type="button"
+                    data-testid="stage-remedy-stash"
+                    disabled={remedyBusy !== null || mutationLockedReason != null}
+                    title={mutationLockedReason}
+                    onClick={() => runRemedy('stash')}
+                    className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {remedyBusy === 'stash' ? 'Stashing…' : 'Stash and continue'}
+                  </button>
+                </DisabledControlTooltip>
+                <DisabledControlTooltip>
+                  <button
+                    type="button"
+                    data-testid="stage-remedy-commit"
+                    disabled={remedyBusy !== null || mutationLockedReason != null}
+                    title={mutationLockedReason}
+                    onClick={() => runRemedy('commit')}
+                    className="cl-button px-2.5 py-1 text-xs text-accent disabled:cursor-not-allowed disabled:opacity-45"
+                  >
+                    {remedyBusy === 'commit' ? 'Committing…' : 'Commit and continue'}
+                  </button>
+                </DisabledControlTooltip>
               </div>
               <p className="text-[10.5px] text-muted">
                 Stash is undoable — <span className="font-mono">git stash pop</span>. Commit uses <span className="font-mono">"canary-lab: wip"</span>.

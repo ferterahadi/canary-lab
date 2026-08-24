@@ -4,6 +4,7 @@ import type { FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
 import { useEvaluationExports } from '@/features/evaluation'
 import { useRuns } from '@/features/runs'
+import type { ExternalWorkTrace, FeatureExternalHistory } from '../state/feature-activity'
 
 // Evidence-derived stage rail for a feature with NO flight record: what has
 // actually been done to this suite, regardless of who did it (flight, wizard,
@@ -32,6 +33,7 @@ export function deriveFeatureStages(
   feature: Pick<Feature, 'evidence' | 'portified'>,
   latestRun?: RunIndexEntry,
   hasExport?: boolean,
+  externalStages?: Partial<Record<FlightStageKey, ExternalWorkTrace>>,
 ): DerivedStage[] | null {
   const ev = feature.evidence
   if (!ev) return null
@@ -41,6 +43,18 @@ export function deriveFeatureStages(
     ? { runId: latestRun.runId, status: latestRun.status }
     : undefined
   const suiteSetUp = ev.envCapture || ev.booted === true
+  // New servers distinguish authored specs from a completed requirement map.
+  // Older payloads have no field, so retain their historical spec+summary
+  // fallback rather than darkening every upgraded workspace until it reloads.
+  const coverageMapped = ev.coverageMapping === undefined
+    ? ev.specs && ev.prdSummary
+    : ev.coverageMapping === 'fresh'
+  const externalPortify = externalStages?.portify?.kind === 'portifying'
+    ? externalStages.portify
+    : undefined
+  const portifyEvidence = externalPortify?.resourceId
+    ? { workflowId: externalPortify.resourceId }
+    : undefined
   const statusFor: Record<FlightStageKey, FlightStageStatus> = {
     // The feature exists in the workspace at all → it was (implicitly or
     // explicitly) scouted. similarity is plumbing — stageRailRows hides it
@@ -59,20 +73,20 @@ export function deriveFeatureStages(
     // summaries where docs/ holds no source docs).
     'docs': ev.prdSummary ? 'done' : 'pending',
     'prd-summary': ev.prdSummary ? 'done' : 'pending',
-    // "Test authoring & coverage" is TWO things, and a spec file only proves the
-    // first. Coverage is a mapping onto requirements, so with no PRD summary it
-    // was never computed and never could be — marking the step done off an
-    // authored spec alone put a green tick on a suite with zero coverage. The
-    // percentage itself is reported, not gated: a conducted flight may settle
-    // this stage below target via accept-partial, so "done" means mapped, not
-    // fully covered.
-    'specs-coverage': ev.specs && ev.prdSummary ? 'done' : 'pending',
+    // "Test authoring & coverage" is TWO things. A spec proves authoring; only
+    // durable mapping evidence proves the second half. Percentage is not the
+    // gate: a completed mapping may honestly settle at 0% or below target.
+    'specs-coverage': ev.specs && ev.prdSummary && coverageMapped ? 'done' : 'pending',
     // Parallel readiness asks whether the feature can boot beside a second copy
     // of itself, and a saved overlay is one route there, not the definition. A
     // config whose every start command already declares a port slot is
     // concurrency-ready with nothing for Portify to rewrite — reporting that as
     // "not started" would tell the user to redo work the config already does.
-    'portify': feature.portified || ev.portInjectability === 'declared' ? 'done' : 'pending',
+    'portify': feature.portified
+      || ev.portInjectability === 'declared'
+      || externalPortify?.status === 'done'
+      ? 'done'
+      : 'pending',
     'run': runStatus,
     'heal': runStatus,
     'evaluation-export': hasExport ? 'done' : 'pending',
@@ -81,6 +95,7 @@ export function deriveFeatureStages(
     key,
     status: statusFor[key],
     ...(key === 'run' && runEvidence ? { evidence: runEvidence } : {}),
+    ...(key === 'portify' && portifyEvidence ? { evidence: portifyEvidence } : {}),
   }))
 }
 
@@ -202,16 +217,24 @@ function hasDoneExport(tasks: EvaluationExportTask[], feature: string): boolean 
  *  (must be called under Runs/EvaluationExport providers). The map re-derives
  *  when a run settles or an export lands, so the squares stay live without a
  *  features refetch. */
-export function useDerivedFeatureStages(features: Feature[]): Map<string, DerivedStage[]> {
+export function useDerivedFeatureStages(
+  features: Feature[],
+  externalHistory?: FeatureExternalHistory,
+): Map<string, DerivedStage[]> {
   const { runs } = useRuns()
   const { tasks } = useEvaluationExports()
   return useMemo(() => {
     const latest = latestTerminalRunByFeature(runs)
     const map = new Map<string, DerivedStage[]>()
     for (const f of features) {
-      const stages = deriveFeatureStages(f, latest.get(f.name), hasDoneExport(tasks, f.name))
+      const stages = deriveFeatureStages(
+        f,
+        latest.get(f.name),
+        hasDoneExport(tasks, f.name),
+        externalHistory?.get(f.name),
+      )
       if (stages) map.set(f.name, stages)
     }
     return map
-  }, [features, runs, tasks])
+  }, [features, runs, tasks, externalHistory])
 }

@@ -8,6 +8,7 @@ import { STAGE_COLUMN, StageStatusChip } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
 import { agentActivityLine } from './StageStatusLines'
 import { SkeletonLines, SkeletonRows, type AwaitingState } from '@/shared/ui/Skeleton'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 // ─── Requirements (R74): the two-path fork + the resting docs panel ──────────
 // While the flight is parked on the prd-source checkpoint the FORK owns the
@@ -269,7 +270,7 @@ export function IntentRow({ description }: { description: string }) {
 /** One fork path card — a radio-like affordance that STAYS visible after the
  *  pick (R74 polish): the selected card lights sky + shows its dot filled, the
  *  other dims but remains clickable, so the previous choice is never hidden. */
-export function ForkPathCard({ testId, title, blurb, recommended, note, selected, dimmed, disabled, onPick }: {
+export function ForkPathCard({ testId, title, blurb, recommended, note, selected, dimmed, disabled, disabledTitle, onPick }: {
   testId: string
   title: string
   blurb: string
@@ -282,19 +283,22 @@ export function ForkPathCard({ testId, title, blurb, recommended, note, selected
   /** A sibling is selected — recede without disappearing. */
   dimmed?: boolean
   disabled: boolean
+  disabledTitle?: string
   onPick: () => void
 }) {
   return (
-    <button
+    <DisabledControlTooltip wrapperClassName="flex min-w-0 flex-1">
+      <button
       type="button"
       data-testid={testId}
       role="radio"
       aria-checked={Boolean(selected)}
       disabled={disabled}
+      title={disabled ? disabledTitle : undefined}
       onClick={onPick}
       /* Neutral surfaces — the accent lives in the border + radio dot only. */
       className={[
-        'relative flex min-w-0 flex-1 cursor-pointer items-start gap-2.5 rounded-md border p-3 text-left transition-all',
+        'relative flex min-w-0 flex-1 cursor-pointer items-start gap-2.5 rounded-md border p-3 text-left transition-all disabled:cursor-not-allowed disabled:opacity-45',
         selected ? 'border-accent/60 bg-selected' : 'border-line bg-transparent',
         dimmed ? 'opacity-60' : '',
       ].filter(Boolean).join(' ')}
@@ -324,6 +328,7 @@ export function ForkPathCard({ testId, title, blurb, recommended, note, selected
         </span>
         <span className="text-[11px] leading-snug text-secondary">{blurb}</span>
       </span>
-    </button>
+      </button>
+    </DisabledControlTooltip>
   )
 }

@@ -337,6 +337,7 @@ export type {
   FlightCheckpoint,
   FlightCheckpointKind,
   FlightCheckpointResponse,
+  ExternalWorkCheckpointData,
   FlightEntryOptions,
   FlightStageEntryOption,
   SpecsCoveragePass,

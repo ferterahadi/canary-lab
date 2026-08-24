@@ -14,10 +14,10 @@
 // apart: the MCP injection stamps `MCP_ORIGIN_HEADER`, and a decision route
 // refuses anything without it while the flight is externally driven and live.
 //
-// Deliberately NOT covered, because neither answers anything on the agent's
-// behalf: `/abort` (ends a flight whose client has gone away — the escape
-// hatch), `/remedy` (stash/commit the user's own dirty repos, which no MCP tool
-// can do for them), and the DELETE (only reachable once the flight is settled).
+// Deliberately NOT covered, because none answers work on the agent's behalf:
+// `/abort` ends a flight whose client has gone away; `/remedy` changes the
+// user's own dirty repos; takeover request/force is the explicit ownership
+// transfer protocol; DELETE is only reachable once the flight is settled.
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import type { FlightManifest } from '../logic/types'
 
@@ -62,7 +62,7 @@ export function rejectForeignFlightDecision(
   return {
     error:
       'This flight is being driven by the agent that started it — answer its checkpoints, pause it, and resume it from there. '
-      + 'Aborting the flight is the only control this UI keeps.',
+      + 'This UI keeps Abort, and an external-work step also offers Request takeover for a safe transfer back to Canary Lab.',
     type: 'flight_externally_driven',
   }
 }

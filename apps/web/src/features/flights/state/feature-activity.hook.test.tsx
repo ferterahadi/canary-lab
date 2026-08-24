@@ -16,15 +16,18 @@ import type { FeatureActivity } from './feature-activity'
 // feature-activity.test.ts. This suite proves composition and nothing else.
 const stores = {
   runs: [] as RunIndexEntry[],
+  allRuns: [] as RunIndexEntry[],
   runDetails: {} as Record<string, RunDetail>,
   workflows: [] as PortifyIndexEntry[],
   drafts: [] as DraftRecord[],
+  records: [] as DraftRecord[] | undefined,
   tasks: [] as EvaluationExportTask[],
   coverageJobs: null as CoverageJobIndexEntry[] | null,
 }
 
 vi.mock('@/features/runs', () => ({
   useActiveRuns: () => ({ runs: stores.runs }),
+  useRuns: () => ({ runs: stores.allRuns }),
   useRunDetails: () => stores.runDetails,
 }))
 vi.mock('@/features/evaluation', () => ({ useEvaluationExports: () => ({ tasks: stores.tasks }) }))
@@ -33,7 +36,7 @@ vi.mock('@/features/portify', async () => ({
   isActivePortify: (status: string) => status === 'editing' || status === 'running',
 }))
 vi.mock('@/features/wizard', async () => ({
-  useWizardDrafts: () => ({ drafts: stores.drafts }),
+  useWizardDrafts: () => ({ drafts: stores.drafts, records: stores.records }),
   isActiveWizardTask: (status: string) => status === 'generating',
 }))
 // The coverage-jobs read rides useLiveResource (WS-invalidated fetch) — the
@@ -65,9 +68,11 @@ beforeEach(() => {
   document.body.appendChild(container)
   root = createRoot(container)
   stores.runs = []
+  stores.allRuns = []
   stores.runDetails = {}
   stores.workflows = []
   stores.drafts = []
+  stores.records = []
   stores.tasks = []
   stores.coverageJobs = null
 })
@@ -117,6 +122,16 @@ describe('useFeatureActivity', () => {
     stores.runDetails = { 'r-x': { manifest: { healMode: 'external' } } as unknown as RunDetail }
     render()
     expect(seen.get('x')).toEqual({ kind: 'healing', runId: 'r-x', external: true })
+  })
+
+  it('uses visible drafts as history when the provider has no records field', () => {
+    stores.drafts = [{
+      draftId: 'd-external', featureName: 'x', status: 'accepted', producer: 'external',
+      createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:01:00Z',
+    } as DraftRecord]
+    stores.records = undefined
+    render()
+    expect(seen.size).toBe(0)
   })
 
   it('lets the loudest verb win when one feature appears in several stores', () => {

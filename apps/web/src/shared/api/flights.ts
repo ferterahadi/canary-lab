@@ -95,6 +95,34 @@ export function respondFlightCheckpoint(
   )
 }
 
+/** Ask the external agent driving the current work hand-off to release this
+ *  step. This persists the request; it does not start Canary's local agent. */
+export function requestFlightTakeover(
+  flightId: string,
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/takeover/request`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    fetchImpl,
+  )
+}
+
+/** Start the current external work hand-off internally without waiting for its
+ *  client to release. The UI confirms the concurrent-file-write risk first. */
+export function forceFlightTakeover(
+  flightId: string,
+  opts?: ClientOptions,
+): Promise<FlightManifestT> {
+  const { baseUrl, fetchImpl } = defaultOpts(opts)
+  return request<FlightManifestT>(
+    `${baseUrl}/api/flights/${encodeURIComponent(flightId)}/takeover/force`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: true }) },
+    fetchImpl,
+  )
+}
+
 /** Read-time remedy for a failed stage: null = nothing actionable; repos [] =
  *  the error is stale and every repo is clean again (just Continue). */
 export function getFlightRemedy(

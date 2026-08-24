@@ -454,5 +454,171 @@ describe('flights routes', () => {
       expect((await app.inject({ method: 'GET', url: '/api/flights/fl_x' })).statusCode).toBe(200)
       expect((await app.inject({ method: 'POST', url: '/api/flights/fl_x/abort' })).statusCode).toBe(200)
     })
+
+    function handOffAdapters(): StageAdapters {
+      const adapters = allDone()
+      adapters.scout = {
+        teardown: () => null,
+        run: async () => ({
+          kind: 'checkpoint',
+          checkpoint: {
+            kind: 'external-work',
+            message: 'do the scout step',
+            options: ['submit', 'run-internally'],
+            data: { stage: 'scout', prompt: 'scan it', handOffId: 'abc12345' },
+          },
+        }),
+        onCheckpointResponse: async (_ctx, response) => (
+          response.choice === 'run-internally'
+            ? { kind: 'done' as const }
+            : { kind: 'failed' as const, error: 'external submit should not reach the adapter after takeover' }
+        ),
+      }
+      return adapters
+    }
+
+    async function startExternalHandOff(): Promise<string> {
+      const started = await app.inject({
+        method: 'POST',
+        url: '/api/flights',
+        body: startBody({ stageProducer: 'external' }),
+      })
+      const flightId = (started.json() as { flightId: string }).flightId
+      await waitForStatus(flightId, ['waiting-for-approval'])
+      return flightId
+    }
+
+    it('requests a cooperative takeover, rejects submit, then starts internally after release', async () => {
+      const store = new FlightRunStore(tmpDir)
+      app = await buildApp(handOffAdapters(), store)
+      const flightId = await startExternalHandOff()
+
+      const requested = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/takeover/request` })
+      expect(requested.statusCode).toBe(200)
+      const requestedManifest = requested.json() as FlightManifest
+      const requestedStage = requestedManifest.stages.find((stage) => stage.key === 'scout')!
+      expect(requestedStage.checkpoint?.data).toMatchObject({
+        handOffId: 'abc12345',
+        takeoverRequestedAt: expect.any(String),
+      })
+      expect(requestedStage.log).toContain('waiting for the external agent to release this step')
+
+      // Idempotent: a double click does not append a second Activity row.
+      const requestedAgain = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/takeover/request` })
+      const repeatedLog = ((requestedAgain.json() as FlightManifest).stages.find((stage) => stage.key === 'scout')?.log ?? '')
+      expect(repeatedLog.match(/waiting for the external agent to release this step/g)).toHaveLength(1)
+
+      const submit = await app.inject({
+        method: 'POST',
+        url: `/api/flights/${flightId}/respond`,
+        headers: { 'x-canary-origin': 'mcp' },
+        body: { response: { choice: 'submit', token: 'abc12345', data: { configSource: 'late' } } },
+      })
+      expect(submit.statusCode).toBe(409)
+      expect(submit.json()).toMatchObject({
+        type: 'flight_takeover_requested',
+        requestedAt: expect.any(String),
+      })
+      expect((await app.inject({ method: 'GET', url: `/api/flights/${flightId}` })).json())
+        .toMatchObject({ status: 'waiting-for-approval' })
+
+      // Compatibility: a persisted request from a build that did not write an
+      // Activity line is still releasable, and the acknowledgement creates the
+      // log from an empty base rather than producing "undefined...".
+      const withoutLog = store.get(flightId)!
+      store.save({
+        ...withoutLog,
+        stages: withoutLog.stages.map((stage) => stage.key === 'scout'
+          ? { ...stage, log: undefined }
+          : stage),
+      })
+      const released = await app.inject({
+        method: 'POST',
+        url: `/api/flights/${flightId}/respond`,
+        headers: { 'x-canary-origin': 'mcp' },
+        body: { response: { choice: 'run-internally' } },
+      })
+      expect(released.statusCode).toBe(200)
+      const done = await waitForStatus(flightId, ['done']) as unknown as FlightManifest
+      expect(done.stages.find((stage) => stage.key === 'scout')?.log)
+        .toContain('The external agent released this step — Canary is taking over')
+    })
+
+    it('forces only a requested takeover and records the unsafe hand-off', async () => {
+      app = await buildApp(handOffAdapters())
+      const flightId = await startExternalHandOff()
+
+      expect((await app.inject({
+        method: 'POST', url: `/api/flights/${flightId}/takeover/force`, body: { confirm: true },
+      })).statusCode).toBe(409)
+      expect((await app.inject({
+        method: 'POST', url: `/api/flights/${flightId}/takeover/force`, body: {},
+      })).statusCode).toBe(400)
+
+      expect((await app.inject({
+        method: 'POST', url: `/api/flights/${flightId}/takeover/request`,
+      })).statusCode).toBe(200)
+      const forced = await app.inject({
+        method: 'POST', url: `/api/flights/${flightId}/takeover/force`, body: { confirm: true },
+      })
+      expect(forced.statusCode).toBe(200)
+      const done = await waitForStatus(flightId, ['done']) as unknown as FlightManifest
+      expect(done.stages.find((stage) => stage.key === 'scout')?.log)
+        .toContain('User forced takeover — Canary is starting this step here')
+    })
+
+    it('rejects takeover when there is no external work hand-off', async () => {
+      app = await buildApp(allDone())
+      const started = await app.inject({ method: 'POST', url: '/api/flights', body: startBody() })
+      const flightId = (started.json() as { flightId: string }).flightId
+      await waitForStatus(flightId, ['done'])
+      const settled = await app.inject({ method: 'POST', url: `/api/flights/${flightId}/takeover/request` })
+      expect(settled.statusCode).toBe(409)
+      expect(settled.json()).toMatchObject({ type: 'flight_takeover_unavailable' })
+      expect((await app.inject({ method: 'POST', url: '/api/flights/missing/takeover/request' })).statusCode).toBe(404)
+      expect((await app.inject({
+        method: 'POST', url: '/api/flights/missing/takeover/force', body: { confirm: true },
+      })).statusCode).toBe(404)
+    })
+
+    it.each([
+      ['no waiting stage', [], { stageProducer: 'external' as const }],
+      ['a different checkpoint kind', [{ key: 'scout', status: 'waiting-for-approval' as const, checkpoint: { kind: 'config-approval' as const, message: 'approve?' } }], { stageProducer: 'external' as const }],
+      ['an internal producer', [{ key: 'scout', status: 'waiting-for-approval' as const, checkpoint: { kind: 'external-work' as const, message: 'work', data: {} } }], { stageProducer: 'internal' as const }],
+    ])('rejects malformed takeover state: %s', async (_label, stages, producer) => {
+      const store = new FlightRunStore(tmpDir)
+      store.save({
+        flightId: 'fl_malformed',
+        feature: 'checkout',
+        repoPaths: [repoDir],
+        description: 'checkout flow',
+        opts: { env: 'local', coverageTarget: 100, yolo: false, ...producer },
+        status: 'waiting-for-approval',
+        currentStage: 'scout',
+        stages,
+        createdAt: '2026-08-25T00:00:00.000Z',
+        updatedAt: '2026-08-25T00:00:00.000Z',
+      } as FlightManifest)
+      app = await buildApp(allDone(), store)
+      const response = await app.inject({
+        method: 'POST', url: '/api/flights/fl_malformed/takeover/request',
+      })
+      expect(response.statusCode).toBe(409)
+      expect(response.json()).toMatchObject({ type: 'flight_takeover_unavailable' })
+    })
+
+    it('maps non-Error takeover store failures on both routes', async () => {
+      app = await buildApp(allDone(), throwingStore('takeover store failed'))
+      const requested = await app.inject({
+        method: 'POST', url: '/api/flights/fl_x/takeover/request',
+      })
+      expect(requested.statusCode).toBe(409)
+      expect(requested.json()).toMatchObject({ error: 'takeover store failed' })
+      const forced = await app.inject({
+        method: 'POST', url: '/api/flights/fl_x/takeover/force', body: { confirm: true },
+      })
+      expect(forced.statusCode).toBe(409)
+      expect(forced.json()).toMatchObject({ error: 'takeover store failed' })
+    })
   })
 })

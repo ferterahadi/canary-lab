@@ -19,6 +19,7 @@ export type {
   FlightCheckpointKind,
   FlightCheckpoint,
   FlightCheckpointResponse,
+  ExternalWorkCheckpointData,
   FlightStage,
   FlightStageErrorDetail,
   FlightStatus,

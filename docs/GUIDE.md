@@ -210,6 +210,13 @@ Mechanical work—scaffold writes, env application, Playwright execution, and ra
 export—stays in Canary Lab in both modes. An external client can return one
 handoff to the internal agent with `choice: "run-internally"`.
 
+The Flight page remains live while an external client works. Its normal
+mutations are disabled, but an `external-work` card offers **Request takeover**.
+That records the request and waits; Canary starts its local agent only after the
+external client stops and acknowledges with `choice: "run-internally"`. If the
+client is gone, **Force takeover** is available behind a warning because Canary
+cannot interrupt file writes already happening in another process.
+
 The default coverage target is 100%. Portify proves injected-port readiness with
 a concurrent double boot. Skipping it leaves the feature serial; it does not
 make fixed ports safe for concurrent runs.

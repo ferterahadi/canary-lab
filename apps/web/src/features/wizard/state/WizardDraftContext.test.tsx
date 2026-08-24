@@ -76,6 +76,7 @@ describe('WizardDraftProvider', () => {
     await settle()
 
     expect(captured.value?.drafts.map((item) => item.draftId)).toEqual(['planning-a', 'ready-b'])
+    expect(captured.value?.records.map((item) => item.draftId)).toEqual(['accepted-c', 'planning-a', 'ready-b'])
   })
 
   it('discovers drafts created outside this page session', async () => {
@@ -114,11 +115,13 @@ describe('WizardDraftProvider', () => {
       workspaceSocket().fire({ type: 'draft-updated', draft: draft({ draftId: 'd-1', status: 'accepted' }) })
     })
     expect(captured.value?.drafts.map((d) => d.draftId)).toEqual(['d-2'])
+    expect(captured.value?.records.map((d) => d.draftId)).toEqual(['d-1', 'd-2'])
 
     act(() => {
       workspaceSocket().fire({ type: 'draft-deleted', draftId: 'd-2' })
     })
     expect(captured.value?.drafts).toEqual([])
+    expect(captured.value?.records.map((d) => d.draftId)).toEqual(['d-1'])
   })
 
   it('ignores a startup list that resolves after unmount, and survives a list failure', async () => {

@@ -9,7 +9,7 @@ import { flightAwaitsUser } from '../lib/external-work'
 export { FLIGHT_STATUS_TONE, FeatureChipBadge, FlightStatusChip, activityStages, featureActivityRows, featureChipState, flightStatusLabel, groupPickerRows, preFlightChipState, resolveFeatureFlightAction } from './FlightChipState'
 export type { FeatureActivityRow, FeatureChipState, FeatureFlightAction, FeatureRef, PickerGroup } from './FlightChipState'
 export { ActivityOnlyRow, NotFlownRow, PreFlightRow, StageMiniRail } from './FlightPickerRows'
-export { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from '../lib/external-work'
+export { EXTERNAL_WORK_COPY, externalMutationTooltip, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from '../lib/external-work'
 
 export function FlightsPill({
   flights,

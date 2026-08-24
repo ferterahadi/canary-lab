@@ -464,6 +464,36 @@ describe('FlightPage', () => {
     expect(mocks.applyFlightRemedy).toHaveBeenCalledWith('fl_1', 'stash')
   })
 
+  it('external ownership keeps dirty-repo remedies visible but inert', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
+      status: 'paused',
+      pauseReason: 'stage-failed',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'portify' ? ('failed' as const) : ('done' as const),
+        ...(key === 'portify' ? { error: 'repo "shop" has uncommitted changes' } : {}),
+      })),
+    }))
+    mocks.getFlightRemedy.mockResolvedValue({
+      remedy: {
+        kind: 'dirty-repos',
+        stage: 'portify',
+        repos: [{ name: 'shop', path: '/repo/shop', modified: 1 }],
+        actions: ['stash', 'commit'],
+      },
+    })
+    await render('fl_1')
+
+    for (const id of ['stage-remedy-stash', 'stage-remedy-commit']) {
+      const button = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)
+      expect(button?.disabled).toBe(true)
+      expect(button?.title).toContain('from the Claude/Codex session')
+      await act(async () => { button?.click() })
+    }
+    expect(mocks.applyFlightRemedy).not.toHaveBeenCalled()
+  })
+
   it('remedy: a stale error over now-clean repos points at Continue instead of buttons', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'paused',

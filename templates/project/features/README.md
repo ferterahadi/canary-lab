@@ -4,9 +4,9 @@ This workspace includes two examples:
 
 - **`storefront-journey`** — a three-service `demo-app/` suite. Press **Run** to
   watch the repair loop fix contract failures until green.
-- **`workflow-workbench`** — a small suite over `workflow-app/`. It has one
-  intentionally uncovered requirement and one fixed service port, giving the
-  Coverage, Author, Verify, and Portify workflows prepared material to inspect.
+- **`workflow-workbench`** — a small suite over `workflow-app/`. Its health test
+  starts unlinked, its greeting test is absent, and its service port is fixed,
+  giving Coverage, Author, Verify, and Portify prepared material to inspect.
 
 `storefront-journey` ships **finished**:
 

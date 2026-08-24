@@ -26,27 +26,36 @@ export function CoverageEmptyMain({ railOpen }: { railOpen: boolean }) {
 // (the donut is the headline number; the bar is the 3-way composition). Static SVG —
 // headless preview forces reduced-motion. Hue tracks the number: green high, amber
 // mid, rose low — the colour reads the health at a glance.
+//
+// Geometry is a clearance problem, not a taste one. The label sits on a CHORD of the
+// inner circle, so the room it gets shrinks the further it is from the centre: at 82px
+// across with a 6px stroke, "COVERED" (~52px at 10px caps) was wider than the ~48px
+// chord it sat on and crowded the stroke. The dial is sized from that constraint —
+// inner radius 38.5px puts ~66px of chord under both lines, so the widest reading
+// ("100%") and the label each clear the ring by ~7px instead of touching it.
+const RING_SIZE = 104
+const RING_R = 42
+const RING_STROKE = 7
+
 export function CoverageRing({ pct }: { pct: number }) {
-  const size = 82
-  const mid = size / 2
-  const r = 32
-  const c = 2 * Math.PI * r
+  const mid = RING_SIZE / 2
+  const c = 2 * Math.PI * RING_R
   const clamped = Math.max(0, Math.min(100, pct))
   const offset = c * (1 - clamped / 100)
   const hue = clamped >= 80 ? 'var(--success)' : clamped >= 40 ? 'var(--warning)' : clamped > 0 ? 'var(--danger)' : 'var(--text-muted)'
   return (
-    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% covered`}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={mid} cy={mid} r={r} fill="none" stroke="var(--border-default)" strokeWidth={6} />
+    <div style={{ position: 'relative', width: RING_SIZE, height: RING_SIZE, flexShrink: 0 }} data-testid="coverage-ring" aria-label={`${pct}% covered`}>
+      <svg width={RING_SIZE} height={RING_SIZE} viewBox={`0 0 ${RING_SIZE} ${RING_SIZE}`}>
+        <circle cx={mid} cy={mid} r={RING_R} fill="none" stroke="var(--border-default)" strokeWidth={RING_STROKE} />
         <circle
-          cx={mid} cy={mid} r={r} fill="none" stroke={hue} strokeWidth={6}
+          cx={mid} cy={mid} r={RING_R} fill="none" stroke={hue} strokeWidth={RING_STROKE}
           strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
           transform={`rotate(-90 ${mid} ${mid})`}
         />
       </svg>
       <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>
-        <span style={{ fontSize: 19, fontWeight: 600, color: 'var(--text-primary)' }}>{Math.round(pct)}<span style={{ fontSize: 10, fontWeight: 600 }}>%</span></span>
-        <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 3 }}>covered</span>
+        <span style={{ fontSize: 24, fontWeight: 600, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>{Math.round(pct)}<span style={{ fontSize: 12, fontWeight: 600 }}>%</span></span>
+        <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 6 }}>covered</span>
       </div>
     </div>
   )

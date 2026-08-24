@@ -91,8 +91,13 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
+  AgentSessionView: ({ source, systemRows, externalSession }: {
+    source?: { kind: string; stage?: string }
+    systemRows?: { pre: string[]; post: string[] }
+    externalSession?: { message: string; status: string }
+  }) => (
     <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
+      {externalSession && <div data-testid="external-session-activity" data-status={externalSession.status}>{externalSession.message}</div>}
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>
@@ -348,7 +353,7 @@ describe('flight controls (R48/R71)', () => {
     expect(container.querySelector('[data-testid="requirements-fork"]')).toBeTruthy()
   })
 
-  it('an external-work hand-off reads as running work, with no Respond and no Pause', async () => {
+  it('an external-work hand-off reads as running work with the normal controls disabled', async () => {
     // The step is being done inside the client that started the flight — there
     // is nothing here for this reader to answer, and nothing this side can stop.
     // A hand-off only ever parks on an EXTERNAL flight, so the fixture carries
@@ -364,16 +369,30 @@ describe('flight controls (R48/R71)', () => {
         ...(key === 'scout' ? { checkpoint: { kind: 'external-work', message: 'Run this scout step in your own client.', options: ['submit', 'run-internally'] } } : {}),
       })),
     }))
-    await render('fl_1')
+    const onStartFlight = vi.fn()
+    await render('fl_1', { onStartFlight })
     const chip = container.querySelector<HTMLElement>('[data-testid="flight-status"]')
     expect(chip?.textContent).toContain('Running in your agent')
     expect(chip?.getAttribute('title')).toBe('Your agent is working on this step. Canary will continue when it finishes.')
-    expect(container.querySelector('[data-testid="flight-primary-respond"]')).toBeNull()
+    const respond = container.querySelector<HTMLButtonElement>('[data-testid="flight-primary-respond"]')
+    expect(respond?.disabled).toBe(true)
+    expect(respond?.title).toContain('from the Claude/Codex session')
     const pause = container.querySelector<HTMLButtonElement>('[data-testid="flight-pause"]')
     expect(pause?.disabled).toBe(true)
-    expect(pause?.title).toBe('Your agent is driving this flight — pause it there, not here.')
+    expect(pause?.title).toBe('Your agent is driving this flight — pause this work from the Claude/Codex session doing the work.')
     await act(async () => { pause?.click() })
     expect(mocks.pauseFlight).not.toHaveBeenCalled()
+    const changeInputs = container.querySelector<HTMLButtonElement>('[data-testid="flight-inputs-change"]')
+    const autopilot = container.querySelector<HTMLButtonElement>('[data-testid="flight-autopilot-toggle"]')
+    expect(changeInputs?.disabled).toBe(true)
+    expect(changeInputs?.title).toContain('from the Claude/Codex session')
+    expect(autopilot?.disabled).toBe(true)
+    expect(autopilot?.title).toContain('from the Claude/Codex session')
+    expect(container.querySelector('[data-testid="external-session-activity"]')?.textContent)
+      .toBe('Work is continuing in your external agent session.')
+    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBeNull()
+    await act(async () => { changeInputs?.click() })
+    expect(onStartFlight).not.toHaveBeenCalled()
   })
 
   it('a real checkpoint on the same status keeps Respond and a live Pause', async () => {
@@ -401,7 +420,7 @@ describe('flight controls (R48/R71)', () => {
       ...over,
     })
 
-    it('drops Respond → on a real question and says where the answer goes instead', async () => {
+    it('keeps Respond → on a real question but disables it with the mutation destination', async () => {
       mocks.getFlight.mockResolvedValue(external({
         status: 'waiting-for-approval',
         currentStage: 'env-capture',
@@ -412,9 +431,10 @@ describe('flight controls (R48/R71)', () => {
         })),
       }))
       await render('fl_1')
-      expect(container.querySelector('[data-testid="flight-primary-respond"]')).toBeNull()
-      expect(container.querySelector('[data-testid="flight-externally-driven"]')?.textContent)
-        .toBe('Driven by your agent — respond from there.')
+      const respond = container.querySelector<HTMLButtonElement>('[data-testid="flight-primary-respond"]')
+      expect(respond?.disabled).toBe(true)
+      expect(respond?.title).toContain('from the Claude/Codex session')
+      expect(container.querySelector('[data-testid="flight-externally-driven"]')).toBeNull()
       // The chip stops calling active work a demand.
       expect(container.querySelector('[data-testid="flight-status"]')?.textContent).not.toContain('Needs approval')
     })
@@ -432,23 +452,36 @@ describe('flight controls (R48/R71)', () => {
       await render('fl_1')
       const pause = container.querySelector<HTMLButtonElement>('[data-testid="flight-pause"]')
       expect(pause?.disabled).toBe(true)
-      expect(pause?.title).toBe('Your agent is driving this flight — pause it there, not here.')
+      expect(pause?.title).toBe('Your agent is driving this flight — pause this work from the Claude/Codex session doing the work.')
+      await act(async () => {
+        pause?.parentElement?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }))
+      })
+      expect(document.body.querySelector('[role="tooltip"]')?.textContent)
+        .toBe('Your agent is driving this flight — pause this work from the Claude/Codex session doing the work.')
       await act(async () => { pause?.click() })
       expect(mocks.pauseFlight).not.toHaveBeenCalled()
-      // No answer buttons at all — the question and its context still render.
-      expect(container.querySelector('[data-testid="checkpoint-choice-retry"]')).toBeNull()
-      expect(container.querySelector('[data-testid="checkpoint-submit-values"]')).toBeNull()
-      expect(container.querySelector('[data-testid="checkpoint-read-only"]')).toBeTruthy()
+      // Same answer surface as an internal flight, now inert.
+      const retry = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-choice-retry"]')
+      const values = container.querySelector<HTMLTextAreaElement>('[data-testid="checkpoint-env-values"]')
+      const submit = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-submit-values"]')
+      expect(retry?.disabled).toBe(true)
+      expect(values?.disabled).toBe(true)
+      expect(submit?.disabled).toBe(true)
+      expect(retry?.title).toContain('from the Claude/Codex session')
+      expect(container.querySelector('[data-testid="checkpoint-read-only"]')).toBeNull()
     })
 
-    it('disables Continue on a paused flight and offers Abort as the one way out', async () => {
+    it('disables Continue and Delete on a paused flight without adding an external-only action', async () => {
       mocks.getFlight.mockResolvedValue(external({ status: 'paused', pauseReason: 'stage-failed' }))
       await render('fl_1')
       const cont = container.querySelector<HTMLButtonElement>('[data-testid="flight-continue"]')
       expect(cont?.disabled).toBe(true)
-      expect(cont?.title).toBe('Your agent is driving this flight — continue it there, not here.')
+      expect(cont?.title).toBe('Your agent is driving this flight — continue or repeat this flight from the Claude/Codex session doing the work.')
       await openMenu()
-      expect(container.querySelector('[data-testid="flight-abort"]')).toBeTruthy()
+      expect(container.querySelector('[data-testid="flight-abort"]')).toBeNull()
+      const deleteButton = container.querySelector<HTMLButtonElement>('[data-testid="flight-delete"]')
+      expect(deleteButton?.disabled).toBe(true)
+      expect(deleteButton?.title).toContain('from the Claude/Codex session')
     })
 
     it('hands the page back once the flight settles — the agent is gone', async () => {

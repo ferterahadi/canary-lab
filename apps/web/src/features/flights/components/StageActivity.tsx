@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react'
 import type { SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/api/client'
-import { AgentSessionView, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
+import { AgentSessionView, type AgentSessionSource, type ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { StatusDot } from '@/shared/ui/atoms'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow } from '@/shared/ui/StepList'
@@ -26,8 +26,8 @@ export function StageActivity({
   settled,
   log,
   leadingSystemRows = [],
+  externalSession,
   empty,
-  agentStop,
 }: {
   /** The stage's one agent session, if it spawned one (flight agent, or the
    *  Evaluation Report's export task). Omitted for agentless stages — the rail
@@ -43,6 +43,9 @@ export function StageActivity({
    *  conductor's log — e.g. the `[external]` row when the run is being repaired
    *  by an external MCP client (no Canary session to tail). */
   leadingSystemRows?: string[]
+  /** Compact provenance for work continuing in the user's own agent. The full
+   *  external monitor stays on its dedicated screen; Flight owns one row. */
+  externalSession?: ExternalSessionActivity
   /** Why this stage has no transcript, when the stage knows better than the
    *  generic "nothing ran here" fallback. A settled stage can hold real evidence
    *  and still have no session to replay — the agent ran in the user's own
@@ -61,7 +64,7 @@ export function StageActivity({
   // different empty states. Once it's live or settled the rail always shows
   // (the live timeline, or the settled disclosure).
   const pending = !live && !settled
-  const nothingYet = lines.length === 0 && leadingSystemRows.length === 0
+  const nothingYet = lines.length === 0 && leadingSystemRows.length === 0 && externalSession === undefined
   if (nothingYet && (!hasSource || pending)) return null
   const open = userToggled ?? !settled
 
@@ -131,6 +134,7 @@ export function StageActivity({
               key={sourceKey}
               source={source}
               systemRows={{ pre: [...leadingSystemRows, ...pre], post }}
+              externalSession={externalSession}
               {...(empty ? { empty } : {})}
             />
           </AgentBlock>

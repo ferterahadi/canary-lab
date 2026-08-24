@@ -91,8 +91,17 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
+  AgentSessionView: ({ source, systemRows, externalSession }: {
+    source?: { kind: string; stage?: string }
+    systemRows?: { pre: string[]; post: string[] }
+    externalSession?: { message: string; status: string; clientKind: string }
+  }) => (
     <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
+      {externalSession && (
+        <div data-testid="external-session-activity" data-status={externalSession.status} data-client={externalSession.clientKind}>
+          {externalSession.message}
+        </div>
+      )}
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>
@@ -289,9 +298,38 @@ describe('derived flights (R81)', () => {
 
     expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toContain('Running')
     expect(container.querySelector('[data-testid="test-run"]')).not.toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="derived-conduct"]')?.disabled).toBe(true)
+    const stop = container.querySelector<HTMLButtonElement>('[data-testid="run-stage-stop"]')
+    expect(stop?.disabled).toBe(true)
+    expect(stop?.title).toContain('from the Claude/Codex session')
+    expect(container.querySelector('[data-testid="flight-external-suite-work"]')).toBeNull()
     expect(mocks.getRunDetail).toHaveBeenCalledWith('run-live')
     expect(onSelectFlight).not.toHaveBeenCalled()
     expect(onSelectStage).not.toHaveBeenCalled()
+  })
+
+  it('keeps both live run mutations visible but disabled during an external repair', async () => {
+    mocks.listRuns.mockResolvedValue([
+      { runId: 'run-heal', feature: 'go-smoke', status: 'healing', healMode: 'external', startedAt: '2026-01-01T00:03:00Z', executionType: 'run' },
+    ])
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-heal',
+      manifest: { runId: 'run-heal', feature: 'go-smoke', status: 'healing', healMode: 'external' },
+      summary: { total: 2, passed: 1, failed: [{ name: 'fails' }] },
+    })
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', allDone()]]),
+      activity: new Map([['go-smoke', { kind: 'healing' as const, runId: 'run-heal', external: true }]]),
+      stage: 'run',
+      onSelectStage: vi.fn(),
+    })
+    await act(async () => {})
+
+    for (const id of ['run-stage-cancel-heal', 'run-stage-stop']) {
+      const button = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)
+      expect(button?.disabled).toBe(true)
+      expect(button?.title).toContain('from the Claude/Codex session')
+    }
   })
 
   it('does not replace a stage the user selected when an external run starts', async () => {
@@ -310,6 +348,80 @@ describe('derived flights (R81)', () => {
     expect(container.querySelector('[data-testid="stage-rail-docs"]')?.getAttribute('aria-current')).toBe('true')
     expect(onSelectFlight).not.toHaveBeenCalled()
     expect(onSelectStage).not.toHaveBeenCalled()
+  })
+
+  it('keeps a settled external authoring hand-off in the shared Activity rail', async () => {
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', allDone()]]),
+      externalHistory: new Map([['go-smoke', {
+        'specs-coverage': {
+          kind: 'authoring',
+          stage: 'specs-coverage',
+          status: 'done',
+          startedAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:05:00Z',
+          clientKind: 'claude',
+          itemCount: 3,
+        },
+      }]]),
+      stage: 'specs-coverage',
+      onSelectStage: vi.fn(),
+    })
+
+    const activityToggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
+    expect(activityToggle).toBeTruthy()
+    act(() => { activityToggle!.click() })
+    const external = container.querySelector('[data-testid="external-session-activity"]')
+    expect(external?.getAttribute('data-client')).toBe('claude')
+    expect(external?.getAttribute('data-status')).toBe('done')
+    expect(external?.textContent).toBe('Completed outside Canary Lab · 3 files applied.')
+    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBeNull()
+  })
+
+  it('shows completed external Parallel-readiness evidence without an entry refresh', async () => {
+    mocks.portifyWorkflow.mockReturnValue({
+      workflowId: 'wf-live',
+      feature: 'go-smoke',
+      repos: [{ name: 'workflow-app' }],
+      agent: 'claude',
+      producer: 'external',
+      branch: 'canary/portify',
+      status: 'saved',
+      attempt: 1,
+      maxAttempts: 3,
+      startedAt: '2026-08-25T00:00:00Z',
+      endedAt: '2026-08-25T00:05:00Z',
+      verification: {
+        ok: true,
+        instances: [
+          { ok: true, ports: { web: 4001 } },
+          { ok: true, ports: { web: 4002 } },
+        ],
+      },
+      diff: ['# repo: workflow-app', '+++ b/server.ts', '+listen(process.env.PORT)'].join('\n'),
+    })
+    await render('feature:go-smoke', {
+      // Deliberately no workflow evidence on the pseudo-stage: the task-scoped
+      // Portify stream is the first completion signal, before the entry probe.
+      derivedStages: new Map([['go-smoke', allDone()]]),
+      externalHistory: new Map([['go-smoke', {
+        portify: {
+          kind: 'portifying',
+          stage: 'portify',
+          resourceId: 'wf-live',
+          status: 'done',
+          startedAt: '2026-08-25T00:00:00Z',
+          updatedAt: '2026-08-25T00:05:00Z',
+          clientKind: 'claude',
+        },
+      }]]),
+      stage: 'portify',
+      onSelectStage: vi.fn(),
+    })
+
+    expect(mocks.portifyWorkflow).toHaveBeenCalledWith('wf-live')
+    expect(container.querySelector('[data-testid="double-boot-panel"]')?.textContent).toContain(':4002')
+    expect(container.querySelector('[data-testid="overlay-panel"]')?.textContent).toContain('server.ts')
   })
 
   it('retains the latest terminal run in the derived Test run pane', async () => {

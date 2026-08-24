@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
 import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunDetail, RunIndexEntry } from '@/shared/api/types'
-import type { FlightStageKey, PortifyIndexEntry } from '@/shared/api/client'
+import type { FlightStageKey, PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
 import * as api from '@/shared/api/client'
 import { useLiveResource } from '@/shared/state/use-live-resource'
 import { useEvaluationExports } from '@/features/evaluation'
 import { isActivePortify, usePortify } from '@/features/portify'
-import { useActiveRuns, useRunDetails } from '@/features/runs'
+import { useActiveRuns, useRunDetails, useRuns } from '@/features/runs'
 import { isActiveWizardTask, useWizardDrafts } from '@/features/wizard'
 
 // Per-feature "what is happening right now" — the live signal behind the
@@ -33,10 +33,35 @@ export interface FeatureActivity {
   taskId?: string
   jobId?: string
   /** The work is being done by the user's OWN agent (an MCP client), not by a
-   *  process this server spawned. Drives the stage's "running in your agent"
-   *  card and the flight view's read-only gate — an externally-driven suite
-   *  accepts no mutations here beyond abort/discard. */
+   *  process this server spawned. Drives the stage's compact external-session
+   *  Activity row and the flight view's mutation lock. */
   external?: boolean
+}
+
+/** Persistent provenance for the newest piece of work behind one Flight step.
+ *  Live activity is deliberately separate: a completed external task must stop
+ *  lighting the Flights pill, but its Activity rail must not revert to "nothing
+ *  ran here" after the files land. */
+export interface ExternalWorkTrace {
+  kind: FeatureActivityKind
+  stage: FlightStageKey
+  /** Stable handle into the task's own live/detail store. */
+  resourceId?: string
+  status: 'running' | 'ready' | 'done' | 'failed' | 'aborted'
+  startedAt: string
+  updatedAt: string
+  clientKind?: string
+  sessionId?: string
+  conversationName?: string
+  sessionUrl?: string
+  itemCount?: number
+}
+
+export type FeatureExternalHistory = Map<string, Partial<Record<FlightStageKey, ExternalWorkTrace>>>
+
+export interface FeatureWorkState {
+  activity: Map<string, FeatureActivity>
+  externalHistory: FeatureExternalHistory
 }
 
 /** Which flight stage a standalone activity kind maps onto — so an
@@ -93,9 +118,9 @@ export function deriveFeatureActivity(input: {
   drafts: DraftRecord[]
   exportTasks?: EvaluationExportTask[]
   coverageJobs?: CoverageJobIndexEntry[]
-  /** Per-run manifests off the runs stream — where a run's `healMode` lives.
-   *  The index entry deliberately doesn't mirror it; active runs always have
-   *  a live detail (the WS snapshot ships one per active run). */
+  /** Per-run manifests off the runs stream. They carry the external client
+   *  details for active runs; the compact index mirrors `healMode` so terminal
+   *  external provenance also survives a cold load. */
   runDetails?: Record<string, RunDetail>
   /** Injected in tests; defaults to wall-clock now. */
   nowMs?: number
@@ -144,20 +169,181 @@ export function deriveFeatureActivity(input: {
     map.set(r.feature, {
       kind,
       runId: r.runId,
-      external: input.runDetails?.[r.runId]?.manifest.healMode === 'external',
+      external: r.healMode === 'external' || input.runDetails?.[r.runId]?.manifest.healMode === 'external',
     })
   }
   return map
 }
 
+/** Keep only the newest producer for each feature + stage. This matters as
+ *  much as keeping terminal records: a stale external run must not keep
+ *  claiming the Activity rail after a newer internal run superseded it. */
+export function deriveFeatureExternalHistory(input: {
+  runs: RunIndexEntry[]
+  portifyWorkflows: PortifyIndexEntry[]
+  draftRecords: DraftRecord[]
+  exportTasks?: EvaluationExportTask[]
+  coverageJobs?: CoverageJobIndexEntry[]
+  runDetails?: Record<string, RunDetail>
+  portifyDetails?: Record<string, PortifyManifest>
+}): FeatureExternalHistory {
+  type Candidate = ExternalWorkTrace & { external: boolean }
+  const latest = new Map<string, Candidate>()
+
+  const remember = (featureValue: string | undefined, candidate: Candidate): void => {
+    const feature = featureValue?.trim()
+    if (!feature) return
+    const key = `${feature}\u0000${candidate.stage}`
+    const previous = latest.get(key)
+    if (!previous || previous.updatedAt <= candidate.updatedAt) latest.set(key, candidate)
+  }
+
+  for (const draft of input.draftRecords) {
+    remember(draft.featureName, {
+      kind: 'authoring',
+      stage: 'specs-coverage',
+      resourceId: draft.draftId,
+      status: draftTraceStatus(draft.status),
+      startedAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+      external: draft.producer === 'external',
+      ...(draft.externalClientKind ? { clientKind: draft.externalClientKind } : {}),
+      ...(draft.externalSessionId ? { sessionId: draft.externalSessionId } : {}),
+      ...(draft.externalConversationName ? { conversationName: draft.externalConversationName } : {}),
+      ...(draft.externalSessionUrl ? { sessionUrl: draft.externalSessionUrl } : {}),
+      ...(draft.generatedFiles ? { itemCount: draft.generatedFiles.length } : {}),
+    })
+  }
+
+  for (const job of input.coverageJobs ?? []) {
+    remember(job.feature, {
+      kind: job.kind === 'summary' ? 'condensing' : 'mapping',
+      stage: job.kind === 'summary' ? 'prd-summary' : 'specs-coverage',
+      resourceId: job.jobId,
+      status: backgroundTraceStatus(job.status),
+      startedAt: job.startedAt,
+      updatedAt: job.endedAt ?? job.startedAt,
+      external: job.producer === 'external',
+      ...(job.externalClientKind ? { clientKind: job.externalClientKind } : {}),
+      ...(job.externalSessionId ? { sessionId: job.externalSessionId } : {}),
+      ...(job.externalConversationName ? { conversationName: job.externalConversationName } : {}),
+      ...(job.externalSessionUrl ? { sessionUrl: job.externalSessionUrl } : {}),
+    })
+  }
+
+  for (const workflow of input.portifyWorkflows) {
+    const detail = input.portifyDetails?.[workflow.workflowId]
+    remember(workflow.feature, {
+      kind: 'portifying',
+      stage: 'portify',
+      resourceId: workflow.workflowId,
+      status: portifyTraceStatus(workflow.status),
+      startedAt: workflow.startedAt,
+      updatedAt: workflow.endedAt ?? workflow.startedAt,
+      external: workflow.producer === 'external',
+      ...(detail?.external?.clientKind ? { clientKind: detail.external.clientKind } : {}),
+      ...(detail?.external?.sessionId ? { sessionId: detail.external.sessionId } : {}),
+      ...(detail?.external?.conversationName ? { conversationName: detail.external.conversationName } : {}),
+      ...(detail?.external?.sessionUrl ? { sessionUrl: detail.external.sessionUrl } : {}),
+    })
+  }
+
+  for (const task of input.exportTasks ?? []) {
+    remember(task.feature, {
+      kind: 'exporting',
+      stage: 'evaluation-export',
+      resourceId: task.taskId,
+      status: task.status === 'running' ? 'running' : task.status === 'completed' ? 'done' : 'failed',
+      startedAt: task.createdAt,
+      updatedAt: task.updatedAt ?? task.createdAt,
+      external: task.producer === 'external',
+      ...(task.clientKind ? { clientKind: task.clientKind } : {}),
+      ...(task.sessionId ? { sessionId: task.sessionId } : {}),
+      ...(task.conversationName ? { conversationName: task.conversationName } : {}),
+      ...(task.externalSessionUrl ? { sessionUrl: task.externalSessionUrl } : {}),
+    })
+  }
+
+  for (const run of input.runs) {
+    if (run.executionType === 'boot' || run.executionType === 'benchmark') continue
+    const detail = input.runDetails?.[run.runId]
+    remember(run.feature, {
+      kind: run.executionType === 'verify'
+        ? 'verifying'
+        : run.status === 'healing' ? 'healing' : 'running',
+      stage: 'run',
+      resourceId: run.runId,
+      status: runTraceStatus(run.status),
+      startedAt: run.startedAt,
+      updatedAt: run.endedAt ?? detail?.manifest.endedAt ?? run.startedAt,
+      external: run.healMode === 'external' || detail?.manifest.healMode === 'external',
+      ...(detail?.manifest.externalHealSession?.clientKind
+        ? { clientKind: detail.manifest.externalHealSession.clientKind }
+        : {}),
+      ...(detail?.manifest.externalHealSession?.sessionId
+        ? { sessionId: detail.manifest.externalHealSession.sessionId }
+        : {}),
+      ...(detail?.manifest.externalHealSession?.conversationName
+        ? { conversationName: detail.manifest.externalHealSession.conversationName }
+        : {}),
+      ...(detail?.manifest.externalHealSession?.sessionUrl
+        ? { sessionUrl: detail.manifest.externalHealSession.sessionUrl }
+        : {}),
+    })
+  }
+
+  const history: FeatureExternalHistory = new Map()
+  for (const [key, candidate] of latest) {
+    if (!candidate.external) continue
+    const separator = key.indexOf('\u0000')
+    const feature = key.slice(0, separator)
+    const stages = history.get(feature) ?? {}
+    const { external: _external, ...trace } = candidate
+    stages[trace.stage] = trace
+    history.set(feature, stages)
+  }
+  return history
+}
+
+function draftTraceStatus(status: DraftRecord['status']): ExternalWorkTrace['status'] {
+  if (status === 'planning' || status === 'generating') return 'running'
+  if (status === 'accepted') return 'done'
+  if (status === 'error') return 'failed'
+  if (status === 'cancelled' || status === 'rejected') return 'aborted'
+  return 'ready'
+}
+
+function backgroundTraceStatus(status: CoverageJobIndexEntry['status']): ExternalWorkTrace['status'] {
+  if (status === 'running') return 'running'
+  if (status === 'done') return 'done'
+  if (status === 'failed') return 'failed'
+  return 'aborted'
+}
+
+function portifyTraceStatus(status: PortifyIndexEntry['status']): ExternalWorkTrace['status'] {
+  if (status === 'saved') return 'done'
+  if (status === 'failed') return 'failed'
+  if (status === 'aborted') return 'aborted'
+  if (status === 'ready-to-save') return 'ready'
+  return 'running'
+}
+
+function runTraceStatus(status: RunIndexEntry['status']): ExternalWorkTrace['status'] {
+  if (status === 'passed') return 'done'
+  if (status === 'failed') return 'failed'
+  if (status === 'aborted') return 'aborted'
+  return 'running'
+}
+
 /** Hook form — must be called under Runs/Portify/WizardDraft/EvaluationExport
  *  providers (App owns the one instance and passes the map down; the pill
  *  stays presentational). */
-export function useFeatureActivity(): Map<string, FeatureActivity> {
+export function useFeatureWorkState(): FeatureWorkState {
   const { runs } = useActiveRuns()
+  const { runs: allRuns } = useRuns()
   const runDetails = useRunDetails()
-  const { workflows } = usePortify()
-  const { drafts } = useWizardDrafts()
+  const { workflows, details: portifyDetails } = usePortify()
+  const { drafts, records } = useWizardDrafts()
   const { tasks } = useEvaluationExports()
   // The one non-WS-store input: coverage jobs live in a file-backed store whose
   // every write publishes `coverage-changed` (bridgeCoverageJobEvents), and the
@@ -169,8 +355,8 @@ export function useFeatureActivity(): Map<string, FeatureActivity> {
     () => api.listAllCoverageJobs(),
     { cache: 'coverage-jobs' },
   )
-  return useMemo(
-    () => deriveFeatureActivity({
+  return useMemo(() => ({
+    activity: deriveFeatureActivity({
       activeRuns: runs,
       portifyWorkflows: workflows,
       drafts,
@@ -178,6 +364,21 @@ export function useFeatureActivity(): Map<string, FeatureActivity> {
       coverageJobs: coverageJobs ?? undefined,
       runDetails,
     }),
-    [runs, workflows, drafts, tasks, coverageJobs, runDetails],
-  )
+    externalHistory: deriveFeatureExternalHistory({
+      runs: allRuns,
+      portifyWorkflows: workflows,
+      draftRecords: records ?? drafts,
+      exportTasks: tasks,
+      coverageJobs: coverageJobs ?? undefined,
+      runDetails,
+      portifyDetails,
+    }),
+  }), [allRuns, runs, workflows, portifyDetails, drafts, records, tasks, coverageJobs, runDetails])
+}
+
+/** Compatibility hook for consumers that only need the live verb map. New
+ *  Flight surfaces should use `useFeatureWorkState` so activity and provenance
+ *  come from one snapshot of the shared stores. */
+export function useFeatureActivity(): Map<string, FeatureActivity> {
+  return useFeatureWorkState().activity
 }

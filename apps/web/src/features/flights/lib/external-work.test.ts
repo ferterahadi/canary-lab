@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { FlightIndexEntry } from '@/shared/api/client'
-import { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from './external-work'
+import { EXTERNAL_WORK_COPY, externalMutationTooltip, externalWorkChipTitle, flightAwaitsUser, isExternalWorkPark, isExternallyDriven, presentedIndexStages } from './external-work'
 
 const entry = (over: Partial<FlightIndexEntry> = {}): FlightIndexEntry => ({
   id: 'fl_1',
@@ -78,10 +78,9 @@ describe('presentedIndexStages', () => {
 
 describe('EXTERNAL_WORK_COPY', () => {
   it('never says "MCP" — the copy has to read for Claude and Codex alike', () => {
-    for (const line of Object.values(EXTERNAL_WORK_COPY)) {
-      expect(line.toLowerCase()).not.toContain('mcp')
-      expect(line.toLowerCase()).not.toContain('approval')
-    }
+    const copy = JSON.stringify(EXTERNAL_WORK_COPY).toLowerCase()
+    expect(copy).not.toContain('mcp')
+    expect(copy).not.toContain('approval')
   })
 })
 
@@ -129,11 +128,11 @@ describe('flightAwaitsUser', () => {
   })
 })
 
-describe('EXTERNAL_DRIVE_COPY', () => {
-  it('never says "MCP", and every line names where the action moved to', () => {
-    for (const line of Object.values(EXTERNAL_DRIVE_COPY)) {
-      expect(line.toLowerCase()).not.toContain('mcp')
-      expect(line.toLowerCase()).toContain('agent')
-    }
+describe('externalMutationTooltip', () => {
+  it('names the owner, action, and Claude/Codex destination for both ownership modes', () => {
+    expect(externalMutationTooltip('flight', 'pause this work'))
+      .toBe('Your agent is driving this flight — pause this work from the Claude/Codex session doing the work.')
+    expect(externalMutationTooltip('suite', 'delete this suite'))
+      .toBe('Your agent is working on this suite — delete this suite from the Claude/Codex session doing the work.')
   })
 })

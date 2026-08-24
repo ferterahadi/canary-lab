@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import type { CoverageJobIndexEntry, DraftRecord, RunIndexEntry } from '@/shared/api/types'
+import type { CoverageJobIndexEntry, DraftRecord, EvaluationExportTask, RunIndexEntry } from '@/shared/api/types'
 import type { PortifyIndexEntry } from '@/shared/api/client'
-import { deriveFeatureActivity } from './feature-activity'
+import { deriveFeatureActivity, deriveFeatureExternalHistory } from './feature-activity'
 
 const run = (over: Partial<RunIndexEntry>): RunIndexEntry => ({
   runId: 'r1',
@@ -180,5 +180,188 @@ describe('deriveFeatureActivity', () => {
       drafts: [draft({ featureName: undefined })],
     })
     expect(map.size).toBe(0)
+  })
+})
+
+describe('deriveFeatureExternalHistory', () => {
+  it('keeps an accepted external authoring hand-off after live activity ends', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [],
+      portifyWorkflows: [],
+      draftRecords: [draft({
+        status: 'accepted',
+        producer: 'external',
+        externalClientKind: 'claude',
+        externalSessionId: 'session-1',
+        externalConversationName: 'Coverage repair',
+        externalSessionUrl: 'claude://session/1',
+        generatedFiles: ['a.spec.ts', 'b.spec.ts'],
+        updatedAt: '2026-01-01T00:05:00Z',
+      })],
+    })
+    expect(history.get('checkout')?.['specs-coverage']).toMatchObject({
+      kind: 'authoring',
+      resourceId: 'd1',
+      status: 'done',
+      clientKind: 'claude',
+      sessionId: 'session-1',
+      conversationName: 'Coverage repair',
+      sessionUrl: 'claude://session/1',
+      itemCount: 2,
+    })
+  })
+
+  it('drops stale external provenance when newer internal work owns the same stage', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [],
+      portifyWorkflows: [],
+      draftRecords: [
+        draft({ producer: 'external', status: 'accepted', updatedAt: '2026-01-01T00:05:00Z' }),
+        draft({ draftId: 'd2', producer: 'internal', status: 'accepted', updatedAt: '2026-01-01T00:06:00Z' }),
+      ],
+    })
+    expect(history.get('checkout')).toBeUndefined()
+  })
+
+  it('maps persistent coverage, portify, run and export producers to their Flight stages', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [run({ runId: 'r-ext', feature: 'run-suite', status: 'passed', healMode: 'external', endedAt: '2026-01-01T00:09:00Z' })],
+      portifyWorkflows: [portify({ feature: 'ports', status: 'saved', producer: 'external', endedAt: '2026-01-01T00:07:00Z' })],
+      draftRecords: [],
+      coverageJobs: [{
+        jobId: 'j1', feature: 'coverage', kind: 'coverage', status: 'done',
+        producer: 'external', startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:04:00Z',
+      }],
+      exportTasks: [{
+        taskId: 't1', runId: 'r1', feature: 'report', mode: 'raw', producer: 'external',
+        status: 'completed', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:08:00Z', downloadReady: true,
+      }] as EvaluationExportTask[],
+      portifyDetails: {
+        wf1: {
+          workflowId: 'wf1', feature: 'ports', producer: 'external', status: 'saved',
+          startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:07:00Z',
+          external: { clientKind: 'codex', sessionId: 'port-session', sessionUrl: 'codex://session/port' },
+        },
+      } as never,
+    })
+    expect(history.get('coverage')?.['specs-coverage']).toMatchObject({ status: 'done', resourceId: 'j1' })
+    expect(history.get('ports')?.portify).toMatchObject({
+      status: 'done', resourceId: 'wf1', clientKind: 'codex', sessionId: 'port-session', sessionUrl: 'codex://session/port',
+    })
+    expect(history.get('run-suite')?.run).toMatchObject({ status: 'done', resourceId: 'r-ext' })
+    expect(history.get('report')?.['evaluation-export']).toMatchObject({ status: 'done', resourceId: 't1' })
+  })
+
+  it('normalizes every persisted status without losing external ownership', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [
+        run({ feature: 'run-passed', status: 'passed', healMode: 'external', endedAt: '2026-01-01T00:08:00Z' }),
+        run({ feature: 'run-failed', runId: 'r-failed', status: 'failed', healMode: 'external' }),
+        run({ feature: 'run-aborted', runId: 'r-aborted', status: 'aborted', healMode: 'external' }),
+        run({ feature: 'run-healing', runId: 'r-healing', status: 'healing', healMode: 'external' }),
+        run({ feature: 'run-verify', runId: 'r-verify', executionType: 'verify' }),
+        run({ feature: 'ignored-boot', runId: 'r-boot', executionType: 'boot' }),
+        run({ feature: 'ignored-benchmark', runId: 'r-benchmark', executionType: 'benchmark' }),
+        run({ feature: 'internal-run', runId: 'r-internal' }),
+      ],
+      runDetails: {
+        'r-verify': {
+          manifest: {
+            healMode: 'external',
+            endedAt: '2026-01-01T00:07:00Z',
+            externalHealSession: { clientKind: 'codex' },
+          },
+        },
+      } as never,
+      portifyWorkflows: [
+        portify({ feature: 'port-saved', status: 'saved', producer: 'external', endedAt: '2026-01-01T00:07:00Z' }),
+        portify({ feature: 'port-failed', workflowId: 'wf-failed', status: 'failed', producer: 'external' }),
+        portify({ feature: 'port-aborted', workflowId: 'wf-aborted', status: 'aborted', producer: 'external' }),
+        portify({ feature: 'port-ready', workflowId: 'wf-ready', status: 'ready-to-save', producer: 'external' }),
+        portify({ feature: 'port-running', workflowId: 'wf-running', status: 'planning', producer: 'external' }),
+      ],
+      draftRecords: [
+        draft({ featureName: 'draft-planning', status: 'planning', producer: 'external' }),
+        draft({ featureName: 'draft-error', draftId: 'd-error', status: 'error', producer: 'external' }),
+        draft({ featureName: 'draft-cancelled', draftId: 'd-cancelled', status: 'cancelled', producer: 'external' }),
+        draft({ featureName: 'draft-rejected', draftId: 'd-rejected', status: 'rejected', producer: 'external' }),
+        draft({ featureName: 'draft-ready', draftId: 'd-ready', status: 'spec-ready', producer: 'external' }),
+        draft({ featureName: undefined, draftId: 'd-unpinned', producer: 'external' }),
+      ],
+      coverageJobs: [
+        {
+          jobId: 'j-running', feature: 'coverage-running', kind: 'summary', status: 'running',
+          producer: 'external', startedAt: '2026-01-01T00:00:00Z',
+        },
+        {
+          jobId: 'j-failed', feature: 'coverage-failed', kind: 'coverage', status: 'failed',
+          producer: 'external', startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:01:00Z',
+        },
+        {
+          jobId: 'j-aborted', feature: 'coverage-aborted', kind: 'coverage', status: 'aborted',
+          producer: 'external', startedAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+      exportTasks: [
+        {
+          taskId: 't-running', runId: 'r-running', feature: 'export-running', mode: 'raw',
+          status: 'running', producer: 'external', createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:01:00Z', downloadReady: false, clientKind: 'claude',
+          sessionId: 'export-session', conversationName: 'Export report',
+        },
+        {
+          taskId: 't-failed', runId: 'r-export-failed', feature: 'export-failed', mode: 'raw',
+          status: 'failed', producer: 'external', createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:01:00Z', downloadReady: false,
+        },
+      ],
+    })
+
+    expect(history.get('draft-planning')?.['specs-coverage']?.status).toBe('running')
+    expect(history.get('draft-error')?.['specs-coverage']?.status).toBe('failed')
+    expect(history.get('draft-cancelled')?.['specs-coverage']?.status).toBe('aborted')
+    expect(history.get('draft-rejected')?.['specs-coverage']?.status).toBe('aborted')
+    expect(history.get('draft-ready')?.['specs-coverage']?.status).toBe('ready')
+    expect(history.has('')).toBe(false)
+    expect(history.get('coverage-running')?.['prd-summary']?.status).toBe('running')
+    expect(history.get('coverage-failed')?.['specs-coverage']?.status).toBe('failed')
+    expect(history.get('coverage-aborted')?.['specs-coverage']?.status).toBe('aborted')
+    expect(history.get('port-failed')?.portify?.status).toBe('failed')
+    expect(history.get('port-aborted')?.portify?.status).toBe('aborted')
+    expect(history.get('port-ready')?.portify?.status).toBe('ready')
+    expect(history.get('port-running')?.portify?.status).toBe('running')
+    expect(history.get('export-running')?.['evaluation-export']).toMatchObject({
+      status: 'running', clientKind: 'claude', sessionId: 'export-session', conversationName: 'Export report',
+    })
+    expect(history.get('export-failed')?.['evaluation-export']?.status).toBe('failed')
+    expect(history.get('run-passed')?.run?.status).toBe('done')
+    expect(history.get('run-failed')?.run?.status).toBe('failed')
+    expect(history.get('run-aborted')?.run?.status).toBe('aborted')
+    expect(history.get('run-healing')?.run).toMatchObject({ kind: 'healing', status: 'running' })
+    expect(history.get('run-verify')?.run).toMatchObject({ kind: 'verifying', status: 'running', clientKind: 'codex' })
+    expect(history.has('ignored-boot')).toBe(false)
+    expect(history.has('ignored-benchmark')).toBe(false)
+    expect(history.has('internal-run')).toBe(false)
+  })
+
+  it('keeps the newest producer per stage and combines different stages for one feature', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [run({
+        feature: 'checkout', runId: 'r-external', status: 'passed', healMode: 'external',
+        endedAt: '2026-01-01T00:07:00Z',
+      })],
+      portifyWorkflows: [portify({ feature: 'checkout', status: 'saved', producer: 'external' })],
+      draftRecords: [
+        draft({ draftId: 'd-new', producer: 'external', status: 'accepted', updatedAt: '2026-01-01T00:06:00Z' }),
+        // Arrives later in the array but is older; it must not steal the stage.
+        draft({ draftId: 'd-old', producer: 'internal', status: 'accepted', updatedAt: '2026-01-01T00:05:00Z' }),
+      ],
+    })
+
+    expect(history.get('checkout')).toMatchObject({
+      'specs-coverage': { kind: 'authoring' },
+      portify: { kind: 'portifying' },
+      run: { kind: 'running' },
+    })
   })
 })

@@ -444,6 +444,21 @@ describe('FlightPage', () => {
     await act(async () => { running?.click() })
     expect(onOpenConfig).not.toHaveBeenCalled()
 
+    // Externally driven: same Advanced setup button, but ownership moves the
+    // mutation to the Claude/Codex session and the tooltip says so.
+    mocks.getFlight.mockResolvedValue(manifest({
+      opts: { env: 'local', coverageTarget: 100, yolo: false, stageProducer: 'external' },
+      status: 'paused',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    await render('fl_1', { onOpenConfig })
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click() })
+    const external = container.querySelector<HTMLButtonElement>('[data-testid="feature-setup-advanced"]')
+    expect(external?.disabled).toBe(true)
+    expect(external?.title).toContain('from the Claude/Codex session')
+    await act(async () => { external?.click() })
+    expect(onOpenConfig).not.toHaveBeenCalled()
+
     // Idle (done): the button re-enables and opens the config editor.
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'done',

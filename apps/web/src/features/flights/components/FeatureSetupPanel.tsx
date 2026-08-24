@@ -10,6 +10,7 @@ import {
 import { STAGE_COLUMN } from './stage-meta'
 import { PANEL_KICKER_CLASS } from './RepoScanPanel'
 import { SkeletonPanel, type AwaitingState } from '@/shared/ui/Skeleton'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 // ─── Feature Setup: the editable config digest (R43) ────────────────────────
 // The fields the user cares about at approval time, editable IN PLACE — every
@@ -48,10 +49,14 @@ export function FeatureSetupPanel({
   editable,
   refreshKey,
   awaiting,
+  lockedTitle,
 }: {
   feature: string
   /** False while the flight is mid-run (edits then would race the conductor). */
   editable: boolean
+  /** Why the controls are inert. Present keeps the normal edit controls in
+   *  place and exposes the destination through their tooltip. */
+  lockedTitle?: string
   /** Bumped on features-changed so an Advanced-setup save shows here live. */
   refreshKey?: number
   /** R83: the suite isn't on disk yet — hold the digest's place with its
@@ -199,6 +204,7 @@ export function FeatureSetupPanel({
                 feature={feature}
                 block={block}
                 allowEdit={editable}
+                lockedTitle={lockedTitle}
                 refreshKey={refreshKey}
                 divider={index > 0}
                 onRename={(v) => setRepoName(block, v)}
@@ -216,13 +222,13 @@ export function FeatureSetupPanel({
             Playwright
           </div>
           <div className="grid grid-cols-[110px_minmax(0,1fr)] items-center gap-x-3 gap-y-1.5 text-[11.5px]">
-            <NumberRow label="Workers" value={typeof pw.workers === 'number' ? pw.workers : null} editable={editable} onSave={(n) => setPw({ workers: n })} testId="setup-pw-workers" />
-            <NumberRow label="Retries" value={typeof pw.retries === 'number' ? pw.retries : null} editable={editable} onSave={(n) => setPw({ retries: n })} testId="setup-pw-retries" />
-            <ModeRow label="Video" value={typeof pwUse?.video === 'string' ? pwUse.video : null} editable={editable} onSave={(v) => setPw({ video: v })} testId="setup-pw-video" />
-            <ModeRow label="Trace" value={typeof pwUse?.trace === 'string' ? pwUse.trace : null} editable={editable} onSave={(v) => setPw({ trace: v })} testId="setup-pw-trace" />
+            <NumberRow label="Workers" value={typeof pw.workers === 'number' ? pw.workers : null} editable={editable} lockedTitle={lockedTitle} onSave={(n) => setPw({ workers: n })} testId="setup-pw-workers" />
+            <NumberRow label="Retries" value={typeof pw.retries === 'number' ? pw.retries : null} editable={editable} lockedTitle={lockedTitle} onSave={(n) => setPw({ retries: n })} testId="setup-pw-retries" />
+            <ModeRow label="Video" value={typeof pwUse?.video === 'string' ? pwUse.video : null} editable={editable} lockedTitle={lockedTitle} onSave={(v) => setPw({ video: v })} testId="setup-pw-video" />
+            <ModeRow label="Trace" value={typeof pwUse?.trace === 'string' ? pwUse.trace : null} editable={editable} lockedTitle={lockedTitle} onSave={(v) => setPw({ trace: v })} testId="setup-pw-trace" />
             {/* Playwright's own default when unset is 'off' — show it honestly
                 so the setting is discoverable; a change writes use.screenshot. */}
-            <ModeRow label="Screenshot" value={typeof pwUse?.screenshot === 'string' ? pwUse.screenshot : 'off'} modes={PW_SCREENSHOT_MODES} editable={editable} onSave={(v) => setPw({ screenshot: v })} testId="setup-pw-screenshot" />
+            <ModeRow label="Screenshot" value={typeof pwUse?.screenshot === 'string' ? pwUse.screenshot : 'off'} modes={PW_SCREENSHOT_MODES} editable={editable} lockedTitle={lockedTitle} onSave={(v) => setPw({ screenshot: v })} testId="setup-pw-screenshot" />
           </div>
         </div>
       )}
@@ -245,7 +251,8 @@ export function FeatureSetupPanel({
             editable={editable}
             onChange={setHeal}
             className="-mx-3"
-            lockedTitle="Locked while the flight is running"
+            lockedTitle={lockedTitle ?? 'Locked while the flight is running'}
+            preserveControlsWhenLocked={lockedTitle != null}
           />
         </div>
       )}
@@ -305,11 +312,12 @@ export function ReadRow({ label, value, mono, info }: { label: string; value: st
  *  read-only text until the pencil arms the block; every input then spans the
  *  full value column (one width for all), and each field still saves itself
  *  on blur/Enter through the shared config PUT. */
-export function ServiceBlock({ feature, block, allowEdit, refreshKey, divider, onRename, onBranch, onCommand }: {
+export function ServiceBlock({ feature, block, allowEdit, lockedTitle, refreshKey, divider, onRename, onBranch, onCommand }: {
   feature: string
   block: RepoBlock
-  /** False while the flight runs — hides the pencil entirely. */
+  /** False while another owner holds mutations. */
   allowEdit: boolean
+  lockedTitle?: string
   refreshKey?: number
   divider: boolean
   onRename: (name: string) => void
@@ -339,18 +347,19 @@ export function ServiceBlock({ feature, block, allowEdit, refreshKey, divider, o
               </span>
             )}
           </div>
-          {allowEdit && (
+          <DisabledControlTooltip>
             <button
               type="button"
               data-testid={`setup-edit-${block.name}`}
               aria-label={editing ? 'Done editing' : 'Edit service'}
-              title={editing ? 'Done editing' : 'Edit name, branch and start command'}
+              title={allowEdit ? (editing ? 'Done editing' : 'Edit name, branch and start command') : lockedTitle}
+              disabled={!allowEdit}
               onClick={() => setEditing(!editing)}
-              className="cl-button shrink-0 px-1.5 py-0.5 text-[11px]"
+              className="cl-button shrink-0 px-1.5 py-0.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-45"
             >
               {editing ? '✓' : '✎'}
             </button>
-          )}
+          </DisabledControlTooltip>
         </div>
         {block.path && <ReadRow label="Repo" value={block.path} mono />}
         {active ? (
@@ -470,57 +479,65 @@ export function SetupField({ label, value, editable, onSave, testId }: {
   )
 }
 
-export function NumberRow({ label, value, editable, onSave, testId }: {
+export function NumberRow({ label, value, editable, lockedTitle, onSave, testId }: {
   label: string
   value: number | null
   editable: boolean
+  lockedTitle?: string
   onSave: (value: number) => void
   testId: string
 }) {
   if (value === null) return null
-  if (!editable) return <ReadRow label={label} value={String(value)} />
   return (
     <>
       <RowLabel label={label} />
-      <input
-        type="number"
-        data-testid={testId}
-        defaultValue={value}
-        min={0}
-        onBlur={(e) => {
-          const n = Number(e.target.value)
-          if (Number.isFinite(n) && n >= 0 && n !== value) onSave(n)
-        }}
-        className="cl-input w-20 px-2 py-1 text-[11.5px]"
-      />
+      <DisabledControlTooltip>
+        <input
+          type="number"
+          data-testid={testId}
+          defaultValue={value}
+          min={0}
+          disabled={!editable}
+          title={!editable ? lockedTitle : undefined}
+          onBlur={(e) => {
+            const n = Number(e.target.value)
+            if (Number.isFinite(n) && n >= 0 && n !== value) onSave(n)
+          }}
+          className="cl-input w-20 px-2 py-1 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-45"
+        />
+      </DisabledControlTooltip>
     </>
   )
 }
 
-export function ModeRow({ label, value, modes = PW_MODES, editable, onSave, testId }: {
+export function ModeRow({ label, value, modes = PW_MODES, editable, lockedTitle, onSave, testId }: {
   label: string
   value: string | null
   /** Valid modes for this setting (video/trace share PW_MODES; screenshot differs). */
   modes?: readonly string[]
   editable: boolean
+  lockedTitle?: string
   onSave: (value: string) => void
   testId: string
 }) {
   if (value === null) return null
-  if (!editable) return <ReadRow label={label} value={value} />
   return (
     <>
       <RowLabel label={label} />
-      <select
-        data-testid={testId}
-        value={value}
-        onChange={(e) => onSave(e.target.value)}
-        className="themed-select cl-input w-44 px-2 py-1 text-[11.5px]"
-      >
-        {[...new Set([value, ...modes])].map((mode) => (
-          <option key={mode} value={mode}>{mode}</option>
-        ))}
-      </select>
+      <DisabledControlTooltip>
+        <select
+          data-testid={testId}
+          value={value}
+          disabled={!editable}
+          title={!editable ? lockedTitle : undefined}
+          onChange={(e) => onSave(e.target.value)}
+          className="themed-select cl-input w-44 px-2 py-1 text-[11.5px] disabled:cursor-not-allowed disabled:opacity-45"
+        >
+          {[...new Set([value, ...modes])].map((mode) => (
+            <option key={mode} value={mode}>{mode}</option>
+          ))}
+        </select>
+      </DisabledControlTooltip>
     </>
   )
 }

@@ -21,14 +21,16 @@ describe('shipped workflow-workbench PRD summary', () => {
       .toEqual(REQUIREMENTS.map((requirement) => requirement.id))
   })
 
-  it('ships one proved requirement and one intentional authoring gap', () => {
+  it('ships one unlinked test and two requirements ready for mapping', () => {
     const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-workbench-cov-'))
     try {
       const ledger = computeFeatureCoverage({ featuresDir: FEATURES_DIR, logsDir, feature: FEATURE })
-      expect(ledger.coveragePct).toBe(50)
-      expect(ledger.totals.untested).toBe(1)
+      expect(ledger.coveragePct).toBe(0)
+      expect(ledger.totals.untested).toBe(2)
+      expect(ledger.requirements.find((entry) => entry.requirement.id === 'R1')?.gapType).toBe('untested')
       expect(ledger.requirements.find((entry) => entry.requirement.id === 'R2')?.gapType).toBe('untested')
-      expect(ledger.totals.orphanTests).toBe(0)
+      expect(ledger.totals.orphanTests).toBe(1)
+      expect(ledger.state).toMatchObject({ coverage: 'absent', headline: 'No coverage' })
     } finally {
       fs.rmSync(logsDir, { recursive: true, force: true })
     }

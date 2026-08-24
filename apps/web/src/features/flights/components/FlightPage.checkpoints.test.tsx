@@ -73,6 +73,8 @@ const mocks = vi.hoisted(() => ({
   getRunDetail: vi.fn(),
   listJournal: vi.fn(),
   respondFlightCheckpoint: vi.fn(),
+  requestFlightTakeover: vi.fn(),
+  forceFlightTakeover: vi.fn(),
   resumeFlight: vi.fn(),
   setFlightAutopilot: vi.fn(),
   abortFlight: vi.fn(),
@@ -114,6 +116,8 @@ vi.mock('@/shared/api/client', () => ({
   getRunDetail: mocks.getRunDetail,
   listJournal: mocks.listJournal,
   respondFlightCheckpoint: mocks.respondFlightCheckpoint,
+  requestFlightTakeover: mocks.requestFlightTakeover,
+  forceFlightTakeover: mocks.forceFlightTakeover,
   resumeFlight: mocks.resumeFlight,
   setFlightAutopilot: mocks.setFlightAutopilot,
   abortFlight: mocks.abortFlight,
@@ -383,7 +387,7 @@ describe('checkpoint display language (R71/W3)', () => {
     expect(mocks.respondFlightCheckpoint).toHaveBeenCalledWith('fl_1', { choice: 'revise', feedback: 'use env vars, not args' })
   })
 
-  it('an external-work hand-off reads as work in progress, with nothing to press', async () => {
+  it('an external-work hand-off keeps normal choices inert and offers a cooperative takeover', async () => {
     mocks.getFlight.mockResolvedValue(parkedOn('scout', {
       kind: 'external-work',
       message: 'Run this scout step in your own client, then respond with the result on `data`.',
@@ -397,14 +401,55 @@ describe('checkpoint display language (R71/W3)', () => {
     // The checkpoint's own message is addressed to the agent holding the step —
     // it never reaches the person reading the web UI.
     expect(container.textContent).not.toContain('respond with the result on')
-    // Both escape hatches are gone: they were the last thing on the page still
-    // inviting this reader to act for the agent. Abort in the flight's ⋯ menu
-    // is what replaced them.
-    expect(container.querySelector('[data-testid="checkpoint-choice-submit"]')).toBeNull()
-    expect(container.querySelector('[data-testid="checkpoint-choice-run-internally"]')).toBeNull()
+    expect(container.textContent).toContain('Canary handed this step to the agent that started the flight')
+    // Internal layout is canonical: both choices remain visible, disabled, and
+    // explain that the mutation belongs in the Claude/Codex session.
+    for (const id of ['checkpoint-choice-submit', 'checkpoint-choice-run-internally']) {
+      const button = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)
+      expect(button?.disabled).toBe(true)
+      expect(button?.title).toContain('from the Claude/Codex session')
+    }
     expect(container.querySelector('[data-testid="checkpoint-recommended"]')).toBeNull()
-    expect(container.querySelector('[data-testid="checkpoint-read-only"]')?.textContent)
-      .toBe('Your agent answers this — it is holding the question now.')
+    expect(container.querySelector('[data-testid="checkpoint-read-only"]')).toBeNull()
+
+    // Takeover is the one enabled control: it first explains the handshake,
+    // then only records a request — Canary does not start local work yet.
+    mocks.requestFlightTakeover.mockResolvedValue(manifest())
+    const request = container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-request-takeover"]')
+    expect(request?.disabled).toBe(false)
+    await act(async () => { request?.click() })
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('will not start local work until that agent acknowledges')
+    const confirm = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Request takeover')
+    await act(async () => { confirm?.click() })
+    expect(mocks.requestFlightTakeover).toHaveBeenCalledWith('fl_1')
+    expect(mocks.respondFlightCheckpoint).not.toHaveBeenCalled()
+  })
+
+  it('a requested takeover waits for release and gates force behind a risk confirmation', async () => {
+    mocks.getFlight.mockResolvedValue(parkedOn('scout', {
+      kind: 'external-work',
+      message: 'hand-off',
+      options: ['submit', 'run-internally'],
+      data: {
+        stage: 'scout',
+        handOffId: 'ff00ff00',
+        takeoverRequestedAt: '2026-08-25T01:00:00.000Z',
+      },
+    }, externallyDriven))
+    mocks.forceFlightTakeover.mockResolvedValue(manifest())
+    await render('fl_1')
+
+    expect(container.querySelector('[data-testid="checkpoint-takeover"]')?.textContent)
+      .toContain('Waiting for your agent to release this step')
+    expect(container.querySelector('[data-testid="checkpoint-request-takeover"]')).toBeNull()
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="checkpoint-force-takeover"]')?.click() })
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('same files may be changed concurrently')
+    expect(mocks.forceFlightTakeover).not.toHaveBeenCalled()
+    const confirm = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent === 'Force takeover')
+    await act(async () => { confirm?.click() })
+    expect(mocks.forceFlightTakeover).toHaveBeenCalledWith('fl_1')
   })
 
   it('names a discarded late result, so a re-park is not mistaken for the first ask', async () => {
@@ -426,9 +471,11 @@ describe('checkpoint display language (R71/W3)', () => {
     await render('fl_1')
     // The question still renders — a viewer wants to know what it stopped on.
     expect(container.querySelector('[data-testid="requirements-fork"]')).toBeTruthy()
-    expect(container.querySelector('[data-testid="requirements-fork-read-only"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="requirements-fork-read-only"]')).toBeNull()
     for (const id of ['fork-path-manual', 'fork-path-agent']) {
-      expect(container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)?.disabled).toBe(true)
+      const button = container.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)
+      expect(button?.disabled).toBe(true)
+      expect(button?.title).toContain('from the Claude/Codex session')
     }
     // Disabled cards mean `mode` never leaves null, so no path content mounts.
     await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="fork-path-manual"]')?.click() })

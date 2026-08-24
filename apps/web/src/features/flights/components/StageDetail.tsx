@@ -1,19 +1,20 @@
 import type { FlightManifest, FlightStage, FlightStageKey } from '@/shared/api/client'
-import { AgentSessionView, type AgentSessionSource } from '@/shared/ui/AgentSessionView'
+import type { AgentSessionSource, ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
+import { clientLabel, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import { TestRunPanel, type RunStageEvidence } from './TestRunPanel'
 import { FeatureSetupPanel, FlightDocsPanel, RepoScanPanel, RequirementsFork } from './FlightStagePanels'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
-import { evaluationTaskId, FactsGrid, StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageStateLine, type StageRailRow } from './stage-meta'
+import { evaluationTaskId, FactsGrid, StageColumn, StageStatusChip, portifyWorkflowId, specsCoverageProgress, stageFacts, stageRowKey, stageStateLine, type StageRailRow } from './stage-meta'
 import { useEvaluationExports } from '@/features/evaluation'
 import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
-import { StageExternalWork } from './StageExternalWork'
-import { isExternallyDriven } from '../lib/external-work'
-import type { FeatureActivity } from '../state/feature-activity'
+import { externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
+import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity } from '../state/feature-activity'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { useStageBandData } from './use-stage-band-data'
 import {
   AllReportsPanel,
@@ -49,6 +50,57 @@ const PORTIFY_NO_TRANSCRIPT = {
   body: 'What the port work produced is the side-by-side boot and the port changes above.',
 }
 
+/** A standalone external task has no Canary-owned transcript. Translate its
+ *  durable producer record into one compact row on the shared Activity rail. */
+export function externalSessionActivity(trace: ExternalWorkTrace): ExternalSessionActivity {
+  const clientKind = externalClientKind(trace.clientKind)
+  const client = clientLabel(clientKind, 'external agent')
+  const owner = clientKind === 'other' ? 'your external agent session' : `your ${client} session`
+  const fileCount = trace.itemCount != null
+    ? ` · ${trace.itemCount} file${trace.itemCount === 1 ? '' : 's'} applied`
+    : ''
+  let message: string
+  if (trace.status === 'running') {
+    message = `Work is continuing in ${owner}.`
+  } else if (trace.status === 'ready') {
+    message = `The result is ready in ${owner}.`
+  } else if (trace.status === 'done') {
+    message = `Completed outside Canary Lab${fileCount}.`
+  } else if (trace.status === 'failed') {
+    message = `Stopped with an error in ${owner}.`
+  } else {
+    message = `Stopped in ${owner}.`
+  }
+  return {
+    clientKind,
+    status: trace.status,
+    message,
+    startedAt: trace.startedAt,
+    ...(trace.status === 'running' ? {} : { endedAt: trace.updatedAt }),
+    ...(trace.conversationName ? { conversationName: trace.conversationName } : {}),
+    ...(trace.sessionUrl ? { sessionUrl: trace.sessionUrl } : {}),
+  }
+}
+
+function externalClientKind(clientKind: string | undefined): ExternalClientKind {
+  const normalized = clientKind?.toLowerCase() ?? ''
+  if (normalized === 'claude-pty' || (normalized.includes('claude') && normalized.includes('pty'))) return 'claude-pty'
+  if (normalized === 'codex-pty' || (normalized.includes('codex') && normalized.includes('pty'))) return 'codex-pty'
+  if (normalized.includes('claude')) return 'claude'
+  if (normalized.includes('codex')) return 'codex'
+  return 'other'
+}
+
+function latestExternalTrace(
+  history: Partial<Record<FlightStageKey, ExternalWorkTrace>> | undefined,
+  stage: FlightStage,
+  companion: FlightStage | null,
+): ExternalWorkTrace | undefined {
+  const candidates = [history?.[stage.key], companion ? history?.[companion.key] : undefined]
+    .filter((trace): trace is ExternalWorkTrace => trace != null)
+  return candidates.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+}
+
 export function StageDetail({
   flightId,
   flight,
@@ -58,6 +110,8 @@ export function StageDetail({
   runLive,
   activeRunId,
   activity,
+  externalHistory,
+  externalMutationOwner,
   onResponded,
   onActionError,
   onStartFlight,
@@ -78,8 +132,12 @@ export function StageDetail({
    *  flight records keep their own stage/link identity instead. */
   activeRunId?: string
   /** This feature's live verb (the one activity map App derives) — drives the
-   *  "handed over to your agent" card on the stage the live job belongs to. */
+   *  compact external-session Activity row on the stage the job belongs to. */
   activity?: FeatureActivity
+  /** Durable external producer records for this feature, keyed by stage. */
+  externalHistory?: Partial<Record<FlightStageKey, ExternalWorkTrace>>
+  /** Present while mutations belong to the Claude/Codex session. */
+  externalMutationOwner?: ExternalMutationOwner
   onResponded: () => void
   /** R71/W1: run-control failures surface on the header's inline error line. */
   onActionError?: (msg: string) => void
@@ -111,16 +169,27 @@ export function StageDetail({
   // the stage settles, so a card with genuinely nothing to show still renders
   // nothing rather than promising more.
   const awaiting = awaitingFor(row.status, live)
+  const externalTrace = latestExternalTrace(externalHistory, stage, companion)
+  // Derived Flights learn external task identity from the task's own live
+  // stream before the workspace evidence probe catches up. Feed that identity
+  // through the normal stage-band path so the result lands without a refresh.
+  const externalPortifyId = externalTrace?.kind === 'portifying'
+    ? externalTrace.resourceId
+    : undefined
+  const dataStage: FlightStage = stage.key === 'portify' && externalPortifyId && !portifyWorkflowId(stage)
+    ? { ...stage, evidence: { ...(stage.evidence ?? {}), workflowId: externalPortifyId } }
+    : stage
   // The Evaluation Report's deliverable: one resolved export task feeds both the
   // facts (run · report mode · archive name) and the activity rail below, so the
   // card reads the same on a conducted flight and a derived one.
   const evalTaskId = evaluationTaskId(stage, flight)
+    ?? (externalTrace?.kind === 'exporting' ? externalTrace.resourceId : undefined)
   const { taskById } = useEvaluationExports()
   // Sources outside the flight record (ledger, boot run, portify workflow,
   // config, envsets, docs) — resolved for the VISIBLE stage only.
   const band = useStageBandData(
     flight,
-    stage,
+    dataStage,
     companion,
     evalTaskId ? taskById(evalTaskId) : null,
   )
@@ -130,8 +199,8 @@ export function StageDetail({
   // would tell the user to act and `failed` that nothing is coming. A stage that
   // is genuinely awaiting outranks it, so a running stage keeps its own reason.
   const awaitingData = awaiting ?? (band.pending ? 'live' : undefined)
-  const facts = stageFacts(stage, flight, companion ?? undefined, band)
-  const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)
+  const facts = stageFacts(dataStage, flight, companion ?? undefined, band)
+  const drillThrough = stageDrillThrough(dataStage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
     ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
@@ -159,6 +228,17 @@ export function StageDetail({
   // Detail travels with whichever half's error is showing.
   const errorDetail = stage.error != null ? stage.errorDetail : companion?.errorDetail
   const combinedLog = [stage.log, companion?.log].filter(Boolean).join('')
+  const activityOnThisRow = activity?.external === true
+    && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stage.key
+  const flightHandOff = isExternallyDriven(flight)
+    && checkpointStage?.checkpoint?.kind === 'external-work'
+  const externalSession: ExternalSessionActivity | undefined = externalTrace
+    ? externalSessionActivity(externalTrace)
+    : activityOnThisRow
+      ? { clientKind: 'other', status: 'running', message: 'Work is continuing in your external agent session.' }
+      : flightHandOff
+        ? { clientKind: 'other', status: 'running', message: 'Work is continuing in your external agent session.' }
+        : undefined
 
   // R66: every stage's activity is the same rail. Resolve its one agent source
   // (if any): agent stages tail their flight session; the Evaluation Report
@@ -169,13 +249,19 @@ export function StageDetail({
   // flight sidecar — tail it through the portify source the wizard already
   // uses, keyed by the id the adapter pins as live progress. Without this the
   // stage's longest phase (the agent editing) shows an empty rail.
-  const portifyId = portifyWorkflowId(stage)
-  const activitySource: AgentSessionSource | undefined =
+  const portifyId = portifyWorkflowId(dataStage)
+  const localActivitySource: AgentSessionSource | undefined =
     evalTaskId ? { kind: 'evaluation', taskId: evalTaskId, live }
     : portifyId ? { kind: 'portify', workflowId: portifyId, live }
     : agentDir ? { kind: 'flight', flightId, stage: agentDir, live }
     : undefined
-  const activityKey = evalTaskId ? `evaluation:${evalTaskId}` : portifyId ? `portify:${portifyId}` : (agentDir ?? 'system-only')
+  // External producers have no Canary-owned transcript. Suppress the local
+  // source entirely so its generic live tail cannot add a second spinner under
+  // the external-session row or replay an older internal session as current.
+  const activitySource = externalSession ? undefined : localActivitySource
+  const activityKey = externalSession
+    ? `external:${externalTrace?.resourceId ?? externalTrace?.sessionId ?? stage.key}`
+    : evalTaskId ? `evaluation:${evalTaskId}` : portifyId ? `portify:${portifyId}` : (agentDir ?? 'system-only')
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -206,21 +292,25 @@ export function StageDetail({
             in-place editor (per-service ✎) is the one editing surface, so the
             fork stays a two-button decision. */}
         {stage.key === 'scaffold' && (stage.status === 'done' || stage.status === 'skipped') && onOpenConfig && (
-          <button
-            type="button"
-            data-testid="feature-setup-advanced"
-            /* Locked while the flight is running (the run/authoring stages own
-               the config) — matches the inline FeatureSetupPanel's `editable`
-               gate below; only editable once the flight is idle. */
-            disabled={flight.status === 'running'}
-            onClick={() => onOpenConfig(flight.feature)}
-            className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px]"
-            title={flight.status === 'running'
-              ? 'Advanced setup is locked while the flight is running'
-              : undefined}
-          >
-            ⚙ Advanced setup
-          </button>
+          <DisabledControlTooltip>
+            <button
+              type="button"
+              data-testid="feature-setup-advanced"
+              /* Locked while the flight is running (the run/authoring stages own
+                 the config) — matches the inline FeatureSetupPanel's `editable`
+                 gate below; only editable once the flight is idle. */
+              disabled={flight.status === 'running' || externalMutationOwner != null}
+              onClick={() => onOpenConfig(flight.feature)}
+              className="cl-button min-h-6 shrink-0 px-2 py-0.5 text-[11px]"
+              title={externalMutationOwner
+                ? externalMutationTooltip(externalMutationOwner, 'change advanced setup')
+                : flight.status === 'running'
+                ? 'Advanced setup is locked while the flight is running'
+                : undefined}
+            >
+              ⚙ Advanced setup
+            </button>
+          </DisabledControlTooltip>
         )}
         {drillThrough && (
           <button
@@ -257,15 +347,6 @@ export function StageDetail({
           lands in the slot its placeholder held. */}
       <FactsGrid facts={facts} awaiting={awaitingData} />
 
-      {/* A skill-started job live on this suite right now, rendered on the
-          stage it belongs to — the branded "running in your agent" panel each
-          job's standalone surface already uses. Not on an externally DRIVEN
-          flight: there the hand-off presentation rides the external-work
-          checkpoint below, and two cards would narrate the same session. */}
-      {!isExternallyDriven(flight) && (
-        <StageExternalWork activity={activity} stageKey={stage.key} />
-      )}
-
       {/* Paused with nothing else to act on (no checkpoint, no error): the
           "how to pick it back up" card fills the void the state sentence alone
           left, and points up to the header's one Continue. Only renders on the
@@ -291,6 +372,9 @@ export function StageDetail({
             return Array.isArray(ev.envFiles) ? (ev.envFiles as unknown[]).filter((f): f is string => typeof f === 'string') : []
           })()}
           onChangeInputs={onStartFlight ? () => onStartFlight(flight.feature, 'fresh') : undefined}
+          mutationLockedReason={externalMutationOwner
+            ? externalMutationTooltip(externalMutationOwner, 'change the flight inputs')
+            : undefined}
         />
       )}
 
@@ -319,7 +403,12 @@ export function StageDetail({
         <FeatureSetupPanel
           feature={flight.feature}
           awaiting={awaiting}
-          editable={flight.status !== 'running'}
+          editable={flight.status !== 'running' && externalMutationOwner == null}
+          lockedTitle={externalMutationOwner
+            ? externalMutationTooltip(externalMutationOwner, 'change suite setup')
+            : flight.status === 'running'
+              ? 'Suite setup is locked while the flight is running'
+              : undefined}
           refreshKey={configRefreshKey}
         />
       )}
@@ -380,6 +469,9 @@ export function StageDetail({
           evidence={runEvidence}
           onOpenRun={drill.onOpenRun}
           onError={onActionError}
+          mutationLockedReason={externalMutationOwner
+            ? externalMutationTooltip(externalMutationOwner, 'stop or change this run')
+            : undefined}
         />
       )}
 
@@ -431,7 +523,9 @@ export function StageDetail({
       })()}
 
       {(row.status === 'failed' && error) && (
-        <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} />
+        <StageErrorPanel flightId={flightId} stageLabel={row.label} detail={error} errorDetail={errorDetail} mutationLockedReason={externalMutationOwner
+          ? externalMutationTooltip(externalMutationOwner, 'apply a repository remedy')
+          : undefined} />
       )}
 
       {/* prd-source renders as the RequirementsFork above; EVERY other kind —
@@ -461,6 +555,7 @@ export function StageDetail({
           live={live}
           settled={settled}
           log={combinedLog}
+          externalSession={externalSession}
           {...(stage.key === 'portify' ? { empty: PORTIFY_NO_TRANSCRIPT } : {})}
         />
       )}

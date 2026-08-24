@@ -179,10 +179,13 @@ const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
     'accept-partial': 'Accept this coverage',
     'retry': 'Try another pass',
   },
-  // No 'external-work' entry: that kind's options are never RENDERED as
-  // buttons. Its two answers ('submit', 'run-internally') belong to the agent
-  // holding the step, and the flight it parks is read-only in this UI — see
-  // external-work.ts. Labels for buttons nobody can press are labels that rot.
+  // These remain visible but disabled while the external agent owns the
+  // flight, just like every other mutation. Human labels matter even for inert
+  // controls: raw protocol keys would make this card look unfinished.
+  'external-work': {
+    'submit': 'Submit the agent result',
+    'run-internally': 'Run this step in Canary Lab',
+  },
   // The wire key stays 'apply' (MCP/autopilot parity) but the ACTION is a save:
   // the verified diff is persisted as the feature's overlay — nothing lands in
   // the product repos; runs apply it into per-run worktrees at boot and reverse

@@ -4,10 +4,11 @@ import type { FlightEntryOptions, FlightIndexEntry, FlightManifest, FlightStage,
 import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
 import { ACTIVITY_CHIP } from './FlightChipState'
-import { EXTERNAL_DRIVE_COPY, EXTERNAL_SUITE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../lib/external-work'
-import { ACTIVITY_STAGE, type FeatureActivity } from '../state/feature-activity'
+import { EXTERNAL_WORK_COPY, externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
+import { ACTIVITY_STAGE, type FeatureActivity, type FeatureExternalHistory } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
@@ -57,6 +58,7 @@ export function FlightDetail({
   configRefreshKey,
   docsRefreshKey,
   activity,
+  externalHistory,
   derivedStages,
   drill,
   stage: routedStage,
@@ -79,6 +81,9 @@ export function FlightDetail({
   docsRefreshKey?: number
   /** Per-feature live activity — drives the run row's live icon (R64). */
   activity?: Map<string, FeatureActivity>
+  /** Persistent external provenance — keeps the Activity rail honest after a
+   *  standalone task settles and drops out of the live activity map. */
+  externalHistory?: FeatureExternalHistory
   derivedStages?: Map<string, DerivedStage[]>
   drill: FlightDrillThroughs
   /** The selected stage, when App owns it (routed as `?stage=…`) — null is
@@ -209,10 +214,14 @@ export function FlightDetail({
 
   // WS `flights-changed` bumps refreshKey — still worth a re-read for a flight
   // the push channel is not carrying (a settled one that an MCP tool just
-  // rewrote). The 2s poll that used to sit here is gone: an ACTIVE flight is
-  // exactly what `/ws/flights` snapshots and pushes on every write, so polling
-  // for it was asking a question the server had already answered.
-  useEffect(() => { refetch() }, [refetch, refreshKey])
+  // rewrote). A DERIVED flight has no flight record; its live facts come from
+  // the workspace-entry probe, so coverage invalidation must re-read that
+  // evidence too. Portify saves change feature config/evidence, so the repos
+  // topic joins coverage here. Reconnect invalidates all topics, providing
+  // reconciliation when a best-effort event was dropped.
+  const derivedEvidenceRefreshKey = derivedFeature ? docsRefreshKey : undefined
+  const derivedConfigRefreshKey = derivedFeature ? configRefreshKey : undefined
+  useEffect(() => { refetch() }, [refetch, refreshKey, derivedEvidenceRefreshKey, derivedConfigRefreshKey])
   const active = flight?.status === 'running' || flight?.status === 'waiting-for-approval'
   useEffect(() => {
     // Only when the push channel is NOT carrying this flight: no socket (a
@@ -228,6 +237,7 @@ export function FlightDetail({
   // pulse) instead of its settled verdict — the icon must never show a green
   // tick over a run that is still working (R64).
   const featureActivity = flight ? activity?.get(flight.feature) : undefined
+  const featureExternalHistory = flight ? externalHistory?.get(flight.feature) : undefined
   // A verify run is a run in verify mode — the run row must read live for it
   // exactly as for a normal run.
   const runLive = featureActivity != null && ACTIVITY_STAGE[featureActivity.kind] === 'run'
@@ -290,6 +300,9 @@ export function FlightDetail({
   // there. Distinct flag because the copy differs — nothing is "driving this
   // flight" — and because it gates the derived-flight controls too.
   const externalSuiteWork = !externallyDriven && featureActivity?.external === true
+  const externalMutationOwner: ExternalMutationOwner | undefined = externallyDriven
+    ? 'flight'
+    : externalSuiteWork ? 'suite' : undefined
   // What the CHIP says. A park is a park: whether the agent is holding a step
   // it was handed or a question it has to answer, the flight is progressing
   // inside that agent and "Needs approval" is a lie either way. Only the
@@ -359,43 +372,25 @@ export function FlightDetail({
         </h1>
         {/* The one primary: the state's obvious next action. Running has none —
             nothing demands a click, so nothing shouts. */}
-        {/* Hidden, not disabled, under external drive: a greyed "Respond →"
-            invites a click on a decision that is not the reader's to make, and
-            the banner below already says where the answer goes. */}
-        {flight.status === 'waiting-for-approval' && !externallyDriven && (
-          <button
-            type="button"
-            data-testid="flight-primary-respond"
-            onClick={respondJump}
-            className="cl-button-primary px-2.5 py-1 text-xs"
-            title="Jump to the question the flight is waiting on"
-          >
-            Respond →
-          </button>
-        )}
-        {/* What replaces every control this flight does not own: one line
-            naming where the decisions actually happen. Disabled buttons say
-            "not here"; this says "there". */}
-        {externallyDriven && (
-          <span
-            data-testid="flight-externally-driven"
-            className="shrink-0 text-[11px] text-secondary"
-            title={EXTERNAL_DRIVE_COPY.bannerTitle}
-          >
-            {EXTERNAL_DRIVE_COPY.banner}
-          </span>
-        )}
-        {/* The suite-work counterpart: a skill the user invoked is working on
-            this suite from their own agent, so the controls below are inert
-            and this line says where the work actually is. */}
-        {externalSuiteWork && (
-          <span
-            data-testid="flight-external-suite-work"
-            className="shrink-0 text-[11px] text-secondary"
-            title={EXTERNAL_SUITE_COPY.bannerTitle}
-          >
-            {EXTERNAL_SUITE_COPY.banner}
-          </span>
+        {/* The internal component tree is canonical. External ownership never
+            removes a mutation; it leaves it in place, inert, and says where to
+            perform it. That keeps the page spatially identical while Claude /
+            Codex owns the decision. */}
+        {flight.status === 'waiting-for-approval' && (
+          <DisabledControlTooltip>
+            <button
+              type="button"
+              data-testid="flight-primary-respond"
+              onClick={respondJump}
+              disabled={externalMutationOwner != null}
+              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              title={externalMutationOwner
+                ? externalMutationTooltip(externalMutationOwner, 'answer this checkpoint')
+                : 'Jump to the question the flight is waiting on'}
+            >
+              Respond →
+            </button>
+          </DisabledControlTooltip>
         )}
         {/* R74: one button per state. Active → Pause (immediate + honest —
             agent killed, run aborted, repo freed; every stage re-runs cleanly).
@@ -403,27 +398,28 @@ export function FlightDetail({
             start-over: "Resume at <stage>" (paused) + "From a step…" (+ optional
             what-went-wrong note that reaches the agent's prompt). */}
         {(flight.status === 'running' || flight.status === 'waiting-for-approval') && (
-          <button
-            type="button"
-            data-testid="flight-pause"
-            onClick={() => act(() => api.pauseFlight(flightId))}
-            // Nothing here can stop work running inside the user's own agent:
-            // pausing from this side would park the flight while the agent kept
-            // going, and its result would then be discarded as stale. Kept
-            // visible and disabled rather than removed — Pause is the control a
-            // user reaches for first, and a missing button reads as a bug — but
-            // the tooltip has to name where it moved, or "disabled" is a dead
-            // end. Abort in the ⋯ menu is the way out if the agent has died.
-            disabled={externallyDriven || externalSuiteWork}
-            className="cl-button px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-            title={externallyDriven
-              ? EXTERNAL_DRIVE_COPY.pause
-              : externalSuiteWork
-              ? EXTERNAL_SUITE_COPY.pause
-              : 'Stops everything — the agent, the test run, and any repair. Continue starts this step again.'}
-          >
-            ⏸ Pause
-          </button>
+          <DisabledControlTooltip>
+            <button
+              type="button"
+              data-testid="flight-pause"
+              onClick={() => act(() => api.pauseFlight(flightId))}
+              // Nothing here can stop work running inside the user's own agent:
+              // pausing from this side would park the flight while the agent kept
+              // going, and its result would then be discarded as stale. Kept
+              // visible and disabled rather than removed — Pause is the control a
+              // user reaches for first, and a missing button reads as a bug — but
+              // the tooltip has to name where it moved, or "disabled" is a dead
+              // end. The safe ownership transfer lives on the external-work
+              // card; Pause itself never races that agent with a local one.
+              disabled={externalMutationOwner != null}
+              className="cl-button px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              title={externalMutationOwner
+                ? externalMutationTooltip(externalMutationOwner, 'pause this work')
+                : 'Stops everything — the agent, the test run, and any repair. Continue starts this step again.'}
+            >
+              ⏸ Pause
+            </button>
+          </DisabledControlTooltip>
         )}
         {/* R81 — a derived flight has no record, so every RECORD-scoped control
             (resume / redo / abort / download) would call an id that doesn't
@@ -438,21 +434,23 @@ export function FlightDetail({
             up outside the conductor. */}
         {derivedFeature ? (
           <>
-            <button
-              type="button"
-              data-testid="derived-conduct"
-              onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
-              disabled={externalSuiteWork}
-              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
-              title={externalSuiteWork
-                ? EXTERNAL_SUITE_COPY.conduct
-                : derivedEntry
-                ? `Continue this suite from ${stageLabel(derivedEntry)} — finished steps are kept`
-                : 'Every step is done — start a fresh flight to fly it again'}
-            >
-              {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
-            </button>
-            <FlightMenu flight={flight} derived onAction={act} onDeleted={onBackToList} externalSuiteWork={externalSuiteWork} />
+            <DisabledControlTooltip>
+              <button
+                type="button"
+                data-testid="derived-conduct"
+                onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
+                disabled={externalMutationOwner != null}
+                className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+                title={externalMutationOwner
+                  ? externalMutationTooltip(externalMutationOwner, 'start or continue a flight')
+                  : derivedEntry
+                  ? `Continue this suite from ${stageLabel(derivedEntry)} — finished steps are kept`
+                  : 'Every step is done — start a fresh flight to fly it again'}
+              >
+                {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
+              </button>
+            </DisabledControlTooltip>
+            <FlightMenu flight={flight} derived onAction={act} onDeleted={onBackToList} externalMutationOwner={externalMutationOwner} />
           </>
         ) : (
           <>
@@ -460,9 +458,9 @@ export function FlightDetail({
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
             {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
-              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externallyDriven={externallyDriven} externalSuiteWork={externalSuiteWork} />
+              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externalMutationOwner={externalMutationOwner} />
             )}
-            <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externallyDriven={externallyDriven} externalSuiteWork={externalSuiteWork} />
+            <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externalMutationOwner={externalMutationOwner} />
           </>
         )}
         <button
@@ -501,7 +499,9 @@ export function FlightDetail({
         // flight answers for itself, so it is the agent's setting while the
         // agent is driving. Disabled with a reason, not hidden: the toggle's
         // VALUE is still information the reader wants.
-        autopilotLockedReason={externallyDriven ? EXTERNAL_DRIVE_COPY.autopilot : undefined}
+        autopilotLockedReason={externalMutationOwner
+          ? externalMutationTooltip(externalMutationOwner, 'change Autopilot')
+          : undefined}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -604,7 +604,7 @@ export function FlightDetail({
               {seeded ? 'Loading the flight’s steps…' : 'Pick a step from the list on the left.'}
             </div>
           ) : (
-            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} activeRunId={derivedActiveRunId} activity={featureActivity} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
+            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} activeRunId={derivedActiveRunId} activity={featureActivity} externalHistory={featureExternalHistory} externalMutationOwner={externalMutationOwner} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
           )}
         </main>
       </div>

@@ -4,6 +4,8 @@ import { isAgentSessionAbsence } from '@/shared/api/client'
 import type { AgentSessionAbsence, AgentSessionEvent, AgentSessionResponse, SubagentThread } from '@/shared/api/client'
 import { connectAgentSessionStream } from '@/shared/api/agent-session-socket'
 import { formatElapsedSeconds } from '@/shared/lib/format'
+import { clientKindToDesktopAgent, clientLabel, type ExternalClientKind } from './external-client-branding'
+import { useOpenAgentApp } from './ExternalAgentCard'
 import { EventRow, SystemRow, groupSystemLines, shortSession } from './AgentSessionRows'
 import { EmptyGlyph, EmptyState, type EmptyStateTone } from './EmptyState'
 import { TIMELINE_CSS } from './agent-session-css'
@@ -33,6 +35,16 @@ export type AgentSessionSource =
   | { kind: 'flight'; flightId: string; stage: string; live?: boolean }
   | { kind: 'flight-plan'; taskId: string; live?: boolean }
 
+export interface ExternalSessionActivity {
+  clientKind: ExternalClientKind
+  status: 'running' | 'ready' | 'done' | 'failed' | 'aborted'
+  message: string
+  startedAt?: string
+  endedAt?: string
+  conversationName?: string
+  sessionUrl?: string
+}
+
 interface Props {
   /** Optional: a stage with only conductor output (no spawned agent) passes
    *  `systemRows` alone and omits `source` — the same rail renders the system
@@ -45,6 +57,10 @@ interface Props {
    *  stage has system rows but no agent session, the block still renders them
    *  instead of the empty "no session log" state. */
   systemRows?: { pre: string[]; post: string[] }
+  /** A task whose transcript lives in the user's own Claude/Codex window. It
+   *  occupies one real row on this rail instead of a second branded card beside
+   *  it; the dedicated task screen remains the owner of the full monitor. */
+  externalSession?: ExternalSessionActivity
   /** Host-supplied copy for the "there is no session" state. A host usually
    *  knows WHY there's no transcript ("this run passed, so no repair agent was
    *  ever spawned") — far more use than the generic fallback below. */
@@ -100,7 +116,7 @@ export function indexSubagents(threads: SubagentThread[] | undefined): Map<strin
  *  past that, the log really is absent. */
 const HISTORY_RETRY_DELAYS_MS = [1500, 3000, 5000]
 
-export function AgentSessionView({ source, systemRows, empty }: Props) {
+export function AgentSessionView({ source, systemRows, externalSession, empty }: Props) {
   const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -282,7 +298,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
   // System rows keep the consolidated block alive even before (or without) an
   // agent session — a stage with only conductor output still renders its rail.
   const sys = systemRows ?? NO_SYSTEM_ROWS
-  const hasSystem = sys.pre.length > 0 || sys.post.length > 0
+  const hasSystem = sys.pre.length > 0 || sys.post.length > 0 || externalSession !== undefined
   const live = source?.live === true
 
   if (error && !hasSystem) {
@@ -361,6 +377,7 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
           </div>
         )}
         <ol className="agentts-rail">
+          {externalSession && <ExternalSessionRow session={externalSession} />}
           {groupSystemLines(sys.pre).map((group, idx) => (
             <SystemRow key={`sys-pre-${idx}`} group={group} />
           ))}
@@ -406,6 +423,93 @@ export function AgentSessionView({ source, systemRows, empty }: Props) {
       )}
     </div>
   )
+}
+
+function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
+  const { opening, error, open } = useOpenAgentApp()
+  const desktopAgent = clientKindToDesktopAgent(session.clientKind)
+  const runningElapsed = useElapsed(session.status === 'running' ? session.startedAt : undefined)
+  const fixedElapsed = session.status === 'running'
+    ? null
+    : durationBetween(session.startedAt, session.endedAt)
+  const elapsed = runningElapsed ?? fixedElapsed
+  const agent = clientLabel(session.clientKind, 'External agent')
+  const label = session.clientKind === 'other' ? 'External session' : `External · ${agent}`
+  const tone = externalSessionTone(session.status)
+  const running = session.status === 'running'
+  const actionLabel = `Open ${agent}`
+
+  return (
+    <li
+      className="agentts-sysrow agentts-extrow"
+      data-status={session.status}
+      data-testid="external-session-activity"
+      role={running ? 'status' : undefined}
+      aria-label={[label, session.message, elapsed ? `${elapsed} elapsed` : null].filter(Boolean).join('. ')}
+    >
+      {running ? (
+        <span className="agentts-worknode" aria-hidden="true" />
+      ) : (
+        <span
+          className="agentts-node agentts-extnode"
+          aria-hidden="true"
+          style={{ color: tone, borderColor: `color-mix(in srgb, ${tone} 48%, var(--border-default))` }}
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+            {session.status === 'done' || session.status === 'ready'
+              ? <path d="M3.5 8.5l3 3 6-6.5" />
+              : session.status === 'failed'
+                ? <path d="M5 5l6 6M11 5l-6 6" />
+                : <path d="M4.5 8h7" />}
+          </svg>
+        </span>
+      )}
+      <div className="agentts-extbody">
+        <div className="agentts-exthead">
+          <span className="agentts-label agentts-extlabel" style={{ color: tone }}>{label}</span>
+          {elapsed && <span className="agentts-worktime" data-testid="external-session-elapsed">{elapsed}</span>}
+        </div>
+        <div className="agentts-extline">
+          <span className="agentts-extmessage" title={session.conversationName}>{session.message}</span>
+          {session.sessionUrl ? (
+            <a
+              href={session.sessionUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="agentts-extaction"
+            >
+              {actionLabel} <span aria-hidden>→</span>
+            </a>
+          ) : desktopAgent ? (
+            <button
+              type="button"
+              className="agentts-extaction"
+              disabled={opening !== null}
+              onClick={() => open(desktopAgent)}
+            >
+              {opening ? 'Opening…' : actionLabel} {!opening && <span aria-hidden>→</span>}
+            </button>
+          ) : null}
+        </div>
+        {error && <span className="agentts-exterror">{error}</span>}
+      </div>
+    </li>
+  )
+}
+
+function externalSessionTone(status: ExternalSessionActivity['status']): string {
+  if (status === 'done' || status === 'ready') return 'var(--success)'
+  if (status === 'failed') return 'var(--danger)'
+  if (status === 'aborted') return 'var(--text-muted)'
+  return 'var(--running)'
+}
+
+function durationBetween(startIso: string | undefined, endIso: string | undefined): string | null {
+  if (!startIso || !endIso) return null
+  const startedAt = Date.parse(startIso)
+  const endedAt = Date.parse(endIso)
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt) || endedAt < startedAt) return null
+  return formatElapsedSeconds((endedAt - startedAt) / 1000)
 }
 
 /** What the rail's live tip should say, read off the transcript rather than

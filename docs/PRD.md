@@ -55,6 +55,10 @@ cross-cutting.
 - An MCP-started Flight can set `stage_producer: "external"` to hand its
   judgment-heavy stages to the connected client through `external-work`
   checkpoints. Mechanical stages and all validation remain server-owned.
+- A user can take an external step back without creating two writers: Canary
+  records a takeover request, rejects later external submits, and starts its
+  local agent only after the client releases the step. A confirmed force path
+  exists when that client is no longer reachable.
 - A resumable background job with typed checkpoints. Autopilot handles routine choices but stops for existing features, missing secrets, and failed automatic answers.
 - **One flight record per feature.** Plain resume and stage re-entry keep repos
   and intent frozen. Only a full redo may replace them, after wiping the prior

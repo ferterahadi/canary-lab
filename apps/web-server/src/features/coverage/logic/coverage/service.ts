@@ -7,7 +7,12 @@ import { computeCoverageLedger, type CoverageTestInput } from './ledger'
 import { lastRunOutcomeForTitle, readLatestRunOutcomes } from '../../../runs/logic/runtime/run-outcomes'
 import { applyTestStrength, type TestAssertions } from './strength'
 import { changedDocPaths, diffDocs, fingerprintDocs } from './fingerprints'
-import { deriveCoverageStateView, type DeriveStateInput } from './state'
+import {
+  deriveCoverageStateView,
+  derivePersistedCoverageState,
+  type DeriveStateInput,
+  type PersistedCoverageState,
+} from './state'
 import { readCoverageRunState } from './run-state'
 import { coverageJobStore } from './jobs/store'
 import { GENERATED_DOC_PREFIX, readDocsCollection } from './docs-collection'
@@ -109,6 +114,22 @@ export function collectTests(featureDir: string): CollectedTests {
   return { tests, assertions, collected }
 }
 
+/** Whether requirement mapping has actually happened for a suite. This is the
+ *  shared predicate behind derived Flight progress: a spec file proves test
+ *  authoring, while annotations or `_coverage-state.json` prove mapping. */
+export function readPersistedCoverageState(featureDir: string): PersistedCoverageState {
+  const summary = readPrdSummary(featureDir)
+  if (!summary) return 'absent'
+  const runState = readCoverageRunState(featureDir)
+  const hasAnnotatedTests = collectTests(featureDir).tests
+    .some((test) => (test.requirements?.length ?? 0) > 0)
+  return derivePersistedCoverageState({
+    hasAnnotatedTests,
+    hasCoverageRun: runState !== null,
+    coverageStale: Boolean(runState && runState.requirementsHash !== summary.requirementsHash),
+  })
+}
+
 export function isDrifted(featureDir: string, summary: PrdSummary | null): boolean {
   const live = readDocsCollection(featureDir).docsHash
   if (!summary) {
@@ -182,6 +203,7 @@ export function computeFeatureCoverage(args: ComputeFeatureCoverageArgs): Covera
     summaryDrifted,
     changedDocs: summaryDrifted ? changedDocPaths(docsDelta) : [],
     hasAnnotatedTests: tests.some((t) => (t.requirements?.length ?? 0) > 0),
+    hasCoverageRun: runState !== null,
     coverageStale,
     coveragePct: ledger.coveragePct,
     activeJob,

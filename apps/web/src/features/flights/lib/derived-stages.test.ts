@@ -105,6 +105,27 @@ describe('deriveFeatureStages', () => {
     expect(statusOf(stages, 'portify')).toBe('done')
     expect(statusOf(stages, 'evaluation-export')).toBe('done')
   })
+
+  it('uses the external Portify stream as immediate derived-stage evidence', () => {
+    const stages = deriveFeatureStages(
+      { evidence: { envCapture: false, prdSummary: false, specs: false }, portified: false },
+      undefined,
+      false,
+      {
+        portify: {
+          kind: 'portifying',
+          stage: 'portify',
+          resourceId: 'wf-live',
+          status: 'done',
+          startedAt: '2026-08-25T00:00:00Z',
+          updatedAt: '2026-08-25T00:05:00Z',
+        },
+      },
+    )!
+    const portify = stages.find((stage) => stage.key === 'portify')
+    expect(portify?.status).toBe('done')
+    expect(portify?.evidence).toEqual({ workflowId: 'wf-live' })
+  })
 })
 
 describe('latestTerminalRunByFeature', () => {
@@ -244,6 +265,16 @@ describe('derived flight tokens (R81)', () => {
       { evidence: { envCapture: true, prdSummary: true, specs: true }, portified: false },
     )
     expect(withPrd?.find((s) => s.key === 'specs-coverage')?.status).toBe('done')
+  })
+
+  it('distinguishes authored tests from durable coverage mapping', () => {
+    const evidence = { envCapture: true, prdSummary: true, specs: true } as const
+    const absent = deriveFeatureStages({ evidence: { ...evidence, coverageMapping: 'absent' } })
+    const fresh = deriveFeatureStages({ evidence: { ...evidence, coverageMapping: 'fresh' } })
+    const stale = deriveFeatureStages({ evidence: { ...evidence, coverageMapping: 'stale' } })
+    expect(statusOf(absent!, 'specs-coverage')).toBe('pending')
+    expect(statusOf(fresh!, 'specs-coverage')).toBe('done')
+    expect(statusOf(stale!, 'specs-coverage')).toBe('pending')
   })
 
   it('entry stage is the first step with nothing to show for it', () => {

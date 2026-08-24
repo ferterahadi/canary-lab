@@ -6,6 +6,7 @@ const base: DeriveStateInput = {
   summaryDrifted: false,
   changedDocs: [],
   hasAnnotatedTests: true,
+  hasCoverageRun: false,
   coverageStale: false,
   coveragePct: 80,
   activeJob: null,
@@ -42,10 +43,16 @@ describe('deriveCoverageStateView — summary axis', () => {
 
 describe('deriveCoverageStateView — coverage axis (summary fresh)', () => {
   it('no annotated tests → No coverage', () => {
-    const s = view({ hasAnnotatedTests: false })
+    const s = view({ hasAnnotatedTests: false, hasCoverageRun: false })
     expect(s.summary).toBe('fresh')
     expect(s.coverage).toBe('absent')
     expect(s.headline).toBe('No coverage')
+  })
+
+  it('a completed mapping with no links is fresh 0%, not absent', () => {
+    const s = view({ hasAnnotatedTests: false, hasCoverageRun: true, coveragePct: 0 })
+    expect(s.coverage).toBe('fresh')
+    expect(s.headline).toBe('Covered 0%')
   })
 
   it('requirements set moved → coverage Stale, only coverage artifact affected', () => {

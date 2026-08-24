@@ -5,6 +5,8 @@ import {
   listFlights,
   getFlight,
   respondFlightCheckpoint,
+  requestFlightTakeover,
+  forceFlightTakeover,
   getFlightRemedy,
   applyFlightRemedy,
   resumeFlight,
@@ -74,6 +76,26 @@ describe('flights api', () => {
     expect(url).toBe('http://x/api/flights/fl_1/respond')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ response: { choice: 'approved' } })
+  })
+
+  it('requestFlightTakeover records a cooperative hand-off request', async () => {
+    const manifest = { id: 'fl_1', status: 'waiting-for-approval' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    await expect(requestFlightTakeover('fl_1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/takeover/request',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+    )
+  })
+
+  it('forceFlightTakeover sends the explicit force confirmation', async () => {
+    const manifest = { id: 'fl_1', status: 'running' }
+    const fetchImpl = vi.fn().mockResolvedValue(ok(manifest))
+    await expect(forceFlightTakeover('fl_1', { baseUrl: 'http://x', fetchImpl })).resolves.toEqual(manifest)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://x/api/flights/fl_1/takeover/force',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"confirm":true}' },
+    )
   })
 
   it('resumeFlight POSTs to the resume endpoint and returns the updated manifest', async () => {

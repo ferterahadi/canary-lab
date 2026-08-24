@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FlightManifest } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
-import { InvalidationProvider } from '@/shared/state/invalidation'
+import { InvalidationProvider, useInvalidation } from '@/shared/state/invalidation'
 
 const mocks = vi.hoisted(() => ({
   listFlights: vi.fn(),
@@ -235,12 +235,20 @@ function manifest(over: Partial<FlightManifest> = {}): FlightManifest {
 // remount key per call remounts FlightPage, which re-runs its fetch effect —
 // the same observable effect, without a prop lever.
 let renderSeq = 0
+let invalidateCoverage: (() => void) | null = null
+
+function InvalidationTap() {
+  const { invalidate } = useInvalidation()
+  invalidateCoverage = () => invalidate('coverage')
+  return null
+}
 
 async function render(flightId: string, extraProps: Record<string, unknown> = {}) {
   renderSeq += 1
   await act(async () => {
     root.render(
       <InvalidationProvider>
+        <InvalidationTap />
         <FlightPage key={renderSeq} flightId={flightId} onSelectFlight={vi.fn()} onClose={vi.fn()} {...extraProps} />
       </InvalidationProvider>,
     )
@@ -430,6 +438,52 @@ describe('detail redesign (R53–R68)', () => {
     await render('fl_1')
     const item = container.querySelector('[data-testid="strip-specs-coverage"]')
     expect(item?.textContent).toContain('100%')
+  })
+
+  it('names an unrun coverage mapping instead of presenting its computed 0% as measured', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'specs-coverage' ? 'pending' as const : 'done' as const,
+        ...(key === 'specs-coverage'
+          ? { evidence: { coveragePct: 0, mappingState: 'absent', testsWritten: 1, total: 2 }, evidenceSource: 'workspace' as const }
+          : {}),
+      })),
+    }))
+    await render('fl_1')
+    const item = container.querySelector('[data-testid="strip-specs-coverage"]')
+    expect(item?.textContent).toContain('Not mapped')
+    expect(item?.textContent).not.toContain('0%')
+  })
+
+  it('refreshes a derived flight’s mapping evidence when coverage changes', async () => {
+    const entry = (mappingState: 'absent' | 'fresh', coveragePct: number) => ({
+      feature: 'checkout',
+      flight: null,
+      active: false,
+      canContinue: false,
+      prefill: { repoPaths: ['/repo/shop'], description: 'checkout flow', env: 'local', coverageTarget: 100 },
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, allowed: true })),
+      evidence: {
+        'specs-coverage': { coveragePct, mappingState, testsWritten: 1, total: 2 },
+      },
+    })
+    mocks.getFlightEntryOptions
+      .mockResolvedValueOnce(entry('absent', 0))
+      .mockResolvedValue(entry('fresh', 50))
+    const stages = FLIGHT_STAGE_KEYS.map((key) => ({
+      key,
+      status: key === 'specs-coverage' ? 'pending' as const : 'done' as const,
+    }))
+
+    await render('feature:checkout', { derivedStages: new Map([['checkout', stages]]) })
+    expect(container.querySelector('[data-testid="strip-specs-coverage"]')?.textContent).toContain('Not mapped')
+
+    await act(async () => { invalidateCoverage?.() })
+    expect(mocks.getFlightEntryOptions).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('[data-testid="strip-specs-coverage"]')?.textContent).toContain('50%')
   })
 
   it('keeps the live loop as the source when it HAS passes — its gap count is the finer signal', async () => {

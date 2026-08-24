@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
 import { capitalizeFirst } from '@/shared/lib/format'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { formatDuration, num, specsCoverageProgress, stageLabel, stageStatusTone, type StageFact } from './stage-meta'
 import { asRecord } from './StageDetail'
 
@@ -76,9 +77,21 @@ export function FlightSummaryStrip({
   // both write `coveragePct`), so it stands in when there is no loop to read.
   const specs = flight.stages.find((s) => s.key === 'specs-coverage')
   const lastMapped = specsCoverageProgress(specs)?.passes.filter((p) => p.note == null).at(-1)
-  const settledPct = num(asRecord(specs?.evidence) ?? {}, 'coveragePct')
+  const specsEvidence = asRecord(specs?.evidence) ?? {}
+  const settledPct = num(specsEvidence, 'coveragePct')
   const coveragePct = lastMapped?.coveragePct ?? settledPct
-  if (coveragePct != null) {
+  const mappingState = typeof specsEvidence.mappingState === 'string' ? specsEvidence.mappingState : null
+  if (!lastMapped && (mappingState === 'absent' || mappingState === 'generating')) {
+    items.push({
+      label: 'Coverage',
+      value: mappingState === 'generating' ? 'Mapping…' : 'Not mapped',
+      tone: mappingState === 'generating' ? 'var(--running)' : 'var(--text-muted)',
+      stage: 'specs-coverage',
+      title: mappingState === 'generating'
+        ? 'Coverage is matching tests to requirements now'
+        : 'Tests exist, but coverage has not matched them to requirements yet',
+    })
+  } else if (coveragePct != null) {
     items.push({
       label: 'Coverage',
       value: `${coveragePct}%`,
@@ -157,39 +170,41 @@ export function FlightSummaryStrip({
       </div>
       {onToggleAutopilot && (
         <div className="ml-auto flex items-center gap-2 border-l border-line pl-3">
-          <button
-            type="button"
-            data-testid="flight-autopilot-toggle"
-            aria-pressed={autopilotOn}
-            disabled={flight.opts.yolo || autopilotLockedReason != null}
-            onClick={() => onToggleAutopilot(!autopilotOn)}
-            className="group flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] outline-none transition-shadow duration-150 focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] disabled:cursor-default"
-            title={autopilotLockedReason
-              ? autopilotLockedReason
-              : flight.opts.yolo
-              ? 'This flight skips every question except missing settings, whatever Autopilot says'
-              : autopilotOn
-                ? 'Autopilot picks the safe answer for you — click to be asked at every question instead'
-                : 'Every question waits for you — click to let Autopilot answer the safe ones'}
-          >
-            <span className="cl-rubric">
-              Autopilot
-            </span>
-            <span
-              aria-hidden="true"
-              className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-all duration-150 group-hover:brightness-110 group-active:brightness-90 group-disabled:opacity-60 ${autopilotActive ? 'border-accent bg-accent' : 'border-line bg-elevated'}`}
+          <DisabledControlTooltip>
+            <button
+              type="button"
+              data-testid="flight-autopilot-toggle"
+              aria-pressed={autopilotOn}
+              disabled={flight.opts.yolo || autopilotLockedReason != null}
+              onClick={() => onToggleAutopilot(!autopilotOn)}
+              className="group flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-[11px] outline-none transition-shadow duration-150 focus-visible:shadow-[0_0_0_3px_var(--accent-soft)] disabled:cursor-default"
+              title={autopilotLockedReason
+                ? autopilotLockedReason
+                : flight.opts.yolo
+                ? 'This flight skips every question except missing settings, whatever Autopilot says'
+                : autopilotOn
+                  ? 'Autopilot picks the safe answer for you — click to be asked at every question instead'
+                  : 'Every question waits for you — click to let Autopilot answer the safe ones'}
             >
+              <span className="cl-rubric">
+                Autopilot
+              </span>
               <span
-                className="inline-block h-3 w-3 rounded-full bg-canvas transition-transform duration-150"
-                style={{ boxShadow: 'var(--shadow-panel)', transform: autopilotOn ? 'translateX(13px)' : 'translateX(2px)' }}
-              />
-            </span>
-            {/* Reserve the widest state word ('off') so toggling on↔off can't
-                resize the group and slide the whole ml-auto cluster sideways. */}
-            <span className={`inline-block min-w-[3ch] text-left font-mono ${autopilotOn ? 'text-secondary' : 'text-muted'}`}>
-              {flight.opts.yolo ? 'yolo' : autopilotOn ? 'on' : 'off'}
-            </span>
-          </button>
+                aria-hidden="true"
+                className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border transition-all duration-150 group-hover:brightness-110 group-active:brightness-90 group-disabled:opacity-60 ${autopilotActive ? 'border-accent bg-accent' : 'border-line bg-elevated'}`}
+              >
+                <span
+                  className="inline-block h-3 w-3 rounded-full bg-canvas transition-transform duration-150"
+                  style={{ boxShadow: 'var(--shadow-panel)', transform: autopilotOn ? 'translateX(13px)' : 'translateX(2px)' }}
+                />
+              </span>
+              {/* Reserve the widest state word ('off') so toggling on↔off can't
+                  resize the group and slide the whole ml-auto cluster sideways. */}
+              <span className={`inline-block min-w-[3ch] text-left font-mono ${autopilotOn ? 'text-secondary' : 'text-muted'}`}>
+                {flight.opts.yolo ? 'yolo' : autopilotOn ? 'on' : 'off'}
+              </span>
+            </button>
+          </DisabledControlTooltip>
         </div>
       )}
     </div>

@@ -2,9 +2,9 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSessionEvent } from '@/shared/api/client'
-import { Markdown, SubagentThreadRow, SystemRow, groupSystemLines, indexSubagents, mergeSubagentEvent } from './AgentSessionView'
+import { AgentSessionView, Markdown, SubagentThreadRow, SystemRow, groupSystemLines, indexSubagents, mergeSubagentEvent } from './AgentSessionView'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -297,5 +297,61 @@ describe('SubagentThreadRow', () => {
     sparse.events[2] = text('2026-07-21T11:31:00.000Z', 'late arrival')
     render(sparse)
     expect(container.textContent).toContain('1 event')
+  })
+})
+
+describe('AgentSessionView external-session Activity row', () => {
+  let container: HTMLDivElement
+  let root: Root
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+  })
+
+  afterEach(() => {
+    act(() => root.unmount())
+    vi.useRealTimers()
+    container.remove()
+  })
+
+  it('shows a live external session with the shared working pulse and elapsed time', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-25T00:01:42.000Z'))
+    act(() => root.render(
+      <AgentSessionView externalSession={{
+        clientKind: 'claude',
+        status: 'running',
+        message: 'Work is continuing in your Claude session.',
+        startedAt: '2026-08-25T00:00:00.000Z',
+      }} />,
+    ))
+
+    const row = container.querySelector('[data-testid="external-session-activity"]')
+    expect(row?.textContent).toContain('External · Claude')
+    expect(row?.textContent).toContain('Work is continuing in your Claude session.')
+    expect(container.querySelector('[data-testid="external-session-elapsed"]')?.textContent).toBe('1m 42s')
+    expect(container.querySelector('.agentts-worknode')).not.toBeNull()
+  })
+
+  it('keeps completed external provenance compact and links back to the session', () => {
+    act(() => root.render(
+      <AgentSessionView externalSession={{
+        clientKind: 'codex',
+        status: 'done',
+        message: 'Completed outside Canary Lab · 3 files applied.',
+        startedAt: '2026-08-25T00:00:00.000Z',
+        endedAt: '2026-08-25T00:05:00.000Z',
+        sessionUrl: 'codex://session/abc',
+      }} />,
+    ))
+
+    const row = container.querySelector('[data-testid="external-session-activity"]')
+    expect(row?.textContent).toContain('External · Codex')
+    expect(row?.textContent).toContain('Completed outside Canary Lab · 3 files applied.')
+    expect(container.querySelector('[data-testid="external-session-elapsed"]')?.textContent).toBe('5m 00s')
+    expect(container.querySelector<HTMLAnchorElement>('.agentts-extaction')?.getAttribute('href')).toBe('codex://session/abc')
+    expect(container.querySelector('.agentts-worknode')).toBeNull()
   })
 })

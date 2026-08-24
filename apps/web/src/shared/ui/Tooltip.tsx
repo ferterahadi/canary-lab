@@ -1,4 +1,4 @@
-import { cloneElement, useLayoutEffect, useRef, useState, type ReactElement } from 'react'
+import { cloneElement, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react'
 import { createPortal } from 'react-dom'
 
 // Lightweight, instant tooltip. The app otherwise leans on native `title`, which
@@ -110,5 +110,29 @@ export function Tooltip({
         document.body,
       )}
     </>
+  )
+}
+
+/** Makes the reason on a disabled form control reachable by hover. Native
+ *  disabled controls do not reliably receive pointer events, so `title` and a
+ *  tooltip cloned directly onto the control both become dead affordances. The
+ *  wrapper owns hover while the control stays disabled and out of hit-testing.
+ *  Enabled controls remain wrapper-free, preserving their normal layout. */
+export function DisabledControlTooltip({
+  children,
+  wrapperClassName = 'inline-flex',
+}: {
+  children: ReactElement<{ disabled?: boolean; title?: string; style?: CSSProperties }>
+  wrapperClassName?: string
+}) {
+  const { disabled, title, style } = children.props
+  if (!disabled || !title) return children
+
+  return (
+    <Tooltip label={title}>
+      <span className={wrapperClassName} style={{ cursor: 'help' }}>
+        {cloneElement(children, { style: { ...style, pointerEvents: 'none' } })}
+      </span>
+    </Tooltip>
   )
 }

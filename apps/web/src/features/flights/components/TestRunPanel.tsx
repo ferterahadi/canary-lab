@@ -10,6 +10,7 @@ import { awaitingFact } from './StageFacts'
 import { SkeletonBar, SkeletonBead, type AwaitingState } from '@/shared/ui/Skeleton'
 import { runHistoryStats } from './stage-metrics'
 import { formatDuration } from '@/shared/lib/format'
+import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 
 // R80 — the Test Run hero. Before this, the run stage rendered the SAME run
 // three-to-four times: the "At a glance" facts card, the RunRepairSummary's own
@@ -57,6 +58,7 @@ export function TestRunPanel({
   onOpenRun,
   onError,
   awaiting,
+  mutationLockedReason,
 }: {
   feature: string
   /** Absent until the stage HAS a run — the hero then renders as its own
@@ -74,6 +76,8 @@ export function TestRunPanel({
   /** R83: the run stage hasn't settled. Regions with nothing in them yet hold
    *  their place as placeholders instead of collapsing the pane. */
   awaiting?: AwaitingState
+  /** External ownership leaves live run controls visible but inert. */
+  mutationLockedReason?: string
 }) {
   const { detail } = useRun(runId)
   const { runs } = useRuns()
@@ -170,7 +174,7 @@ export function TestRunPanel({
 
         {/* No run id means there is no run to control — the surrounding branch
             can still render from manifest/evidence alone. */}
-        {runId && <RunControls runId={runId} status={status} active={active} onError={report} />}
+        {runId && <RunControls runId={runId} status={status} active={active} onError={report} mutationLockedReason={mutationLockedReason} />}
 
         {/* External heal: the repair runs in the user's own MCP client, so there
             is no Canary transcript to embed — an honest status line, with the
@@ -511,36 +515,44 @@ function RunControls({
   status,
   active,
   onError,
+  mutationLockedReason,
 }: {
   runId: string
   status: RunStatus
   active: boolean
   onError: (err: unknown) => void
+  mutationLockedReason?: string
 }) {
   if (!active) return null
   return (
     <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="run-stage-controls">
       {active && status === 'healing' && (
-        <button
-          type="button"
-          data-testid="run-stage-cancel-heal"
-          onClick={() => { api.cancelHealRun(runId).catch(onError) }}
-          className="cl-button px-2 py-0.5 text-[11px]"
-          title="Stops the repair and keeps the failing result. The flight will ask what to do next."
-        >
-          Cancel repair
-        </button>
+        <DisabledControlTooltip>
+          <button
+            type="button"
+            data-testid="run-stage-cancel-heal"
+            disabled={mutationLockedReason != null}
+            onClick={() => { api.cancelHealRun(runId).catch(onError) }}
+            className="cl-button px-2 py-0.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-45"
+            title={mutationLockedReason ?? 'Stops the repair and keeps the failing result. The flight will ask what to do next.'}
+          >
+            Cancel repair
+          </button>
+        </DisabledControlTooltip>
       )}
       {active && (
-        <button
-          type="button"
-          data-testid="run-stage-stop"
-          onClick={() => { api.stopRun(runId).catch(onError) }}
-          className="cl-button px-2 py-0.5 text-[11px] text-danger"
-          title="Ends this run only — the flight keeps going and asks what to do next. Pause stops everything."
-        >
-          ⏹ Stop run
-        </button>
+        <DisabledControlTooltip>
+          <button
+            type="button"
+            data-testid="run-stage-stop"
+            disabled={mutationLockedReason != null}
+            onClick={() => { api.stopRun(runId).catch(onError) }}
+            className="cl-button px-2 py-0.5 text-[11px] text-danger disabled:cursor-not-allowed disabled:opacity-45"
+            title={mutationLockedReason ?? 'Ends this run only — the flight keeps going and asks what to do next. Pause stops everything.'}
+          >
+            ⏹ Stop run
+          </button>
+        </DisabledControlTooltip>
       )}
     </div>
   )
@@ -562,4 +574,3 @@ function shortRunRef(runId: string): string {
   const tail = runId.split(/[-_]/).pop()
   return tail && tail.length >= 3 ? tail : runId
 }
-

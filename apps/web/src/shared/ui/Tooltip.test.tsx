@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Tooltip, TOOLTIP_ANCHOR_ATTR } from './Tooltip'
+import { DisabledControlTooltip, Tooltip, TOOLTIP_ANCHOR_ATTR } from './Tooltip'
 
 /** happy-dom reports every rect as zero, so a positioning test has to supply its
  *  own. Returns a rect whose `bottom`/`left` are what the assertions read. */
@@ -85,5 +85,33 @@ describe('Tooltip', () => {
     })
     act(() => { container.querySelector<HTMLButtonElement>('[data-testid="trigger"]')?.click() })
     expect(onClick).toHaveBeenCalled()
+  })
+
+  it('anchors a disabled control tooltip to a hoverable wrapper', () => {
+    act(() => {
+      root.render(
+        <DisabledControlTooltip>
+          <button type="button" data-testid="trigger" disabled title="Continue in the external agent">Continue</button>
+        </DisabledControlTooltip>,
+      )
+    })
+    const trigger = container.querySelector<HTMLButtonElement>('[data-testid="trigger"]')!
+    const wrapper = trigger.parentElement!
+    expect(wrapper).not.toBe(container)
+    expect(trigger.style.pointerEvents).toBe('none')
+
+    act(() => { wrapper.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toBe('Continue in the external agent')
+  })
+
+  it('leaves an enabled control wrapper-free', () => {
+    act(() => {
+      root.render(
+        <DisabledControlTooltip>
+          <button type="button" data-testid="trigger" title="Continue">Continue</button>
+        </DisabledControlTooltip>,
+      )
+    })
+    expect(container.querySelector('[data-testid="trigger"]')?.parentElement).toBe(container)
   })
 })

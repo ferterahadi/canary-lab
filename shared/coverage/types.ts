@@ -387,4 +387,10 @@ export interface CoverageJobIndexEntry {
    *  opening one manifest per job. Absent on entries written before the
    *  mirror existed — those all predate external jobs, so absent = internal. */
   producer?: 'internal' | 'external'
+  /** External-session metadata is already present on manifest-backed index
+   *  responses; declare it here so Flight Activity can link to the owner. */
+  externalClientKind?: string
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
 }

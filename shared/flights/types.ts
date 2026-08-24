@@ -145,6 +145,22 @@ export interface FlightCheckpoint {
   data?: unknown
 }
 
+/** `data` payload of an `external-work` checkpoint. The prompt/context remain
+ *  stage-specific; these fields are the protocol every external hand-off
+ *  shares. `takeoverRequestedAt` is written by the web UI when the user asks
+ *  Canary to run THIS step. The external client must then stop its work and
+ *  acknowledge with choice `run-internally`; until it does, Canary stays
+ *  parked so two agents never edit the same files at once. */
+export interface ExternalWorkCheckpointData {
+  stage?: FlightStageKey
+  prompt?: string
+  promptPath?: string
+  context?: unknown
+  handOffId?: string
+  lastRejection?: 'stale_submission'
+  takeoverRequestedAt?: string
+}
+
 /** Outcome of the collector agent's previous attempt, carried on the
  *  `prd-source` checkpoint's `data`. Structured rather than folded into
  *  `message` so the UI can give the verdict its own row AND stop recommending

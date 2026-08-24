@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
+import type { FeatureExternalHistory } from '../state/feature-activity'
 
 // The two stores this hook reads own a WebSocket and a fetch loop apiece, which
 // is the one edge a unit test can't reproduce. Everything the hook itself does
@@ -62,15 +63,15 @@ const task = (over: Partial<EvaluationExportTask> = {}): EvaluationExportTask =>
   ...over,
 })
 
-let seen: Map<string, { key: string; status: string }[]>
+let seen: Map<string, { key: string; status: string; evidence?: Record<string, unknown> }[]>
 
-function Probe({ features }: { features: Feature[] }) {
-  seen = useDerivedFeatureStages(features) as never
+function Probe({ features, externalHistory }: { features: Feature[]; externalHistory?: FeatureExternalHistory }) {
+  seen = useDerivedFeatureStages(features, externalHistory) as never
   return null
 }
 
-function render(features: Feature[]): void {
-  act(() => root.render(<Probe features={features} />))
+function render(features: Feature[], externalHistory?: FeatureExternalHistory): void {
+  act(() => root.render(<Probe features={features} externalHistory={externalHistory} />))
 }
 
 const statusOf = (name: string, key: string): string | undefined =>
@@ -115,5 +116,21 @@ describe('useDerivedFeatureStages', () => {
     exportsValue.tasks = [task({ status: 'running' as EvaluationExportTask['status'] })]
     render([feature()])
     expect(statusOf('checkout', 'evaluation-export')).not.toBe('done')
+  })
+
+  it('re-derives Parallel readiness from external Portify completion', () => {
+    render([feature({ portified: false })], new Map([['checkout', {
+      portify: {
+        kind: 'portifying',
+        stage: 'portify',
+        resourceId: 'wf-live',
+        status: 'done',
+        startedAt: '2026-08-25T00:00:00Z',
+        updatedAt: '2026-08-25T00:05:00Z',
+      },
+    }]]))
+    expect(statusOf('checkout', 'portify')).toBe('done')
+    expect(seen.get('checkout')?.find((stage) => stage.key === 'portify')?.evidence)
+      .toEqual({ workflowId: 'wf-live' })
   })
 })

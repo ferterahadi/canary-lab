@@ -185,7 +185,14 @@ function docSourceLabel(source: string | null | undefined): string | null {
 export function partialProbedLine(stage: FlightStage): string | null {
   if (stage.evidenceSource !== 'workspace' || stage.key !== 'specs-coverage') return null
   const ev = evidenceOf(stage)
-  return num(ev, 'total') === 0 ? 'Tests are written, but there are no requirements to match them to yet.' : null
+  if (num(ev, 'total') === 0) return 'Tests are written, but there are no requirements to match them to yet.'
+  const mappingState = str(ev, 'mappingState')
+  const tests = num(ev, 'testsWritten')
+  if (mappingState === 'absent') {
+    return `${tests != null ? plural(tests, 'test') : 'Tests'} ${tests === 1 ? 'is' : 'are'} written, but coverage mapping has not run yet.`
+  }
+  if (mappingState === 'stale') return 'Tests are written, but coverage mapping is stale — run Coverage again.'
+  return null
 }
 
 /** One sentence for what a stage's agent is doing right now, from the live
@@ -392,12 +399,19 @@ export function stageStateLine(stage: FlightStage, flight: FlightManifest, compa
       if (stage.evidenceSource === 'workspace') {
         const covered = num(ev, 'covered')
         const total = num(ev, 'total')
+        const mappingState = str(ev, 'mappingState')
+        const tests = num(ev, 'testsWritten')
         // No requirements means coverage is UNDEFINED, not zero. A suite with real
         // specs and no PRD to map them against would otherwise read "0% — 0 of 0
         // covered", which sounds like a failure instead of nothing to measure.
         if (total === 0) return 'Tests are written, but there are no requirements to match them to yet.'
-        const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} covered` : ''
-        return `Tests written, coverage at ${pct ?? '?'}%${of}.`
+        if (mappingState === 'absent') {
+          return `${tests != null ? plural(tests, 'test') : 'Tests'} ${tests === 1 ? 'is' : 'are'} written, but coverage mapping has not run yet.`
+        }
+        if (mappingState === 'generating') return 'Matching tests to requirements…'
+        if (mappingState === 'stale') return 'Tests are written, but coverage mapping is stale — run Coverage again.'
+        const of = covered != null && total != null ? ` — ${covered} of ${total} requirement${total === 1 ? '' : 's'} claimed` : ''
+        return `Tests written. Claimed coverage is ${pct ?? '?'}%${of}. Nothing has run yet.`
       }
       return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
     }

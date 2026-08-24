@@ -21,7 +21,7 @@ const FlightPage = lazy(() => import('./features/flights/components/FlightPage')
 import { FlightStartDialog } from './features/flights/components/FlightStartDialog'
 import { useRuns, useRun, useGlobalActiveRun } from './features/runs/state/RunsContext'
 import { useRunStart } from './features/runs/state/use-run-start'
-import { useFeatureActivity, type FeatureActivity } from './features/flights/state/feature-activity'
+import { useFeatureWorkState, type FeatureActivity } from './features/flights/state/feature-activity'
 import { presentedIndexStages, resolveFeatureFlightAction } from './features/flights'
 import { derivedFlightFeature, useDerivedFeatureStages } from './features/flights/lib/derived-stages'
 import { derivePendingFeatures } from './features/flights/lib/pending-features'
@@ -94,10 +94,10 @@ export function App() {
   // R26: per-feature live activity (runs / portify / authoring) — the one
   // instance behind the Flights pill and the flights landing list. Clicking an
   // activity-only row opens the activity's REAL surface.
-  const featureActivity = useFeatureActivity()
+  const { activity: featureActivity, externalHistory: featureExternalHistory } = useFeatureWorkState()
   // Evidence-derived stage rails for flightless picker rows — one instance,
   // same ownership rule as featureActivity (the pill stays presentational).
-  const derivedStages = useDerivedFeatureStages(features)
+  const derivedStages = useDerivedFeatureStages(features, featureExternalHistory)
   // The Getting Started launcher — the server-owned guided catalog `init`
   // prepared for this workspace, plus whether to offer it at all.
   const demo = useDemoLauncher(allRuns, flights)
@@ -540,6 +540,7 @@ export function App() {
               // settled flight (which the push channel never snapshots).
               indexEntry={flights.find((f) => f.flightId === selectedFlightId) ?? null}
               activity={featureActivity}
+              externalHistory={featureExternalHistory}
               derivedStages={derivedStages}
               // Select the feature too: the config dialog is qualified by the
               // durable `feature` param, so opening it for a flight's feature

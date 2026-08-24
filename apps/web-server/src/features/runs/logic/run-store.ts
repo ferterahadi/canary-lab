@@ -31,20 +31,21 @@ export function listRuns(logsDir: string, opts: ListRunsOptions = {}): RunIndexE
   const filtered = opts.feature ? all.filter((e) => e.feature === opts.feature) : all
   return [...filtered]
     .sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0))
-    .map((entry) => fillHealCycles(logsDir, entry))
+    .map((entry) => fillIndexProvenance(logsDir, entry))
 }
 
-/** The index mirrors `healCycles` from the manifest, but entries written before
- *  it did have none — and a repair total that silently skipped them would report
- *  a healed feature as never repaired. The index is a cache and the manifest is
- *  truth, so read the manifest for the gap. One stat-and-parse per un-mirrored
- *  run, on a list that holds dozens of entries at most; a run whose directory
- *  has been cleaned away legitimately has no answer and stays absent. */
-function fillHealCycles(logsDir: string, entry: RunIndexEntry): RunIndexEntry {
-  if (entry.healCycles !== undefined) return entry
+/** The index mirrors repair evidence/provenance from the manifest. Entries
+ *  written before either field existed have gaps; the manifest is truth, so
+ *  read it only when one is missing. A cleaned run legitimately stays absent. */
+function fillIndexProvenance(logsDir: string, entry: RunIndexEntry): RunIndexEntry {
+  if (entry.healCycles !== undefined && entry.healMode !== undefined) return entry
   const manifest = readManifest(path.join(runDirFor(logsDir, entry.runId), 'manifest.json'))
-  if (!manifest?.healCycles) return entry
-  return { ...entry, healCycles: manifest.healCycles }
+  if (!manifest) return entry
+  return {
+    ...entry,
+    ...(entry.healCycles === undefined && manifest.healCycles ? { healCycles: manifest.healCycles } : {}),
+    ...(entry.healMode === undefined && manifest.healMode ? { healMode: manifest.healMode } : {}),
+  }
 }
 
 /**

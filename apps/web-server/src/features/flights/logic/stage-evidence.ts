@@ -1,6 +1,7 @@
 import fs from 'fs'
 import path from 'path'
 import { docsDirFor } from '../../coverage/logic/coverage/docs-collection'
+import { readPersistedCoverageState } from '../../coverage/logic/coverage/service'
 import { portInjectability, type PortInjectability } from '../../../../../../shared/launcher/port-injectability'
 import type { RepoPrerequisite } from '../../../../../../shared/launcher/types'
 import { listRuns } from '../../runs/logic/run-store'
@@ -123,6 +124,10 @@ export interface FeatureStageEvidence {
   prdSummary: boolean
   /** At least one spec under e2e/ (specs-coverage stage artifact). */
   specs: boolean
+  /** Durable requirement-mapping evidence. A spec alone leaves this absent;
+   *  annotations preserve manual/legacy work and `_coverage-state.json`
+   *  records a mapper that completed with zero links. */
+  coverageMapping: 'absent' | 'fresh' | 'stale'
   /** How far the config gets this feature toward booting concurrently.
    *  Parallel readiness is a property of the config, not of Portify: a service
    *  that natively reads `PORT` declares its slot outright and needs no
@@ -144,6 +149,7 @@ export function deriveFeatureEvidence(
     booted: logsDir !== undefined && feature !== undefined && findBootProof(logsDir, feature) !== null,
     prdSummary: hasPrdSummary(featureDir),
     specs: hasAuthoredSpecs(featureDir),
+    coverageMapping: readPersistedCoverageState(featureDir),
     portInjectability: portInjectability(repos),
   }
 }
