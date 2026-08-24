@@ -11,7 +11,7 @@ describe('canary-lab agent install', () => {
     install('all', { homeDir: home, dryRun: true, log: (line) => lines.push(line) })
 
     expect(lines.join('\n')).toContain('[dry-run] copy Codex skill')
-    expect(lines.join('\n')).toContain('npx -y canary-lab mcp --profile lifecycle')
+    expect(lines.join('\n')).toContain('npx -y canary-lab mcp --profile full')
     expect(fs.existsSync(path.join(home, '.codex'))).toBe(false)
   })
 
@@ -102,7 +102,7 @@ describe('canary-lab agent install', () => {
     expect(lines.join('\n')).toContain('Updated Codex skill')
   })
 
-  it('instructs agents to verify fixes with signal_run instead of start_run', () => {
+  it('ships the load-bearing workflow instructions across every agent surface', () => {
     const assets = path.resolve(__dirname, '..', '..', 'agent-integrations')
     const mirrors = (skill: string) => [
       path.join(assets, 'codex', 'skills', skill, 'SKILL.md'),
@@ -133,6 +133,17 @@ describe('canary-lab agent install', () => {
       const body = fs.readFileSync(skillPath, 'utf-8')
       expect(body).toContain('Do not reflexively call `list_features` or `list_runs` after health')
       expect(body).toContain('For random or new feature creation, call `create_feature` directly with a unique feature name')
+    }
+
+    // The Getting Started card promises a workflow, not a cached report. A
+    // fresh scaffold already has a fresh 50% ledger, so this instruction is
+    // what makes the agent mint the externally-owned job the UI can surface.
+    for (const skillPath of mirrors('canary-lab-coverage')) {
+      const body = fs.readFileSync(skillPath, 'utf-8')
+      expect(body).toContain('An explicit `/canary-lab-coverage <suite>` invocation is **execution mode**')
+      expect(body).toContain('call `start_external_coverage` even')
+      expect(body).toContain('when `state.coverage` is `"fresh"`')
+      expect(body).toContain("Starting that job is what makes the external agent's ownership")
     }
 
     // The flight entry point keeps the full bootstrap (incl. the --port note).

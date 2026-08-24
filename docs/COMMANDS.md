@@ -35,7 +35,7 @@ The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_chec
 
 - `init` creates the workspace, installs dependencies and Chromium, and registers agent tools. Use `--no-install` for CI or offline setup.
 - `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
-- `setup` refreshes agent registration. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
+- `setup` refreshes agent registration with the `full` profile so every installed focused skill, including Portify, has its tools. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
 - `boot` starts a feature's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
 - `mcp` connects an AI client to the UI server. The default `lifecycle` profile covers authoring through export. Use a narrower profile when possible, `portify` for port injection, or `full` for every tool.
 - `new feature` creates a feature deterministically. `env` applies or restores an envset.

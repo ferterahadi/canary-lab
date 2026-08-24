@@ -5,8 +5,8 @@ export const CANARY_LAB_MCP_PROFILES = ['repair', 'verify', 'author', 'coverage'
 export type CanaryLabMcpProfile = typeof CANARY_LAB_MCP_PROFILES[number]
 
 // The default profile when a client connects without an explicit one (bare
-// `canary-lab mcp`, the registered Desktop/CLI invocation, a profile-less
-// /mcp request). `lifecycle` is the everyday end-to-end surface (repair +
+// `canary-lab mcp` or a profile-less /mcp request). Setup-installed Desktop/CLI
+// clients explicitly request `full`; `lifecycle` is the lean end-to-end surface (repair +
 // verify + author + coverage + export + flight) minus the STANDALONE portify
 // management tools — starting a portify workflow from scratch, saving or
 // cancelling one, removing a portification, listing status. Those stay opt-in

@@ -32,6 +32,16 @@ An invocation argument (`/canary-lab-coverage <suite>` — the Getting Started
 guide's "Measure Coverage" card emits exactly this shape) is a suite
 (feature) name in the connected workspace — go straight to its ledger.
 
+An explicit `/canary-lab-coverage <suite>` invocation is **execution mode**,
+not a read-only coverage question. After reading the ledger, the turn MUST call
+a start tool: when the summary is fresh, call `start_external_coverage` even
+when `state.coverage` is `"fresh"`; when the summary is stale or absent, start
+and submit the summary first, then start coverage mapping. Do not stop at the
+cached ledger. Starting that job is what makes the external agent's ownership
+and progress visible in Canary Lab. A natural-language question such as "what
+is covered?" remains read-only and may report a fresh ledger without starting
+a job.
+
 ## Coverage Loop
 
 **Start by reading the ledger, not by regenerating it**: call
@@ -41,7 +51,8 @@ guide's "Measure Coverage" card emits exactly this shape) is a suite
   summary is current; re-running it is not just wasted work — a re-run that
   fails to echo the previous requirement ids mints fresh ones and orphans
   every existing `@req-*` tag, flipping covered requirements to untested.
-  Go to Step 2 (or, if the mapping is also fresh, just report the ledger).
+  Go to Step 2. Only a read-only natural-language question may report a fresh
+  mapping directly; an explicit invocation still starts Step 2.
 - `state.summary` `stale`/`absent` → run Step 1 (echo the previous ids!).
 - `state.coverage: "blocked"` → read the ledger's `next:` field and follow
   it — don't present a menu. When `next` reports no source doc ("Setup

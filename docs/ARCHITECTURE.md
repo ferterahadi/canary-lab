@@ -527,8 +527,9 @@ link, or the per-repo reason there is none.
 - **Profiles** pick the tool subset via `?profile=`. There are seven workflow profiles and two composed profiles: `repair` (heal loop), `verify` (verification configs), `author`
   (feature/envset/draft authoring), `coverage` (docs → PRD summary → ledger), `export`
   (evaluation archives), `flight` (the conducted pipeline), `portify` (port-injection
-  workflow), then `lifecycle` (**the default**: repair + verify + author + coverage +
-  export + flight, no portify) and `full` (lifecycle + portify). `coverage`, `export`
+  workflow), then `lifecycle` (**the bare-server default**: repair + verify + author + coverage +
+  export + flight, no portify) and `full` (lifecycle + portify). `setup` registers
+  clients with `full` because it installs every focused skill. `coverage`, `export`
   and `flight` were carved out of what used to be one oversized `author` array; the
   composed unions absorbed the split, so nothing had to move twice. Optional
   `?client_kind=claude|codex|other|...` (the `*-pty` kinds are set by the runner, not passed by clients).

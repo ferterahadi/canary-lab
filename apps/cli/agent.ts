@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 
 import fs from 'fs'
-import { resolveCliPath, isTempInstallPath } from './mcp-registration'
+import { REGISTERED_CANARY_LAB_MCP_PROFILE, resolveCliPath, isTempInstallPath } from './mcp-registration'
 import os from 'os'
 import path from 'path'
 import { runAsScript } from './run-as-script'
-import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../web-server/src/mcp/tools'
 import { copyDirRecursive } from '../../shared/lib/copy-dir'
 
 type Target = 'codex' | 'claude' | 'all'
@@ -80,19 +79,19 @@ export function install(target: Target, opts: AgentInstallOptions = {}): void {
 
   log('')
   log('MCP command for local clients:')
-  log(`  npx -y canary-lab mcp --profile ${DEFAULT_CANARY_LAB_MCP_PROFILE}`)
+  log(`  npx -y canary-lab mcp --profile ${REGISTERED_CANARY_LAB_MCP_PROFILE}`)
   log('')
   log('Codex config snippet:')
   log('[mcp_servers.Canary_Lab]')
   log('command = "npx"')
-  log(`args = ["-y", "canary-lab", "mcp", "--profile", "${DEFAULT_CANARY_LAB_MCP_PROFILE}"]`)
+  log(`args = ["-y", "canary-lab", "mcp", "--profile", "${REGISTERED_CANARY_LAB_MCP_PROFILE}"]`)
   log('')
   log('Claude Code config snippet:')
   log(JSON.stringify({
     mcpServers: {
       'Canary_Lab': {
         command: 'npx',
-        args: ['-y', 'canary-lab', 'mcp', '--profile', DEFAULT_CANARY_LAB_MCP_PROFILE],
+        args: ['-y', 'canary-lab', 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE],
       },
     },
   }, null, 2))

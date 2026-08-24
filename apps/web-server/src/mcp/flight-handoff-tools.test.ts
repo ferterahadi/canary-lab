@@ -62,10 +62,10 @@ describe('flight hand-off tools are reachable from the flight profile', () => {
     for (const tool of tools) expect([...flight]).toContain(tool)
   })
 
-  // lifecycle (the DEFAULT profile — what `setup` registers) and full are unions
-  // over flight, so they inherit the above. Asserted anyway: lifecycle is the
-  // profile the failure actually happened on, and a future refactor could stop
-  // composing it from FLIGHT_TOOLS without any other test noticing.
+  // lifecycle (the bare-server default) and full (the setup-installed profile)
+  // are unions over flight, so they inherit the above. Asserted anyway: a
+  // future refactor could stop composing either from FLIGHT_TOOLS without any
+  // other test noticing.
   it.each(['lifecycle', 'full'] as const)('%s inherits every hand-off tool', (profile) => {
     const available = new Set(TOOLS_BY_PROFILE[profile])
     for (const tools of Object.values(REQUIRED_TOOLS)) {

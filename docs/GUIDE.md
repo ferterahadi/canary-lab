@@ -272,8 +272,10 @@ queue. This planning surface is not available through the CLI or MCP.
 
 ## External authoring workflow
 
-The default `lifecycle` MCP profile combines six workflows—repair, verify,
-author, coverage, export, and Flight—while leaving specialized Portify tools out.
+The bare MCP server's default `lifecycle` profile combines six workflows—repair,
+verify, author, coverage, export, and Flight—while leaving specialized Portify
+tools out. `setup` registers clients with `full` because it installs every
+focused skill, including Portify.
 A client can use the following standalone flow without asking Canary Lab to
 author the content:
 

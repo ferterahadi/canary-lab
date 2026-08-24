@@ -1,6 +1,6 @@
 import { execFileSync } from 'child_process'
 import path from 'path'
-import { DEFAULT_CANARY_LAB_MCP_PROFILE } from '../web-server/src/mcp/tools'
+import type { CanaryLabMcpProfile } from '../web-server/src/mcp/tools'
 import { isUnderTempDir } from '../../shared/runtime/temp-path'
 
 export type McpRegistrationTarget = 'codex' | 'claude'
@@ -31,6 +31,13 @@ const SERVER_NAME = 'Canary_Lab'
 // npm package id used in the portable `npx <pkg>@latest` invocation — must stay
 // the publishable package name, not the display key.
 const PACKAGE_NAME = 'canary-lab'
+
+/** `setup` installs every focused skill, so the connection it registers must
+ *  carry every matching workflow. Keep this separate from the bare MCP
+ *  server's lean `lifecycle` default: manual clients can still opt into a
+ *  narrow surface, while a setup-installed `/canary-lab-portify` never lands
+ *  on a connection that withholds its start/save tools. */
+export const REGISTERED_CANARY_LAB_MCP_PROFILE: CanaryLabMcpProfile = 'full'
 
 // Older builds registered the server under this key. `setup`/`upgrade` migrate
 // any such entry to SERVER_NAME so existing users pick up the rename
@@ -79,11 +86,11 @@ export function resolveMcpInvocation(opts: {
   projectRoot?: string
 }): ResolvedMcpInvocation {
   if (isEphemeralNpxInstall(opts.cliPath)) {
-    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', DEFAULT_CANARY_LAB_MCP_PROFILE] }
+    return { command: 'npx', args: ['-y', `${PACKAGE_NAME}@latest`, 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE] }
   }
   const invocation: ResolvedMcpInvocation = {
     command: opts.execPath,
-    args: [opts.cliPath, 'mcp', '--profile', DEFAULT_CANARY_LAB_MCP_PROFILE],
+    args: [opts.cliPath, 'mcp', '--profile', REGISTERED_CANARY_LAB_MCP_PROFILE],
   }
   // GUI clients (Claude/Codex Desktop) launch servers with a minimal env that
   // often lacks the nvm/homebrew node dir, so embed an explicit PATH.
