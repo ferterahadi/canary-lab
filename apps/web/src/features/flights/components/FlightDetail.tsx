@@ -5,8 +5,9 @@ import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
+import { ACTIVITY_CHIP } from './FlightChipState'
 import { EXTERNAL_DRIVE_COPY, EXTERNAL_SUITE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../lib/external-work'
-import type { FeatureActivity } from '../state/feature-activity'
+import { ACTIVITY_STAGE, type FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 import { STAGE_BLURB, STAGE_COMPANION, STAGE_ICON, formatStageDuration, stageLabel, stageRailRows, stageStatusTone } from './stage-meta'
@@ -229,7 +230,11 @@ export function FlightDetail({
   const featureActivity = flight ? activity?.get(flight.feature) : undefined
   // A verify run is a run in verify mode — the run row must read live for it
   // exactly as for a normal run.
-  const runLive = featureActivity?.kind === 'running' || featureActivity?.kind === 'verifying'
+  const runLive = featureActivity != null && ACTIVITY_STAGE[featureActivity.kind] === 'run'
+  // A recorded flight keeps pointing at the run it conducted. A DERIVED flight
+  // has no such record, so its live run identity comes from the shared run
+  // stream. This is display-only: it never navigates or starts another run.
+  const derivedActiveRunId = derivedFeature && runLive ? featureActivity.runId : undefined
   const railRows = useMemo(() => {
     const rows = flight ? stageRailRows(flight.stages) : []
     return runLive ? rows.map((r) => (r.key === 'run' && r.status !== 'running' ? { ...r, status: 'running' as const } : r)) : rows
@@ -290,7 +295,10 @@ export function FlightDetail({
   // inside that agent and "Needs approval" is a lie either way. Only the
   // flight's own pauses fall through to their real labels.
   const agentHolding = externallyDriven && flight.status === 'waiting-for-approval'
-  const tone = agentHolding ? FLIGHT_STATUS_TONE['running'] : FLIGHT_STATUS_TONE[flight.status]
+  const suiteActivityChip = externalSuiteWork && featureActivity ? ACTIVITY_CHIP[featureActivity.kind] : null
+  const tone = agentHolding
+    ? FLIGHT_STATUS_TONE['running']
+    : suiteActivityChip?.tone ?? FLIGHT_STATUS_TONE[flight.status]
   const evalStage = flight.stages.find((s) => s.key === 'evaluation-export') ?? null
   return (
     <>
@@ -330,6 +338,8 @@ export function FlightDetail({
             // borrow the record-only "paused by you / a stage failed" copy.
             title={agentHolding
               ? EXTERNAL_WORK_COPY.headerTitle
+              : suiteActivityChip
+              ? suiteActivityChip.title
               : derivedFeature
               ? (flight.status === 'done'
                 ? "Every step is done. It was finished outside Canary's own pipeline, so there is no flight history to show"
@@ -339,9 +349,11 @@ export function FlightDetail({
                 : flight.pauseReason === 'restart' ? 'Interrupted by a server restart — Continue resumes it'
                 : 'A step failed — Continue retries it')
               : undefined}
-            icon={flight.status === 'running' || agentHolding ? <StatusDot state="running" className="shrink-0" /> : undefined}
+            icon={flight.status === 'running' || agentHolding || suiteActivityChip ? <StatusDot state="running" className="shrink-0" /> : undefined}
             label={agentHolding
               ? EXTERNAL_WORK_COPY.headerLabel
+              : suiteActivityChip
+              ? capitalizeFirst(suiteActivityChip.label)
               : capitalizeFirst(derivedFeature && flight.status !== 'done' ? 'idle' : flightStatusLabel(flight.status))}
           />
         </h1>
@@ -592,7 +604,7 @@ export function FlightDetail({
               {seeded ? 'Loading the flight’s steps…' : 'Pick a step from the list on the left.'}
             </div>
           ) : (
-            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} activity={featureActivity} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
+            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} activeRunId={derivedActiveRunId} activity={featureActivity} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
           )}
         </main>
       </div>

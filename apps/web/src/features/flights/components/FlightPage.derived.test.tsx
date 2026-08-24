@@ -267,6 +267,75 @@ describe('derived flights (R81)', () => {
     expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toBe('Done')
   })
 
+  it('renders an external run from the live run stream without navigating', async () => {
+    mocks.listRuns.mockResolvedValue([
+      { runId: 'run-live', feature: 'go-smoke', status: 'running', startedAt: '2026-01-01T00:03:00Z', executionType: 'run' },
+    ])
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-live',
+      manifest: { runId: 'run-live', feature: 'go-smoke', status: 'running', healMode: 'external' },
+      summary: { total: 2, passed: 1, failed: [] },
+    })
+    const onSelectFlight = vi.fn()
+    const onSelectStage = vi.fn()
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', allDone()]]),
+      activity: new Map([['go-smoke', { kind: 'running' as const, runId: 'run-live', external: true }]]),
+      stage: 'run',
+      onSelectStage,
+      onSelectFlight,
+    })
+    await act(async () => {})
+
+    expect(container.querySelector('[data-testid="flight-status"]')?.textContent).toContain('Running')
+    expect(container.querySelector('[data-testid="test-run"]')).not.toBeNull()
+    expect(mocks.getRunDetail).toHaveBeenCalledWith('run-live')
+    expect(onSelectFlight).not.toHaveBeenCalled()
+    expect(onSelectStage).not.toHaveBeenCalled()
+  })
+
+  it('does not replace a stage the user selected when an external run starts', async () => {
+    const onSelectFlight = vi.fn()
+    const onSelectStage = vi.fn()
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', allDone()]]),
+      activity: new Map([['go-smoke', { kind: 'running' as const, runId: 'run-live', external: true }]]),
+      stage: 'docs',
+      onSelectStage,
+      onSelectFlight,
+    })
+
+    expect(container.querySelector('[data-testid="stage-rail-run"]')?.querySelector('.cl-status-dot')).not.toBeNull()
+    expect(container.querySelector('[data-testid="test-run"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stage-rail-docs"]')?.getAttribute('aria-current')).toBe('true')
+    expect(onSelectFlight).not.toHaveBeenCalled()
+    expect(onSelectStage).not.toHaveBeenCalled()
+  })
+
+  it('retains the latest terminal run in the derived Test run pane', async () => {
+    const stages = allDone().map((stage) => stage.key === 'run'
+      ? { ...stage, evidence: { runId: 'run-latest', status: 'passed' } }
+      : stage)
+    mocks.listRuns.mockResolvedValue([
+      { runId: 'run-latest', feature: 'go-smoke', status: 'passed', startedAt: '2026-01-01T00:03:00Z', executionType: 'run' },
+    ])
+    mocks.getRunDetail.mockResolvedValue({
+      runId: 'run-latest',
+      manifest: { runId: 'run-latest', feature: 'go-smoke', status: 'passed' },
+      summary: { total: 2, passed: 2, failed: [] },
+    })
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', stages]]),
+      stage: 'run',
+      onSelectStage: vi.fn(),
+    })
+    await act(async () => {})
+
+    expect(container.querySelector('[data-testid="test-run"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="test-run-hero"]')?.textContent).toContain('2/2')
+    expect(mocks.getRunDetail).toHaveBeenCalledWith('run-latest')
+  })
+
   it('offers exactly one primary and no record-scoped controls', async () => {
     await render('feature:go-smoke', { derivedStages: new Map([['go-smoke', allDone()]]) })
     expect(container.querySelector('[data-testid="derived-conduct"]')).toBeTruthy()

@@ -19,6 +19,9 @@ import { useRuns } from '@/features/runs'
 export interface DerivedStage {
   key: FlightStageKey
   status: FlightStageStatus
+  /** Run-store evidence for stages whose identity must survive the active →
+   *  terminal transition without waiting for a Flight REST refetch. */
+  evidence?: Record<string, unknown>
 }
 
 /** Status per stage from workspace evidence. Returns null when the server
@@ -34,6 +37,9 @@ export function deriveFeatureStages(
   if (!ev) return null
   const runStatus: FlightStageStatus =
     latestRun?.status === 'passed' ? 'done' : latestRun?.status === 'failed' ? 'failed' : 'pending'
+  const runEvidence = latestRun
+    ? { runId: latestRun.runId, status: latestRun.status }
+    : undefined
   const suiteSetUp = ev.envCapture || ev.booted === true
   const statusFor: Record<FlightStageKey, FlightStageStatus> = {
     // The feature exists in the workspace at all → it was (implicitly or
@@ -71,7 +77,11 @@ export function deriveFeatureStages(
     'heal': runStatus,
     'evaluation-export': hasExport ? 'done' : 'pending',
   }
-  return FLIGHT_STAGE_KEYS.map((key) => ({ key, status: statusFor[key] }))
+  return FLIGHT_STAGE_KEYS.map((key) => ({
+    key,
+    status: statusFor[key],
+    ...(key === 'run' && runEvidence ? { evidence: runEvidence } : {}),
+  }))
 }
 
 // ---------------------------------------------------------------------------
@@ -114,7 +124,9 @@ export function buildDerivedManifest(
   // The summary strip's RUN reads `runVerdict` — a conducted-flight field a
   // derived record never had, so the strip stayed blank beside a green run one
   // click below. The probed run evidence carries the same verdict; lift it.
-  const probedRunStatus = (prefill?.evidence?.run as { status?: unknown } | undefined)?.status
+  const derivedRunStatus = stages.find((stage) => stage.key === 'run')?.evidence?.status
+  const probedRunStatus = derivedRunStatus
+    ?? (prefill?.evidence?.run as { status?: unknown } | undefined)?.status
   const runVerdict = probedRunStatus === 'passed' || probedRunStatus === 'failed' || probedRunStatus === 'aborted'
     ? probedRunStatus
     : undefined
@@ -140,7 +152,18 @@ export function buildDerivedManifest(
     // work behind a bare "not started". A stage with no artifact to report still
     // carries nothing, so nothing is invented for a step that never happened.
     stages: stages.map((s) => {
-      const evidence = prefill?.evidence?.[s.key]
+      const probed = prefill?.evidence?.[s.key]
+      // The run store is the live source for a derived run's identity and
+      // verdict; the REST probe may be older because the page fetched it before
+      // this run started. Merge only when both name the SAME run — carrying an
+      // older run's counts onto the newer id would turn valid evidence into a
+      // false verdict. The live detail stream fills those fields for a new run.
+      const sameRun = s.key === 'run'
+        && typeof s.evidence?.runId === 'string'
+        && s.evidence.runId === probed?.runId
+      const evidence = probed && s.evidence
+        ? (s.key !== 'run' || sameRun ? { ...probed, ...s.evidence } : s.evidence)
+        : s.evidence ?? probed
       return evidence
         ? { key: s.key, status: s.status, evidence, evidenceSource: 'workspace' as const }
         : { key: s.key, status: s.status }

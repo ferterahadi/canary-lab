@@ -56,6 +56,7 @@ export function StageDetail({
   stage,
   companion,
   runLive,
+  activeRunId,
   activity,
   onResponded,
   onActionError,
@@ -73,6 +74,9 @@ export function StageDetail({
   companion: FlightStage | null
   /** A run for this feature is live right now (R64) — the run row polls. */
   runLive?: boolean
+  /** Run identity supplied by the live run stream for a derived Flight. Real
+   *  flight records keep their own stage/link identity instead. */
+  activeRunId?: string
   /** This feature's live verb (the one activity map App derives) — drives the
    *  "handed over to your agent" card on the stage the live job belongs to. */
   activity?: FeatureActivity
@@ -129,7 +133,7 @@ export function StageDetail({
   const facts = stageFacts(stage, flight, companion ?? undefined, band)
   const drillThrough = stageDrillThrough(stage, flight, drill, companion, onOpenConfig)
   const runId = runMerged
-    ? (((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
+    ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
   // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
   // the run detail poll, so StageDetail no longer fetches it here (R80). The

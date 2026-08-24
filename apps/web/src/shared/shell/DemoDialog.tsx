@@ -195,7 +195,10 @@ function RailRow({ workflow, selected, tone, onSelect }: {
     >
       <span className="min-w-0 flex-1 truncate">{workflow.title}</span>
       <span className="flex h-2 w-2 shrink-0 items-center justify-center">
-        {tone !== 'ready' && <StatusDot state={railDot(tone)} />}
+        {/* Competing demos are temporarily unavailable, not warning states.
+            Keep their rows quiet while the active workflow's running dot and
+            settled workflows' success dots retain their meaning. */}
+        {tone !== 'ready' && tone !== 'blocked' && <StatusDot state={railDot(tone)} />}
       </span>
     </button>
   )

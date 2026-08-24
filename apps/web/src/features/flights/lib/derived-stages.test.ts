@@ -83,9 +83,13 @@ describe('deriveFeatureStages', () => {
 
   it('latest run drives the run/heal cells: passed → done, failed → failed, none → pending', () => {
     const ev = { evidence: { envCapture: true, prdSummary: false, specs: true } }
-    const passed = deriveFeatureStages(ev, run({ status: 'passed' }))!
+    const passed = deriveFeatureStages(ev, run({ runId: 'latest-pass', status: 'passed' }))!
     expect(statusOf(passed, 'run')).toBe('done')
     expect(statusOf(passed, 'heal')).toBe('done')
+    expect(passed.find((stage) => stage.key === 'run')?.evidence).toEqual({
+      runId: 'latest-pass',
+      status: 'passed',
+    })
     const failed = deriveFeatureStages(ev, run({ status: 'failed' }))!
     expect(statusOf(failed, 'run')).toBe('failed')
     const none = deriveFeatureStages(ev)!
@@ -201,6 +205,33 @@ describe('derived flight tokens (R81)', () => {
     // A stage with no probed block stays status-only — nothing is invented.
     expect(m.stages.find((s) => s.key === 'scout')?.evidence).toBeUndefined()
     expect(m.stages.find((s) => s.key === 'scout')?.evidenceSource).toBeUndefined()
+  })
+
+  it('keeps the newest run-store identity when the entry probe still names an older run', () => {
+    const stages = deriveFeatureStages(
+      { evidence: { envCapture: true, prdSummary: true, specs: true } },
+      run({ runId: 'run-new', status: 'failed' }),
+    )!
+    const m = buildDerivedManifest('go-smoke', stages, {
+      evidence: {
+        run: { runId: 'run-old', status: 'passed', counts: { passed: 3, total: 3, failed: 0 } },
+      },
+    })
+    expect(m.runVerdict).toBe('failed')
+    expect(m.stages.find((stage) => stage.key === 'run')?.evidence).toEqual({
+      runId: 'run-new',
+      status: 'failed',
+    })
+
+    const matching = buildDerivedManifest('go-smoke', stages, {
+      evidence: {
+        run: { runId: 'run-new', status: 'failed', counts: { passed: 1, total: 3, failed: 2 } },
+      },
+    })
+    expect(matching.stages.find((stage) => stage.key === 'run')?.evidence).toMatchObject({
+      runId: 'run-new',
+      counts: { passed: 1, total: 3, failed: 2 },
+    })
   })
 
   it('leaves the coverage step OPEN when there is no PRD to map specs onto', () => {

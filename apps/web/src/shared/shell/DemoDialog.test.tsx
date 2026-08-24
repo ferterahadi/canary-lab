@@ -194,6 +194,24 @@ describe('DemoDialog', () => {
     expect((q('getting-started-action-coverage') as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('shows one running rail dot without warning dots on the competing demos', () => {
+    render({
+      session: {
+        active: {
+          sessionId: 'gs-rail', workflow: 'run', owner: 'external',
+          target: { kind: 'run', id: 'run-1' }, startedAt: 'a', updatedAt: 'a',
+        },
+        completed: {},
+      },
+    })
+
+    const activeDot = q('getting-started-workflow-run')?.querySelector('.cl-status-dot')
+    expect(activeDot?.className).toContain('bg-running')
+    for (const id of ['flight', 'coverage', 'author', 'portify', 'heal', 'export']) {
+      expect(q(`getting-started-workflow-${id}`)?.querySelector('.cl-status-dot')).toBeNull()
+    }
+  })
+
   it('shows external ownership in place without pretending progress lives in the dialog', () => {
     render({
       session: {
