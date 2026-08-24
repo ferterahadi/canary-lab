@@ -57,7 +57,7 @@ Only relevant when the flight was started with `stage_producer: "external"`
 because there is no client to hand work to). Seven steps then park on an
 `external-work` checkpoint instead of spawning Canary's own CLI: **scout**
 (survey the repos, draft the feature config), **docs** (gather or infer the
-requirement docs), **prd-summary** (distill the docs into testable
+requirement docs — ask the user first; see the docs bullet below), **prd-summary** (distill the docs into testable
 requirements), **specs↔coverage** (author the spec files, then map them
 onto the requirements — two sequential hand-offs per authoring pass: the
 mapping park asks for `{ mappings[], unmappable[] }` and every test in its
@@ -83,6 +83,18 @@ preserved).
   would have received it — fan-out rule included. Split the reading across your
   own subagents where the prompt says to. If the payload was oversized, `Read`
   `checkpoint.data.promptPath` instead.
+- **The `docs` hand-off: ask the user BEFORE gathering.** The prompt asks you to
+  search the repos (or read the diff), but the user may already hold the
+  requirements. Ask first — "do you have a PRD/spec to give me (paste it, or
+  point me at a local file), or should I gather from the repos by intent /
+  infer from the branch diff?" — and never invent a document. If they supply
+  material, do not gather: write their content (or a faithful distillation of
+  their file) to `checkpoint.data.context.outPath` and submit — or, when they
+  want their original file kept live, `write_feature_doc` with `link_path` and
+  then submit; the step re-parks as `prd-source` with the linked doc counted,
+  so answer `continue` there. Skip the ask only when the user already chose a
+  gather path at a `prd-source` park in this conversation, or told you to
+  proceed without them.
 - Do the work with your own tools, writing to the real paths the prompt names.
   Then release it: `respond_flight_checkpoint(flightId, choice: "submit", data: <the shape the prompt asks for>, token: checkpoint.data.handOffId)`.
 - **Pass `token`, and re-check before you submit.** `checkpoint.data.handOffId`
