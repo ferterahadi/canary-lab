@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { slugify } from '../../features/runs/logic/runtime/summary-types'
 import { registerCoverageAuthoringTools } from './authoring-coverage'
-import { captureTools } from './__fixtures__/tool-group-harness'
+import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The offloaded coverage surface: the calling client does the reading and the
 // inference, Canary hands out context and writes the answer through its own
@@ -430,5 +430,97 @@ describe('submit_external_coverage', () => {
     // run, which is the whole distinction the second percentage exists to carry.
     expect(out.coveragePct).toBe(100)
     expect(out.provenPct).toBe(100)
+  })
+})
+
+describe('Getting Started demo tracking (start_external_summary / start_external_coverage)', () => {
+  it('rejects both starts as busy while another demo owns the workspace', async () => {
+    // The claim gate sits BEFORE the docs/summary checks, so no seeding needed.
+    writeFeature()
+    const gs = fakeGettingStartedDemo({ kind: 'busy', active: BUSY_ACTIVE, message: 'busy with run' })
+    const { call } = harness({ gettingStartedDemo: gs.demo })
+
+    for (const tool of ['start_external_summary', 'start_external_coverage'] as const) {
+      const out = await call(tool, { feature: 'checkout', session_id: 's1' })
+      expect(out.type).toBe('getting_started_busy')
+      expect(out.active).toEqual(BUSY_ACTIVE)
+      expect(out.message).toBe('busy with run')
+      // The steering must forbid a second workflow, not suggest a retry.
+      expect((out.nextSteps as string[]).join(' ')).toContain('do not start another Getting Started workflow')
+    }
+    // Rejected before any job was minted — nothing to attach or abandon.
+    expect(gs.attached).toEqual([])
+    expect(gs.abandoned).toEqual([])
+    expect(fs.existsSync(path.join(logsDir, 'coverage-jobs'))).toBe(false)
+  })
+
+  it('each start claims the coverage card and attaches its own job', async () => {
+    writeFeature()
+    const gsSummary = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-sum' })
+    const { call } = harness({ gettingStartedDemo: gsSummary.demo })
+
+    const summary = await call('start_external_summary', { feature: 'checkout', session_id: 's1' })
+    expect(gsSummary.claims).toEqual([{ workflow: 'coverage', feature: 'checkout' }])
+    expect(gsSummary.attached).toEqual([
+      { sessionId: 'gs-sum', target: { kind: 'coverage-job', id: summary.jobId, feature: 'checkout' } },
+    ])
+    expect(gsSummary.abandoned).toEqual([])
+
+    await call('submit_external_summary', {
+      jobId: summary.jobId,
+      requirements: [{ title: 'Create todo', text: 'a user can create a todo', pathTypes: ['happy'] }],
+    })
+    // The mapping pass re-claims under the same card — a fresh session id.
+    const gsCoverage = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-cov' })
+    const { call: callCoverage } = harness({ gettingStartedDemo: gsCoverage.demo })
+    const coverage = await callCoverage('start_external_coverage', { feature: 'checkout', session_id: 's2' })
+    expect(gsCoverage.attached).toEqual([
+      { sessionId: 'gs-cov', target: { kind: 'coverage-job', id: coverage.jobId, feature: 'checkout' } },
+    ])
+  })
+
+  it('a start that mints no job releases the claim instead of locking the card', async () => {
+    // needs-docs (no PRD) and needs-summary (no spine) both answer without a
+    // job — an unreleased claim would block every card until a restart.
+    const dir = writeFeature()
+    fs.rmSync(path.join(dir, 'docs'), { recursive: true, force: true })
+    const gsSummary = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-sum' })
+    const { call } = harness({ gettingStartedDemo: gsSummary.demo })
+    const summary = await call('start_external_summary', { feature: 'checkout', session_id: 's1' })
+    expect(summary.status).toBe('needs-docs')
+    expect(gsSummary.abandoned).toEqual(['gs-sum'])
+    expect(gsSummary.attached).toEqual([])
+
+    const gsCoverage = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-cov' })
+    const { call: callCoverage } = harness({ gettingStartedDemo: gsCoverage.demo })
+    const coverage = await callCoverage('start_external_coverage', { feature: 'checkout', session_id: 's2' })
+    expect(coverage.status).toBe('needs-summary')
+    expect(gsCoverage.abandoned).toEqual(['gs-cov'])
+    expect(gsCoverage.attached).toEqual([])
+  })
+
+  it('a start that throws releases the claim on the way out', async () => {
+    // A same-kind job already in flight trips the single-flight conflict AFTER
+    // the claim succeeded — the catch must abandon it or the card locks.
+    writeFeature()
+    const { call } = harness()
+    const runningSummary = await call('start_external_summary', { feature: 'checkout', session_id: 's1' })
+
+    const gsSummary = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-sum' })
+    const { text } = harness({ gettingStartedDemo: gsSummary.demo })
+    const out = await text('start_external_summary', { feature: 'checkout', session_id: 's2' })
+    expect(out).toContain('already running for checkout')
+    expect(gsSummary.abandoned).toEqual(['gs-sum'])
+
+    await call('submit_external_summary', {
+      jobId: runningSummary.jobId,
+      requirements: [{ title: 'Create todo', text: 'a user can create a todo', pathTypes: ['happy'] }],
+    })
+    await startCoverageJob()
+    const gsCoverage = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-cov' })
+    const { text: textCoverage } = harness({ gettingStartedDemo: gsCoverage.demo })
+    const covOut = await textCoverage('start_external_coverage', { feature: 'checkout', session_id: 's3' })
+    expect(covOut).toContain('already running for checkout')
+    expect(gsCoverage.abandoned).toEqual(['gs-cov'])
   })
 })

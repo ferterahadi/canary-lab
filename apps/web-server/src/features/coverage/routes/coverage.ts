@@ -23,6 +23,7 @@ import {
   type AgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface CoverageRouteDeps {
   featuresDir: string
@@ -36,6 +37,9 @@ export interface CoverageRouteDeps {
    *  rail reflects the redo live (no-op when absent or the flight is active). */
   flightStore?: FlightStore
   workspaceEvents?: WorkspaceEventPublisher
+  /** Getting Started demo tracking — a job start carrying gettingStartedSource
+   *  claims the 'coverage' card. Absent in tests → no tracking. */
+  gettingStarted?: GettingStartedSessionStore
 }
 
 // The Requirement Coverage Ledger REST surface — the single computation layer the
@@ -312,7 +316,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     return buildAgentSessionResponse(located)
   })
 
-  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter } | undefined }>(
+  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter; gettingStartedSource?: GettingStartedOwner } | undefined }>(
     '/api/features/:name/coverage/jobs',
     async (req, reply) => {
       const kind = req.body?.kind
@@ -323,6 +327,18 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       if (!featureExists(deps.featuresDir, req.params.name)) {
         reply.code(404)
         return { error: `feature not found: ${req.params.name}` }
+      }
+      // The internal coverage demo runs summary + mapping as two jobs; each
+      // start re-claims, so the card briefly settles between them (by design).
+      let gettingStartedSession: string | null = null
+      if (req.body?.gettingStartedSource && deps.gettingStarted) {
+        try {
+          gettingStartedSession = deps.gettingStarted.claim('coverage', req.body.gettingStartedSource).sessionId
+        } catch (err) {
+          if (!(err instanceof GettingStartedBusyError)) throw err
+          reply.code(409)
+          return { type: err.type, error: err.message, active: err.active }
+        }
       }
       try {
         const { manifest } = startCoverageJob(
@@ -338,9 +354,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           },
           { store: jobStore, workspaceEvents: deps.workspaceEvents },
         )
+        if (gettingStartedSession) {
+          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'coverage-job', id: manifest.jobId, feature: req.params.name })
+        }
         reply.code(202)
         return manifest
       } catch (err) {
+        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         if (err instanceof CoverageJobConflictError) {
           reply.code(409)
           return { error: err.message, existingJobId: err.existingJobId }

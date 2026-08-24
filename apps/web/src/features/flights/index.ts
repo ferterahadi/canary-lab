@@ -18,6 +18,7 @@ export type { FeatureFlightAction } from './components/FlightsPill'
 export {
   StageStatusChip,
   stageLabel,
+  stageRowKey,
 } from './components/stage-meta'
 export type { DerivedStage } from './lib/derived-stages'
 export { derivedFlightToken } from './lib/derived-stages'

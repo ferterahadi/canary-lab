@@ -14,7 +14,7 @@ import {
   type ExternalDraftStage,
 } from '../../features/wizard/logic/draft-store'
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
-import { type ToolGroupContext, EXTERNAL_DRAFT_STAGE, asJsonResult, errorResult, externalDraftAuthoringNextSteps, externalDraftView, newDraftId, statusForExternalStage } from '../tool-support'
+import { type ToolGroupContext, EXTERNAL_DRAFT_STAGE, asJsonResult, errorResult, externalDraftAuthoringNextSteps, externalDraftView, gettingStartedBusyResult, newDraftId, statusForExternalStage } from '../tool-support'
 
 export function registerExternalDraftTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -32,6 +32,10 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
   }, async ({ feature, stage, session_id, client_kind, conversation_name, external_session_url }) => {
     const featureConfig = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === feature)
     if (!featureConfig) return errorResult(`feature not found: ${feature}`)
+    // Getting Started demo tracking: claim BEFORE the record exists so a second
+    // demo can't slip in between; attach right after the write links the claim.
+    const claim = deps.gettingStartedDemo?.claim('author', feature) ?? null
+    if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
     const draftId = newDraftId()
     const record = createDraft(deps.store.logsDir, {
       draftId,
@@ -56,6 +60,7 @@ export function registerExternalDraftTools(ctx: ToolGroupContext): void {
       updatedAt: new Date().toISOString(),
     }
     writeDraft(deps.store.logsDir, next)
+    if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'draft', id: draftId, feature })
     return asJsonResult({
       ...externalDraftView(next),
       canaryLabBehavior: 'tracking-only',

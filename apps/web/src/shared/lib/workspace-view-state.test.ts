@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, draft: null, configTab: null, focusTest: null, runTab: null, returnFlight: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, configTab: null, focusTest: null, runTab: null, returnFlight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -386,31 +386,18 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('specs-coverage')
   })
 
-  it('round-trips the draft dialog + its draft id qualifier (URL-only, not mirrored)', () => {
-    persistView(view({ dialog: 'draft', draft: 'dr_abc123' }))
-    expect(window.location.search).toContain('dialog=draft')
-    expect(window.location.search).toContain('draft=dr_abc123')
-    expect(readPersistedView()).toEqual(view({ dialog: 'draft', draft: 'dr_abc123' }))
-    expect(localStorage.getItem(KEY)).not.toContain('dr_abc123')
+  // External authoring now surfaces on the flight's specs-coverage stage, so the
+  // `draft` dialog and its id qualifier are tombstones like `wf` and `task`.
+  it('ignores the retired draft dialog in a stale deep link', () => {
+    window.history.replaceState(null, '', '/?dialog=draft&draft=dr_abc123&feature=checkout')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
   })
 
-  it('reads the draft dialog with no draft id as a null qualifier', () => {
-    // A hand-typed or truncated link can open the dialog without naming a draft.
-    window.history.replaceState(null, '', '/?dialog=draft')
-    expect(readPersistedView()).toEqual(view({ dialog: 'draft', draft: null }))
-  })
-
-  it('drops a draft param found in the URL when the dialog is not draft', () => {
-    window.history.replaceState(null, '', '/?feature=checkout&dialog=config&draft=dr_stale')
-    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
-  })
-
-  it('drops the draft param on close and keeps it out of localStorage', () => {
-    persistView(view({ dialog: 'draft', draft: 'dr_abc123' }))
-    persistView(view({ dialog: null }))
+  it('clears a stale draft param on the next persist', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&draft=dr_stale')
+    persistView(view({ feature: 'checkout', dialog: 'config' }))
     expect(window.location.search).not.toContain('draft=')
-    persistView(view({ dialog: 'draft', draft: 'dr_abc123' }))
-    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: null })
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
   })
 
   it('round-trips the config dialog + its tab qualifier (URL-only, not mirrored)', () => {
@@ -432,8 +419,8 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
   })
 
   it('drops a tab param found in the URL when the dialog is not config', () => {
-    window.history.replaceState(null, '', '/?dialog=draft&draft=dr_1&tab=ports')
-    expect(readPersistedView()).toEqual(view({ dialog: 'draft', draft: 'dr_1' }))
+    window.history.replaceState(null, '', '/?feature=checkout&dialog=verification&tab=ports')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'verification' }))
   })
 
   it('drops the tab param on close', () => {

@@ -107,7 +107,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
 // mapping happens in the user's own client, so we show who is driving it +
 // Canary's tracked log instead of a (non-existent) agent session stream. Built
 // on the shared ExternalAgentCard so it matches external heal / portify / draft.
-function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
+export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
   const clientKind = (job.externalClientKind ?? 'other') as ExternalClientKind
   const { opening, error: openError, open } = useOpenAgentApp()
   // Jump-to-agent affordance: prefer the client's own conversation deep-link when

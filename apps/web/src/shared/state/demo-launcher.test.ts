@@ -65,7 +65,7 @@ describe('Getting Started Flight destinations', () => {
   })
 
   it('starts a fresh Flight directly at the requested stage', () => {
-    expect(demoFlightLaunch('workflow-workbench', 'portify', flightEntry())).toEqual({
+    expect(demoFlightLaunch('portify', 'workflow-workbench', flightEntry())).toEqual({
       kind: 'start',
       body: {
         feature: 'workflow-workbench',
@@ -75,6 +75,8 @@ describe('Getting Started Flight destinations', () => {
         coverageTarget: 85,
         fromStage: 'portify',
         autopilot: true,
+        gettingStartedSource: 'internal',
+        gettingStartedWorkflow: 'portify',
       },
     })
   })
@@ -87,12 +89,14 @@ describe('Getting Started Flight destinations', () => {
       canContinue: true,
       flight: { flightId: 'fl_1', status: 'paused', stages: [] },
     })
-    expect(demoFlightLaunch('workflow-workbench', 'evaluation-export', entry)).toEqual({
+    expect(demoFlightLaunch('export', 'workflow-workbench', entry)).toEqual({
       kind: 'start',
       body: {
         feature: 'workflow-workbench',
         mode: 'continue',
         autopilot: true,
+        gettingStartedSource: 'internal',
+        gettingStartedWorkflow: 'export',
       },
     })
   })
@@ -101,13 +105,15 @@ describe('Getting Started Flight destinations', () => {
     const entry = flightEntry({
       flight: { flightId: 'fl_1', status: 'completed', stages: [] },
     })
-    expect(demoFlightLaunch('workflow-workbench', 'evaluation-export', entry)).toEqual({
+    expect(demoFlightLaunch('export', 'workflow-workbench', entry)).toEqual({
       kind: 'start',
       body: {
         feature: 'workflow-workbench',
         mode: 'jump',
         fromStage: 'evaluation-export',
         autopilot: true,
+        gettingStartedSource: 'internal',
+        gettingStartedWorkflow: 'export',
       },
     })
   })
@@ -117,7 +123,7 @@ describe('Getting Started Flight destinations', () => {
       active: true,
       flight: { flightId: 'fl_1', status: 'running', stages: [] },
     })
-    expect(demoFlightLaunch('workflow-workbench', 'specs-coverage', entry)).toEqual({
+    expect(demoFlightLaunch('author', 'workflow-workbench', entry)).toEqual({
       kind: 'open',
       flightId: 'fl_1',
     })

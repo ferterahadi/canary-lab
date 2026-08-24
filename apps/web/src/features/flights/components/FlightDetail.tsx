@@ -5,7 +5,7 @@ import { capitalizeFirst } from '@/shared/lib/format'
 import { StatusDot, useEscapeToClose } from '@/shared/ui/atoms'
 import { Chip } from '@/shared/ui/StatusChip'
 import { FLIGHT_STATUS_TONE, flightStatusLabel } from './FlightsPill'
-import { EXTERNAL_DRIVE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../lib/external-work'
+import { EXTERNAL_DRIVE_COPY, EXTERNAL_SUITE_COPY, EXTERNAL_WORK_COPY, isExternallyDriven } from '../lib/external-work'
 import type { FeatureActivity } from '../state/feature-activity'
 import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import type { ConfigTab } from '@/shared/lib/workspace-view-state'
@@ -226,7 +226,10 @@ export function FlightDetail({
   // While a run for this feature is live, the run row reads `running` (blue +
   // pulse) instead of its settled verdict — the icon must never show a green
   // tick over a run that is still working (R64).
-  const runLive = flight ? activity?.get(flight.feature)?.kind === 'running' : false
+  const featureActivity = flight ? activity?.get(flight.feature) : undefined
+  // A verify run is a run in verify mode — the run row must read live for it
+  // exactly as for a normal run.
+  const runLive = featureActivity?.kind === 'running' || featureActivity?.kind === 'verifying'
   const railRows = useMemo(() => {
     const rows = flight ? stageRailRows(flight.stages) : []
     return runLive ? rows.map((r) => (r.key === 'run' && r.status !== 'running' ? { ...r, status: 'running' as const } : r)) : rows
@@ -276,6 +279,12 @@ export function FlightDetail({
   // went back to demanding a click for a flight this reader does not drive.
   // A derived pseudo-manifest has no record and no driving client.
   const externallyDriven = !derivedFeature && isExternallyDriven(flight)
+  // Standalone external work on this SUITE (a skill the user invoked — author,
+  // coverage, portify, export — running in their own agent) makes this page
+  // read-only the same way an externally driven flight does: monitor here, act
+  // there. Distinct flag because the copy differs — nothing is "driving this
+  // flight" — and because it gates the derived-flight controls too.
+  const externalSuiteWork = !externallyDriven && featureActivity?.external === true
   // What the CHIP says. A park is a park: whether the agent is holding a step
   // it was handed or a question it has to answer, the flight is progressing
   // inside that agent and "Needs approval" is a lie either way. Only the
@@ -364,6 +373,18 @@ export function FlightDetail({
             {EXTERNAL_DRIVE_COPY.banner}
           </span>
         )}
+        {/* The suite-work counterpart: a skill the user invoked is working on
+            this suite from their own agent, so the controls below are inert
+            and this line says where the work actually is. */}
+        {externalSuiteWork && (
+          <span
+            data-testid="flight-external-suite-work"
+            className="shrink-0 text-[11px] text-secondary"
+            title={EXTERNAL_SUITE_COPY.bannerTitle}
+          >
+            {EXTERNAL_SUITE_COPY.banner}
+          </span>
+        )}
         {/* R74: one button per state. Active → Pause (immediate + honest —
             agent killed, run aborted, repo freed; every stage re-runs cleanly).
             Settled → ONE Continue menu absorbing resume / repeat-a-step /
@@ -381,10 +402,12 @@ export function FlightDetail({
             // user reaches for first, and a missing button reads as a bug — but
             // the tooltip has to name where it moved, or "disabled" is a dead
             // end. Abort in the ⋯ menu is the way out if the agent has died.
-            disabled={externallyDriven}
+            disabled={externallyDriven || externalSuiteWork}
             className="cl-button px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
             title={externallyDriven
               ? EXTERNAL_DRIVE_COPY.pause
+              : externalSuiteWork
+              ? EXTERNAL_SUITE_COPY.pause
               : 'Stops everything — the agent, the test run, and any repair. Continue starts this step again.'}
           >
             ⏸ Pause
@@ -407,14 +430,17 @@ export function FlightDetail({
               type="button"
               data-testid="derived-conduct"
               onClick={() => onStartFlight?.(derivedFeature, derivedEntry ? 'refly' : 'fresh', derivedEntry)}
-              className="cl-button-primary px-2.5 py-1 text-xs"
-              title={derivedEntry
+              disabled={externalSuiteWork}
+              className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
+              title={externalSuiteWork
+                ? EXTERNAL_SUITE_COPY.conduct
+                : derivedEntry
                 ? `Continue this suite from ${stageLabel(derivedEntry)} — finished steps are kept`
                 : 'Every step is done — start a fresh flight to fly it again'}
             >
               {derivedEntry ? `Continue from ${stageLabel(derivedEntry)}` : 'Fly again'}
             </button>
-            <FlightMenu flight={flight} derived onAction={act} onDeleted={onBackToList} />
+            <FlightMenu flight={flight} derived onAction={act} onDeleted={onBackToList} externalSuiteWork={externalSuiteWork} />
           </>
         ) : (
           <>
@@ -422,9 +448,9 @@ export function FlightDetail({
               <DownloadEvaluationAction flight={flight} stage={evalStage} testId="flight-primary-download" primary />
             )}
             {(flight.status === 'paused' || flight.status === 'failed' || flight.status === 'aborted' || flight.status === 'done') && (
-              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externallyDriven={externallyDriven} />
+              <ContinueMenu flight={flight} onAction={act} onStartFlight={onStartFlight} externallyDriven={externallyDriven} externalSuiteWork={externalSuiteWork} />
             )}
-            <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externallyDriven={externallyDriven} />
+            <FlightMenu flight={flight} onAction={act} onDeleted={onBackToList} externallyDriven={externallyDriven} externalSuiteWork={externalSuiteWork} />
           </>
         )}
         <button
@@ -566,7 +592,7 @@ export function FlightDetail({
               {seeded ? 'Loading the flight’s steps…' : 'Pick a step from the list on the left.'}
             </div>
           ) : (
-            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
+            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} activity={featureActivity} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
           )}
         </main>
       </div>

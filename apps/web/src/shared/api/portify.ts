@@ -30,6 +30,9 @@ export interface PortifyIndexEntry {
   branch?: string
   startedAt: string
   endedAt?: string
+  /** Mirrored from the manifest; absent on entries written before the mirror
+   *  existed, which all predate external portify — absent = internal. */
+  producer?: PortifyProducer
 }
 
 export type PortifyProducer = RunProducer

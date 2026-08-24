@@ -12,7 +12,7 @@ import {
 } from '../../features/coverage/logic/coverage/jobs/external'
 import type { ParsedRequirement } from '../../features/coverage/logic/coverage/prd-summary'
 import type { ProposedMapping } from '../../../../../shared/coverage/types'
-import { type ToolGroupContext, asJsonResult, coverageMappingInput, errorResult, failureResult, summaryRequirementInput, variantDimensionInput } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, coverageMappingInput, errorResult, failureResult, gettingStartedBusyResult, summaryRequirementInput, variantDimensionInput } from '../tool-support'
 
 export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -28,6 +28,14 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
       external_session_url: z.string().optional(),
     },
   }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
+    // Getting Started demo tracking. The coverage demo is a two-job sequence:
+    // the summary claim settles when its job completes and start_external_coverage
+    // re-claims — a brief settled state between the two is accepted by design.
+    const claim = deps.gettingStartedDemo?.claim('coverage', feature) ?? null
+    if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
+    const abandonClaim = (): void => {
+      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.abandon(claim.sessionId)
+    }
     try {
       const res = startExternalSummary(
         {
@@ -42,12 +50,14 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         { store: coverageJobStore(deps.store.logsDir) },
       )
       if (res.kind === 'needs-docs') {
+        abandonClaim()
         return asJsonResult({
           status: 'needs-docs',
           feature,
           next: `No source doc on file for "${feature}". ASK THE USER to attach or paste the PRD/spec (do NOT invent one or pull an external file), then write_feature_doc("${feature}", "<name>.md", <content>) and call start_external_summary again.`,
         })
       }
+      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'coverage-job', id: res.manifest.jobId, feature })
       return asJsonResult({
         jobId: res.manifest.jobId,
         status: res.manifest.status,
@@ -58,6 +68,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         next: `Follow context.prompt: read each doc in context.docs, extract requirements (reuse a context.previousRequirementIds id to preserve it), then call submit_external_summary with jobId "${res.manifest.jobId}" and requirements[].`,
       })
     } catch (err) {
+      abandonClaim()
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
       if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
       throw err
@@ -109,6 +120,12 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
       external_session_url: z.string().optional(),
     },
   }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
+    // Second half of the coverage demo — re-claims after the summary job settled.
+    const claim = deps.gettingStartedDemo?.claim('coverage', feature) ?? null
+    if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
+    const abandonClaim = (): void => {
+      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.abandon(claim.sessionId)
+    }
     try {
       const res = startExternalCoverage(
         {
@@ -123,12 +140,14 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         { store: coverageJobStore(deps.store.logsDir) },
       )
       if (res.kind === 'needs-summary') {
+        abandonClaim()
         return asJsonResult({
           status: 'needs-summary',
           feature,
           next: `No PRD summary for "${feature}". Call start_external_summary first (read the docs, submit_external_summary), then start_external_coverage again.`,
         })
       }
+      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'coverage-job', id: res.manifest.jobId, feature })
       return asJsonResult({
         jobId: res.manifest.jobId,
         status: res.manifest.status,
@@ -139,6 +158,7 @@ export function registerCoverageAuthoringTools(ctx: ToolGroupContext): void {
         next: `Follow context.prompt: group context.tests by their \`file\` and dispatch one read-only subagent per group in a single parallel round (up to 5 at once) when there is more than one group to read, otherwise read them yourself. Decide each test's requirement id(s), then call submit_external_coverage with jobId "${res.manifest.jobId}" — every test in mappings[] or unmappable[].`,
       })
     } catch (err) {
+      abandonClaim()
       if (err instanceof FeatureNotFoundError) return errorResult(err.message)
       if (err instanceof CoverageJobConflictError) return errorResult(`${err.message} (existing job ${err.existingJobId})`)
       throw err

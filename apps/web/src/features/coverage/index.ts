@@ -13,6 +13,10 @@ export {
   useDocDrop,
 } from './components/CoverageDocsRail'
 export { VerificationDialog } from './components/VerificationDialog'
+// The branded "mapping runs in your connected client" monitor — reused by the
+// flight's Requirements / Test-authoring stages so an external coverage job
+// reads identically there and on the coverage page's Generating pane.
+export { ExternalMonitorPanel as CoverageExternalMonitorPanel } from './components/CoverageGeneratingPane'
 // The gap + strength vocabulary: labels, status hues, tier tooltips, and the two
 // canonical orders. Exported so the flight's Test-authoring composition card is
 // literally the same words and colours as the ledger page its stage header links

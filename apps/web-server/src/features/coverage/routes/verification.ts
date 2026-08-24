@@ -11,6 +11,7 @@ import {
 } from '../logic/verification'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface VerificationRouteDeps {
   featuresDir: string
@@ -21,6 +22,9 @@ export interface VerificationRouteDeps {
     options?: { cleanupBootRunId: string },
   ): Promise<OrchestratorLike>
   workspaceEvents?: WorkspaceEventPublisher
+  /** Getting Started demo tracking — an execute carrying gettingStartedSource
+   *  claims the 'verify' card. Absent in tests → no tracking. */
+  gettingStarted?: GettingStartedSessionStore
 }
 
 export async function verificationRoutes(app: FastifyInstance, deps: VerificationRouteDeps): Promise<void> {
@@ -129,7 +133,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         reply.code(400)
         return { error: parsed.error }
       }
-      const { bootRunId, ...input } = parsed
+      const { bootRunId, gettingStartedSource, ...input } = parsed
       if (bootRunId) {
         const boot = deps.store.get(bootRunId)?.manifest
         if (!boot || boot.executionType !== 'boot' || boot.feature !== feature.name || !isActiveRunStatus(boot.status)) {
@@ -144,14 +148,29 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         reply.code(409)
         return { error: `Another execution is ${active.status} (${active.feature}). Stop it first.` }
       }
+      // A verify demo's work record IS its run, so the claim targets kind 'run'.
+      let gettingStartedSession: string | null = null
+      if (gettingStartedSource && deps.gettingStarted) {
+        try {
+          gettingStartedSession = deps.gettingStarted.claim('verify', gettingStartedSource).sessionId
+        } catch (err) {
+          if (!(err instanceof GettingStartedBusyError)) throw err
+          reply.code(409)
+          return { type: err.type, error: err.message, active: err.active }
+        }
+      }
       try {
         const orch = bootRunId
           ? await deps.startVerification(feature.name, input, { cleanupBootRunId: bootRunId })
           : await deps.startVerification(feature.name, input)
         deps.store.registry.set(orch.runId, orch)
+        if (gettingStartedSession) {
+          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: orch.runId })
+        }
         reply.code(201)
         return { runId: orch.runId, executionType: 'verify' }
       } catch (err) {
+        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         reply.code(statusCodeOf(err))
         return { error: errorMessageOf(err) }
       }
@@ -170,6 +189,7 @@ interface ExecuteVerificationBody {
   targetUrls?: unknown
   playwrightEnvsetId?: unknown
   bootRunId?: unknown
+  gettingStartedSource?: unknown
 }
 
 function findFeature(featuresDir: string, name: string) {
@@ -202,11 +222,19 @@ function parseExecuteBody(body: ExecuteVerificationBody) {
   if (body.bootRunId !== undefined && typeof body.bootRunId !== 'string') {
     return { error: 'bootRunId must be a string' } as const
   }
+  const gettingStartedSource: GettingStartedOwner | undefined =
+    body.gettingStartedSource === 'internal' || body.gettingStartedSource === 'external'
+      ? body.gettingStartedSource
+      : undefined
+  if (body.gettingStartedSource !== undefined && !gettingStartedSource) {
+    return { error: "gettingStartedSource must be 'internal' or 'external'" } as const
+  }
   return {
     ...(body.configId ? { configId: body.configId } : {}),
     ...(body.playwrightEnvsetId ? { playwrightEnvsetId: body.playwrightEnvsetId } : {}),
     ...(isStringRecord(body.targetUrls) ? { targetUrls: body.targetUrls } : {}),
     ...(body.bootRunId ? { bootRunId: body.bootRunId } : {}),
+    ...(gettingStartedSource ? { gettingStartedSource } : {}),
   }
 }
 

@@ -33,8 +33,24 @@ interface Resolved {
   feedback: { tone: FeedbackTone; text: string }
 }
 
+/** Card titles for the blocked line ("Waiting for … to finish"). Mirrors the
+ *  server's onboarding titles — the active claim carries only the workflow key. */
+const WORKFLOW_WAIT_LABEL: Record<string, string> = {
+  run: 'Repair a Broken Suite',
+  flight: 'Full Flight',
+  coverage: 'Measure Coverage',
+  author: 'Author Tests',
+  portify: 'Enable Parallel Runs',
+  verify: 'Verify a Running App',
+  export: 'Export an Evaluation',
+}
+
+/** What "Open <this>" opens: coverage jobs land on the coverage ledger, runs on
+ *  the run detail, everything else on the suite's Flight page (pinned stage). */
 function targetLabel(target: GettingStartedTarget): string {
-  return target.kind === 'flight' ? 'Flight' : 'run'
+  if (target.kind === 'run') return 'run'
+  if (target.kind === 'coverage-job') return 'coverage'
+  return 'Flight'
 }
 
 /** The rail's dot: state stays visible on a workflow you aren't reading, so a
@@ -87,29 +103,35 @@ function ActionButton({ workflow, resolved }: { workflow: OnboardingWorkflow; re
   )
 }
 
-function resolveCore(workflow: OnboardingWorkflow, session: GettingStartedSessionState, launching: boolean, launchError: string | null, onLaunch: () => void, onOpenTarget: (target: GettingStartedTarget) => void): Resolved {
+/** One resolution ladder for BOTH rail groups: every workflow now claims a
+ *  session, so every card gets the same live verb, open-target button, blocked
+ *  line and completion receipt. `blocker` is the More-group precondition
+ *  ("Complete Run and Heal first.") — folded into unavailability so it gates
+ *  the button and the copied command identically. */
+function resolveWorkflow(workflow: OnboardingWorkflow, session: GettingStartedSessionState, blocker: string | undefined, launching: boolean, launchError: string | null, onLaunch: () => void, onOpenTarget: (target: GettingStartedTarget) => void): Resolved {
   const active = session.active
   const isActive = active?.workflow === workflow.id
-  const completion = workflow.id === 'run' || workflow.id === 'flight'
-    ? session.completed[workflow.id]
-    : undefined
+  const completion = session.completed[workflow.id]
   const internalTarget = isActive && active?.owner === 'internal' ? active.target : null
   const referenceTarget = internalTarget ?? completion?.target ?? null
-  const unavailable = workflow.unavailableReason !== null || workflow.internalAction === null
+  const unavailableReason = workflow.unavailableReason ?? blocker ?? null
+  const unavailable = unavailableReason !== null || workflow.internalAction === null
   const blocked = active !== null && !isActive
 
-  let actionLabel = 'Run in Canary Lab'
+  const kind = workflow.internalAction?.kind
+  const idleLabel = kind && kind !== 'run' && kind !== 'flight' ? MORE_ACTION_LABEL[kind] : 'Run in Canary Lab'
+  let actionLabel = idleLabel
   if (launching) actionLabel = 'Starting…'
   else if (internalTarget) actionLabel = `Open ${targetLabel(internalTarget)}`
   else if (isActive && active.owner === 'external') actionLabel = 'Running in your agent'
   else if (isActive) actionLabel = 'Starting…'
   else if (referenceTarget) actionLabel = `Open last ${targetLabel(referenceTarget)}`
 
-  let feedback: { tone: FeedbackTone; text: string } = { tone: 'ready', text: workflow.unavailableReason ?? '' }
+  let feedback: { tone: FeedbackTone; text: string } = { tone: 'ready', text: unavailableReason ?? '' }
   if (launchError) feedback = { tone: 'blocked', text: launchError }
   else if (blocked) feedback = {
     tone: 'blocked',
-    text: `Waiting for ${active.workflow === 'flight' ? 'Full Flight' : 'Run and Heal'} to finish.`,
+    text: `Waiting for ${WORKFLOW_WAIT_LABEL[active.workflow] ?? 'the running demo'} to finish.`,
   }
   else if (isActive && active.owner === 'external') feedback = {
     tone: 'running',
@@ -132,28 +154,6 @@ function resolveCore(workflow: OnboardingWorkflow, session: GettingStartedSessio
     onAction: () => referenceTarget && !isActive
       ? onOpenTarget(referenceTarget)
       : internalTarget ? onOpenTarget(internalTarget) : onLaunch(),
-    feedback,
-  }
-}
-
-function resolveMore(workflow: OnboardingWorkflow, session: GettingStartedSessionState, blocker: string | undefined, launching: boolean, launchError: string | null, onLaunch: () => void): Resolved {
-  const blocked = session.active !== null
-  const unavailableReason = workflow.unavailableReason ?? blocker ?? null
-  const kind = workflow.internalAction?.kind
-  const actionLabel = kind && kind !== 'run' && kind !== 'flight' ? MORE_ACTION_LABEL[kind] : 'Run in Canary Lab'
-  const feedback: { tone: FeedbackTone; text: string } = launchError
-    ? { tone: 'blocked', text: launchError }
-    : blocked
-      ? { tone: 'blocked', text: 'Waiting for the running demo to finish.' }
-      : { tone: 'ready', text: unavailableReason ?? '' }
-  return {
-    actionLabel: launching ? 'Starting…' : actionLabel,
-    actionDisabled: blocked || launching || unavailableReason !== null || !workflow.internalAction,
-    // The folded reason, not the raw field: a precondition blocker ("Complete
-    // Run and Heal first.") gates the external prompt exactly like the button —
-    // the copied command would hit the same missing prerequisite in the agent.
-    copyDisabled: blocked || launching || unavailableReason !== null,
-    onAction: onLaunch,
     feedback,
   }
 }
@@ -308,9 +308,8 @@ export function DemoDialog({ open, onClose, workflows, session, actionBlockers =
       .finally(() => setLaunching((current) => current === workflow.id ? null : current))
   }
 
-  const resolve = (workflow: OnboardingWorkflow): Resolved => workflow.group === 'start'
-    ? resolveCore(workflow, session, launching === workflow.id, launchErrors[workflow.id] ?? null, () => launch(workflow), onOpenTarget)
-    : resolveMore(workflow, session, actionBlockers[workflow.id], launching === workflow.id, launchErrors[workflow.id] ?? null, () => launch(workflow))
+  const resolve = (workflow: OnboardingWorkflow): Resolved =>
+    resolveWorkflow(workflow, session, actionBlockers[workflow.id], launching === workflow.id, launchErrors[workflow.id] ?? null, () => launch(workflow), onOpenTarget)
 
   // The rail always opens on something: a running demo owns the view, else the
   // first starter. A dialog that opens on an empty pane teaches nothing.

@@ -44,7 +44,7 @@ interface RunsContextValue {
   startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot') => Promise<string>
   startVerification: (
     feature: string,
-    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string },
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ) => Promise<string>
   /** Lazily hydrate a run detail that was omitted from the initial WS
    *  snapshot. Terminal runs use this path so selecting historical rows does
@@ -207,7 +207,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
 
   const startVerification = useCallback(async (
     feature: string,
-    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string },
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ): Promise<string> => {
     const { runId } = await api.executeVerification(feature, input)
     if (state.connection !== 'live') await refresh()
@@ -279,7 +279,7 @@ export interface UseRunsResult {
   /** Start a deployment verification. */
   startVerification: (
     feature: string,
-    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string },
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ) => Promise<string>
   // ── Per-run actions (the runId is the first arg). The parent can
   //    dispatch these for any row without needing a child component. ──

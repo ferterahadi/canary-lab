@@ -5,3 +5,6 @@
 // this feature's contract, so add one deliberately.
 
 export { useEvaluationExports } from './state/EvaluationExportContext'
+// One export task in place (status line, output pane, download) — the flight's
+// Evaluation Report stage mounts it for a live external export.
+export { EvaluationTaskPanel } from './components/EvaluationTaskPanel'

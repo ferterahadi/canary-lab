@@ -16,10 +16,10 @@ let changes: number
 
 function resolver(): GettingStartedStatusResolver {
   return {
-    run: () => runStatus,
-    flight: () => flightStatus,
-    isRunActive: (status) => ['queued', 'running', 'healing'].includes(status),
-    isFlightActive: (status) => ['queued', 'running', 'waiting-for-approval'].includes(status),
+    status: (target) => (target.kind === 'flight' ? flightStatus : runStatus),
+    isActive: (target, status) => target.kind === 'flight'
+      ? ['queued', 'running', 'waiting-for-approval'].includes(status)
+      : ['queued', 'running', 'healing'].includes(status),
   }
 }
 

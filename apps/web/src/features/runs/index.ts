@@ -15,6 +15,7 @@ export {
   useActiveRuns,
   useActiveVerifyRuns,
   useRun,
+  useRunDetails,
   useRuns,
 } from './state/RunsContext'
 export { sourceLineForBodyLine } from './utils/editor-location'

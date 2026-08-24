@@ -382,4 +382,9 @@ export interface CoverageJobIndexEntry {
   status: CoverageJobStatus
   startedAt: string
   endedAt?: string
+  /** Mirrored from the manifest so the activity map can tell an external
+   *  (MCP-client-driven) job from a spawned one off the index alone, without
+   *  opening one manifest per job. Absent on entries written before the
+   *  mirror existed — those all predate external jobs, so absent = internal. */
+  producer?: 'internal' | 'external'
 }

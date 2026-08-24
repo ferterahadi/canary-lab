@@ -42,6 +42,8 @@ demo follow the **Local app** flow below: boot the app, then verify it.
 2. Create or adjust a config with `create_verification_config` / `update_verification_config` — a config binds a feature to a target environment (base URLs, env set, health-check expectations). Ask the user for the target URLs rather than inventing them.
 3. `execute_verification` starts the verification run. `featureId` is required; pass either a saved `configId`, or ad-hoc `targetUrls` + `playwrightEnvsetId`. It returns an `executionId`.
 
+**Both flows**: if `execute_verification` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace — follow the active target it returns; do not start another workflow. While the verification runs, the user can watch it live in the Canary Lab UI on the suite's Flight page (Test Run stage, in verify mode) — that view is read-only while this client drives.
+
 **Both flows end the same way**: poll `get_verification_result(executionId)` for the outcome; if it is still running, wait ~10s and call it again — stop once it reaches a terminal status. Report the result's `status`, and on failure the pass/fail counts in the result (`diagnostics.summary` / `diagnostics.failedTests` — there is no `counts` field on a verify result). There is no heal claim here — a failure is a finding to report (and possibly a `canary-lab-run` follow-up locally), not something to fix against the target environment. Only `abort_run` a held boot session with the user's confirmation (the `bootRunId` hand-off above tears it down automatically).
 
 ## Guardrails

@@ -11,7 +11,7 @@ import {
   evaluationExportTaskPaths,
 } from '../../features/evaluation/logic/evaluation-export-store'
 import { registerEvaluationExportTools } from './authoring-export'
-import { captureTools } from './__fixtures__/tool-group-harness'
+import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The externally-authored evaluation export: create a task for a finished run,
 // submit client wording, then read/download/delete the rendered archive.
@@ -120,6 +120,40 @@ describe('start_external_evaluation_export', () => {
 
     expect(out.task).not.toHaveProperty('conversationName')
     expect(out.task).not.toHaveProperty('externalSessionUrl')
+  })
+
+  it('getting-started: rejects the start as busy while another demo owns the workspace', async () => {
+    const gs = fakeGettingStartedDemo({ kind: 'busy', active: BUSY_ACTIVE, message: 'busy with run' })
+    const { call } = harness(runDetail(), { gettingStartedDemo: gs.demo })
+
+    const out = await call('start_external_evaluation_export', {
+      runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
+    })
+
+    expect(out.type).toBe('getting_started_busy')
+    expect(out.active).toEqual(BUSY_ACTIVE)
+    expect(gs.attached).toEqual([])
+  })
+
+  it('getting-started: a successful start attaches the new task; a gated start never claims', async () => {
+    // The claim sits AFTER the terminal/boot gates so a rejected start never
+    // needs releasing — a boot session must bounce without touching the card.
+    const gs = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-exp' })
+    const boot = runDetail({}, { executionType: 'boot', status: 'aborted' })
+    const { text } = harness(boot, { gettingStartedDemo: gs.demo })
+    await text('start_external_evaluation_export', {
+      runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
+    })
+    expect(gs.claims).toEqual([])
+
+    const { call } = harness(runDetail(), { gettingStartedDemo: gs.demo })
+    const out = await call('start_external_evaluation_export', {
+      runId: 'run-1', language: 'English', session_id: 's-1', client_kind: 'claude',
+    })
+    expect(gs.claims).toEqual([{ workflow: 'export', feature: 'checkout' }])
+    expect(gs.attached).toEqual([
+      { sessionId: 'gs-exp', target: { kind: 'export', id: (out.task as { taskId: string }).taskId, feature: 'checkout' } },
+    ])
   })
 
   it('offers an export for a failed run, which is the case that most needs one', async () => {

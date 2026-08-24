@@ -36,6 +36,8 @@ import type { WorkspaceEvent } from '../../../shared/workspace-events'
 
 import { CoverageJobRunStore, type CoverageJobStore, type CoverageJobStoreEvent } from '../logic/coverage/jobs/store'
 
+import { GettingStartedSessionStore, type GettingStartedActiveSession } from '../../config/logic/getting-started-session'
+
 let tmpDir: string
 
 let featuresDir: string
@@ -327,6 +329,116 @@ describe('coverage routes', () => {
     const ids = jobs.map((j) => j.jobId)
     expect(ids.indexOf('cj-b')).toBeLessThan(ids.indexOf('cj-c'))
     expect(ids.indexOf('cj-c')).toBeLessThan(ids.indexOf('cj-a'))
+  })
+
+  it('getting-started: claims on gettingStartedSource, attaches the job, and 409s while another demo holds the claim', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart adds an item\nuser adds an item to the cart' })
+    await app.inject({ method: 'POST', url: '/api/features/checkout/prd-summary/regenerate', payload: {} })
+    await app.close()
+
+    // A real session store (the claim/settle lifecycle is filesystem state);
+    // the resolver keeps the job "active" so read() doesn't settle it mid-test.
+    const gettingStarted = new GettingStartedSessionStore(
+      logsDir,
+      { status: () => 'running', isActive: () => true },
+      () => {},
+    )
+    app = Fastify()
+    await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, gettingStarted })
+    await app.ready()
+
+    const start = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/coverage/jobs',
+      payload: { kind: 'coverage', gettingStartedSource: 'external' },
+    })
+    expect(start.statusCode).toBe(202)
+    const jobId = (start.json() as { jobId: string }).jobId
+    // The claim is linked to the job it started — that link is what the
+    // Getting Started card resolves its live status from.
+    expect(gettingStarted.read().active).toMatchObject({
+      workflow: 'coverage',
+      owner: 'external',
+      target: { kind: 'coverage-job', id: jobId, feature: 'checkout' },
+    })
+
+    // While that demo holds the workspace, a second sourced start bounces.
+    const busy = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/coverage/jobs',
+      payload: { kind: 'summary', gettingStartedSource: 'internal' },
+    })
+    expect(busy.statusCode).toBe(409)
+    const busyBody = busy.json() as { type: string; error: string; active: GettingStartedActiveSession }
+    expect(busyBody.type).toBe('getting_started_busy')
+    expect(busyBody.active.workflow).toBe('coverage')
+    expect(typeof busyBody.error).toBe('string')
+  })
+
+  it('getting-started: a start without a source never claims; a job conflict releases a made claim', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart\nuser adds an item' })
+    await app.close()
+
+    const store = new CoverageJobRunStore(logsDir)
+    const gettingStarted = new GettingStartedSessionStore(
+      logsDir,
+      { status: () => 'running', isActive: () => true },
+      () => {},
+    )
+    app = Fastify()
+    await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, coverageJobStore: store, gettingStarted })
+    await app.ready()
+
+    // Seed a running job so startCoverageJob throws its single-flight conflict.
+    store.save({ jobId: 'cj-blocker', feature: 'checkout', kind: 'coverage', status: 'running', startedAt: '2026-01-01T00:00:00Z', log: '' })
+
+    const conflict = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/coverage/jobs',
+      payload: { kind: 'coverage', gettingStartedSource: 'internal' },
+    })
+    expect(conflict.statusCode).toBe(409)
+    expect((conflict.json() as { existingJobId: string }).existingJobId).toBe('cj-blocker')
+    // The claim made before the failed start must be released, or the demo
+    // card stays locked with no job behind it.
+    expect(gettingStarted.read().active).toBeNull()
+
+    // An unsourced start against the same wired store never touches the claim.
+    const unsourced = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/coverage/jobs',
+      payload: { kind: 'coverage' },
+    })
+    expect(unsourced.statusCode).toBe(409) // still the job conflict — and still no claim
+    expect(gettingStarted.read().active).toBeNull()
+  })
+
+  it('getting-started: a non-busy claim failure propagates as a 500, not a swallowed demo state', async () => {
+    writeFeature('checkout', SPEC, { 'spec.md': '# Cart\nuser adds an item' })
+    await app.close()
+
+    // An attached active session whose resolver explodes: the route's claim
+    // call re-throws anything that is not the busy signal.
+    let explode = false
+    const gettingStarted = new GettingStartedSessionStore(
+      logsDir,
+      { status: () => { if (explode) throw new Error('resolver exploded'); return 'running' }, isActive: () => true },
+      () => {},
+    )
+    const session = gettingStarted.claim('coverage', 'internal')
+    gettingStarted.attach(session.sessionId, { kind: 'coverage-job', id: 'cj-x', feature: 'checkout' })
+    explode = true
+
+    app = Fastify()
+    await app.register(coverageRoutes, { featuresDir, logsDir, projectRoot: tmpDir, gettingStarted })
+    await app.ready()
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/coverage/jobs',
+      payload: { kind: 'coverage', gettingStartedSource: 'external' },
+    })
+    expect(res.statusCode).toBe(500)
   })
 
   it('re-throws non-conflict errors from startCoverageJob as 500 (line 275)', async () => {

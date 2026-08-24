@@ -101,11 +101,12 @@ export function regeneratePrdSummary(
 export function startCoverageJob(
   feature: string,
   kind: CoverageJobKind,
-  opts?: ClientOptions & { adapter?: 'auto' | 'claude' | 'codex' | 'deterministic' },
+  opts?: ClientOptions & { adapter?: 'auto' | 'claude' | 'codex' | 'deterministic'; gettingStartedSource?: 'internal' | 'external' },
 ): Promise<CoverageJobManifest> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)
   const body: Record<string, unknown> = { kind }
   if (opts?.adapter) body.adapter = opts.adapter
+  if (opts?.gettingStartedSource) body.gettingStartedSource = opts.gettingStartedSource
   return request<CoverageJobManifest>(
     `${baseUrl}/api/features/${encodeURIComponent(feature)}/coverage/jobs`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },

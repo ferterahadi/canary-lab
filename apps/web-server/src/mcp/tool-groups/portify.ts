@@ -7,7 +7,7 @@ import { computePortPreflight } from '../../features/runs/logic/runtime/port-pre
 import { publishWorkspaceEvent } from '../../shared/workspace-events'
 import { overlayExists as portifyOverlayExists } from '../../features/portify/logic/runtime/overlay'
 import { portInjectability } from '../../../../../shared/launcher/port-injectability'
-import { type ToolGroupContext, asJsonResult, ensureExternalClaimForMcpCall, errorResult, failureResult, summarizeUnifiedDiff } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, ensureExternalClaimForMcpCall, errorResult, failureResult, gettingStartedBusyResult, summarizeUnifiedDiff } from '../tool-support'
 
 export function registerPortifyTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -24,6 +24,10 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
     },
   }, async ({ feature, session_id, client_kind, conversation_name, external_session_url }) => {
     if (!deps.startExternalPortify) return errorResult('startExternalPortify dependency is not configured')
+    // Getting Started demo tracking: claim before the workflow exists, attach
+    // its workflowId after, release on any start failure.
+    const claim = deps.gettingStartedDemo?.claim('portify', feature) ?? null
+    if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
     try {
       const result = await deps.startExternalPortify({
         feature,
@@ -32,6 +36,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
         ...(conversation_name ? { conversationName: conversation_name } : {}),
         ...(external_session_url ? { sessionUrl: external_session_url } : {}),
       })
+      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'portify', id: result.workflowId, feature })
       return asJsonResult({
         ...result,
         status: 'editing',
@@ -41,6 +46,7 @@ export function registerPortifyTools(ctx: ToolGroupContext): void {
         next: `Edit each target's source (in its worktree path) so the listener reads an injected port, declare the matching \`ports\` slots in ${result.configPath}, then call submit_external_portify with workflowId "${result.workflowId}". Poll get_portify; save_portify once status is "ready-to-save".`,
       })
     } catch (err) {
+      if (claim?.kind === 'claimed') deps.gettingStartedDemo?.abandon(claim.sessionId)
       return failureResult(err)
     }
   })

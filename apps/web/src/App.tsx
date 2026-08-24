@@ -12,7 +12,6 @@ import { GlobalStatusBar } from './shared/shell/GlobalStatusBar'
 import { CollisionConfirmDialog } from './features/runs/components/CollisionConfirmDialog'
 import { RunStartErrorDialog } from './features/runs/components/RunStartErrorDialog'
 import { PortifyWizard } from './features/portify/components/PortifyWizard'
-import { DraftDialog } from './features/wizard/components/DraftDialog'
 // The three routed full-screen views load lazily: none of them is needed for
 // the workspace's first paint, and together (the flight detail tree above all)
 // they were a large slice of the single main chunk every cold load downloaded.
@@ -78,7 +77,6 @@ export function App() {
     verifyOpen, setVerifyOpen,
     flightStartFor, flightStartFresh, flightStartStage, setFlightStartFor,
     flightStartNew, setFlightStartNew,
-    draftFor, setDraftFor,
     demoOpen, setDemoOpen,
     settingsOpen, setSettingsOpen,
     resumePlanTaskId, setResumePlanTaskId,
@@ -183,9 +181,8 @@ export function App() {
       // openFlight clears the stage when the flight changes, so pin it after.
       if (target.stage) setFlightStage(target.stage)
     }
-    else if (target.kind === 'draft') setDraftFor(target.draftId)
     else setPortifyTarget({ kind: 'revisit', workflowId: target.workflowId })
-  }, [navigateToRun, openFlight, setFlightStage, setPortifyTarget, setDraftFor, flightsRef])
+  }, [navigateToRun, openFlight, setFlightStage, setPortifyTarget, flightsRef])
 
   // Column 3 lists runs scoped to the currently-selected feature. Boot-only
   // sessions are excluded — they're not test runs and live in the global
@@ -341,7 +338,7 @@ export function App() {
       // leaving the Author demo nothing to do). The standalone mapping job reads
       // the shipped PRD summary and only reports.
       try {
-        await api.startCoverageJob(action.feature, 'coverage')
+        await api.startCoverageJob(action.feature, 'coverage', { gettingStartedSource: 'internal' })
       } catch (error) {
         // Already mapping (started from another tab/agent) — the ledger page
         // attaches to the running job on mount, so just go look at it.
@@ -355,7 +352,7 @@ export function App() {
     if (action.kind === 'export' || action.kind === 'author' || action.kind === 'portify') {
       const stage = DEMO_FLIGHT_STAGE[action.kind]
       const entry = await api.getFlightEntryOptions(action.feature)
-      const launch = demoFlightLaunch(action.feature, stage, entry)
+      const launch = demoFlightLaunch(action.kind, action.feature, entry)
       const flightId = launch.kind === 'start'
         ? (await api.startFlight(launch.body)).flightId
         : launch.flightId
@@ -373,6 +370,7 @@ export function App() {
           targetUrls,
           playwrightEnvsetId: 'local',
           bootRunId,
+          gettingStartedSource: 'internal',
         })
         setDemoOpen(false)
         navigateToRun(action.feature, verificationRunId)
@@ -390,9 +388,28 @@ export function App() {
       openFlight(target.id)
       return
     }
+    if (target.kind === 'coverage-job') {
+      setSelectedFeature(target.feature)
+      navigateToCoverage(target.feature)
+      return
+    }
+    if (target.kind === 'draft' || target.kind === 'portify' || target.kind === 'export') {
+      // These demos live on the suite's flight page, pinned to their stage —
+      // a stage completed standalone still routes there via the derived token.
+      const stage = DEMO_FLIGHT_STAGE[target.kind === 'draft' ? 'author' : target.kind]
+      const flight = flightsRef.current.find((entry) => entry.feature === target.feature)
+      openFlight(flight ? flight.flightId : derivedFlightToken(target.feature))
+      setFlightStage(stage)
+      return
+    }
+    // kind 'run' — a run demo's target, or a verify demo's verification run.
+    // Resolve the run's own feature; fall back to the run workflow's fixture
+    // for a record the list hasn't loaded yet.
+    const runFeature = allRuns.find((run) => run.runId === target.id)?.feature
     const runWorkflow = demo.workflows.find((workflow) => workflow.id === 'run')?.internalAction
-    if (runWorkflow?.kind === 'run') navigateToRun(runWorkflow.feature, target.id)
-  }, [demo.workflows, navigateToRun, openFlight, setDemoOpen])
+    const feature = runFeature ?? (runWorkflow?.kind === 'run' ? runWorkflow.feature : null)
+    if (feature) navigateToRun(feature, target.id)
+  }, [allRuns, demo.workflows, flightsRef, navigateToCoverage, navigateToRun, openFlight, setDemoOpen, setFlightStage, setSelectedFeature])
 
   const selectedFeatureEnvs =
     features.find((f) => f.name === selectedFeature)?.envs ?? []
@@ -701,9 +718,6 @@ export function App() {
             invalidate('ports')
           }}
         />
-      )}
-      {draftFor && (
-        <DraftDialog draftId={draftFor} onClose={() => setDraftFor(null)} />
       )}
     </div>
   )

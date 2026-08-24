@@ -124,6 +124,24 @@ export const EXTERNAL_DRIVE_COPY = {
   checkpointLine: 'Your agent answers this — it is holding the question now.',
 } as const
 
+/** Standalone external work — a skill the user invoked (author, coverage,
+ *  portify, export) is working on this SUITE from their own agent session, with
+ *  no flight record driving it. The same read-only rule as EXTERNAL_DRIVE_COPY
+ *  — the flight page monitors, the agent acts — but its own phrasing: nothing
+ *  is "driving this flight", the agent is working on the suite. The predicate
+ *  is the feature's live activity (`FeatureActivity.external`), read where the
+ *  page already holds it, so there is no second derivation to drift. */
+export const EXTERNAL_SUITE_COPY = {
+  /** Header line — the counterpart of EXTERNAL_DRIVE_COPY.banner. */
+  banner: 'Your agent is working on this suite — follow it below.',
+  bannerTitle:
+    'A skill you invoked is working on this suite from your own agent session. Monitor it here; act from that session. Controls unlock when it finishes.',
+  pause: 'Your agent is working on this suite — nothing here can stop that work.',
+  continueFlight: 'Your agent is working on this suite — flights can continue once it finishes.',
+  conduct: 'Your agent is working on this suite — start a flight once it finishes.',
+  delete: 'Your agent is working on this suite — deleting it now would rip the files out from under that work.',
+} as const
+
 /** The question every "does this need a click?" surface is really asking — the
  *  pill's count, the picker's rank-0 sort, the suites column's ordering, the
  *  chip's amber attention wash, the toasts.

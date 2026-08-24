@@ -46,7 +46,6 @@ export interface WorkspaceNavigation {
   flightStartFor: string | null
   flightStartFresh: boolean
   flightStartNew: boolean
-  draftFor: string | null
   /** Whether the Getting Started guide is open (routed ?dialog=demo). */
   demoOpen: boolean
   /** Whether Project Settings is open (routed ?dialog=settings). */
@@ -76,8 +75,6 @@ export interface WorkspaceNavigation {
    *  dialog on the re-entry picker. */
   flightStartStage: FlightStageKey | null
   setFlightStartNew: (open: boolean) => void
-  /** Open (id) / close (null) the external authoring-draft dialog. */
-  setDraftFor: (id: string | null) => void
   /** Open / close the Getting Started guide. */
   setDemoOpen: (open: boolean) => void
   /** Open / close Project Settings. */
@@ -141,7 +138,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setFlightStartFresh(f !== null && intent === 'fresh')
     setFlightStartStage(f !== null ? fromStage : null)
   }, [])
-  const [draftFor, setDraftFor] = useState<string | null>(SEED.draftFor)
   const [demoOpen, setDemoOpen] = useState<boolean>(SEED.demoOpen)
   const [settingsOpen, setSettingsOpen] = useState<boolean>(SEED.settingsOpen)
   const [resumePlanTaskId, setResumePlanTaskId] = useState<string | null>(SEED.resumePlanTaskId)
@@ -172,7 +168,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartFor,
     flightStartFresh,
     flightStartNew,
-    draftFor,
     demoOpen,
     settingsOpen,
     resumePlanTaskId,
@@ -189,16 +184,15 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     persistView(navToPersistedView(state))
     // Intentionally keyed on the primitive fields, not the freshly-built `state`
     // object (new identity every render).
-    // draftFor is listed explicitly: the `dialog` value stays 'draft' when the
-    // open draft changes id-to-id, so keying on `dialog` alone would leave the
-    // URL's `draft` param stale. configTab is listed for the same reason — the
-    // dialog stays 'config' while the user switches tabs inside it.
-     
-    // focusTest is listed for the same reason as draftFor/configTab: the run
-    // stays the same while the focused test changes, so keying on selectedRunId
-    // alone would leave the URL's `test` param stale. runTab is the same case —
+    // configTab is listed explicitly: the `dialog` value stays 'config' while
+    // the user switches tabs inside it, so keying on `dialog` alone would leave
+    // the URL's `tab` param stale.
+
+    // focusTest is listed for the same reason as configTab: the run stays the
+    // same while the focused test changes, so keying on selectedRunId alone
+    // would leave the URL's `test` param stale. runTab is the same case —
     // re-opening the SAME run on a different tab must rewrite `runtab`.
-  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, draftFor, configTab, focusTest, runTab, returnFlight])
+  }, [view, selectedFeature, selectedRunId, dialog, selectedFlightId, flightStage, configTab, focusTest, runTab, returnFlight])
 
   // Cross-tab: another tab's durable-tier change (view + feature) pushes here.
   useEffect(() => onViewChangedInOtherTab((s) => {
@@ -260,7 +254,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     flightStartFresh,
     flightStartStage,
     flightStartNew,
-    draftFor,
     demoOpen,
     settingsOpen,
     resumePlanTaskId,
@@ -277,7 +270,6 @@ export function useWorkspaceNavigation(): WorkspaceNavigation {
     setVerifyOpen,
     setFlightStartFor,
     setFlightStartNew,
-    setDraftFor,
     setDemoOpen,
     setSettingsOpen,
     setResumePlanTaskId,

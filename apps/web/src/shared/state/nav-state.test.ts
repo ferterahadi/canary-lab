@@ -21,7 +21,6 @@ const base: NavState = {
   flightStartFor: null,
   flightStartFresh: false,
   flightStartNew: false,
-  draftFor: null,
   demoOpen: false,
   settingsOpen: false,
   resumePlanTaskId: null,
@@ -38,7 +37,6 @@ const persisted = (over: Partial<PersistedView> = {}): PersistedView => ({
   dialog: null,
   flight: null,
   flightStage: null,
-  draft: null,
   configTab: null,
   focusTest: null,
   runTab: null,
@@ -73,7 +71,7 @@ describe('initialNavState', () => {
     const s = initialNavState(persisted({ dialog: 'config', feature: 'checkout', configTab: 'ports' }))
     expect(s.configTab).toBe('ports')
     // A tab that outlived its dialog is dropped, not carried onto another one.
-    expect(initialNavState(persisted({ dialog: 'draft', configTab: 'ports' })).configTab).toBeNull()
+    expect(initialNavState(persisted({ dialog: 'verification', configTab: 'ports' })).configTab).toBeNull()
   })
 
   it('opens the config dialog on the persisted feature', () => {
@@ -100,10 +98,6 @@ describe('initialNavState', () => {
   it('opens verification / flight-new from their dialog params', () => {
     expect(initialNavState(persisted({ dialog: 'verification' })).verifyOpen).toBe(true)
     expect(initialNavState(persisted({ dialog: 'flight-new' })).flightStartNew).toBe(true)
-  })
-
-  it('opens the draft dialog on the persisted draft id', () => {
-    expect(initialNavState(persisted({ dialog: 'draft', draft: 'dr_9' })).draftFor).toBe('dr_9')
   })
 
   it('reopens the demo chooser from a cold load, and only from its own param', () => {
@@ -164,12 +158,8 @@ describe('routedDialog precedence (z-order)', () => {
     expect(routedDialog(base)).toBeNull()
   })
 
-  it('config outranks draft, flight-start, flight-new and verify', () => {
-    expect(routedDialog({ ...base, configFor: 'x', draftFor: 'dr_9', flightStartFor: 'y', flightStartNew: true, verifyOpen: true })).toBe('config')
-  })
-
-  it('draft outranks flight-start, flight-new and verify', () => {
-    expect(routedDialog({ ...base, draftFor: 'dr_9', flightStartFor: 'y', flightStartNew: true, verifyOpen: true })).toBe('draft')
+  it('config outranks flight-start, flight-new and verify', () => {
+    expect(routedDialog({ ...base, configFor: 'x', flightStartFor: 'y', flightStartNew: true, verifyOpen: true })).toBe('config')
   })
 
   it('flight-start outranks flight-new and verify', () => {
@@ -216,12 +206,7 @@ describe('routedDialog precedence (z-order)', () => {
 describe('navToPersistedView', () => {
   it('projects the routable fields + the winning dialog', () => {
     const s: NavState = { ...base, view: 'flights', feature: 'checkout', run: 'run-1', flight: 'fl_1', configFor: 'checkout', configTab: 'ports' }
-    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, draft: null, configTab: 'ports', focusTest: null, runTab: null, returnFlight: null })
-  })
-
-  it('projects the open draft id + dialog=draft', () => {
-    const s: NavState = { ...base, draftFor: 'dr_9' }
-    expect(navToPersistedView(s)).toEqual({ view: 'workspace', feature: null, run: null, dialog: 'draft', flight: null, flightStage: null, draft: 'dr_9', configTab: null, focusTest: null, runTab: null, returnFlight: null })
+    expect(navToPersistedView(s)).toEqual({ view: 'flights', feature: 'checkout', run: 'run-1', dialog: 'config', flight: 'fl_1', flightStage: null, configTab: 'ports', focusTest: null, runTab: null, returnFlight: null })
   })
 })
 
@@ -264,14 +249,20 @@ describe('resolveActivityTarget', () => {
       .toEqual({ kind: 'portify', workflowId: 'wf_1' })
   })
 
-  it('authoring → the draft dialog for its draftId', () => {
+  it('authoring → the flight at its specs stage (the routed draft dialog is retired)', () => {
+    // draftId or not, monitoring happens where every other agent job does:
+    // the FlightPage's specs-coverage stage renders the external draft card.
     expect(resolveActivityTarget('checkout', { kind: 'authoring', draftId: 'dr_9' }, flights))
-      .toEqual({ kind: 'draft', draftId: 'dr_9' })
-  })
-
-  it('authoring with no draftId → the flight at its specs stage', () => {
+      .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'specs-coverage' })
     expect(resolveActivityTarget('checkout', { kind: 'authoring' }, flights))
       .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'specs-coverage' })
+  })
+
+  it('EXTERNAL portifying → the flight at its portify stage, not the embedded view', () => {
+    // The agent runs in the user's own client; the embedded workflow view's
+    // controls have nothing to drive, so it monitors like everything else.
+    expect(resolveActivityTarget('checkout', { kind: 'portifying', workflowId: 'wf_1', external: true }, flights))
+      .toEqual({ kind: 'flight', flightId: 'fl_1', stage: 'portify' })
   })
 
   it('portifying with no workflowId → the flight at its portify stage', () => {

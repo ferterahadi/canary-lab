@@ -8,7 +8,7 @@ import type { FlightLauncherIntent } from '@/shared/state/nav-state'
 import { START_FRESH_BLURB, START_FRESH_LABEL } from './FlightStartDialog'
 import { STAGE_BLURB, STAGE_ICON, stageRowKey, stageStatusTone } from './stage-meta'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
-import { EXTERNAL_DRIVE_COPY } from '../lib/external-work'
+import { EXTERNAL_DRIVE_COPY, EXTERNAL_SUITE_COPY } from '../lib/external-work'
 
 /** The stages Continue → "from a step…" offers — the user-facing rail rows
  *  (merged-pair primaries), labeled the way the rail labels them. The server
@@ -48,6 +48,7 @@ export function ContinueMenu({
   onAction,
   onStartFlight,
   externallyDriven = false,
+  externalSuiteWork = false,
 }: {
   flight: FlightManifest
   onAction: (call: () => Promise<unknown>, onSuccess?: () => void) => void
@@ -59,6 +60,10 @@ export function ContinueMenu({
    *  one trigger, so disabling the trigger disables both — and the menu never
    *  opens onto choices the user cannot take. */
   externallyDriven?: boolean
+  /** Standalone external work (a skill the user invoked) is live on this suite
+   *  — continuing a flight would run the pipeline into the same files that
+   *  agent is editing right now. Same disablement, its own copy. */
+  externalSuiteWork?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -86,8 +91,10 @@ export function ContinueMenu({
         aria-haspopup={paused ? 'menu' : 'dialog'}
         aria-expanded={paused ? open : dialogOpen}
         onClick={() => (paused ? setOpen((v) => !v) : setDialogOpen(true))}
-        disabled={externallyDriven}
-        title={externallyDriven ? EXTERNAL_DRIVE_COPY.continueFlight : undefined}
+        disabled={externallyDriven || externalSuiteWork}
+        title={externallyDriven
+          ? EXTERNAL_DRIVE_COPY.continueFlight
+          : externalSuiteWork ? EXTERNAL_SUITE_COPY.continueFlight : undefined}
         className="cl-button-primary px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-45"
       >
         Continue ▾
@@ -340,6 +347,7 @@ export function FlightMenu({
   onAction,
   onDeleted,
   externallyDriven = false,
+  externalSuiteWork = false,
 }: {
   flight: FlightManifest
   /** R81: a pseudo-manifest for a feature with no flight record. The menu's one
@@ -350,6 +358,10 @@ export function FlightMenu({
   onDeleted: () => void
   /** The flight belongs to the MCP client driving it — see the Abort item. */
   externallyDriven?: boolean
+  /** Standalone external work is live on this suite — deleting it would rip
+   *  the files out from under that agent, so Delete is inert (with the reason)
+   *  until the work finishes. */
+  externalSuiteWork?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [armed, setArmed] = useState<string | null>(null)
@@ -377,6 +389,9 @@ export function FlightMenu({
     tone?: string
     title?: string
     testId: string
+    /** Inert with the reason in `title` — kept visible so the action doesn't
+     *  read as missing while external work holds it. */
+    disabled?: boolean
     fire: () => void
   }
   // R74/R76: Pause is a header button and resume/repeat/start-over collapsed
@@ -418,7 +433,10 @@ export function FlightMenu({
           key: 'delete',
           label: removeFlightOnly ? 'Remove flight…' : 'Delete suite…',
           tone: 'var(--danger)',
-          title: removeFlightOnly
+          disabled: externalSuiteWork,
+          title: externalSuiteWork
+            ? EXTERNAL_SUITE_COPY.delete
+            : removeFlightOnly
             ? 'Remove this flight record — it stopped before a suite was created'
             : 'Delete this suite — its folder (settings, tests, saved env values, docs) and its whole flight history',
           testId: 'flight-delete',
@@ -455,12 +473,13 @@ export function FlightMenu({
                 role="menuitem"
                 data-testid={isArmed ? `${item.testId}-confirm` : item.testId}
                 title={item.title}
+                disabled={item.disabled}
                 onClick={() => {
                   if (item.confirmLabel && !isArmed) { setArmed(item.key); return }
                   setOpen(false)
                   item.fire()
                 }}
-                className="cl-hover-row rounded px-2.5 py-1.5 text-left text-xs transition-colors"
+                className="cl-hover-row rounded px-2.5 py-1.5 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ color: item.tone }}
               >
                 {isArmed ? item.confirmLabel : item.label}

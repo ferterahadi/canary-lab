@@ -280,7 +280,7 @@ describe('DemoDialog', () => {
     expect(button.disabled).toBe(true)
     expect(button.style.pointerEvents).toBe('none')
     hover(button.parentElement, true)
-    expect(tooltip()?.textContent).toContain('Waiting for Run and Heal to finish')
+    expect(tooltip()?.textContent).toContain('Waiting for Repair a Broken Suite to finish')
   })
 
   it('shows no dot and no tooltip when there is nothing to report', () => {

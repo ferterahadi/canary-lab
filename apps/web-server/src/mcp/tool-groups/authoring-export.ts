@@ -11,7 +11,7 @@ import {
 import { completeExternalEvaluationExport, createExternalEvaluationExportTask } from '../../features/evaluation/logic/external-evaluation-export'
 import { applyEvaluationTextSlotRewrite, buildTestReviewPacket, deterministicEvaluationRewrite, normalizeEvaluationRewrite, type EvaluationRewrite } from '../../features/evaluation/logic/test-review-export'
 import { isTerminalRunStatus } from '../../../../../shared/run-state'
-import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult } from '../tool-support'
+import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, evaluationRewriteInput, evaluationTextSlotInput, externalEvaluationReportSchema, failureResult, gettingStartedBusyResult } from '../tool-support'
 
 export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
   const { registerTool, deps, clientKindInput } = ctx
@@ -40,6 +40,10 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
     if (executionType === 'boot' || executionType === 'benchmark') {
       return errorResult(`run ${runId} is a ${executionType} session with no test results — run the suite first (start_run), then export that run`)
     }
+    // Getting Started demo tracking: claimed after the gates above so a
+    // rejected start never needs releasing; task creation below is synchronous.
+    const claim = deps.gettingStartedDemo?.claim('export', detail.manifest.feature) ?? null
+    if (claim?.kind === 'busy') return gettingStartedBusyResult(claim)
     // Record shape + persistence shared with the flight's export hand-off.
     const task = createExternalEvaluationExportTask({
       logsDir: deps.store.logsDir,
@@ -50,6 +54,7 @@ export function registerEvaluationExportTools(ctx: ToolGroupContext): void {
       language,
       ...(external_session_url ? { sessionUrl: external_session_url } : {}),
     })
+    if (claim?.kind === 'claimed') deps.gettingStartedDemo?.attach(claim.sessionId, { kind: 'export', id: task.taskId, feature: detail.manifest.feature })
     return asJsonResult({
       task: evaluationExportTaskView(task),
       reportSchema: externalEvaluationReportSchema(detail),

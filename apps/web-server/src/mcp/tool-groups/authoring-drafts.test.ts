@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createDraft, readDraft, type DraftRecord } from '../../features/wizard/logic/draft-store'
 import { registerExternalDraftTools } from './authoring-drafts'
-import { captureTools } from './__fixtures__/tool-group-harness'
+import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The external-draft record lifecycle: create → stage updates → apply.
 //
@@ -108,6 +108,38 @@ describe('start_external_draft', () => {
     })
 
     expect(readDraft(logsDir, String(out.draftId))!.repos).toEqual([])
+  })
+
+  it('getting-started: rejects the start as busy while another demo owns the workspace', async () => {
+    writeFeature('checkout')
+    const gs = fakeGettingStartedDemo({ kind: 'busy', active: BUSY_ACTIVE, message: 'busy with run' })
+    const { call } = harness({ gettingStartedDemo: gs.demo })
+
+    const out = await call('start_external_draft', {
+      feature: 'checkout', stage: 'scaffolding', session_id: 's1', client_kind: 'claude',
+    })
+
+    expect(out.type).toBe('getting_started_busy')
+    expect(out.active).toEqual(BUSY_ACTIVE)
+    // Rejected before the record was written — no draft to attach.
+    expect(gs.attached).toEqual([])
+    expect(fs.existsSync(path.join(logsDir, 'drafts'))).toBe(false)
+  })
+
+  it('getting-started: a successful start attaches the new draft to the claim', async () => {
+    writeFeature('checkout')
+    const gs = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-draft' })
+    const { call } = harness({ gettingStartedDemo: gs.demo })
+
+    const out = await call('start_external_draft', {
+      feature: 'checkout', stage: 'scaffolding', session_id: 's1', client_kind: 'claude',
+    })
+
+    expect(gs.claims).toEqual([{ workflow: 'author', feature: 'checkout' }])
+    expect(gs.attached).toEqual([
+      { sessionId: 'gs-draft', target: { kind: 'draft', id: out.draftId, feature: 'checkout' } },
+    ])
+    expect(gs.abandoned).toEqual([])
   })
 
   it('stores the conversation identity when the client supplies it', async () => {

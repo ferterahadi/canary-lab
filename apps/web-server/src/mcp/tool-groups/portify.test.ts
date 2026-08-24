@@ -4,7 +4,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RunDetail } from '../../features/runs/logic/run-store'
 import { registerPortifyTools } from './portify'
-import { captureTools } from './__fixtures__/tool-group-harness'
+import { BUSY_ACTIVE, captureTools, fakeGettingStartedDemo } from './__fixtures__/tool-group-harness'
 
 // The six port-ification tools, plus the two heal reads' not-found arms.
 //
@@ -86,6 +86,41 @@ describe('start_external_portify', () => {
 
     expect(await text('start_external_portify', { feature: 'checkout', session_id: 's', client_kind: 'claude' }))
       .toContain('a portify workflow already exists for checkout')
+  })
+
+  it('getting-started: rejects the start as busy while another demo owns the workspace', async () => {
+    const startExternalPortify = vi.fn()
+    const gs = fakeGettingStartedDemo({ kind: 'busy', active: BUSY_ACTIVE, message: 'busy with run' })
+    const { call } = harness({ startExternalPortify, gettingStartedDemo: gs.demo })
+
+    const out = await call('start_external_portify', { feature: 'checkout', session_id: 's', client_kind: 'claude' })
+
+    expect(out.type).toBe('getting_started_busy')
+    expect(out.active).toEqual(BUSY_ACTIVE)
+    // Rejected before the workflow was set up — no worktrees minted.
+    expect(startExternalPortify).not.toHaveBeenCalled()
+  })
+
+  it('getting-started: a successful start attaches the workflow; a failed one releases the claim', async () => {
+    const gs = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-port' })
+    const { call } = harness({
+      startExternalPortify: async () => ({ workflowId: 'wf-1', configPath: '/c', targets: [] }),
+      gettingStartedDemo: gs.demo,
+    })
+    await call('start_external_portify', { feature: 'checkout', session_id: 's', client_kind: 'claude' })
+    expect(gs.claims).toEqual([{ workflow: 'portify', feature: 'checkout' }])
+    expect(gs.attached).toEqual([
+      { sessionId: 'gs-port', target: { kind: 'portify', id: 'wf-1', feature: 'checkout' } },
+    ])
+
+    const gsFailed = fakeGettingStartedDemo({ kind: 'claimed', sessionId: 'gs-fail' })
+    const { text } = harness({
+      startExternalPortify: async () => { throw new Error('a portify workflow already exists for checkout') },
+      gettingStartedDemo: gsFailed.demo,
+    })
+    await text('start_external_portify', { feature: 'checkout', session_id: 's', client_kind: 'claude' })
+    expect(gsFailed.abandoned).toEqual(['gs-fail'])
+    expect(gsFailed.attached).toEqual([])
   })
 
   it('stringifies a non-Error rejection rather than reporting an object', async () => {

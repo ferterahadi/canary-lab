@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DraftRecord, RunIndexEntry } from '@/shared/api/types'
+import type { CoverageJobIndexEntry, DraftRecord, RunIndexEntry } from '@/shared/api/types'
 import type { PortifyIndexEntry } from '@/shared/api/client'
 import { deriveFeatureActivity } from './feature-activity'
 
@@ -46,8 +46,8 @@ describe('deriveFeatureActivity', () => {
       nowMs,
     })
     expect(map.get('stale')).toBeUndefined()
-    expect(map.get('fresh')).toEqual({ kind: 'authoring', draftId: 'd-fresh' })
-    expect(map.get('server')).toEqual({ kind: 'authoring', draftId: 'd-srv' })
+    expect(map.get('fresh')).toEqual({ kind: 'authoring', draftId: 'd-fresh', external: true })
+    expect(map.get('server')).toEqual({ kind: 'authoring', draftId: 'd-srv', external: false })
   })
 
   it('maps each absorbed surface to its verb with a handle into the real surface', () => {
@@ -56,9 +56,9 @@ describe('deriveFeatureActivity', () => {
       portifyWorkflows: [portify({ feature: 'b', workflowId: 'wf-b' })],
       drafts: [draft({ featureName: 'c', draftId: 'd-c' })],
     })
-    expect(map.get('a')).toEqual({ kind: 'running', runId: 'r-a' })
-    expect(map.get('b')).toEqual({ kind: 'portifying', workflowId: 'wf-b' })
-    expect(map.get('c')).toEqual({ kind: 'authoring', draftId: 'd-c' })
+    expect(map.get('a')).toEqual({ kind: 'running', runId: 'r-a', external: false })
+    expect(map.get('b')).toEqual({ kind: 'portifying', workflowId: 'wf-b', external: false })
+    expect(map.get('c')).toEqual({ kind: 'authoring', draftId: 'd-c', external: false })
   })
 
   it('splits the two run verbs on the run STATUS — a healing run is not "running"', () => {
@@ -72,8 +72,8 @@ describe('deriveFeatureActivity', () => {
     })
     // The chip fed by this map is the only place a heal shows outside the run
     // detail header, so the status has to survive the collapse to one verb.
-    expect(map.get('repairing')).toEqual({ kind: 'healing', runId: 'r-heal' })
-    expect(map.get('testing')).toEqual({ kind: 'running', runId: 'r-run' })
+    expect(map.get('repairing')).toEqual({ kind: 'healing', runId: 'r-heal', external: false })
+    expect(map.get('testing')).toEqual({ kind: 'running', runId: 'r-run', external: false })
   })
 
   it('marks a feature with a running evaluation export as exporting', () => {
@@ -90,7 +90,7 @@ describe('deriveFeatureActivity', () => {
         { taskId: 't-c', runId: 'r-c', feature: '   ', status: 'running' },
       ] as never,
     })
-    expect(map.get('checkout')).toEqual({ kind: 'exporting', taskId: 't-a', runId: 'r-a' })
+    expect(map.get('checkout')).toEqual({ kind: 'exporting', taskId: 't-a', runId: 'r-a', external: false })
     expect(map.get('billing')).toBeUndefined()
     expect(map.size).toBe(1)
   })
@@ -102,7 +102,7 @@ describe('deriveFeatureActivity', () => {
       drafts: [],
       exportTasks: [{ taskId: 't-a', runId: 'r-a', feature: 'checkout', status: 'running' }] as never,
     })
-    expect(map.get('checkout')).toEqual({ kind: 'running', runId: 'r-live' })
+    expect(map.get('checkout')).toEqual({ kind: 'running', runId: 'r-live', external: false })
   })
 
   it('one verb per feature, loudest wins: running > portifying > authoring', () => {
@@ -130,6 +130,47 @@ describe('deriveFeatureActivity', () => {
       drafts: [draft({ featureName: 'ready-f', status: 'spec-ready' })],
     })
     expect(map.size).toBe(0)
+  })
+
+  it('maps the two coverage job phases to their own verbs, later phase winning', () => {
+    const job = (over: Partial<CoverageJobIndexEntry>): CoverageJobIndexEntry => ({
+      jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'running',
+      startedAt: '2026-01-01T00:00:00Z', producer: 'external',
+      ...over,
+    } as CoverageJobIndexEntry)
+    const map = deriveFeatureActivity({
+      activeRuns: [],
+      portifyWorkflows: [],
+      drafts: [],
+      coverageJobs: [
+        job({ feature: 'distilling', jobId: 'j-sum' }),
+        job({ feature: 'annotating', jobId: 'j-map', kind: 'coverage', producer: undefined }),
+        // A settled job is not activity.
+        job({ feature: 'done-f', jobId: 'j-done', status: 'done' }),
+        // Both phases live on one feature → the chained mapping job wins (the
+        // summary phase is already done by the time mapping starts).
+        job({ feature: 'both', jobId: 'j-b-sum' }),
+        job({ feature: 'both', jobId: 'j-b-map', kind: 'coverage' }),
+      ],
+    })
+    expect(map.get('distilling')).toEqual({ kind: 'condensing', jobId: 'j-sum', external: true })
+    expect(map.get('annotating')).toEqual({ kind: 'mapping', jobId: 'j-map', external: false })
+    expect(map.get('done-f')).toBeUndefined()
+    expect(map.get('both')).toEqual({ kind: 'mapping', jobId: 'j-b-map', external: true })
+  })
+
+  it('a verify-mode run reads as verifying, external when its manifest heals externally', () => {
+    const map = deriveFeatureActivity({
+      activeRuns: [
+        run({ feature: 'staging', runId: 'r-ver', executionType: 'verify' }),
+        run({ feature: 'ext', runId: 'r-ext', executionType: 'verify' }),
+      ],
+      portifyWorkflows: [],
+      drafts: [],
+      runDetails: { 'r-ext': { manifest: { healMode: 'external' } } } as never,
+    })
+    expect(map.get('staging')).toEqual({ kind: 'verifying', runId: 'r-ver', external: false })
+    expect(map.get('ext')).toEqual({ kind: 'verifying', runId: 'r-ext', external: true })
   })
 
   it('skips an authoring draft that has no feature name yet (nothing to pin it to)', () => {

@@ -9,7 +9,17 @@ import type { FlightRouteContext } from './flight-route-context'
 import { FlightConflictError, FlightExistsError, FlightFrozenError, FlightStageEntryError, startFlight, type FlightEntryMode } from '../logic/conductor'
 import { FLIGHT_STAGE_KEYS, type FlightOptions, type FlightStageKey } from '../logic/types'
 import { expandHome, reclaimGettingStartedFlight } from './flight-route-support'
-import { GettingStartedBusyError, type GettingStartedOwner } from '../../config/logic/getting-started-session'
+import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedWorkflow } from '../../config/logic/getting-started-session'
+
+/** The author/portify/export demos launch a flight pinned to their stage, so
+ *  the flight-start claim must land under the DEMO's workflow key, not
+ *  'flight' — otherwise the Getting Started card for the invoked skill never
+ *  lights. Unknown values degrade to 'flight', matching how `agent` and
+ *  `stageProducer` treat an older client's nonsense. */
+function claimWorkflowFor(value: string | undefined): GettingStartedWorkflow {
+  const known: GettingStartedWorkflow[] = ['run', 'flight', 'coverage', 'author', 'portify', 'verify', 'export']
+  return known.find((workflow) => workflow === value) ?? 'flight'
+}
 
 export async function registerFlightStartRoutes(app: FastifyInstance, deps: FlightRouteDeps, ctx: FlightRouteContext): Promise<void> {
   const { store, planStore, conductorDeps } = ctx
@@ -46,6 +56,10 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
            *  it the agent could repeat a step but never say why. */
           feedback?: string
           gettingStartedSource?: GettingStartedOwner
+          /** Which Getting Started card this start belongs to. The
+           *  author/portify/export demos run AS a flight but must claim their
+           *  own workflow key so their card lights. Absent/unknown → 'flight'. */
+          gettingStartedWorkflow?: string
         }
       | undefined
   }>('/api/flights', async (req, reply) => {
@@ -120,7 +134,7 @@ export async function registerFlightStartRoutes(app: FastifyInstance, deps: Flig
     let gettingStartedSession: string | null = null
     if (body.gettingStartedSource && deps.gettingStarted) {
       try {
-        gettingStartedSession = deps.gettingStarted.claim('flight', body.gettingStartedSource).sessionId
+        gettingStartedSession = deps.gettingStarted.claim(claimWorkflowFor(body.gettingStartedWorkflow), body.gettingStartedSource).sessionId
       } catch (err) {
         if (!(err instanceof GettingStartedBusyError)) throw err
         reply.code(409)

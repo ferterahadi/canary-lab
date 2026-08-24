@@ -112,6 +112,11 @@ export interface PortifyIndexEntry {
   branch?: string
   startedAt: string
   endedAt?: string
+  /** Mirrored from the manifest so the activity map can tell an external
+   *  (MCP-client-driven) workflow from a spawned one off the index alone.
+   *  Absent on entries written before the mirror existed — those all predate
+   *  external portify, so absent = internal. */
+  producer?: PortifyProducer
 }
 
 export interface StartPortifyInput {

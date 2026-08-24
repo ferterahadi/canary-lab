@@ -41,6 +41,7 @@ function indexEntryFromManifest(m: CoverageJobManifest) {
     status: m.status,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    ...(m.producer ? { producer: m.producer } : {}),
   }
 }
 

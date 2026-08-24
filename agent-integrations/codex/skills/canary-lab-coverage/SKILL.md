@@ -69,8 +69,14 @@ guide's "Measure Coverage" card emits exactly this shape) is a suite
 - Canary reconciles ids against the prior summary (surviving ids preserved;
   new ones get fresh ids; dropped ones marked deprecated) and writes
   `docs/_prd-summary.{json,md}` — it never re-derives the requirements.
-- The job is async + single-flight per feature and shows live in the GUI as
-  an external session.
+- The job is async + single-flight per feature and shows live in the GUI:
+  the suite's Flight page carries it on the matching stage (the summary on
+  Requirements, the mapping on Test authoring & coverage) — that view is
+  read-only while this client drives; the user monitors there, you act here.
+- If `start_external_summary` or `start_external_coverage` returns
+  `type: "getting_started_busy"`, a Getting Started demo already owns the
+  workspace — follow the active target it returns; do not start another
+  workflow.
 - Re-run whenever the ledger's `state` reports the summary `stale`
   (`state.drift.changedDocs` names which docs moved) — ids are preserved, so
   existing tags keep resolving.

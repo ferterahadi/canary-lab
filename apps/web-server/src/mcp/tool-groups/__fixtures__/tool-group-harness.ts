@@ -1,5 +1,6 @@
 import { CLIENT_KIND, type ToolGroupContext } from '../../tool-support'
 import type { McpClientFacts } from '../../client-surface'
+import type { GettingStartedBusyActive, GettingStartedDemoClaim, GettingStartedDemoTarget } from '../../tool-schemas'
 
 // Drives one tool group without a server: capture the handlers it registers,
 // then call them directly against fake deps. What these tools branch on is the
@@ -23,6 +24,52 @@ export interface CapturedTools {
 }
 
 export const DEFAULT_CLIENT_FACTS: McpClientFacts = { surface: 'other', canFanOut: false, sampling: false }
+
+/** The claim another demo already holds, as a busy rejection relays it. */
+export const BUSY_ACTIVE: GettingStartedBusyActive = {
+  sessionId: 'gs-other',
+  workflow: 'run',
+  owner: 'internal',
+  target: { kind: 'run', id: 'r-1' },
+}
+
+export interface FakeGettingStartedDemo {
+  demo: {
+    claim: (workflow: 'coverage' | 'author' | 'portify' | 'export', feature: string) => GettingStartedDemoClaim | null
+    attach: (sessionId: string, target: GettingStartedDemoTarget) => void
+    abandon: (sessionId: string) => void
+  }
+  claims: Array<{ workflow: string; feature: string }>
+  attached: Array<{ sessionId: string; target: GettingStartedDemoTarget }>
+  abandoned: string[]
+}
+
+/** A recording `gettingStartedDemo` dep for the four start_* tools that claim a
+ *  Getting Started card. The answer is fixed per instance because the branch
+ *  under test is the TOOL's (busy → reject, claimed → attach/abandon); the real
+ *  claim/settle lifecycle is covered on GettingStartedSessionStore itself. */
+export function fakeGettingStartedDemo(claim: GettingStartedDemoClaim): FakeGettingStartedDemo {
+  const claims: FakeGettingStartedDemo['claims'] = []
+  const attached: FakeGettingStartedDemo['attached'] = []
+  const abandoned: string[] = []
+  return {
+    demo: {
+      claim: (workflow, feature) => {
+        claims.push({ workflow, feature })
+        return claim
+      },
+      attach: (sessionId, target) => {
+        attached.push({ sessionId, target })
+      },
+      abandon: (sessionId) => {
+        abandoned.push(sessionId)
+      },
+    },
+    claims,
+    attached,
+    abandoned,
+  }
+}
 
 /** `deps` is deliberately `unknown`-ish: every group reads a different slice of
  *  CanaryLabMcpDeps, and a test that wired the whole thing would be asserting

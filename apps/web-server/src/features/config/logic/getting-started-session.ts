@@ -2,11 +2,30 @@ import fs from 'fs'
 import path from 'path'
 import { isActiveRunStatus, isQueuedRunStatus } from '../../../../../../shared/run-state'
 
-export type GettingStartedWorkflow = 'run' | 'flight'
+/** One key per Getting Started card — the two starters plus the five "More
+ *  workflows". Each demo claims under its own key so every card can show its
+ *  own attempted/running/completed state. */
+export type GettingStartedWorkflow =
+  | 'run'
+  | 'flight'
+  | 'coverage'
+  | 'author'
+  | 'portify'
+  | 'verify'
+  | 'export'
 export type GettingStartedOwner = 'internal' | 'external'
+/** What a claim is linked to. `run`/`flight` predate the widening and stay
+ *  featureless (persisted session.json records exist in that shape); the newer
+ *  kinds carry `feature` because their open-target navigation is feature-first
+ *  (the coverage ledger, the suite's flight page pinned to a stage). A `verify`
+ *  demo's target is its verification run, so it reuses kind 'run'. */
 export type GettingStartedTarget =
   | { kind: 'run'; id: string }
   | { kind: 'flight'; id: string }
+  | { kind: 'draft'; id: string; feature: string }
+  | { kind: 'coverage-job'; id: string; feature: string }
+  | { kind: 'portify'; id: string; feature: string }
+  | { kind: 'export'; id: string; feature: string }
 
 export interface GettingStartedActiveSession {
   sessionId: string
@@ -31,11 +50,12 @@ export interface GettingStartedSessionState {
   completed: Partial<Record<GettingStartedWorkflow, GettingStartedCompletion>>
 }
 
+/** Resolves a claim's linked record to its live status. One method pair over
+ *  the target union (rather than one pair per kind) so adding a target kind is
+ *  a compile error here and one `case` in server.ts, not six new methods. */
 export interface GettingStartedStatusResolver {
-  run(runId: string): string | null
-  flight(flightId: string): string | null
-  isRunActive(status: string): boolean
-  isFlightActive(status: string): boolean
+  status(target: GettingStartedTarget): string | null
+  isActive(target: GettingStartedTarget, status: string): boolean
 }
 
 /** The run-side liveness predicate for the resolver. `isActiveRunStatus` alone
@@ -82,9 +102,11 @@ function writeState(file: string, state: GettingStartedSessionState): void {
 }
 
 /**
- * Workspace-level guard for the four Getting Started demos. The claim is made
- * before a run/flight starts, linked to its persisted record immediately after,
- * and settled only from that record's real status.
+ * Workspace-level guard for the Getting Started demos — one claim at a time
+ * across all seven workflows. The claim is made before the demo's work record
+ * (run, flight, draft, coverage job, portify workflow, export task) is created,
+ * linked to that record immediately after, and settled only from the record's
+ * real status.
  */
 export class GettingStartedSessionStore {
   private readonly file: string
@@ -156,16 +178,10 @@ export class GettingStartedSessionStore {
     const state = readState(this.file)
     const active = state.active
     if (!active?.target) return
-    const resolvedStatus = active.target.kind === 'run'
-      ? this.resolver.run(active.target.id)
-      : this.resolver.flight(active.target.id)
     // A linked target that disappeared out-of-band (logs cleanup) cannot still
     // own an agent. Settle it as missing instead of leaving a permanent lock.
-    const status = resolvedStatus ?? 'missing'
-    const stillActive = active.target.kind === 'run'
-      ? this.resolver.isRunActive(status)
-      : this.resolver.isFlightActive(status)
-    if (stillActive) return
+    const status = this.resolver.status(active.target) ?? 'missing'
+    if (this.resolver.isActive(active.target, status)) return
     // A repair run writes `failed` for a few milliseconds before auto-heal
     // claims it and changes the same record to `healing`. Do not release the
     // demo owner in that gap. A genuinely terminal failure stays failed and is

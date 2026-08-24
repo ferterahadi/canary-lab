@@ -15,7 +15,7 @@ import { type DraftRecord, type ExternalDraftStage } from '../features/wizard/lo
 import { isTerminalRunStatus } from '../../../../shared/run-state'
 import { encodeToonTable } from '../shared/toon'
 import type { McpClientFacts } from './client-surface'
-import type { CanaryLabMcpDeps } from './tool-schemas'
+import type { CanaryLabMcpDeps, GettingStartedBusyActive } from './tool-schemas'
 import type { FeatureAuthoringContext } from '../features/config/logic/feature-authoring'
 
 export { BOOT_SESSION_MESSAGE, WAIT_FOR_HEAL_TASK_DEFAULT_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_MAX_TIMEOUT_MS, WAIT_FOR_HEAL_TASK_WINDOW_MS, bootSessionValue, classifyWaitForHealTask, dirtyTestsWarning, healWaitNext, isActiveBootRun, stillWaitingValue, waitForHealTask } from './heal-task-wait'
@@ -293,6 +293,18 @@ export function asToonResult(value: unknown): CallToolResult {
 
 export function errorResult(message: string): CallToolResult {
   return { content: [{ type: 'text', text: message }], isError: true }
+}
+
+/** The rejection every demo-starting tool returns when another Getting Started
+ *  demo already holds the workspace. Same shape as start_run's busy arm so a
+ *  client handles one contract. */
+export function gettingStartedBusyResult(busy: { active: GettingStartedBusyActive; message: string }): CallToolResult {
+  return asJsonResult({
+    type: 'getting_started_busy',
+    active: busy.active,
+    message: busy.message,
+    nextSteps: ['follow the active demo in its current owner; do not start another Getting Started workflow'],
+  })
 }
 
 /**

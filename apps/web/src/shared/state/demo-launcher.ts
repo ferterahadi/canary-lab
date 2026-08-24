@@ -46,10 +46,14 @@ export type DemoFlightLaunch =
   | { kind: 'start'; body: StartFlightBody }
 
 export function demoFlightLaunch(
+  kind: DemoFlightActionKind,
   feature: string,
-  stage: FlightStageKey,
   entry: FlightEntryOptions,
 ): DemoFlightLaunch {
+  const stage = DEMO_FLIGHT_STAGE[kind]
+  // Every start below is a demo start, so it claims the invoked workflow's
+  // Getting Started card — the same key the MCP skill path claims.
+  const demo = { gettingStartedSource: 'internal', gettingStartedWorkflow: kind } as const
   if (entry.active && entry.flight) return { kind: 'open', flightId: entry.flight.flightId }
   if (entry.flight) {
     // Paused → resume, never jump: the R78 jump wipe resets the entry stage and
@@ -59,8 +63,8 @@ export function demoFlightLaunch(
     return {
       kind: 'start',
       body: entry.canContinue
-        ? { feature, mode: 'continue', autopilot: true }
-        : { feature, mode: 'jump', fromStage: stage, autopilot: true },
+        ? { feature, mode: 'continue', autopilot: true, ...demo }
+        : { feature, mode: 'jump', fromStage: stage, autopilot: true, ...demo },
     }
   }
   return {
@@ -73,6 +77,7 @@ export function demoFlightLaunch(
       coverageTarget: entry.prefill.coverageTarget,
       fromStage: stage,
       autopilot: true,
+      ...demo,
     },
   }
 }

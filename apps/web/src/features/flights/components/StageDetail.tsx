@@ -10,6 +10,9 @@ import { CheckpointControls } from './CheckpointControls'
 import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
+import { StageExternalWork } from './StageExternalWork'
+import { isExternallyDriven } from '../lib/external-work'
+import type { FeatureActivity } from '../state/feature-activity'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { useStageBandData } from './use-stage-band-data'
 import {
@@ -53,6 +56,7 @@ export function StageDetail({
   stage,
   companion,
   runLive,
+  activity,
   onResponded,
   onActionError,
   onStartFlight,
@@ -69,6 +73,9 @@ export function StageDetail({
   companion: FlightStage | null
   /** A run for this feature is live right now (R64) — the run row polls. */
   runLive?: boolean
+  /** This feature's live verb (the one activity map App derives) — drives the
+   *  "handed over to your agent" card on the stage the live job belongs to. */
+  activity?: FeatureActivity
   onResponded: () => void
   /** R71/W1: run-control failures surface on the header's inline error line. */
   onActionError?: (msg: string) => void
@@ -245,6 +252,15 @@ export function StageDetail({
           works. A stage pane no longer collapses to a bare sentence, and a value
           lands in the slot its placeholder held. */}
       <FactsGrid facts={facts} awaiting={awaitingData} />
+
+      {/* A skill-started job live on this suite right now, rendered on the
+          stage it belongs to — the branded "running in your agent" panel each
+          job's standalone surface already uses. Not on an externally DRIVEN
+          flight: there the hand-off presentation rides the external-work
+          checkpoint below, and two cards would narrate the same session. */}
+      {!isExternallyDriven(flight) && (
+        <StageExternalWork activity={activity} stageKey={stage.key} />
+      )}
 
       {/* Paused with nothing else to act on (no checkpoint, no error): the
           "how to pick it back up" card fills the void the state sentence alone

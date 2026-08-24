@@ -27,7 +27,7 @@ guide's "Repair a Broken Suite" card emits exactly this shape) is a suite
 
 ## External Run Loop
 
-If `start_run` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace. Follow the returned active run or Flight in its current owner; do not start another.
+If `start_run` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace. Follow the returned active target (a run, Flight, coverage job, draft, portify, or export) in its current owner; do not start another workflow.
 
 1. Call `list_features` and choose the requested feature.
 2. Call `start_run` with `claim_heal: true`, a stable `session_id`, and a useful `conversation_name`. Do **not** pass `client_kind` — the MCP bridge auto-detects it from the connection; guessing it yourself can mis-set it and suppress heal claim. Heal claiming is open to interactive Claude/Codex clients (Desktop or CLI alike) — only runner-spawned PTY agents are blocked — so an ordinary CLI session like this one can own the heal loop. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.

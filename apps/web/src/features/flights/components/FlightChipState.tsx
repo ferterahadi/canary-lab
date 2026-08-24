@@ -74,6 +74,9 @@ export const ACTIVITY_CHIP: Record<FeatureActivityKind, { label: string; title: 
   'exporting': { label: 'exporting', title: 'Building the evaluation report', tone: FLIGHT_STATUS_TONE['running'] },
   'portifying': { label: 'port setup', title: 'Making the suite safe to run two at a time', tone: FLIGHT_STATUS_TONE['running'] },
   'authoring': { label: 'writing', title: 'Writing tests', tone: FLIGHT_STATUS_TONE['running'] },
+  'verifying': { label: 'verifying', title: 'Verifying the suite against a deployed environment', tone: FLIGHT_STATUS_TONE['running'] },
+  'condensing': { label: 'condensing', title: 'Distilling the docs into the PRD summary', tone: FLIGHT_STATUS_TONE['running'] },
+  'mapping': { label: 'mapping', title: 'Mapping tests to requirements', tone: FLIGHT_STATUS_TONE['running'] },
 }
 
 /** Short chip verb for a RUNNING flight, keyed by the stage the conductor is on

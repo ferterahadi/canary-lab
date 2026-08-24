@@ -48,8 +48,12 @@ export interface StartFlightBody {
   /** R79: which CLI conducts the flight's stage agents. Sticky per record —
    *  jump/continue reuse the stored one. Absent = claude. */
   agent?: 'claude' | 'codex'
-  /** Marks one of the four Getting Started demos; ordinary flights omit it. */
+  /** Marks a Getting Started demo start; ordinary flights omit it. */
   gettingStartedSource?: 'internal' | 'external'
+  /** Which Getting Started card a demo flight belongs to: the author/portify/
+   *  export demos run AS a flight but claim their own workflow key so their
+   *  card lights. Absent → 'flight'. Only read with gettingStartedSource. */
+  gettingStartedWorkflow?: 'flight' | 'author' | 'portify' | 'export'
 }
 
 /** Start / continue / redo / jump a flight (POST /api/flights, non-blocking —

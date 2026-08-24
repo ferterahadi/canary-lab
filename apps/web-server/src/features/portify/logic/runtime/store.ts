@@ -34,6 +34,7 @@ function indexEntryFromManifest(m: PortifyManifest) {
     branch: m.branch,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    ...(m.producer ? { producer: m.producer } : {}),
   }
 }
 

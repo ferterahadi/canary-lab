@@ -23,7 +23,7 @@ vi.mock('../lib/workspace-view-state', () => viewState)
 function persisted(over: Partial<PersistedView> = {}): PersistedView {
   return {
     view: 'workspace', feature: null, run: null, dialog: null, flight: null,
-    flightStage: null, draft: null, configTab: null, focusTest: null,
+    flightStage: null, configTab: null, focusTest: null,
     runTab: null, returnFlight: null,
     ...over,
   }
@@ -99,9 +99,6 @@ describe('useWorkspaceNavigation — seeding from the route', () => {
     await mount(persisted({ dialog: 'flight-new' }))
     expect(nav.flightStartNew).toBe(true)
 
-    await mount(persisted({ dialog: 'draft', draft: 'd1' }))
-    expect(nav.draftFor).toBe('d1')
-
     await mount(persisted({ dialog: 'demo' }))
     expect(nav.demoOpen).toBe(true)
   })
@@ -153,7 +150,6 @@ describe('useWorkspaceNavigation — dialog openers', () => {
     await act(async () => {
       nav.setVerifyOpen(true)
       nav.setFlightStartNew(true)
-      nav.setDraftFor('d9')
       nav.setDemoOpen(true)
       nav.setResumePlanTaskId('plan-1')
       nav.setPortifyTarget({ kind: 'new', feature: 'checkout' })
@@ -161,12 +157,11 @@ describe('useWorkspaceNavigation — dialog openers', () => {
 
     expect(nav.verifyOpen).toBe(true)
     expect(nav.flightStartNew).toBe(true)
-    expect(nav.draftFor).toBe('d9')
     expect(nav.demoOpen).toBe(true)
     expect(nav.resumePlanTaskId).toBe('plan-1')
     expect(nav.portifyTarget).toEqual({ kind: 'new', feature: 'checkout' })
-    // Config outranks draft, which outranks the rest.
-    expect(nav.routedDialog).toBe('draft')
+    // flight-new outranks demo and verify in the z-order.
+    expect(nav.routedDialog).toBe('flight-new')
   })
 })
 

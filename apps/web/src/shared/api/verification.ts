@@ -72,7 +72,7 @@ export function updateVerificationConfig(
 
 export function executeVerification(
   feature: string,
-  body: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string },
+  body: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   opts?: ClientOptions,
 ): Promise<{ runId: string; executionType: 'verify' }> {
   const { baseUrl, fetchImpl } = defaultOpts(opts)

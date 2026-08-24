@@ -60,18 +60,36 @@ export const evaluationRewriteInput = z.object({
   })),
 })
 
+/** The active Getting Started claim, as relayed in a busy rejection. Workflow
+ *  and target kinds are strings here — the MCP layer only echoes them back to
+ *  the calling agent; the server owns the closed unions. */
+export interface GettingStartedBusyActive {
+  sessionId: string
+  workflow: string
+  owner: 'internal' | 'external'
+  target: { kind: string; id: string } | null
+}
+
+/** What a Getting Started demo claim is linked to when the record is created
+ *  by an MCP tool directly (the run/flight/verify tools claim inside their
+ *  REST routes instead). */
+export type GettingStartedDemoTarget =
+  | { kind: 'draft'; id: string; feature: string }
+  | { kind: 'coverage-job'; id: string; feature: string }
+  | { kind: 'portify'; id: string; feature: string }
+  | { kind: 'export'; id: string; feature: string }
+
+export type GettingStartedDemoClaim =
+  | { kind: 'claimed'; sessionId: string }
+  | { kind: 'busy'; active: GettingStartedBusyActive; message: string }
+
 /** Result of an MCP-driven start request under concurrency. */
 export type McpStartRunOutcome =
   | { kind: 'started'; runId: string }
   | { kind: 'queued'; runId: string; reason: 'resources' | 'repo-collision' }
   | {
       kind: 'getting-started-busy'
-      active: {
-        sessionId: string
-        workflow: 'run' | 'flight'
-        owner: 'internal' | 'external'
-        target: { kind: 'run' | 'flight'; id: string } | null
-      }
+      active: GettingStartedBusyActive
       message: string
     }
   | {
@@ -163,6 +181,17 @@ export interface CanaryLabMcpDeps {
   /** Un-portify a saved feature: revert its config (snapshot or legacy strip) +
    *  delete the overlay. Mirrors DELETE /api/features/:name/portify-overlay. */
   removePortification?: (feature: string) => { name: string; portified: boolean; reverted: boolean }
+  /** The Getting Started claim surface for the tools that create their work
+   *  records through logic calls rather than REST (start_external_draft,
+   *  start_external_summary/coverage, start_external_portify,
+   *  start_external_evaluation_export). The server owns the fixture matching:
+   *  `claim` returns null when the call is not a demo, the session on success,
+   *  and the already-active claim when another demo holds the workspace. */
+  gettingStartedDemo?: {
+    claim: (workflow: 'coverage' | 'author' | 'portify' | 'export', feature: string) => GettingStartedDemoClaim | null
+    attach: (sessionId: string, target: GettingStartedDemoTarget) => void
+    abandon: (sessionId: string) => void
+  }
   workspaceEvents?: WorkspaceEventPublisher
   /** Test-file integrity store. When present, terminal/needs_heal run results
    *  carry a `dirtyTests` warning the agent relays verbatim. Read-only here —

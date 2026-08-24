@@ -6,10 +6,9 @@ import type { DraftRecord } from '@/shared/api/types'
 // Live list of authoring drafts, fed by the REST list on mount and kept current
 // by workspace events. Every draft is authored by an external MCP client, so
 // this tracks records — it never starts, accepts or rejects an agent's work.
-// Open-state belongs to nav (App's routed `draftFor`), not here.
+// A live draft surfaces on the flight page's Test-authoring stage (StageExternalWork); this context only tracks the records.
 interface WizardDraftContextValue {
   drafts: DraftRecord[]
-  refreshDraft: (draftId: string) => Promise<DraftRecord | null>
   deleteTask: (draftId: string) => Promise<void>
 }
 
@@ -39,14 +38,6 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
     setDraftsById((current) => ({ ...current, [draft.draftId]: draft }))
     return draft
   }, [forgetDraft])
-
-  const refreshDraft = useCallback(async (draftId: string): Promise<DraftRecord | null> => {
-    try {
-      return rememberDraft(await api.getDraft(draftId))
-    } catch {
-      return null
-    }
-  }, [rememberDraft])
 
   const reconcileDraftList = useCallback((drafts: DraftRecord[]): void => {
     const visible = drafts.filter(isVisibleWizardTask)
@@ -104,9 +95,8 @@ export function WizardDraftProvider({ children, wsBase, WebSocketImpl }: WizardD
 
   const value = useMemo<WizardDraftContextValue>(() => ({
     drafts,
-    refreshDraft,
     deleteTask,
-  }), [deleteTask, drafts, refreshDraft])
+  }), [deleteTask, drafts])
 
   return (
     <WizardDraftContext.Provider value={value}>

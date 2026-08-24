@@ -24,7 +24,7 @@ import { register as registerBenchmark } from './features/benchmark/index'
 import { PortifyRunStore } from './features/portify/logic/runtime/store'
 import { coverageJobStore as sharedCoverageJobStore } from './features/coverage/logic/coverage/jobs/store'
 import { FlightRunStore } from './features/flights/logic/store'
-import { isActiveFlightStatus } from '../../../shared/flights/types'
+import { isActiveFlightStatus, type FlightStatus } from '../../../shared/flights/types'
 import { removeFlightRecordsForFeature } from './features/flights/logic/conductor'
 import { MCP_ORIGIN_HEADER } from './features/flights/routes/flight-decision-origin'
 import { PlanFeaturesStore } from './features/flights/logic/plan-features'
@@ -36,8 +36,8 @@ import {
   resolveWorkflowAgentRef,
 } from './features/agent-sessions/logic/agent-session-log'
 import { WorkspaceEventBus } from './shared/workspace-events'
-import { GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
-import { isGettingStartedFlightStart, isGettingStartedRunFeature } from './features/config/routes/onboarding'
+import { GettingStartedBusyError, GettingStartedSessionStore, isGettingStartedRunActive } from './features/config/logic/getting-started-session'
+import { WORKBENCH_SUITE, isGettingStartedFlightStart, isGettingStartedRunFeature } from './features/config/routes/onboarding'
 import type { ServerContext } from './server-context'
 import { UpdateJobStore } from './features/version/logic/update-job'
 import { VersionState } from './features/version/logic/version-state'
@@ -45,9 +45,9 @@ import { register as registerVersion } from './features/version/index'
 import { getInstalledPackageName, getInstalledPackageVersion } from '../../../shared/runtime/upgrade-check'
 import { PaneBroker } from './features/runs/logic/pane-broker'
 import { loadFeatures } from './shared/feature-loader'
-import { bridgeDraftEvents, reconcileInterruptedDrafts } from './features/wizard/logic/draft-store'
+import { bridgeDraftEvents, readDraft, reconcileInterruptedDrafts } from './features/wizard/logic/draft-store'
 import { agentJobStore as sharedAgentJobStore, bridgeAgentJobEvents } from './features/agent-sessions/logic/agent-jobs/store'
-import { bridgeEvaluationExportEvents } from './features/evaluation/logic/evaluation-export-store'
+import { bridgeEvaluationExportEvents, readEvaluationExportTask } from './features/evaluation/logic/evaluation-export-store'
 import { bridgeCoverageJobEvents } from './features/coverage/logic/coverage/jobs/store'
 import { runDirFor, buildRunPaths } from './features/runs/logic/runtime/run-paths'
 import { RunOrchestrator, collectPortSlots, buildServiceSpecs, buildQueuedServiceEntries } from './features/runs/logic/runtime/orchestrator'
@@ -158,13 +158,36 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   reconcileInterruptedDrafts(logsDir, () => new Date().toISOString())
   const workspaceEvents = new WorkspaceEventBus()
   const gettingStarted = new GettingStartedSessionStore(logsDir, {
-    run: (runId) => runStore.get(runId)?.manifest.status ?? null,
-    flight: (flightId) => flightStore.get(flightId)?.status ?? null,
-    // NOT bare isActiveRunStatus: a queued demo run is still the demo's target
-    // (see isGettingStartedRunActive) — the bare predicate settled it as
-    // "completed: queued" and dropped the one-demo lock mid-run.
-    isRunActive: isGettingStartedRunActive,
-    isFlightActive: isActiveFlightStatus,
+    status: (target) => {
+      switch (target.kind) {
+        case 'run': return runStore.get(target.id)?.manifest.status ?? null
+        case 'flight': return flightStore.get(target.id)?.status ?? null
+        case 'draft': return readDraft(logsDir, target.id)?.status ?? null
+        case 'coverage-job': return coverageJobStore.get(target.id)?.status ?? null
+        case 'portify': return portifyStore.get(target.id)?.status ?? null
+        case 'export': return readEvaluationExportTask(logsDir, target.id)?.status ?? null
+      }
+    },
+    isActive: (target, status) => {
+      switch (target.kind) {
+        // NOT bare isActiveRunStatus: a queued demo run is still the demo's
+        // target (see isGettingStartedRunActive) — the bare predicate settled
+        // it as "completed: queued" and dropped the one-demo lock mid-run.
+        case 'run': return isGettingStartedRunActive(status)
+        // The cast is sound: a flight target's status comes from flightStore
+        // (typed FlightStatus); the resolver's 'missing' fallback simply isn't
+        // in ACTIVE_FLIGHT_STATUSES, so it reads as settled — the intent.
+        case 'flight': return isActiveFlightStatus(status as FlightStatus)
+        // Terminal draft statuses only — 'spec-ready' still awaits apply, so
+        // the author demo stays claimed until the tests actually land.
+        case 'draft': return !['accepted', 'cancelled', 'error'].includes(status)
+        case 'coverage-job': return status === 'running'
+        // 'ready-to-save' still awaits the save/cancel decision — the portify
+        // demo isn't done until the overlay is captured or discarded.
+        case 'portify': return !['saved', 'failed', 'aborted'].includes(status)
+        case 'export': return status === 'running'
+      }
+    },
   }, () => workspaceEvents.publish({ type: 'getting-started-changed' }))
   // Test-file integrity ("dirty") tracking. One feature-scoped store is the
   // single source of truth both the UI feature list and the MCP run result read.
@@ -222,6 +245,20 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
   gettingStarted.reconcileInterrupted()
   runStore.onEvent(() => gettingStarted.reconcile())
   flightStore.onEvent(() => gettingStarted.reconcile())
+  portifyStore.onEvent(() => gettingStarted.reconcile())
+  // Draft, coverage-job, and export-task mutations already reach the workspace
+  // bus through their store bridges (both the GUI and MCP write through the
+  // same shared stores), so the settle trigger rides those events instead of a
+  // second per-store subscription. `getting-started-changed` itself is filtered
+  // out — reconcile publishes it, so reacting to it would ping-pong (harmlessly,
+  // since a settled state reconciles to a no-op, but pointlessly).
+  workspaceEvents.subscribe((event) => {
+    if (
+      event.type === 'draft-created' || event.type === 'draft-updated' || event.type === 'draft-deleted'
+      || event.type === 'coverage-changed'
+      || event.type === 'evaluation-export-created' || event.type === 'evaluation-export-updated' || event.type === 'evaluation-export-deleted'
+    ) gettingStarted.reconcile()
+  })
   // Tracks which external AI client (Claude Desktop / Codex CLI etc.) holds
   // heal duty for each run. Routes hit this; the orchestrator subscribes to
   // claim-changed events through the run-store fan-out.
@@ -377,9 +414,9 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
             kind: 'getting-started-busy',
             active: body.active as {
               sessionId: string
-              workflow: 'run' | 'flight'
+              workflow: string
               owner: 'internal' | 'external'
-              target: { kind: 'run' | 'flight'; id: string } | null
+              target: { kind: string; id: string } | null
             },
             message: String(body.error ?? 'Another Getting Started demo is already running.'),
           }
@@ -395,7 +432,12 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
       const resp = await app.inject({
         method: 'POST',
         url: `/api/features/${encodeURIComponent(feature)}/verifications`,
-        payload: input,
+        // Same demo attribution the startRun injector applies: verifying the
+        // workbench suite from an external client IS the Verify demo, so the
+        // route claims the Getting Started session for it.
+        payload: feature === WORKBENCH_SUITE
+          ? { ...input, gettingStartedSource: 'external' }
+          : input,
       })
       if (resp.statusCode !== 200 && resp.statusCode !== 201) {
         const body = (() => { try { return JSON.parse(resp.payload) } catch { return resp.payload } })()
@@ -441,6 +483,29 @@ export async function createServer(opts: CreateServerOptions): Promise<CreateSer
     getPortify: (workflowId) => portifyStore.get(workflowId),
     savePortify: (workflowId) => portifyRunner.save(workflowId),
     cancelPortify: (workflowId) => portifyRunner.cancel(workflowId),
+    // The Getting Started claim for the MCP tools that create their work
+    // records through logic calls rather than REST (draft, coverage job,
+    // portify workflow, export task — the run/flight/verify tools go through
+    // app.inject, where the routes claim). The feature-matching lives here so
+    // the MCP layer never has to know which suites are the demo fixtures.
+    gettingStartedDemo: {
+      claim: (workflow, feature) => {
+        const isDemo = workflow === 'export'
+          ? isGettingStartedRunFeature(feature)
+          : feature === WORKBENCH_SUITE
+        if (!isDemo) return null
+        try {
+          return { kind: 'claimed', sessionId: gettingStarted.claim(workflow, 'external').sessionId }
+        } catch (err) {
+          if (err instanceof GettingStartedBusyError) {
+            return { kind: 'busy', active: err.active, message: err.message }
+          }
+          throw err
+        }
+      },
+      attach: (sessionId, target) => gettingStarted.attach(sessionId, target),
+      abandon: (sessionId) => gettingStarted.abandon(sessionId),
+    },
     // Un-portify a saved feature: revert the config (snapshot or legacy strip) +
     // delete the overlay, then emit so live clients update. Mirrors the REST route.
     removePortification: (feature) => {

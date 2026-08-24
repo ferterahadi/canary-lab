@@ -136,34 +136,6 @@ describe('WizardDraftProvider', () => {
     expect(captured.value?.drafts).toEqual([])
   })
 
-  it('refreshDraft re-reads one record, and returns null when the read fails', async () => {
-    const captured = renderProbe()
-    await settle()
-
-    vi.mocked(api.getDraft).mockResolvedValue(draft({ draftId: 'd-1', status: 'generating' }))
-    let refreshed: unknown
-    await act(async () => { refreshed = await captured.value?.refreshDraft('d-1') })
-    expect((refreshed as { draftId: string }).draftId).toBe('d-1')
-    expect(captured.value?.drafts.map((d) => d.draftId)).toEqual(['d-1'])
-
-    vi.mocked(api.getDraft).mockRejectedValue(new Error('gone'))
-    let missing: unknown = 'unset'
-    await act(async () => { missing = await captured.value?.refreshDraft('d-1') })
-    expect(missing).toBeNull()
-    // The failed read must not evict the record we already have.
-    expect(captured.value?.drafts.map((d) => d.draftId)).toEqual(['d-1'])
-  })
-
-  it('refreshDraft forgets a record the server now reports as accepted', async () => {
-    vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'generating' })])
-    const captured = renderProbe()
-    await settle()
-
-    vi.mocked(api.getDraft).mockResolvedValue(draft({ draftId: 'd-1', status: 'accepted' }))
-    await act(async () => { await captured.value?.refreshDraft('d-1') })
-    expect(captured.value?.drafts).toEqual([])
-  })
-
   it('deleteTask stops an in-flight session first, then deletes', async () => {
     vi.mocked(api.listDrafts).mockResolvedValue([draft({ draftId: 'd-1', status: 'generating' })])
     vi.mocked(api.cancelDraftGeneration).mockResolvedValue({ draftId: 'd-1', status: 'cancelled' })

@@ -112,6 +112,13 @@ describe('coverage api', () => {
     expect(JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string)).toEqual({ kind: 'coverage' })
   })
 
+  it('startCoverageJob carries the Getting Started source so the demo claim rides the same POST', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(ok({ jobId: 'j3' }, 202))
+    await startCoverageJob('checkout', 'summary', { baseUrl: 'http://x', fetchImpl, gettingStartedSource: 'internal' })
+    expect(JSON.parse((fetchImpl.mock.calls[0] as [string, RequestInit])[1].body as string))
+      .toEqual({ kind: 'summary', gettingStartedSource: 'internal' })
+  })
+
   it('listCoverageJobs GETs the feature-scoped jobs list', async () => {
     const jobs = [{ jobId: 'j1', feature: 'checkout', kind: 'summary', status: 'done' }]
     const fetchImpl = vi.fn().mockResolvedValue(ok(jobs))

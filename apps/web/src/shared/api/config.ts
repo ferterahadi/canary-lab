@@ -351,9 +351,19 @@ export interface OnboardingWorkflow {
   unavailableReason: string | null
 }
 
-export type GettingStartedWorkflow = 'run' | 'flight'
+/** Mirrors the server union (config/logic/getting-started-session.ts) — one
+ *  key per Getting Started card, the two starters plus the five workflows. */
+export type GettingStartedWorkflow = 'run' | 'flight' | 'coverage' | 'author' | 'portify' | 'verify' | 'export'
 export type GettingStartedOwner = 'internal' | 'external'
-export type GettingStartedTarget = { kind: 'run' | 'flight'; id: string }
+/** run/flight are featureless (pre-widening persisted records); the newer
+ *  kinds carry `feature` because their open-target navigation is feature-first. */
+export type GettingStartedTarget =
+  | { kind: 'run'; id: string }
+  | { kind: 'flight'; id: string }
+  | { kind: 'draft'; id: string; feature: string }
+  | { kind: 'coverage-job'; id: string; feature: string }
+  | { kind: 'portify'; id: string; feature: string }
+  | { kind: 'export'; id: string; feature: string }
 
 export interface GettingStartedActiveSession {
   sessionId: string

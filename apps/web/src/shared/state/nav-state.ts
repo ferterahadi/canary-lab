@@ -1,5 +1,5 @@
 import type { ConfigTab, PersistedView, RouteDialog, RunArrivalTab, WorkspaceView } from '../lib/workspace-view-state'
-import { ACTIVITY_STAGE, derivedFlightToken, type FeatureActivity } from '@/features/flights'
+import { ACTIVITY_STAGE, derivedFlightToken, stageRowKey, type FeatureActivity } from '@/features/flights'
 import type { FlightIndexEntry, FlightStageKey } from '../api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 
@@ -54,9 +54,6 @@ export interface NavState {
   flightStartFresh: boolean
   /** The new-flight launcher — intent + repo picker (routed ?dialog=flight-new). */
   flightStartNew: boolean
-  /** The external authoring draft whose dialog is open (routed ?dialog=draft),
-   *  by draft id. */
-  draftFor: string | null
   /** The Getting Started guide (routed ?dialog=demo). Opens itself once on a
    *  workspace that has never run anything; afterwards it is reached from the
    *  status bar. The route key stays `demo` for existing deep links. */
@@ -107,7 +104,6 @@ export function initialNavState(persisted: PersistedView): NavState {
       : null,
     flightStartFresh: persisted.dialog === 'flight-fresh',
     flightStartNew: persisted.dialog === 'flight-new',
-    draftFor: persisted.dialog === 'draft' ? persisted.draft : null,
     demoOpen: persisted.dialog === 'demo',
     settingsOpen: persisted.dialog === 'settings',
     resumePlanTaskId: null,
@@ -123,7 +119,7 @@ export function initialNavState(persisted: PersistedView): NavState {
 }
 
 /** Which routed dialog owns the URL. Precedence follows z-order: the full-screen
- *  overlays (config > draft > flight-start > flight-new > demo) sit above the
+ *  overlays (config > flight-start > flight-new > demo) sit above the
  *  in-column verify dialog, so the topmost open one wins.
  *
  *  `demo` ranks BELOW flight-new deliberately: its own "Start a flight" action
@@ -137,7 +133,6 @@ export function initialNavState(persisted: PersistedView): NavState {
  *  would actually be on top if they were. */
 export function routedDialog(state: NavState): RouteDialog | null {
   if (state.configFor) return 'config'
-  if (state.draftFor) return 'draft'
   if (state.flightStartFor) return state.flightStartFresh ? 'flight-fresh' : 'flight-start'
   if (state.flightStartNew) return 'flight-new'
   if (state.demoOpen) return 'demo'
@@ -155,7 +150,6 @@ export function navToPersistedView(state: NavState): PersistedView {
     dialog: routedDialog(state),
     flight: state.flight,
     flightStage: state.flightStage,
-    draft: state.draftFor,
     configTab: state.configTab,
     // Only the CURRENT run's focus reaches the URL — a stale pair from a
     // previously-selected run is dropped rather than pinned.
@@ -174,7 +168,6 @@ export type ActivityTarget =
   | { kind: 'run'; feature: string; runId: string }
   | { kind: 'flight'; flightId: string; stage?: FlightStageKey }
   | { kind: 'portify'; workflowId: string }
-  | { kind: 'draft'; draftId: string }
 
 export function resolveActivityTarget(
   feature: string,
@@ -197,18 +190,22 @@ export function resolveActivityTarget(
     const flight = flights.find((f) => f.feature === feature)
     return { kind: 'flight', flightId: flight ? flight.flightId : derivedFlightToken(feature), stage }
   }
-  if (activity.kind === 'portifying' && activity.workflowId) {
+  // An INTERNAL portify keeps the embedded workflow view — the app's own agent
+  // is editing a scratch worktree and that view carries its controls. An
+  // external one has nothing to control here (the agent runs in the user's own
+  // client), so it monitors like everything else: the flight's portify stage,
+  // which shows the hand-off card + live status.
+  if (activity.kind === 'portifying' && activity.workflowId && !activity.external) {
     return { kind: 'portify', workflowId: activity.workflowId }
   }
-  if (activity.kind === 'authoring' && activity.draftId) {
-    // The authoring verb is always an external MCP draft — open its own routed
-    // dialog (the live agent session + cleanup controls). Routing to the flights
-    // view (the old R36 behavior) dead-ended: from the picker it just reopened
-    // the picker, and there was no draft surface mounted at all.
-    return { kind: 'draft', draftId: activity.draftId }
-  }
-  // Every remaining case — an export, or a verb whose own id is missing (an
-  // older server, or a job caught mid-write) — opens the flight at the stage
-  // that verb belongs to. Monitoring is always one click away.
-  return flightTarget(ACTIVITY_STAGE[activity.kind])
+  // Every remaining case — authoring, coverage jobs, exports, runs, or a verb
+  // whose own id is missing (an older server, or a job caught mid-write) —
+  // opens the flight at the stage that verb belongs to. Skills the user invokes
+  // and GUI-started jobs monitor in the SAME place: the FlightPage stage.
+  // (Authoring used to open its own routed dialog; that detour is retired —
+  // the specs-coverage stage now renders the external draft card.)
+  // Through `stageRowKey` because the rail folds pairs: `condensing` maps to
+  // prd-summary, a stage the rail shows only as the Requirements row (`docs`) —
+  // pinning the raw key would select a row that doesn't exist.
+  return flightTarget(stageRowKey(ACTIVITY_STAGE[activity.kind]))
 }
