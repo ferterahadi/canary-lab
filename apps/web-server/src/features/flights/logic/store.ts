@@ -1,6 +1,6 @@
 import path from 'path'
 import type { FlightIndexEntry, FlightManifest, FlightStageKey } from './types'
-import { isActiveFlightStatus } from './types'
+import { isActiveFlightStatus, isTerminalFlightStatus } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../shared/lib/file-backed-task-store'
 
 // File-backed, event-emitting store for Flight background jobs. A thin
@@ -35,26 +35,48 @@ export interface FlightStore {
   latestForFeature(feature: string): FlightIndexEntry | null
   save(manifest: FlightManifest): void
   remove(flightId: string): void
+  /** Re-home every record from one feature name to another (suite rename). */
+  renameFeature(from: string, to: string): number
   /** Per-flight sidecar dir (agent-session refs, stage artifacts). */
   flightDir(flightId: string): string
+  /** The workspace logs root this store writes under. Exposed because sibling
+   *  stores are addressed from it — the restart wipe drops a stage's agent-job
+   *  rows alongside its sidecar dir, and both live under this root. */
+  readonly logsDir: string
   reconcileInterrupted(now: () => string): void
   onEvent(fn: (event: FlightStoreEvent) => void): void
   offEvent(fn: (event: FlightStoreEvent) => void): void
 }
 
 function indexEntryFromManifest(m: FlightManifest): FlightIndexEntry {
+  // Clearable keys (group / pauseReason / checkpointKind / endedAt) are ALWAYS present — as
+  // `undefined` when the manifest has none — because the index upsert is a
+  // shallow merge (`{ ...oldRow, ...entry }`): a merge can overwrite a key but
+  // never delete one, so omitting a cleared key would leave the previous
+  // value stuck on the row forever (a resumed flight showing `running` WITH
+  // its old `pauseReason: "stage-failed"`). An explicit `undefined` overrides
+  // the stale value in the merge, and JSON.stringify drops the key on write.
   return {
     id: m.flightId,
     createdAt: m.createdAt,
     flightId: m.flightId,
     feature: m.feature,
     repoPaths: m.repoPaths,
+    group: m.opts.group,
     status: m.status,
-    ...(m.pauseReason ? { pauseReason: m.pauseReason } : {}),
+    pauseReason: m.pauseReason,
+    // Which kind of stop a parked flight is on, so the slim consumers can tell
+    // a question for the human from an `external-work` hand-off without
+    // loading the manifest. Only one stage can be parked at a time.
+    checkpointKind: m.stages.find((s) => s.status === 'waiting-for-approval')?.checkpoint?.kind,
+    // Who drives the flight, so the slim consumers can tell an externally
+    // driven flight (read-only here — every decision belongs to the MCP client
+    // that started it) from one this UI may act on.
+    stageProducer: m.opts.stageProducer,
     currentStage: m.currentStage,
     stages: m.stages.map((s) => ({ key: s.key, status: s.status })),
     updatedAt: m.updatedAt,
-    ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    endedAt: m.endedAt,
   }
 }
 
@@ -68,13 +90,15 @@ export class FlightRunStore implements FlightStore {
   private readonly listeners = new Set<(event: FlightStoreEvent) => void>()
   private readonly store: FileBackedTaskStore<FlightManifest>
 
-  constructor(logsDir: string) {
+  constructor(public readonly logsDir: string) {
     this.store = new FileBackedTaskStore<FlightManifest>({
       logsDir,
       dirName: 'flights',
       recordFile: 'flight.json',
       idOf: (m) => m.flightId,
       indexEntryOf: indexEntryFromManifest,
+      featureOf: (m) => m.feature,
+      withFeature: (m, feature) => ({ ...m, feature }),
       sortNewestFirst: true,
       reconcile: {
         isInterrupted: (m) => m.status === 'running',
@@ -84,13 +108,37 @@ export class FlightRunStore implements FlightStore {
           pauseReason: 'restart' as const,
           updatedAt: now,
           stages: m.stages.map((s) =>
-            s.status === 'running' ? { ...s, status: 'pending' as const } : s,
+            // `activeSince` is cleared WITHOUT banking: the server died at some
+            // unknowable point, so `now - activeSince` would count the downtime
+            // as stage work. Losing the pre-crash segment undercounts; banking
+            // it here could overcount by hours. Undercounting never lies upward.
+            s.status === 'running' ? { ...s, status: 'pending' as const, activeSince: undefined } : s,
           ),
           error: m.error ?? 'Interrupted by server restart — resume with `canary-lab flight`',
         }),
       },
     })
+    this.repairLegacyTerminalStages()
     this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, flightId: e.id }))
+  }
+
+  /** Older aborts only settled the flight, leaving the interrupted stage live.
+   *  Repair those persisted records at open so a terminal flight cannot render
+   *  a blue "running" stage or retain an answerable checkpoint. */
+  private repairLegacyTerminalStages(): void {
+    for (const entry of this.store.list()) {
+      const manifest = this.store.get(entry.id)
+      if (!manifest || !isTerminalFlightStatus(manifest.status)) continue
+      let repaired = false
+      const stages = manifest.stages.map((stage) => {
+        if (stage.status !== 'running' && stage.status !== 'waiting-for-approval') return stage
+        repaired = true
+        // Same no-banking rule as the restart reconcile above: whenever this
+        // stage actually stopped, it wasn't now.
+        return { ...stage, status: 'pending' as const, checkpoint: undefined, activeSince: undefined }
+      })
+      if (repaired) this.store.save({ ...manifest, stages })
+    }
   }
 
   list(): FlightIndexEntry[] {
@@ -124,6 +172,10 @@ export class FlightRunStore implements FlightStore {
 
   remove(flightId: string): void {
     this.store.remove(flightId)
+  }
+
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
   }
 
   flightDir(flightId: string): string {

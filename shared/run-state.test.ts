@@ -6,6 +6,7 @@ import {
   deriveDisplayStatus,
   deriveRunActionAvailability,
   isActiveRunStatus,
+  isQueuedRunStatus,
   isRestartableRunStatus,
   isStaleHeartbeat,
   isTerminalRunStatus,
@@ -27,6 +28,13 @@ describe('run status predicates', () => {
     expect(isRestartableRunStatus('failed')).toBe(true)
     expect(isRestartableRunStatus('aborted')).toBe(true)
     expect(isRestartableRunStatus('passed')).toBe(false)
+
+    // Queued is its own state: admitted but holding no processes or ports, so
+    // it must not read as active (which would imply resources are in use).
+    expect(isQueuedRunStatus('queued')).toBe(true)
+    expect(isQueuedRunStatus('running')).toBe(false)
+    expect(isQueuedRunStatus(null)).toBe(false)
+    expect(isActiveRunStatus('queued')).toBe(false)
   })
 
   it('detects stale heartbeats without treating missing or invalid timestamps as stale', () => {

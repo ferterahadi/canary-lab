@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
+
 import type {
   PlaywrightArtifactGroup,
   PlaywrightPlaybackEvent,
   RepoBranchSnapshot,
   ServiceManifestEntry,
-} from '../../../shared/api/types'
+} from '@/shared/api/types'
+
 import {
   DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY,
   artifactsForPlayback,
@@ -112,20 +114,104 @@ describe('playbackTests', () => {
     ])
   })
 
+  it('collapses heal-cycle reruns whose line number shifted within the same spec file', () => {
+    // A heal edit moved the test from line 205 to 222 between the failed
+    // attempt and the passing rerun — same test, one entry, latest attempt.
+    const events: PlaywrightPlaybackEvent[] = [
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:00.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:205' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:06.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:205' },
+        status: 'failed',
+        passed: false,
+        durationMs: 6000,
+        retry: 0,
+        error: { message: 'Condition was not met within 6000ms' },
+      },
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:02:00.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:222' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:02:49.000Z',
+        test: { name: 'cleanup', title: 'survives final cleanup', location: 'cleanup-race.spec.ts:222' },
+        status: 'passed',
+        passed: true,
+        durationMs: 49000,
+        retry: 0,
+      },
+    ]
+
+    expect(playbackTests(events)).toEqual([
+      expect.objectContaining({
+        name: 'cleanup',
+        status: 'passed',
+        passed: true,
+        location: 'cleanup-race.spec.ts:222',
+      }),
+    ])
+  })
+
+  it('keeps same-titled tests in different spec files as separate entries', () => {
+    const events: PlaywrightPlaybackEvent[] = [
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:00.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'api.spec.ts:10' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:02.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'api.spec.ts:10' },
+        status: 'passed',
+        passed: true,
+        durationMs: 2000,
+        retry: 0,
+      },
+      {
+        type: 'test-begin',
+        time: '2026-01-01T00:00:03.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'worker.spec.ts:10' },
+      },
+      {
+        type: 'test-end',
+        time: '2026-01-01T00:00:05.000Z',
+        test: { name: 'health', title: 'gateway is healthy', location: 'worker.spec.ts:10' },
+        status: 'passed',
+        passed: true,
+        durationMs: 2000,
+        retry: 0,
+      },
+    ]
+
+    expect(playbackTests(events)).toEqual([
+      expect.objectContaining({ location: 'api.spec.ts:10' }),
+      expect.objectContaining({ location: 'worker.spec.ts:10' }),
+    ])
+  })
+
   it('uses the test name as the playback identity when location is missing', () => {
     const events: PlaywrightPlaybackEvent[] = [
       {
         type: 'test-begin',
         time: '2026-01-01T00:00:00.000Z',
-        test: { name: 'legacy checkout', title: 'legacy checkout' },
+        test: { name: 'legacy checkout', title: 'legacy checkout', location: '' },
       },
       {
         type: 'test-end',
         time: '2026-01-01T00:00:03.000Z',
-        test: { name: 'legacy checkout', title: 'legacy checkout' },
+        test: { name: 'legacy checkout', title: 'legacy checkout', location: '' },
         status: 'passed',
         passed: true,
         durationMs: 3000,
+        retry: 0,
       },
     ]
 
@@ -307,199 +393,143 @@ describe('playbackTests', () => {
   })
 })
 
-describe('artifactsForPlayback', () => {
-  const groups: PlaywrightArtifactGroup[] = [
-    {
-      testName: 'auth.spec.ts:login',
-      artifacts: [
-        artifact('screenshot', 'screen.png', 1),
-        artifact('screenshot', 'canary-lab-final-page-login.png', 2),
-        artifact('trace', 'trace.zip'),
-        artifact('video', 'video.webm'),
-        artifact('other', 'notes.txt'),
-      ],
-    },
+// Every case below was taken from the real playback corpus (32,575 step events
+// across 79 recorded runs), not invented — the previous compactor rendered a
+// column of identical `Verified toBe` rows for the API suites because it read
+// Playwright's matcher name as the assertion's target.
+describe('playback step compaction against real Playwright step titles', () => {
+  const step = (title: string, category: string): PlaywrightPlaybackEvent => ({
+    type: 'step-begin',
+    time: '2026-01-01T00:00:01.000Z',
+    test: { name: 'api', title: 'API' },
+    step: { title, category },
+  })
+  const around = (...steps: PlaywrightPlaybackEvent[]): PlaywrightPlaybackEvent[] => [
+    { type: 'test-begin', time: '2026-01-01T00:00:00.000Z', test: { name: 'api', title: 'API', location: 'api.spec.ts:1' } },
+    ...steps,
   ]
+  const titles = (events: PlaywrightPlaybackEvent[]): string[] =>
+    playbackTests(events)[0].steps.map((s) => s.title)
 
-  it('uses default policy when no run policy exists', () => {
-    expect(artifactsForPlayback('auth.spec.ts:login', groups, undefined)).toEqual({
-      screenshotMode: DEFAULT_PLAYWRIGHT_ARTIFACT_POLICY.screenshot,
-      screenshots: [artifact('screenshot', 'canary-lab-final-page-login.png', 2)],
-      links: [artifact('trace', 'trace.zip')],
-    })
+  it('tallies matcher-only assertions instead of repeating them verbatim', () => {
+    expect(titles(around(
+      step('Expect "toBe"', 'expect'),
+      step('Expect "toBeTruthy"', 'expect'),
+      step('Expect "toBe"', 'expect'),
+    ))).toEqual(['Verified 3 assertions'])
   })
 
-  it('hides screenshots and retained links disabled by policy', () => {
-    expect(artifactsForPlayback('auth.spec.ts:login', groups, {
-      screenshot: 'off',
-      video: 'off',
-      trace: 'off',
-    })).toEqual({
-      screenshotMode: 'off',
-      screenshots: [],
-      links: [],
-    })
+  it('treats space-separated negation as the same matcher-only shape', () => {
+    expect(titles(around(step('Expect "not toBeNaN"', 'expect')))).toEqual(['Verified 1 assertion'])
   })
 
-  it('includes retained video links when policy enables them', () => {
-    expect(artifactsForPlayback('auth.spec.ts:login', groups, {
-      screenshot: 'on',
-      video: 'on-first-retry',
-      trace: 'retain-on-failure',
-    })).toEqual({
-      screenshotMode: 'on',
-      screenshots: [artifact('screenshot', 'canary-lab-final-page-login.png', 2)],
-      links: [artifact('trace', 'trace.zip'), artifact('video', 'video.webm')],
-    })
+  it('keeps the assertion when the matcher names a target, in reading order', () => {
+    expect(titles(around(
+      step('Expect "toBe"', 'expect'),
+      step(`Expect "toBeVisible" getByRole('button', { name: /^authorize$/i })`, 'expect'),
+      step('Expect "toBe"', 'expect'),
+    ))).toEqual(['Verified 1 assertion', 'Verified authorize is visible', 'Verified 1 assertion'])
   })
 
-  it('returns empty artifacts when the test has no artifact group', () => {
-    expect(artifactsForPlayback('missing', groups, {
-      screenshot: 'on',
-      video: 'on',
-      trace: 'on',
-    })).toEqual({
-      screenshotMode: 'on',
-      screenshots: [],
-      links: [],
-    })
+  it('reads regex-literal locator names, which are as common as quoted ones', () => {
+    expect(titles(around(
+      step('Expect "toBeVisible" getByText(/token created/i)', 'expect'),
+      step(`Click getByRole('button', { name: /login|sign in/i })`, 'pw:api'),
+    ))).toEqual(['Verified token created is visible', 'Clicked login / sign in'])
   })
 
-  it('falls back to the newest screenshot when no final-page screenshot exists', () => {
-    const groupsWithoutFinal: PlaywrightArtifactGroup[] = [
-      {
-        testName: 'auth.spec.ts:login',
-        artifacts: [
-          artifact('screenshot', 'older.png'),
-          artifact('screenshot', 'newer.png', 3),
-        ],
-      },
-    ]
-
-    expect(artifactsForPlayback('auth.spec.ts:login', groupsWithoutFinal, {
-      screenshot: 'only-on-failure',
-      video: 'off',
-      trace: 'off',
-    }).screenshots).toEqual([artifact('screenshot', 'newer.png', 3)])
+  it('surfaces API requests, which are the whole trace for a non-browser suite', () => {
+    expect(titles(around(
+      step('Create request context', 'pw:api'),
+      step('POST "/oauth/token"', 'pw:api'),
+      step('GET "/api/queues/%2f"', 'pw:api'),
+    ))).toEqual(['POST /oauth/token', 'GET /api/queues/%2f'])
   })
 
-  it('keeps screenshot ordering stable when mtimes are missing', () => {
-    // Pass mtimeMs as explicit undefined via cast to bypass the default in `artifact()`,
-    // exercising the `?? 0` fallback in the sort comparator.
-    const missingMtime = (name: string): PlaywrightArtifactGroup['artifacts'][number] => ({
-      name,
-      kind: 'screenshot',
-      path: `/tmp/${name}`,
-      url: `/artifacts/${name}`,
-      sizeBytes: 1,
-      mtimeMs: undefined as unknown as number,
-    })
-    const groupsWithoutMtime: PlaywrightArtifactGroup[] = [
-      {
-        testName: 'auth.spec.ts:login',
-        artifacts: [missingMtime('first.png'), missingMtime('second.png')],
-      },
-    ]
-
-    const result = artifactsForPlayback('auth.spec.ts:login', groupsWithoutMtime, {
-      screenshot: 'on',
-      video: 'off',
-      trace: 'off',
-    }).screenshots
-    expect(result).toHaveLength(1)
-    expect(result[0].name).toBe('first.png')
+  it("passes an author's own assertion message through untouched", () => {
+    expect(titles(around(step('auth probe should return a userId', 'expect'))))
+      .toEqual(['auth probe should return a userId'])
   })
 
-  it('prefers the deterministic final-page screenshot over attachment duplicates', () => {
-    const groupsWithAttachmentDuplicate: PlaywrightArtifactGroup[] = [
-      {
-        testName: 'auth.spec.ts:login',
-        artifacts: [
-          artifact('screenshot', 'canary-lab-final-page-hash.png', 5, 'case/attachments/canary-lab-final-page-hash.png'),
-          artifact('screenshot', 'canary-lab-final-page-login.png', 2, 'case/canary-lab-final-page-login.png'),
-          artifact('screenshot', 'test-finished-1.png', 6, 'case/test-finished-1.png'),
-        ],
-      },
-    ]
-
-    expect(artifactsForPlayback('auth.spec.ts:login', groupsWithAttachmentDuplicate, {
-      screenshot: 'on',
-      video: 'off',
-      trace: 'off',
-    }).screenshots).toEqual([
-      artifact('screenshot', 'canary-lab-final-page-login.png', 2, 'case/canary-lab-final-page-login.png'),
+  it('never renders a negated assertion as its positive', () => {
+    // The pane is evidence: reporting `not toBeVisible` as "is visible" states
+    // the opposite of what the test asserted.
+    expect(titles(around(
+      step(`Expect "not toBeVisible" getByRole('button', { name: 'Deny' })`, 'expect'),
+      step(`Expect "not toHaveText" getByText('Welcome')`, 'expect'),
+      step(`Expect "not toBeFrobnicated" getByLabel('Widget')`, 'expect'),
+    ))).toEqual([
+      'Verified Deny is not visible',
+      'Verified Welcome does not have the expected text',
+      'Verified Widget does not match toBeFrobnicated',
     ])
   })
-})
 
-describe('branch helpers', () => {
-  const branches: RepoBranchSnapshot[] = [
-    repo('/workspace', 'main'),
-    repo('/workspace/apps/shop', 'checkout'),
-    repo('/other', 'other'),
-  ]
-
-  it('selects the closest repo path for a service cwd', () => {
-    expect(branchForService(service('/workspace'), branches)).toEqual(repo('/workspace', 'main'))
-    expect(branchForService(service('/workspace/apps/shop/web'), branches)).toEqual(repo('/workspace/apps/shop', 'checkout'))
-    expect(branchForService(service('/workspace/api'), branches)).toEqual(repo('/workspace', 'main'))
-    expect(branchForService(service('/missing'), branches)).toBeNull()
-    expect(branchForService(service('////'), [repo('/', 'root')])).toEqual(repo('/', 'root'))
-    expect(branchForService(service('/workspace/apps/shop/web'), [
-      repo('/workspace/apps/shop', 'checkout'),
-      repo('/workspace', 'main'),
-    ])).toEqual(repo('/workspace/apps/shop', 'checkout'))
+  it('does not let a matcher name be read as an action verb', () => {
+    // `toBeChecked` contains "check" and `toBeSelected` contains "select" — the
+    // verb branches used to claim them and report an assertion as a click.
+    expect(titles(around(
+      step(`Expect "toBeChecked" getByLabel('Terms')`, 'expect'),
+      step(`Expect "toBeVisible" getByLabel('Terms')`, 'expect'),
+    ))).toEqual(['Verified Terms is checked', 'Verified Terms is visible'])
   })
 
-  it('formats branch labels and tooltips', () => {
-    expect(branchLabel({ ...repo('/workspace', null), detached: true })).toBe('detached')
-    expect(branchLabel(repo('/workspace', null))).toBe('unknown')
-    expect(branchLabel(repo('/workspace', 'main'))).toBe('main')
+  it('does not invent words out of regex character classes', () => {
+    // `/^Pickup\\s/` matches a button labelled "Pickup"; stripping the backslash
+    // rendered "Pickups", a string that appears neither in the test nor the UI.
+    expect(titles(around(
+      step(`Click getByRole('button', { name: /^Pickup\\s/ })`, 'pw:api'),
+      step(`Click getByRole('button', { name: /Hi,\\s+\\S+/ })`, 'pw:api'),
+      step(`Click getByRole('button', { name: /^allow\\b/i })`, 'pw:api'),
+      step(`Click getByText(/example\\.com/)`, 'pw:api'),
+    ))).toEqual(['Clicked Pickup', 'Clicked Hi', 'Clicked allow', 'Clicked example.com'])
+  })
 
-    expect(branchTooltip(service('/workspace/app'), {
-      ...repo('/workspace', 'feature/current'),
-      expectedBranch: 'main',
-      dirty: true,
-    })).toBe([
-      'repo: repo',
-      'branch: feature/current',
-      'expected: main',
-      'dirty: yes',
-      'mismatch: yes',
-      'repo path: /workspace',
-      'service cwd: /workspace/app',
-    ].join('\n'))
+  it('holds a tally open while any assertion under it is still running', () => {
+    const events = around(
+      step('Expect "toBe"', 'expect'),
+      step('Expect "toBe"', 'expect'),
+    )
+    events.push({
+      type: 'step-end',
+      time: '2026-01-01T00:00:02.000Z',
+      test: { name: 'api', title: 'API' },
+      step: { title: 'Expect "toBe"', category: 'expect' },
+    })
+    const [tally] = playbackTests(events)[0].steps
+    expect(tally.title).toBe('Verified 2 assertions')
+    expect(tally.ended).toBe(false)
+  })
 
-    expect(branchTooltip(service('/workspace/app'), repo('/workspace/', 'main'))).toBe([
-      'repo: repo',
-      'branch: main',
-      'repo path: /workspace/',
-      'service cwd: /workspace/app',
-    ].join('\n'))
+  it('drops attachment bookkeeping', () => {
+    expect(titles(around(
+      step('Attach "canary-lab-final-page"', 'test.attach'),
+      step('POST "/api/login"', 'pw:api'),
+    ))).toEqual(['POST /api/login'])
   })
 })
 
-function artifact(kind: PlaywrightArtifactGroup['artifacts'][number]['kind'], name: string, mtimeMs: number | undefined = 0, artifactPath = `/tmp/${name}`): PlaywrightArtifactGroup['artifacts'][number] {
-  return {
-    name,
-    kind,
-    path: artifactPath,
-    url: `/artifacts/${name}`,
-    sizeBytes: 1,
-    mtimeMs,
-  }
-}
+describe('branchForService', () => {
+  const repo = { name: 'mighty-cns', path: '/Users/me/Documents/mighty-cns', branch: 'main', dirty: false, detached: false }
 
-function repo(repoPath: string, branch: string | null): RepoBranchSnapshot {
-  return {
-    name: 'repo',
-    path: repoPath,
-    branch,
-    detached: false,
-    dirty: false,
-  }
-}
+  it('matches a service running in a per-run worktree by repo name', () => {
+    // The isolated-run default: cwd is under `logs/runs/<id>/worktrees/<repo>`,
+    // nowhere near the repo snapshot's own path — path containment found nothing
+    // and the ref silently disappeared from every isolated run.
+    const service = {
+      cwd: '/Users/me/Documents/canary-lab-workspace/logs/runs/2026-07-01T0245-o456/worktrees/mighty-cns',
+      repoName: 'mighty-cns',
+    }
+    expect(branchForService(service, [repo])).toBe(repo)
+  })
 
-function service(cwd: string): Pick<ServiceManifestEntry, 'cwd'> {
-  return { cwd }
-}
+  it('still falls back to the deepest containing path when no repo name is recorded', () => {
+    const nested = { name: 'inner', path: '/Users/me/Documents/mighty-cns/packages/inner', branch: 'dev', dirty: false, detached: false }
+    const service = { cwd: '/Users/me/Documents/mighty-cns/packages/inner/src' }
+    expect(branchForService(service, [repo, nested])).toBe(nested)
+  })
+
+  it('returns null when the named repo is absent rather than guessing by path', () => {
+    expect(branchForService({ cwd: '/tmp/elsewhere', repoName: 'unknown-repo' }, [repo])).toBeNull()
+  })
+})

@@ -1,14 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, type ReactNode } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 import type {
   DisplayStatus,
   RunDetail,
   RunIndexEntry,
   RunStatus,
   TransientAction,
-} from '../../../shared/api/types'
+} from '@/shared/api/types'
 import { deriveDisplayStatus } from '../utils/run-actions'
-import { isActiveRunStatus } from '../../../../../../shared/run-state'
+import { isActiveRunStatus } from '@shared/run-state'
+import { defaultWsBase } from '@/shared/api/reconnecting-socket'
 import {
   errorMessage,
   frameToAction,
@@ -43,7 +44,7 @@ interface RunsContextValue {
   startRun: (feature: string, env?: string, isolation?: 'worktree' | 'queue', mode?: 'test' | 'boot') => Promise<string>
   startVerification: (
     feature: string,
-    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ) => Promise<string>
   /** Lazily hydrate a run detail that was omitted from the initial WS
    *  snapshot. Terminal runs use this path so selecting historical rows does
@@ -92,9 +93,10 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
     let backoff = RECONNECT_INITIAL_MS
     let cancelled = false
 
+    // Never runs after teardown, so it needs no `cancelled` guard of its own:
+    // its only callers are the initial call below and the reconnect timer, and
+    // cleanup clears that timer before its callback can fire.
     const connect = (): void => {
-      /* v8 ignore next -- cleanup clears reconnect timers before this closure can run cancelled. */
-      if (cancelled) return
       try {
         socket = new Ctor(url)
       } catch {
@@ -126,9 +128,10 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
       }
     }
 
+    // Same reasoning: both callers have already ruled out teardown — the
+    // constructor's catch runs inside `connect`, and `onclose` checks
+    // `cancelled` before it gets here.
     const scheduleReconnect = (): void => {
-      /* v8 ignore next -- callers guard cleanup through cleared timers or socket close. */
-      if (cancelled) return
       reconnectTimer = setTimeout(() => {
         // After multiple rounds of growing backoff, surface the
         // disconnect to the user. They can still click around the
@@ -204,7 +207,7 @@ export function RunsProvider({ children, wsUrl, WebSocketImpl }: RunsProviderPro
 
   const startVerification = useCallback(async (
     feature: string,
-    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ): Promise<string> => {
     const { runId } = await api.executeVerification(feature, input)
     if (state.connection !== 'live') await refresh()
@@ -276,7 +279,7 @@ export interface UseRunsResult {
   /** Start a deployment verification. */
   startVerification: (
     feature: string,
-    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string },
+    input: { configId?: string; targetUrls?: Record<string, string>; playwrightEnvsetId?: string; bootRunId?: string; gettingStartedSource?: 'internal' | 'external' },
   ) => Promise<string>
   // ── Per-run actions (the runId is the first arg). The parent can
   //    dispatch these for any row without needing a child component. ──
@@ -389,21 +392,32 @@ export function useGlobalActiveRun(): UseGlobalActiveRunResult {
 // Every run that occupies resources or a queue slot right now: running,
 // healing, or queued. Concurrent runs are allowed, so this can hold several.
 // Drives the top-right runs control + its badge count.
+//
+// Memoized on `state.runs`, not recomputed per render: consumers put the
+// returned array in dep arrays (`useFeatureActivity` memoizes on it), and a
+// fresh `.filter()` identity every render silently defeated every one of those
+// memos — the exact unstable-dep pattern behind the 3877ms workspace-load
+// incident.
 export function useActiveRuns(): { runs: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
-  const runs = state.runs.filter((r) => isActiveRunStatus(r.status) || r.status === 'queued')
-  return { runs, count: runs.length }
+  return useMemo(() => {
+    const runs = state.runs.filter((r) => isActiveRunStatus(r.status) || r.status === 'queued')
+    return { runs, count: runs.length }
+  }, [state.runs])
 }
 
 // Boot-only sessions that are currently live (booting or held). These are
 // surfaced in the global Services pill, NOT the Runs list — a boot is not a
 // test run. `executionType === 'boot'` is the discriminator.
+// Same memo rationale as useActiveRuns above.
 export function useActiveBootSessions(): { sessions: RunIndexEntry[]; count: number } {
   const { state } = useRunsContext()
-  const sessions = state.runs.filter(
-    (r) => r.executionType === 'boot' && (isActiveRunStatus(r.status) || r.status === 'queued'),
-  )
-  return { sessions, count: sessions.length }
+  return useMemo(() => {
+    const sessions = state.runs.filter(
+      (r) => r.executionType === 'boot' && (isActiveRunStatus(r.status) || r.status === 'queued'),
+    )
+    return { sessions, count: sessions.length }
+  }, [state.runs])
 }
 
 // Deployed-env verification runs that are live right now (record-only, no
@@ -427,8 +441,8 @@ export function useRunDetails(): Record<string, RunDetail> {
 // ─── Internals ───────────────────────────────────────────────────────────
 
 function defaultWsUrl(): string {
-  /* v8 ignore next -- React DOM tests require a browser-like window. */
-  if (typeof window === 'undefined') return 'ws://localhost/ws/runs'
-  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  return `${proto}//${window.location.host}/ws/runs`
+  // Shares the app's one origin→ws-base helper rather than re-deriving it: this
+  // was a second copy of the same protocol/host logic, including its own
+  // no-window fallback.
+  return `${defaultWsBase()}/ws/runs`
 }

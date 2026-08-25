@@ -6,6 +6,7 @@ import path from 'path'
 import {
   checkoutBranch,
   collectRepoBranchSnapshots,
+  detectBaseBranch,
   diffContentSinceSnapshot,
   diffNamesSinceSnapshot,
   findRepo,
@@ -42,6 +43,13 @@ describe('git-repo helpers', () => {
   it('parses porcelain status and ref lists', () => {
     expect(parsePorcelainStatus(' M README.md\n?? tmp.txt\n\n')).toEqual([' M README.md', '?? tmp.txt'])
     expect(parseRefList('main\nfeature/demo\n\n')).toEqual(['main', 'feature/demo'])
+  })
+
+  it('detectBaseBranch: honors override, else falls back to an existing main/master', () => {
+    const repo = tmpRepo() // default branch is main, no origin/HEAD
+    expect(detectBaseBranch(repo, 'develop')).toBe('develop') // override wins
+    expect(detectBaseBranch(repo)).toBe('main') // no origin → first existing of main/master
+    expect(detectBaseBranch(path.join(os.tmpdir(), 'cl-not-a-repo-xyz'))).toBeNull()
   })
 
   it('reports empty status for missing, file, and non-git paths', async () => {
@@ -112,6 +120,33 @@ describe('git-repo helpers', () => {
     expect(status.currentBranch).toBe('feature/demo')
   })
 
+  it('announces the switch — three callers reach here and none of them should have to', async () => {
+    // The MCP tool, the workspace repo picker and the feature-config repo row
+    // all land on this one writer. Before it announced, an agent switching a
+    // branch left every other client's Repos tab on the old one.
+    const events: { type: string }[] = []
+    const repo = tmpRepo()
+    await checkoutBranch(repo, 'feature/demo', { publish: (e) => events.push(e) })
+    expect(events).toEqual([{ type: 'features-changed' }])
+  })
+
+  it('stays silent when the repo is already on that branch', async () => {
+    const events: { type: string }[] = []
+    const repo = tmpRepo()
+    await checkoutBranch(repo, 'main', { publish: (e) => events.push(e) })
+    // Nothing changed, so nothing is announced — a nudge with nothing behind it
+    // makes every client refetch for no reason.
+    expect(events).toEqual([])
+  })
+
+  it('stays silent when the checkout fails', async () => {
+    const events: { type: string }[] = []
+    const repo = tmpRepo()
+    await expect(checkoutBranch(repo, 'missing-branch', { publish: (e) => events.push(e) }))
+      .rejects.toThrow(/missing-branch|pathspec/)
+    expect(events).toEqual([])
+  })
+
   it('validates configured branch targets before run start', async () => {
     const repo = tmpRepo()
     await expect(validateConfiguredRepoBranches({
@@ -132,6 +167,7 @@ describe('git-repo helpers', () => {
       featureDir: repo,
       repos: [{ name: 'app', localPath: repo, branch: 'feature/demo' }],
     }).catch((e: unknown) => e as { statusCode?: number; branchMismatch?: unknown })
+    if (!err) throw new Error('expected validateConfiguredRepoBranches to reject')
     expect(err.statusCode).toBe(409)
     expect(err.branchMismatch).toEqual([
       { name: 'app', path: repo, expected: 'feature/demo', current: 'main', detached: false, isGitRepo: true },

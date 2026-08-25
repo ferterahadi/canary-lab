@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import * as api from '../api/client'
 import type { ExecutionType, Feature, RunStatus, VersionStatus } from '../api/types'
 import { useMcpPromo } from './McpPromoContext'
-import { FeatureConfigEditor } from '../../features/config/components/FeatureConfigEditor'
+import { FeatureConfigEditor, SettingsModal } from '@/features/config'
+import { FeatureChipBadge, FlightStatusChip, flightAwaitsUser, readGroupOpen, writeGroupOpen, type FeatureFlightAction } from '@/features/flights'
 import { ThemeToggle } from '../ui/ThemeToggle'
 import { VersionUpdateButton } from './VersionUpdateButton'
-import { SettingsModal } from '../../features/config/components/SettingsModal'
-import { ChevronRightIcon } from '../../features/config/components/atoms'
+import { ChevronRightIcon } from '@/shared/ui/atoms'
 import { Tooltip } from '../ui/Tooltip'
-import { readGroupOpen, writeGroupOpen } from '../../features/flights/lib/group-open-state'
+import { useInvalidationKey } from '../state/invalidation'
 
 interface Props {
   features: Feature[]
@@ -22,19 +22,32 @@ interface Props {
   activeRunExecutionType?: ExecutionType | null
   onSelectFeature: (name: string) => void
   onFeaturesChanged?: (preferredFeature?: string | null) => void
-  /** Incremented by App when a coverage job finishes → re-fetches headlines. */
-  coverageRefreshKey?: number
-  /** Incremented by App when a portify overlay is saved → the open Ports tab
-   *  refetches its config doc so the rewritten slots show without a tab switch. */
-  portsRefreshKey?: number
   /** Opens the Requirement Coverage ledger for a feature (R8 column entry point). */
   onOpenCoverage?: (feature: string) => void
   /** Opens the new-flight dialog (intent + repo picker) — the "+ New" action.
    *  Flight is the only GUI path to a new feature (R40/R50). */
   onStartNewFlight?: () => void
+  /** Opens the routed flight view — a pending (pre-scaffold) placeholder row
+   *  has no feature dir to select, so clicking it resumes its flight instead.
+   *  Also the destination of the per-row flight shortcut below. */
+  onOpenFlight?: (flightId: string) => void
+  /** The row's hover flight shortcut: where this suite's flight lives and what
+   *  state it's in, or null when there's nothing to open yet (see
+   *  `resolveFeatureFlightAction`). Omitting the prop drops the action. */
+  flightAction?: (feature: string) => FeatureFlightAction | null
   /** Current-vs-latest version + self-update job state. Drives the footer
    *  "update available" indicator; null until the registry check resolves. */
   versionStatus?: VersionStatus | null
+  /** Launch the port-ification wizard for a feature (config dialog → Ports tab). */
+  onStartPortify?: (feature: string) => void
+  /** Reopen a past/active port-ification workflow (by id) in the wizard. */
+  onOpenPortify?: (workflowId: string) => void
+  /** Project Settings is route-driven (`?dialog=settings`) when these are
+   *  supplied — controlled by App. Omitted (e.g. in unit tests) → the column
+   *  falls back to its own internal open-state. Same hybrid the runs column's
+   *  Verify dialog uses. */
+  settingsOpen?: boolean
+  onSettingsOpenChange?: (open: boolean) => void
 }
 
 // Colour the Coverage icon by the derived headline (R8). Neutral (inherit) for
@@ -42,9 +55,9 @@ interface Props {
 // real signal; green when covered, sky while generating, amber when stale.
 function coverageHeadlineColor(headline: string | null | undefined): string | undefined {
   if (!headline) return undefined
-  if (headline.startsWith('Covered')) return 'rgb(52, 211, 153)'
-  if (headline === 'Generating') return 'rgb(56, 189, 248)'
-  if (headline === 'Stale') return 'rgb(251, 191, 36)'
+  if (headline.startsWith('Covered')) return 'var(--success)'
+  if (headline === 'Generating') return 'var(--running)'
+  if (headline === 'Stale') return 'var(--warning)'
   return undefined
 }
 
@@ -64,6 +77,11 @@ function featureRowRank(
 ): number {
   if (activeRunFeature && f.name === activeRunFeature) return 0
   if (f.dirty?.status === 'dirty') return 1
+  // A pending placeholder parked on approval needs the human — it ranks with
+  // dirty; otherwise it rests with a settled feature so the column stays calm.
+  // A hand-off to the user's own agent asks nothing of this reader, so it rests
+  // too — floating it to the top would nag about work already under way.
+  if (f.pending) return flightAwaitsUser(f.pending) ? 1 : 2
   return 2
 }
 
@@ -108,23 +126,40 @@ export function FeaturesColumn({
   activeRunExecutionType,
   onSelectFeature,
   onFeaturesChanged,
-  coverageRefreshKey,
-  portsRefreshKey,
   onOpenCoverage,
   onStartNewFlight,
+  onOpenFlight,
+  flightAction,
   versionStatus,
+  onStartPortify,
+  onOpenPortify,
+  settingsOpen,
+  onSettingsOpenChange,
 }: Props) {
   const { gatePromo } = useMcpPromo()
+  // Coverage headlines re-fetch when a coverage job finishes (`coverage-changed`).
+  const coverageRefreshKey = useInvalidationKey('coverage')
   const [configFor, setConfigFor] = useState<string | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  // Controlled when App drives it from the route; uncontrolled otherwise.
+  const [settingsOpenInternal, setSettingsOpenInternal] = useState(false)
+  const settingsDialogOpen = settingsOpen ?? settingsOpenInternal
+  const setSettingsDialogOpen = useCallback((open: boolean) => {
+    if (onSettingsOpenChange) onSettingsOpenChange(open)
+    else setSettingsOpenInternal(open)
+  }, [onSettingsOpenChange])
   // Per-feature coverage headline → colours the column's Coverage icon (R8).
   // Fetched on mount + when the feature set changes (not polled — generating
   // state is surfaced by the status-bar pill instead, which avoids recomputing
   // every feature's coverage on a tight loop).
   const [coverageHeadlines, setCoverageHeadlines] = useState<Record<string, string | null>>({})
   const featureKey = features.map((f) => f.name).join(',')
+  // The effect only asks *whether* coverage is reachable, never calls the handler.
+  // Depending on the callback itself made every App re-render refetch all the
+  // features' coverage — App passes a fresh arrow each render, and one ledger
+  // recompute per feature is the most expensive route in the app.
+  const canOpenCoverage = Boolean(onOpenCoverage)
   useEffect(() => {
-    if (!onOpenCoverage || features.length === 0) return
+    if (!canOpenCoverage || features.length === 0) return
     let alive = true
     api.listCoverageStates()
       .then((states) => {
@@ -135,7 +170,7 @@ export function FeaturesColumn({
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [featureKey, onOpenCoverage, features.length, coverageRefreshKey])
+  }, [featureKey, canOpenCoverage, features.length, coverageRefreshKey])
 
   // R55: features declaring a `group` collapse under an accordion; the rest
   // stay flat. Sections order worst-first (a group with a running/dirty
@@ -146,7 +181,7 @@ export function FeaturesColumn({
     <div className="cl-panel flex h-full flex-col">
       <div className="cl-panel-header flex items-center justify-between gap-2 px-4 py-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="cl-kicker">Features</span>
+          <span className="cl-kicker">Suites</span>
           {features.length > 0 && <span className="cl-count-chip">{features.length}</span>}
         </div>
         <button
@@ -176,6 +211,8 @@ export function FeaturesColumn({
                     coverageHeadline={coverageHeadlines[f.name]}
                     onSelectFeature={onSelectFeature}
                     onOpenCoverage={onOpenCoverage}
+                    onOpenFlight={onOpenFlight}
+                    flightAction={flightAction}
                     onConfigure={setConfigFor}
                   />
                 ))}
@@ -192,6 +229,8 @@ export function FeaturesColumn({
                 coverageHeadlines={coverageHeadlines}
                 onSelectFeature={onSelectFeature}
                 onOpenCoverage={onOpenCoverage}
+                onOpenFlight={onOpenFlight}
+                flightAction={flightAction}
                 onConfigure={setConfigFor}
               />
             ))}
@@ -204,7 +243,7 @@ export function FeaturesColumn({
           <VersionUpdateButton status={versionStatus ?? null} />
           <button
           type="button"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => setSettingsDialogOpen(true)}
           aria-label="Open settings"
           title="Settings"
           className="cl-icon-button h-7 w-7"
@@ -216,13 +255,14 @@ export function FeaturesColumn({
           </button>
         </div>
       </div>
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsDialogOpen && <SettingsModal onClose={() => setSettingsDialogOpen(false)} />}
 
       {configFor && (
         <FeatureConfigEditor
           feature={configFor}
           portified={features.find((f) => f.name === configFor)?.portified ?? false}
-          portsRefreshKey={portsRefreshKey}
+          onStartPortify={onStartPortify}
+          onOpenPortify={onOpenPortify}
           onClose={() => setConfigFor(null)}
           onRenamed={(_, nextFeature) => {
             setConfigFor(nextFeature)
@@ -250,6 +290,8 @@ function FeatureRow({
   coverageHeadline,
   onSelectFeature,
   onOpenCoverage,
+  onOpenFlight,
+  flightAction,
   onConfigure,
 }: {
   feature: Feature
@@ -260,8 +302,14 @@ function FeatureRow({
   coverageHeadline?: string | null
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
+  onOpenFlight?: (flightId: string) => void
+  flightAction?: (feature: string) => FeatureFlightAction | null
   onConfigure: (feature: string) => void
 }) {
+  // A pending placeholder (First-Flight batch, pre-scaffold) has no feature dir
+  // to select or configure — render it muted with its flight's status chip;
+  // clicking the row resumes the flight.
+  if (f.pending) return <PendingFeatureRow feature={f} onOpenFlight={onOpenFlight} />
   const isSelected = f.name === selectedFeature
   const isDirty = f.dirty?.status === 'dirty'
   const isActive = Boolean(activeRunFeature) && f.name === activeRunFeature
@@ -270,14 +318,43 @@ function FeatureRow({
         ? 'booted'
         : activeRunStatus === 'healing' ? 'healing' : 'running')
     : null
+  // The hover shortcut to this suite's flight — absent for a suite nothing has
+  // touched yet (starting stays with "+ New" / the picker, per R40), and absent
+  // without a destination handler. Resolved once so the reserved width below
+  // can't disagree with what actually renders.
+  const flight = onOpenFlight ? flightAction?.(f.name) ?? null : null
+  // A flight moving through this suite gets the column's quietest treatment: a
+  // bare wash plus its status chip at rest, no ring and no motion (the hover-only
+  // paper-plane icon was the ONLY cue before, so a suite mid-flight read as idle).
+  // A resting/finished flight gets nothing — every flown suite carrying a
+  // permanent tint would make the column noise again.
+  const inFlight = Boolean(flight?.live || flight?.attention)
+  // The action cluster FLOATS over the row's right edge instead of sitting in
+  // flow, so three icons cost the suite name zero width at rest — in a column
+  // of long `cns_*` names that width is the column's actual content. The name
+  // only makes room (padding-right) while the row is hovered/focused, so
+  // nothing ever moves: the ellipsis just lands earlier. Width is computed from
+  // the visible count so a 1-action row doesn't reserve space for three.
+  const actionCount = 1 + (onOpenCoverage ? 1 : 0) + (flight ? 1 : 0)
+  // The at-rest flight chip already sits in flow at that same right edge, so it
+  // has ALREADY cost the name its width — reserving the full cluster on top of it
+  // left an in-flight row with ~18px of readable name on hover (204px row − 72px
+  // chip − 100px reservation). Subtract what the chip yields; the cluster floats
+  // over the chip's box as it fades, so the icons still land clear of the text.
+  const chipWidth = inFlight ? 72 + 6 : 0
+  const actionsWidth = Math.max(0, actionCount * 28 + (actionCount - 1) * 2 + 12 - chipWidth)
   return (
     <li
-      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
+      className={`feature-row group cl-list-row text-sm${isSelected ? ' cl-list-row-selected' : ''}${inFlight ? (flight?.attention ? ' cl-list-row-inflight-attention' : ' cl-list-row-inflight') : ''}${runState ? ` cl-list-row-${runState}` : ''}${isDirty ? ' cl-list-row-dirty' : ''}`}
       style={{
-        color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+        // An in-flight suite reads at full text contrast like a selected one: at 6%
+        // the wash alone is nearly invisible on the dark theme, so the brighter
+        // name does as much of the work as the tint.
+        color: isSelected || inFlight ? 'var(--text-primary)' : 'var(--text-secondary)',
         fontWeight: isSelected ? 500 : 400,
+        ['--feature-row-actions' as string]: `${actionsWidth}px`,
       }}
-      title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : undefined}
+      title={runState ? (runState === 'healing' ? 'Healing now' : runState === 'booted' ? 'Services up (boot-only)' : 'Running now') : inFlight ? flight?.title : undefined}
     >
       {isDirty && (
         <Tooltip label="Test files modified — review in the status bar">
@@ -302,9 +379,9 @@ function FeatureRow({
             data-testid={`portified-badge-${f.name}`}
             className="ml-1.5 flex h-4 w-4 shrink-0 items-center justify-center self-center rounded text-[11px] leading-none"
             style={{
-              color: 'rgb(52,211,153)',
-              background: 'color-mix(in srgb, rgb(52,211,153) 14%, transparent)',
-              border: '1px solid color-mix(in srgb, rgb(52,211,153) 35%, transparent)',
+              color: 'var(--success)',
+              background: 'color-mix(in srgb, var(--success) 14%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--success) 35%, transparent)',
             }}
           >
             ⇄
@@ -315,7 +392,7 @@ function FeatureRow({
         type="button"
         onClick={() => onSelectFeature(f.name)}
         title={f.name}
-        className="min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
+        className="feature-row__name min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
         style={{ color: 'inherit', fontWeight: 'inherit' }}
       >
         {f.name}
@@ -323,38 +400,71 @@ function FeatureRow({
       {runState && (
         <span className="sr-only">{runState === 'healing' ? 'Healing' : runState === 'booted' ? 'Services up' : 'Running'}</span>
       )}
-      {onOpenCoverage && (
-        <Tooltip label="Coverage">
+      {inFlight && flight && (
+        /* In flow, not floating — it keeps its box while fading under the hover
+           action cluster, so the row can't reflow as the pointer arrives. */
+        <span className="feature-row__flight-chip mr-1.5 shrink-0 self-center" data-testid={`flight-chip-${f.name}`}>
+          <FeatureChipBadge chip={flight} />
+        </span>
+      )}
+      <span className="feature-row__actions">
+        {flight && (
+          /* Reads state, not just destination: "Flight · to approve" beats a bare
+             "Flight" when the point of coming here is to find out. */
+          <Tooltip label={`Flight · ${flight.label}`}>
+            <button
+              type="button"
+              onClick={() => { onSelectFeature(f.name); onOpenFlight?.(flight.flightId) }}
+              aria-label={`Open flight for ${f.name} — ${flight.title}`}
+              data-testid={`flight-shortcut-${f.name}`}
+              data-flight-id={flight.flightId}
+              className="cl-icon-button h-7 w-7 shrink-0"
+              /* The flight chip's own hue — green done, sky running, amber
+                 needs-you — so the icon carries the state it jumps to. A
+                 resting `idle` tone is the neutral secondary text colour, which
+                 is exactly the calm the column wants. */
+              style={{ color: flight.tone }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M22 2 11 13" />
+                <path d="M22 2 15 22l-4-9-9-4Z" />
+              </svg>
+            </button>
+          </Tooltip>
+        )}
+        {onOpenCoverage && (
+          <Tooltip label="Coverage">
+            <button
+              type="button"
+              onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
+              aria-label={`Open coverage for ${f.name}`}
+              data-testid={`coverage-action-${f.name}`}
+              data-headline={coverageHeadline ?? ''}
+              className="cl-icon-button h-7 w-7 shrink-0"
+              style={{ color: coverageHeadlineColor(coverageHeadline) }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <circle cx="12" cy="12" r="4.5" />
+                <circle cx="12" cy="12" r="0.6" fill="currentColor" />
+              </svg>
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip label="Config">
           <button
             type="button"
-            onClick={() => { onSelectFeature(f.name); onOpenCoverage(f.name) }}
-            aria-label={`Open coverage for ${f.name}`}
-            data-testid={`coverage-action-${f.name}`}
-            data-headline={coverageHeadline ?? ''}
-            className="feature-row__cog cl-icon-button mr-0.5 h-7 w-7 shrink-0 self-center"
-            style={{ color: coverageHeadlineColor(coverageHeadline) }}
+            onClick={() => onConfigure(f.name)}
+            aria-label={`Configure ${f.name}`}
+            className="cl-icon-button h-7 w-7 shrink-0"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <circle cx="12" cy="12" r="4.5" />
-              <circle cx="12" cy="12" r="0.6" fill="currentColor" />
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
         </Tooltip>
-      )}
-      <Tooltip label="Config">
-        <button
-          type="button"
-          onClick={() => onConfigure(f.name)}
-          aria-label={`Configure ${f.name}`}
-          className="feature-row__cog cl-icon-button mr-1.5 h-7 w-7 shrink-0 self-center"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-        </button>
-      </Tooltip>
+      </span>
     </li>
   )
 }
@@ -372,6 +482,8 @@ function FeatureGroupAccordion({
   coverageHeadlines,
   onSelectFeature,
   onOpenCoverage,
+  onOpenFlight,
+  flightAction,
   onConfigure,
 }: {
   section: FeatureGroupSection
@@ -382,6 +494,8 @@ function FeatureGroupAccordion({
   coverageHeadlines: Record<string, string | null>
   onSelectFeature: (name: string) => void
   onOpenCoverage?: (feature: string) => void
+  onOpenFlight?: (flightId: string) => void
+  flightAction?: (feature: string) => FeatureFlightAction | null
   onConfigure: (feature: string) => void
 }) {
   const { group } = section
@@ -394,7 +508,7 @@ function FeatureGroupAccordion({
         onClick={toggle}
         aria-expanded={open}
         data-testid={`feature-group-toggle-${group}`}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-white/[0.03]"
+        className="cl-hover-row flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors"
       >
         <span
           aria-hidden="true"
@@ -421,11 +535,49 @@ function FeatureGroupAccordion({
               coverageHeadline={coverageHeadlines[f.name]}
               onSelectFeature={onSelectFeature}
               onOpenCoverage={onOpenCoverage}
+              onOpenFlight={onOpenFlight}
+              flightAction={flightAction}
               onConfigure={onConfigure}
             />
           ))}
         </ul>
       )}
     </section>
+  )
+}
+
+/** A placeholder row for a First-Flight batch feature whose flight is queued or
+ *  running but hasn't scaffolded `feature.config.cjs` yet (R69). Muted and
+ *  cog-less — there's no config/coverage to open — it carries the flight's live
+ *  status chip and resumes the flight on click, so a just-launched batch shows
+ *  in the ledger immediately and the user can pick up from where they left off. */
+function PendingFeatureRow({
+  feature: f,
+  onOpenFlight,
+}: {
+  feature: Feature
+  onOpenFlight?: (flightId: string) => void
+}) {
+  const pending = f.pending
+  if (!pending) return null
+  return (
+    <li
+      className="feature-row group cl-list-row text-sm"
+      data-testid={`pending-feature-${f.name}`}
+      style={{ color: 'var(--text-muted)' }}
+    >
+      <button
+        type="button"
+        onClick={() => onOpenFlight?.(pending.flightId)}
+        title={`${f.name} — setting up; open the flight`}
+        className="min-w-0 flex-1 truncate rounded-md px-2 py-2 text-left"
+        style={{ color: 'inherit' }}
+      >
+        {f.name}
+      </button>
+      <span className="mr-1.5 shrink-0 self-center">
+        <FlightStatusChip flight={pending} />
+      </span>
+    </li>
   )
 }

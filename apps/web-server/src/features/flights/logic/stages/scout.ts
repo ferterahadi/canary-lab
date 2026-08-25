@@ -1,8 +1,11 @@
 import path from 'path'
-import { readFeatureConfig } from '../../../config/logic/config-ast'
+import { readFeatureConfig } from '../../../../shared/config-ast'
 import { renderPrompt } from '../../../../shared/prompts'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
-import { extractJson, type FlightStageDeps, defaultSpawnAgent } from './context'
+import { decodeSubmission, extractJson, stageFeedback, type FlightStageDeps, defaultSpawnAgent, stageJobRef } from './context'
+import { agentSpawnJob } from './stage-jobs'
+import { externalizable, externalWorkCheckpoint } from './externalizable'
+import { agentProgressSink } from './agent-progress'
 
 // The one genuinely new agent prompt in the flight: read the target repo(s)
 // and draft a feature.config.cjs (dev commands, port slots, health checks) +
@@ -23,6 +26,8 @@ export function buildScoutPrompt(args: {
   description: string
   feature: string
   env: string
+  /** Re-entry note from Continue → from-a-step (R74). */
+  feedback?: string
 }): string {
   return renderPrompt('scout.md', {
     repoPaths: args.repoPaths.map((p) => `- ${p}`).join('\n'),
@@ -30,6 +35,9 @@ export function buildScoutPrompt(args: {
     featureJson: JSON.stringify(args.feature),
     descriptionJson: JSON.stringify(args.description),
     envJson: JSON.stringify(args.env),
+    feedbackNote: args.feedback
+      ? `Feedback on the previous attempt — take it into account: ${args.feedback}`
+      : '',
   })
 }
 
@@ -46,32 +54,48 @@ function validateDraft(draft: ScoutDraft): string | null {
   return null
 }
 
+/** Normalize + validate a draft from EITHER executor. The external client's answer
+ *  is held to exactly the same bar as the local agent's — an unparseable
+ *  feature.config.cjs fails the stage whoever produced it, so the stage's evidence
+ *  stays evidence rather than becoming the producer's self-report. */
+function settleDraft(draft: ScoutDraft): StageOutcome {
+  draft.envFiles = Array.isArray(draft.envFiles) ? draft.envFiles.filter((f) => typeof f === 'string') : []
+  const invalid = validateDraft(draft)
+  if (invalid) return { kind: 'failed', error: invalid }
+  return { kind: 'done', evidence: draft }
+}
+
 export function scoutStage(deps: FlightStageDeps): StageAdapter {
   const spawnAgent = deps.spawnAgent ?? defaultSpawnAgent
+
+  const scoutPromptFor = (m: ReturnType<StageContext['manifest']>): string =>
+    buildScoutPrompt({
+      repoPaths: m.repoPaths,
+      description: m.description,
+      feature: m.feature,
+      env: m.opts.env,
+      feedback: stageFeedback(m, 'scout'),
+    })
 
   const draftAndValidate = async (ctx: StageContext): Promise<StageOutcome> => {
     const m = ctx.manifest()
     ctx.appendLog(`[scout] reading ${m.repoPaths.join(', ')}…\n`)
     const { text } = await spawnAgent({
-      prompt: buildScoutPrompt({
-        repoPaths: m.repoPaths,
-        description: m.description,
-        feature: m.feature,
-        env: m.opts.env,
-      }),
+      prompt: scoutPromptFor(m),
       cwd: m.repoPaths[0],
       stageDir: path.join(ctx.flightDir, 'scout'),
-      onChunk: ctx.appendLog,
+      job: stageJobRef(deps, m, 'scout'),
+      onChunk: agentProgressSink(ctx),
       signal: ctx.signal,
+      agent: m.opts.agent,
     })
-    const draft = extractJson<ScoutDraft>(text)
-    draft.envFiles = Array.isArray(draft.envFiles) ? draft.envFiles.filter((f) => typeof f === 'string') : []
-    const invalid = validateDraft(draft)
-    if (invalid) return { kind: 'failed', error: invalid }
-    return { kind: 'done', evidence: draft }
+    return settleDraft(extractJson<ScoutDraft>(text))
   }
 
-  return {
+  const internal: StageAdapter = {
+    // The spawned surveyor, when one is live. Reached by scope, so this is null
+    // only when the stage owns no local spawn at all.
+    teardown: (ctx) => agentSpawnJob(ctx, 'scout'),
     run: draftAndValidate,
     // LEGACY release path (remove after one release): manifests that parked on
     // scout's config-approval BEFORE the checkpoint moved to scaffold still
@@ -81,7 +105,10 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       const draft = stage?.checkpoint?.data as ScoutDraft | undefined
       const choice = response.choice ?? ''
       if (choice === 'approve' && draft) {
-        const edited = (response.data as Partial<ScoutDraft> | undefined)?.configSource
+        const decoded = decodeSubmission(response.data)
+        const edited = decoded.ok
+          ? (decoded.data as Partial<ScoutDraft> | undefined)?.configSource
+          : undefined
         const final: ScoutDraft = edited ? { ...draft, configSource: edited } : draft
         const invalid = validateDraft(final)
         if (invalid) return { kind: 'failed', error: invalid }
@@ -93,4 +120,36 @@ export function scoutStage(deps: FlightStageDeps): StageAdapter {
       return { kind: 'checkpoint', checkpoint: stage.checkpoint }
     },
   }
+
+  return externalizable('scout', internal, {
+    message: 'Survey the repos and draft the feature config in your own client, then respond with { configSource, envFiles } on `data`.',
+    handOff: (ctx) => {
+      const m = ctx.manifest()
+      // The client executes the SAME prompt the local CLI would have, so both
+      // executors work from one set of instructions — including the fan-out rule.
+      return { prompt: scoutPromptFor(m), context: { repoPaths: m.repoPaths, answerShape: { configSource: 'string', envFiles: 'string[]' } } }
+    },
+    consume: async (ctx, result) => {
+      // A rejected submission must RE-PARK, never settle `failed`. The stage's
+      // checkpointResponse persists, so a resume REPLAYS the last answer — and a
+      // failing one then fails identically forever, leaving the flight advanceable
+      // only by a full redo. Re-parking replaces that answer with the next attempt.
+      // (Found by driving a real flight; the unit test had asserted `failed` as
+      // correct. docs' collector already re-parks for the same reason.)
+      const reject = (why: string): StageOutcome => {
+        ctx.appendLog(`[scout] external draft rejected — ${why}\n`)
+        const m = ctx.manifest()
+        return externalWorkCheckpoint(ctx, 'scout', scoutPromptFor(m), {
+          message: `That draft was rejected: ${why}. Fix it and respond again with { configSource, envFiles } on \`data\` — or answer "run-internally" to hand the step to Canary's own agent.`,
+          context: { repoPaths: m.repoPaths, answerShape: { configSource: 'string', envFiles: 'string[]' }, lastRejection: why },
+        })
+      }
+      const decoded = decodeSubmission(result)
+      if (!decoded.ok) return reject(decoded.error)
+      const draft = decoded.data as ScoutDraft | undefined
+      if (!draft || typeof draft !== 'object') return reject('no draft was submitted')
+      const settled = settleDraft({ ...draft })
+      return settled.kind === 'failed' ? reject(settled.error) : settled
+    },
+  })
 }

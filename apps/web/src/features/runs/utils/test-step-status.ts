@@ -4,7 +4,7 @@
 // status. Once a per-step reporter lands we can refine `statusForStep` to take
 // the step path and look it up individually.
 
-import type { RunSummary } from '../../../shared/api/types'
+import type { RunSummary } from '@/shared/api/types'
 
 export type StepStatus = 'pending' | 'testing' | 'passed' | 'failed' | 'skipped' | 'timedout'
 export type RunningTestSummary = NonNullable<RunSummary['running']>
@@ -22,33 +22,33 @@ export interface StatusPresentation {
 export const STATUS_PRESENTATION: Record<StepStatus, StatusPresentation> = {
   passed: {
     label: 'passed',
-    cardClassName: 'border-emerald-500/40 bg-emerald-500/5 dark:border-emerald-500/50',
-    pillClassName: 'border-emerald-500/60 bg-emerald-50 text-emerald-700 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-300',
+    cardClassName: 'border-success/40 bg-success/5 dark:border-success/50',
+    pillClassName: 'border-success/60 bg-success/10 text-success',
   },
   testing: {
     label: 'running',
-    cardClassName: 'border-sky-500/50 bg-sky-500/10 dark:border-sky-500/60',
-    pillClassName: 'border-sky-500/60 bg-sky-50 text-sky-700 dark:border-sky-400/60 dark:bg-sky-400/10 dark:text-sky-300',
+    cardClassName: 'border-running/50 bg-running/10 dark:border-running/60',
+    pillClassName: 'border-running/60 bg-running/10 text-running',
   },
   failed: {
     label: 'failed',
-    cardClassName: 'border-rose-500/50 bg-rose-500/5 dark:border-rose-500/60',
-    pillClassName: 'border-rose-500/60 bg-rose-50 text-rose-700 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-300',
+    cardClassName: 'border-danger/50 bg-danger/5 dark:border-danger/60',
+    pillClassName: 'border-danger/60 bg-danger/10 text-danger',
   },
   skipped: {
     label: 'skipped',
-    cardClassName: 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/50',
-    pillClassName: 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300',
+    cardClassName: 'border-warning/40 bg-warning/5 dark:border-warning/50',
+    pillClassName: 'border-warning/60 bg-warning/10 text-warning',
   },
   timedout: {
     label: 'timeout',
-    cardClassName: 'border-amber-500/40 bg-amber-500/5 dark:border-amber-500/50',
-    pillClassName: 'border-amber-500/60 bg-amber-50 text-amber-700 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-300',
+    cardClassName: 'border-warning/40 bg-warning/5 dark:border-warning/50',
+    pillClassName: 'border-warning/60 bg-warning/10 text-warning',
   },
   pending: {
     label: 'pending',
-    cardClassName: 'border-zinc-300 bg-zinc-50/40 dark:border-zinc-700 dark:bg-zinc-900/30',
-    pillClassName: 'border-zinc-400/70 bg-transparent text-zinc-600 dark:border-zinc-500/70 dark:text-zinc-300',
+    cardClassName: 'border-line-strong bg-elevated/40',
+    pillClassName: 'border-idle/70 bg-transparent text-secondary',
   },
 }
 

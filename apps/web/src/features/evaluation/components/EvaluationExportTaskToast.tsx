@@ -1,14 +1,14 @@
-import type { EvaluationExportMode, EvaluationExportTask } from '../../../shared/api/types'
-import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '../../runs/components/external-client-branding'
+import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/types'
+import { AgentSessionView } from '@/shared/ui/AgentSessionView'
+import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
 import {
   ExternalAgentCard,
   ExternalClientCta,
+  ExternalStatusPill,
   pillPalette,
-  StatusPill as CardStatusPill,
   useOpenAgentApp,
   type PillPalette,
-} from '../../runs/components/ExternalAgentCard'
+} from '@/shared/ui/ExternalAgentCard'
 
 // R29 (canary-first-flight): the standalone evaluation-export dialog is gone —
 // export progress/output renders WHERE the export lives: the flight detail's
@@ -124,7 +124,7 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
         eyebrow="External evaluation export session"
         headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
         subtitle={task.conversationName}
-        statusPill={<CardStatusPill label={label} palette={palette} />}
+        statusPill={<ExternalStatusPill label={label} palette={palette} />}
         meta={
           task.sessionId && (
             <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
@@ -178,7 +178,7 @@ export function ExternalEvaluationPanel({ task, log }: { task: EvaluationExportT
 function exportStatusPill(status: EvaluationExportTask['status']): { label: string; palette: PillPalette } {
   if (status === 'completed') return { label: 'Ready', palette: pillPalette('var(--success)') }
   if (status === 'failed') return { label: 'Failed', palette: pillPalette('var(--danger)') }
-  return { label: 'Exporting', palette: pillPalette('var(--border-focus)') }
+  return { label: 'Exporting', palette: pillPalette('var(--accent)') }
 }
 
 function exportBodyCopy(status: EvaluationExportTask['status']): string {

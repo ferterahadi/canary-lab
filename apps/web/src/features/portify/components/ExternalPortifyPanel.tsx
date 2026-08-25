@@ -1,6 +1,6 @@
-import type { PortifyManifest, PortifyStatus } from '../../../shared/api/client'
-import { clientLabel, clientTint, shortSession, type ExternalClientKind } from '../../runs/components/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, StatusPill } from '../../runs/components/ExternalAgentCard'
+import type { PortifyManifest, PortifyStatus } from '@/shared/api/client'
+import { clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill } from '@/shared/ui/ExternalAgentCard'
 
 // Portify-side analog of ExternalDraftAgentPanel / ExternalHealPanel. When a
 // port-ification workflow is driven by an external MCP client (the agent runs
@@ -20,7 +20,7 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
       eyebrow="External port-ification session"
       headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
       subtitle={m.external?.conversationName}
-      statusPill={<StatusPill label={statusLabel(m.status)} palette={statusPalette(m.status)} />}
+      statusPill={<ExternalStatusPill label={statusLabel(m.status)} palette={statusPalette(m.status)} />}
       meta={
         m.external?.sessionId && (
           <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-muted)' }}>
@@ -65,7 +65,7 @@ export function ExternalPortifyPanel({ m }: { m: PortifyManifest }) {
           style={{
             whiteSpace: 'pre-wrap',
             fontFamily: 'var(--font-mono)',
-            color: 'rgb(251,191,36)',
+            color: 'var(--warning)',
             background: 'var(--bg-base)',
             border: '1px solid var(--border-default)',
           }}

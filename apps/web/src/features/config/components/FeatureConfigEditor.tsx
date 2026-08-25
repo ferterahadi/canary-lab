@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { GeneralTab } from './GeneralTab'
 import { ReposTab } from './ReposTab'
 import { PortsTab } from './PortsTab'
 import { EnvsetsTab } from './EnvsetsTab'
 import { PlaywrightTab } from './PlaywrightTab'
-import { CloseIcon, ConfirmModal, TrashIcon } from './atoms'
-import * as api from '../../../shared/api/client'
+import { Modal, TrashIcon } from '@/shared/ui/atoms'
+import { DeleteSuiteConfirm } from './DeleteSuiteConfirm'
+import { ConfigDocCacheProvider } from './config-doc-cache'
+import type { ConfigTab } from '@/shared/lib/workspace-view-state'
 
-type Tab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
+type Tab = ConfigTab
 
 interface Props {
   feature: string
@@ -17,143 +19,78 @@ interface Props {
   onClose: () => void
   onDeleted?: (feature: string) => void
   onRenamed?: (oldFeature: string, nextFeature: string) => void
+  /** Uncontrolled seed — the tab this dialog opens on when the mount doesn't
+   *  own the selection. Ignored once `tab` is supplied. */
   initialTab?: Tab
-  /** Bumped by App when a portify overlay is saved → the Ports tab refetches its
-   *  config doc so the rewritten slots show without a tab switch / refresh. */
-  portsRefreshKey?: number
-  /** Bumped by App on `features-changed` → the Repos tab refetches each repo's
-   *  git-status row so an MCP/other-tab branch checkout shows live. */
-  reposRefreshKey?: number
-  /** Launch the port-ification wizard for this feature (from the Service tab). */
+  /** Controlled tab + its setter. The routed mount (App) passes both so the
+   *  open tab lives in the URL; the unrouted mount (the features list gear)
+   *  passes neither and keeps the internal state. */
+  tab?: Tab
+  onTabChange?: (tab: Tab) => void
+  /** Launch the port-ification wizard for this feature (from the Ports tab). */
   onStartPortify?: (feature: string) => void
   /** Reopen a past/active port-ification workflow (by id) from the Ports tab. */
   onOpenPortify?: (workflowId: string) => void
 }
 
-export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', portsRefreshKey, reposRefreshKey, onStartPortify, onOpenPortify }: Props) {
-  const [tab, setTab] = useState<Tab>(initialTab)
+export function FeatureConfigEditor({ feature, portified = false, onClose, onDeleted, onRenamed, initialTab = 'general', tab: tabProp, onTabChange, onStartPortify, onOpenPortify }: Props) {
+  const [internalTab, setInternalTab] = useState<Tab>(initialTab)
+  const tab = tabProp ?? internalTab
+  const setTab = (next: Tab) => { setInternalTab(next); onTabChange?.(next) }
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const [confirmName, setConfirmName] = useState('')
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
-  const closeDeleteConfirm = (): void => {
-    if (deleting) return
-    setConfirmDelete(false)
-    setConfirmName('')
-    setDeleteError(null)
-  }
-
-  const deleteCurrentFeature = async (): Promise<void> => {
-    if (confirmName !== feature || deleting) return
-    setDeleting(true)
-    setDeleteError(null)
-    try {
-      await api.deleteFeature(feature, confirmName)
-      onDeleted?.(feature)
-      onClose()
-    } catch (err: unknown) {
-      setDeleteError(err instanceof Error ? err.message : 'Delete failed')
-      setDeleting(false)
-    }
-  }
 
   return (
-    <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center"
-      onClick={onClose}
-    >
-      <div
-        className="cl-modal flex h-[88vh] w-[min(960px,94vw)] flex-col overflow-hidden rounded-lg"
-        style={{ background: 'var(--bg-elevated)' }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="cl-dialog-header">
-          <div className="min-w-0 flex-1">
-            <div className="cl-kicker mb-1">Feature configuration</div>
-            <div className="truncate text-sm font-semibold" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-              {feature}
-            </div>
-          </div>
+    // The cache lives here, so it is born and dies with the dialog: every open
+    // re-reads from disk, and within one open a tab switch is a pure render.
+    <ConfigDocCacheProvider>
+      <Modal
+        open
+        onClose={onClose}
+        eyebrow="Feature configuration"
+        title={feature}
+        width={960}
+        height="88vh"
+        headerActions={
           <button
             type="button"
-            onClick={() => {
-              setConfirmDelete(true)
-              setConfirmName('')
-              setDeleteError(null)
-            }}
+            onClick={() => setConfirmDelete(true)}
             aria-label={`Delete ${feature}`}
-            title="Delete feature"
+            title="Delete suite"
             className="cl-icon-button h-7 w-7 shrink-0"
             style={{ border: '1px solid color-mix(in srgb, var(--danger) 36%, var(--border-default))', color: 'var(--danger)' }}
           >
             <TrashIcon />
           </button>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="cl-icon-button h-7 w-7 shrink-0"
-            style={{ border: '1px solid var(--border-default)' }}
-          >
-            <CloseIcon size={14} />
-          </button>
-        </header>
-
-        <nav
-          className="cl-panel-header flex gap-1 px-3 py-1.5 text-xs"
-        >
-          <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
-          <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
-          <TabButton active={tab === 'ports'} onClick={() => setTab('ports')}>Ports</TabButton>
-          <TabButton active={tab === 'envsets'} onClick={() => setTab('envsets')}>Envsets</TabButton>
-          <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
-        </nav>
-
-        <div className="flex-1 min-h-0">
-          {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
-          {tab === 'repos' && <ReposTab feature={feature} refreshKey={reposRefreshKey} />}
-          {tab === 'ports' && <PortsTab feature={feature} portified={portified} portsRefreshKey={portsRefreshKey} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
-          {tab === 'envsets' && <EnvsetsTab feature={feature} />}
-          {tab === 'playwright' && <PlaywrightTab feature={feature} />}
-        </div>
-        <ConfirmModal
-          open={confirmDelete}
-          title="Delete feature"
-          message={
-            <div className="space-y-3">
-              <p>
-                This permanently deletes <code style={{ fontFamily: 'var(--font-mono)' }}>{feature}</code> from the features folder, including its config, Playwright tests, envsets, and helper files.
-              </p>
-              <p style={{ color: 'var(--danger)' }}>
-                This cannot be undone. Type the feature name to confirm.
-              </p>
-              <input
-                value={confirmName}
-                onChange={(e) => setConfirmName(e.target.value)}
-                className="cl-input w-full rounded-md px-2 py-1.5 text-xs"
-                style={{ fontFamily: 'var(--font-mono)' }}
-                autoFocus
-                placeholder={feature}
-              />
-              {deleteError && <p style={{ color: 'var(--danger)' }}>{deleteError}</p>}
+        }
+        subheader={
+          <>
+            {/* No size utility: `.cl-tab` is unlayered CSS and outranks a
+                Tailwind utility, so a `text-xs` here would read as 12px and
+                render as the tab voice's 12.5px. */}
+            <nav className="cl-panel-header flex gap-1 px-3 py-1.5">
+              <TabButton active={tab === 'general'} onClick={() => setTab('general')}>General</TabButton>
+              <TabButton active={tab === 'repos'} onClick={() => setTab('repos')}>Service</TabButton>
+              <TabButton active={tab === 'ports'} onClick={() => setTab('ports')}>Ports</TabButton>
+              <TabButton active={tab === 'envsets'} onClick={() => setTab('envsets')}>Envsets</TabButton>
+              <TabButton active={tab === 'playwright'} onClick={() => setTab('playwright')}>Playwright</TabButton>
+            </nav>
+            <div className="flex-1 min-h-0">
+              {tab === 'general' && <GeneralTab feature={feature} onFeatureRenamed={(nextFeature) => onRenamed?.(feature, nextFeature)} />}
+              {tab === 'repos' && <ReposTab feature={feature} />}
+              {tab === 'ports' && <PortsTab feature={feature} portified={portified} onStartPortify={onStartPortify} onOpenPortify={onOpenPortify} />}
+              {tab === 'envsets' && <EnvsetsTab feature={feature} />}
+              {tab === 'playwright' && <PlaywrightTab feature={feature} />}
             </div>
-          }
-          confirmLabel="Delete Feature"
-          variant="danger"
-          busy={deleting}
-          confirmDisabled={confirmName !== feature}
-          onCancel={closeDeleteConfirm}
-          onConfirm={deleteCurrentFeature}
-        />
-      </div>
-    </div>
+          </>
+        }
+      />
+      <DeleteSuiteConfirm
+        feature={feature}
+        open={confirmDelete}
+        onCancel={() => setConfirmDelete(false)}
+        onDeleted={() => { onDeleted?.(feature); onClose() }}
+      />
+    </ConfigDocCacheProvider>
   )
 }
 

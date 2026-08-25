@@ -1,14 +1,9 @@
-You are mapping a feature's E2E tests to the requirements they verify, for a
-verified-coverage ledger. You are given the feature's **requirements** (each with
-a stable `id`) and a set of **tests** that currently carry NO requirement
-linkage. For each test, decide which requirement(s) it actually exercises.
+Map untagged E2E tests to the stable requirement IDs they verify.
 
-This is a MAPPING task, not an authoring task:
-- You only declare which requirement id(s) each test covers — you NEVER rewrite a
-  test body or invent new tests.
-- Only map to requirement ids that appear in the list below. If a test doesn't
-  clearly verify any listed requirement, leave it out of your output entirely.
-- A test may cover more than one requirement; list all that genuinely apply.
+This is mapping, not authoring:
+- Never rewrite or invent tests.
+- Use only IDs below. Put tests with no clear match in `unmappable`.
+- List every requirement a test genuinely covers.
 
 For each mapped test, also state which path(s) it exercises:
 - `happy` — the expected valid flow.
@@ -21,19 +16,23 @@ Always include `pathTypes` on every mapping.
 
 {{variantInstructions}}
 
-When a variant dimension applies, a requirement is only fully covered once EVERY
-variant it lists is exercised by some test. So your `variants` per test must
-reflect what the test ACTUALLY hits — read the endpoint / fixture / setup, don't
-infer breadth from the test name. A test that drives only one variant must claim
-only that one, even if the requirement it maps to lists several.
+A requirement is fully covered only when its mapped tests exercise every variant
+it lists. Claim only what each test actually hits; read its setup and endpoint,
+never infer breadth from the title.
 
 ## How to work
 
-Work as an agent, not a one-shot. The test bodies are **not** inlined here — each
-test below is just a name + the path to its spec file. Use your tools to **read the
-actual test file** (the `file` shown) and grep the source it touches, so each
-mapping reflects what the test really exercises. Read first, then decide the
-mappings. This is read-only analysis: do not edit any file.
+Test bodies are not inlined. Read every listed `file` and relevant source before
+mapping. This is read-only; edit nothing.
+
+### Fan out when there is enough reading to divide
+
+Group the tests below by the `file` they live in, and never split one spec file
+across two readers. With several groups and more than a handful of tests, dispatch
+one read-only subagent per group in a single parallel round (up to 5), each reading
+only its files and returning only its group's mappings. Otherwise read them yourself.
+Give every subagent the full requirement list unchanged.
+The merged answer is yours, not theirs; verify every test yourself.
 
 ## Requirements (map only to these ids)
 
@@ -45,10 +44,9 @@ mappings. This is read-only analysis: do not edit any file.
 
 ## Output
 
-Return ONLY a JSON object of this shape (no prose, no markdown fences). Omit any
-test you cannot confidently map. `confidence` is your 0–1 certainty that the
-mapping is correct (how sure you are the test verifies that requirement, not how
-good the test is):
+Return ONLY a JSON object of this shape (no prose, no markdown fences).
+`confidence` is your 0–1 certainty that the mapping is correct (how sure you are
+the test verifies that requirement, not how good the test is):
 
 {
   "mappings": [
@@ -60,7 +58,13 @@ good the test is):
       "rationale": "one short sentence on why this test verifies that requirement",
       "confidence": 0.9
     }
+  ],
+  "unmappable": [
+    { "testName": "exact test name as given", "reason": "one short sentence" }
   ]
 }
+
+**Every test must appear exactly once: in `mappings` or `unmappable`.** Include a
+reason for no match or a failed subagent. Canary rejects incomplete rosters.
 
 Your entire final message must be the JSON object — nothing before or after it.

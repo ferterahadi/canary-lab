@@ -11,7 +11,7 @@ export function BenchmarkPill({ active, onOpen }: { active: boolean; onOpen: () 
       title={active ? 'A benchmark is running — click to view' : 'Run a benchmark — race two repair agents on a sabotaged codebase'}
     >
       {active ? (
-        <span aria-hidden="true" className="inline-block h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: 'rgb(56,189,248)' }} />
+        <span aria-hidden="true" className="inline-block h-1.5 w-1.5 animate-pulse rounded-full" style={{ background: 'var(--running)' }} />
       ) : (
         <span>⚔</span>
       )}

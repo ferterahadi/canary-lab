@@ -1,0 +1,16 @@
+{
+  "appRoots": {},
+  "slots": {
+    "storefront-journey.env": {
+      "description": "Canary Lab storefront-journey feature .env",
+      "target": "$CANARY_LAB_PROJECT_ROOT/features/storefront-journey/.env"
+    }
+  },
+  "feature": {
+    "slots": [
+      "storefront-journey.env"
+    ],
+    "testCommand": "npx playwright test",
+    "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/storefront-journey"
+  }
+}

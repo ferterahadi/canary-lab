@@ -4,48 +4,104 @@ CLI reference for Canary Lab. For the overview, quick start, and core workflow, 
 
 ```bash
 npx canary-lab flight <repo-path...> "<what to test>" [--feature <name>] [--env <envset>] [--coverage-target <pct>] [--base <branch>] [--from-stage <key>] [--redo] [--yolo] [--fresh]
-npx canary-lab init <folder> [--port <port>] [--no-install]
-npx canary-lab setup
+npx canary-lab init <folder> [--package-spec <spec>] [--port <port>] [--no-install]
+npx canary-lab setup [--workspace <path>] [--agent auto|codex|claude|all] [--dry-run] [--force]
 npx canary-lab ui
-npx canary-lab mcp [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full]
-npx canary-lab mcp doctor [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full]
+npx canary-lab mcp [--url <url>] [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full|compact] [--client-kind <kind>]
+npx canary-lab mcp doctor [--profile repair|verify|author|coverage|export|flight|portify|lifecycle|full|compact]
 npx canary-lab new feature <name> --description "..."
 npx canary-lab env apply <feature> <set>
 npx canary-lab env revert <feature>
+npx canary-lab boot <feature> [env]
+npx canary-lab boot stop <runId>
+npx canary-lab upgrade [--silent] [--check] [--force-archive]
+```
+
+## Command Details
+
+### `flight`
+
+`flight` takes one or more product repos from suite setup through evaluation export.
+
+- It creates or finds the workspace and starts the server when needed.
+- Autopilot answers seven routine checkpoints. Existing-feature choices, missing secrets, and failed automatic answers still reach you. See [Checkpoints and autopilot](GUIDE.md#checkpoints-and-autopilot).
+- `--redo` restarts the existing flight. `--from-stage <key>` re-enters at a stage after checking its prerequisites. `--fresh` creates a new feature.
+- Repos and the test description are fixed after startup. To change them, stop and delete the flight in the UI, then start again.
+- Exit codes are `0` for green, `1` for a completed non-green run, `2` for a checkpoint, and `3` for failure.
+
+The web UI and MCP tools (`start_flight`, `get_flight`, and `respond_flight_checkpoint`) use the same flight record.
+
+### Other commands
+
+- `init` creates the workspace, installs dependencies and Chromium, and registers agent tools. Use `--no-install` for CI or offline setup.
+- `ui` starts the main human interface. Its port comes from `canary-lab.config.json`; change it in Project Settings, not with `ui --port`.
+- `setup` refreshes agent registration with the `compact` profile. It exposes one always-loaded `exec` tool that dispatches every installed skill, including Portify. `--force` replaces existing entries, `--dry-run` previews changes, and `--agent` limits the target.
+- `boot` starts a feature's services without tests. It requires the UI server; `boot stop <runId>` ends the session.
+- `mcp` connects an AI client to the UI server. A bare command defaults to the direct `lifecycle` profile. Setup-installed clients use `compact`; focused profiles and `full` remain available for direct-tool debugging and rollback.
+- `new feature` creates a feature deterministically. `env` applies or restores an envset.
+- `upgrade` refreshes managed workspace files, existing agent skills, and existing MCP connections. It also repairs the browser-install hook and downloads the matching browser when an older workspace needs it. It does not install a newer npm package by itself.
+
+### Upgrade from 1.5.x to 2.0.0
+
+Install Node 22.12 or newer first, then run:
+
+```bash
+npm install --save-dev canary-lab@2
 npx canary-lab upgrade
 ```
 
-- `flight` is the one-command onboarding: it takes bare product repo(s) to a green, covered, healed run ending in an evaluation archive (similarity check → repo scout → scaffold → env capture → docs/PRD → specs↔coverage loop → portify → run → heal → export). It locates or creates the workspace, boots the server if needed, streams stage progress to the terminal, and prompts at checkpoints: config approval (after the feature is scaffolded — the config being approved is the real on-disk `feature.config.cjs`; `redraft` re-runs the repo scan), the Requirements pause (the PRD-source checkpoint ALWAYS parks so you can add/link docs — answer `continue` to release with what's there), portify apply, the export flavor (`raw` fast report vs `localized` agent-rewritten reasoning), and missing env values — that last one is never skipped, even with `--yolo` (which answers everything else automatically, exporting `raw`). Several repo paths become ONE feature spanning them. A feature has exactly ONE flight record: re-running `flight` resumes an interrupted flight from its failed stage; on a settled flight it offers **continue / redo / jump** (`--redo` restarts from stage 1 discarding the record's stage evidence; `--from-stage <key>` starts at a chosen stage — prerequisites are checked and a rejection names the missing artifact, e.g. jumping to `run` with no specs authored). A flight's **repos and intent are frozen** once it first starts: `--redo`/`--from-stage` reuse the stored repos + description, so omit the positionals (name the flight with `--feature <name>` when there is no repo path to match on); passing DIFFERENT repos or a different description is rejected and the CLI points you at the reuse form or at **deleting the flight in the web UI** to start fresh with different ones (there is no delete command or MCP tool — deletion is a web-UI action). `--fresh` is for a brand-new feature. A repo that already has a feature parks on a rerun/enhance/new choice instead of duplicating it. Exit code: `0` green, `1` done with a non-green run (archive still produced), `2` parked on a checkpoint, `3` failed. The same flight is drivable from the web UI (Flights pill) and over MCP (`start_flight` / `get_flight` / `respond_flight_checkpoint`).
-- `init` scaffolds the workspace, then runs `npm install` + the Playwright browser download and registers tools — so `ui` boots immediately. Pass `--no-install` to scaffold only (CI / offline) and install manually afterward.
-- `ui` is the primary human workflow.
-- `setup` refreshes the agent/tool registration described in [Quick Start](../README.md#quick-start).
-- `mcp` bridges local AI clients into the UI server, starting it if needed. It defaults to `lifecycle` — the everyday end-to-end loop (authoring + coverage + flight + run/heal + verify + export, no portify). Narrow it with `--profile repair` for run/heal only, `--profile verify` for deployment checks, `--profile author` for feature/spec authoring, `--profile coverage` for docs → PRD summary → coverage ledger, `--profile export` for evaluation archives, `--profile flight` for the end-to-end pipeline; use `--profile portify` for the specialized port-injection workflow, or `--profile full` for the complete surface (lifecycle + portify). Each profile has a matching agent skill (`/canary-lab`, `/canary-lab-run`, `/canary-lab-verify`, `/canary-lab-author`, `/canary-lab-coverage`, `/canary-lab-portify`, `/canary-lab-export`).
-- `new feature` and `env` are deterministic wrappers for scripts and agents.
-- `upgrade` syncs scaffolded docs and skills in an existing project (not a dependency upgrade).
+Restart `canary-lab ui` and connected agent apps afterwards. The 2.0 UI Update
+button runs both commands for you. When the 1.5.x Update button installs 2.0 but
+its older updater cannot run the new migration, the first 2.0 startup detects
+the 1.5.x workspace stamp and finishes that migration before serving the UI.
+Upgrade preserves existing feature folders, personal `CLAUDE.md` / `AGENTS.md`
+notes, custom skills, and unrelated `package.json` fields. The 2.0 demonstration
+apps ship only in newly initialized workspaces; upgrading an existing workspace
+does not add or replace samples.
 
-## Requirement Coverage (MCP, `coverage`/`lifecycle`/`full` profiles)
+## Compact MCP invocation
 
-The coverage ledger is reachable over MCP as well as the UI — both call the same computation, so they can't diverge:
+Setup-installed clients list one public tool, `exec`. Pass the exact atomic tool
+name as `command` and keep its inputs in the structured `arguments` object:
+
+```json
+{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}
+```
+
+That is the feature-scoped shape; commands with different inputs use the
+argument fields returned by `describe_tool`.
+
+`list_tools`, `search_tools`, and `describe_tool` are internal discovery
+commands reached through the same `exec` shape. Do not prefix commands with
+verbs such as `learn` or `call`. The `full` profile still exposes all 63 atomic
+tools directly if a client needs the old surface.
+
+## Requirement Coverage (MCP, `compact` or direct `coverage`/`lifecycle`/`full` profiles)
+
+MCP and the UI use the same coverage computation:
 
 - `get_feature_coverage(feature)` — the full ledger: each requirement → its mapped tests → a gap type (`covered` / `path-incomplete` / `variant-incomplete` / `untested`), the coverage %, and the per-test strictness grade with a suggested stronger check.
 - `list_feature_docs(feature)` — the docs that feed the PRD (source vs generated), plus the summary status.
-- `start_external_summary(feature)` → `submit_external_summary(jobId, requirements)` — YOU read the source docs (returned in the prompt) and propose the requirements; canary reconciles ids (preserving existing ones) and writes the summary. No local agent — over MCP you author it. Add docs first with `write_feature_doc`.
-- `start_external_coverage(feature)` → `submit_external_coverage(jobId, mappings)` — YOU read the tests and map them to requirements; canary writes the `@req-*` tags and recomputes. Needs a summary first.
+- `start_external_summary(feature)` → `submit_external_summary(jobId, requirements)` — you derive requirements from the returned source docs; Canary Lab preserves existing IDs and writes the summary. Add docs first with `write_feature_doc`.
+- `start_external_coverage(feature)` → `submit_external_coverage(jobId, mappings)` — you map tests to requirements; Canary Lab writes the `@req-*` tags and recomputes coverage. Requires a summary.
 
-Tests link to requirements via Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }` (legacy `@requirement`/`@path` comments still parse); see [FEATURES](FEATURES.md#requirement-coverage). Canary computes coverage from your tags; it never writes a requirement's test for you.
+Tests link to requirements through Playwright tags on each `test()` — `{ tag: ['@req-<id>', '@path-happy|sad|edge'] }`. Legacy `@requirement` and `@path` comments still work. Coverage tools map existing tests; Flight's authoring stage can create tests for uncovered requirements. See [FEATURES](FEATURES.md#requirement-coverage).
 
 ## Trigger-surface parity (skill / MCP / REST / UI)
 
-Every capability is triggerable identically from four surfaces, all against the same store — start something on one surface and every other surface sees it live:
+The profile column names the focused direct-tool profile. The setup-installed
+`compact` profile reaches every listed atomic tool through `exec`.
+
+Major capabilities share stores, so work started on one surface appears on the others:
 
 | Capability | Agent skill | MCP profile (tools) | REST | UI |
 |---|---|---|---|---|
 | Flight (end-to-end) | `/canary-lab` | `flight` — `start_flight` / `get_flight` / `respond_flight_checkpoint` | `POST/GET /api/flights*` | Flights pill → flight view |
 | Run + heal | `/canary-lab-run` | `repair` — `start_run` / `wait_for_heal_task` / `signal_run` … | `/api/runs*` | feature Runs column / run detail |
 | Deployed verification | `/canary-lab-verify` | `verify` — `execute_verification` … | `/api/verification*` | Verify dialog |
-| Feature authoring | `/canary-lab-author` | `author` — `create_feature` / draft flow / envsets | `/api/features*` | Add Test wizard / config editor |
-| Coverage ledger | `/canary-lab-coverage` | `coverage` — summary/coverage jobs + ledger | `/api/coverage*` | Coverage ledger page (features column) |
-| Portify | `/canary-lab-portify` | `portify` — external portify workflow | `/api/portify*` | Ports tab → portify wizard |
+| Feature authoring | `/canary-lab-author` | `author` — `create_feature` / draft flow / envsets | `/api/features*` | Flight → Test authoring & coverage stage / config editor |
+| Coverage ledger | `/canary-lab-coverage` | `coverage` — summary/coverage jobs + ledger | `/api/coverage*` | Coverage ledger page (Suites column) |
+| Portify | `/canary-lab-portify` | `portify` — external portify workflow | `/api/portify*` | Flight → Parallel readiness stage (also run-collision recovery); Ports tab reports injectability |
 | Evaluation export | `/canary-lab-export` | `export` — evaluation export tools | `/api/evaluation*` | run detail → Export Evaluation |
 
 If a new capability lands with a missing cell, that's a gap — the parity bar is part of the product, not a coincidence.

@@ -1,5 +1,5 @@
 import crypto from 'crypto'
-import type { DocEntry } from '../../../coverage/logic/coverage/docs-collection'
+import type { DocEntry } from './docs-collection'
 import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 
 // Per-doc and per-requirement fingerprints (R3). The whole-collection `docsHash`

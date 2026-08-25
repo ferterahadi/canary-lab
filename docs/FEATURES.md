@@ -1,36 +1,142 @@
-# Feature Folders
+# Feature Folder Reference
 
-How features are structured in Canary Lab. For the overview, quick start, and core workflow, see the [README](../README.md).
+A Canary Lab feature is the unit that one run executes. It connects product
+repositories and service start commands to Playwright tests, environment files,
+and requirement evidence. Features live under `features/<name>/`.
 
-A feature lives under `features/<name>/` with `feature.config.cjs`, a Playwright config, specs under `e2e/`, and envsets under `envsets/`.
+See the [README](../README.md) for workspace setup and the [Guide](GUIDE.md) for
+running, repairing, and exporting a feature.
 
-Create one from the UI or with:
+## Create a feature
+
+Create a deterministic starter from the UI or CLI:
 
 ```bash
 npx canary-lab new feature checkout-discounts --description "Validate checkout discounts"
 ```
 
-The UI's Add Test flow can also turn a PRD or uploaded document into a generated plan and Playwright files for review. Generated tests still run through Playwright.
+The scaffold contains a feature config, Playwright config, envset metadata, a
+local envset, and an example spec. Replace the example with real behavior.
 
-## Requirement Coverage
+Flight can build the same structure from one or more product repos, collect
+requirements, author and map tests, prepare services for concurrent ports, run
+the suite, repair failures, and export the evaluation. An external MCP client
+can instead author specs through `start_external_draft` →
+`update_external_draft_stage` → `apply_external_draft`.
 
-A feature can also carry a `docs/` folder of source material (specs, tickets, notes as `*.md`). Canary Lab summarizes that collection into a **PRD** — a list of requirements, each with a stable id — stored back in `docs/` as `_prd-summary.json` (+ a readable `_prd-summary.md`). Regeneration preserves existing requirement ids, so the tags below never break as the docs evolve.
+## Folder layout
 
-Tie tests to requirements with Playwright tags **on** the `test()` (greppable, rename-proof):
-
-```ts
-test('DELETE /todos/:id removes a todo', { tag: ['@req-R3', '@path-happy'] }, async () => { /* ... */ })
+```text
+features/<name>/
+├── feature.config.cjs
+├── playwright.config.ts
+├── e2e/
+│   └── <name>.spec.ts
+├── envsets/
+│   ├── envsets.config.json
+│   └── <environment>/
+│       └── <slot file>
+├── docs/                         optional requirement sources
+│   ├── <source>.md
+│   ├── _prd-summary.json         generated structured requirements
+│   └── _prd-summary.md           generated readable summary
+├── portify/                      optional saved port overlay
+└── verification.configs.json    optional deployed targets
 ```
 
-- `@req-<id>` — repeatable; a test may cover several requirements.
-- `@path-happy|sad|edge` — happy = the expected flow, sad = the negative/error flow, edge = a boundary case.
-- `@variant-<value>` — optional; for a requirement that must hold across a domain axis (channel, tenant, region…).
-- Legacy `// @requirement <id>` / `// @path happy` comments above the test still parse as a fallback.
+| Path | Purpose |
+| --- | --- |
+| `feature.config.cjs` | Feature name, environments, repositories, service commands, readiness checks, and optional port slots |
+| `playwright.config.ts` | Playwright execution and artifact policy for this suite |
+| `e2e/*.spec.ts` | Tests executed by the feature |
+| `envsets/envsets.config.json` | Maps named slot files to their target paths and defines the test command |
+| `envsets/<environment>/` | Values temporarily applied for a selected environment |
+| `docs/` | Source requirements and generated PRD summary sidecars |
+| `portify/` | Verified patches that make service ports injectable; applied only in run worktrees |
+| `verification.configs.json` | Saved deployed-environment verification inputs |
 
-Open the **Coverage** view (the 🎯 pill in the top bar, per feature) for the ledger: requirements on the left, tests on the right, synced colour highlighting. Coverage is **semantic, not run-gated** — it asks "does a mapped test claim every path (and variant) this requirement implies?", and canary computes the % straight from the tags, so the headline number is math, not an agent's opinion. Gaps:
+## Feature configuration
 
-- **Untested** — no test mapped to the requirement.
-- **Path-incomplete** — some paths are claimed, but a sad/edge path has no test.
-- **Variant-incomplete** — a variant-bearing requirement is tested on only some of its values (e.g. an "all 4 channels" rule covered by an email-only test).
+`feature.config.cjs` exports `{ config }`. A repository may start several
+services. Each structured start command can declare a readiness check, restrict
+itself to selected environments, and expose injectable port slots:
 
-Depth is graded separately: a **strictness** score rates each covering test by the strongest layer its assertions touch — app log (tier 1), internal state (tier 2), app API (tier 3), or a browser confirming the real effect (tier 4) — labels it shallow/basic/solid/strong, and surfaces the stronger check to write. The `example_todo_api` sample ships an annotated PRD demonstrating all of this.
+```js
+const path = require('node:path')
+
+const appDir = path.join(__dirname, '..', '..', 'checkout-api')
+
+const config = {
+  name: 'checkout-discounts',
+  description: 'Validate checkout discount behavior',
+  envs: ['local', 'production'],
+  repos: [{
+    name: 'checkout-api',
+    localPath: appDir,
+    envs: ['local'],
+    startCommands: [{
+      name: 'api',
+      command: 'npm run dev',
+      ports: [{ name: 'api', env: 'PORT' }],
+      healthCheck: { http: { url: 'http://127.0.0.1:${port.api}/health' } },
+    }],
+  }],
+  featureDir: __dirname,
+}
+
+module.exports = { config }
+```
+
+Canary Lab allocates each declared slot per run, injects the configured env var,
+and resolves `${port.<name>}` in start commands, readiness checks, and applied
+envset files. A saved Portify overlay is still required when the application
+source itself ignores the injected value.
+
+Use repository- or command-level `envs: ['local']` to skip local services when
+the selected envset points Playwright at a deployed URL.
+
+## Requirement coverage
+
+Put specifications, tickets, and distilled notes in `docs/`. Canary Lab turns
+the source collection into `_prd-summary.json` and `_prd-summary.md`. Surviving
+requirements keep their IDs across regeneration; removed requirements remain
+deprecated so existing test tags do not silently point at a different meaning.
+
+Map a test with Playwright tags on the `test()` call:
+
+```ts
+test('DELETE /todos/:id removes a todo', {
+  tag: ['@req-R3', '@path-happy'],
+}, async () => {
+  // ...
+})
+```
+
+- `@req-<id>` maps the test to a requirement. It is repeatable.
+- `@path-happy`, `@path-sad`, and `@path-edge` state which expected,
+  error, or boundary paths the test exercises.
+- `@variant-<value>` claims a value from the feature's optional variant
+  dimension, such as channel, tenant, region, role, or plan.
+- Legacy `@requirement`, `@path`, and `@variant` comments immediately above a
+  test still parse as a migration fallback.
+
+The headline coverage percentage is claim-based. A requirement is covered only
+when mapped tests claim every required path and every applicable
+path-by-variant cell. It does not become covered merely because a test passed.
+
+| Gap | Meaning |
+| --- | --- |
+| `untested` | No test maps to the requirement |
+| `path-incomplete` | At least one required happy, sad, or edge path is unclaimed |
+| `variant-incomplete` | At least one applicable path-by-variant cell is unclaimed |
+| `covered` | Every required path, or every applicable path-by-variant cell, is claimed |
+
+When the feature has run, the ledger adds a separate **proven** view from the
+latest run. A mapped test can therefore claim coverage while its requirement
+remains unproven because the test failed or did not run. This latest-run overlay
+does not change the claim-based gap types or coverage percentage.
+
+Coverage depth is separate from both. Canary Lab classifies the strongest
+assertion layer in each test—application log, internal state, application API or
+UI, or a real external destination—and labels it `shallow`, `basic`, `solid`, or
+`strong`.

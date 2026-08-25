@@ -1,0 +1,16 @@
+{
+  "appRoots": {},
+  "slots": {
+    "workflow-workbench.env": {
+      "description": "Workflow workbench target",
+      "target": "$CANARY_LAB_PROJECT_ROOT/features/workflow-workbench/.env"
+    }
+  },
+  "feature": {
+    "slots": [
+      "workflow-workbench.env"
+    ],
+    "testCommand": "npx playwright test",
+    "testCwd": "$CANARY_LAB_PROJECT_ROOT/features/workflow-workbench"
+  }
+}

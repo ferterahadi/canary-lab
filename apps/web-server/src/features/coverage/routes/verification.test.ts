@@ -6,6 +6,7 @@ import Fastify from 'fastify'
 import { verificationRoutes } from './verification'
 import { createRegistry, RunStore, type OrchestratorLike } from '../../runs/logic/run-store'
 import type { WorkspaceEvent } from '../../../shared/workspace-events'
+import { GettingStartedSessionStore, type GettingStartedActiveSession } from '../../config/logic/getting-started-session'
 
 let tmpDir: string
 let featuresDir: string
@@ -157,6 +158,41 @@ describe('verification routes', () => {
     expect(registry.get('verify-42')?.runId).toBe('verify-42')
   })
 
+  it('allows verification beside its own boot session and asks the runner to clean it up', async () => {
+    writeFeature()
+    const registry = createRegistry()
+    registry.set('boot-1', fakeOrchestrator('boot-1'))
+    const store = new RunStore(logsDir, registry)
+    store.bootstrap({
+      runId: 'boot-1',
+      executionType: 'boot',
+      feature: 'checkout',
+      startedAt: '2026-05-24T00:00:00.000Z',
+      status: 'running',
+      healCycles: 0,
+      services: [],
+    })
+    const startVerification = vi.fn(async () => fakeOrchestrator('verify-with-boot'))
+    const app = Fastify()
+    await app.register(verificationRoutes, { featuresDir, store, startVerification })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/verifications',
+      payload: {
+        playwrightEnvsetId: 'local',
+        targetUrls: { api: 'http://127.0.0.1:4123' },
+        bootRunId: 'boot-1',
+      },
+    })
+
+    expect(res.statusCode).toBe(201)
+    expect(startVerification).toHaveBeenCalledWith('checkout', {
+      playwrightEnvsetId: 'local',
+      targetUrls: { api: 'http://127.0.0.1:4123' },
+    }, { cleanupBootRunId: 'boot-1' })
+  })
+
   it('returns not-found and validation errors for verification config routes', async () => {
     writeFeature()
     const store = new RunStore(logsDir, createRegistry())
@@ -285,6 +321,7 @@ describe('verification routes', () => {
       [{ playwrightEnvsetId: 1 }, 'playwrightEnvsetId must be a string'],
       [{ targetUrls: [] }, 'targetUrls must be a string map'],
       [{ targetUrls: { api: 1 } }, 'targetUrls must be a string map'],
+      [{ bootRunId: 1 }, 'bootRunId must be a string'],
     ] as const) {
       const res = await app.inject({
         method: 'POST',
@@ -294,6 +331,14 @@ describe('verification routes', () => {
       expect(res.statusCode).toBe(400)
       expect(res.json()).toEqual({ error })
     }
+
+    const missingBoot = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/verifications',
+      payload: { playwrightEnvsetId: 'local', bootRunId: 'missing' },
+    })
+    expect(missingBoot.statusCode).toBe(400)
+    expect(missingBoot.json()).toEqual({ error: 'bootRunId must name an active boot session for this feature' })
 
     startVerification.mockResolvedValueOnce(fakeOrchestrator('verify-config'))
     const configOnly = await app.inject({
@@ -322,5 +367,128 @@ describe('verification routes', () => {
     expect(emptyBody.statusCode).toBe(500)
     expect(emptyBody.json()).toEqual({ error: 'spawn failed' })
     expect(startVerification).toHaveBeenCalledWith('checkout', {})
+  })
+
+  it('rejects a gettingStartedSource that is neither internal nor external', async () => {
+    writeFeature()
+    const store = new RunStore(logsDir, createRegistry())
+    const app = Fastify()
+    await app.register(verificationRoutes, { featuresDir, store, startVerification: async () => fakeOrchestrator() })
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/features/checkout/verifications',
+      payload: { playwrightEnvsetId: 'production', gettingStartedSource: 'bogus' },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.json()).toEqual({ error: "gettingStartedSource must be 'internal' or 'external'" })
+  })
+
+  describe('Getting Started demo tracking', () => {
+    /** The resolver keeps every linked target "active" so a read() mid-test
+     *  can't settle the claim under the assertion. */
+    function sessionStore(): GettingStartedSessionStore {
+      return new GettingStartedSessionStore(logsDir, { status: () => 'running', isActive: () => true }, () => {})
+    }
+
+    it('claims the verify card and attaches the started run to it', async () => {
+      writeFeature()
+      const store = new RunStore(logsDir, createRegistry())
+      const gettingStarted = sessionStore()
+      const app = Fastify()
+      await app.register(verificationRoutes, {
+        featuresDir,
+        store,
+        startVerification: async () => fakeOrchestrator('verify-gs'),
+        gettingStarted,
+      })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout/verifications',
+        payload: { playwrightEnvsetId: 'production', gettingStartedSource: 'internal' },
+      })
+
+      expect(res.statusCode).toBe(201)
+      // A verify demo's work record IS its run — the claim targets kind 'run'.
+      expect(gettingStarted.read().active).toMatchObject({
+        workflow: 'verify',
+        owner: 'internal',
+        target: { kind: 'run', id: 'verify-gs' },
+      })
+    })
+
+    it('409s a sourced execute while another demo holds the workspace', async () => {
+      writeFeature()
+      const store = new RunStore(logsDir, createRegistry())
+      const gettingStarted = sessionStore()
+      gettingStarted.claim('run', 'external')
+      const startVerification = vi.fn()
+      const app = Fastify()
+      await app.register(verificationRoutes, { featuresDir, store, startVerification, gettingStarted })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout/verifications',
+        payload: { playwrightEnvsetId: 'production', gettingStartedSource: 'external' },
+      })
+
+      expect(res.statusCode).toBe(409)
+      const body = res.json() as { type: string; error: string; active: GettingStartedActiveSession }
+      expect(body.type).toBe('getting_started_busy')
+      expect(body.active.workflow).toBe('run')
+      // Bounced before any verification started.
+      expect(startVerification).not.toHaveBeenCalled()
+    })
+
+    it('releases the claim when the verification fails to start', async () => {
+      writeFeature()
+      const store = new RunStore(logsDir, createRegistry())
+      const gettingStarted = sessionStore()
+      const app = Fastify()
+      await app.register(verificationRoutes, {
+        featuresDir,
+        store,
+        startVerification: async () => { throw new Error('spawn error') },
+        gettingStarted,
+      })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout/verifications',
+        payload: { playwrightEnvsetId: 'production', gettingStartedSource: 'external' },
+      })
+
+      expect(res.statusCode).toBe(500)
+      // An unreleased claim would lock every demo card behind a run that
+      // never existed.
+      expect(gettingStarted.read().active).toBeNull()
+    })
+
+    it('re-throws a non-busy claim failure instead of mislabelling it a demo state', async () => {
+      writeFeature()
+      const store = new RunStore(logsDir, createRegistry())
+      // An attached active session whose resolver explodes: the route's claim
+      // call must propagate anything that is not the busy signal.
+      let explode = false
+      const gettingStarted = new GettingStartedSessionStore(
+        logsDir,
+        { status: () => { if (explode) throw new Error('resolver exploded'); return 'running' }, isActive: () => true },
+        () => {},
+      )
+      const session = gettingStarted.claim('verify', 'internal')
+      gettingStarted.attach(session.sessionId, { kind: 'run', id: 'r-x' })
+      explode = true
+      const app = Fastify()
+      await app.register(verificationRoutes, { featuresDir, store, startVerification: async () => fakeOrchestrator(), gettingStarted })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/features/checkout/verifications',
+        payload: { playwrightEnvsetId: 'production', gettingStartedSource: 'internal' },
+      })
+
+      expect(res.statusCode).toBe(500)
+    })
   })
 })

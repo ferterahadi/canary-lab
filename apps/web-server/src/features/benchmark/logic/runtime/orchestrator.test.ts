@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { BenchmarkOrchestrator } from './orchestrator'
+import { BenchmarkOrchestrator, type BenchmarkOrchestratorDeps } from './orchestrator'
 import { SabotageNoopError } from './race'
 import type { BenchmarkManifest } from './types'
 import type { BenchmarkReport } from './report'
@@ -7,7 +7,7 @@ import type { BenchmarkReport } from './report'
 function makeManifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
     benchmarkId: 'b1',
-    feature: 'example_todo_api',
+    feature: 'demo_inventory',
     skill: 'broken-delete-contract',
     level: 'med',
     iterations: 1,
@@ -39,7 +39,10 @@ describe('BenchmarkOrchestrator.run', () => {
         return { sabotageSha: 'a1b2c3d', diff: 'D' }
       },
       writeDiff: (d) => calls.push(`diff:${d}`),
-      setupArms: async (sha) => calls.push(`setup:${sha}`),
+      setupArms: async (sha) => {
+        calls.push(`setup:${sha}`)
+        return {}
+      },
       runRace: async ({ onResult, onIterationComplete }) => {
         onResult({ arm: 'A', iteration: 1, healed: true, healCycles: 2, wallClockMs: 100 })
         onResult({ arm: 'B', iteration: 1, healed: false, healCycles: 5, wallClockMs: 200 })
@@ -76,7 +79,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => persisted.push(structuredClone(m)),
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async ({ onArmStart }) => {
         onArmStart('A', 1, 'run-A')
         onArmStart('B', 1, 'run-B')
@@ -118,6 +121,12 @@ describe('BenchmarkOrchestrator.run', () => {
     expect(final?.arms.find((a) => a.arm === 'B')?.worktreePath).toBeUndefined()
   })
 
+  // A case here forced `setupArms` to resolve `undefined` through a cast, to
+  // cover a `?? {}` fallback in the orchestrator. `setupArms` is typed to resolve
+  // a real object, so no caller could produce that state — the cast manufactured
+  // it. The fallback is gone and so is the case; the empty-object behaviour is
+  // still covered by the arm above, which returns `{}` legitimately.
+
   it('marks the run aborted (not done) when isAborted() is true', async () => {
     let final: BenchmarkManifest | undefined
     const orch = new BenchmarkOrchestrator({
@@ -125,7 +134,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => { final = m },
       sabotage: async () => ({ sabotageSha: 'a1b2c3d', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => '2026-06-03T02:00:00.000Z',
       isAborted: () => true,
@@ -142,7 +151,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: () => {},
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => { raceRan = true; return REPORT },
       now: () => 't',
       isAborted: () => true,
@@ -158,7 +167,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: () => {},
       sabotage: async () => { throw new Error('child killed') },
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => 't',
       isAborted: () => true,
@@ -176,7 +185,10 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: () => {},
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => { abortNow = true },
+      setupArms: async () => {
+        abortNow = true
+        return {}
+      },
       runRace: async () => { raceRan = true; return REPORT },
       now: () => 't',
       isAborted: () => abortNow,
@@ -199,7 +211,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => persisted.push(structuredClone(m)),
       sabotage: async () => ({ sabotageSha: 'sha', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async ({ onArmStart, onResult, onIterationComplete }) => {
         inRace = true
         onArmStart('A', 1, 'run-A')
@@ -227,7 +239,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => { final = m },
       sabotage: async () => { throw 'plain string failure' },
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => 't',
     })
@@ -246,7 +258,7 @@ describe('BenchmarkOrchestrator.run', () => {
         throw new Error('could not break it')
       },
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => REPORT,
       now: () => '2026-06-03T02:00:00.000Z',
       cleanup: async () => {
@@ -268,7 +280,7 @@ describe('BenchmarkOrchestrator.run', () => {
       persist: (m) => { final = m },
       sabotage: async () => ({ sabotageSha: 'a1b2c3d', diff: 'D' }),
       writeDiff: () => {},
-      setupArms: async () => {},
+      setupArms: async () => ({}),
       runRace: async () => { throw new SabotageNoopError('broke no test') },
       now: () => '2026-06-03T02:00:00.000Z',
     })

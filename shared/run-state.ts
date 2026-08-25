@@ -66,6 +66,120 @@ export interface RunBootFailure {
   logPath: string
 }
 
+/**
+ * Why the auto-heal loop stopped without the run passing. Typed and persisted
+ * on the manifest so the Test Run surface can state the reason plainly instead
+ * of leaving it buried in the diagnosis journal (or, for a silent agent, lost
+ * entirely). Written at every give-up site in the auto-heal loop.
+ *
+ * - `no-signal`   — the heal agent produced no signal and changed no files;
+ *                   `agentWait` says which watchdog fired and `agentCause`
+ *                   (classified from the agent's own output tail) says why the
+ *                   agent went quiet (usage limit, auth, crash, …).
+ * - `max-cycles`  — hit the hard cycle cap (AUTO_HEAL_MAX_CYCLES).
+ * - `no-progress` — the same failing set survived the no-progress limit of
+ *                   consecutive fix attempts, or a fixless rerun made no gain.
+ * - `cancelled`   — the user stopped heal (or the run was aborted) mid-loop.
+ * - `foreign-abort` — a DIFFERENT process wrote a terminal status onto this
+ *                   run's manifest while this one was still repairing (a second
+ *                   server booting against the same logs dir is how this
+ *                   happens). Nothing outside the owning process can stop the
+ *                   heal loop, so the loop winds itself down and says so rather
+ *                   than repairing a run every reader thinks has ended.
+ *
+ * There is deliberately no `spawn-failed`: a heal agent that fails to spawn
+ * throws out of the loop rather than settling it, so no run has ever ended with
+ * that reason. Reinstate it here (and in the UI) only alongside a `recordHealEnd`
+ * call that can actually produce it.
+ */
+export interface HealEnd {
+  reason: 'no-signal' | 'max-cycles' | 'no-progress' | 'cancelled' | 'foreign-abort'
+  /** Which watchdog ended the wait. Set only when `reason === 'no-signal'`. */
+  agentWait?: 'idle-timeout' | 'hard-timeout' | 'pty-died'
+  /** Best-effort classification of why the agent went quiet, from its output
+   *  tail. Set only when `reason === 'no-signal'`. `unknown` = tail captured
+   *  but no known fingerprint matched. */
+  agentCause?: 'usage-limit' | 'auth' | 'rate-limit' | 'crash' | 'trust-prompt' | 'approval-prompt' | 'unknown'
+  /** 1-based heal cycle in flight when the loop gave up (0 if it never began). */
+  cycle: number
+  /** Plain-language sentence for the UI + transcript. */
+  message: string
+  /** ISO timestamp. */
+  at: string
+}
+
+/**
+ * The fix diff captured from a run's per-run worktree at teardown — the heal
+ * agent's edits, isolated from the overlay/envset/uncommitted state that was
+ * hydrated into the worktree before boot (those form the capture baseline).
+ * The product repos are NEVER mutated; this patch is the ONLY record of what
+ * the repair did, and the user applies it (or opens a PR) on demand.
+ * Absent on green runs (nothing to fix), in-place (non-worktree) runs, and
+ * runs whose agent changed nothing.
+ */
+export interface RunFixCaptureRepo {
+  /** feature.config repos[].name. */
+  repoName: string
+  /** Absolute path to the saved unified-diff patch (<runDir>/fixes/<repo>.patch). */
+  patchPath: string
+  /** The patch's basename, for display and PR body references. */
+  patchFile: string
+  /** The SOURCE repo working-tree root the patch applies against. */
+  repoRoot: string
+  /** The repo HEAD sha the worktree — and thus the patch — is based on. */
+  baseSha: string
+  /** Number of files the fix touched. */
+  files: number
+  /**
+   * Repo-relative paths of those files, so the Changes tab can name what the
+   * repair touched instead of only counting it. Once the patch is applied into
+   * the real repo, the user's editor shows these interleaved with whatever they
+   * were already working on — this list is the only thing that separates them.
+   *
+   * Capped at FIX_CAPTURE_MAX_FILE_NAMES; `files` still carries the true count,
+   * so a repair past the cap reads as "n of N" rather than a short list
+   * pretending to be complete. Absent on captures written before this field.
+   */
+  fileNames?: string[]
+}
+
+/** Name-list cap for RunFixCaptureRepo.fileNames. The manifest is re-read on
+ *  every run-detail fetch, and a pathological repair must not turn it into a
+ *  path dump; the count and the patch itself both survive the cap. */
+export const FIX_CAPTURE_MAX_FILE_NAMES = 200
+
+export interface RunFixCapture {
+  repos: RunFixCaptureRepo[]
+  /** ISO timestamp of the capture (run teardown). */
+  capturedAt: string
+}
+
+/** A pull request opened from a run's captured fix, per repo. Persisted so the
+ *  Fixes-captured panel can show "PR opened →" instead of re-offering the
+ *  button, and so a repeat request is idempotent (returns the existing URL). */
+export interface RunProposedPr {
+  repoName: string
+  url: string
+  /** The pushed head branch (deterministic per FEATURE+repo, so every healed
+   *  run of a feature updates one review thread instead of opening its own). */
+  branch: string
+  /** The base branch the PR targets. */
+  base: string
+  createdAt: string
+}
+
+/** What a pull-request attempt did, per repo — failures included. A green run
+ *  proposes automatically, and a repo that could not open one (no push rights,
+ *  gh not signed in, patch no longer applies) has to say so somewhere: without
+ *  this the Changes view would show a fix with no PR and no explanation. */
+export interface RunPrAttempt {
+  /** ISO timestamp of the attempt. */
+  at: string
+  /** True when the run proposed on its own; false for the user-driven dialog. */
+  auto: boolean
+  results: Array<{ repoName: string; ok: boolean; url?: string; reason?: string }>
+}
+
 export interface RunLifecycleSnapshot {
   phase: RunLifecyclePhase
   headline: string
@@ -252,6 +366,8 @@ function disabledReason(
   if (action === 'stop') return (status === 'running' || status === 'queued') ? undefined : 'Stop is available only while a run is queued or its tests are running.'
   if (action === 'cancelHeal') return status === 'healing' ? undefined : 'Cancel Heal is available only while an agent is healing.'
   if (action === 'delete') return isTerminalRunStatus(status) ? undefined : 'Delete is available after the run finishes.'
-  if (action === 'restartHeal') return isRestartableRunStatus(status) ? undefined : 'Restart Heal is available after a failed or aborted run.'
-  return undefined
+  // `restartHeal` is the last remaining member of RunActionAvailabilitySet, so
+  // it is the unconditional tail rather than one more guarded case — there is
+  // no unreachable default left behind for the coverage gate to carry.
+  return isRestartableRunStatus(status) ? undefined : 'Restart Heal is available after a failed or aborted run.'
 }

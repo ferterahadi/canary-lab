@@ -9,7 +9,7 @@ import {
   requirementFingerprintMap,
   withFingerprints,
 } from './fingerprints'
-import type { PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
+import type { PathType, PrdSummary, Requirement } from '../../../../../../../shared/coverage/types'
 
 const r = (id: string, extra: Partial<Requirement> = {}): Requirement =>
   ({ id, title: `${id} title`, text: `${id} text`, pathTypes: ['happy'], ...extra })
@@ -28,7 +28,7 @@ describe('fingerprintRequirement', () => {
 
   it('ignores id (the durable spine) but tracks path types order-independently', () => {
     // Same content, different id → same fingerprint (id is excluded).
-    const same = { title: 'T', text: 'body', pathTypes: ['happy'] as const }
+    const same = { title: 'T', text: 'body', pathTypes: ['happy'] as PathType[] }
     expect(fingerprintRequirement({ id: 'R1', ...same })).toBe(fingerprintRequirement({ id: 'R2', ...same }))
     expect(fingerprintRequirement(r('R1', { pathTypes: ['happy', 'sad'] })))
       .toBe(fingerprintRequirement(r('R1', { pathTypes: ['sad', 'happy'] })))

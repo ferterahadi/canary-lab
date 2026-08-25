@@ -3,11 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getEnvsetsIndex, getFeatureConfigDoc, type ParsedConfigDoc } from '../../../shared/api/client'
+import { getEnvsetsIndex, getFeatureConfigDoc, type ParsedConfigDoc } from '@/shared/api/client'
 import { TemplatedInput } from './TemplatedInput'
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     getEnvsetsIndex: vi.fn(),
@@ -20,11 +20,13 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  vi.mocked(getEnvsetsIndex).mockReset().mockResolvedValue({ envs: [{ name: 'local', slots: ['app.env'] }] })
+  vi.mocked(getEnvsetsIndex)
+    .mockReset()
+    .mockResolvedValue({ envs: [{ name: 'local', slots: ['app.env'] }], slotDescriptions: {} })
   vi.mocked(getFeatureConfigDoc).mockReset().mockResolvedValue(docWithPorts())
 })
 

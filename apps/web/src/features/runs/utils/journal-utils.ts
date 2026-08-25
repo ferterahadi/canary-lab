@@ -3,7 +3,7 @@
 // side too so the in-place "show all runs" toggle and the optimistic-after-
 // delete refresh don't always need a round trip.
 
-import type { JournalEntry } from '../../../shared/api/types'
+import type { JournalEntry } from '@/shared/api/types'
 
 // Newest first by iteration. Entries with a null iteration sink to the
 // bottom (this is also what the server returns, but we re-sort to be safe
@@ -87,12 +87,13 @@ export function presentJournalFields(fields: readonly ParsedField[]): ParsedFiel
   return out
 }
 
-export type OutcomeBadge = 'pending' | 'all_passed' | 'partial' | 'no_change' | 'regression' | 'unknown'
+export type OutcomeBadge = 'pending' | 'all_passed' | 'advanced' | 'partial' | 'no_change' | 'regression' | 'unknown'
 
 export function classifyOutcome(outcome: string | null | undefined): OutcomeBadge {
   switch (outcome) {
     case 'pending':
     case 'all_passed':
+    case 'advanced':
     case 'partial':
     case 'no_change':
     case 'regression':
@@ -105,17 +106,23 @@ export function classifyOutcome(outcome: string | null | undefined): OutcomeBadg
 export function outcomeBadgeClass(outcome: OutcomeBadge): string {
   switch (outcome) {
     case 'all_passed':
-      return 'border-emerald-500/40 text-emerald-700 bg-emerald-500/10 dark:text-emerald-300'
+      return 'border-success/40 text-success bg-success/10'
+    // Its own hue rather than a second success or warning shade: `advanced` is
+    // the label most likely to be misread, and it sits in journals right next
+    // to both. Five labels, five hues — the eye separates them before the word
+    // is read.
+    case 'advanced':
+      return 'border-accent/40 text-accent bg-accent/10'
     case 'partial':
-      return 'border-amber-500/50 text-amber-700 bg-amber-500/10 dark:text-amber-300'
+      return 'border-warning/50 text-warning bg-warning/10'
     case 'no_change':
-      return 'border-rose-500/40 text-rose-700 bg-rose-500/10 dark:text-rose-300'
+      return 'border-danger/40 text-danger bg-danger/10'
     case 'regression':
-      return 'border-rose-600/50 text-rose-800 bg-rose-600/15 dark:text-rose-200'
+      return 'border-danger/50 text-danger bg-danger/15'
     case 'pending':
-      return 'border-sky-500/40 text-sky-700 bg-sky-500/10 dark:text-sky-300'
+      return 'border-running/40 text-running bg-running/10'
     case 'unknown':
     default:
-      return 'border-zinc-300 text-zinc-600 bg-zinc-200/40 dark:border-zinc-700 dark:text-zinc-400 dark:bg-zinc-800/40'
+      return 'border-line-strong text-secondary bg-selected/60'
   }
 }

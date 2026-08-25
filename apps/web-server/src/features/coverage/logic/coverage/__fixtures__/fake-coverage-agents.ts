@@ -10,7 +10,7 @@ import type { DocsCollection } from '../docs-collection'
 import { reconcileRequirementIds, type ParsedRequirement, type SummarizePrdArgs, type SummarizePrdDeps } from '../prd-summary'
 import type { AnnotateTestInput, ProposeMappingsArgs, ProposeMappingsDeps } from '../annotate-engine'
 import { withFingerprints } from '../fingerprints'
-import type { PrdSummary, ProposedMapping, Requirement } from '../../../../../../../shared/coverage/types'
+import type { PrdSummary, ProposedMapping, Requirement } from '../../../../../../../../shared/coverage/types'
 
 // --- Summary: one requirement per markdown heading ------------------------------
 

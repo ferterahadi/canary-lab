@@ -3,14 +3,14 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '../../../shared/api/client'
-import type { FeatureDocsListing } from '../../../shared/api/types'
+import * as api from '@/shared/api/client'
+import type { FeatureDocsListing } from '@/shared/api/types'
 import { CoverageDocsRail } from './CoverageDocsRail'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     listFeatureDocs: vi.fn(),
@@ -54,7 +54,7 @@ beforeEach(() => {
   vi.mocked(api.listFeatureDocs).mockResolvedValue(structuredClone(LISTING))
   vi.mocked(api.importFeatureDoc).mockResolvedValue({ written: true, relativePath: 'features/checkout/docs/x.md' })
   vi.mocked(api.deleteFeatureDoc).mockResolvedValue({ deleted: true })
-  vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'] })
+  vi.mocked(api.clearPrdSummary).mockResolvedValue({ feature: 'checkout', removed: ['_prd-summary.json'], untagged: [] })
   vi.mocked(api.openEditor).mockResolvedValue({ opened: true, editor: 'auto' })
 })
 

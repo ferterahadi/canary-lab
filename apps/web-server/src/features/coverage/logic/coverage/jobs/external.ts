@@ -13,11 +13,11 @@ import {
   type SummaryAuthoringContext,
 } from '../service'
 import { CoverageJobConflictError } from './runner'
+import { IncompleteCoverageAnswerError, missingFromRoster } from '../external-submissions'
 import type { CoverageJobStore } from './store'
 import type { CoverageJobManifest } from './types'
 import type { ParsedRequirement } from '../prd-summary'
 import type { ProposedMapping, VariantDimension } from '../../../../../../../../shared/coverage/types'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 
 // Offloaded ("external") coverage + PRD summary: the calling MCP client does the
 // agent work itself — Canary spawns NO local agent. The start_* tool hands the
@@ -45,7 +45,6 @@ export type StartExternalCoverageResult =
 
 export interface ExternalCoverageDeps {
   store: CoverageJobStore
-  workspaceEvents?: WorkspaceEventPublisher
 }
 
 function defaultJobId(): string {
@@ -82,18 +81,21 @@ export function startExternalCoverage(
     startedAt: now(),
     log: '[external] coverage offloaded to the calling client — Canary will recompute on submit_external_coverage\n',
     producer: 'external',
+    // Pin the roster the client is being handed, so submit can check the answer
+    // covers it. Recomputing the roster at submit time instead would blame the
+    // client for a test added to the feature after it started reading.
+    externalTestRoster: context.tests.map((t) => t.testName),
     ...(args.clientKind ? { externalClientKind: args.clientKind } : {}),
     externalSessionId: args.sessionId,
     ...(args.conversationName ? { externalConversationName: args.conversationName } : {}),
     ...(args.sessionUrl ? { externalSessionUrl: args.sessionUrl } : {}),
   }
   deps.store.save(manifest)
-  // The job now exists and is `running` — tell every open client so the feature's
-  // coverage pill flips to "Generating" and an open ledger re-attaches to the
-  // Generating screen live, without a refresh (cl_ws-driven-state). Same event
-  // the submit path uses; the client reaction (re-list states / re-attach) is
-  // idempotent for both the start and the finish of a coverage job.
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
+  // Saving is what announces it: the store's boot-time bridge
+  // (`bridgeCoverageJobEvents`, wired in server.ts) publishes off this write, so
+  // the feature's coverage pill flips to "Generating" and an open ledger
+  // re-attaches live without a refresh (cl_ws-driven-state). Nothing publishes
+  // from HERE — do not add a call, it would double-fire.
   return { kind: 'started', manifest, context }
 }
 
@@ -102,8 +104,16 @@ export interface SubmitExternalCoverageArgs {
   logsDir: string
   jobId: string
   mappings: ProposedMapping[]
+  /** Test names the client read and explicitly could not map. Together with
+   *  `mappings` this must account for the whole roster — see
+   *  `IncompleteCoverageAnswerError`. */
+  unmappable?: string[]
   now?: () => string
 }
+
+// Moved to external-submissions.ts so the flight's mapping hand-off words its
+// re-park identically; re-exported to keep this module's public surface.
+export { IncompleteCoverageAnswerError }
 
 export interface SubmitExternalCoverageResult {
   manifest: CoverageJobManifest
@@ -123,6 +133,18 @@ export function submitExternalCoverage(
   if (!job) throw new Error(`coverage job not found: ${args.jobId}`)
   if (job.producer !== 'external') throw new Error('only external coverage jobs can be submitted through this tool')
 
+  // The roster check — the price of the client owning its own fan-out. Once
+  // subagents do the reading, canary cannot see which tests were examined, and a
+  // test silently missing from the answer is indistinguishable from one read and
+  // found to have no requirement. The ledger would score it uncovered on the
+  // client's silence rather than on evidence, so an incomplete answer is
+  // rejected (recoverable — the client re-submits with the rest).
+  // Jobs started before the roster existed skip the check; see the field's doc.
+  if (job.externalTestRoster?.length) {
+    const missing = missingFromRoster(job.externalTestRoster, args.mappings, args.unmappable ?? [])
+    if (missing.length) throw new IncompleteCoverageAnswerError(missing, job.externalTestRoster.length)
+  }
+
   const result = applyExternalCoverageMappings({
     featuresDir: args.featuresDir,
     logsDir: args.logsDir,
@@ -139,7 +161,6 @@ export function submitExternalCoverage(
     result: { applied: result.applied.length },
   }
   deps.store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: job.feature })
   return { manifest, result }
 }
 
@@ -198,9 +219,8 @@ export function startExternalSummary(
     ...(args.sessionUrl ? { externalSessionUrl: args.sessionUrl } : {}),
   }
   deps.store.save(manifest)
-  // Flip the coverage pill to "Generating" and re-attach an open ledger to the
-  // Generating screen live (cl_ws-driven-state) — same event the submit path uses.
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
+  // Announced by the store bridge off this save, exactly as above — not from
+  // here.
   return { kind: 'started', manifest, context: built.context }
 }
 
@@ -246,6 +266,5 @@ export function submitExternalSummary(
     result: { requirementCount: result.summary.requirements.length },
   }
   deps.store.save(manifest)
-  publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: job.feature })
   return { manifest, result }
 }

@@ -8,7 +8,7 @@ import {
   formatJournalFieldKey,
   presentJournalFields,
 } from './journal-utils'
-import type { JournalEntry } from '../../../shared/api/types'
+import type { JournalEntry } from '@/shared/api/types'
 
 const entry = (overrides: Partial<JournalEntry>): JournalEntry => ({
   iteration: 1,
@@ -101,6 +101,7 @@ describe('classifyOutcome', () => {
   it.each([
     ['pending', 'pending'],
     ['all_passed', 'all_passed'],
+    ['advanced', 'advanced'],
     ['partial', 'partial'],
     ['no_change', 'no_change'],
     ['regression', 'regression'],
@@ -120,7 +121,7 @@ describe('classifyOutcome', () => {
 
 describe('outcomeBadgeClass', () => {
   it('returns distinct classes per outcome', () => {
-    const outcomes = ['pending', 'all_passed', 'partial', 'no_change', 'regression', 'unknown'] as const
+    const outcomes = ['pending', 'all_passed', 'advanced', 'partial', 'no_change', 'regression', 'unknown'] as const
     const seen = new Set<string>()
     for (const o of outcomes) {
       const cls = outcomeBadgeClass(o)

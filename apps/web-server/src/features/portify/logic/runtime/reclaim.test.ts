@@ -130,4 +130,49 @@ describe('reclaimOrphanedPortify', () => {
     await reclaimOrphanedPortify(store, logsDir, () => '2026-06-07T01:00:00.000Z')
     expect(store.get('nosnap')?.status).toBe('aborted')
   })
+
+  it('keeps a ready-to-save workflow with a pending capture PARKED: worktree removed, config untouched, status intact', async () => {
+    const { logsDir, featureDir, appRepo } = await fixture()
+    const store = new PortifyRunStore(logsDir)
+    const id = 'portify-parked'
+    const wt = await createBranchAndWorktree({
+      repoName: 'app', localPath: appRepo,
+      worktreesDir: portifyDir(logsDir, id) + '/worktrees',
+      branch: 'canary/dynamic-ports-myfeat',
+    })
+    roots.push(wt.handle.worktreeRoot)
+    const { originalConfigPath, pendingOverlayPath } = buildPortifyPaths(portifyDir(logsDir, id))
+    fs.mkdirSync(path.dirname(originalConfigPath), { recursive: true })
+    fs.writeFileSync(originalConfigPath, 'ORIGINAL\n')
+    // The ready-to-save park persisted its overlay capture before the restart.
+    fs.writeFileSync(pendingOverlayPath, JSON.stringify({ version: 1, capturedAt: 'x', repos: [], originalConfig: 'ORIGINAL\n' }))
+    store.save(manifest({
+      workflowId: id, featureDir, status: 'ready-to-save',
+      repos: [{ name: 'app', path: appRepo, worktreePath: wt.handle.worktreeRoot }],
+    }))
+
+    await reclaimOrphanedPortify(store, logsDir, () => '2026-06-07T01:00:00.000Z')
+
+    // Worktree + branch reclaimed (a revise needs a live agent session anyway)…
+    expect(fs.existsSync(wt.handle.worktreeRoot)).toBe(false)
+    const branches = await runGit(appRepo, ['branch', '--list', 'canary/dynamic-ports-myfeat'])
+    expect(branches.stdout.trim()).toBe('')
+    // …but the review stays answerable: status kept, config still portified
+    // in place (exactly the live parked state), no restart error stamped.
+    expect(store.get(id)?.status).toBe('ready-to-save')
+    expect(store.get(id)?.error).toBeUndefined()
+    expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf-8')).toBe('EDITED BY AGENT\n')
+  })
+
+  it('still aborts a ready-to-save workflow that has NO pending capture (pre-capture records)', async () => {
+    const { logsDir, featureDir } = await fixture()
+    const store = new PortifyRunStore(logsDir)
+    const { originalConfigPath } = buildPortifyPaths(portifyDir(logsDir, 'old'))
+    fs.mkdirSync(path.dirname(originalConfigPath), { recursive: true })
+    fs.writeFileSync(originalConfigPath, 'ORIGINAL\n')
+    store.save(manifest({ workflowId: 'old', featureDir, status: 'ready-to-save', repos: [] }))
+    await reclaimOrphanedPortify(store, logsDir, () => '2026-06-07T01:00:00.000Z')
+    expect(store.get('old')?.status).toBe('aborted')
+    expect(fs.readFileSync(path.join(featureDir, 'feature.config.cjs'), 'utf-8')).toBe('ORIGINAL\n')
+  })
 })

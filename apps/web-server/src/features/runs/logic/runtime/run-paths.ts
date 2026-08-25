@@ -11,6 +11,10 @@ export interface RunPaths {
   summaryPath: string
   playwrightStdoutPath: string
   playwrightEventsPath: string
+  // Newline-delimited `--test-list` entries for a targeted rerun, rewritten
+  // before each Playwright invocation that uses one. Kept in the run dir rather
+  // than a temp file so a rerun's exact selection stays inspectable afterwards.
+  rerunListPath: string
   lifecycleEventsPath: string
   playwrightArtifactsDir: string
   // Durable copy of each Playwright per-test artifact directory. Playwright's
@@ -32,6 +36,15 @@ export interface RunPaths {
   runnerLogPath: string
   healIndexPath: string
   diagnosisJournalPath: string
+  // Tail of the heal agent's raw terminal output, written only when the loop
+  // gives up on a no-signal cycle. The heal-failure classifier reads this to
+  // explain WHY the agent went quiet (usage limit, auth, crash) — the agent's
+  // own bytes are the only evidence when it never wrote a signal.
+  healAgentTailPath: string
+  // Directory holding the heal fix patches captured at teardown — one
+  // `<repoName>.patch` per changed repo plus a `fixes.json` index. The
+  // run detail's Changes tab and the PR pipeline read from here.
+  fixesDir: string
   failedDir: string
   signalsDir: string
   restartSignal: string
@@ -57,6 +70,7 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     summaryPath: path.join(runDir, 'e2e-summary.json'),
     playwrightStdoutPath: path.join(runDir, 'playwright.log'),
     playwrightEventsPath: path.join(runDir, 'playwright-events.jsonl'),
+    rerunListPath: path.join(runDir, 'rerun-test-list.txt'),
     lifecycleEventsPath: path.join(runDir, 'lifecycle-events.jsonl'),
     playwrightArtifactsDir: path.join(runDir, 'playwright-artifacts'),
     playwrightArtifactsKeepDir: path.join(runDir, 'playwright-artifacts-keep'),
@@ -65,6 +79,8 @@ export function buildRunPaths(runDir: string, overrides?: { signalsDir?: string 
     runnerLogPath: path.join(runDir, 'runner.log'),
     healIndexPath: path.join(runDir, 'heal-index.md'),
     diagnosisJournalPath: path.join(runDir, 'diagnosis-journal.md'),
+    healAgentTailPath: path.join(runDir, 'heal-agent-tail.txt'),
+    fixesDir: path.join(runDir, 'fixes'),
     failedDir: path.join(runDir, 'failed'),
     signalsDir,
     restartSignal: path.join(signalsDir, '.restart'),

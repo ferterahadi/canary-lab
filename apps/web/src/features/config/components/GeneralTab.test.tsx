@@ -3,11 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getFeatureConfigDoc, putFeatureConfigDoc, type ParsedConfigDoc } from '../../../shared/api/client'
+import { getFeatureConfigDoc, putFeatureConfigDoc, type ParsedConfigDoc } from '@/shared/api/client'
 import { GeneralTab } from './GeneralTab'
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     getFeatureConfigDoc: vi.fn(),
@@ -19,7 +19,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -92,6 +92,31 @@ describe('GeneralTab', () => {
     await clickSave()
     const savedValue = vi.mocked(putFeatureConfigDoc).mock.calls[0][1] as Record<string, unknown>
     expect('group' in savedValue).toBe(false)
+  })
+
+  it('offers the same two run shapes as the flight digest, and persists an explicit 0 for the run-everything one', async () => {
+    vi.mocked(getFeatureConfigDoc).mockResolvedValue(doc('feat'))
+    vi.mocked(putFeatureConfigDoc).mockResolvedValue(doc('feat'))
+
+    await act(async () => {
+      root.render(<GeneralTab feature="feat" />)
+    })
+
+    // An absent threshold reads as on at the default — not as "off" — and both
+    // shapes are named, so the cost of the other one isn't hidden behind a
+    // switch the user has to flip to discover.
+    const stop = container.querySelector('[data-testid="general-heal-mode-stop"]')
+    const full = container.querySelector('[data-testid="general-heal-mode-full"]')
+    expect(stop?.getAttribute('aria-checked')).toBe('true')
+    expect(full?.getAttribute('aria-checked')).toBe('false')
+    expect(container.querySelector<HTMLInputElement>('[data-testid="general-heal-threshold"]')?.value).toBe('2')
+
+    await act(async () => {
+      full!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    await clickSave()
+    expect(putFeatureConfigDoc).toHaveBeenCalledWith('feat', expect.objectContaining({ healOnFailureThreshold: 0 }))
   })
 
   async function clickSave(): Promise<void> {

@@ -20,7 +20,7 @@ const mockActiveRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count
 const mockBootSessions = vi.hoisted(() => ({ value: { sessions: [] as unknown[], count: 0 } }))
 const mockVerifyRuns = vi.hoisted(() => ({ value: { runs: [] as unknown[], count: 0 } }))
 
-vi.mock('../../features/runs/state/RunsContext', () => ({
+vi.mock('@/features/runs/state/RunsContext', () => ({
   useRuns: () => ({ connection: 'live', runs: [], abort: vi.fn() }),
   useActiveRuns: () => mockActiveRuns.value,
   useActiveBootSessions: () => mockBootSessions.value,
@@ -29,19 +29,19 @@ vi.mock('../../features/runs/state/RunsContext', () => ({
   useRunDetails: () => ({}),
 }))
 
-vi.mock('../../features/benchmark/state/BenchmarkContext', () => ({
+vi.mock('@/features/benchmark/state/BenchmarkContext', () => ({
   useBenchmarks: () => ({ benchmarks: [], connection: 'live', startBenchmark: vi.fn(), abortBenchmark: vi.fn(), loadBenchmark: vi.fn() }),
 }))
 
-vi.mock('../../features/benchmark/components/BenchmarkWindow', () => ({
+vi.mock('@/features/benchmark/components/BenchmarkWindow', () => ({
   BenchmarkWindow: () => null,
 }))
 
-vi.mock('../../features/wizard/components/WizardTaskStatus', () => ({
+vi.mock('@/features/wizard/components/WizardTaskStatus', () => ({
   WizardTaskStatus: () => null,
 }))
 
-vi.mock('../../features/evaluation/components/EvaluationExportTaskToast', () => ({
+vi.mock('@/features/evaluation/components/EvaluationExportTaskToast', () => ({
   EvaluationExportDialogHost: () => null,
 }))
 
@@ -184,6 +184,42 @@ describe('GlobalStatusBar', () => {
     expect(container.textContent).not.toContain('Deploy check')
   })
 
+  // R83: a flight's Latest-run drill-through lands in the workspace run detail,
+  // which has no close of its own — this chip is the only way back.
+  it('R83: offers a way back to the flight a drill-through came from', async () => {
+    const onReturnToFlight = vi.fn()
+    await act(async () => {
+      root.render(
+        <GlobalStatusBar
+          activeRunDetail={null}
+          returnFlight="fl_abc"
+          returnFlightLabel="merchant-pass-fnb"
+          onReturnToFlight={onReturnToFlight}
+        />,
+      )
+    })
+    const chip = container.querySelector('[data-testid="return-to-flight"]')
+    expect(chip?.textContent).toContain('merchant-pass-fnb')
+    await act(async () => { chip?.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(onReturnToFlight).toHaveBeenCalledWith('fl_abc')
+  })
+
+  it('R83: still offers the way back when the flight index no longer names it', async () => {
+    await act(async () => {
+      root.render(
+        <GlobalStatusBar activeRunDetail={null} returnFlight="fl_abc" onReturnToFlight={vi.fn()} />,
+      )
+    })
+    expect(container.querySelector('[data-testid="return-to-flight"]')?.textContent).toContain('Flight')
+  })
+
+  it('R83: no return chip when the user got here on their own', async () => {
+    await act(async () => {
+      root.render(<GlobalStatusBar activeRunDetail={null} />)
+    })
+    expect(container.querySelector('[data-testid="return-to-flight"]')).toBeNull()
+  })
+
   it('R6 consolidation: no Coverage/Portify/Services pills — the Flights pill is the per-feature entry point', async () => {
     await act(async () => {
       root.render(<GlobalStatusBar activeRunDetail={null} />)
@@ -221,7 +257,7 @@ describe('GlobalStatusBar', () => {
 
     expect(container.textContent).not.toContain('Playwright')
     expect(container.textContent).toContain('MCP')
-    expect(container.textContent).toContain('ready')
+    expect(container.textContent).toContain('Ready')
     expect(container.textContent).not.toContain('12 tools')
     expect(container.textContent).not.toContain('Check health')
     expect(container.textContent).not.toContain('Test MCP')
@@ -264,5 +300,46 @@ describe('GlobalStatusBar', () => {
     })
     expect(api.getMcpHealth).toHaveBeenLastCalledWith('author')
     expect(document.body.querySelector('[data-mcp-health-menu]')?.textContent).toContain('write_feature_doc')
+  })
+
+  describe('the Getting started pill', () => {
+    const demoPill = (): HTMLButtonElement | undefined =>
+      [...container.querySelectorAll('button')]
+        .find((b): b is HTMLButtonElement => b.textContent?.includes('Getting started') ?? false)
+
+    const renderBar = async (props: Record<string, unknown>): Promise<void> => {
+      await act(async () => {
+        root.render(<GlobalStatusBar activeRunDetail={null} {...props} />)
+      })
+    }
+
+    it('is absent when the workspace hides Getting Started', async () => {
+      await renderBar({ demoAvailable: false })
+      expect(demoPill()).toBeUndefined()
+    })
+
+    it('appears when Getting Started is enabled', async () => {
+      await renderBar({ demoAvailable: true })
+      expect(demoPill()).toBeDefined()
+    })
+
+    it('carries an attention dot until the chooser has been opened', async () => {
+      await renderBar({ demoAvailable: true, demoUnseen: true })
+      expect(demoPill()?.querySelector('span[aria-hidden="true"].absolute')).not.toBeNull()
+    })
+
+    it('drops the dot once the chooser has been opened', async () => {
+      await renderBar({ demoAvailable: true, demoUnseen: false })
+      expect(demoPill()?.querySelector('span[aria-hidden="true"].absolute')).toBeNull()
+    })
+
+    it('opens the guide — the permanent way back after it is closed', async () => {
+      const onOpenDemo = vi.fn()
+      await renderBar({ demoAvailable: true, onOpenDemo })
+      await act(async () => {
+        demoPill()?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      })
+      expect(onOpenDemo).toHaveBeenCalledOnce()
+    })
   })
 })

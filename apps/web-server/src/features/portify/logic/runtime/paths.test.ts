@@ -9,6 +9,10 @@ describe('portify paths', () => {
     expect(portifyDir('/logs', 'portify-1')).toBe(path.join('/logs', 'portify', 'portify-1'))
   })
 
+  // `toEqual` on the whole set is deliberate: every file the workflow dir owns
+  // has to be reachable from one place, so a NEW path landing in
+  // buildPortifyPaths without a test is itself the failure. Adding a field here
+  // is the intended cost of adding one there.
   it('builds the full path set for a workflow dir', () => {
     const dir = portifyDir('/logs', 'portify-1')
     const p = buildPortifyPaths(dir)
@@ -18,6 +22,8 @@ describe('portify paths', () => {
       agentLogPath: path.join(dir, 'agent.log'),
       verifyLogDir: path.join(dir, 'verify'),
       originalConfigPath: path.join(dir, 'original-config.snapshot'),
+      // Restart-proofs a parked `ready-to-save` review — see PortifyPaths.
+      pendingOverlayPath: path.join(dir, 'pending-overlay.json'),
     })
   })
 })

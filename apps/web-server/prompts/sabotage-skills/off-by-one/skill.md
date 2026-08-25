@@ -4,15 +4,13 @@
 
 ## Description
 
-Introduce a single, subtle logic bug in one function or request handler so that
-exactly one test goes red. The app still compiles and boots; the failure reads
-like an ordinary "wrong value" bug.
+Add one subtle logic bug that fails exactly one test while the app still builds
+and boots.
 
 ## Sabotage instructions
 
-You are deliberately breaking this app to benchmark an AI repair loop. Introduce
-**exactly one** subtle logic error in a **single** function or request handler in
-the application / service code. The change must:
+To benchmark repair, add **exactly one** subtle logic error to **one** application
+or service function. It must:
 
 - be small and plausible — a flipped boolean, an off-by-one, a wrong comparison,
   or a dropped / defaulted field — not an obvious deletion or a syntax error;

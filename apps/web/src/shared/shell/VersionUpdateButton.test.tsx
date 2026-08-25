@@ -66,6 +66,7 @@ describe('VersionUpdateButton', () => {
     const pop = popover()!
     expect(pop.textContent).toContain('Update available')
     expect(pop.textContent).toContain('Update to v1.4.2')
+    expect(pop.textContent).toContain('refreshes this workspace and its agent connections')
     const updateBtn = [...pop.querySelectorAll('button')].find((b) => /Update to v1\.4\.2/.test(b.textContent ?? ''))!
     act(() => { updateBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
     expect(spy).toHaveBeenCalledOnce()

@@ -1,9 +1,10 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { loadFeatures } from '../../../config/logic/feature-loader'
+import { loadFeatures } from '../../../../shared/feature-loader'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightStageDeps } from './context'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Pre-flight similarity check: never silently create a near-duplicate of a
 // feature that already covers the target repo(s). Deterministic scan — no
@@ -26,17 +27,11 @@ interface Match {
   repo: string
 }
 
-function findMatch(deps: FlightStageDeps, repoPaths: string[], log: (m: string) => void): { match: Match | null; scanned: number } {
+function findMatch(deps: FlightStageDeps, repoPaths: string[]): { match: Match | null; scanned: number } {
   const targets = new Set(repoPaths.map(real))
-  let features: ReturnType<typeof loadFeatures> = []
-  try {
-    features = loadFeatures(deps.featuresDir)
-  } catch (err) {
-    // A broken unrelated feature config must not ground the flight — scan what
-    // loads and say so. loadFeatures only re-throws real Error instances
-    // (its own healthCheck-validation guard); everything else it swallows.
-    log(`[similarity] feature scan degraded: ${(err as Error).message}\n`)
-  }
+  // loadFeatures itself skips (and console.errors) any feature with a broken
+  // healthCheck config, so a bad unrelated feature never grounds this scan.
+  const features = loadFeatures(deps.featuresDir)
   for (const feature of features) {
     for (const repo of feature.repos ?? []) {
       if (targets.has(real(repo.localPath))) {
@@ -53,11 +48,11 @@ function findMatch(deps: FlightStageDeps, repoPaths: string[], log: (m: string) 
 function applyChoice(ctx: StageContext, match: Match, choice: string): StageOutcome {
   if (choice === 'rerun') {
     ctx.patchFlight({ feature: match.feature })
-    return { kind: 'jump', to: 'run', skipReason: `rerun of existing feature ${match.feature}`, evidence: { match, choice } }
+    return { kind: 'jump', to: 'run', skipReason: `re-running the existing suite "${match.feature}"`, evidence: { match, choice } }
   }
   if (choice === 'enhance') {
     ctx.patchFlight({ feature: match.feature })
-    return { kind: 'jump', to: 'docs', skipReason: `enhancing existing feature ${match.feature}`, evidence: { match, choice } }
+    return { kind: 'jump', to: 'docs', skipReason: `updating the existing suite "${match.feature}"`, evidence: { match, choice } }
   }
   // 'new' — proceed fresh; scaffold picks a non-colliding feature name.
   return { kind: 'done', evidence: { match, choice: 'new' } }
@@ -65,9 +60,12 @@ function applyChoice(ctx: StageContext, match: Match, choice: string): StageOutc
 
 export function similarityStage(deps: FlightStageDeps): StageAdapter {
   return {
+    // Owns nothing: a deterministic scan of the features dir, over before a
+    // pause could land on it.
+    teardown: () => null,
     async run(ctx) {
       const m = ctx.manifest()
-      const { match, scanned } = findMatch(deps, m.repoPaths, ctx.appendLog)
+      const { match, scanned } = findMatch(deps, m.repoPaths)
       if (!match) return { kind: 'done', evidence: { scanned, match: null } }
       if (m.opts.plannedSplit) {
         // A confirmed plan-features batch deliberately creates N distinct
@@ -84,8 +82,8 @@ export function similarityStage(deps: FlightStageDeps): StageAdapter {
         kind: 'checkpoint',
         checkpoint: {
           kind: 'similarity-choice',
-          message: `Feature "${match.feature}" already targets ${match.repo} ("${match.description}"). Rerun it, enhance it with this flight's docs/specs delta, or create a new feature?`,
-          options: ['rerun', 'enhance', 'new'],
+          message: `A suite called "${match.feature}" already tests ${match.repo} ("${match.description}"). Re-run it, update it with this flight's new docs and tests, or start a fresh suite?`,
+          options: [...CHECKPOINT_OPTIONS['similarity-choice']],
           data: { match },
         },
       }

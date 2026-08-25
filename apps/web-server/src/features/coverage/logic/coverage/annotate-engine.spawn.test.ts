@@ -1,8 +1,13 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
+
 import { EventEmitter } from 'events'
+
 import fs from 'fs'
+import os from 'os'
+import path from 'path'
 
 const { mockSpawn } = vi.hoisted(() => ({ mockSpawn: vi.fn() }))
+
 vi.mock('child_process', () => ({ spawn: mockSpawn }))
 
 vi.mock('../../../agent-sessions/logic/agent-idle-timer', () => ({
@@ -26,8 +31,12 @@ vi.mock('../../../agent-sessions/logic/agent-binary', () => ({
 }))
 
 import { proposeCoverageMappings } from './annotate-engine'
+
 import type { Requirement } from '../../../../../../../shared/coverage/types'
+
 import { startIdleTimer } from '../../../agent-sessions/logic/agent-idle-timer'
+import { stopAgentProcesses } from '../../../agent-sessions/logic/agent-process'
+import { agentJobStore } from '../../../agent-sessions/logic/agent-jobs/store'
 
 const REQS: Requirement[] = [
   { id: 'R1', title: 'Create todo', text: 'A user can create a todo item', pathTypes: ['happy'] },
@@ -117,7 +126,7 @@ describe('defaultRunAgent — claude non-zero exit', () => {
         tests: [{ name: 'delete removes the todo item' }],
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -131,7 +140,7 @@ describe('defaultRunAgent — spawn error event', () => {
         tests: [{ name: 'create makes a new todo' }],
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -150,7 +159,7 @@ describe('defaultRunAgent — pre-aborted signal', () => {
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -171,7 +180,7 @@ describe('defaultRunAgent — abort signal during run', () => {
         signal: controller.signal,
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -395,7 +404,7 @@ describe('defaultRunAgent — settled guard: finish called twice (line 278 true 
         cwd: '/tmp/nonexistent-canary-test-dir',
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -423,7 +432,7 @@ describe('defaultRunAgent — close with non-null signal (line 323 ?? branch)', 
         tests: [{ name: 'delete removes the todo item' }],
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
   })
 })
 
@@ -443,7 +452,7 @@ describe('defaultRunAgent — Error thrown in catch (line 377 err.message branch
         resolveAgents: () => ['claude'],
         runAgent: async () => { throw new Error('agent exploded') },
       },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
 
     // onOutput received the err.message before the throw
     expect(outputChunks.some((c) => c.includes('agent exploded'))).toBe(true)
@@ -466,48 +475,73 @@ describe('defaultRunAgent — non-Error thrown in catch (line 377 String(err) br
         // eslint-disable-next-line @typescript-eslint/only-throw-error
         runAgent: async () => { throw 'non-error string' },
       },
-    )).rejects.toThrow(/requires the claude or codex agent/)
+    )).rejects.toThrow(/Coverage mapping failed/)
 
     // onOutput received the String(err) message before the throw
     expect(outputChunks.some((c) => c.includes('non-error string'))).toBe(true)
   })
 })
 
-describe('defaultRunAgent — onIdle fires child.kill and rejects (lines 297-298)', () => {
-  it('throws (LLM-only) when the idle timer fires onIdle', async () => {
-    // Override the module-level mock for this one test: call onIdle synchronously
-    // so the code path at lines 297-298 (child.kill + finish(Error)) is executed.
-    vi.mocked(startIdleTimer).mockImplementationOnce(
-      (opts: { activity?: () => number; onIdle: (ms: number) => void }) => {
-        opts.activity?.()
-        opts.onIdle(300_000)  // fires the idle callback immediately
-        return { bump: vi.fn(), stop: vi.fn() }
-      },
-    )
-
-    const child = new EventEmitter() as EventEmitter & {
-      stdout: EventEmitter
-      stderr: EventEmitter
-      stdin: { end: ReturnType<typeof vi.fn> }
-      kill: ReturnType<typeof vi.fn>
-    }
-    child.stdout = new EventEmitter()
-    child.stderr = new EventEmitter()
-    child.stdin = { end: vi.fn() }
-    // Real SIGTERM closes the process; the runner resolves on close, and the
-    // idled flag turns that into the idle rejection → deterministic fallback.
-    child.kill = vi.fn(() => { child.emit('close', null, 'SIGTERM') })
+describe('spawnScope', () => {
+  it('threads the stop scope down to the shared runner so an owner can kill the mapper', async () => {
+    // The mapping half of the flight's Test authoring stage spawns through here,
+    // three forwards deep (runCoverageEngine → proposeCoverageMappings →
+    // defaultRunAgent → runAgentProcess). Each of those is a place a hand-off can
+    // be silently dropped, so the assertion is the observable end: stopping the
+    // scope kills the child.
+    const scope = '/flights/fl_scope/coverage-map'
+    const child = makeFakeChild({ delayMs: 60_000 })
+    child.kill = vi.fn((signal?: NodeJS.Signals) => {
+      child.emit('close', null, signal ?? 'SIGTERM')
+      return true
+    })
     mockSpawn.mockReturnValue(child)
 
-    // onIdle → kill → close → idled rejection → the only agent failed → throws.
-    await expect(proposeCoverageMappings(
+    const pending = proposeCoverageMappings(
+      { requirements: REQS, tests: [{ name: 'creates a todo' }], spawnScope: scope },
+      { resolveAgents: () => ['claude'] },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    await stopAgentProcesses(scope)
+
+    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    // A killed mapper is a FAILED mapper, not an empty answer: silence must never
+    // reach the ledger as "nothing covers these requirements".
+    await expect(pending).rejects.toThrow(/coverage annotate agent failed with SIGTERM/)
+  })
+})
+
+describe('agentJob descriptor', () => {
+  it('forwards a record descriptor so the coverage mapper is logged too', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-annotate-rec-'))
+    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
+    await proposeCoverageMappings(
       {
         requirements: REQS,
-        tests: [{ name: 'delete removes the todo item' }],
-        cwd: '/tmp/nonexistent-canary-test-dir',
+        tests: [{ name: 'creates a todo' }],
+        agentJob: { record: { jobId: 'fl-1:coverage-map', flightId: 'fl-1', feature: 'checkout', stage: 'coverage-map', agent: 'claude' }, logsDir },
       },
       { resolveAgents: () => ['claude'] },
-    )).rejects.toThrow(/requires the claude or codex agent/)
-    expect(child.kill).toHaveBeenCalledWith('SIGTERM')
+    )
+    expect(agentJobStore(logsDir).get('fl-1:coverage-map')).toMatchObject({ stage: 'coverage-map', status: 'done' })
+    fs.rmSync(logsDir, { recursive: true, force: true })
+  })
+
+  it('records a codex mapper, which pins no session', async () => {
+    const logsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-annotate-rec-codex-'))
+    mockSpawn.mockReturnValue(makeFakeChild({ stdout: VALID_STDOUT }))
+    await proposeCoverageMappings(
+      {
+        requirements: REQS,
+        tests: [{ name: 'creates a todo' }],
+        agentJob: { record: { jobId: 'fl-1:coverage-map', flightId: 'fl-1', feature: 'checkout', stage: 'coverage-map', agent: 'codex' }, logsDir },
+      },
+      { resolveAgents: () => ['codex'] },
+    )
+    const rec = agentJobStore(logsDir).get('fl-1:coverage-map')!
+    expect(rec.agent).toBe('codex')
+    expect(rec.sessionId).toBeUndefined()
+    fs.rmSync(logsDir, { recursive: true, force: true })
   })
 })

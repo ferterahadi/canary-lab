@@ -68,6 +68,51 @@ describe('DirtySpecStore', () => {
     expect(onDisk.message).toContain('Tests have been modified')
   })
 
+  // Every emit becomes a `tests-dirty-changed` push and a full `/api/features`
+  // refetch on the client. The `.git` watcher fans a single git write out to
+  // every feature sharing that root, so a recompute that changed nothing must
+  // stay completely silent — measured at 33 wasted refetches per git write.
+  it('does not re-write or re-emit when a recompute finds nothing new', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    await store.captureRunStart('checkout', featureDir)
+
+    const recordPath = path.join(logsDir, 'dirty-specs', 'checkout', 'dirty.json')
+    const mtimeBefore = fs.statSync(recordPath).mtimeMs
+    const events: string[] = []
+    store.onEvent((e) => events.push(e.kind))
+
+    await store.recompute('checkout', featureDir)
+    await store.recompute('checkout', featureDir)
+
+    expect(events).toEqual([])
+    expect(fs.statSync(recordPath).mtimeMs).toBe(mtimeBefore)
+    expect(store.isDirty('checkout')).toBe(false)
+  })
+
+  // Guards the trap in the skip check: callers hand `saveWithDirty` an already
+  // augmented record, so the comparison has to be against what's on disk. A
+  // baseline rewrite carries the same status and dirtySpecs as the stored row.
+  it('still saves when only a baseline changed, with status and dirtySpecs untouched', async () => {
+    writeSpec(PASS)
+    const store = new DirtySpecStore(logsDir)
+    await store.captureRunStart('checkout', featureDir)
+    const firstHashes = store.get('checkout')?.runStartHashes
+
+    // A different-but-still-clean tree: re-capturing must persist new baselines.
+    writeSpec(TWO_TESTS)
+    const events: string[] = []
+    store.onEvent((e) => events.push(e.kind))
+    const rec = await store.captureRunStart('checkout', featureDir)
+
+    expect(rec.status).toBe('clean')
+    expect(rec.dirtySpecs).toEqual([])
+    expect(rec.runStartHashes).not.toEqual(firstHashes)
+    expect(events).toContain('changed')
+    const onDisk = JSON.parse(fs.readFileSync(path.join(logsDir, 'dirty-specs', 'checkout', 'dirty.json'), 'utf8'))
+    expect(onDisk.runStartHashes).toEqual(rec.runStartHashes)
+  })
+
   it('approve clears the dirty flag', async () => {
     writeSpec(PASS)
     const store = new DirtySpecStore(logsDir)
@@ -190,5 +235,36 @@ describe('DirtySpecStore', () => {
     writeSpec(TAMPERED)
     await store.recompute('checkout', featureDir)
     expect(events).toEqual([])
+  })
+
+  it('renameFeature() moves the record to the new feature id', async () => {
+    // Here the feature name IS the record id, so a rename re-homes the record
+    // directory as well as the field — the dirty cue has to follow the suite.
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    expect(store.get('checkout')).not.toBeNull()
+
+    expect(store.renameFeature('checkout', 'checkout_v2')).toBe(1)
+    expect(store.get('checkout')).toBeNull()
+    const moved = store.get('checkout_v2')
+    expect(moved?.featureId).toBe('checkout_v2')
+    expect(moved?.id).toBe('checkout_v2')
+  })
+
+  it('renameFeature() is a no-op when no record matches', async () => {
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    expect(store.renameFeature('absent', 'other')).toBe(0)
+    expect(store.get('checkout')?.featureId).toBe('checkout')
+  })
+
+  it('remove() drops the record', async () => {
+    const store = new DirtySpecStore(logsDir)
+    writeSpec(PASS)
+    await store.captureRunStart('checkout', featureDir)
+    store.remove('checkout')
+    expect(store.get('checkout')).toBeNull()
   })
 })

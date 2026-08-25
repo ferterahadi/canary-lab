@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { recoverClaudeFinalText } from './agent-stream'
+import { recoverClaudeFinalText, recoverClaudeAssistantText } from './agent-stream'
 
 describe('recoverClaudeFinalText', () => {
   it('prefers the terminal result envelope', () => {
@@ -58,5 +58,26 @@ describe('recoverClaudeFinalText', () => {
       JSON.stringify({ type: 'result', result: 'final' }),
     ].join('\n')
     expect(recoverClaudeFinalText(out)).toBe('final')
+  })
+})
+
+describe('recoverClaudeAssistantText', () => {
+  it('keeps an earlier turn when a later one only signs off in prose', () => {
+    // The scout failure mode: the JSON answer lands in turn 1, then the agent
+    // adds a chatter turn (which also becomes the terminal result). The final
+    // recovery drops the JSON; the all-turns recovery keeps it.
+    const out = [
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '```json\n{"configSource":"x","envFiles":[]}\n```' }] } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Already delivered the JSON above.' }] } }),
+      JSON.stringify({ type: 'result', result: 'Already delivered the JSON above.' }),
+    ].join('\n')
+    expect(recoverClaudeFinalText(out)).toBe('Already delivered the JSON above.')
+    const all = recoverClaudeAssistantText(out)
+    expect(all).toContain('"configSource"')
+    expect(all).toContain('Already delivered the JSON above.')
+  })
+
+  it('falls back to raw stdout when there are no assistant turns', () => {
+    expect(recoverClaudeAssistantText('not json at all')).toBe('not json at all')
   })
 })

@@ -7,7 +7,7 @@ const KEY = 'cl.workspace.view'
 
 /** Build a full PersistedView with sensible defaults for the fields under test. */
 function view(partial: Partial<PersistedView>): PersistedView {
-  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, ...partial }
+  return { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, configTab: null, focusTest: null, runTab: null, returnFlight: null, ...partial }
 }
 
 beforeEach(() => {
@@ -30,6 +30,89 @@ describe('workspace-view-state (R12)', () => {
     expect(window.location.search).toContain('feature=checkout')
     // A fresh read (as on refresh) recovers the same state from the URL.
     expect(readPersistedView()).toEqual(view({ view: 'coverage', feature: 'checkout' }))
+  })
+
+  // R82: `test` names WHICH failing test the run detail lands on. It qualifies a
+  // selected run, so it round-trips with one and is dropped without one.
+  it('round-trips the focused test alongside its run', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', focusTest: 'test-case-req-r4-otp-guard' }))
+    expect(window.location.search).toContain('run=7cvh')
+    expect(window.location.search).toContain('test=test-case-req-r4-otp-guard')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: '7cvh', focusTest: 'test-case-req-r4-otp-guard' }))
+  })
+
+  it('drops the focused test when no run is selected', () => {
+    persistView(view({ feature: 'checkout', focusTest: 'test-case-req-r4-otp-guard' }))
+    expect(window.location.search).not.toContain('test=')
+    expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  it('ignores a stray test param on a URL with no run', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&test=test-case-orphan')
+    expect(readPersistedView().focusTest).toBeNull()
+  })
+
+  // `runtab` names WHICH pane a drill-through wanted (the flight run stage's
+  // captured-fixes link → Changes). Same qualifier rules as `test`.
+  it('round-trips the arrival tab alongside its run', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', runTab: 'changes' }))
+    expect(window.location.search).toContain('runtab=changes')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', run: '7cvh', runTab: 'changes' }))
+  })
+
+  it('drops the arrival tab when no run is selected', () => {
+    persistView(view({ feature: 'checkout', runTab: 'changes' }))
+    expect(window.location.search).not.toContain('runtab=')
+    expect(readPersistedView().runTab).toBeNull()
+  })
+
+  it('ignores an unknown runtab value rather than opening a pane that has none', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&run=7cvh&runtab=nonsense')
+    expect(readPersistedView().runTab).toBeNull()
+  })
+
+  // R83: `from` names the flight a stage drill-through left, so the destination
+  // (coverage ledger / run detail) can offer a way back that survives a refresh.
+  it('round-trips the origin flight on a drilled-into view', () => {
+    persistView(view({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_abc' }))
+    expect(window.location.search).toContain('from=fl_abc')
+    expect(readPersistedView()).toEqual(view({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_abc' }))
+  })
+
+  it('round-trips a derived-flight origin token', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', returnFlight: 'feature:checkout' }))
+    expect(readPersistedView().returnFlight).toBe('feature:checkout')
+  })
+
+  it('drops the origin flight on the flights view — you are already there', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc', returnFlight: 'fl_abc' }))
+    expect(window.location.search).not.toContain('from=')
+    expect(readPersistedView().returnFlight).toBeNull()
+  })
+
+  it('ignores a stray from param on the flights view', () => {
+    window.history.replaceState(null, '', '/?view=flights&flight=fl_abc&from=fl_old')
+    expect(readPersistedView().returnFlight).toBeNull()
+  })
+
+  it('treats a lone from param as an authoritative URL (workspace + origin)', () => {
+    window.history.replaceState(null, '', '/?from=fl_abc')
+    expect(readPersistedView()).toEqual(view({ returnFlight: 'fl_abc' }))
+  })
+
+  it('reads an empty from param as no origin', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&from=')
+    expect(readPersistedView().returnFlight).toBeNull()
+  })
+
+  it('keeps the origin flight OUT of localStorage (URL-only tier)', () => {
+    persistView(view({ view: 'coverage', feature: 'checkout', returnFlight: 'fl_abc' }))
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'coverage', feature: 'checkout' })
+  })
+
+  it('keeps the focused test OUT of localStorage (URL-only tier)', () => {
+    persistView(view({ feature: 'checkout', run: '7cvh', focusTest: 'test-case-req-r4-otp-guard' }))
+    expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'workspace', feature: 'checkout' })
   })
 
   it('mirrors the durable tier to localStorage so other tabs can read it', () => {
@@ -186,6 +269,24 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(localStorage.getItem(KEY)).not.toContain('flight-new')
   })
 
+  it('round-trips the demo chooser, URL-only like every other dialog', () => {
+    persistView(view({ dialog: 'demo' }))
+    expect(window.location.search).toContain('dialog=demo')
+    expect(readPersistedView()).toEqual(view({ dialog: 'demo' }))
+    // Never mirrored to localStorage: a chooser open in one tab must not pop
+    // open in another.
+    expect(localStorage.getItem(KEY)).not.toContain('demo')
+  })
+
+  it('round-trips Project Settings, URL-only like every other dialog', () => {
+    persistView(view({ dialog: 'settings' }))
+    expect(window.location.search).toContain('dialog=settings')
+    expect(readPersistedView()).toEqual(view({ dialog: 'settings' }))
+    // Never mirrored to localStorage: settings open in one tab must not pop
+    // open in another.
+    expect(localStorage.getItem(KEY)).not.toContain('settings')
+  })
+
   it('R50: ignores the retired add-test / portify dialogs in stale deep links', () => {
     window.history.replaceState(null, '', '/?dialog=add-test')
     expect(readPersistedView()).toEqual(view({}))
@@ -253,5 +354,78 @@ describe('workspace-view-state — run + dialog routing (R24)', () => {
     expect(window.location.search).not.toContain('flight=')
     persistView(view({ view: 'flights', flight: 'fl_abc123' }))
     expect(JSON.parse(localStorage.getItem(KEY)!)).toEqual({ view: 'flights', feature: null })
+  })
+
+  // The stage qualifies an OPEN flight. Without it a drill-through's way back
+  // re-ran the detail's auto-pick and landed on a different stage than the one
+  // the user drilled from.
+  it('round-trips the selected stage alongside its flight', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'specs-coverage' }))
+    expect(window.location.search).toContain('stage=specs-coverage')
+    expect(readPersistedView()).toEqual(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'specs-coverage' }))
+  })
+
+  it('drops the stage without a flight to hang it on', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'portify' }))
+    // The flights LANDING list — no flight open, so no stage to remember.
+    persistView(view({ view: 'flights', flight: null, flightStage: 'portify' }))
+    expect(window.location.search).not.toContain('stage=')
+    // …and off the flights view entirely.
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'portify' }))
+    persistView(view({ view: 'coverage', feature: 'checkout', flight: 'fl_abc123', flightStage: 'portify' }))
+    expect(window.location.search).not.toContain('stage=')
+  })
+
+  it('ignores a stray stage param when no flight is open', () => {
+    window.history.replaceState(null, '', '/?view=flights&stage=portify')
+    expect(readPersistedView()).toEqual(view({ view: 'flights' }))
+  })
+
+  it('keeps the selected stage OUT of localStorage (URL-only tier)', () => {
+    persistView(view({ view: 'flights', flight: 'fl_abc123', flightStage: 'specs-coverage' }))
+    expect(localStorage.getItem(KEY)).not.toContain('specs-coverage')
+  })
+
+  // External authoring now surfaces on the flight's specs-coverage stage, so the
+  // `draft` dialog and its id qualifier are tombstones like `wf` and `task`.
+  it('ignores the retired draft dialog in a stale deep link', () => {
+    window.history.replaceState(null, '', '/?dialog=draft&draft=dr_abc123&feature=checkout')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout' }))
+  })
+
+  it('clears a stale draft param on the next persist', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&draft=dr_stale')
+    persistView(view({ feature: 'checkout', dialog: 'config' }))
+    expect(window.location.search).not.toContain('draft=')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config' }))
+  })
+
+  it('round-trips the config dialog + its tab qualifier (URL-only, not mirrored)', () => {
+    persistView(view({ feature: 'checkout', dialog: 'config', configTab: 'ports' }))
+    expect(window.location.search).toContain('dialog=config')
+    expect(window.location.search).toContain('tab=ports')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config', configTab: 'ports' }))
+    expect(localStorage.getItem(KEY)).not.toContain('ports')
+  })
+
+  it('reads the config dialog with no tab as a null qualifier (the mount picks its default)', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&dialog=config')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config', configTab: null }))
+  })
+
+  it('ignores an unknown tab name', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&dialog=config&tab=bogus')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'config', configTab: null }))
+  })
+
+  it('drops a tab param found in the URL when the dialog is not config', () => {
+    window.history.replaceState(null, '', '/?feature=checkout&dialog=verification&tab=ports')
+    expect(readPersistedView()).toEqual(view({ feature: 'checkout', dialog: 'verification' }))
+  })
+
+  it('drops the tab param on close', () => {
+    persistView(view({ feature: 'checkout', dialog: 'config', configTab: 'ports' }))
+    persistView(view({ feature: 'checkout', dialog: null }))
+    expect(window.location.search).not.toContain('tab=')
   })
 })

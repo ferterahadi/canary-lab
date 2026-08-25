@@ -2,8 +2,12 @@ import fs from 'fs'
 import path from 'path'
 import type { ServiceSpec } from './orchestrator'
 import type { PtyFactory, PtyHandle } from './pty-spawner'
-import { isHealthy, isTcpListening } from './launcher/startup'
+import { coerceTcpPort, isHealthy, isTcpListening } from '../../../../shared/launcher-startup'
 import { compressLogByTemplate } from './log-template'
+// Services spawn children (`npx tsx`), so teardown kills the process GROUP or
+// grandchildren survive and keep the port bound. The shared helper carries the
+// pgid sanity guard (a pid ≤ 1 must never be negated into a broadcast kill).
+import { killTree } from './run-spawn'
 
 // Standalone "boot these services, wait for health, then tear down" primitive,
 // lifted from RunOrchestrator's private spawn/health loop minus the run-state
@@ -53,16 +57,6 @@ export interface BootProbeOptions {
    *  this resolver is provided we append a pointer to the full log so the agent
    *  reading the failure can `Read` the complete output instead of guessing. */
   fullLogPathFor?: (safeName: string) => string | undefined
-}
-
-function killTree(pty: PtyHandle, signal: NodeJS.Signals = 'SIGTERM'): void {
-  // Services spawn children (`npx tsx`), so kill the process GROUP or
-  // grandchildren survive and keep the port bound. Fall back to the pty handle.
-  try {
-    process.kill(-pty.pid, signal)
-    return
-  } catch { /* fall through */ }
-  try { pty.kill(signal) } catch { /* already dead */ }
 }
 
 function delay(ms: number): Promise<void> {
@@ -174,7 +168,7 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
   const teardown = (): void => {
     if (torndown) return
     torndown = true
-    for (const pty of ptys) killTree(pty)
+    for (const pty of ptys) killTree(pty, 'SIGTERM')
   }
 
   for (const svc of opts.specs) {
@@ -204,7 +198,7 @@ export async function bootAndProbe(opts: BootProbeOptions): Promise<BootProbeRes
       (isHttp ? probe.http.deadlineMs : probe.tcp.deadlineMs) ?? fallbackDeadline
     const attempt = isHttp
       ? () => healthCheck(probe.http.url, probe.http.timeoutMs)
-      : () => isTcpListening(probe.tcp.port, probe.tcp.host ?? '127.0.0.1', probe.tcp.timeoutMs)
+      : () => isTcpListening(coerceTcpPort(probe.tcp.port), probe.tcp.host ?? '127.0.0.1', probe.tcp.timeoutMs)
     const detail = isHttp ? `url=${probe.http.url}` : `port=${probe.tcp.port}`
 
     const deadline = Date.now() + deadlineMs

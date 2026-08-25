@@ -2,19 +2,21 @@
 // picker (FlightsPill) and the features column (FeaturesColumn) so both group
 // accordions remember which sections the user collapsed across refreshes and
 // tabs. Each surface owns its own localStorage key; the group→bool map inside
-// is the same shape. Default OPEN — a group only stays collapsed once the user
-// deliberately closes it.
+// is the same shape. The resting default is per-surface (`defaultOpen`): the
+// features column stays open, the flights picker collapses; either way an
+// explicit user toggle is honoured over the default.
 
-/** Read the per-group open map for a surface; a group defaults to OPEN unless
- *  it was explicitly closed (stored `false`). Storage failures fall back open. */
-export function readGroupOpen(storageKey: string, group: string): boolean {
+/** Read the per-group open map for a surface. A group the user has never
+ *  toggled falls back to `defaultOpen` (default true); an explicit stored
+ *  boolean always wins. Storage failures fall back to `defaultOpen`. */
+export function readGroupOpen(storageKey: string, group: string, defaultOpen = true): boolean {
   try {
     const raw = localStorage.getItem(storageKey)
-    if (!raw) return true
+    if (!raw) return defaultOpen
     const map = JSON.parse(raw) as Record<string, boolean>
-    return map[group] !== false
+    return typeof map[group] === 'boolean' ? map[group] : defaultOpen
   } catch {
-    return true
+    return defaultOpen
   }
 }
 

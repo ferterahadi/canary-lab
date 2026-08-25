@@ -55,6 +55,24 @@ describe('buildTestNumbering', () => {
   })
 })
 
+describe('testNumberKey', () => {
+  it('defaults an absent file and line to the same key the builder used', () => {
+    // The ledger and playback rows carry file/line as OPTIONAL, and callers pass
+    // them straight through (`testNumberKey(t.file, t.line)`). If the lookup
+    // defaulted differently from `buildTestNumbering`, the badge would silently
+    // come back undefined for exactly those rows.
+    expect(testNumberKey(undefined, undefined)).toBe(testNumberKey('', 0))
+    expect(testNumberKey('e2e/a.spec.ts', undefined)).toBe(testNumberKey('e2e/a.spec.ts', 0))
+    expect(testNumberKey(undefined, 12)).toBe(testNumberKey('', 12))
+  })
+
+  it('resolves a badge for a row whose file and line are absent', () => {
+    const map = buildTestNumbering([{}])
+
+    expect(map.get(testNumberKey(undefined, undefined))).toBe(1)
+  })
+})
+
 describe('parseLocation', () => {
   it('parses file:line', () => {
     expect(parseLocation('e2e/foo.spec.ts:34')).toEqual({ file: 'e2e/foo.spec.ts', line: 34 })

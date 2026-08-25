@@ -6,7 +6,7 @@ import {
   isActivePortify,
   latestSavedWorkflowId,
 } from './portify-state'
-import type { PortifyIndexEntry, PortifyManifest } from '../../../shared/api/client'
+import type { PortifyIndexEntry, PortifyManifest } from '@/shared/api/client'
 
 function m(over: Partial<PortifyManifest> = {}): PortifyManifest {
   return {
@@ -40,6 +40,15 @@ describe('portifyReducer', () => {
     expect(s.workflows.map((w) => w.workflowId)).toEqual(['w2', 'w1'])
     expect(s.details.w2.workflowId).toBe('w2')
     expect(s.workflows.find((w) => w.workflowId === 'w1')?.status).toBe('verifying')
+  })
+
+  it('preserves external producer ownership when a manifest update rebuilds the index entry', () => {
+    const state = portifyReducer(initialPortifyState, {
+      type: 'update',
+      workflowId: 'w1',
+      manifest: m({ producer: 'external' }),
+    })
+    expect(state.workflows[0]?.producer).toBe('external')
   })
 
   it('removed drops the workflow + its detail', () => {

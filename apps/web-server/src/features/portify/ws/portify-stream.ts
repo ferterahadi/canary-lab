@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
-import type { PortifyStore, PortifyStoreEvent } from '../../portify/logic/runtime/store'
-import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../../portify/logic/runtime/types'
+import type { PortifyStore, PortifyStoreEvent } from '../logic/runtime/store'
+import type { PortifyIndexEntry, PortifyManifest, PortifyStatus } from '../logic/runtime/types'
 
 // `/ws/portify` — push channel for the port-ification wizard + the
 // GlobalStatusBar button, mirroring ws/benchmark-stream.ts. On connect, sends

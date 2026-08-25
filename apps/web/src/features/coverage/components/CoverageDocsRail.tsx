@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type DragEvent, type JSX } from 'react'
-import * as api from '../../../shared/api/client'
-import type { FeatureDocsListing } from '../../../shared/api/types'
+import * as api from '@/shared/api/client'
+import type { FeatureDocsListing } from '@/shared/api/types'
+import { DocPill, EmptyDropzone } from './DocPill'
+
+export { DocPill, EmptyDropzone } from './DocPill'
 
 export function readAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -15,10 +18,72 @@ export function readAsBase64(file: File): Promise<string> {
   })
 }
 
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+/** Drag-and-drop wiring for a docs drop target — one home for the dragging
+ *  flag + the three handlers, shared by the coverage rail and the flight
+ *  Requirements panel so both surfaces accept files the same way. */
+export function useDocDrop(disabled: boolean, onFiles: (files: FileList) => void): {
+  dragging: boolean
+  dropHandlers: {
+    onDragOver: (e: DragEvent) => void
+    onDragLeave: (e: DragEvent) => void
+    onDrop: (e: DragEvent) => void
+  }
+} {
+  const [dragging, setDragging] = useState(false)
+  const onDrop = useCallback((e: DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    if (disabled) return
+    const files = e.dataTransfer.files
+    if (files && files.length > 0) onFiles(files)
+  }, [disabled, onFiles])
+  return {
+    dragging,
+    dropHandlers: {
+      onDragOver: (e: DragEvent) => { e.preventDefault(); if (disabled) return; setDragging(true) },
+      onDragLeave: (e: DragEvent) => { if (e.currentTarget === e.target) setDragging(false) },
+      onDrop,
+    },
+  }
+}
+
+/** The dashed "add more docs" tile that follows an existing pill list. */
+export function AddDocsTile({ onPick, disabled, testId = 'add-another-doc' }: {
+  onPick: () => void
+  disabled: boolean
+  testId?: string
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      onClick={onPick}
+      disabled={disabled}
+      className="flex w-full items-center justify-center gap-2"
+      style={{
+        padding: '10px 12px', borderRadius: 'var(--radius-md)',
+        border: '1px dashed var(--border-default)', background: 'transparent',
+        color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11.5,
+      }}
+    >
+      <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
+      Add docs — drop files or click to browse
+    </button>
+  )
+}
+
+/** The accent overlay a drop target shows while a drag hovers it. The host
+ *  element must be position:relative. */
+export function DocsDropOverlay({ label }: { label: string }) {
+  return (
+    <div
+      data-testid="drop-overlay"
+      className="pointer-events-none absolute inset-0 flex items-center justify-center"
+      style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: '2px dashed var(--accent)', borderRadius: 'var(--radius-md)' }}
+    >
+      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>{label}</span>
+    </div>
+  )
 }
 
 interface Props {
@@ -49,7 +114,6 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   const [listing, setListing] = useState<FeatureDocsListing | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // `keepError` lets a refetch that follows a partially-failed batch import
@@ -145,13 +209,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
   // the agent is reading the current docs, so mutating them is never valid.
   const docsReadOnly = docsFrozen || generating
 
-  const onDrop = useCallback((e: DragEvent) => {
-    e.preventDefault()
-    setDragging(false)
-    if (locked || docsFrozen) return
-    const files = e.dataTransfer.files
-    if (files && files.length > 0) void importFiles(files)
-  }, [importFiles, locked, docsFrozen])
+  const { dragging, dropHandlers } = useDocDrop(locked || docsFrozen, (files) => { void importFiles(files) })
 
   const sourceCount = listing?.sourceDocCount ?? 0
   const dirPrefix = `features/${feature}/docs/`
@@ -182,14 +240,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
               <path d="M14 2v6h6" />
             </svg>
           </span>
-          <span
-            data-testid="docs-rail-count"
-            className="flex h-5 w-5 items-center justify-center rounded-full"
-            style={{
-              fontSize: 11, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-primary)',
-              background: 'color-mix(in srgb, var(--text-muted) 16%, transparent)',
-            }}
-          >
+          <span data-testid="docs-rail-count" className="cl-count-chip">
             {sourceCount}
           </span>
           <span aria-hidden="true" style={{ marginTop: 'auto', color: 'var(--text-muted)' }}>
@@ -212,9 +263,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         background: 'var(--bg-surface)', position: 'relative',
         transition: 'width 140ms ease',
       }}
-      onDragOver={(e) => { e.preventDefault(); if (docsFrozen || locked) return; if (!dragging) setDragging(true) }}
-      onDragLeave={(e) => { if (e.currentTarget === e.target) setDragging(false) }}
-      onDrop={onDrop}
+      {...dropHandlers}
     >
       <input
         ref={fileInputRef}
@@ -235,7 +284,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
         className="flex items-center gap-2"
         style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-default)' }}
       >
-        <h2 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>Source docs</h2>
+        <h2 className="cl-kicker">Source docs</h2>
         <button
           type="button"
           data-testid="docs-rail-toggle"
@@ -270,17 +319,19 @@ export function CoverageDocsRail(props: Props): JSX.Element {
           <div
             data-testid="docs-rail-drift"
             style={{
-              fontSize: 11, color: 'rgb(251, 191, 36)', lineHeight: 1.45, marginBottom: 12,
-              border: '1px solid rgb(251,191,36)', borderRadius: 'var(--radius-md)', padding: '6px 10px',
+              fontSize: 11, color: 'var(--warning)', lineHeight: 1.45, marginBottom: 12,
+              border: '1px solid color-mix(in srgb, var(--warning) 40%, transparent)',
+              background: 'color-mix(in srgb, var(--warning) 8%, transparent)',
+              borderRadius: 'var(--radius-md)', padding: '6px 10px',
             }}
           >
-            <span style={{ fontFamily: 'var(--font-mono, monospace)' }}>{drift.changedDocs.join(', ')}</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>{drift.changedDocs.join(', ')}</span>
             {' '}changed → affects {drift.affectedArtifacts.join(' + ')}
           </div>
         )}
 
         {error && (
-          <div data-testid="docs-error" style={{ color: 'rgb(251, 113, 133)', fontSize: 11.5, lineHeight: 1.45, marginBottom: 12 }}>
+          <div data-testid="docs-error" style={{ color: 'var(--danger)', fontSize: 11.5, lineHeight: 1.45, marginBottom: 12 }}>
             {error}
           </div>
         )}
@@ -308,21 +359,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
                 />
               ))}
               {!docsReadOnly && (
-                <button
-                  type="button"
-                  data-testid="add-another-doc"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={locked}
-                  className="flex w-full items-center justify-center gap-2"
-                  style={{
-                    padding: '10px 12px', borderRadius: 'var(--radius-md)',
-                    border: '1px dashed var(--border-default)', background: 'transparent',
-                    color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11.5,
-                  }}
-                >
-                  <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
-                  Add docs — drop files or click to browse
-                </button>
+                <AddDocsTile onPick={() => fileInputRef.current?.click()} disabled={locked} />
               )}
             </div>
           )
@@ -340,11 +377,8 @@ export function CoverageDocsRail(props: Props): JSX.Element {
             data-testid="generate-summary"
             onClick={() => onGenerate('summary')}
             disabled={generating || sourceCount === 0}
-            className="cl-button w-full px-3 py-1.5"
+            className={`${!generating && sourceCount > 0 ? 'cl-button-primary' : 'cl-button'} w-full px-3 py-1.5`}
             title={sourceCount === 0 ? 'Add a source doc first' : 'Generate the PRD summary from these docs'}
-            style={!generating && sourceCount > 0
-              ? { background: 'var(--accent)', color: '#0b0f17', borderColor: 'var(--accent)', fontWeight: 600 }
-              : undefined}
           >
             {generating ? 'Generating…' : 'Generate'}
           </button>
@@ -359,7 +393,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
               onClick={() => void redoFromStart()}
               disabled={locked}
               className="cl-button w-full px-3 py-1.5"
-              style={{ background: 'rgb(251, 113, 133)', color: '#0b0f17', borderColor: 'rgb(251, 113, 133)', fontWeight: 600 }}
+              style={{ background: 'var(--danger)', color: 'var(--on-accent)', borderColor: 'var(--danger)', fontWeight: 600 }}
             >
               Wipe everything &amp; start over
             </button>
@@ -388,134 +422,7 @@ export function CoverageDocsRail(props: Props): JSX.Element {
       </div>
 
       {/* Full-rail drag overlay */}
-      {dragging && (
-        <div
-          data-testid="drop-overlay"
-          className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          style={{ background: 'color-mix(in srgb, var(--accent) 10%, transparent)', border: '2px dashed var(--accent)', borderRadius: 'var(--radius-md)' }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>Drop to add source docs</span>
-        </div>
-      )}
+      {dragging && <DocsDropOverlay label="Drop to add source docs" />}
     </div>
-  )
-}
-
-export function DocPill({ relPath, dirPrefix, generated, sizeBytes, busy, onOpen, onRemove, removeTitle, linked, linkTarget, broken }: {
-  relPath: string
-  dirPrefix: string
-  generated: boolean
-  sizeBytes: number
-  busy: boolean
-  onOpen: () => void
-  /** Omitted when the doc set is frozen (a summary exists) — the pill is read-only. */
-  onRemove?: () => void
-  removeTitle: string
-  /** Symlinked doc — the user's original elsewhere is the live source (R44). */
-  linked?: boolean
-  linkTarget?: string
-  /** Dangling symlink (its target moved) — dangerous tint, still deletable. */
-  broken?: boolean
-}) {
-  const [hover, setHover] = useState(false)
-  return (
-    <div
-      data-testid={`doc-pill-${relPath}`}
-      className="flex items-center gap-2.5"
-      onClick={onOpen}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
-      title={`Open ${dirPrefix}${relPath} in editor`}
-      style={{
-        padding: '9px 11px',
-        borderRadius: 'var(--radius-md)',
-        background: hover ? 'var(--bg-selected)' : 'var(--bg-base)',
-        border: `1px solid ${hover ? 'color-mix(in srgb, var(--text-muted) 38%, var(--border-default))' : 'var(--border-default)'}`,
-        cursor: 'pointer',
-        transition: 'background 120ms, border-color 120ms',
-      }}
-    >
-      <span
-        aria-hidden="true"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded"
-        style={{
-          background: 'color-mix(in srgb, var(--text-muted) 12%, transparent)',
-          color: generated ? 'rgb(56,189,248)' : 'var(--text-secondary)',
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6" />
-        </svg>
-      </span>
-      <div className="min-w-0 flex-1">
-        <div style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12, lineHeight: 1.3 }} className="truncate" title={linked && linkTarget ? `↗ ${linkTarget}` : `${dirPrefix}${relPath}`}>
-          <span style={{ color: broken ? 'var(--danger)' : 'var(--text-primary)', fontWeight: 600 }}>{relPath}</span>
-          {linked && (
-            <span
-              data-testid={`doc-linked-${relPath}`}
-              className="ml-1.5 rounded px-1 py-[1px] text-[9px] font-semibold"
-              style={{ color: broken ? 'var(--danger)' : 'rgb(56,189,248)', border: `1px solid color-mix(in srgb, ${broken ? 'var(--danger)' : 'rgb(56,189,248)'} 40%, transparent)` }}
-            >
-              {broken ? 'link broken' : 'symlink ↗'}
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-          {generated ? 'Generated PRD artifact' : linked ? 'Linked doc — the original stays the live source' : 'Source doc'} · {formatBytes(sizeBytes)}
-        </div>
-      </div>
-      {onRemove && (
-        <button
-          type="button"
-          data-testid={`remove-doc-${relPath}`}
-          onClick={(e) => { e.stopPropagation(); onRemove() }}
-          disabled={busy}
-          aria-label={`Remove ${relPath}`}
-          title={removeTitle}
-          className="cl-icon-button h-6 w-6 shrink-0"
-          style={{ color: 'var(--text-muted)' }}
-        >
-          ✕
-        </button>
-      )}
-    </div>
-  )
-}
-
-function EmptyDropzone({ onPick, dragging, busy }: { onPick: () => void; dragging: boolean; busy: boolean }) {
-  return (
-    <button
-      type="button"
-      data-testid="empty-dropzone"
-      onClick={onPick}
-      disabled={busy}
-      className="flex w-full flex-col items-center justify-center gap-2 text-center"
-      style={{
-        padding: '34px 16px',
-        borderRadius: 'var(--radius-md)',
-        border: `2px dashed ${dragging ? 'var(--accent)' : 'var(--border-default)'}`,
-        background: dragging ? 'color-mix(in srgb, var(--accent) 8%, transparent)' : 'var(--bg-base)',
-        cursor: 'pointer',
-        transition: 'border-color 150ms, background 150ms',
-      }}
-    >
-      <span
-        aria-hidden="true"
-        className="flex h-10 w-10 items-center justify-center rounded-full"
-        style={{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)' }}
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-      </span>
-      <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)' }}>Add source docs</span>
-      <span style={{ fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-        Drop spec, ticket, or notes files here — or click to browse. Accepts <code>.md</code>, <code>.txt</code>, <code>.pdf</code>, <code>.docx</code>.
-      </span>
-    </button>
   )
 }

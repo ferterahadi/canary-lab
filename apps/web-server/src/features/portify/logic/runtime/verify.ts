@@ -9,11 +9,16 @@ import type { PortifyBootInstance, PortifyVerification } from './types'
 // Proof that a feature's ports are injectable: boot the whole stack TWICE
 // CONCURRENTLY on two disjoint port maps and require both to come up healthy.
 //
-// Correctness lynchpin: ports are injected via each service's PROCESS ENV
-// (buildServiceSpecs' resolvePortEnv) — never an on-disk `.env`. Both instances
-// share one worktree checkout, so a shared config file would collide; per-
-// process env injection is exactly what port-ification enables. We therefore do
-// NOT apply any envset to disk here.
+// Correctness lynchpin: PORTS are injected via each service's PROCESS ENV
+// (buildServiceSpecs' resolvePortEnv) — never an on-disk file. Both instances
+// share one worktree checkout, so a file could only ever carry ONE port map.
+// NON-port envset content (datasource hosts, API keys) is identical for both
+// instances, so the caller (the runner's verify dep) hydrates it into the
+// worktree for the boot window via hydrateEnvsetIntoWorktrees — without it the
+// boots run the checked-in config the real-path envset apply normally
+// overwrites — leaving any `${port.*}` tokens in those files verbatim. Only
+// port-dependent wiring must stay per-process; this function itself still
+// touches no disk.
 
 export interface VerifyDeps {
   ptyFactory: PtyFactory
@@ -121,7 +126,47 @@ export async function verifyDoubleBoot(
   const notPortFixable =
     !ok && failedBoots.length > 0 && failedBoots.every((r) => !r.ok && r.kind === 'dependency')
 
-  return { ok, instances, failureDetail, notPortFixable }
+  if (ok || notPortFixable) return { ok, instances, failureDetail, notPortFixable }
+
+  // Differential triage: the double-boot conflates "can this feature boot at
+  // all?" with "do two concurrent boots collide?". One extra SOLO boot on its
+  // own fresh ports separates them, so the retry prompt sends the agent at the
+  // real defect instead of burning attempts port-hunting a baseline failure
+  // (e.g. a boot-time migration validating against drifted shared-DB state).
+  // Runs only on the failure path — a passing verify costs nothing extra.
+  // NOT a hard stop either way: an agent CAN fix an app-code baseline blocker
+  // (a Flyway validation relax did exactly that), so this classifies blame
+  // rather than killing the workflow.
+  const portMapC = await allocatePorts(slots)
+  const specsC = buildServiceSpecs(feature, deps.verifyLogDir, env, { portMap: portMapC, repoPathOverrides })
+  let resC: BootProbeResult | undefined
+  try {
+    resC = await bootAndProbe({
+      ...bootOpts,
+      specs: specsC,
+      onOutput: fileTee(deps.verifyLogDir, 'baseline'),
+      fullLogPathFor: (safeName) => path.join(deps.verifyLogDir, `baseline-${safeName}.log`),
+    })
+  } finally {
+    try { resC?.teardown() } catch { /* ignore */ }
+    releasePorts([...portMapC.values()])
+  }
+  // Branch on the baseline result itself rather than on the derived label, so
+  // the failure arm keeps its narrowed `failedService`/`detail`.
+  const baseline = resC!
+  const failureClass = baseline.ok ? 'concurrency-failure' : 'baseline-boot-failed'
+  const triage = baseline.ok
+    ? 'BASELINE CHECK: a single boot on its own ports PASSES — the failure only appears when TWO instances boot concurrently. Look for per-boot state that is still shared: a build/cache dir both boots write, a port one of them still hardcodes, on-disk files both mutate.'
+    : `BASELINE CHECK: a SINGLE boot on its own ports ALSO fails — this failure is NOT caused by concurrency or port injection. Fix the boot blocker itself if it lives in the app code, or report it as not port-fixable if it is environmental. Solo-boot failure: ${baseline.failedService} — ${baseline.detail}`
+  return {
+    ok,
+    instances,
+    // We only get here with `ok === false`, and a not-ok verify always has at
+    // least one failed instance to describe — so `failureDetail` is set.
+    failureDetail: `${triage}\n\n${failureDetail}`,
+    notPortFixable,
+    failureClass,
+  }
 }
 
 function instanceFrom(portMap: Map<string, number>, res: BootProbeResult): PortifyBootInstance {

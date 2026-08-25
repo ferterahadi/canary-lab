@@ -35,15 +35,6 @@ export function McpPromoProvider({ children }: { children: ReactNode }) {
     setPending(null)
   }, [])
 
-  const continuePending = useCallback((dismiss: boolean): void => {
-    /* v8 ignore next -- this callback is only wired while a pending promo dialog is mounted. */
-    if (!pending) return
-    if (dismiss) markDismissed(pending.action)
-    const action = pending.continueAction
-    setPending(null)
-    action()
-  }, [pending])
-
   const value = useMemo<McpPromoContextValue>(() => ({ gatePromo }), [gatePromo])
 
   return (
@@ -54,7 +45,16 @@ export function McpPromoProvider({ children }: { children: ReactNode }) {
           action={pending.action}
           videoSrc={VIDEO_SRC}
           onCancel={close}
-          onContinue={continuePending}
+          // Built inside the `pending &&` branch on purpose: TypeScript narrows
+          // `pending` to non-null here, so the "no pending promo" state this
+          // handler used to guard against is unrepresentable rather than an
+          // untestable early return.
+          onContinue={(dismiss) => {
+            if (dismiss) markDismissed(pending.action)
+            const action = pending.continueAction
+            setPending(null)
+            action()
+          }}
         />
       )}
     </McpPromoContext.Provider>

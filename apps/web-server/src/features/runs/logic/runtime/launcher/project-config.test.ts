@@ -28,54 +28,87 @@ afterEach(() => {
 describe('project config', () => {
   it('returns defaults when the config file is missing or unreadable JSON', () => {
     const projectRoot = mkProject()
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
 
     fs.writeFileSync(projectConfigPath(projectRoot), '{not json')
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
   })
 
   it('loads valid healAgent values and falls back for unknown values', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ healAgent: 'manual' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ healAgent: 'wizard' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
   })
 
   it('loads valid editor values and falls back for unknown values', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vscode' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'vscode', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'vscode', personalWikiPath: null, autoProposePr: true, showDemo: true })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'cursor' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null, autoProposePr: true, showDemo: true })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'system' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'system', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'system', personalWikiPath: null, autoProposePr: true, showDemo: true })
 
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ editor: 'vim' }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
   })
 
   it('persists only supported healAgent values', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'codex', editor: 'auto', personalWikiPath: null })
+    saveProjectConfig(projectRoot, { healAgent: 'codex', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
     expect(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).toBe(
-      '{\n  "healAgent": "codex",\n  "editor": "auto",\n  "personalWikiPath": null\n}\n',
+      '{\n  "healAgent": "codex",\n  "editor": "auto",\n  "personalWikiPath": null,\n  "autoProposePr": true,\n  "showDemo": true\n}\n',
     )
 
-    saveProjectConfig(projectRoot, { healAgent: 'other' as never, editor: 'auto', personalWikiPath: null })
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+    saveProjectConfig(projectRoot, { healAgent: 'other' as never, editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
   })
 
   it('persists only supported editor values', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'auto', editor: 'cursor', personalWikiPath: null })
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null })
+    saveProjectConfig(projectRoot, { healAgent: 'auto', editor: 'cursor', personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'cursor', personalWikiPath: null, autoProposePr: true, showDemo: true })
 
-    saveProjectConfig(projectRoot, { healAgent: 'auto', editor: 'other' as never, personalWikiPath: null })
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null })
+    saveProjectConfig(projectRoot, { healAgent: 'auto', editor: 'other' as never, personalWikiPath: null, autoProposePr: true, showDemo: true })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'auto', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
+  })
+
+  it('treats auto-PR as on unless the config explicitly turns it off', () => {
+    // Opt-OUT, not opt-in: a workspace written before the setting existed —
+    // and one that omits the key — still proposes. Only a literal `false`
+    // stops a green healed run from opening a pull request.
+    const projectRoot = mkProject()
+    fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ autoProposePr: false }))
+    expect(loadProjectConfig(projectRoot).autoProposePr).toBe(false)
+
+    for (const loose of [undefined, 'no', 0, null]) {
+      fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ autoProposePr: loose }))
+      expect(loadProjectConfig(projectRoot).autoProposePr).toBe(true)
+    }
+
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: false, showDemo: true })
+    expect(loadProjectConfig(projectRoot).autoProposePr).toBe(false)
+  })
+
+  it('treats the demos as shown unless the config explicitly turns them off', () => {
+    // Same opt-OUT rule: every workspace written before this field existed keeps
+    // offering the demos, and only a literal `false` clears the status-bar pill.
+    const projectRoot = mkProject()
+    fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ showDemo: false }))
+    expect(loadProjectConfig(projectRoot).showDemo).toBe(false)
+
+    for (const loose of [undefined, 'no', 0, null]) {
+      fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ showDemo: loose }))
+      expect(loadProjectConfig(projectRoot).showDemo).toBe(true)
+    }
+
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: false })
+    expect(loadProjectConfig(projectRoot).showDemo).toBe(false)
   })
 
   it('normalizes valid personal wiki paths and clears invalid ones', () => {
@@ -113,7 +146,7 @@ describe('project config', () => {
   it('loads missing or invalid stored personal wiki paths as null', () => {
     const projectRoot = mkProject()
     fs.writeFileSync(projectConfigPath(projectRoot), JSON.stringify({ personalWikiPath: path.join(projectRoot, 'missing') }))
-    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+    expect(loadProjectConfig(projectRoot)).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
   })
 
   it('loads a valid port and omits invalid or out-of-range ports', () => {
@@ -129,24 +162,24 @@ describe('project config', () => {
 
   it('does not add a port key to config files that omit it', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'codex', editor: 'auto', personalWikiPath: null })
+    saveProjectConfig(projectRoot, { healAgent: 'codex', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })
     expect(fs.readFileSync(projectConfigPath(projectRoot), 'utf-8')).toBe(
-      '{\n  "healAgent": "codex",\n  "editor": "auto",\n  "personalWikiPath": null\n}\n',
+      '{\n  "healAgent": "codex",\n  "editor": "auto",\n  "personalWikiPath": null,\n  "autoProposePr": true,\n  "showDemo": true\n}\n',
     )
   })
 
   it('persists a valid port and drops invalid ones', () => {
     const projectRoot = mkProject()
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 8080 })
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 8080 })
     expect(loadProjectConfig(projectRoot).port).toBe(8080)
 
-    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 99999 })
+    saveProjectConfig(projectRoot, { healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 99999 })
     expect(loadProjectConfig(projectRoot).port).toBeUndefined()
   })
 
   it('resolves the configured port or falls back to the default', () => {
-    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, port: 8000 })).toBe(8000)
-    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null })).toBe(DEFAULT_PORT)
+    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true, port: 8000 })).toBe(8000)
+    expect(resolveProjectPort({ healAgent: 'external', editor: 'auto', personalWikiPath: null, autoProposePr: true, showDemo: true })).toBe(DEFAULT_PORT)
     expect(DEFAULT_PORT).toBe(7421)
   })
 })

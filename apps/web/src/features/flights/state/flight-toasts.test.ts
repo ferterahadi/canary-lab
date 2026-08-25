@@ -2,10 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   AGGREGATE_TOAST_ID,
   attentionKey,
+  attentionKeyMap,
+  diffFlightToasts,
   flightNeedsAttention,
   type FlightAttentionInput,
 } from './flight-toasts'
-import type { FlightPauseReason, FlightStatus } from '../../../shared/api/client'
+import type { FlightPauseReason, FlightStatus } from '@/shared/api/client'
+
+// Stage-label resolver stub — the real STAGE_LABEL map lives on the component
+// side and is injected into the pure diff, so the test supplies its own.
+const stageLabel = (s: FlightAttentionInput['currentStage'] | undefined): string | null =>
+  s ? ({ scout: 'Scout', run: 'Run' } as Record<string, string>)[s] ?? s : null
 
 const fl = (over: Partial<FlightAttentionInput> = {}): FlightAttentionInput => ({
   flightId: 'fl_1',
@@ -52,101 +59,175 @@ describe('attentionKey (diff key folds pauseReason in)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// The App effect's decision flow, replicated over the real helpers. This mirrors
-// exactly the per-flight branch in App.tsx (seed → aggregate; post-seed → sticky
-// per-flight, suppressing the on-screen flight, excluding queued). Verifying it
-// here keeps the rules honest without mounting the whole App/WS/RunsContext.
+// The App effect's decision, now exercised over the REAL pure diff so the rules
+// stay honest without mounting the whole App/WS/RunsContext. `attentionKeyMap`
+// produces the `prev` a caller stores between refreshes.
 // ---------------------------------------------------------------------------
 
-interface ToastLike { id: string; sticky?: boolean }
-
-function runDiff(
-  prev: Map<string, string> | null,
-  flights: FlightAttentionInput[],
-  ctx: { view: string; selectedFlightId: string | null },
-): { toasts: ToastLike[]; nextKeys: Map<string, string> } {
-  const toasts: ToastLike[] = []
-  const nextKeys = new Map(flights.map((f) => [f.flightId, attentionKey(f)]))
-  if (prev === null) {
-    const waiting = flights.filter(flightNeedsAttention)
-    if (waiting.length > 0) toasts.push({ id: AGGREGATE_TOAST_ID, sticky: true })
-    return { toasts, nextKeys }
-  }
-  for (const f of flights) {
-    if (prev.get(f.flightId) === attentionKey(f)) continue
-    if (!flightNeedsAttention(f)) continue
-    if (ctx.view === 'flights' && ctx.selectedFlightId === f.flightId) continue
-    toasts.push({ id: f.flightId, sticky: true })
-  }
-  return { toasts, nextKeys }
-}
-
 const noView = { view: 'workspace', selectedFlightId: null }
+const ids = (out: ReturnType<typeof diffFlightToasts>) => out.map((t) => t.id)
 
-describe('flight-toast diff flow (R68)', () => {
+describe('diffFlightToasts (R68)', () => {
   it('seed: N already-waiting flights collapse into ONE aggregate sticky toast', () => {
     const flights = [
       fl({ flightId: 'a', status: 'waiting-for-approval' }),
       fl({ flightId: 'b', status: 'paused', pauseReason: 'stage-failed' }),
       fl({ flightId: 'c', status: 'running' }),
     ]
-    const { toasts } = runDiff(null, flights, noView)
-    expect(toasts).toHaveLength(1)
-    expect(toasts[0]).toEqual({ id: AGGREGATE_TOAST_ID, sticky: true })
+    const out = diffFlightToasts(null, flights, noView, stageLabel)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ id: AGGREGATE_TOAST_ID, kind: 'aggregate' })
+    expect(out[0].title).toBe('2 flights need your input')
   })
 
   it('seed: no aggregate toast when nothing needs attention', () => {
-    const flights = [fl({ flightId: 'a', status: 'running' })]
-    expect(runDiff(null, flights, noView).toasts).toHaveLength(0)
+    expect(diffFlightToasts(null, [fl({ flightId: 'a', status: 'running' })], noView, stageLabel)).toHaveLength(0)
+  })
+
+  it('seed: singular copy for exactly one waiting flight', () => {
+    const out = diffFlightToasts(null, [fl({ status: 'waiting-for-approval' })], noView, stageLabel)
+    // Copy preserved verbatim from the App effect ("need", not "needs").
+    expect(out[0].title).toBe('1 flight need your input')
   })
 
   it('first sight after seed: a newly-revealed waiting flight fires its own sticky toast', () => {
-    // Seed with a running flight; reconnect reveals it now waiting.
-    const seed = runDiff(null, [fl({ flightId: 'a', status: 'running' })], noView)
-    const after = runDiff(seed.nextKeys, [fl({ flightId: 'a', status: 'waiting-for-approval' })], noView)
-    expect(after.toasts).toEqual([{ id: 'a', sticky: true }])
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    const out = diffFlightToasts(prev, [fl({ flightId: 'a', status: 'waiting-for-approval', currentStage: 'scout' })], noView, stageLabel)
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ id: 'a', kind: 'flight', title: 'checkout needs input' })
+    expect(out[0].kind === 'flight' && out[0].body).toBe('Scout is waiting for you')
   })
 
   it('first sight after seed: a flight NEVER before seen, already waiting, still toasts', () => {
-    const seed = runDiff(null, [], noView)
-    const after = runDiff(seed.nextKeys, [fl({ flightId: 'new', status: 'waiting-for-approval' })], noView)
-    expect(after.toasts).toEqual([{ id: 'new', sticky: true }])
+    const out = diffFlightToasts(attentionKeyMap([]), [fl({ flightId: 'new', status: 'waiting-for-approval' })], noView, stageLabel)
+    expect(ids(out)).toEqual(['new'])
+  })
+
+  it('paused copy names the failed stage and points at resume', () => {
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    const out = diffFlightToasts(prev, [fl({ flightId: 'a', status: 'paused', pauseReason: 'stage-failed', currentStage: 'run' })], noView, stageLabel)
+    expect(out[0]).toMatchObject({ title: 'checkout paused' })
+    expect(out[0].kind === 'flight' && out[0].body).toBe('Run failed — open to resume')
+  })
+
+  it('a restart pause reads as interrupted, not failed', () => {
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    const out = diffFlightToasts(prev, [fl({ flightId: 'a', status: 'paused', pauseReason: 'restart', currentStage: 'specs-coverage' })], noView, stageLabel)
+    expect(out[0]).toMatchObject({ title: 'checkout paused' })
+    const body = out[0].kind === 'flight' ? out[0].body : ''
+    expect(body).not.toMatch(/failed/)
+    expect(body).toMatch(/interrupted by a server restart/i)
+    expect(body).toMatch(/open to resume/)
+  })
+
+  it('a restart pause with no known stage still says interrupted, not failed', () => {
+    // `stageLabelFor` returns null for a flight paused before any stage is
+    // current; the toast must still distinguish a restart from a failure,
+    // because the two lead the user to different next actions.
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    const out = diffFlightToasts(
+      prev,
+      [fl({ flightId: 'a', status: 'paused', pauseReason: 'restart', currentStage: undefined })],
+      noView,
+      stageLabel,
+    )
+    expect(out[0].kind === 'flight' && out[0].body).toBe('Interrupted by a server restart — open to resume')
   })
 
   it('a user→stage-failed pause transition toasts (pauseReason folded into the key)', () => {
-    const seed = runDiff(null, [fl({ flightId: 'a', status: 'paused', pauseReason: 'user' })], noView)
-    // Seed was a user pause → no aggregate.
-    expect(seed.toasts).toHaveLength(0)
-    const after = runDiff(seed.nextKeys, [fl({ flightId: 'a', status: 'paused', pauseReason: 'stage-failed' })], noView)
-    expect(after.toasts).toEqual([{ id: 'a', sticky: true }])
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'paused', pauseReason: 'user' })])
+    const out = diffFlightToasts(prev, [fl({ flightId: 'a', status: 'paused', pauseReason: 'stage-failed' })], noView, stageLabel)
+    expect(ids(out)).toEqual(['a'])
   })
 
   it('queued flights never toast — seed and transition alike', () => {
     const queued = (id: string): FlightAttentionInput =>
       fl({ flightId: id, status: 'paused', pauseReason: 'queued' as FlightPauseReason })
-    expect(runDiff(null, [queued('a')], noView).toasts).toHaveLength(0)
-    const seed = runDiff(null, [fl({ flightId: 'a', status: 'running' })], noView)
-    expect(runDiff(seed.nextKeys, [queued('a')], noView).toasts).toHaveLength(0)
+    expect(diffFlightToasts(null, [queued('a')], noView, stageLabel)).toHaveLength(0)
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    expect(diffFlightToasts(prev, [queued('a')], noView, stageLabel)).toHaveLength(0)
   })
 
   it('suppression: the on-screen flight is not toasted, but a sibling still is', () => {
-    const seed = runDiff(null, [
+    const prev = attentionKeyMap([
       fl({ flightId: 'a', status: 'running' }),
       fl({ flightId: 'b', status: 'running' }),
-    ], noView)
-    const after = runDiff(seed.nextKeys, [
+    ])
+    const out = diffFlightToasts(prev, [
       fl({ flightId: 'a', status: 'waiting-for-approval' }),
       fl({ flightId: 'b', status: 'waiting-for-approval' }),
-    ], { view: 'flights', selectedFlightId: 'a' })
-    // 'a' is on screen → suppressed; 'b' still toasts.
-    expect(after.toasts).toEqual([{ id: 'b', sticky: true }])
+    ], { view: 'flights', selectedFlightId: 'a' }, stageLabel)
+    expect(ids(out)).toEqual(['b'])
   })
 
   it('no re-toast when the attention key is unchanged across refreshes', () => {
-    const seed = runDiff(null, [fl({ flightId: 'a', status: 'running' })], noView)
-    const first = runDiff(seed.nextKeys, [fl({ flightId: 'a', status: 'waiting-for-approval' })], noView)
-    expect(first.toasts).toHaveLength(1)
-    const second = runDiff(first.nextKeys, [fl({ flightId: 'a', status: 'waiting-for-approval' })], noView)
-    expect(second.toasts).toHaveLength(0)
+    const prev = attentionKeyMap([fl({ flightId: 'a', status: 'running' })])
+    const waiting = [fl({ flightId: 'a', status: 'waiting-for-approval' })]
+    const first = diffFlightToasts(prev, waiting, noView, stageLabel)
+    expect(first).toHaveLength(1)
+    const second = diffFlightToasts(attentionKeyMap(waiting), waiting, noView, stageLabel)
+    expect(second).toHaveLength(0)
+  })
+})
+
+describe('external-work hand-offs never nag', () => {
+  it('a hand-off is work in progress, so it raises no toast', () => {
+    expect(flightNeedsAttention({ status: 'waiting-for-approval', checkpointKind: 'external-work' })).toBe(false)
+    // Any other kind on the same status is still a question for the human.
+    expect(flightNeedsAttention({ status: 'waiting-for-approval', checkpointKind: 'coverage-stuck' })).toBe(true)
+  })
+
+  it('is left out of the seed aggregate', () => {
+    const out = diffFlightToasts(
+      null,
+      [fl({ status: 'waiting-for-approval', checkpointKind: 'external-work' })],
+      { view: 'workspace', selectedFlightId: null },
+      stageLabel,
+    )
+    expect(out).toEqual([])
+  })
+
+  it('still toasts when the SAME flight moves from a hand-off to a real question', () => {
+    // Both wear `waiting-for-approval`: without the kind in the diff key this
+    // transition reads as unchanged and the question is never surfaced.
+    const before = fl({ status: 'waiting-for-approval', checkpointKind: 'external-work', currentStage: 'scout' })
+    const after = fl({ status: 'waiting-for-approval', checkpointKind: 'missing-env', currentStage: 'scout' })
+    expect(attentionKey(before)).not.toBe(attentionKey(after))
+    const out = diffFlightToasts(
+      attentionKeyMap([before]),
+      [after],
+      { view: 'workspace', selectedFlightId: null },
+      stageLabel,
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ title: 'checkout needs input', body: 'Scout is waiting for you' })
+  })
+
+  // Widened past the hand-off. The toast that made the whole thing look broken
+  // was "Docs extraction failed — open to resume" on a flight the agent was
+  // still working: a stage-failed pause, and a real question after it, both
+  // nagging a reader with no control to press.
+  it('an externally driven flight never nags, whatever it stopped on', () => {
+    for (const f of [
+      { status: 'waiting-for-approval' as const, checkpointKind: 'prd-source' as const },
+      { status: 'waiting-for-approval' as const, checkpointKind: 'missing-env' as const },
+      { status: 'paused' as const, pauseReason: 'stage-failed' as const },
+      { status: 'paused' as const, pauseReason: 'restart' as const },
+    ]) {
+      expect(flightNeedsAttention({ ...f, stageProducer: 'external' })).toBe(false)
+      // Same stop on a flight Canary drives itself still asks for the human.
+      expect(flightNeedsAttention(f)).toBe(true)
+    }
+  })
+
+  it('nags again once the externally driven flight settles into a failure', () => {
+    // `failed` is terminal, not a stop the agent resumes — and no status the
+    // attention predicate treats as needing input, external or not.
+    expect(flightNeedsAttention({ status: 'failed', stageProducer: 'external' })).toBe(false)
+  })
+
+  it('keys a pauseReason ahead of a checkpointKind, and falls back to the bare status', () => {
+    expect(attentionKey({ status: 'paused', pauseReason: 'user', checkpointKind: 'external-work' })).toBe('paused:user')
+    expect(attentionKey({ status: 'running' })).toBe('running')
   })
 })

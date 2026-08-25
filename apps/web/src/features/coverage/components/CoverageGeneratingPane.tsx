@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { CoverageJobManifest } from '../../../shared/api/types'
-import { AgentSessionView } from '../../agent-sessions/components/AgentSessionView'
-import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '../../runs/components/external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, pillPalette, StatusPill, useOpenAgentApp } from '../../runs/components/ExternalAgentCard'
+import type { CoverageJobManifest } from '@/shared/api/types'
+import { formatElapsedSeconds } from '@/shared/lib/format'
+import { AgentSessionView } from '@/shared/ui/AgentSessionView'
+import { clientKindToDesktopAgent, clientLabel, clientTint, shortSession, type ExternalClientKind } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, pillPalette, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
 
 // R13/R15: the dedicated Generating screen. While a coverage/summary job runs, the
 // Coverage tab shows THIS and nothing else — never the ledger, never the empty
@@ -51,13 +52,13 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
     <div className="min-h-0 h-full overflow-auto" data-testid="coverage-generating" style={{ scrollbarGutter: 'stable' }}>
       <div style={{ maxWidth: 720, margin: '0 auto', padding: '26px 24px 40px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <span className="cl-pulse" aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: 'rgb(56, 189, 248)', boxShadow: '0 0 10px rgb(56,189,248)' }} />
-          <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'rgb(56, 189, 248)' }}>
+          <span className="cl-pulse" aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: 'var(--running)', boxShadow: '0 0 10px color-mix(in srgb, var(--running) 45%, transparent)' }} />
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--running)' }}>
             Generating
           </span>
-          <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {elapsed}s</span>
+          <span data-testid="generating-elapsed" style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>· {formatElapsedSeconds(elapsed)}</span>
         </div>
-        <h2 style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', margin: '6px 0 4px' }}>
+        <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', margin: '6px 0 4px' }}>
           {job.kind === 'summary' ? 'Summarizing & mapping coverage' : 'Mapping coverage'}
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 22 }}>
@@ -106,7 +107,7 @@ export function CoverageGeneratingPane({ feature, job }: Props) {
 // mapping happens in the user's own client, so we show who is driving it +
 // Canary's tracked log instead of a (non-existent) agent session stream. Built
 // on the shared ExternalAgentCard so it matches external heal / portify / draft.
-function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
+export function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
   const clientKind = (job.externalClientKind ?? 'other') as ExternalClientKind
   const { opening, error: openError, open } = useOpenAgentApp()
   // Jump-to-agent affordance: prefer the client's own conversation deep-link when
@@ -122,7 +123,7 @@ function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
         headline={clientKind === 'other' ? 'External Client' : clientLabel(clientKind)}
         subtitle={job.externalConversationName}
         statusPill={
-          <StatusPill
+          <ExternalStatusPill
             label={job.kind === 'summary' ? 'Summarizing' : 'Mapping'}
             palette={pillPalette('var(--border-focus)')}
           />
@@ -176,7 +177,7 @@ function ExternalMonitorPanel({ job }: { job: CoverageJobManifest }) {
 }
 
 function PhaseRow({ n, title, body, done, active }: { n: number; title: string; body: string; done: boolean; active: boolean }) {
-  const accent = done ? 'rgb(52, 211, 153)' : active ? 'rgb(56, 189, 248)' : 'var(--text-muted)'
+  const accent = done ? 'var(--success)' : active ? 'var(--running)' : 'var(--text-muted)'
   return (
     <div
       data-testid={`phase-${n}`}
@@ -184,8 +185,8 @@ function PhaseRow({ n, title, body, done, active }: { n: number; title: string; 
       style={{
         display: 'flex', gap: 14, padding: '14px 16px', marginBottom: 10,
         borderRadius: 'var(--radius-md)',
-        border: `1px solid ${active ? 'color-mix(in srgb, rgb(56,189,248) 45%, var(--border-default))' : 'var(--border-default)'}`,
-        background: active ? 'color-mix(in srgb, rgb(56,189,248) 8%, var(--bg-surface))' : 'var(--bg-surface)',
+        border: `1px solid ${active ? 'color-mix(in srgb, var(--running) 45%, var(--border-default))' : 'var(--border-default)'}`,
+        background: active ? 'color-mix(in srgb, var(--running) 8%, var(--bg-surface))' : 'var(--bg-surface)',
         opacity: !active && !done ? 0.6 : 1,
         transition: 'opacity 150ms, border-color 150ms, background 150ms',
       }}
@@ -196,9 +197,9 @@ function PhaseRow({ n, title, body, done, active }: { n: number; title: string; 
         style={{
           flexShrink: 0, width: 26, height: 26, borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 13, fontWeight: 700,
+          fontSize: 13, fontWeight: 600,
           background: done || active ? accent : 'var(--bg-base)',
-          color: done || active ? '#0b0f17' : 'var(--text-muted)',
+          color: done || active ? 'var(--on-accent)' : 'var(--text-muted)',
           border: done || active ? 'none' : '1px solid var(--border-default)',
         }}
       >

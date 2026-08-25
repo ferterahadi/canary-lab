@@ -1,0 +1,217 @@
+// MCP tools — reads.
+//
+// Registration bodies are unchanged from the pre-split tools.ts; only the
+// enclosing function is new. Add a tool here, then wire its name into the
+// profile arrays in ../tool-support.ts (see the cl_add-mcp-tool skill).
+import { z } from 'zod'
+import { buildExternalRunSnapshotSlim } from '../../features/runs/logic/heal/external-heal-surface'
+import { loadFeatures } from '../../shared/feature-loader'
+import { createVerificationConfig, getVerificationConfig, listVerificationConfigs, updateVerificationConfig } from '../../features/coverage/logic/verification'
+import {
+  isActiveRunStatus,
+  isTerminalRunStatus,
+  deriveRunActionAvailability,
+} from '../../../../../shared/run-state'
+import { publishWorkspaceEvent } from '../../shared/workspace-events'
+import { type ToolGroupContext, asJsonResult, asToonResult, errorResult, failureResult, verificationResult } from '../tool-support'
+
+export function registerReadTools(ctx: ToolGroupContext): void {
+  const { registerTool, deps, clientKindInput } = ctx
+
+  // ─── reads ────────────────────────────────────────────────────────────
+
+  registerTool('list_features', {
+    description: 'List existing Canary Lab features when you need to choose or inspect one. Do not call this before random/new feature creation; call create_feature directly with a unique name and retry on collision. Returned as a TOON table `[N]{name,description,envs,repos}:`. To keep one flat row per feature, the list-valued columns are packed: `envs` is `|`-joined env names; `repos` is `|`-joined repo entries, each `name@localPath@branch` (branch empty if none). Split on `|` then `@` to unpack.',
+    inputSchema: {},
+  }, async () => {
+    const features = loadFeatures(deps.featuresDir).map((f) => ({
+      name: f.name,
+      description: f.description ?? '',
+      // Pack the list-valued fields into delimited scalars so the array reaches
+      // the TOON tabular form (one flat row per feature) instead of the verbose
+      // list form. Lossless for paths/branches that don't contain `@` or `|`.
+      envs: (f.envs ?? []).join('|'),
+      repos: (f.repos ?? [])
+        .map((r) => [r.name, r.localPath, r.branch ?? ''].join('@'))
+        .join('|'),
+    }))
+    return asToonResult(features)
+  })
+
+  registerTool('list_runs', {
+    description: 'List Canary Lab runs, newest first (default 20 — raise `limit` for more history). Optionally filter by feature. Each row is already slim (id, feature, status, timestamps); fetch one run\'s detail with get_run. Returned as a TOON table: a `[N]{col,...}:` header line followed by one comma-separated row per run (quoted cells are JSON-escaped strings).',
+    inputSchema: {
+      feature: z.string().optional().describe('Feature name. Omit to list across all features.'),
+      limit: z.number().int().positive().max(200).default(20).describe('Max runs to return, newest first. Default 20.'),
+    },
+  }, async ({ feature, limit }) => {
+    return asToonResult(deps.store.list(feature ? { feature } : {}).slice(0, limit))
+  })
+
+  registerTool('get_run', {
+    description: 'Fetch one run\'s core detail: manifest + summary + artifact base URL. The bulky raw arrays (lifecycleEvents, playwrightArtifacts, playbackEvents) are OMITTED by default to protect context — pass includeRaw:true to inline them when you need them. Never poll this to wait for a result; block on wait_for_heal_task.',
+    inputSchema: {
+      runId: z.string(),
+      includeRaw: z.boolean().default(false).describe('Inline the full lifecycleEvents[] + playwrightArtifacts[] + playbackEvents[]. Off by default (they can be large); call again with includeRaw:true when you need the raw timeline/artifacts.'),
+    },
+  }, async ({ runId, includeRaw }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    // Eval-review-first: a terminal run's next stop is the evaluation export —
+    // reviewing it (per-test reasoning + playback) IS the core canary loop.
+    const next = isTerminalRunStatus(detail.manifest.status)
+      ? { next: `Run is terminal (${detail.manifest.status}). The user-facing next step is /canary-lab-export ${runId}; do not replace it with an npx canary-lab export command. When continuing in this client instead of handing off, call start_external_evaluation_export(runId), submit it, and give the user the returned archivePath. Status is preserved even for a failed run, and evaluation.html is inside that existing zip.` }
+      : {}
+    if (includeRaw) return asJsonResult({ ...detail, ...next })
+    const { lifecycleEvents: _lifecycleEvents, playwrightArtifacts: _playwrightArtifacts, playbackEvents: _playbackEvents, ...core } = detail
+    return asJsonResult({
+      ...core,
+      artifactsBase: `/api/runs/${encodeURIComponent(runId)}/artifacts/`,
+      raw: { omitted: ['lifecycleEvents', 'playwrightArtifacts', 'playbackEvents'], hint: 'call get_run with includeRaw:true to inline them' },
+      ...next,
+    })
+  })
+
+  registerTool('get_run_snapshot', {
+    description: 'Verbose external-heal run snapshot: summary, full counts, failed tests, artifact base, heal prompt map, and the heal index + journal as on-disk PATHS (Read them for the full markdown — never inlined, so a long heal loop can\'t bloat the response). For verbose debugging only; never poll it to wait — block on wait_for_heal_task.',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    return asJsonResult(buildExternalRunSnapshotSlim({
+      detail,
+      logsDir: deps.store.logsDir,
+      projectRoot: deps.projectRoot,
+    }))
+  })
+
+  registerTool('get_run_actions', {
+    description: 'Which actions are valid right now for a run (pauseHeal, stop, cancelHeal, delete, restartHeal, signal kinds, evaluation export).',
+    inputSchema: { runId: z.string() },
+  }, async ({ runId }) => {
+    const detail = deps.store.get(runId)
+    if (!detail) return errorResult(`run not found: ${runId}`)
+    const status = detail.manifest.status
+    return asJsonResult({
+      status,
+      availability: deriveRunActionAvailability(status, null),
+      signal: { rerun: isActiveRunStatus(status), restart: isActiveRunStatus(status), heal: isActiveRunStatus(status) },
+      evaluationExport: { available: isTerminalRunStatus(status) },
+      externalClaim: deps.broker.getSession(runId),
+    })
+  })
+
+  registerTool('list_verification_configs', {
+    description: 'List saved Verify configurations for a Canary Lab feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+    },
+  }, async ({ featureId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    return asJsonResult(listVerificationConfigs(feature))
+  })
+
+  registerTool('get_verification_config', {
+    description: 'Fetch one saved Verify configuration for a Canary Lab feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      configId: z.string().describe('Verification config id.'),
+    },
+  }, async ({ featureId, configId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    const config = getVerificationConfig(feature, configId)
+    if (!config) return errorResult(`verification config not found: ${configId}`)
+    return asJsonResult(config)
+  })
+
+  registerTool('create_verification_config', {
+    description: 'Create a saved Verify configuration for a feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      name: z.string().describe('Configuration name, e.g. Beta or Staging.'),
+      targetUrls: z.record(z.string(), z.string()).describe('Target URLs keyed by verification target id.'),
+      playwrightEnvsetId: z.string().describe('Playwright envset to apply for verification.'),
+    },
+  }, async ({ featureId, name, targetUrls, playwrightEnvsetId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    try {
+      const created = createVerificationConfig(feature, { name, targetUrls, playwrightEnvsetId }, deps.workspaceEvents)
+      return asJsonResult(created)
+    } catch (err) {
+      return failureResult(err)
+    }
+  })
+
+  registerTool('update_verification_config', {
+    description: 'Update a saved Verify configuration for a feature.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      configId: z.string().describe('Verification config id.'),
+      name: z.string().describe('Configuration name, e.g. Beta or Staging.'),
+      targetUrls: z.record(z.string(), z.string()).describe('Target URLs keyed by verification target id.'),
+      playwrightEnvsetId: z.string().describe('Playwright envset to apply for verification.'),
+    },
+  }, async ({ featureId, configId, name, targetUrls, playwrightEnvsetId }) => {
+    const feature = loadFeatures(deps.featuresDir).find((candidate) => candidate.name === featureId)
+    if (!feature) return errorResult(`feature not found: ${featureId}`)
+    try {
+      const config = updateVerificationConfig(feature, configId, { name, targetUrls, playwrightEnvsetId }, deps.workspaceEvents)
+      if (!config) return errorResult(`verification config not found: ${configId}`)
+      return asJsonResult(config)
+    } catch (err) {
+      return failureResult(err)
+    }
+  })
+
+  registerTool('execute_verification', {
+    description: 'Execute Verify against target URLs — a deployed environment, or a local app you already booted with boot_services (pass that boot runId as bootRunId; the boot session is torn down when the verification run starts). This never boots services itself and never starts healing. Without bootRunId, any active run — a held boot session included — is a 409 collision.',
+    inputSchema: {
+      featureId: z.string().describe('Feature name.'),
+      configId: z.string().optional().describe('Saved verification config id.'),
+      targetUrls: z.record(z.string(), z.string()).optional().describe('Target URLs keyed by verification target id. For a local boot_services session, derive each from get_run(bootRunId): the origin of manifest.services[].healthUrl.'),
+      playwrightEnvsetId: z.string().optional().describe('Playwright envset to apply for verification (e.g. "local" when verifying a boot_services session).'),
+      bootRunId: z.string().optional().describe('Active boot_services runId for this feature. Exempts that session from the active-run collision check and stops it once verification starts.'),
+    },
+  }, async ({ featureId, configId, targetUrls, playwrightEnvsetId, bootRunId }) => {
+    if (!deps.startVerification) return errorResult('startVerification dependency is not configured')
+    try {
+      const started = await deps.startVerification(featureId, {
+        ...(configId ? { configId } : {}),
+        ...(targetUrls ? { targetUrls } : {}),
+        ...(playwrightEnvsetId ? { playwrightEnvsetId } : {}),
+        ...(bootRunId ? { bootRunId } : {}),
+      })
+      const detail = deps.store.get(started.runId)
+      if (!detail) {
+        return asJsonResult({
+          executionId: started.runId,
+          executionType: 'verify',
+          status: 'queued',
+          targetUrls: targetUrls ?? {},
+          playwrightEnvsetId: playwrightEnvsetId ?? '',
+        })
+      }
+      return asJsonResult(verificationResult(detail))
+    } catch (err) {
+      return failureResult(err)
+    }
+  })
+
+  registerTool('get_verification_result', {
+    description: 'Retrieve Verify result and diagnostics for a verification execution.',
+    inputSchema: {
+      executionId: z.string().describe('Verification execution id.'),
+    },
+  }, async ({ executionId }) => {
+    const detail = deps.store.get(executionId)
+    if (!detail) return errorResult(`verification result not found: ${executionId}`)
+    if ((detail.manifest.executionType ?? 'run') !== 'verify') {
+      return errorResult(`execution is not verify: ${executionId}`)
+    }
+    return asJsonResult(verificationResult(detail))
+  })
+
+}

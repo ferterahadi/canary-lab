@@ -2,7 +2,13 @@ import fs from 'fs'
 import path from 'path'
 import { runGit } from '../../../../shared/git-repo'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
+import { OVERLAY_DIRNAME, patchFileName } from '../../../../../../../shared/portify-overlay'
+import type { PortSlot } from '../../../../../../../shared/launcher/types'
 import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
+
+// Naming rules live in shared/portify-overlay.ts (the web UI shows these
+// paths); re-exported here so server-side callers keep one import.
+export { OVERLAY_DIRNAME, patchFileName }
 
 // The ephemeral port overlay: a captured set of unified diffs (one per product
 // repo) that make a feature's services read canary-lab-injected ports. Unlike
@@ -13,7 +19,9 @@ import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 //
 // On-disk layout under `<featureDir>/portify/`:
 //   meta.json            — OverlayMeta (base SHAs, captured-at, touched-file
-//                          hashes per repo, for staleness detection)
+//                          hashes per repo for staleness detection, and the
+//                          `ports` slots declared per repo — carried only so a
+//                          feature borrowing this patch is handed them)
 //   <repoName>.patch     — the unified diff for that repo (includes added files)
 //   original-config.snapshot — feature.config.cjs as it was BEFORE Portify edited
 //                          it (slots + ${port.x} health-check rewrites). Lets
@@ -21,7 +29,6 @@ import type { HealAgent } from '../../../runs/logic/runtime/auto-heal'
 //                          delete the code overlay. Absent on legacy overlays.
 
 export const OVERLAY_VERSION = 1
-export const OVERLAY_DIRNAME = 'portify'
 export const OVERLAY_META_FILE = 'meta.json'
 export const OVERLAY_ORIGINAL_CONFIG_FILE = 'original-config.snapshot'
 
@@ -41,6 +48,12 @@ export interface OverlayRepo {
   patch: string
   /** Files that existed at capture and the patch modifies (drives staleness). */
   touchedFiles: OverlayTouchedFile[]
+  /** The `ports` slots THIS feature declared for this repo when the patch was
+   *  captured. Never applied anywhere — it is a hint carried across the borrow
+   *  (see buildSiblingOverlayIndex): the patched source reads these env vars, so
+   *  a feature borrowing the patch is handed the exact slots to declare instead
+   *  of re-deriving them from the diff. Absent on legacy overlays. */
+  ports?: PortSlot[]
 }
 
 export interface OverlayMeta {
@@ -59,6 +72,8 @@ export interface OverlayRepoInput {
   /** Unified diff content (as produced by `captureDiff`). */
   patch: string
   touchedFiles: OverlayTouchedFile[]
+  /** Slots declared for this repo — see {@link OverlayRepo.ports}. */
+  ports?: PortSlot[]
 }
 
 export interface WriteOverlayInput {
@@ -106,12 +121,6 @@ export function readOverlayOriginalConfig(featureDir: string): string | null {
   }
 }
 
-/** Filesystem-safe patch filename for a repo. */
-export function patchFileName(repoName: string): string {
-  const slug = repoName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'repo'
-  return `${slug}.patch`
-}
-
 /** A verified overlay exists for this feature (meta present with ≥1 repo). */
 export function overlayExists(featureDir: string): boolean {
   const meta = readMeta(featureDir)
@@ -147,7 +156,15 @@ export function writeOverlay(featureDir: string, input: WriteOverlayInput): Over
   const repos: OverlayRepo[] = input.repos.map((r) => {
     const patch = patchFileName(r.name)
     atomicWrite(path.join(dir, patch), r.patch)
-    return { name: r.name, baseSha: r.baseSha, patch, touchedFiles: r.touchedFiles }
+    return {
+      name: r.name,
+      baseSha: r.baseSha,
+      patch,
+      touchedFiles: r.touchedFiles,
+      // Omit rather than write `[]` so "this feature declared none" and "this
+      // overlay predates slot recording" stay distinguishable on disk.
+      ...(r.ports && r.ports.length > 0 ? { ports: r.ports } : {}),
+    }
   })
   const meta: OverlayMeta = {
     version: OVERLAY_VERSION,

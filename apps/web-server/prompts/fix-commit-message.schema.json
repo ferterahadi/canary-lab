@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["commitSubject", "commitBody", "prTitle", "prBody"],
+  "properties": {
+    "commitSubject": {
+      "type": "string",
+      "description": "Conventional Commits subject line, imperative mood, at most 72 characters."
+    },
+    "commitBody": {
+      "type": "string",
+      "description": "Commit body, 1-3 short paragraphs hard-wrapped at 72 columns."
+    },
+    "prTitle": {
+      "type": "string",
+      "description": "Plain-English pull request title with no Conventional Commits prefix."
+    },
+    "prBody": {
+      "type": "string",
+      "description": "GitHub-flavoured markdown body: summary, What changed, How this was found, Review notes."
+    }
+  }
+}

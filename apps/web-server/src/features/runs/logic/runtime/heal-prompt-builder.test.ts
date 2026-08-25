@@ -122,6 +122,27 @@ describe('buildHealAddendum', () => {
     expect(addendum).toContain('consider reverting')
   })
 
+  it('steers AWAY from a revert when the prior outcome was advanced', () => {
+    // The inverse of the regression steer, and the reason `advanced` exists:
+    // under --max-failures=1 a working fix surfaces the next never-run test as
+    // the blocker. That used to classify as `regression`, so the cycle after a
+    // successful repair was told to revert it.
+    fs.mkdirSync(logsDir, { recursive: true })
+    fs.writeFileSync(journalPath, [
+      '## Iteration 1 — t1',
+      '',
+      '- hypothesis: first try',
+      '- outcome: advanced',
+      '',
+    ].join('\n'))
+
+    const addendum = buildHealAddendum({ cycle: 2 })
+
+    expect(addendum).toContain('Prior fix outcome: advanced')
+    expect(addendum).toContain('keep the fix')
+    expect(addendum).not.toContain('reverting')
+  })
+
   it('emits no prior-outcome line when the outcome is still pending or on cycle 1', () => {
     fs.mkdirSync(logsDir, { recursive: true })
     fs.writeFileSync(journalPath, [

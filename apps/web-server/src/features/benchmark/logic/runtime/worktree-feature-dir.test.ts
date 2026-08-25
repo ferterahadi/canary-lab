@@ -3,14 +3,15 @@ import { worktreeFeatureDir } from './worktree-feature-dir'
 
 describe('worktreeFeatureDir', () => {
   it('maps a self-contained feature dir (featureDir === repo) into the worktree', () => {
-    // Scaffold samples: localPath === featureDir === __dirname.
+    // A hand-written feature whose localPath === featureDir === __dirname. The
+    // public scaffold starts with no features, so this stays a generic fixture.
     expect(
       worktreeFeatureDir({
-        repoLocalPath: '/ws/features/flaky_orders_api',
-        featureDir: '/ws/features/flaky_orders_api',
-        worktreeRepoPath: '/bench/worktrees/arm-A/flaky_orders_api',
+        repoLocalPath: '/ws/features/sample_feature',
+        featureDir: '/ws/features/sample_feature',
+        worktreeRepoPath: '/bench/worktrees/arm-A/sample_feature',
       }),
-    ).toBe('/bench/worktrees/arm-A/flaky_orders_api')
+    ).toBe('/bench/worktrees/arm-A/sample_feature')
   })
 
   it('maps a feature dir nested inside the repo into the worktree, preserving the subpath', () => {

@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { docsDirFor } from '../../../coverage/logic/coverage/docs-collection'
+import { docsDirFor } from './docs-collection'
 
 // Records the requirements-set hash the coverage engine last ran against. The
 // state model compares this to the live summary's `requirementsHash`: if they

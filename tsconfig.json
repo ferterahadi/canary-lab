@@ -9,6 +9,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["shared/**/*", "scripts/**/*"],
+  "include": ["shared/**/*", "apps/cli/**/*"],
   "exclude": ["node_modules"]
 }

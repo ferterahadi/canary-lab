@@ -1,7 +1,11 @@
 import { EventEmitter } from 'events'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChildProcess } from 'child_process'
-import { buildClaudeAgenticArgs, runAgentProcess } from './agent-process'
+import { buildClaudeAgenticArgs, runAgentProcess, stopAgentProcesses, stopAllAgentProcesses } from './agent-process'
+import { agentJobStore } from './agent-jobs/store'
 
 // hoisted so the factory can reference mockNodeSpawn before imports resolve
 const { mockNodeSpawn } = vi.hoisted(() => ({ mockNodeSpawn: vi.fn() }))
@@ -41,8 +45,41 @@ describe('buildClaudeAgenticArgs', () => {
   it('builds tools-on stream-json args', () => {
     expect(buildClaudeAgenticArgs('hi')).toEqual([
       '-p', 'hi', '--dangerously-skip-permissions',
+      '--strict-mcp-config',
+      '--disallowedTools', 'WebFetch,WebSearch',
       '--output-format=stream-json', '--include-partial-messages', '--verbose',
     ])
+  })
+
+  it('inherits no MCP server the spawn did not ask for', () => {
+    // Without this, a read-only spawn still arrived holding the user's
+    // connected MCP servers — `--tools` bounds built-ins only.
+    expect(buildClaudeAgenticArgs('hi')).toContain('--strict-mcp-config')
+    expect(buildClaudeAgenticArgs('hi', { readOnly: true })).toContain('--strict-mcp-config')
+  })
+
+  it('denies the outbound tools on every headless spawn, bypass or not', () => {
+    // `--disallowedTools` is evaluated before the bypass, so this deny holds
+    // even though the same argv carries `--dangerously-skip-permissions`.
+    for (const args of [buildClaudeAgenticArgs('hi'), buildClaudeAgenticArgs('hi', { readOnly: true })]) {
+      const at = args.indexOf('--disallowedTools')
+      expect(args.slice(at, at + 2)).toEqual(['--disallowedTools', 'WebFetch,WebSearch'])
+    }
+  })
+
+  it('holds no tool allowlist by default — a repairing agent needs to write', () => {
+    expect(buildClaudeAgenticArgs('hi')).not.toContain('--tools')
+  })
+
+  it('takes the write tools away entirely for a read-only agent', () => {
+    // `--tools` is a capability allowlist, not an instruction: Edit/Write/Bash
+    // are absent from the session, so `--dangerously-skip-permissions` cannot
+    // hand them back. Verified live against claude 2.1.220.
+    const args = buildClaudeAgenticArgs('hi', { readOnly: true })
+    expect(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2)).toEqual([
+      '--tools', 'Read,Glob,Grep',
+    ])
+    expect(args).toContain('--dangerously-skip-permissions')
   })
 
   it('pins a session id', () => {
@@ -261,5 +298,229 @@ describe('runAgentProcess', () => {
     child.close(0)
     expect(resolveBinary).not.toHaveBeenCalled()
     expect(spawn.calls[0].command).toBe('/usr/local/bin/claude')
+  })
+})
+
+// A child that dies when signalled, so a stop can be awaited to completion. Set
+// `ignoreSigterm` to model the wedged CLI the SIGKILL escalation exists for.
+class SignalableChild extends FakeChild {
+  ignoreSigterm = false
+  override kill(signal?: NodeJS.Signals): boolean {
+    super.kill(signal)
+    const sig = signal ?? 'SIGTERM'
+    if (sig === 'SIGKILL' || !this.ignoreSigterm) this.close(null, sig)
+    return true
+  }
+}
+
+function spawnScoped(child: FakeChild, scope?: string) {
+  return runAgentProcess({
+    command: 'claude', args: [], idleMs: 60_000,
+    spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    ...(scope === undefined ? {} : { spawnScope: scope }),
+  })
+}
+
+describe('stopAgentProcesses / stopAllAgentProcesses', () => {
+  it('stops only the children spawned under the given scope', async () => {
+    const mine = new SignalableChild()
+    const theirs = new SignalableChild()
+    const mineHandle = spawnScoped(mine, '/flights/fl_1/scout')
+    spawnScoped(theirs, '/flights/fl_2/scout')
+
+    await stopAgentProcesses('/flights/fl_1/scout')
+
+    expect(mine.signals).toContain('SIGTERM')
+    expect(theirs.signals).toEqual([])
+    // Resolving means the child is GONE, not merely signalled — that guarantee is
+    // the whole reason a pause awaits this.
+    await expect(mineHandle.done).resolves.toMatchObject({ signal: 'SIGTERM' })
+    theirs.close(0)
+  })
+
+  it('resolves without killing anything when the scope has no live child', async () => {
+    const other = new SignalableChild()
+    spawnScoped(other, '/flights/fl_1/scout')
+    // The normal no-op: a stage whose spawn already finished, or one parked on an
+    // external hand-off that never spawned at all.
+    await expect(stopAgentProcesses('/flights/fl_1/docs')).resolves.toBeUndefined()
+    expect(other.signals).toEqual([])
+    other.close(0)
+  })
+
+  it('is a no-op once the child has exited on its own', async () => {
+    const child = new SignalableChild()
+    const h = spawnScoped(child, '/flights/fl_1/scout')
+    child.close(0)
+    await h.done
+    await stopAgentProcesses('/flights/fl_1/scout')
+    // Closing removed it from the registry, so the stop never re-signals a
+    // finished process.
+    expect(child.signals).toEqual([])
+  })
+
+  it('escalates to SIGKILL when the child ignores SIGTERM', async () => {
+    vi.useFakeTimers()
+    const wedged = new SignalableChild()
+    wedged.ignoreSigterm = true
+    const h = spawnScoped(wedged, '/flights/fl_1/specs-coverage')
+
+    const stopped = stopAgentProcesses('/flights/fl_1/specs-coverage', { graceMs: 100 })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(wedged.signals).toEqual(['SIGTERM'])
+
+    await vi.advanceTimersByTimeAsync(100)
+    await stopped
+    expect(wedged.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    await expect(h.done).resolves.toMatchObject({ signal: 'SIGKILL' })
+  })
+
+  it('sweeps every live child on shutdown, scoped or not', async () => {
+    const scoped = new SignalableChild()
+    const unscoped = new SignalableChild()
+    spawnScoped(scoped, '/flights/fl_1/scout')
+    spawnScoped(unscoped)
+
+    // Deliberately not awaited: the registry is module state, so this sweep also
+    // picks up children left live by every other test in this file — fakes that
+    // never emit 'close', so awaiting it would hang on them rather than on
+    // anything this test is about. `terminate` signals synchronously before it
+    // waits, so one microtask is enough to observe the claim under test. The real
+    // shutdown path does await, and is bounded by ui-command's watchdog.
+    void stopAllAgentProcesses()
+    await Promise.resolve()
+
+    // The unscoped ones are portify/benchmark/commit-message spawns: they opt out
+    // of scoped stop but must never outlive the server.
+    expect(scoped.signals).toContain('SIGTERM')
+    expect(unscoped.signals).toContain('SIGTERM')
+  })
+
+  it('does not hang when the child fails to launch while being stopped', async () => {
+    const child = new FakeChild()
+    const h = spawnScoped(child, '/flights/fl_1/docs')
+    h.done.catch(() => { /* asserted below */ })
+    const stopped = stopAgentProcesses('/flights/fl_1/docs')
+    child.emit('error', new Error('ENOENT'))
+    // `done` rejects rather than resolving; the stop still settles, because there
+    // is no process left to wait for.
+    await expect(stopped).resolves.toBeUndefined()
+    await expect(h.done).rejects.toThrow('ENOENT')
+  })
+
+  it('forwards the scope to the registry only when the caller asked for one', async () => {
+    const scoped = new SignalableChild()
+    const unscoped = new SignalableChild()
+    spawnScoped(scoped, '/flights/fl_1/prd-summary')
+    spawnScoped(unscoped)
+
+    await stopAgentProcesses('/flights/fl_1/prd-summary')
+
+    expect(scoped.signals).toContain('SIGTERM')
+    expect(unscoped.signals).toEqual([])
+    unscoped.close(0)
+  })
+})
+
+describe('durable records — how a spawn ends, in the record', () => {
+  // The runner owns this lifecycle so there is exactly one implementation of
+  // "started / done / failed / stopped". The distinctions matter to a reader who
+  // has only the row: an exit code cannot tell you whether someone asked the agent
+  // to stop or it fell over on its own.
+  let logsDir: string
+
+  beforeEach(() => {
+    logsDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agentrec-')))
+  })
+
+  afterEach(() => fs.rmSync(logsDir, { recursive: true, force: true }))
+
+  const ref = { jobId: 'fl-1:scout', flightId: 'fl-1', feature: 'checkout', stage: 'scout', agent: 'claude' as const }
+
+  function spawnWithRecord(child: FakeChild, scope = '/flights/fl-1/scout') {
+    return runAgentProcess({
+      command: 'claude', args: [], idleMs: 60_000, spawnScope: scope,
+      record: ref, agentJobLogsDir: logsDir,
+      spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    })
+  }
+
+  it('writes the record `running` at spawn, before anything has happened', () => {
+    const child = new SignalableChild()
+    spawnWithRecord(child)
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({
+      status: 'running', flightId: 'fl-1', stage: 'scout', scope: '/flights/fl-1/scout',
+    })
+    child.close(0)
+  })
+
+  it('settles `done` on a clean exit', async () => {
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    child.close(0)
+    await h.done
+    const rec = agentJobStore(logsDir).get('fl-1:scout')!
+    expect(rec.status).toBe('done')
+    expect(rec.endedAt).toBeTruthy()
+  })
+
+  it('settles `failed` with the exit code on a non-zero exit', async () => {
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    child.close(3)
+    await h.done
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({ status: 'failed', exitCode: 3 })
+  })
+
+  it('settles `stopped`, not `failed`, when someone asked it to stop', async () => {
+    // Same underlying exit as a crash — a signal and no code. Only the record's
+    // knowledge of the REQUEST separates "we stopped it" from "it died".
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    await stopAgentProcesses('/flights/fl-1/scout', { by: 'user' })
+    await h.done.catch(() => {})
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({ status: 'stopped', stoppedBy: 'user' })
+  })
+
+  it('attributes a flight-driven teardown to the flight, not the user', async () => {
+    const child = new SignalableChild()
+    const h = spawnWithRecord(child)
+    await stopAgentProcesses('/flights/fl-1/scout')
+    await h.done.catch(() => {})
+    expect(agentJobStore(logsDir).get('fl-1:scout')).toMatchObject({ status: 'stopped', stoppedBy: 'flight' })
+  })
+
+  it('settles `failed` when the CLI could not be launched at all', async () => {
+    const child = new FakeChild()
+    const h = spawnWithRecord(child)
+    child.emit('error', new Error('ENOENT'))
+    await expect(h.done).rejects.toThrow('ENOENT')
+    const rec = agentJobStore(logsDir).get('fl-1:scout')!
+    expect(rec.status).toBe('failed')
+    expect(rec.note).toContain('could not be launched')
+  })
+
+  it('writes nothing when the caller passes no descriptor', async () => {
+    // The standalone coverage job's path: its own manifest is already the durable,
+    // reconciled, surfaced record, so a second per-spawn row would be a duplicate.
+    const child = new SignalableChild()
+    const h = runAgentProcess({
+      command: 'claude', args: [], idleMs: 60_000,
+      spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    })
+    child.close(0)
+    await h.done
+    expect(agentJobStore(logsDir).list()).toEqual([])
+  })
+
+  it('writes nothing when a descriptor arrives with no logs dir to write to', async () => {
+    const child = new SignalableChild()
+    const h = runAgentProcess({
+      command: 'claude', args: [], idleMs: 60_000, record: ref,
+      spawnImpl: fakeSpawn(child).impl, resolveBinary: () => null,
+    })
+    child.close(0)
+    await h.done
+    expect(agentJobStore(logsDir).list()).toEqual([])
   })
 })

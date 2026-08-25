@@ -114,6 +114,10 @@ describe('RunOrchestrator boot-only mode', () => {
     // The failed service is marked timeout (red dot) but the session is held.
     expect(manifest.services[0]).toMatchObject({ name: 'api', status: 'timeout' })
     expect(manifest.lifecycle?.phase).toBe('services-ready')
+    // The failure record still lands: readers (flight boot-verify) need the
+    // real cause + service log path even though the session stays up.
+    expect(manifest.bootFailure).toMatchObject({ service: 'api', reason: 'health-timeout' })
+    expect(manifest.bootFailure?.logPath).toContain('svc-api')
   })
 
   it('tears the services down and finalizes on stop', async () => {

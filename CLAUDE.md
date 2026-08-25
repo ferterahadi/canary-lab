@@ -17,10 +17,23 @@ copied to `dist/templates/` during build.
 ## Hard rules
 
 - **Never run the canary-apply rebuild/restart cycle** — the user runs it themselves
-  (see the `cl_verify-changes` skill for the hand-off).
-- **Never add `/* v8 ignore */` pragmas** — write a real test or use a config-level
-  exclude.
-- Touching `apps/web-server/mcp/tools.ts` or any run-loop semantics (collision,
+  (see the `cl_verify-changes` skill for the hand-off). Sole exception: a checkout
+  that carries a gitignored `cl_apply-local` skill has opted in locally — follow that
+  skill instead of handing off.
+- **Don't reach for a `/* v8 ignore */` pragma.** Write a real test, or delete the
+  arm, or make the state unrepresentable in the type. A pragma is allowed for one
+  case only: a defence-in-depth guard that an earlier validator makes unreachable,
+  where deleting it would weaken a security property and testing it would mean
+  proving that validator broken. It must carry a `-- reason`, and the file stays in
+  the coverage gate. `npm run check:conventions` holds the line — new pragma files
+  need a deliberate allowlist entry.
+- **The repair rule is load-bearing: agents fix the app, not the test.** Never
+  weaken, delete, skip, or loosen a test to make a run green, and never soften the
+  prose that tells an agent so (`REPAIR_INSTRUCTIONS`, the heal `MODE_COPY`, the
+  shipped `canary-lab-run` skills). Pinned by
+  `apps/web-server/src/mcp/repair-guardrail.test.ts` + `auto-heal.test.ts`; rationale in
+  the `cl_run-evidence-invariants` skill.
+- Touching `apps/web-server/src/mcp/` tools or any run-loop semantics (collision,
   queue, boot sessions, heal claims, pass counts) → use the `cl_add-mcp-tool` /
   `cl_sync-agent-surfaces` skills. The sync invariants are easy to miss by hand.
 - Changes under `templates/` only ship via the build — finish with
@@ -36,6 +49,9 @@ copied to `dist/templates/` during build.
   table.
 - [docs/PRD.md](docs/PRD.md) — product intent, non-goals, and quality bars
   (reverse-engineered; the tie-breaker for product-questionable changes).
+- [docs/DESIGN-SYSTEM.md](docs/DESIGN-SYSTEM.md) — the `apps/web` token catalog,
+  status-hue vocabulary, CSS/React primitives, and layout patterns. The *what
+  exists* reference; the `cl_ui-design-philosophy` skill is the *how to decide*.
 - [docs/GUIDE.md](docs/GUIDE.md) / [docs/FEATURES.md](docs/FEATURES.md) /
   [docs/COMMANDS.md](docs/COMMANDS.md) — user-facing docs (env switching incl.
   remote-URL testing, run output, CLI reference).
@@ -48,10 +64,13 @@ are easy to miss by hand. (Claude: via the Skill tool. Codex: skills load
 natively.)
 
 **Process / how to work**
+- `cl_code-conventions` — writing or reviewing any code here: the comment,
+  error, type, test and coverage conventions a linter can't express. The
+  mechanical half is enforced by `npm run check:conventions`, not by reading.
 - `cl_reuse-shared-logic` — about to add code/UI that resembles something already
   here (a 2nd agent spawn, pill/dialog, store, parser, timeout): reuse or extend
   one shared helper/component/primitive instead of copy-pasting a variant. Lists
-  the existing primitives + the agent-process-runner duplication still owed.
+  the existing primitives; the agent-process runner is consolidated — keep it so.
 - `cl_manage-prompts` — adding/editing/moving an LLM prompt an agent spawn sends
   (heal, wizard, portify, coverage/PRD, flights): every prompt is a template file
   under `apps/web-server/prompts/`, loaded via `shared/prompts.ts` — never an
@@ -67,11 +86,19 @@ natively.)
 - `cl_release` — publishing the package (`npm run publish:package`).
 
 **Run loop & MCP layer**
+- `cl_run-evidence-invariants` — touching anything that produces or reports a
+  verdict (counts, heal prompts/modes, run artifacts, exports, coverage math):
+  the rules that keep the output evidence rather than an agent's self-report.
 - `cl_add-mcp-tool` — add/remove/rename/move a tool in
-  `apps/web-server/mcp/tools.ts`, or fix tool-count / unknown-tool smoke fails.
+  `apps/web-server/src/mcp/tool-groups/`, size what a tool returns into the agent's
+  context, or fix tool-count / unknown-tool smoke fails.
 - `cl_sync-agent-surfaces` — after changing run-loop semantics (collision,
-  queue, boot sessions, heal claims, signal/rerun, pass counts): keep MCP
-  instructions, tool results, and shipped `SKILL.md` files in agreement.
+  queue, boot sessions, heal claims, signal/rerun, pass counts, the repair
+  rule): keep MCP instructions, tool results, and the shipped `SKILL.md` files
+  in agreement — enumerate them, never work from a memorized file list.
+- `cl_flight-progress-model` — changing flight records, the flights index, or any
+  UI deciding whether a feature "has flown": progress is derived from stage
+  evidence, not from index membership.
 - `cl_add-sample-feature` — editing sample features under `templates/project/`
   (feature.config.cjs, envsets, e2e specs); template changes ship via build.
 - `cl_async-task-ux` — adding a long-running background task (coverage,

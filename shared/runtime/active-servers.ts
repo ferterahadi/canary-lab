@@ -1,6 +1,8 @@
 import fs from 'fs'
+import os from 'os'
 import path from 'path'
-import { canaryLabHome, registryDir } from './workspace-registry'
+import { registryDir } from './workspace-registry'
+import { isUnderTempDir } from './temp-path'
 
 // A record of the Canary Lab UI/MCP HTTP servers currently listening, keyed by
 // project root. The single registered MCP bridge reads this to follow whatever
@@ -19,7 +21,23 @@ export interface ActiveServersFile {
   servers: ActiveServerEntry[]
 }
 
-export function activeServersPath(homeDir: string = canaryLabHome()): string {
+// Deliberately NOT scoped by CANARY_LAB_HOME. That variable isolates state that
+// is the USER'S — the workspace registry and the client registrations — so a
+// throwaway demo or smoke test can never clutter or re-point them. Liveness is a
+// different kind of fact: "a server is listening on this port right now" is true
+// of the machine, it prunes itself when the process dies, and hiding it is what
+// forced an MCP client to be launched from inside the workspace before it could
+// find its own server. A demo server that nobody can reach from an ordinary
+// session is not isolation, it is a discovery hole.
+//
+// CANARY_LAB_LIVE_REGISTRY_HOME exists for a sandbox that must not write to the
+// real home at all; tests pass `homeDir` explicitly instead.
+export function liveRegistryHome(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.CANARY_LAB_LIVE_REGISTRY_HOME?.trim()
+  return override ? override : os.homedir()
+}
+
+export function activeServersPath(homeDir: string = liveRegistryHome()): string {
   return path.join(registryDir(homeDir), 'active-servers.json')
 }
 
@@ -98,7 +116,8 @@ export function unregisterActiveServer(
 
 // Pick the live server the caller most likely means: an explicit project-root
 // env wins, else the server enclosing the cwd (nearest root), else the most
-// recently registered. Mirrors the bridge's existing autostart resolution
+// recently registered durable workspace — a temp project root only wins when it
+// is the sole live server. Mirrors the bridge's existing autostart resolution
 // priority so behaviour is consistent.
 export function resolveActiveServer(
   opts: {
@@ -128,7 +147,14 @@ export function resolveActiveServer(
     if (enclosing) return enclosing
   }
 
-  return [...servers].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+  // Nothing pinned this and nothing encloses the cwd, so the pick is a guess —
+  // make it the least destructive one. A server whose project root is under the
+  // OS temp dir is a demo or a smoke test: reachable, but a folder the OS may
+  // delete, so it loses to any durable workspace and wins only when it is the
+  // only thing running. Newest-first within each group keeps the previous
+  // behaviour for the ordinary single-workspace case.
+  const byRecency = [...servers].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  return byRecency.find((server) => !isUnderTempDir(server.projectRoot)) ?? byRecency[0]
 }
 
 function isAtOrUnder(child: string, parent: string): boolean {

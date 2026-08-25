@@ -1,0 +1,104 @@
+import { describe, expect, it } from 'vitest'
+import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
+import type { FlightIndexEntry } from '@shared/flights/types'
+import type { Feature } from '@/shared/api/types'
+import { derivePendingFeatures } from './pending-features'
+
+const flight = (over: Partial<FlightIndexEntry>): FlightIndexEntry => ({
+  id: 'fl_1',
+  createdAt: '2026-01-01T00:00:00Z',
+  flightId: 'fl_1',
+  feature: 'checkout',
+  repoPaths: ['/repo/shop'],
+  status: 'running',
+  currentStage: 'scout',
+  stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'pending' as const })),
+  updatedAt: '2026-01-01T00:00:00Z',
+  ...over,
+})
+
+const feature = (over: Partial<Feature>): Feature => ({
+  name: 'checkout',
+  repos: [],
+  envs: [],
+  ...over,
+})
+
+describe('derivePendingFeatures', () => {
+  it('mints a stub per non-terminal flight whose feature is not on disk yet', () => {
+    const stubs = derivePendingFeatures(
+      [
+        flight({ flightId: 'a', id: 'a', feature: 'login', status: 'running', group: 'Auth' }),
+        flight({ flightId: 'b', id: 'b', feature: 'signup', status: 'paused', pauseReason: 'queued', group: 'Auth' }),
+      ],
+      [],
+    )
+    expect(stubs.map((s) => s.name)).toEqual(['login', 'signup'])
+    expect(stubs.every((s) => s.group === 'Auth')).toBe(true)
+    // Carries the flight handle + live state onto the placeholder so the row can
+    // open the flight and render its status chip.
+    expect(stubs[0].pending).toEqual({ flightId: 'a', status: 'running', currentStage: 'scout' })
+    expect(stubs[1].pending).toEqual({ flightId: 'b', status: 'paused', currentStage: 'scout', pauseReason: 'queued' })
+    // Stubs are inert: no repos/envs so nothing downstream tries to boot them.
+    expect(stubs[0].repos).toEqual([])
+    expect(stubs[0].envs).toEqual([])
+  })
+
+  it('drops a flight whose feature already exists on disk — the real row wins', () => {
+    const stubs = derivePendingFeatures(
+      [flight({ feature: 'checkout', status: 'running' })],
+      [feature({ name: 'checkout', group: 'Shop' })],
+    )
+    expect(stubs).toEqual([])
+  })
+
+  it('never stubs a terminal flight (done/failed/aborted produced no live feature)', () => {
+    const stubs = derivePendingFeatures(
+      [
+        flight({ flightId: 'a', id: 'a', feature: 'done-f', status: 'done' }),
+        flight({ flightId: 'b', id: 'b', feature: 'failed-f', status: 'failed' }),
+        flight({ flightId: 'c', id: 'c', feature: 'aborted-f', status: 'aborted' }),
+      ],
+      [],
+    )
+    expect(stubs).toEqual([])
+  })
+
+  it('collapses duplicate flight records for the same feature to one stub', () => {
+    const stubs = derivePendingFeatures(
+      [
+        flight({ flightId: 'a', id: 'a', feature: 'checkout', status: 'running' }),
+        flight({ flightId: 'b', id: 'b', feature: 'checkout', status: 'paused' }),
+      ],
+      [],
+    )
+    expect(stubs).toHaveLength(1)
+    expect(stubs[0].pending?.flightId).toBe('a')
+  })
+
+  it('carries the checkpoint kind so the column can tell a question from a hand-off', () => {
+    const [handOff] = derivePendingFeatures(
+      [flight({ feature: 'scan', status: 'waiting-for-approval', checkpointKind: 'external-work' })],
+      [],
+    )
+    expect(handOff.pending?.checkpointKind).toBe('external-work')
+    // Absent rather than undefined-valued when the flight is not parked.
+    const [running] = derivePendingFeatures([flight({ feature: 'go', status: 'running' })], [])
+    expect(running.pending && 'checkpointKind' in running.pending).toBe(false)
+  })
+
+  it('carries stageProducer, so the column knows the row is nobody here to act on', () => {
+    const [external] = derivePendingFeatures(
+      [flight({ feature: 'scan', status: 'waiting-for-approval', stageProducer: 'external' })],
+      [],
+    )
+    expect(external.pending?.stageProducer).toBe('external')
+    const [plain] = derivePendingFeatures([flight({ feature: 'go', status: 'running' })], [])
+    expect(plain.pending && 'stageProducer' in plain.pending).toBe(false)
+  })
+
+  it('leaves group undefined when the flight carries none', () => {
+    const stubs = derivePendingFeatures([flight({ feature: 'solo', group: undefined })], [])
+    expect(stubs[0].group).toBeUndefined()
+  })
+})

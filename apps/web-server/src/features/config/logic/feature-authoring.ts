@@ -1,5 +1,4 @@
 import fs from 'fs'
-import os from 'os'
 import path from 'path'
 import {
   buildFeatureSkeletonScaffold,
@@ -9,13 +8,29 @@ import {
   type GeneratedFeatureFile,
 } from '../../../../../../shared/feature-scaffold'
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
-import { loadFeatures } from './feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import { checkoutBranch, findRepo, getGitStatus, resolveRepoPath } from '../../../shared/git-repo'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../config/logic/config-ast'
+import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../shared/config-ast'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+
+export { deleteFeatureDoc, linkFeatureDoc, writeFeatureDoc } from './feature-docs-authoring'
 
 export interface FeatureAuthoringContext {
   projectRoot: string
   featuresDir: string
+  /** The workspace bus, so a write announces ITSELF.
+   *
+   *  These writers are the one home for feature-directory state — the flight
+   *  stages, the config/coverage routes and the MCP authoring tools all land
+   *  here — but each caller used to publish the matching event afterwards, and
+   *  the three surfaces drifted (a doc written by a tool refreshed the Docs
+   *  rail; the same doc written by a stage sometimes didn't). The event belongs
+   *  to the write, not to whoever asked for it. File state has no store to hang
+   *  this off (the stores get shared/store-event-bridge.ts instead), so the
+   *  writer function IS the seam.
+   *
+   *  Optional: a caller with no bus (a pure unit test) still writes. */
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 export interface EnvFileSource {
@@ -106,6 +121,7 @@ export function createFeatureSkeleton(input: FeatureAuthoringContext & {
   for (const env of sanitizeEnvNames(input.envs)) {
     fs.mkdirSync(path.join(featureDir, 'envsets', env), { recursive: true })
   }
+  publishWorkspaceEvent(input.workspaceEvents, { type: 'feature-created', feature: input.feature })
   return {
     ok: true,
     feature: input.feature,
@@ -204,6 +220,7 @@ export function captureFeatureEnvFiles(ctx: FeatureAuthoringContext, input: {
   writeEnvsetsConfig(envsetsDir, cfg)
   syncFeatureEnvs(feature.featureDir, Array.from(envs).sort())
   const summary = getFeatureEnvsetSummary(ctx, input.feature)
+  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'envsets-changed', feature: feature.name })
   return { ok: true, captured, summary: summary! }
 }
 
@@ -231,15 +248,16 @@ export async function checkoutFeatureRepoBranch(ctx: FeatureAuthoringContext, in
   if (!repo) return { error: 'repo not found', statusCode: 404 }
   try {
     return {
-      ...await checkoutBranch(repo.localPath, input.branch.trim()),
+      ...await checkoutBranch(repo.localPath, input.branch.trim(), ctx.workspaceEvents),
       path: resolveRepoPath(repo.localPath),
       expectedBranch: repo.branch ?? null,
     }
   } catch (err) {
+    // A rejection value is `unknown`, so neither an Error shape nor a statusCode
+    // is guaranteed here — both fallbacks are real. Pinned in
+    // feature-authoring.mock.test.ts.
     return {
-      /* v8 ignore next 2 -- checkoutBranch rejects with Error instances. */
       error: err instanceof Error ? err.message : String(err),
-      /* v8 ignore next 3 -- checkoutBranch attaches statusCode to expected failures. */
       statusCode: typeof (err as { statusCode?: unknown }).statusCode === 'number'
         ? (err as { statusCode: number }).statusCode
         : 500,
@@ -260,6 +278,7 @@ export function deleteFeature(ctx: FeatureAuthoringContext, input: {
     return { ok: false, error: 'feature directory is outside the features root', featureDir }
   }
   fs.rmSync(featureDir, { recursive: true, force: true })
+  publishWorkspaceEvent(ctx.workspaceEvents, { type: 'feature-deleted', feature: input.feature })
   return { ok: true, featureDir }
 }
 
@@ -280,118 +299,6 @@ export function applyExternalDraftFiles(input: {
     written.push(target)
   }
   return { ok: true, written }
-}
-
-// Write a prose doc (distilled session, plan, notes) into a feature's `docs/`
-// directory. The one home for feature-scoped documentation — the scaffold
-// otherwise has no place for it, and the draft-apply path rejects non-spec
-// files. Create-or-replace: the caller picks a slug; re-writing the same
-// relPath overwrites. Markdown only; path-traversal hardened.
-export function writeFeatureDoc(ctx: FeatureAuthoringContext, input: {
-  feature: string
-  relPath: string
-  content: string
-}): { ok: true; writtenPath: string; relativePath: string } | { ok: false; error: string } {
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
-  if (typeof input.content !== 'string' || input.content.trim() === '') {
-    return { ok: false, error: 'content must be a non-empty string' }
-  }
-  const resolved = resolveDocRelPath(input.relPath)
-  if (!resolved.ok) return { ok: false, error: resolved.error }
-  const docsDir = path.join(feature.featureDir, 'docs')
-  const dest = path.join(docsDir, resolved.rel)
-  if (!isWithin(docsDir, dest)) return { ok: false, error: 'relPath must not escape the docs directory' }
-  fs.mkdirSync(path.dirname(dest), { recursive: true })
-  // Never write THROUGH a symlink into the user's original file — replace the
-  // link with a real file instead.
-  try {
-    if (fs.lstatSync(dest).isSymbolicLink()) fs.rmSync(dest)
-  } catch {
-    /* absent — plain create */
-  }
-  fs.writeFileSync(dest, input.content, 'utf8')
-  return { ok: true, writtenPath: dest, relativePath: path.relative(feature.featureDir, dest) }
-}
-
-// Symlink a LOCAL doc into a feature's docs/, so the user's original stays the
-// live source (edits show up on the next PRD summary without a re-import).
-// Falls back to a copy where symlinks aren't permitted (Windows without
-// developer mode) and reports which happened. Same traversal hardening as
-// writeFeatureDoc; the flight's docs stage and the Requirements UI both land
-// here — one home for linked docs.
-export function linkFeatureDoc(ctx: FeatureAuthoringContext, input: {
-  feature: string
-  /** Absolute or ~-relative path of the doc to link. */
-  targetPath: string
-  /** Name inside docs/ — defaults to the target's basename. */
-  relPath?: string
-}): { ok: true; writtenPath: string; relativePath: string; linked: boolean } | { ok: false; error: string } {
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
-  const expanded =
-    input.targetPath === '~' || input.targetPath.startsWith('~/')
-      ? path.join(os.homedir(), input.targetPath.slice(1))
-      : input.targetPath
-  let real: string
-  try {
-    real = fs.realpathSync(path.resolve(expanded))
-  } catch {
-    return { ok: false, error: `target does not exist: ${input.targetPath}` }
-  }
-  if (!fs.statSync(real).isFile()) return { ok: false, error: 'target is not a file' }
-  if (!/\.(md|markdown|txt)$/i.test(real)) {
-    return { ok: false, error: 'only .md / .markdown / .txt docs can be linked' }
-  }
-  const resolved = resolveDocRelPath(input.relPath ?? path.basename(real), { allowTxt: true })
-  if (!resolved.ok) return { ok: false, error: resolved.error }
-  const docsDir = path.join(feature.featureDir, 'docs')
-  const dest = path.join(docsDir, resolved.rel)
-  if (!isWithin(docsDir, dest)) return { ok: false, error: 'relPath must not escape the docs directory' }
-  if (isWithin(docsDir, real)) return { ok: false, error: 'target is already inside the docs directory' }
-  fs.mkdirSync(path.dirname(dest), { recursive: true })
-  try {
-    fs.lstatSync(dest)
-    fs.rmSync(dest) // replace an existing doc/link of the same name
-  } catch {
-    /* absent */
-  }
-  let linked = true
-  try {
-    fs.symlinkSync(real, dest)
-  } catch {
-    fs.copyFileSync(real, dest)
-    linked = false
-  }
-  return { ok: true, writtenPath: dest, relativePath: path.relative(feature.featureDir, dest), linked }
-}
-
-// Delete a SOURCE doc from a feature's `docs/`. Refuses generated artifacts
-// (`_`-prefixed: _prd-*, _coverage-*) — those are engine-managed, not user docs —
-// and is path-traversal hardened the same way as writeFeatureDoc.
-export function deleteFeatureDoc(ctx: FeatureAuthoringContext, input: {
-  feature: string
-  relPath: string
-}): { ok: true; relativePath: string } | { ok: false; error: string } {
-  const feature = findFeature(ctx.featuresDir, input.feature)
-  if (!feature?.featureDir) return { ok: false, error: 'feature not found' }
-  const resolved = resolveDocRelPath(input.relPath)
-  if (!resolved.ok) return { ok: false, error: resolved.error }
-  if (path.basename(resolved.rel).startsWith('_')) {
-    return { ok: false, error: 'cannot delete a generated artifact' }
-  }
-  const docsDir = path.join(feature.featureDir, 'docs')
-  const dest = path.join(docsDir, resolved.rel)
-  if (!isWithin(docsDir, dest)) return { ok: false, error: 'relPath must not escape the docs directory' }
-  // lstat, not exists: a dangling symlink (its target moved) must still be
-  // deletable. rmSync on a symlink removes the link only — never the target.
-  try {
-    fs.lstatSync(dest)
-  } catch {
-    return { ok: false, error: 'doc not found' }
-  }
-  fs.rmSync(dest)
-  return { ok: true, relativePath: path.relative(feature.featureDir, dest) }
 }
 
 export function externalTestFileRules(): Record<string, unknown> {
@@ -431,30 +338,8 @@ export function parseRedactedEntries(raw: string): RedactedEntry[] {
   return Array.from(keys).sort().map((key) => ({ key, value: '********' as const }))
 }
 
-function findFeature(featuresDir: string, featureName: string): FeatureConfig | undefined {
+export function findFeature(featuresDir: string, featureName: string): FeatureConfig | undefined {
   return loadFeatures(featuresDir).find((feature) => feature.name === featureName)
-}
-
-// Resolve a caller-supplied doc path to a path relative to the feature's
-// `docs/` dir. Accepts an optional leading `docs/` so both "notes.md" and
-// "docs/notes.md" land in the same place. Rejects absolute paths and
-// non-markdown extensions; traversal is caught by the `isWithin` guard at the
-// call site (so `../x.md` resolves and then fails the within-docs check).
-function resolveDocRelPath(
-  relPath: string,
-  opts?: { allowTxt?: boolean },
-): { ok: true; rel: string } | { ok: false; error: string } {
-  const trimmed = (relPath ?? '').trim()
-  if (!trimmed) return { ok: false, error: 'relPath required' }
-  if (path.isAbsolute(trimmed)) return { ok: false, error: 'relPath must be relative' }
-  const rel = trimmed.replace(/^\.?[/\\]?docs[/\\]/i, '')
-  // Written docs stay markdown-only (imports convert to .md); a LINKED doc
-  // keeps its original name, so plain-text sources are allowed there.
-  const extRe = opts?.allowTxt ? /\.(md|markdown|txt)$/i : /\.(md|markdown)$/i
-  if (!extRe.test(rel)) {
-    return { ok: false, error: opts?.allowTxt ? 'relPath must end in .md, .markdown or .txt' : 'relPath must end in .md or .markdown' }
-  }
-  return { ok: true, rel }
 }
 
 function readEnvsetsConfig(envsetsDir: string): EnvsetsConfigJson {
@@ -480,9 +365,7 @@ function syncFeatureEnvs(featureDir: string, envs: string[]): void {
   if (!configPath) return
   const source = fs.readFileSync(configPath, 'utf8')
   const parsed = readFeatureConfig(source)
-  /* v8 ignore next 2 -- loaded feature configs are object exports; this is defensive for stale hand edits. */
-  if (!parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) return
-  const next = { ...(parsed.value as Record<string, ConfigValue>), envs } as ConfigValue
+  const next: ConfigValue = { ...parsed.value, envs }
   fs.writeFileSync(configPath, writeFeatureConfig(source, next), 'utf8')
 }
 
@@ -524,7 +407,7 @@ function sanitizeSlotName(slot: string): string {
   return clean
 }
 
-function isWithin(root: string, candidate: string): boolean {
+export function isWithin(root: string, candidate: string): boolean {
   const rel = path.relative(path.resolve(root), path.resolve(candidate))
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }

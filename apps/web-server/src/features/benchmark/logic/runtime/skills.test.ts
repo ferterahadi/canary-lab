@@ -46,7 +46,7 @@ describe('loadSabotageSkills', () => {
       title: 'Broken delete contract',
       level: 'med',
       summary: 'an API contract lies',
-      appliesTo: ['example_todo_api'],
+      appliesTo: ['demo_inventory'],
     })
     const skills = loadSabotageSkills(root)
     expect(skills).toHaveLength(1)
@@ -55,7 +55,7 @@ describe('loadSabotageSkills', () => {
     expect(s.title).toBe('Broken delete contract')
     expect(s.level).toBe('med')
     expect(s.summary).toBe('an API contract lies')
-    expect(s.appliesTo).toEqual(['example_todo_api'])
+    expect(s.appliesTo).toEqual(['demo_inventory'])
     expect(s.description).toContain('Break an API contract')
     // recipe starts at the instructions and runs to EOF (so it carries the
     // Constraints / no-cheat block), but NOT the picker Description above it.
@@ -156,13 +156,13 @@ describe('sabotageSkillsForFeature', () => {
   })
 
   it('keeps only skills whose appliesTo includes the feature', () => {
-    const skills = [skill('a', ['example_todo_api']), skill('b', ['other'])]
-    expect(sabotageSkillsForFeature(skills, 'example_todo_api').map((s) => s.name)).toEqual(['a'])
+    const skills = [skill('a', ['demo_inventory']), skill('b', ['other'])]
+    expect(sabotageSkillsForFeature(skills, 'demo_inventory').map((s) => s.name)).toEqual(['a'])
   })
 
   it('treats empty appliesTo or "*" as applies-to-all', () => {
     const skills = [skill('all1', []), skill('all2', ['*']), skill('specific', ['other'])]
-    expect(sabotageSkillsForFeature(skills, 'example_todo_api').map((s) => s.name)).toEqual([
+    expect(sabotageSkillsForFeature(skills, 'demo_inventory').map((s) => s.name)).toEqual([
       'all1',
       'all2',
     ])

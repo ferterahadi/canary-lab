@@ -1,8 +1,10 @@
 import fs from 'fs'
 import { spawn as nodeSpawn, type ChildProcess } from 'child_process'
-import { modelArgs } from '../../agent-sessions/logic/agent-models'
-import { startIdleTimer, type IdleTimer } from '../../agent-sessions/logic/agent-idle-timer'
-import { resolveAgentBinary, isAgentKind, type HealAgent } from '../../agent-sessions/logic/agent-binary'
+import { modelArgs } from './agent-models'
+import { startIdleTimer, type IdleTimer } from './agent-idle-timer'
+import { resolveAgentBinary, isAgentKind, type HealAgent } from './agent-binary'
+import { agentJobStore } from './agent-jobs/store'
+import type { AgentJobRecordRef, AgentJobStatus } from './agent-jobs/types'
 
 // One home for spawning an agent CLI (the Portify model): pipe stdout/stderr,
 // reset the idle clock on every chunk (the liveness signal), kill on a genuine
@@ -10,17 +12,56 @@ import { resolveAgentBinary, isAgentKind, type HealAgent } from '../../agent-ses
 // (wizard, coverage annotate/PRD, eval rewrite, portify, sabotage) composes this
 // instead of re-implementing spawn+tee+idle. See the `cl_reuse-shared-logic` skill.
 
+// The tools a read-only agent is allowed to hold. `--tools` is a hard
+// capability allowlist, not a prompt instruction: the tools left out are absent
+// from the session entirely, so the agent cannot use them even under
+// `--dangerously-skip-permissions`. Verified against claude 2.1.220 — with this
+// list the agent reports having no Edit and no Bash, and a file it was told to
+// write is not created.
+//
+// It bounds BUILT-IN tools only. MCP tools come from the user's own config
+// whether or not this spawn asks for any, so the allowlist alone left a
+// read-only agent holding a browser — `--strict-mcp-config` below is what
+// actually closes that.
+export const CLAUDE_READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'] as const
+
+// Outbound tools no unattended canary agent has a use for. Every agent spawned
+// through here works on local code the user already has: a scout reads a repo,
+// portify edits ports, sabotage plants a bug. None of them need to fetch a URL
+// or run a search, and an unattended window is the worst time to allow one.
+//
+// `--disallowedTools` is evaluated BEFORE `--dangerously-skip-permissions`, so
+// the deny survives the bypass — verified against claude 2.1.220.
+export const CLAUDE_DENIED_TOOLS = ['WebFetch', 'WebSearch'] as const
+
 // The claude agentic argv — tools on, plus stream-json so stdout streams
 // token-by-token (claude `-p` is otherwise silent during its final-message
 // composition, which trips the idle clock). Consumed only for liveness + answer
 // recovery; the live view is the session JSONL tail.
+//
+// Permissions ARE bypassed here, and have to be: `-p` has no human to approve a
+// tool call, so a prompt would hang until the idle watchdog killed it. What the
+// bypass must not mean is unbounded power — an agent whose job is to read and
+// answer is spawned with `readOnly`, which takes the write tools away entirely
+// rather than trusting it not to use them.
 export function buildClaudeAgenticArgs(
   prompt: string,
-  opts: { model?: string | null; sessionId?: string; resume?: boolean } = {},
+  opts: { model?: string | null; sessionId?: string; resume?: boolean; readOnly?: boolean } = {},
 ): string[] {
   return [
     '-p', prompt,
     '--dangerously-skip-permissions',
+    // No MCP server this spawn did not ask for. `--tools` bounds the BUILT-IN
+    // tools only — measured on 2.1.220, a read-only spawn without this still
+    // arrived holding whatever MCP servers the user happens to have connected,
+    // `browser_run_code_unsafe` among them. None of these agents pass an
+    // `--mcp-config`, so the correct set is empty: they read the workspace and
+    // answer, and an unattended window is no place to inherit a human's
+    // connected tools. (The heal REPL is a different builder and keeps its
+    // Playwright MCP config.)
+    '--strict-mcp-config',
+    '--disallowedTools', CLAUDE_DENIED_TOOLS.join(','),
+    ...(opts.readOnly ? ['--tools', CLAUDE_READ_ONLY_TOOLS.join(',')] : []),
     '--output-format=stream-json',
     '--include-partial-messages',
     '--verbose',
@@ -34,6 +75,15 @@ export function buildClaudeAgenticArgs(
 export interface AgentProcessResult {
   code: number | null
   signal: NodeJS.Signals | null
+  /** Set when this child was stopped ON REQUEST (a per-agent stop, a flight
+   *  teardown, the shutdown sweep) rather than finishing.
+   *
+   *  The request is the authority, not the exit shape. A well-behaved CLI HANDLES
+   *  SIGTERM and exits cleanly, so `signal` is null and `code` looks ordinary —
+   *  measured live against claude, where a stopped scout returned partial output
+   *  that its stage then blamed on the agent ("did not return parseable JSON")
+   *  instead of on the user who stopped it. */
+  stopped?: 'user' | 'flight'
   /** Accumulated stdout (empty when `captureStdout` is false). */
   stdout: string
   /** Accumulated stderr (for error messages). */
@@ -78,6 +128,95 @@ export interface RunAgentProcessOpts {
   spawnImpl?: typeof nodeSpawn
   /** Override agent-kind → path resolution (tests). Defaults to resolveAgentBinary. */
   resolveBinary?: (agent: HealAgent) => string | null
+  /**
+   * Opt-in label that makes this child findable again after the fact, so an
+   * owner can stop it without having kept the handle. A flight passes its stage
+   * sidecar dir, which is why a paused stage can kill the agent it started
+   * several call layers down (the spawn happens inside `defaultSpawnAgent`, the
+   * PRD distiller, or the coverage annotator — none of which hand the handle
+   * back). Callers with no such need omit it and are unaffected, except that
+   * `stopAllAgentProcesses` sweeps them too on shutdown.
+   */
+  spawnScope?: string
+  /**
+   * Write a durable record for this spawn: `running` now, terminal on close. The
+   * RUNNER owns that lifecycle rather than each caller, so there is exactly one
+   * implementation of "started / done / failed / stopped" and a new agent feature
+   * inherits it by passing a descriptor.
+   *
+   * Optional because there are two genuine caller classes: work a flight owns
+   * (which has no record of its own), and jobs that already ARE records — the
+   * standalone coverage job's manifest is durable, reconciled and surfaced
+   * already, so a second per-spawn record would be the duplicate this repo's
+   * reuse rule exists to prevent.
+   */
+  record?: AgentJobRecordRef
+  /** Where records go. Required alongside `record`; absent → nothing is written. */
+  agentJobLogsDir?: string
+}
+
+/** How long a stopped child gets to exit on SIGTERM before it is SIGKILLed. An
+ *  agent CLI flushing its session JSONL needs a moment; one that has wedged must
+ *  not hold a pause (or a server shutdown) open forever. */
+const AGENT_STOP_GRACE_MS = 8_000
+
+interface LiveAgentProcess {
+  child: ChildProcess
+  scope: string | undefined
+  done: Promise<AgentProcessResult>
+  /** Set when a stop was requested, so the record settles `stopped` rather than
+   *  `failed` — "someone asked it to stop" and "it fell over" are different
+   *  endings, and a reader of the row cannot tell them apart from an exit code. */
+  stopRequestedBy?: 'user' | 'flight'
+}
+
+/** Every agent child currently running, keyed by the child itself so removal
+ *  needs nothing but the `child` already in scope at settle time.
+ *
+ *  This exists because "stop" used to mean "stop waiting". A flight pause could
+ *  abort its own poll while the CLI it spawned kept editing the user's repo, and
+ *  quitting the server orphaned those children entirely — nothing tracked them,
+ *  so `cleanup()` had nothing to kill. */
+const liveAgentProcesses = new Map<ChildProcess, LiveAgentProcess>()
+
+async function terminate(entry: LiveAgentProcess, graceMs: number, by: 'user' | 'flight' = 'flight'): Promise<void> {
+  entry.stopRequestedBy = by
+  try { entry.child.kill('SIGTERM') } catch { /* already dead */ }
+  const escalate = setTimeout(() => {
+    try { entry.child.kill('SIGKILL') } catch { /* already dead */ }
+  }, graceMs)
+  try {
+    // Awaiting `done` is the whole point: the caller promised the work stopped,
+    // so it must not return while the child is still exiting.
+    await entry.done
+  } catch {
+    // `done` rejects only on a spawn 'error' — the process never ran, so there
+    // is nothing left to wait for.
+  } finally {
+    clearTimeout(escalate)
+  }
+}
+
+/** Stop every live child spawned under `scope`, resolving once they have all
+ *  exited. Unknown scope → resolves immediately; a stage whose spawn already
+ *  finished (or which never spawned, e.g. one parked on an external hand-off)
+ *  is the normal no-op case, not an error. */
+export async function stopAgentProcesses(
+  scope: string,
+  opts: { graceMs?: number; by?: 'user' | 'flight' } = {},
+): Promise<void> {
+  const matches = [...liveAgentProcesses.values()].filter((entry) => entry.scope === scope)
+  await Promise.all(matches.map((entry) => terminate(entry, opts.graceMs ?? AGENT_STOP_GRACE_MS, opts.by ?? 'flight')))
+}
+
+/** Stop EVERY live agent child, scoped or not — the server-shutdown sweep.
+ *  Without it a SIGTERM to the server left its agents re-parented and running:
+ *  next-boot reconcile repaired the flight/portify RECORDS, but the processes
+ *  kept going, and a claude agent kept editing the user's repo after the app it
+ *  belonged to was gone. */
+export async function stopAllAgentProcesses(): Promise<void> {
+  const entries = [...liveAgentProcesses.values()]
+  await Promise.all(entries.map((entry) => terminate(entry, AGENT_STOP_GRACE_MS)))
 }
 
 // Every CLI spawned through here is a runner-spawned agent (benchmark sabotage,
@@ -115,14 +254,49 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
   let stderr = ''
   let idleTimer: IdleTimer | undefined
 
+  // Best-effort throughout: a record is bookkeeping, and losing it must never take
+  // the spawn down with it.
+  const jobs = opts.record && opts.agentJobLogsDir ? agentJobStore(opts.agentJobLogsDir) : null
+  if (jobs && opts.record) {
+    try {
+      jobs.save({
+        ...opts.record,
+        scope: opts.spawnScope,
+        startedAt: new Date().toISOString(),
+        status: 'running',
+      })
+    } catch { /* bookkeeping only */ }
+  }
+  const settleRecord = (
+    status: AgentJobStatus,
+    patch: Partial<{ exitCode: number; note: string; stoppedBy: 'user' | 'flight' }> = {},
+  ): void => {
+    if (!jobs || !opts.record) return
+    try {
+      jobs.patch(opts.record.jobId, { status, endedAt: new Date().toISOString(), ...patch })
+    } catch { /* bookkeeping only */ }
+  }
+
   const done = new Promise<AgentProcessResult>((resolve, reject) => {
     let settled = false
     const finish = (err: Error | null, code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return
       settled = true
       idleTimer?.stop()
-      if (err) reject(err)
-      else resolve({ code, signal, stdout, stderr })
+      // Read the stop intent BEFORE dropping the registry entry — it is where the
+      // "someone asked" flag lives, and it is what separates a `stopped` ending
+      // from a `failed` one for a reader who has only the row.
+      const stoppedBy = liveAgentProcesses.get(child)?.stopRequestedBy
+      liveAgentProcesses.delete(child)
+      if (err) {
+        settleRecord('failed', { note: `The agent could not be launched: ${err.message}` })
+        reject(err)
+        return
+      }
+      if (stoppedBy) settleRecord('stopped', { stoppedBy, note: 'Stopped on request; it did not finish its work.' })
+      else if (code === 0) settleRecord('done')
+      else settleRecord('failed', { ...(code === null ? {} : { exitCode: code }), note: `The agent exited ${signal ? `on ${signal}` : `with code ${code}`}.` })
+      resolve({ code, signal, stdout, stderr, ...(stoppedBy ? { stopped: stoppedBy } : {}) })
     }
     // Register the lifecycle listeners BEFORE starting the idle timer: a mocked
     // (or pathologically fast) timer could fire onIdle → kill → 'close'
@@ -151,6 +325,12 @@ export function runAgentProcess(opts: RunAgentProcessOpts): AgentProcessHandle {
       onIdle: () => { opts.onIdle?.(); try { child.kill('SIGTERM') } catch { /* already dead */ } },
     })
   })
+
+  // Registered unconditionally: nothing above can have settled yet. The only
+  // paths to `finish` are the child's own 'close'/'error' events and the idle
+  // timer, and the timer is a setInterval — so the earliest any of them can fire
+  // is a later tick, by which point this entry exists for `finish` to delete.
+  liveAgentProcesses.set(child, { child, scope: opts.spawnScope, done })
 
   try { child.stdin?.end(useStdin ? opts.stdin : undefined) } catch { /* ignore */ }
 

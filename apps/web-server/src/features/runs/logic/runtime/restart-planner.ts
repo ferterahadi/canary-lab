@@ -1,5 +1,5 @@
 import path from 'path'
-import type { ServiceSpec } from './orchestrator'
+import type { ServiceSpec } from './run-orchestrator-types'
 
 // Pure path-prefix matching: given the absolute paths the heal agent claims to
 // have changed (from a `.restart` signal body), determine which services need

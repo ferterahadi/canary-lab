@@ -4,23 +4,30 @@
 // module just re-exports it for feature-local imports.
 
 export {
+  CHECKPOINT_OPTIONS,
   FLIGHT_STAGE_KEYS,
+  STAGE_DEPENDS_ON,
   ACTIVE_FLIGHT_STATUSES,
   isActiveFlightStatus,
   isTerminalFlightStatus,
 } from '../../../../../../shared/flights/types'
 
 export type {
+  AgentActivity,
   FlightStageKey,
   FlightStageStatus,
   FlightCheckpointKind,
   FlightCheckpoint,
   FlightCheckpointResponse,
+  ExternalWorkCheckpointData,
   FlightStage,
+  FlightStageErrorDetail,
   FlightStatus,
   FlightOptions,
   FlightManifest,
   FlightIndexEntry,
   FlightStageEntryOption,
   FlightEntryOptions,
+  PrdSourceAttempt,
+  PrdSourceCheckpointData,
 } from '../../../../../../shared/flights/types'

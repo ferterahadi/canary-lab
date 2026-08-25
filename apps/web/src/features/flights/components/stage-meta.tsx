@@ -1,5 +1,14 @@
-import type { FlightManifest, FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '../../../shared/api/client'
-import { StatusDot } from '../../config/components/atoms'
+import type { ReactNode } from 'react'
+import type { FlightStage, FlightStageKey, FlightStageStatus, SpecsCoverageProgress } from '@/shared/api/client'
+import { capitalizeFirst } from '@/shared/lib/format'
+import { StatusDot } from '@/shared/ui/atoms'
+import { Chip } from '@/shared/ui/StatusChip'
+
+export { evaluationTaskId, FactTile, FactsGrid, plural, stageFacts } from './StageFacts'
+export type { StageBandData, StageFact } from './StageFacts'
+export { STAGE_COMPANION, stageRailRows, stageRowKey } from './StageRail'
+export type { StageRailRow } from './StageRail'
+export { formatDuration, formatStageDuration, healEndLine, healEndShort, stageStateLine, stageWorkMs } from './StageStatusLines'
 
 // One home for the flight-stage presentation vocabulary (R14/R16/R18): the
 // user-facing stage labels, the status tone/icon treatment, the shared status
@@ -7,36 +16,78 @@ import { StatusDot } from '../../config/components/atoms'
 // trailer column leads with. Stage KEYS stay canonical in the store/MCP/CLI —
 // only the display layer speaks outcome language.
 
-/** Stage key → what the stage does for the user (outcome, not implementation).
- *  similarity/scout/env-capture named per the R18 feedback table; scaffold and
- *  portify describe their verified function (create the feature in the
- *  workspace / make services port-injectable for concurrent runs). */
-export const STAGE_LABEL: Record<FlightStageKey, string> = {
-  'similarity': 'Existing feature found',
-  'scout': 'Repo scan',
-  'scaffold': 'Feature setup',
-  'env-capture': 'Environment snapshot',
-  'docs': 'Docs extraction',
-  'prd-summary': 'Requirements summary',
-  'specs-coverage': 'Test authoring & coverage',
-  'portify': 'Parallel readiness',
-  'run': 'Test Run',
-  'heal': 'Auto-repair',
-  'evaluation-export': 'Evaluation Report',
+/** Stage key → user-facing label. Moved to shared/flights/stage-labels.ts so
+ *  the server's own user-facing messages (stage-entry rejections) speak the
+ *  same names the rail shows instead of raw stage keys; re-exported here so the
+ *  flight components keep their one import home. */
+export { FLIGHT_STAGE_LABEL as STAGE_LABEL, flightStageLabel as stageLabel } from '@shared/flights/stage-labels'
+
+/** The stage pane's card column. Every panel, facts grid, error/paused card and
+ *  the Test Run hero share it, so a stage reads as ONE column of like blocks
+ *  instead of a ragged pile of shrink-wrapped boxes.
+ *  Widened from 76ch: the Test Run stage now shows each failure's wrapped title
+ *  and its assertion error, and at 76ch that content was squeezed into the left
+ *  third of a pane with nothing in the rest of it. Prose (the state line, panel
+ *  blurbs) deliberately stays at the narrower 76ch reading measure. */
+export const STAGE_COLUMN = 'w-full max-w-[92ch]'
+
+/** The Test Run hero's row geometry, in ONE place. Four blocks stack inside that
+ *  card — the run identity row, the stats line, the failing-test rows, and the
+ *  skeleton that stands in for all three — and each used to state its own gutter
+ *  and dot size. RunRow sat at `px-3` with a 0.55rem dot while a failure row sat
+ *  at `px-1.5` with a 6px one, so the card had two left edges 6px apart and the
+ *  eye read the failures as belonging to a different list.
+ *
+ *  A failure's dot stays visually smaller (it IS a subordinate row) but is
+ *  centred in a `DOT` -wide lane, so the smaller dot shares the run row's dot
+ *  centre and every title in the card starts on `TEXT_INDENT`. */
+export const HERO_ROW = {
+  /** RunRow's `px-3`. */
+  GUTTER: '0.75rem',
+  /** RunRow's StatusDot — also the lane a smaller row dot is centred in. */
+  DOT: '0.55rem',
+  /** RunRow's `gap-2`. */
+  GAP: '0.5rem',
+  /** Where every title/meta/stats line in the hero begins. */
+  TEXT_INDENT: 'calc(0.75rem + 0.55rem + 0.5rem)',
+} as const
+
+/** The column as a wrapper, so a panel with two render branches cannot cap one
+ *  and forget the other. Six evidence panels wrapped their SETTLED output in a
+ *  bare `<div className={STAGE_COLUMN}>` and returned their skeleton unwrapped,
+ *  so a working stage showed pane-wide placeholders that visibly narrowed the
+ *  moment real figures arrived — the exact opposite of the R83 promise that a
+ *  value lands in the slot its placeholder held. */
+export function StageColumn({ children }: { children: ReactNode }) {
+  return <div className={STAGE_COLUMN}>{children}</div>
 }
 
-export function stageLabel(key: string): string {
-  return (STAGE_LABEL as Record<string, string>)[key] ?? key
+/** One-line "what this stage does", in plain language — shown in the flight
+ *  launcher's full-flight preview so the pipeline explains itself, instead of
+ *  every locked row repeating the same "unlocks after the first flight" note
+ *  (that lock is stated once, on the section header). */
+export const STAGE_BLURB: Record<FlightStageKey, string> = {
+  'similarity': 'Runs every step below, start to finish.',
+  'scout': 'Reads your repo to learn what it is built with and how it starts.',
+  'scaffold': 'Creates the test suite in your workspace, with settings and a start command.',
+  'env-capture': 'Copies the settings the app needs to start.',
+  'docs': 'Collects the documents that describe what the feature should do.',
+  'prd-summary': 'Turns those documents into a short list of things to test.',
+  'specs-coverage': 'Writes tests and matches them to requirements until all are covered.',
+  'portify': 'Lets each service take its port from settings, so two runs can go at once.',
+  'run': 'Starts the app and runs the tests, fixing failures as they come up.',
+  'heal': 'Fixes failures by editing the app, then runs the tests again.',
+  'evaluation-export': 'Packs the finished run into a report you can download.',
 }
 
 /** The single status hue map — rail, chip, mini rail, and any artifact surface
  *  all read this so a colour means the same thing everywhere. */
 export function stageStatusTone(status: FlightStageStatus | undefined): string {
-  if (status === 'done') return 'rgb(52, 211, 153)'
-  if (status === 'running') return 'rgb(56, 189, 248)'
-  if (status === 'waiting-for-approval') return 'rgb(251, 191, 36)'
+  if (status === 'done') return 'var(--success)'
+  if (status === 'running') return 'var(--running)'
+  if (status === 'waiting-for-approval') return 'var(--warning)'
   if (status === 'failed') return 'var(--danger)'
-  if (status === 'skipped') return 'color-mix(in srgb, rgb(52, 211, 153) 55%, var(--text-muted))'
+  if (status === 'skipped') return 'color-mix(in srgb, var(--success) 55%, var(--text-muted))'
   return 'var(--text-muted)'
 }
 
@@ -49,9 +100,11 @@ export const STAGE_ICON: Record<FlightStageStatus, string> = {
   'skipped': '↷',
 }
 
-const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
+export const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
   'pending': 'pending',
-  'running': 'generating',
+  // "running", not "generating": this label sits on EVERY running stage, and a
+  // repo scan, a boot check or a live Playwright run generates nothing.
+  'running': 'running',
   'waiting-for-approval': 'needs approval',
   'done': 'done',
   'failed': 'failed',
@@ -64,26 +117,119 @@ const STAGE_STATUS_LABEL: Record<FlightStageStatus, string> = {
 export function StageStatusChip({ status }: { status: FlightStageStatus }) {
   const tone = stageStatusTone(status)
   return (
-    <span
-      data-testid="stage-status-chip"
-      className="inline-flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 text-[10.5px] font-medium"
-      style={{ color: tone, border: `1px solid color-mix(in srgb, ${tone} 35%, transparent)` }}
-    >
-      {status === 'running'
+    <Chip
+      testId="stage-status-chip"
+      chrome="fill"
+      tone={tone}
+      fontSize={10}
+      icon={status === 'running'
         ? <StatusDot state="running" className="shrink-0" />
         : <span aria-hidden="true">{STAGE_ICON[status]}</span>}
-      {STAGE_STATUS_LABEL[status]}
-    </span>
+      label={capitalizeFirst(STAGE_STATUS_LABEL[status])}
+    />
   )
 }
 
-function num(ev: Record<string, unknown>, key: string): number | null {
+// ─── Checkpoint display vocabulary (R71/W3) ─────────────────────────────────
+// Server checkpoint kinds and option KEYS stay canonical (MCP/CLI/four-surface
+// parity — respond_flight_checkpoint still takes the raw key). This map is the
+// display layer only: outcome language for card titles and option buttons,
+// mirroring the STAGE_LABEL pattern. An unmapped kind/option falls back to its
+// raw key, so new server checkpoints degrade readable, never blank.
+
+const CHECKPOINT_TITLE: Record<string, string> = {
+  'similarity-choice': 'Existing suite found — what should this flight do?',
+  'config-approval': 'Does this setup look right?',
+  'missing-env': 'Some settings are missing',
+  'prd-source': 'Where should requirements come from?',
+  'coverage-stuck': 'Coverage stopped short of the target',
+  'portify-gate': 'Make this suite safe to run twice at once?',
+  'portify-apply': 'Save these port changes?',
+  'run-failed': 'The test run did not pass',
+  'export-mode': 'How should the report be built?',
+  // StageDetail presents this protocol checkpoint as running Activity, not a
+  // decision card. Keep the wire vocabulary labelled for any consumer that
+  // still asks for a generic checkpoint title.
+  'external-work': 'External agent work',
+}
+
+const CHECKPOINT_OPTION_LABEL: Record<string, Record<string, string>> = {
+  'similarity-choice': {
+    'rerun': 'Run existing tests',
+    'enhance': 'Update it, then run',
+    'new': 'Start a fresh suite',
+  },
+  'config-approval': {
+    'approve': 'Looks right',
+    'redraft': 'Scan again and redo it',
+  },
+  'missing-env': {
+    'retry': 'Re-check the files',
+    'waive': 'Capture only what exists',
+  },
+  'prd-source': {
+    'continue': 'Use the docs I\'ve added',
+    'collect-repo-docs': 'Collect docs from the repos',
+    'infer-from-diff': 'Infer from the git diff',
+  },
+  'coverage-stuck': {
+    'accept-partial': 'Accept this coverage',
+    'retry': 'Try another pass',
+  },
+  // These protocol answers are sent by the agent that owns the hand-off. They
+  // stay labelled for display-vocabulary completeness, but Flight Page does
+  // not render them as buttons for the person monitoring the run.
+  'external-work': {
+    'submit': 'Submit the agent result',
+    'run-internally': 'Run this step in Canary Lab',
+  },
+  // The wire key stays 'apply' (MCP/autopilot parity) but the ACTION is a save:
+  // the verified diff is persisted as the feature's overlay — nothing lands in
+  // the product repos; runs apply it into per-run worktrees at boot and reverse
+  // it at teardown. Mirrors the wizard's "Save overlay" button so the same
+  // The upfront ask, before any agent/double-boot cost is spent. Autopilot
+  // answers 'run'; a human can bail here instead of 45 minutes later.
+  'portify-gate': {
+    'run': 'Yes — make it parallel-ready',
+    'skip': 'Skip it (runs go one at a time)',
+  },
+  // decision reads the same everywhere. 'revise' sends feedback back to the
+  // agent for another edit + re-verify pass (the checkpoint re-parks with the
+  // new diff); 'cancel' discards the worktree edits and SKIPS the stage — the
+  // flight proceeds without parallel readiness (declining is a decision, not
+  // a failure; a later flight retries).
+  'portify-apply': {
+    'apply': 'Save the port changes',
+    'revise': 'Request changes',
+    'cancel': 'Skip it (throw the changes away)',
+  },
+  'run-failed': {
+    'rerun': 'Start a new run',
+    'export-as-is': 'Build the report anyway',
+  },
+  'export-mode': {
+    'raw': 'Straight from the numbers (fast)',
+    'localized': 'Written up by an agent (slower)',
+  },
+}
+
+export function checkpointTitle(kind: string): string {
+  return CHECKPOINT_TITLE[kind] ?? kind
+}
+
+export function checkpointOptionLabel(kind: string, option: string): string {
+  return CHECKPOINT_OPTION_LABEL[kind]?.[option] ?? option
+}
+
+export function num(ev: Record<string, unknown>, key: string): number | null {
   return typeof ev[key] === 'number' ? (ev[key] as number) : null
 }
-function str(ev: Record<string, unknown>, key: string): string | null {
+
+export function str(ev: Record<string, unknown>, key: string): string | null {
   return typeof ev[key] === 'string' ? (ev[key] as string) : null
 }
-function evidenceOf(stage: { evidence?: unknown } | undefined): Record<string, unknown> {
+
+export function evidenceOf(stage: { evidence?: unknown } | undefined): Record<string, unknown> {
   return (stage?.evidence ?? {}) as Record<string, unknown>
 }
 
@@ -98,402 +244,38 @@ export function specsCoverageProgress(
   return p && typeof p.pass === 'number' && typeof p.phase === 'string' && Array.isArray(p.passes) ? p : null
 }
 
-// ─── Rail rows (R21/R22/R32/R33) ────────────────────────────────────────────
-// The rail is a lens for the USER, not a dump of the conductor's internals:
-// - similarity is plumbing — visible ONLY when it needs a human (parked on the
-//   similarity-choice checkpoint) or failed; a silent pass/skip never shows.
-// - three stage PAIRS are one step in the user's mental model and merge into
-//   one row keyed by the pair's first stage; the companion's status folds in.
-//   Store/MCP/CLI keys are untouched:
-//     run + heal          → "Test Run"       (run my tests, repair what breaks)
-//     scaffold + env-capture → "Feature setup" (create it, prove it boots)
-//     docs + prd-summary  → "Requirements"   (collect docs, distill them)
-
-export interface StageRailRow {
-  key: FlightStageKey
-  label: string
-  status: FlightStageStatus
-}
-
-/** Pair-merged rail rows: row key → the companion stage folded into it. The
- *  companion never gets its own row; its status/evidence/checkpoint surface
- *  through the pair (StageDetail reads it via this map too). */
-export const STAGE_COMPANION: Partial<Record<FlightStageKey, FlightStageKey>> = {
-  'run': 'heal',
-  'scaffold': 'env-capture',
-  'docs': 'prd-summary',
-}
-const FOLDED_KEYS = new Set<string>(Object.values(STAGE_COMPANION))
-
-/** Merged label where the pair reads as one outcome the individual stage
- *  labels don't cover (the stage-entry menu still names each stage alone). */
-const MERGED_LABEL: Partial<Record<FlightStageKey, string>> = {
-  'scaffold': 'Feature setup',
-  'docs': 'Requirements',
-}
-
-function mergedPairStatus(
-  primary: { status: FlightStageStatus } | undefined,
-  companion: { status: FlightStageStatus } | undefined,
-): FlightStageStatus {
-  const p = primary?.status ?? 'pending'
-  const c = companion?.status ?? 'pending'
-  if (p === 'running' || c === 'running') return 'running'
-  if (p === 'waiting-for-approval' || c === 'waiting-for-approval') return 'waiting-for-approval'
-  if (p === 'failed' || c === 'failed') return 'failed'
-  return p
-}
-
-export function stageRailRows(
-  stages: Array<{ key: string; status: FlightStageStatus }>,
-): StageRailRow[] {
-  const rows: StageRailRow[] = []
-  for (const s of stages) {
-    const key = s.key as FlightStageKey
-    if (key === 'similarity') {
-      if (s.status !== 'waiting-for-approval' && s.status !== 'failed') continue
-      rows.push({ key, label: s.status === 'failed' ? 'Pre-flight check' : STAGE_LABEL.similarity, status: s.status })
-      continue
-    }
-    if (FOLDED_KEYS.has(key)) continue // folded into its pair row
-    const companionKey = STAGE_COMPANION[key]
-    if (companionKey) {
-      const companion = stages.find((x) => x.key === companionKey)
-      rows.push({ key, label: MERGED_LABEL[key] ?? stageLabel(key), status: mergedPairStatus(s, companion) })
-      continue
-    }
-    rows.push({ key, label: stageLabel(key), status: s.status })
-  }
-  return rows
-}
-
-// ─── Stage facts (R20) ──────────────────────────────────────────────────────
-// One uniform template for every stage: the 2–4 things the user cares about at
-// that stage, as label→value rows. Everything else is the details disclosure
-// or the drill-through page's job.
-
-export interface StageFact {
-  label: string
-  value: string
-  tone?: 'good' | 'warn' | 'bad'
-  /** Render the value in the mono face (paths, filenames, commands). */
-  mono?: boolean
-  /** Hover detail when the visible value is a shortened form (e.g. a path). */
-  title?: string
-}
-
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? '' : 's'}`
-}
-
-function baseName(p: string): string {
-  return p.split('/').pop() ?? p
-}
-
-/** Boot-proof fact from the env-capture evidence (rendered on the merged
- *  Feature setup row — R32). */
-function bootCheckFacts(envEv: Record<string, unknown>): StageFact[] {
-  const captured = num(envEv, 'captured')
-  const boot = envEv.boot as { services?: Array<{ name?: string; status?: string }> } | undefined
-  const services = boot?.services ?? []
-  const failed = services.filter((s) => s.status === 'timeout')
-  return [
-    ...(captured != null ? [{ label: 'Env files', value: plural(captured, 'file') }] : []),
-    ...(services.length > 0
-      ? [{
-          label: 'Boot check',
-          value: failed.length === 0
-            ? `${services.map((s) => s.name).filter(Boolean).join(', ')} healthy`
-            : `${failed.map((s) => s.name).filter(Boolean).join(', ')} failed`,
-          tone: failed.length === 0 ? 'good' as const : 'bad' as const,
-        }]
-      : []),
-  ]
-}
-
-const MAX_LIST_FACTS = 5
-
-export function stageFacts(
-  stage: FlightStage,
-  flight: FlightManifest,
-  companion?: FlightStage,
-): StageFact[] {
+/** The portify workflow id, live or settled: evidence carries it once the
+ *  stage settles; progress pins it the moment the workflow starts. The agent
+ *  editing phase is the stage's longest — the embedded agent timeline needs
+ *  the id DURING it; the drill-through uses the same pin once the stage
+ *  settles or parks (drills are hidden while a stage runs). */
+export function portifyWorkflowId(stage: { key: string; evidence?: unknown; progress?: unknown } | null | undefined): string | null {
+  if (!stage || stage.key !== 'portify') return null
   const ev = evidenceOf(stage)
-  const cev = evidenceOf(companion)
-  if (stage.status === 'pending') return []
-  switch (stage.key) {
-    case 'similarity': {
-      const match = ev.match as Record<string, unknown> | null | undefined
-      return match && typeof match.feature === 'string'
-        ? [{ label: 'Matches', value: match.feature }]
-        : []
-    }
-    case 'scout': {
-      // R57: repos + intent render as the RepoScanPanel's cards; the facts keep
-      // only what the scan itself discovered.
-      const envFiles = Array.isArray(ev.envFiles) ? (ev.envFiles as unknown[]).filter((f): f is string => typeof f === 'string') : []
-      return envFiles.length > 0
-        ? [{ label: 'Env files', value: envFiles.map(baseName).join(', '), mono: true, title: envFiles.join('\n') }]
-        : []
-    }
-    case 'scaffold': {
-      // R32: the merged Feature setup row — identity + the env/boot proof from
-      // the folded env-capture companion. The config digest (run command,
-      // ports, Playwright) renders beside these from the live feature config.
-      const dir = str(ev, 'featureDir')
-      return [
-        { label: 'Feature', value: flight.feature },
-        ...(ev.reused ? [{ label: 'Setup', value: 'Reused existing', tone: 'good' as const }] : []),
-        ...(dir ? [{ label: 'Location', value: dir.split('/').slice(-2).join('/'), mono: true, title: dir }] : []),
-        ...bootCheckFacts(cev),
-      ]
-    }
-    case 'env-capture':
-      // Folded into the scaffold row (R32); kept for completeness if a caller
-      // renders the stage standalone.
-      return bootCheckFacts(ev)
-    case 'docs': {
-      // R33: the merged Requirements row — the collected docs by name (path on
-      // hover), the source rung, and the distilled requirement count from the
-      // folded prd-summary companion.
-      const docs = Array.isArray(ev.docs) ? (ev.docs as unknown[]).filter((d): d is string => typeof d === 'string') : []
-      const source = str(ev, 'source')
-      const count = num(cev, 'requirementCount')
-      const shown = docs.slice(0, MAX_LIST_FACTS)
-      return [
-        ...shown.map((d, i) => ({
-          label: docs.length === 1 ? 'Doc' : `Doc ${i + 1}`,
-          value: d,
-          mono: true,
-          title: `features/${flight.feature}/docs/${d}`,
-        })),
-        ...(docs.length > shown.length ? [{ label: ' ', value: `+${docs.length - shown.length} more` }] : []),
-        ...(source ? [{ label: 'Source', value: source }] : []),
-        ...(count != null ? [{ label: 'Requirements', value: String(count) }] : []),
-      ]
-    }
-    case 'prd-summary': {
-      const count = num(ev, 'requirementCount')
-      return count != null ? [{ label: 'Requirements', value: String(count) }] : []
-    }
-    case 'specs-coverage': {
-      const p = specsCoverageProgress(stage)
-      // Evidence lands when the stage settles; while the loop runs the same
-      // facts come from the live progress shape.
-      const pct = num(ev, 'coveragePct') ?? p?.coveragePct ?? null
-      const gapRows = Array.isArray(ev.gaps) ? (ev.gaps as Array<{ gap?: string }>) : null
-      const gaps = gapRows ? gapRows.length : p?.gapsOpen ?? null
-      // R35: name the gap kinds, not just the count ("2 untested, 1 path-incomplete").
-      const byKind = new Map<string, number>()
-      for (const g of gapRows ?? []) {
-        if (typeof g.gap === 'string') byKind.set(g.gap, (byKind.get(g.gap) ?? 0) + 1)
-      }
-      const breakdown = [...byKind].map(([kind, n]) => `${n} ${kind}`).join(', ')
-      return [
-        ...(stage.status === 'running' && p ? [{ label: 'Pass', value: `${p.pass} of ${p.maxPasses}` }] : []),
-        ...(pct != null ? [{ label: 'Coverage', value: `${pct}%`, tone: pct >= flight.opts.coverageTarget ? 'good' as const : 'warn' as const }] : []),
-        ...(gaps != null
-          ? [{
-              label: 'Open gaps',
-              value: gaps === 0 ? '0' : breakdown ? `${gaps} — ${breakdown}` : String(gaps),
-              tone: gaps === 0 ? 'good' as const : 'warn' as const,
-            }]
-          : []),
-        ...(stage.status !== 'running' && p && p.passes.length > 0 ? [{ label: 'Passes', value: String(p.passes.length) }] : []),
-      ]
-    }
-    case 'portify':
-      // R35: verdict → proof → what changed, in that order.
-      if (stage.status === 'skipped') return [{ label: 'Parallel', value: 'Already verified — safe for parallel runs', tone: 'good' }]
-      if (typeof ev.workflowId !== 'string') return []
-      return [
-        { label: 'Parallel', value: 'Safe — services boot side by side', tone: 'good' },
-        { label: 'Proof', value: 'Concurrent double boot, both green' },
-        { label: 'Edits', value: ev.edits ? 'Applied (overlay)' : 'None needed' },
-      ]
-    case 'run': {
-      const runStatus = str(ev, 'status') ?? flight.runVerdict
-      const cycles = num(ev, 'healCycles') ?? num(cev, 'healCycles')
-      const healMode = str(cev, 'healMode')
-      return [
-        ...(runStatus ? [{ label: 'Verdict', value: runStatus, tone: runStatus === 'passed' ? 'good' as const : 'bad' as const }] : []),
-        ...(cycles != null ? [{ label: 'Repairs', value: cycles === 0 ? 'None needed' : plural(cycles, 'cycle'), tone: cycles === 0 ? 'good' as const : undefined }] : []),
-        ...(healMode ? [{ label: 'Repair agent', value: healMode === 'external' ? 'External client' : 'Canary (this server)' }] : []),
-      ]
-    }
-    case 'evaluation-export': {
-      const zip = str(ev, 'evaluationZip') ?? flight.links?.evaluationZip
-      return zip ? [{ label: 'Archive', value: zip.split('/').pop() ?? zip, mono: true, title: zip }] : []
-    }
-    default:
-      return []
-  }
+  if (typeof ev.workflowId === 'string') return ev.workflowId
+  const prog = (stage.progress ?? {}) as Record<string, unknown>
+  return typeof prog.workflowId === 'string' ? prog.workflowId : null
 }
 
-/** Compact wall-clock duration between two ISO stamps ("4s", "2m 14s",
- *  "1h 03m") — the rail rows and the summary strip both render it (R61). */
-export function formatDuration(startedAt?: string, endedAt?: string): string | null {
-  if (!startedAt || !endedAt) return null
-  const ms = Date.parse(endedAt) - Date.parse(startedAt)
-  if (!Number.isFinite(ms) || ms < 0) return null
-  const s = Math.round(ms / 1000)
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
+/** The live phase mirror the portify adapter republishes on change (see
+ *  PortifyStageProgress). Empty object for settled/older flights. */
+export function portifyProgress(stage: { progress?: unknown }): Record<string, unknown> {
+  return (stage.progress ?? {}) as Record<string, unknown>
 }
 
-const FACT_TONE: Record<NonNullable<StageFact['tone']>, string> = {
-  good: 'rgb(52, 211, 153)',
-  warn: 'rgb(251, 191, 36)',
-  bad: 'var(--danger)',
+/** Fact-tile label per live portify phase (PortifyStatus, matched by string —
+ *  an unknown/new phase renders as itself rather than hiding). */
+export const PORTIFY_PHASE_LABEL: Record<string, string> = {
+  'planning': 'Planning the edits',
+  'editing': 'Agent editing services',
+  'verifying': 'Double-boot verifying',
+  'ready-to-save': 'Verified — review pending',
 }
 
-/** The one facts renderer every stage uses (R20): quiet label → value rows. */
-export function FactsGrid({ facts }: { facts: StageFact[] }) {
-  if (facts.length === 0) return null
-  return (
-    <dl data-testid="stage-facts" className="m-0 grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-4 gap-y-1">
-      {facts.map((f, i) => (
-        <div key={`${f.label}-${i}`} className="contents">
-          <dt className="text-[10.5px] font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>{f.label}</dt>
-          <dd
-            className="m-0 truncate text-[12px]"
-            title={f.title ?? f.value}
-            style={{
-              color: f.tone ? FACT_TONE[f.tone] : 'var(--text-primary)',
-              ...(f.mono ? { fontFamily: 'var(--font-mono)', fontSize: 11.5 } : {}),
-            }}
-          >
-            {f.value}
-          </dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
-/** "Where are we" — one plain-language line per stage per status (R16 Q1).
- *  Folds the load-bearing evidence facts (scan count, coverage %, heal cycles)
- *  into the sentence; the raw evidence stays in the facts and the log. Never
- *  returns an empty string for a settled or running stage.
- *
- *  For a merged pair row (R22/R32/R33) pass the companion: while the companion
- *  is the active/blocking half its line speaks ("Repair agent is fixing…",
- *  "Capturing env files…"); once both settle the pair gets one combined line. */
-export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
-  const ev = (stage.evidence ?? {}) as Record<string, unknown>
-  const { key, status } = stage
-
-  // The companion is the half that needs narrating right now.
-  if (companion && (companion.status === 'running' || companion.status === 'waiting-for-approval' || companion.status === 'failed')) {
-    return stageStateLine(companion, flight)
-  }
-  const companionDone = companion?.status === 'done'
-
-  if (status === 'pending') return 'Waiting for earlier stages.'
-  if (status === 'waiting-for-approval') return stage.checkpoint?.message ?? 'Paused — your decision is needed below.'
-  if (status === 'skipped') return stage.skipReason ?? 'Skipped.'
-  if (status === 'failed') return 'Failed — details below.'
-
-  // Pair-settled combined lines (R32/R33): one sentence for the whole step.
-  if (companionDone && key === 'scaffold') {
-    const cev = (companion?.evidence ?? {}) as Record<string, unknown>
-    const captured = num(cev, 'captured')
-    const verb = ev.reused ? 'reused' : 'created'
-    return `Feature "${flight.feature}" ${verb} — env captured${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''}, dry-run boot passed.`
-  }
-  if (companionDone && key === 'docs') {
-    const cev = (companion?.evidence ?? {}) as Record<string, unknown>
-    const count = num(cev, 'requirementCount')
-    const docs = Array.isArray(ev.docs) ? ev.docs.length : null
-    const source = str(ev, 'source')
-    return `${count != null ? `${count} requirement${count === 1 ? '' : 's'}` : 'Requirements'} distilled${docs != null ? ` from ${docs} doc${docs === 1 ? '' : 's'}` : ''}${source ? ` (${source})` : ''}.`
-  }
-
-  const running = status === 'running'
-  switch (key) {
-    case 'similarity': {
-      if (running) return 'Checking existing features for a duplicate…'
-      const match = ev.match as Record<string, unknown> | null | undefined
-      const scanned = num(ev, 'scanned')
-      if (match && typeof match.feature === 'string') {
-        const choice = str(ev, 'choice')
-        return `Matched existing feature "${match.feature}"${choice ? ` — continuing as ${choice}` : ''}.`
-      }
-      return `No duplicate found${scanned != null ? ` (${scanned} feature${scanned === 1 ? '' : 's'} scanned)` : ''} — proceeding fresh.`
-    }
-    case 'scout':
-      return running
-        ? 'Agent is reading the repo to draft the feature config…'
-        : 'Feature config drafted from the repo.'
-    case 'scaffold':
-      return running
-        ? 'Creating the feature in the workspace…'
-        : ev.reused
-          ? `Feature "${flight.feature}" already existed — reused.`
-          : `Feature "${flight.feature}" created in the workspace.`
-    case 'env-capture': {
-      if (running) return 'Capturing env files and boot-testing the config…'
-      const captured = num(ev, 'captured')
-      return `Environment captured${captured != null ? ` (${captured} file${captured === 1 ? '' : 's'})` : ''} — dry-run boot passed.`
-    }
-    case 'docs': {
-      if (running) return 'Collecting requirement docs…'
-      const docs = Array.isArray(ev.docs) ? ev.docs.length : null
-      const source = str(ev, 'source')
-      return `Requirement docs collected${docs != null ? ` (${docs})` : ''}${source ? ` from ${source}` : ''}.`
-    }
-    case 'prd-summary': {
-      if (running) return 'Agent is distilling the docs into requirements…'
-      const count = num(ev, 'requirementCount')
-      return `Requirements summary ready${count != null ? ` — ${count} requirement${count === 1 ? '' : 's'}` : ''}.`
-    }
-    case 'specs-coverage': {
-      const pct = num(ev, 'coveragePct')
-      if (running) {
-        // The loop's live sub-phase (R27): which half of author↔map is
-        // happening, and which pass we're on. Older flights have no
-        // progress shape — fall back to the generic line.
-        const p = specsCoverageProgress(stage)
-        if (p) {
-          const doing =
-            p.phase === 'authoring'
-              ? `agent is authoring specs to close ${p.gapsOpen} gap${p.gapsOpen === 1 ? '' : 's'}`
-              : p.phase === 'validating'
-                ? 'validating the authored specs (compile + list)'
-                : 'mapping the specs against the requirements'
-          return `Pass ${p.pass} of ${p.maxPasses} — ${doing}…`
-        }
-        return 'Agent is authoring specs to close coverage gaps…'
-      }
-      if (ev.acceptedPartial) return `Coverage accepted at ${pct ?? '?'}% (partial, per your call).`
-      return `Coverage target met${pct != null ? ` — ${pct}%` : ''}.`
-    }
-    case 'portify':
-      if (running) return 'Verifying the services boot concurrently (port injection)…'
-      return ev.edits
-        ? 'Services are port-injectable — edits applied and double-boot verified.'
-        : 'Services are port-injectable — no edits needed, double-boot verified.'
-    case 'run': {
-      if (running) return 'Tests are running…'
-      const runId = str(ev, 'runId') ?? flight.links?.runId
-      const runStatus = str(ev, 'status') ?? flight.runVerdict
-      return `Run ${runId ?? ''}${runStatus ? ` ${runStatus}` : ''}`.trim() + '.'
-    }
-    case 'heal': {
-      if (running) return 'Repair agent is fixing the failure…'
-      const cycles = num(ev, 'healCycles')
-      const runStatus = str(ev, 'finalStatus') ?? str(ev, 'status') ?? flight.runVerdict
-      if (cycles != null && cycles > 0) return `${cycles} repair cycle${cycles === 1 ? '' : 's'} — run ${runStatus ?? 'settled'}.`
-      return `No repair needed — run ${runStatus ?? 'settled'}.`
-    }
-    case 'evaluation-export': {
-      if (running) return 'Building the evaluation archive…'
-      const zip = str(ev, 'evaluationZip') ?? flight.links?.evaluationZip
-      return `Evaluation ready${zip ? ` — ${zip.split('/').pop() ?? ''}` : ''}.`
-    }
-    default:
-      return running ? 'Working…' : 'Done.'
-  }
+/** State-line sentence per live portify phase — same keys as the labels. */
+export const PORTIFY_PHASE_LINE: Record<string, string> = {
+  'planning': 'Working out which services need port changes…',
+  'editing': 'Editing the services to take their port from settings…',
+  'verifying': 'Starting two copies side by side to check…',
+  'ready-to-save': 'Checks passed — getting the review ready…',
 }

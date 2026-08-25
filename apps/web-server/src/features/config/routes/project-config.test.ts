@@ -1,11 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
 import fs from 'fs'
+
 import os from 'os'
+
 import path from 'path'
+
 import Fastify, { type FastifyInstance } from 'fastify'
 
-const spawnMock = vi.fn(() => ({ unref: vi.fn() }))
-const spawnSyncMock = vi.fn(() => ({ status: 1 }))
+const spawnMock = vi.fn((_command: string, _args: readonly string[], _options?: unknown) => ({
+  unref: vi.fn(),
+}))
+
+const spawnSyncMock = vi.fn(
+  (_command: string, _args: readonly string[], _options?: unknown) => ({ status: 1 }),
+)
+
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>()
   return { ...actual, spawn: spawnMock, spawnSync: spawnSyncMock }
@@ -15,10 +25,12 @@ const { projectConfigRoutes } = await import('./project-config')
 
 let projectRoot: string
 
-async function makeApp(): Promise<FastifyInstance> {
+async function makeApp(
+  extra: Partial<Parameters<typeof projectConfigRoutes>[1]> = {},
+): Promise<FastifyInstance> {
   const app = Fastify()
   await app.register(async (a) => {
-    await projectConfigRoutes(a, { projectRoot })
+    await projectConfigRoutes(a, { projectRoot, ...extra })
   })
   await app.ready()
   return app
@@ -42,7 +54,7 @@ describe('GET /api/project-config', () => {
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -56,7 +68,7 @@ describe('GET /api/project-config', () => {
     const app = await makeApp()
     try {
       const r = await app.inject({ method: 'GET', url: '/api/project-config' })
-      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'manual', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -76,7 +88,7 @@ describe('PUT /api/project-config', () => {
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null })
+      expect(written).toEqual({ healAgent: 'claude', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -95,7 +107,35 @@ describe('PUT /api/project-config', () => {
         payload: {},
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'codex', editor: 'auto', personalWikiPath: null , autoProposePr: true, showDemo: true})
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('preserves a pinned port when an unrelated setting changes', async () => {
+    fs.writeFileSync(
+      path.join(projectRoot, 'canary-lab.config.json'),
+      JSON.stringify({ healAgent: 'external', port: 7420 }),
+    )
+    const app = await makeApp()
+    try {
+      const r = await app.inject({
+        method: 'PUT',
+        url: '/api/project-config',
+        payload: { editor: 'cursor' },
+      })
+      expect(r.statusCode).toBe(200)
+      const written = JSON.parse(
+        fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
+      )
+      // `port` is settings-adjacent but never travels in this body: it is owned
+      // by POST /api/project-config/port, which rebinds the server as it saves.
+      // Dropping the pin here is silent — nothing rereads the file until the
+      // next boot, which then lands on DEFAULT_PORT and strands every client
+      // still pointed at the pinned one.
+      expect(written.port).toBe(7420)
+      expect(r.json().port).toBe(7420)
     } finally {
       await app.close()
     }
@@ -124,11 +164,11 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'cursor' },
       })
       expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
+      expect(r.json()).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true, showDemo: true})
       const written = JSON.parse(
         fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'),
       )
-      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null })
+      expect(written).toEqual({ healAgent: 'external', editor: 'cursor', personalWikiPath: null , autoProposePr: true, showDemo: true})
     } finally {
       await app.close()
     }
@@ -143,6 +183,69 @@ describe('PUT /api/project-config', () => {
         payload: { editor: 'vim' },
       })
       expect(r.statusCode).toBe(400)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('writes the auto-PR preference and rejects a non-boolean', async () => {
+    const app = await makeApp()
+    try {
+      const off = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { autoProposePr: false } })
+      expect(off.statusCode).toBe(200)
+      expect(off.json().autoProposePr).toBe(false)
+
+      // Omitting it preserves the stored choice rather than silently re-enabling
+      // a push the user turned off.
+      const other = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { editor: 'vscode' } })
+      expect(other.json().autoProposePr).toBe(false)
+
+      const bad = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { autoProposePr: 'yes' } })
+      expect(bad.statusCode).toBe(400)
+      expect(bad.json()).toEqual({ error: 'autoProposePr must be a boolean' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('writes the show-demo preference and rejects a non-boolean', async () => {
+    const app = await makeApp()
+    try {
+      const off = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: false } })
+      expect(off.statusCode).toBe(200)
+      expect(off.json().showDemo).toBe(false)
+
+      // Omitting it preserves the stored choice — saving an unrelated setting
+      // must not put the demos back in a status bar the user cleared.
+      const other = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { editor: 'vscode' } })
+      expect(other.json().showDemo).toBe(false)
+
+      const bad = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: 'no' } })
+      expect(bad.statusCode).toBe(400)
+      expect(bad.json()).toEqual({ error: 'showDemo must be a boolean' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('announces a persisted write so every open client refetches', async () => {
+    const publish = vi.fn()
+    const app = await makeApp({ workspaceEvents: { publish } })
+    try {
+      await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: false } })
+      expect(publish).toHaveBeenCalledWith({ type: 'project-config-changed' })
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('stays silent when the write is rejected — a 400 changed nothing', async () => {
+    const publish = vi.fn()
+    const app = await makeApp({ workspaceEvents: { publish } })
+    try {
+      const bad = await app.inject({ method: 'PUT', url: '/api/project-config', payload: { showDemo: 'no' } })
+      expect(bad.statusCode).toBe(400)
+      expect(publish).not.toHaveBeenCalled()
     } finally {
       await app.close()
     }
@@ -163,6 +266,8 @@ describe('PUT /api/project-config', () => {
         healAgent: 'external',
         editor: 'auto',
         personalWikiPath: fs.realpathSync(wiki),
+        autoProposePr: true,
+        showDemo: true,
       })
     } finally {
       await app.close()
@@ -356,489 +461,6 @@ describe('POST /api/open-agent', () => {
         payload: { agent: 'codex' },
       })
       expect(r.statusCode).toBe(500)
-    } finally {
-      await app.close()
-    }
-  })
-})
-
-describe('POST /api/open-editor', () => {
-  function writeSpec(name = 'a.spec.ts'): string {
-    const file = path.join(projectRoot, name)
-    fs.writeFileSync(file, "test('a', async () => {})\n")
-    return file
-  }
-
-  it('rejects missing files in the request body', async () => {
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: {},
-      })
-      expect(r.statusCode).toBe(400)
-      expect(r.json()).toEqual({ error: 'file is required' })
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('rejects a missing request body', async () => {
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-      })
-      expect(r.statusCode).toBe(400)
-      expect(r.json()).toEqual({ error: 'file is required' })
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('rejects relative paths', async () => {
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file: 'a.spec.ts' },
-      })
-      expect(r.statusCode).toBe(400)
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('rejects paths outside the project root', async () => {
-    const outside = path.join(fs.realpathSync(os.tmpdir()), `outside-${Date.now()}.spec.ts`)
-    fs.writeFileSync(outside, "test('outside', async () => {})\n")
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file: outside },
-      })
-      expect(r.statusCode).toBe(400)
-    } finally {
-      fs.rmSync(outside, { force: true })
-      await app.close()
-    }
-  })
-
-  it('rejects missing files', async () => {
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file: path.join(projectRoot, 'missing.spec.ts') },
-      })
-      expect(r.statusCode).toBe(404)
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('rejects directories inside the project root', async () => {
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file: projectRoot },
-      })
-      expect(r.statusCode).toBe(400)
-      expect(r.json()).toEqual({ error: 'file must be a file' })
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('rejects invalid editor values', async () => {
-    const file = writeSpec()
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'vim' },
-      })
-      expect(r.statusCode).toBe(400)
-      expect(r.json()).toEqual({ error: 'editor must be one of: auto, vscode, cursor, system' })
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('uses cursor -g when editor is cursor', async () => {
-    const file = writeSpec()
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, line: 12, column: 3, editor: 'cursor' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
-      expect(spawnMock).toHaveBeenCalledWith('cursor', ['-g', `${file}:12:3`], expect.any(Object))
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('uses code -g when editor is vscode', async () => {
-    const file = writeSpec()
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, line: 2, editor: 'vscode' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'vscode' })
-      expect(spawnMock).toHaveBeenCalledWith('code', ['-g', `${file}:2:1`], expect.any(Object))
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('falls back to the platform opener for system', async () => {
-    const file = writeSpec()
-    const orig = process.platform
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, line: 2, editor: 'system' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'system' })
-      expect(spawnMock).toHaveBeenCalledWith('open', [file], expect.any(Object))
-    } finally {
-      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
-      await app.close()
-    }
-  })
-
-  it('uses cmd start for the system opener on windows', async () => {
-    const file = writeSpec()
-    const orig = process.platform
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'system' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'system' })
-      expect(spawnMock).toHaveBeenCalledWith('cmd', ['/c', 'start', '', file], expect.any(Object))
-    } finally {
-      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
-      await app.close()
-    }
-  })
-
-  it('uses xdg-open for the system opener on linux', async () => {
-    const file = writeSpec()
-    const orig = process.platform
-    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'system' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'system' })
-      expect(spawnMock).toHaveBeenCalledWith('xdg-open', [file], expect.any(Object))
-    } finally {
-      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
-      await app.close()
-    }
-  })
-
-  it('auto-detects cursor before vscode', async () => {
-    const file = writeSpec()
-    spawnSyncMock.mockImplementation((command, args) => ({
-      status: command === 'which' && args[0] === 'cursor' ? 0 : 1,
-    }))
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'auto' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
-      expect(spawnMock.mock.calls[0][0]).toBe('cursor')
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('uses the configured editor when the request omits one', async () => {
-    const file = writeSpec()
-    fs.writeFileSync(
-      path.join(projectRoot, 'canary-lab.config.json'),
-      JSON.stringify({ editor: 'cursor' }),
-    )
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
-      expect(spawnMock.mock.calls[0][0]).toBe('cursor')
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('auto-detects vscode when cursor is unavailable', async () => {
-    const file = writeSpec()
-    spawnSyncMock.mockImplementation((command, args) => ({
-      status: command === 'which' && args[0] === 'code' ? 0 : 1,
-    }))
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'auto' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'vscode' })
-      expect(spawnMock.mock.calls[0][0]).toBe('code')
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('auto-detects the system opener when cli editors are unavailable', async () => {
-    const file = writeSpec()
-    const orig = process.platform
-    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
-    spawnSyncMock.mockReturnValue({ status: 1 })
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'auto' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'system' })
-      expect(spawnMock).toHaveBeenCalledWith('open', [file], expect.any(Object))
-    } finally {
-      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
-      await app.close()
-    }
-  })
-
-  it('uses where for auto-detection on windows', async () => {
-    const file = writeSpec()
-    const orig = process.platform
-    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true })
-    spawnSyncMock.mockImplementation((command, args) => ({
-      status: command === 'where' && args[0] === 'cursor' ? 0 : 1,
-    }))
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'auto' },
-      })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toEqual({ opened: true, editor: 'cursor' })
-      expect(spawnSyncMock.mock.calls[0][0]).toBe('where')
-    } finally {
-      Object.defineProperty(process, 'platform', { value: orig, configurable: true })
-      await app.close()
-    }
-  })
-
-  it('returns 500 when spawning the editor throws', async () => {
-    const file = writeSpec()
-    spawnMock.mockImplementationOnce(() => { throw new Error('boom') })
-    const app = await makeApp()
-    try {
-      const r = await app.inject({
-        method: 'POST',
-        url: '/api/open-editor',
-        payload: { file, editor: 'cursor' },
-      })
-      expect(r.statusCode).toBe(500)
-      expect(r.json()).toEqual({ error: 'boom' })
-    } finally {
-      await app.close()
-    }
-  })
-
-})
-
-describe('POST /api/open-workspace', () => {
-  it('opens the project root in the configured editor', async () => {
-    const app = await makeApp()
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
-      expect(r.statusCode).toBe(200)
-      const body = r.json() as { opened: boolean; path: string; editor: string }
-      expect(body.opened).toBe(true)
-      expect(body.path).toBe(projectRoot)
-      expect(spawnMock).toHaveBeenCalled()
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('respects the configured editor choice', async () => {
-    fs.writeFileSync(
-      path.join(projectRoot, 'canary-lab.config.json'),
-      JSON.stringify({ editor: 'cursor' }),
-    )
-    const app = await makeApp()
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
-      expect(r.statusCode).toBe(200)
-      expect(spawnMock).toHaveBeenCalledWith('cursor', [projectRoot], expect.anything())
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('returns opened:false instead of erroring when the launch throws', async () => {
-    spawnMock.mockImplementationOnce(() => { throw new Error('boom') })
-    const app = await makeApp()
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
-      expect(r.statusCode).toBe(200)
-      const body = r.json() as { opened: boolean; error?: string }
-      expect(body.opened).toBe(false)
-      expect(body.error).toBe('boom')
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('stringifies a non-Error throw from the launch', async () => {
-    spawnMock.mockImplementationOnce(() => { throw 'boom-string' })
-    const app = await makeApp()
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/open-workspace' })
-      expect(r.statusCode).toBe(200)
-      const body = r.json() as { opened: boolean; error?: string }
-      expect(body.opened).toBe(false)
-      expect(body.error).toBe('boom-string')
-    } finally {
-      await app.close()
-    }
-  })
-})
-
-describe('POST /api/project-config/port', () => {
-  async function makePortApp(deps: { countActiveRuns?: () => number; onPortChange?: (port: number) => void } = {}): Promise<FastifyInstance> {
-    const app = Fastify()
-    await app.register(async (a) => {
-      await projectConfigRoutes(a, { projectRoot, ...deps })
-    })
-    await app.ready()
-    return app
-  }
-
-  function readConfig() {
-    return JSON.parse(fs.readFileSync(path.join(projectRoot, 'canary-lab.config.json'), 'utf-8'))
-  }
-
-  it('rejects an invalid port', async () => {
-    const app = await makePortApp()
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 99999 } })
-      expect(r.statusCode).toBe(400)
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('short-circuits when the port is unchanged', async () => {
-    fs.writeFileSync(path.join(projectRoot, 'canary-lab.config.json'), JSON.stringify({ port: 8200 }))
-    const onPortChange = vi.fn()
-    const app = await makePortApp({ onPortChange })
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8200 } })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toMatchObject({ restarting: false })
-      expect(onPortChange).not.toHaveBeenCalled()
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('treats active runs as zero when no countActiveRuns dep is provided', async () => {
-    const onPortChange = vi.fn()
-    // No countActiveRuns → `deps.countActiveRuns?.() ?? 0` → 0 → no confirm gate.
-    const app = await makePortApp({ onPortChange })
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8300 } })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toMatchObject({ restarting: true, port: 8300 })
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('requires confirmation when runs are active', async () => {
-    const onPortChange = vi.fn()
-    const app = await makePortApp({ countActiveRuns: () => 2, onPortChange })
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8300 } })
-      expect(r.statusCode).toBe(409)
-      expect(r.json()).toMatchObject({ needsConfirm: true, activeRuns: 2 })
-      expect(onPortChange).not.toHaveBeenCalled()
-      expect(fs.existsSync(path.join(projectRoot, 'canary-lab.config.json'))).toBe(false)
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('saves the new port, returns the new origin, and triggers the restart hook', async () => {
-    const onPortChange = vi.fn()
-    const app = await makePortApp({ countActiveRuns: () => 0, onPortChange })
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8300 } })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toMatchObject({ restarting: true, port: 8300, newOrigin: 'http://localhost:8300' })
-      expect(readConfig().port).toBe(8300)
-      expect(onPortChange).toHaveBeenCalledExactlyOnceWith(8300)
-    } finally {
-      await app.close()
-    }
-  })
-
-  it('proceeds past the active-run guard when confirm is true', async () => {
-    const onPortChange = vi.fn()
-    const app = await makePortApp({ countActiveRuns: () => 3, onPortChange })
-    try {
-      const r = await app.inject({ method: 'POST', url: '/api/project-config/port', payload: { port: 8400, confirm: true } })
-      expect(r.statusCode).toBe(200)
-      expect(r.json()).toMatchObject({ restarting: true, port: 8400 })
-      expect(readConfig().port).toBe(8400)
-      expect(onPortChange).toHaveBeenCalledExactlyOnceWith(8400)
     } finally {
       await app.close()
     }

@@ -1,5 +1,5 @@
-import { useEffect } from 'react'
-import type { RepoCollisionChoice } from '../../../shared/api/client'
+import type { RepoCollisionChoice } from '@/shared/api/client'
+import { Modal } from '@/shared/ui/atoms'
 
 interface Props {
   info: RepoCollisionChoice
@@ -20,28 +20,11 @@ interface Props {
 // modal pattern.
 export function CollisionConfirmDialog({ info, feature, onChoose, onCancel, portsConfigured, onPortify }: Props) {
   const offerPortify = portsConfigured === false && !!onPortify
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onCancel() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onCancel])
 
   return (
-    <div
-      className="cl-modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-6"
-      onClick={onCancel}
-    >
-      <div
-        className="cl-modal w-[460px] p-5"
-        style={{ background: 'var(--bg-elevated)' }}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Same-app collision"
-      >
-        <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-          {feature} uses the same app as a running run
-        </h2>
-        <p className="mt-1.5 text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+    <Modal open onClose={onCancel} title={`${feature} uses the same app as a running run`} ariaLabel="Same-app collision" width={460}>
+      <div className="p-5">
+        <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
           {info.conflictingFeature} is currently using the same repo. Running both
           in place could let one run’s fixes corrupt the other. Isolate this run
           in its own git worktree to run now, or queue it until the other finishes.
@@ -82,6 +65,6 @@ export function CollisionConfirmDialog({ info, feature, onChoose, onCancel, port
           </button>
         </div>
       </div>
-    </div>
+    </Modal>
   )
 }

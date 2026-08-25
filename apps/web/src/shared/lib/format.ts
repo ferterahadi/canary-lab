@@ -1,29 +1,24 @@
 // Pure formatting helpers used by the read-only views.
 
-import type { RunStatus } from '../api/types'
+/** The evaluation archive's filename — the `<feature>-<runId>` shape the server
+ *  mints as the task's `archiveBase`. One home so the name the browser saves, the
+ *  name a UI shows and the name the download header carries cannot drift; the
+ *  internal `export.zip` inside the logs dir is never a user-facing name. */
+export function evaluationArchiveFilename(feature: string, runId: string): string {
+  return `canary-lab-evaluation-${safeFilename(feature)}-${safeFilename(runId)}.zip`
+}
 
-/**
- * @deprecated Use the `<RunStatusIndicator status={...} />` component instead.
- * The bordered-pill style this returns is no longer used in the UI — it
- * collided visually with destructive action buttons (Stop / Delete). Kept
- * exported only to avoid breaking any external consumer; new call sites
- * should not be added.
- */
-export function statusBadgeClass(status: RunStatus): string {
-  switch (status) {
-    case 'passed':
-      return 'bg-emerald-500/15 text-emerald-700 border-emerald-500/40 dark:text-emerald-300'
-    case 'failed':
-      return 'bg-rose-500/15 text-rose-700 border-rose-500/40 dark:text-rose-300'
-    case 'running':
-      return 'bg-sky-500/15 text-sky-700 border-sky-500/40 dark:text-sky-300'
-    case 'healing':
-      return 'bg-amber-500/15 text-amber-700 border-amber-500/40 dark:text-amber-300'
-    case 'aborted':
-      return 'bg-zinc-500/15 text-zinc-700 border-zinc-500/40 dark:text-zinc-300'
-    default:
-      return 'bg-zinc-500/15 text-zinc-700 border-zinc-500/40 dark:text-zinc-300'
-  }
+/** Sentence-case a state word for display: only the FIRST character is raised,
+ *  so a two-word label stays "Needs approval" rather than the title-cased
+ *  "Needs Approval" a CSS `text-transform: capitalize` would produce. */
+export function capitalizeFirst(input: string): string {
+  return input.charAt(0).toUpperCase() + input.slice(1)
+}
+
+/** Filesystem-safe segment for a download name — anything outside
+ *  `[A-Za-z0-9._-]` collapses to a single dash. */
+export function safeFilename(input: string): string {
+  return input.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'run'
 }
 
 // Format a duration (in milliseconds) as a short human string. Examples:
@@ -40,6 +35,21 @@ export function formatDuration(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60)
   const seconds = Math.round(totalSeconds - minutes * 60)
   return `${minutes}m ${seconds}s`
+}
+
+// A still-running clock, in whole seconds. Distinct from `formatDuration`: that
+// one reports a *measured* duration and prints a tenth, which a once-a-second
+// tick doesn't have — so a live clock through it would always read a false
+// ".0". Rolls up past a minute so a long wait stays readable ("1200s" -> "20m
+// 00s"). Examples: 0 -> "0s", 12 -> "12s", 74 -> "1m 14s", 3700 -> "1h 02m".
+export function formatElapsedSeconds(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0s'
+  const secs = Math.floor(seconds)
+  if (secs < 60) return `${secs}s`
+  const mins = Math.floor(secs / 60)
+  const pad = (n: number): string => n.toString().padStart(2, '0')
+  if (mins < 60) return `${mins}m ${pad(secs % 60)}s`
+  return `${Math.floor(mins / 60)}h ${pad(mins % 60)}m`
 }
 
 // Compute duration from ISO start + (optional) end. If end is missing, treats
@@ -65,6 +75,13 @@ export function formatBytes(bytes: number): string {
   }
   const rounded = unit === 0 || value >= 100 ? Math.round(value) : Math.round(value * 10) / 10
   return `${rounded} ${units[unit]}`
+}
+
+// Thousands-separated count for display: 27627 -> "27,627". Grouped by hand
+// rather than via toLocaleString because the separator must not depend on the
+// browser's locale — a band tile and its test have to agree on the same string.
+export function formatCount(n: number): string {
+  return `${n}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
 // Compact "time ago" from an ISO string, relative to `now` (ms). Examples:

@@ -2,12 +2,15 @@
 // 86, 90-91) that are unreachable with real spec files, since the AST extractor never
 // sets sourceFile and only sets requirements/pathTypes via Playwright tags.
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest'
+
 import fs from 'fs'
+
 import os from 'os'
+
 import path from 'path'
 
-vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../../config/logic/ast-extractor')>()
+vi.mock('../../../../shared/ast-extractor', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../../../shared/ast-extractor')>()
   return {
     ...original,
     extractTestsFromSource: vi.fn(original.extractTestsFromSource),
@@ -15,17 +18,22 @@ vi.mock('../../../config/logic/ast-extractor', async (importOriginal) => {
 })
 
 import { computeFeatureCoverage, runCoverageEngine as runCoverageEngineReal, regeneratePrdSummary as regeneratePrdSummaryReal, clearPrdSummary, buildCoverageMappingContext, applyExternalCoverageMappings, applyExternalSummary } from './service'
-import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
+
+import { extractTestsFromSource } from '../../../../shared/ast-extractor'
+
 import { fakeSummarize, fakePropose } from './__fixtures__/fake-coverage-agents'
 
 // Coverage generation is LLM-only; inject the fake agent via the dep seams.
 const regeneratePrdSummary = (args: Parameters<typeof regeneratePrdSummaryReal>[0]) =>
   regeneratePrdSummaryReal(args, { summarize: fakeSummarize })
+
 const runCoverageEngine = (args: Parameters<typeof runCoverageEngineReal>[0]) =>
   runCoverageEngineReal(args, { propose: fakePropose })
 
 let tmpDir: string
+
 let featuresDir: string
+
 let logsDir: string
 
 beforeEach(() => {
@@ -191,7 +199,7 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
     // m.file absent and testName not in fileByTestName → !file → skip
     const result = applyExternalCoverageMappings({
       featuresDir, logsDir, feature: 'checkout',
-      mappings: [{ testName: 'no-such-test-xyz', requirements: ['R1'] }],
+      mappings: [{ testName: 'no-such-test-xyz', requirements: ['R1'], source: 'agent' }],
       now: '2026-01-01T00:00:00Z',
     })
     expect(result.applied).toEqual([])
@@ -202,7 +210,7 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
     writeFeature('checkout')
     const result = applyExternalCoverageMappings({
       featuresDir, logsDir, feature: 'checkout',
-      mappings: [{ testName: 'shared', requirements: undefined as unknown as string[] }],
+      mappings: [{ testName: 'shared', requirements: undefined as unknown as string[], source: 'agent' }],
     })
     expect(result.applied).toEqual([])
   })
@@ -212,7 +220,7 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
     const result = applyExternalCoverageMappings({
       featuresDir, logsDir, feature: 'checkout',
-      mappings: [{ testName: 'shared', requirements: ['R1'], file: 'does-not-exist.spec.ts' }],
+      mappings: [{ testName: 'shared', requirements: ['R1'], file: 'does-not-exist.spec.ts', source: 'agent' }],
       now: '2026-01-01T00:00:00Z',
     })
     expect(result.applied).toEqual([])
@@ -236,6 +244,7 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
         requirements: ['R1'],
         file: path.join('e2e', 'a.spec.ts'),
         variants: ['EMAIL', 'fax'], // 'EMAIL' normalizes to 'email' (in vocab); 'fax' dropped
+        source: 'agent',
       }],
       now: '2026-01-01T00:00:00Z',
     })
@@ -249,7 +258,7 @@ describe('applyExternalCoverageMappings — null summary and edge cases', () => 
     await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
     const result = applyExternalCoverageMappings({
       featuresDir, logsDir, feature: 'checkout',
-      mappings: [{ testName: 'shared', requirements: ['R1'] }], // no m.file
+      mappings: [{ testName: 'shared', requirements: ['R1'], source: 'agent' }], // no m.file
       now: '2026-01-01T00:00:00Z',
     })
     // R1 must exist in the summary for the mapping to apply
@@ -423,6 +432,37 @@ describe('computeFeatureCoverage — proven axis (readLatestRunOutcomes join)', 
     const t = ledger.tests.find((t) => t.name === 'shared')
     expect(t?.lastRun).toEqual({ runId: 'r1', passed: true })
     expect(ledger.requirements[0].proven).toBe(true)
+    // A single clean execution carries no merged-execution flag.
+    expect(ledger.provenSpansExecutions).toBeUndefined()
+  })
+
+  it('threads the retry marker and the merged-execution flag from the summary onto the ledger', async () => {
+    const dir = writeFeature('checkout')
+    fs.writeFileSync(
+      path.join(dir, 'e2e', 'a.spec.ts'),
+      `import { test } from '@playwright/test'\ntest('shared', { tag: ['@req-R1', '@path-happy'] }, async () => {})\n`,
+    )
+    await regeneratePrdSummary({ featuresDir, feature: 'checkout', now: '2026-01-01T00:00:00Z' })
+
+    fs.mkdirSync(path.join(logsDir, 'runs', 'r1'), { recursive: true })
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'index.json'),
+      JSON.stringify([{ runId: 'r1', feature: 'checkout', startedAt: '2026-01-01T00:00:00Z', status: 'passed' }]),
+    )
+    fs.writeFileSync(
+      path.join(logsDir, 'runs', 'r1', 'e2e-summary.json'),
+      JSON.stringify({
+        passedNames: ['test-case-shared'],
+        passedOnRetry: ['test-case-shared'],
+        mergedFromPriorExecution: true,
+        failed: [],
+      }),
+    )
+
+    const ledger = computeFeatureCoverage({ featuresDir, logsDir, feature: 'checkout' })
+    const t = ledger.tests.find((t) => t.name === 'shared')
+    expect(t?.lastRun).toEqual({ runId: 'r1', passed: true, retried: true })
+    expect(ledger.provenSpansExecutions).toBe(true)
   })
 
   it('leaves lastRun unset for a test the run never touched (lastRun undefined branch)', async () => {

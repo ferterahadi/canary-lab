@@ -7,7 +7,8 @@ import type {
   PlaywrightScreenshotMode,
   RepoBranchSnapshot,
   ServiceManifestEntry,
-} from '../../../shared/api/types'
+} from '@/shared/api/types'
+import { parseLocation } from '@/shared/test-numbering'
 
 export interface PlaybackTest {
   name: string
@@ -76,20 +77,24 @@ export function playbackTests(events?: PlaywrightPlaybackEvent[]): PlaybackTest[
     tests.set(key, current)
     latestKeyByName.set(event.test.name, key)
   }
-  // Collapse attempts to one entry per (name, location). Retries and heal-cycle
-  // reruns share a location and fold into the latest attempt. Two distinct
-  // tests that happen to share a title (and therefore a `name`) but live at
-  // different locations stay as separate entries — the export HTML disambiguates
+  // Collapse attempts to one entry per (name, spec file). Retries and
+  // heal-cycle reruns fold into the latest attempt — the line number is
+  // deliberately ignored because heal edits shift a test's line between
+  // cycles (e.g. :205 → :222) while it stays the same test. Two distinct
+  // tests that happen to share a title (and therefore a `name`) but live in
+  // different files stay as separate entries — the export HTML disambiguates
   // them via positional anchor IDs. Map preserves first-seen identity order,
   // last write wins so the latest attempt is kept.
-  const latestKeyByIdentity = new Map<string, string>()
+  // Carries the test alongside its key: every entry here comes straight out of
+  // `tests`, so re-looking it up afterwards only added a `has`/`get` pair whose
+  // miss arm nothing could reach.
+  const latestByIdentity = new Map<string, { key: string; test: PlaybackTest }>()
   for (const [key, test] of tests.entries()) {
-    const identity = `${test.name}@${locationByKey.get(key) ?? ''}`
-    latestKeyByIdentity.set(identity, key)
+    const file = parseLocation(locationByKey.get(key))?.file ?? ''
+    const identity = `${test.name}@${file}`
+    latestByIdentity.set(identity, { key, test })
   }
-  return [...latestKeyByIdentity.values()]
-    .map((key) => (tests.has(key) ? { key, test: tests.get(key)! } : null))
-    .filter((entry): entry is { key: string; test: PlaybackTest } => entry !== null)
+  return [...latestByIdentity.values()]
     .map(({ key, test }) => ({
       ...test,
       location: test.location ?? locationByKey.get(key),
@@ -115,9 +120,26 @@ export function artifactsForPlayback(
 }
 
 export function branchForService(
-  service: Pick<ServiceManifestEntry, 'cwd'>,
+  service: Pick<ServiceManifestEntry, 'cwd' | 'repoName'>,
   branches: RepoBranchSnapshot[],
 ): RepoBranchSnapshot | null {
+  // Repo name first, path containment second.
+  //
+  // A run that isolates its services — the default now — starts each one in a
+  // per-run git worktree at `<workspace>/logs/runs/<id>/worktrees/<repo>`. That
+  // cwd is NOT a child of the repo snapshot's own `path`
+  // (`~/Documents/<repo>`), so containment alone matched nothing and the ref
+  // silently vanished from every isolated run's service card and service tab.
+  // The manifest already records `service.repoName === repo.name`, which is the
+  // relationship the snapshot is actually keyed on.
+  const named = service.repoName?.trim()
+  if (named) {
+    const byName = branches.find((repo) => repo.name === named)
+    if (byName) return byName
+  }
+  // Fallback for services with no `repoName` (older manifests, and services
+  // running straight out of a checkout): deepest containing repo wins, so a
+  // nested repo beats its parent.
   const cwd = normalizePath(service.cwd)
   let best: RepoBranchSnapshot | null = null
   for (const repo of branches) {
@@ -146,13 +168,81 @@ export function branchTooltip(service: Pick<ServiceManifestEntry, 'cwd'>, repo: 
   return parts.join('\n')
 }
 
+type PlaybackStep = PlaybackTest['steps'][number]
+
+/** A step that survived filtering. `title: null` marks an assertion whose only
+ *  content was the matcher name (`Expect "toBe"`): one such row says nothing,
+ *  eleven in a column say nothing eleven times — but the fact that eleven
+ *  assertions ran is worth one line, so they collapse into a tally. */
+interface MappedStep {
+  step: PlaybackStep
+  title: string | null
+}
+
 function compactPlaybackSteps(steps: PlaybackTest['steps']): PlaybackTest['steps'] {
-  const compacted = steps.flatMap((step) => {
-    if (step.category === 'hook' || step.category === 'fixture') return []
-    const title = compactStepTitle(step.title)
-    return title ? [{ ...step, title }] : []
+  const mapped = steps.flatMap<MappedStep>((step) => {
+    // Hooks, fixtures and attachments are Playwright's own bookkeeping —
+    // `Before Hooks`, `Fixture "request"`, `Attach "canary-lab-final-page"`.
+    if (step.category === 'hook' || step.category === 'fixture' || step.category === 'test.attach') return []
+    const assertion = assertionRow(step.title, step.category)
+    if (assertion !== undefined) return assertion === null ? [{ step, title: null }] : [{ step, title: assertion }]
+    const title = compactStepTitle(step.title, step.category)
+    return title ? [{ step, title }] : []
   })
-  return compacted
+
+  // Collapse each consecutive run of bare assertions into one tally, in place,
+  // so the surrounding steps keep their order.
+  const out: PlaybackTest['steps'] = []
+  const pending: PlaybackStep[] = []
+  const flush = (): void => {
+    if (pending.length === 0) return
+    out.push({
+      ...pending[pending.length - 1],
+      // A tally is only finished when every assertion under it is: one still
+      // open must not be reported as done.
+      ended: pending.every((step) => step.ended),
+      title: `Verified ${pending.length} assertion${pending.length === 1 ? '' : 's'}`,
+    })
+    pending.length = 0
+  }
+  for (const entry of mapped) {
+    if (entry.title === null) {
+      pending.push(entry.step)
+      continue
+    }
+    flush()
+    out.push({ ...entry.step, title: entry.title })
+  }
+  flush()
+  return out
+}
+
+/** An `expect` step that named a matcher and nothing else. */
+/** The row an `expect` step earns, or `null` when it names no target and should
+ *  join the assertion tally instead. `undefined` means "not a matcher-shaped
+ *  expect step" — the caller falls through to the generic compaction.
+ *
+ *  One function because there used to be two: `isBareAssertion` decided the
+ *  tally and `compactStepTitle` independently recomputed the same target to
+ *  build the row. Since the tally check ran FIRST and diverted every
+ *  no-target step, the guard inside `compactStepTitle` could never fire — dead
+ *  code that no test could reach, kept alive only because the duplication hid
+ *  it. Deciding and rendering in one place removes both. */
+function assertionRow(title: string, category: string): string | null | undefined {
+  if (category !== 'expect' && !/^[Ee]xpect/.test(title)) return undefined
+  const matcher = EXPECT_MATCHER_RE.exec(title)
+  if (!matcher) return undefined
+  // Look for the target in what FOLLOWS the matcher, never in the matcher
+  // itself: `Expect "toBeVisible" getByRole('button', { name: 'Authorize' })`
+  // is about the Authorize button; `Expect "toBe"` is about nothing the UI
+  // can name, so it earns no row of its own.
+  const rest = title.slice(matcher[0].length)
+  const target = describeActionTarget(rest, rest.match(/['"]([^'"]{1,80})['"]/)?.[1])
+  if (target === null) return null
+  // The negation is load-bearing. Dropping it renders `not toBeVisible` as
+  // "is visible" — the opposite of what the test asserted, in a pane whose
+  // whole job is to be evidence.
+  return `Verified ${target} ${matcherPhrase(matcher[2], Boolean(matcher[1]))}`.trimEnd()
 }
 
 function preferredScreenshots(artifacts: PlaywrightArtifact[]): PlaywrightArtifact[] {
@@ -168,25 +258,135 @@ function isAttachmentPath(pathLabel: string): boolean {
   return pathLabel.split(/[\\/]+/).includes('attachments')
 }
 
-function compactStepTitle(title: string): string | null {
+/** Playwright's own plumbing steps — present in every test, informative in none. */
+const STEP_PLUMBING = [
+  'launch browser',
+  'create context',
+  'create page',
+  'close context',
+  'create request context',
+  'dispose request context',
+  'wait for selector',
+  'wait for load state',
+]
+
+/** `POST "/oauth/token"` — an API suite's steps are HTTP calls, and they are the
+ *  most informative rows on the card. The old title-only matcher recognised no
+ *  verb in them and dropped every one. */
+const API_REQUEST_RE = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+["']([^"']+)["']/i
+
+/** `Expect "toBe"` / `Expect "toBeVisible" getByRole(…)` — Playwright's generic
+ *  assertion step. The quoted token is the MATCHER, not the target, so the old
+ *  code read it as a target and rendered 11 identical `Verified toBe` rows for
+ *  an API test. Matchers are universally named `to<Something>` (optionally
+ *  negated), which is what separates them from an author's own message. */
+const EXPECT_MATCHER_RE = /^[Ee]xpect(?:\.soft|\.poll)?\s*["'](not[. ])?(to[A-Z]\w*)["']/
+
+/**
+ * One playback step in plain words, or `null` to drop it.
+ *
+ * Category matters: the same word means different things in `pw:api` (a real
+ * HTTP request) and `test.step` (this harness's own `page.click` marker), and a
+ * bare matcher name in an `expect` step is not a target no matter how much it
+ * looks like one.
+ */
+function compactStepTitle(title: string, category?: string): string | null {
   const lower = title.toLowerCase()
-  if (
-    lower.includes('launch browser') ||
-    lower.includes('create context') ||
-    lower.includes('create page') ||
-    lower.includes('close context') ||
-    lower.includes('wait for selector')
-  ) return null
+  if (STEP_PLUMBING.some((noise) => lower.includes(noise))) return null
+  if (lower === 'screenshot') return null
+
+  const api = API_REQUEST_RE.exec(title)
+  if (api) return `${api[1].toUpperCase()} ${api[2]}`
+
+  // `page.click` / `page.goto` — the harness's own step names. Rewrite to the
+  // same verb vocabulary the raw Playwright titles use, then fall through.
+  const harnessVerb = /^page\.([a-z_]+)/i.exec(title)?.[1]
+  if (harnessVerb) return harnessStepLabel(harnessVerb)
 
   const quoted = title.match(/['"]([^'"]{1,80})['"]/)?.[1]
+
+  // Assertions are settled BEFORE the action verbs, because a matcher name
+  // contains one: `Expect "toBeChecked" …` hits `includes('check')` and would
+  // be reported as a *click on a checkbox* rather than as an assertion.
+  // Matcher-shaped `expect` steps never arrive here — `assertionRow` claims them
+  // in the caller, so this branch only sees the shapes it could not parse.
+  if (category === 'expect' || lower.startsWith('expect')) {
+    // Not the matcher shape. Either the author supplied their own message
+    // (`expect(x, 'auth probe should return a userId')` — Playwright uses the
+    // message as the step title) or the quoted token names what was checked.
+    // Both are the best line available, so keep them.
+    if (lower.startsWith('expect')) return `Verified ${describeActionTarget(title, quoted) ?? 'expectation'}`
+    return title.replace(/\s+/g, ' ').slice(0, 120)
+  }
+
   if (lower.includes('navigate')) return quoted ? `Opened ${quoted}` : 'Opened page'
   if (lower.includes('click')) return `Clicked ${describeActionTarget(title, quoted) ?? 'page element'}`
   if (lower.includes('fill')) return describeFillAction(title) ?? 'Filled field'
   if (lower.includes('press')) return quoted ? `Pressed ${quoted}` : 'Pressed key'
   if (lower.includes('select')) return quoted ? `Selected ${friendlyTarget(quoted)}` : 'Selected option'
   if (lower.includes('check')) return `Checked ${describeActionTarget(title, quoted) ?? 'option'}`
-  if (lower.includes('expect')) return `Verified ${describeActionTarget(title, quoted) ?? 'expectation'}`
+
   return isBrowserAction(title) ? title.replace(/\s+/g, ' ').slice(0, 80) : null
+}
+
+function harnessStepLabel(verb: string): string | null {
+  switch (verb.toLowerCase()) {
+    case 'goto': return 'Opened page'
+    case 'click': return 'Clicked page element'
+    case 'fill': return 'Filled field'
+    case 'screenshot': return null
+    case '_expect': return null
+    default: return null
+  }
+}
+
+/** Matcher name → the tail of a sentence. Unknown matchers add nothing, so they
+ *  return an empty string and the row reads `Verified <target>` — but a negated
+ *  unknown matcher still has to say so, or the row asserts the opposite of the
+ *  test. */
+function matcherPhrase(matcher: string, negated = false): string {
+  const phrase = ((): string => {
+    switch (matcher) {
+      case 'toBeVisible': return 'is visible'
+      case 'toBeHidden': return 'is hidden'
+      case 'toBeEnabled': return 'is enabled'
+      case 'toBeDisabled': return 'is disabled'
+      case 'toBeChecked': return 'is checked'
+      case 'toHaveText': return 'has the expected text'
+      case 'toHaveValue': return 'has the expected value'
+      case 'toHaveURL': return 'has the expected URL'
+      case 'toContainText': return 'contains the expected text'
+      default: return ''
+    }
+  })()
+  if (!negated) return phrase
+  // `is visible` → `is not visible`; an unphrased matcher falls back to naming
+  // the matcher itself rather than silently dropping the negation.
+  if (phrase.startsWith('is ')) return `is not ${phrase.slice(3)}`
+  if (phrase.startsWith('has ')) return `does not have ${phrase.slice(4)}`
+  if (phrase.startsWith('contains ')) return `does not contain ${phrase.slice(9)}`
+  return `does not match ${matcher}`
+}
+
+/** `/^authorize$/i` → `authorize`. Anchors and escapes are regex syntax, not
+ *  something a reader of the trace needs to see. */
+function unanchorPattern(pattern: string): string {
+  return pattern
+    .replace(/^\^/, '')
+    .replace(/\$$/, '')
+    // Character classes and their quantifiers are wildcards standing in for
+    // text nobody can predict — `/^Pickup\\s/` matches a button labelled
+    // "Pickup". Dropping the backslash alone rendered it "Pickups", a word that
+    // appears neither in the test nor on the page.
+    .replace(/\\[dDsSwWbB]\+?\*?\??/g, ' ')
+    // What is left is an escaped literal (`example\\.com`, `Order \\#`).
+    .replace(/\\(?=.)/g, '')
+    // An alternation is a set of acceptable labels, not a pipe-delimited string.
+    .replace(/\|/g, ' / ')
+    .replace(/\s+/g, ' ')
+    // A trailing separator left behind by a stripped wildcard reads as a typo.
+    .replace(/[\s,;:.-]+$/, '')
+    .trim()
 }
 
 function friendlyTarget(target: string): string {
@@ -212,6 +412,15 @@ function firstActionValue(title: string): { text: string; raw: string } | null {
 function describeActionTarget(title: string, quoted: string | undefined): string | null {
   const roleName = title.match(/getByRole\([^)]*name:\s*['"]([^'"]+)['"]/i)?.[1]
   if (roleName) return roleName
+
+  // Regex-literal locators are as common as string ones in this corpus
+  // (`{ name: /^authorize$/i }`, `getByText(/token created/i)`), and reading
+  // only the quoted form collapsed 850+ distinct rows to a bare `button`.
+  const roleRegex = title.match(/getByRole\([^)]*name:\s*\/(.+?)\/[gimsuy]*\s*\}/i)?.[1]
+  if (roleRegex) return unanchorPattern(roleRegex)
+
+  const textRegex = title.match(/getByText\(\/(.+?)\/[gimsuy]*\)/i)?.[1]
+  if (textRegex) return unanchorPattern(textRegex)
 
   const label = title.match(/getByLabel\(['"]([^'"]+)['"]/i)?.[1]
   if (label) return label

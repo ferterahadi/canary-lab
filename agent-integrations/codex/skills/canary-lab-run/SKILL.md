@@ -6,19 +6,49 @@ type: skill
 
 # Canary Lab — Run + Heal Loop
 
+## MCP Invocation
+
+Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
+rendered as `mcp__Canary_Lab__exec`). Every
+Canary Lab tool name below is the exact `command` value, not a separate public
+tool. For a feature-scoped command, replace both placeholders in this shape:
+
+```json
+{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}
+```
+
+This is the envelope shape, not every command's complete schema. Add the
+fields that command declares inside `arguments`; call `describe_tool` when a
+field is uncertain.
+
+Never invent a wrapper verb such as `learn` or `call`, embed JSON in a command
+string, or turn arguments into flags. Keep fields such as `confirm: true` inside
+`arguments`. Use `list_tools`, `search_tools`, or `describe_tool` as the
+`command` when discovery is needed. A deliberately selected focused or `full`
+profile still exposes atomic tools for debugging; the setup-installed path is
+`compact` + `exec`.
+
 Canary Lab owns the run verdicts and artifacts; this client applies the
 fixes. These tools arrive via the Canary Lab MCP server. If this client is
-already connected (the plugin connects with `full`), skip this step. To
-configure a connection manually: `npx canary-lab mcp --profile repair` (the
-composite `lifecycle`/`full` profiles carry the same tools).
+already connected (the plugin connects with `compact`), skip this step. To
+configure the same connection manually: `npx canary-lab mcp --profile compact`.
+
+## Arguments
+
+An invocation argument (`/canary-lab-run <suite>` — the Getting Started
+guide's "Repair a Broken Suite" card emits exactly this shape) is a suite
+(feature) name in the connected workspace: pass it to `start_run` directly.
 
 ## Workspace Bootstrap
 
-1. Read `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`); one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`.
-2. Check `/mcp/health` on the UI's port: read `port` from the workspace's `canary-lab.config.json` (fallback `7421`), then `curl -s http://127.0.0.1:<port>/mcp/health` — success is a JSON response. Confirm `projectRoot` matches the selected workspace.
+1. Find the LIVE server first: read `~/.canary-lab/active-servers.json`, which records `projectRoot`, `port` and `pid` for every UI that registered. A stopped server's entry LINGERS — the file is only rewritten when the next server registers — so an entry is a candidate, not proof: the health check below is what confirms it. One entry → that is your server and its `port`. Several → take the one whose `projectRoot` is the workspace the user means. None → fall back to `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`): one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`. Do NOT start from a guessed port.
+2. Then CONFIRM it is the right server: `curl -s http://127.0.0.1:<port>/mcp/health` and check that `projectRoot` is the workspace you intended. A healthy response does **not** settle the question on its own — a stale UI left behind by a demo or a tarball smoke test answers a port just as convincingly as the right one, and that is how a flight ends up running in someone's throwaway workspace. `projectRoot` matches what you intended → continue and tell the user which workspace. It names a DIFFERENT workspace → this is the wrong server; go back to step 1 rather than adopting it. It is under a temp directory (`/tmp`, `/private/var/folders`, `%TEMP%`) → never auto-select it; those are throwaway demo workspaces, so use one only when the user names it explicitly. Only when no live server serves the workspace you want does one need starting.
 3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up.
+4. A healthy `/mcp/health` means the server is live. On the setup-installed `compact` profile, atomic names such as `get_feature_coverage` are deliberately absent from `tools/list`; only `exec` is public. Call `exec` with `{"command":"list_tools","arguments":{}}` before concluding the connection is missing. Only an unknown-tool error for `exec` means this session is not connected — ask the user to run `npx canary-lab setup --force` and reconnect/restart the client, then retry. Never drive `/mcp` with a hand-written HTTP/JSON-RPC client (curl included; the health check above is the only direct HTTP use): a custom client bypasses client detection and reconnect handling.
 
 ## External Run Loop
+
+If `start_run` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace. Follow the returned active target (a run, Flight, coverage job, draft, portify, or export) in its current owner; do not start another workflow.
 
 1. Call `list_features` and choose the requested feature.
 2. Call `start_run` with `claim_heal: true`, a stable `session_id`, and a useful `conversation_name`. Do **not** pass `client_kind` — the MCP bridge auto-detects it from the connection; guessing it yourself can mis-set it and suppress heal claim. Heal claiming is open to interactive Claude/Codex clients (Desktop or CLI alike) — only runner-spawned PTY agents are blocked — so an ordinary CLI session like this one can own the heal loop. For requests like "rerun 7cvh", pass `run_ref: "7cvh"`.
@@ -37,8 +67,9 @@ composite `lifecycle`/`full` profiles carry the same tools).
     - **`context.failedTests` empty AND `context.bootFailure` set**: a **service failed to boot** — no tests ran. `Read` `context.bootFailure.logPath` to find why the service won't serve, fix the service/app code, then `signal_run` `kind: "restart"` (`context.nextSteps` already reflects this).
 
     Call `get_run_snapshot` only when you need the verbose raw summary, full counts, or deeper debugging fields.
-11. When **several** tests fail, fan out the diagnosis **and the fix-drafting**: dispatch one read-only sub-agent per failure, hand it the `failureId`, and have it call `get_failure_detail(runId, failureId)` to investigate just that slice in parallel and report back a hypothesis **plus a concrete proposed patch** (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must **not** touch the working tree or call `signal_run`; they only investigate and draft. Then **you** apply the patches yourself, serially — reconcile by hand if two patches touch the same file — then re-test and `signal_run` once. Only investigation + drafting fan out; applying, re-testing, and signalling stay single-threaded. (For a single failure, just investigate and fix it directly.)
+11. When **several** tests fail, fan out the diagnosis **and the fix-drafting**: dispatch one read-only sub-agent per failure in a single parallel round (up to 5 at once), hand each the `failureId`, and have it call `get_failure_detail(runId, failureId)` to investigate just that slice in parallel and report back a hypothesis **plus a concrete proposed patch** (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must **not** touch the working tree or call `signal_run`; they only investigate and draft. Then **you** apply the patches yourself, serially — reconcile by hand if two patches touch the same file — then re-test and `signal_run` once. Only investigation + drafting fan out; applying, re-testing, and signalling stay single-threaded. A sub-agent that comes back empty has **not** cleared its failure — say so in the hypothesis, or investigate that one yourself, rather than signalling as though its test were addressed. (For a single failure, just investigate and fix it directly.)
 12. Fix app/service code, not tests, unless the test is provably wrong.
+    - **Edit where the run actually booted.** When the heal context carries `context.worktrees` (repo name → path), this run is isolated and the services under test were booted from those per-run git worktrees — every **portified** feature runs this way, and so does any run the user isolated after a collision. Apply your fix under the `context.worktrees` path. `context.repoBranches[].path` is the **product** repo, which an isolated run never reads: patch only that and the rerun comes back byte-identical, which reads as "my fix did not work" when the fix was right and simply never loaded. The worktree edits are captured at teardown, so nothing is lost. When `context.worktrees` is absent, the run boots the repos in place and `repoBranches[].path` is the edit target.
 13. Call `signal_run` **once** per cycle with `kind: "rerun"` for test-only/app-code fixes that do not need service restart, or `kind: "restart"` when services or env need restarting. Include `hypothesis` and `fixDescription`; Canary Lab writes the journal from that signal and its observed git diff. One accountable signal per cycle, even when you fixed several failures.
 14. Do not call a separate journal-writing tool; the runner records failing tests, changed files, signal, outcome, and diff.
 15. Repeat from `wait_for_heal_task` (looping on `still_waiting`) until the run passes or reaches terminal failure.
@@ -49,13 +80,29 @@ composite `lifecycle`/`full` profiles carry the same tools).
 | --- | --- |
 | `still_waiting` | Not terminal — re-call with the same `runId` + `session_id`. |
 | `needs_heal` | Fix (see step 10), `signal_run` once, then wait again. |
-| `passed` | Report `result.counts.statusLine`, stop. |
+| `passed` | Report `result.counts.statusLine`, plus what happened to your fix (see below), then stop. |
 | `failed` | Report `result.counts.statusLine` + failure summary, stop. |
 | `boot_session` | Report which services came up, stop — never wait again. |
+
+## What happens to your fix when the run passes
+
+Your edits are never left only in your head or only on disk. At teardown Canary Lab diffs the
+run's working copy, saves the result as a patch per repo, and — unless the workspace turned it
+off — opens a **draft pull request** from it. So on `passed`:
+
+- **Do not open a pull request yourself**, and do not push a branch. The run does it, on a branch
+  named per feature + repo, so healing the same feature again updates that same pull request
+  instead of opening a second one.
+- Report what the run reports: the pull request URL when there is one, or the per-repo reason
+  there isn't (gh not signed in, no push rights, the patch no longer applies). Both live on the
+  run's `prAttempt`; the diff itself is on the run's **Changes** tab in the Canary Lab UI.
+- A run that ends red, or that gives up after its cycle cap, opens nothing — a fix that didn't
+  make the tests pass is not a fix to propose.
 
 ## Guardrails
 
 - `session_id` recipe: generate one id at the start of the conversation (any unique string) and pass that identical value in every tool call for the rest of the conversation.
+- A FLIGHT can hand you a run via an `external-work` checkpoint carrying a `runId`: the run was started in external-heal mode UNCLAIMED for you — `claim_heal` it with your own `session_id` and drive this exact loop, then re-call `get_flight` and release with `respond_flight_checkpoint(flightId, choice: "submit")` once the run is terminal (a failed run is a valid terminal answer; Canary reads the verdict from the run record). If that re-check carries `checkpoint.data.takeoverRequestedAt`, stop your repair work and release with `choice: "run-internally"` instead — do not submit. Never `abort_run` a flight-owned run to escape it, and never start another run for that feature while the flight owns it. The flight will wait on you indefinitely — a parked hand-off has no deadline — so do not end your turn with it open; after 45 minutes with no `get_flight` contact the read reports `handOffIdle` on it.
 - `heartbeat` is a low-level liveness refresh for long local repair stretches. `wait_for_heal_task` heartbeats while waiting, and `signal_run` and `get_heal_context` refresh liveness, so call explicit `heartbeat` only before or after a long stretch of local `Read` / `Edit` / `Write` / `Bash` work.
 - `start_run` is the single entrypoint for start/resume/restart intent. With no `run_ref`/`force_new`, a healing run for the feature is continued by default. Concurrent runs are allowed: a same-app collision returns `repo_collision_requires_choice` (resolve with `isolation: "worktree"` or `"queue"`); over the resource budget, the run is `queued` and starts automatically.
 - For requests like "rerun 7cvh", `start_run` resolves the run suffix and restarts that same failed/aborted run in remaining-test mode. Canary Lab reruns failed tests first, then skipped tests, then pending/not-run tests; do not tell the user no test filter exists.
@@ -66,6 +113,9 @@ composite `lifecycle`/`full` profiles carry the same tools).
 - Do not call `abort_run` unless the user asks, and pass the required confirmation only for an explicit abort/kill/stop-everything request.
 - Prefer compact `get_heal_context` when you need to refresh failure artifacts outside the wait loop. Use `get_run_snapshot` only for verbose fallback/debugging context.
 - Read responses are slim by default to protect your context, but the full data is always one step away — pull it whenever a failure needs deeper detail (just never in a wait loop): `get_run` omits the raw `lifecycleEvents`/`playwrightArtifacts`/`playbackEvents` (call it again with `includeRaw:true` to inline them); `get_run_snapshot` returns the heal-index and journal as **paths** to `Read`; `list_runs` returns the newest 20 (raise `limit`).
-- On any terminal run, point the user at the evaluation export as the next step (the `canary-lab-export` skill / `export` profile produces it).
+- On any terminal run, recommend the exact next skill invocation
+  `/canary-lab-export <runId>`, replacing the placeholder with the terminal
+  run's returned ID. Do not substitute `npx canary-lab export`; the export skill
+  uses the connected MCP server and preserves the exact run selection.
 - Record concise, factual journal notes. Do not paste raw transcripts.
 - When the run is waiting for external heal, Canary Lab is the source of truth for status, artifacts, and rerun/restart signals.

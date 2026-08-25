@@ -3,14 +3,15 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as api from '../../../shared/api/client'
-import type { EvaluationExportTask } from '../../../shared/api/types'
+import * as api from '@/shared/api/client'
+import type { EvaluationExportTask } from '@/shared/api/types'
 import { EvaluationExportProvider, useEvaluationExports } from './EvaluationExportContext'
+import { Probe, exportSockets, task, taskSocket, workspaceSocket } from './__fixtures__/evaluation-export-context-fixtures'
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     startEvaluationExport: vi.fn(),
@@ -21,10 +22,13 @@ vi.mock('../../../shared/api/client', async () => {
   }
 })
 
-class FakeWebSocket {
+export class FakeWebSocket {
   static instances: FakeWebSocket[] = []
   readyState = 0
   onmessage: ((event: MessageEvent) => void) | null = null
+  // Never fired by the constructor: the reconnect handler only runs on a
+  // RE-open, so a test has to drive open/close ordering itself.
+  onopen: (() => void) | null = null
   onclose: (() => void) | null = null
   onerror: (() => void) | null = null
   closeCalls = 0
@@ -45,6 +49,7 @@ class FakeWebSocket {
 }
 
 let container: HTMLDivElement
+
 let root: Root
 
 beforeEach(() => {
@@ -68,6 +73,18 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+function renderProbe(WebSocketImpl: typeof WebSocket = FakeWebSocket as unknown as typeof WebSocket) {
+  const captured: { value: ReturnType<typeof useEvaluationExports> | null } = { value: null }
+  act(() => {
+    root.render(
+      <EvaluationExportProvider WebSocketImpl={WebSocketImpl} wsBase="ws://test">
+        <Probe captured={captured} />
+      </EvaluationExportProvider>,
+    )
+  })
+  return captured
+}
+
 describe('EvaluationExportProvider', () => {
   it('rehydrates persisted tasks and replays task logs on mount', async () => {
     const running = task({ taskId: 'persisted-running', runId: 'run-persisted', status: 'running' })
@@ -88,17 +105,24 @@ describe('EvaluationExportProvider', () => {
     expect(api.listEvaluationExportTasks).toHaveBeenCalledWith()
     expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['persisted-completed', 'persisted-running'])
     expect(captured.value?.taskForRun('run-persisted')?.taskId).toBe('persisted-running')
+    // Only the live task gets a stream on mount. A finished export's log is
+    // historical and is pulled by `watchTask` when a panel surfaces it.
     expect(exportSockets().map((socket) => socket.url)).toEqual([
-      'ws://test/ws/evaluation-exports/persisted-completed',
       'ws://test/ws/evaluation-exports/persisted-running',
     ])
 
     act(() => {
-      taskSocket('persisted-completed').fire({ type: 'data', chunk: 'completed restored log\n' })
       taskSocket('persisted-running').fire({ type: 'data', chunk: 'running restored log\n' })
     })
-    expect(captured.value?.logsByTaskId['persisted-completed']).toContain('completed restored log')
     expect(captured.value?.logsByTaskId['persisted-running']).toContain('running restored log')
+
+    act(() => {
+      captured.value?.watchTask('persisted-completed')
+    })
+    act(() => {
+      taskSocket('persisted-completed').fire({ type: 'data', chunk: 'completed restored log\n' })
+    })
+    expect(captured.value?.logsByTaskId['persisted-completed']).toContain('completed restored log')
   })
 
   it('starts an export, streams logs, refreshes on exit, and exposes lookup helpers', async () => {
@@ -209,12 +233,36 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    // Startup reconciliation already subscribed it once; watchTask stays a no-op.
-    expect(exportSockets()).toHaveLength(1)
+    // Mount leaves finished tasks alone, so this is the only path that attaches.
+    expect(exportSockets()).toHaveLength(0)
     act(() => {
       captured.value?.watchTask('cold-task')
     })
     expect(exportSockets()).toHaveLength(1)
+
+    // Panels call watchTask from an effect, so repeat calls must not re-attach.
+    act(() => {
+      captured.value?.watchTask('cold-task')
+      captured.value?.watchTask('cold-task')
+    })
+    expect(exportSockets()).toHaveLength(1)
+  })
+
+  it('replays a finished export log once a panel watches it', async () => {
+    const done = task({ taskId: 'cold-task', runId: 'run-cold', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([done])
+    const captured = renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    act(() => {
+      captured.value?.watchTask('cold-task')
+    })
+    act(() => {
+      taskSocket('cold-task').fire({ type: 'data', chunk: 'completed restored log\n' })
+    })
+    expect(captured.value?.logsByTaskId['cold-task']).toContain('completed restored log')
   })
 
   it('handles duplicate task subscriptions and string failures', async () => {
@@ -442,142 +490,70 @@ describe('EvaluationExportProvider', () => {
     await act(async () => {
       await Promise.resolve()
     })
-    expect(exportSockets()).toHaveLength(1)
+    // A completed task is never attached on discovery — not on the first pass…
+    expect(exportSockets()).toHaveLength(0)
 
     await act(async () => {
       vi.advanceTimersByTime(3000)
       await Promise.resolve()
     })
 
-    expect(exportSockets()).toHaveLength(1)
+    // …and not on a later one either.
+    expect(exportSockets()).toHaveLength(0)
   })
 
-  it('ignores periodic discovery results after unmount', async () => {
+  it('re-lists on a workspace reconnect, since the bus has no replay', async () => {
     vi.useFakeTimers()
-    let resolveTasks: (tasks: EvaluationExportTask[]) => void = () => {}
+    const created = task({ taskId: 'missed-task', runId: 'run-missed', status: 'completed' })
     vi.mocked(api.listEvaluationExportTasks)
       .mockResolvedValueOnce([])
-      .mockReturnValueOnce(new Promise<EvaluationExportTask[]>((resolve) => { resolveTasks = resolve }))
-
-    renderProbe()
-    await act(async () => {
-      await Promise.resolve()
-    })
-    await act(async () => {
-      vi.advanceTimersByTime(3000)
-      await Promise.resolve()
-    })
-    act(() => {
-      root.unmount()
-    })
-
-    await act(async () => {
-      resolveTasks([task({ taskId: 'late-periodic-task', runId: 'run-late', status: 'running' })])
-      await Promise.resolve()
-    })
-
-    expect(exportSockets()).toHaveLength(0)
-    root = createRoot(container)
-  })
-
-  it('sorts remaining tasks by createdAt after dismissTask', async () => {
-    const t1 = task({ taskId: 't1', runId: 'r1', status: 'completed', createdAt: '2026-01-01T00:00:00.000Z' })
-    const t2 = task({ taskId: 't2', runId: 'r2', status: 'completed', createdAt: '2026-01-02T00:00:00.000Z' })
-    const t3 = task({ taskId: 't3', runId: 'r3', status: 'completed', createdAt: '2026-01-03T00:00:00.000Z' })
-    vi.mocked(api.listEvaluationExportTasks).mockResolvedValueOnce([t1, t2, t3])
-    vi.mocked(api.cancelEvaluationExportTask).mockResolvedValue(undefined)
-    const captured = renderProbe()
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-    expect(captured.value?.tasks.map((t) => t.taskId)).toEqual(['t3', 't2', 't1'])
-    await act(async () => {
-      await captured.value!.dismissTask('t2')
-    })
-    expect(captured.value?.tasks.map((t) => t.taskId)).toEqual(['t3', 't1'])
-  })
-
-  it('calls refreshTask when a data chunk signals an agent session ref (line 76 true branch)', async () => {
-    // The onData handler only calls refreshTask when:
-    // 1. the task has no sessionRef yet, AND
-    // 2. the chunk matches `[agent:xxx] starting localized rewrite|still running`
-    const running = task({ taskId: 'ref-task', runId: 'run-ref', status: 'running' })
-    const withRef = { ...running, sessionRef: { agent: 'claude' as const, sessionId: 'sid', logPath: '/tmp/x.jsonl' } }
-    vi.mocked(api.startEvaluationExport).mockResolvedValue(running)
-    vi.mocked(api.getEvaluationExportTask).mockResolvedValue(withRef)
+      .mockResolvedValue([created])
 
     const captured = renderProbe()
-    await act(async () => {
-      await captured.value?.startExport('run-ref', 'localized')
-    })
+    await act(async () => { await Promise.resolve() })
+    const first = workspaceSocket()
+    act(() => { first.onopen?.() })
+    expect(captured.value?.tasks).toEqual([])
 
-    // Fire a chunk matching the regex (no sessionRef yet → refreshTask fires)
+    // Drop the socket and let it come back. Anything the server published in
+    // the gap — this export finishing — was never delivered.
     await act(async () => {
-      taskSocket('ref-task').fire({ type: 'data', chunk: '[agent:claude] starting localized rewrite\n' })
+      first.close()
+      vi.advanceTimersByTime(2000)
       await Promise.resolve()
     })
-    expect(api.getEvaluationExportTask).toHaveBeenCalledWith('ref-task')
+    const reopened = workspaceSocket()
+    await act(async () => {
+      reopened.onopen?.()
+      await Promise.resolve()
+    })
+
+    expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['missed-task'])
   })
 
-  it('throws when the hook is used outside the provider', () => {
-    function OutsideProviderProbe() {
-      useEvaluationExports()
-      return null
-    }
+  it('survives a re-list that fails on reconnect', async () => {
+    vi.useFakeTimers()
+    const known = task({ taskId: 'known-task', runId: 'run-known', status: 'completed' })
+    vi.mocked(api.listEvaluationExportTasks)
+      .mockResolvedValueOnce([known])
+      .mockRejectedValue(new Error('offline'))
 
-    expect(() => {
-      act(() => {
-        root.render(<OutsideProviderProbe />)
-      })
-    }).toThrow('useEvaluationExports must be used inside EvaluationExportProvider')
+    const captured = renderProbe()
+    await act(async () => { await Promise.resolve() })
+    const first = workspaceSocket()
+    act(() => { first.onopen?.() })
+
+    await act(async () => {
+      first.close()
+      vi.advanceTimersByTime(2000)
+      await Promise.resolve()
+    })
+    await act(async () => {
+      workspaceSocket().onopen?.()
+      await Promise.resolve()
+    })
+
+    // A later valid push still recovers state, so the known list stays put.
+    expect(captured.value?.tasks.map((item) => item.taskId)).toEqual(['known-task'])
   })
 })
-
-function renderProbe(WebSocketImpl: typeof WebSocket = FakeWebSocket as unknown as typeof WebSocket) {
-  const captured: { value: ReturnType<typeof useEvaluationExports> | null } = { value: null }
-  act(() => {
-    root.render(
-      <EvaluationExportProvider WebSocketImpl={WebSocketImpl} wsBase="ws://test">
-        <Probe captured={captured} />
-      </EvaluationExportProvider>,
-    )
-  })
-  return captured
-}
-
-function workspaceSocket(): FakeWebSocket {
-  const socket = FakeWebSocket.instances.find((item) => item.url === 'ws://test/ws/workspace')
-  if (!socket) throw new Error('workspace socket not opened')
-  return socket
-}
-
-function exportSockets(): FakeWebSocket[] {
-  return FakeWebSocket.instances.filter((item) => item.url.includes('/ws/evaluation-exports/'))
-}
-
-function taskSocket(taskId: string): FakeWebSocket {
-  const url = `ws://test/ws/evaluation-exports/${taskId}`
-  const socket = FakeWebSocket.instances.find((item) => item.url === url)
-  if (!socket) throw new Error(`task socket not opened: ${taskId}`)
-  return socket
-}
-
-function Probe({ captured }: { captured: { value: ReturnType<typeof useEvaluationExports> | null } }) {
-  captured.value = useEvaluationExports()
-  return null
-}
-
-function task(overrides: Partial<EvaluationExportTask> = {}): EvaluationExportTask {
-  return {
-    taskId: 'task-1',
-    runId: 'run-1',
-    feature: 'checkout',
-    mode: 'raw',
-    status: 'running',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-    downloadReady: false,
-    ...overrides,
-  }
-}

@@ -7,6 +7,10 @@ import { buildRunPaths, runDirFor } from '../runtime/run-paths'
 import { stuckSlugsFromJournal } from '../runtime/log-enrichment'
 import { ESCALATION_THRESHOLD, buildHealEscalation, type HealEscalation } from '../runtime/heal-escalation'
 import type { HealSignalKind, RunBootFailure } from '../../../../../../../shared/run-state'
+import { CompactRunCounts, NormalizedRunCounts, compactCounts, normalizeRunCounts } from './external-heal-counts'
+
+export { normalizeRunCounts } from './external-heal-counts'
+export type { CompactRunCounts, NormalizedRunCounts } from './external-heal-counts'
 
 export interface ExternalHealFailedTest {
   /** Stable per-failure id — equals the on-disk `failed/<failureId>/` dir name
@@ -27,31 +31,6 @@ export interface ExternalHealFailedTest {
   artifacts: Array<{ name: string; kind: string; url: string }>
 }
 
-export interface CompactRunCounts {
-  totalKnown: number
-  passed: number
-  failed: number
-  skipped: number
-  notRun: number
-  statusLine: string
-}
-
-export interface NormalizedRunCounts {
-  totalKnown: number
-  passed: number
-  failed: number
-  skipped: number
-  notRun: number
-  passedNames: string[]
-  passedIds: string[]
-  failedNames: string[]
-  failedIds: string[]
-  skippedNames: string[]
-  skippedIds: string[]
-  notRunNames: string[]
-  statusLine: string
-}
-
 export interface ExternalHealContext {
   runId: string
   feature: string
@@ -59,6 +38,13 @@ export interface ExternalHealContext {
   status: string
   healCycles: number
   repoBranches: RunDetail['manifest']['repoBranches']
+  // Repo name → the per-run git worktree this run actually booted that repo from,
+  // present whenever the run is worktree-isolated (every portified feature, and
+  // any run the user isolated after a collision). REQUIRED reading before an edit:
+  // `repoBranches[].path` is the PRODUCT repo, which an isolated run never reads,
+  // so an agent that patched only that path spent a whole heal cycle watching an
+  // identical failure and concluding its correct fix had not worked.
+  worktrees?: RunDetail['manifest']['worktrees']
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   counts: CompactRunCounts
@@ -100,6 +86,8 @@ export interface ExternalRunSnapshot {
   status: string
   healCycles: number
   repoBranches: RunDetail['manifest']['repoBranches']
+  /** See ExternalHealContext.worktrees — the tree this run boots, when isolated. */
+  worktrees?: RunDetail['manifest']['worktrees']
   lifecycle: RunDetail['manifest']['lifecycle'] | null
   externalHealSession: RunDetail['manifest']['externalHealSession'] | null
   summary: RunDetail['summary'] | null
@@ -150,13 +138,43 @@ const FAILURE_DETAIL_INLINE_MAX_BYTES = 8 * 1024
 // needs_heal and get_heal_context) so skill-less clients read it exactly when a
 // heal is needed — keeping it OUT of the always-on MCP profile instructions.
 // Must stay in sync with the run-loop steps in the shipped SKILL.md files.
-const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
+// Exported so `mcp/repair-guardrail.test.ts` can pin the two invariants that sit
+// PAST the CLI's 2048-char `instructions` cut and therefore reach a skill-less
+// client only through this result: the repair rule and the pass-count rule.
+export const EXTERNAL_HEAL_NEXT_STEPS: readonly string[] = [
+  // The repair rule rides the RESULT, not just session-init prose. A skill-less
+  // client may never see INSTRUCTIONS_BY_PROFILE.repair in full: the Claude Code
+  // CLI truncates a server's `instructions` at 2048 chars, and the rule's
+  // neighbours in that string (the pass-count rule, "never edit the test files")
+  // already sit past the cut. Tool results are not truncated, so this is the only
+  // channel that provably reaches the agent on the cycle it is about to edit code.
+  'Fix app/service code, not tests, unless a test is provably wrong. Never delete, skip, weaken, or loosen an assertion to turn the run green — a run that goes green because the test stopped checking is the exact failure Canary Lab exists to catch.',
   'Read context.healPrompt.startHere first. The packet is slim: context.healIndex / context.journal are PATHS (Read them when needed), and each context.failedTests[] entry carries a failureId plus pointer dirs (errorPath, traceDir, playwrightMcpDir).',
-  'When SEVERAL tests fail, fan out the diagnosis AND the fix-drafting: spawn one read-only sub-agent per failure, hand it the failureId, and have it call get_failure_detail(runId, failureId) to investigate just that slice in parallel and report back a hypothesis PLUS a concrete proposed patch (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must NOT touch the working tree or call signal_run; they only investigate and draft.',
+  'When SEVERAL tests fail, fan out the diagnosis AND the fix-drafting: spawn one read-only sub-agent per failure in a single parallel round (up to 5 at once), hand each the failureId, and have it call get_failure_detail(runId, failureId) to investigate just that slice in parallel and report back a hypothesis PLUS a concrete proposed patch (the exact file edits / unified diff) for its failure. The sub-agents are read-only — they must NOT touch the working tree or call signal_run; they only investigate and draft. A sub-agent that comes back empty has NOT cleared its failure — say so in the hypothesis or investigate that one yourself, rather than signalling as though its test were addressed.',
   'Apply the drafted patches YOURSELF, serially — if two patches touch the same file, reconcile them by hand before applying. Then signal_run ONCE per cycle: kind:"rerun" for test-only/app-code fixes, "restart" when services or env must restart, with hypothesis + fixDescription. One accountable signal per cycle — only investigation + drafting fan out; applying, re-testing, and signalling stay single-threaded.',
   'Then call wait_for_heal_task again on the same runId + session_id (loop on still_waiting). Repeat until passed or terminal failure.',
+  // Same reasoning as the repair rule above: this invariant lives at offset ~3549
+  // of INSTRUCTIONS_BY_PROFILE.repair, i.e. past the CLI's 2048-char cut, so the
+  // result is the only channel that delivers it.
+  'Read pass counts from result.counts.statusLine / counts.passed — never total - failed. A test absent from every result list is not run, not passed; do not report it as a pass.',
   'To re-execute, reuse the run rather than tearing it down: signal_run re-runs the failed tests in place for an active healing run; for a failed/aborted run pass its run_ref to start_run (reruns failed → skipped → pending/not-run only). The run_ref rerun already covers skipped + pending, so it is complete — do NOT force_new just to avoid "skipped" tests; force_new on a portified feature spins a fresh per-run worktree and resets THIS journal to Iteration 1. Do not abort_run then start a fresh run — a fresh start re-runs the whole suite and is only worth it when prior passes are invalidated.',
 ]
+
+// Where to edit, for a worktree-isolated run. Conditional because it is only true
+// for SOME runs, and a rule stated on every run is one an agent learns to skim:
+// a non-isolated run boots the product repo in place and this line would be wrong.
+//
+// Earned by a live flight: the agent fixed the right defect in the right file in
+// the product repo, re-ran, saw byte-identical output, and reasonably concluded the
+// fix was wrong. The run had booted the service from its per-run worktree the whole
+// time. Nothing in the context said so — `repoBranches[].path` pointed at the
+// product repo — so this states the path AND why the obvious one is not it.
+function worktreeEditRule(worktrees: Record<string, string>): string {
+  const targets = Object.entries(worktrees)
+    .map(([repo, root]) => `${repo} → ${root}`)
+    .join('; ')
+  return `EDIT THE WORKTREE, not the product repo: this run is isolated, and the services under test were booted from a per-run git worktree (${targets}). An edit to the product repo path in repoBranches[] is NOT read by this run, so it re-runs byte-identically and looks like your fix failed. Apply every fix under the worktree path above; the worktree is captured at teardown, so the work is not lost.`
+}
 
 // Boot-failure heal procedure: the run failed before any test ran because a
 // service wouldn't come up, so there are no failedTests to investigate — the
@@ -190,6 +208,16 @@ export function slimRepeatHealContext(context: ExternalHealContext): ExternalHea
   return { ...rest, guidance: REPEAT_HEAL_GUIDANCE }
 }
 
+// Splice the worktree rule in at index 1 — immediately after the repair rule,
+// which stays first because it is the product's reason to exist.
+function withWorktreeRule(
+  steps: string[],
+  worktrees: Record<string, string> | undefined,
+): string[] {
+  if (!worktrees || Object.keys(worktrees).length === 0) return steps
+  return [steps[0]!, worktreeEditRule(worktrees), ...steps.slice(1)]
+}
+
 export function buildExternalHealContext(input: BuildExternalHealContextInput): ExternalHealContext {
   const snapshot = buildExternalRunSnapshot(input)
   const runDir = runDirFor(input.logsDir, snapshot.runId)
@@ -220,6 +248,7 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     status: snapshot.status,
     healCycles: snapshot.healCycles,
     repoBranches: snapshot.repoBranches,
+    ...(snapshot.worktrees ? { worktrees: snapshot.worktrees } : {}),
     lifecycle: snapshot.lifecycle,
     externalHealSession: snapshot.externalHealSession,
     counts: compactCounts(snapshot.counts),
@@ -232,9 +261,15 @@ export function buildExternalHealContext(input: BuildExternalHealContextInput): 
     ...(snapshot.healPrompt ? { healPrompt: snapshot.healPrompt } : {}),
     // A boot failure has no failedTests — the failure is the service log, so the
     // agent gets the boot-failure procedure instead of the test-triage one.
-    nextSteps: snapshot.bootFailure
-      ? [...bootFailureNextSteps(snapshot.bootFailure)]
-      : [...EXTERNAL_HEAL_NEXT_STEPS],
+    // The where-to-edit rule rides directly behind the repair rule in both
+    // procedures: it governs every edit that follows, so an agent that stops
+    // reading early has still seen it.
+    nextSteps: withWorktreeRule(
+      snapshot.bootFailure
+        ? [...bootFailureNextSteps(snapshot.bootFailure)]
+        : [...EXTERNAL_HEAL_NEXT_STEPS],
+      snapshot.worktrees,
+    ),
     ...(escalation ? { escalation } : {}),
   }
 }
@@ -276,6 +311,9 @@ export function buildExternalRunSnapshot(input: BuildExternalHealContextInput): 
     status: detail.manifest.status,
     healCycles: detail.manifest.healCycles,
     repoBranches: detail.manifest.repoBranches ?? [],
+    ...(detail.manifest.worktrees && Object.keys(detail.manifest.worktrees).length > 0
+      ? { worktrees: detail.manifest.worktrees }
+      : {}),
     lifecycle: detail.manifest.lifecycle ?? null,
     externalHealSession: detail.manifest.externalHealSession ?? null,
     summary: summary ?? null,
@@ -376,17 +414,6 @@ function nonEmptyDir(dir: string): string | null {
   }
 }
 
-function compactCounts(counts: NormalizedRunCounts): CompactRunCounts {
-  return {
-    totalKnown: counts.totalKnown,
-    passed: counts.passed,
-    failed: counts.failed,
-    skipped: counts.skipped,
-    notRun: counts.notRun,
-    statusLine: counts.statusLine,
-  }
-}
-
 export interface WriteHealSignalInput {
   logsDir: string
   runId: string
@@ -406,83 +433,6 @@ function healSignalPath(paths: ReturnType<typeof buildRunPaths>, kind: HealSigna
   if (kind === 'restart') return paths.restartSignal
   if (kind === 'rerun') return paths.rerunSignal
   return paths.healSignal
-}
-
-export function normalizeRunCounts(summary: RunDetail['summary'] | null): NormalizedRunCounts {
-  const summaryWithKnownTests = summary as (RunDetail['summary'] & { knownTests?: unknown }) | null
-  const knownTests = Array.isArray(summaryWithKnownTests?.knownTests)
-    ? summaryWithKnownTests.knownTests
-    : []
-  const knownEntries = knownTests.flatMap((entry) => {
-    if (!entry || typeof entry !== 'object') return []
-    const value = entry as { id?: unknown; name?: unknown }
-    const name = typeof value.name === 'string' ? value.name : ''
-    if (!name) return []
-    return [{
-      id: typeof value.id === 'string' && value.id.length > 0 ? value.id : undefined,
-      name,
-    }]
-  })
-  const passedNames = uniqueStrings(summary?.passedNames ?? [])
-  const passedIds = uniqueStrings(((summary as { passedIds?: unknown[] } | null)?.passedIds) ?? [])
-  const failedNames = uniqueStrings((summary?.failed ?? []).map((entry) => entry.name))
-  const failedIds = uniqueStrings((summary?.failed ?? []).map((entry) => (entry as { id?: unknown }).id))
-  const skippedNames = uniqueStrings(summary?.skippedNames ?? [])
-  const skippedIds = uniqueStrings(((summary as { skippedIds?: unknown[] } | null)?.skippedIds) ?? [])
-  const hasResultIds = passedIds.length > 0 || failedIds.length > 0 || skippedIds.length > 0
-  const accountedIds = new Set([...passedIds, ...failedIds, ...skippedIds])
-  const accountedNames = new Set([...passedNames, ...failedNames, ...skippedNames])
-  const notRunNames = knownEntries
-    .filter((entry) => {
-      if (hasResultIds && entry.id) return !accountedIds.has(entry.id)
-      return !accountedNames.has(entry.name)
-    })
-    .map((entry) => entry.name)
-  const totalKnown = knownEntries.length > 0 ? knownEntries.length : numberOrZero(summary?.total)
-  const passed = typeof summary?.passed === 'number' ? summary.passed : passedNames.length
-  const failed = failedNames.length
-  const skipped = typeof summary?.skipped === 'number' ? summary.skipped : skippedNames.length
-  const notRun = knownEntries.length > 0
-    ? notRunNames.length
-    : Math.max(0, totalKnown - passed - failed - skipped)
-
-  return {
-    totalKnown,
-    passed,
-    failed,
-    skipped,
-    notRun,
-    passedNames,
-    passedIds,
-    failedNames,
-    failedIds,
-    skippedNames,
-    skippedIds,
-    notRunNames,
-    statusLine: statusLineForCounts({ totalKnown, passed, failed, skipped, notRun }),
-  }
-}
-
-function statusLineForCounts(counts: Pick<NormalizedRunCounts, 'totalKnown' | 'passed' | 'failed' | 'skipped' | 'notRun'>): string {
-  const parts = [`${counts.passed}/${counts.totalKnown} passed`, `${counts.failed} failed`]
-  if (counts.skipped > 0) parts.push(`${counts.skipped} skipped`)
-  parts.push(`${counts.notRun} not run`)
-  return parts.join(', ')
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  const seen = new Set<string>()
-  const out: string[] = []
-  for (const value of values) {
-    if (typeof value !== 'string' || value.length === 0 || seen.has(value)) continue
-    seen.add(value)
-    out.push(value)
-  }
-  return out
-}
-
-function numberOrZero(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 function safeRead(file: string): string | null {

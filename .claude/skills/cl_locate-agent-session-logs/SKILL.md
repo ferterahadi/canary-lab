@@ -1,9 +1,13 @@
 ---
 name: cl_locate-agent-session-logs
-description: Use whenever you touch how Canary finds, reads, or builds a path to a claude/codex CLI session log (the JSONL transcript that feeds AgentSessionView), or when a user reports an agent view is "blank", "stuck", "shows nothing", or "only works on my machine". Covers where each CLI stores its logs, the env-aware config-dir resolvers (CLAUDE_CONFIG_DIR / CODEX_HOME), the one-home rule for path-building, and the boot-time shell hydration that keeps PTY + headless + read-side in agreement. Consult before recomputing any `~/.claude/projects/...` or `~/.codex/sessions/...` path by hand. NOT for designing what an agent viewer shows (that's cl_surfacing-agent-work), and note MCP external runs have no session log at all — a "blank" ExternalXXXPanel is not a path bug.
+description: Use whenever you touch how Canary finds, reads, or builds a path to a claude/codex CLI session log (the JSONL behind AgentSessionView), before recomputing any ~/.claude/projects/... or ~/.codex/sessions/... path by hand, or when an agent view is "blank" / "stuck" / "only works on my machine".
 ---
 
 # Canary Lab — Locating Agent Session Logs
+
+Not for designing what an agent viewer *shows* → `cl_surfacing-agent-work`. And note
+MCP external runs have no session log at all — a blank `ExternalXXXPanel` is not a
+path bug.
 
 Canary never scrapes a terminal to display agent output. Each agent CLI
 **writes its own JSONL transcript to disk**; Canary just needs the *path*, then
@@ -48,19 +52,37 @@ otherwise.)
 - **Never recompute a session-log path by hand.** Building
   `path.join(home, '.claude', 'projects', …)` or reading `process.env.HOME`
   inline is the recurring smell — it skips the env override, the realpath, and
-  the `/`→`-` encoding, and it drifts from the canonical version. Route through:
+  the project-dir slug encoding, and it drifts from the canonical version.
+  Route through:
   - `claudeSessionLogPath(cwd, sessionId)` — the deterministic claude path
   - `claudeConfigDir()` / `codexConfigDir()` — the config-dir base
   - the existing locators (`findClaudeLogBySessionId`, `locateCodexSessionLog`,
     `locateLatest*`, `resolveManifestSessionRef`, `resolveWorkflowAgentRef`)
+- **The slug is not `/`→`-`, and it has already changed once.** claude 2.1.220
+  folds **every** non-alphanumeric character to `-` (`/var/folders/s_/x` →
+  `-var-folders-s--x`); older builds folded only `/`, leaving `.` and `_`
+  intact. Measured 2026-08-04: 118 of 119 dirs in `~/.claude/projects` are pure
+  `[A-Za-z0-9-]`, and the lone underscore-preserving dir was last written
+  2026-04-08. Treat the slug as a **guess at someone else's private format**:
+  - **Prefer the session id whenever you have one.** It's ours, pinned via
+    `--session-id`, globally unique, and encoding-proof.
+    `locateClaudeSessionLog` falls back to `findClaudeLogBySessionId` for
+    exactly this reason.
+  - **When you have no id**, try `claudeProjectDirCandidates(cwd)` (current slug
+    then legacy) rather than one encoding — a run straddling a CLI upgrade has
+    logs under both.
+  - The failure mode is the usual one: log on disk, viewer blank. It hid for
+    months because workspace run dirs have no `_`, while every macOS temp dir
+    (`/var/folders/s_/…`) does — so it only bit demo, smoke, and temp-dir
+    flight runs.
 - **In session-log / config-dir path code, the `.claude` / `.codex` string
   literals belong in exactly two places** — the fallback inside the two
   resolvers. If a literal appears anywhere else on a path that will be *read
   back* to find a log, it's a stray; fold it into the resolver. (Two such
   strays existed: `portify/agent.ts` and `agent-session-tailer.ts`.)
   Known occurrences *outside* this rule's scope: the skill-install destination
-  paths in `scripts/agent.ts` (`path.join(home, '.codex'|'.claude', 'skills',
-  …)`) and the CLI-presence detection checks in `scripts/setup.ts`
+  paths in `apps/cli/agent.ts` (`path.join(home, '.codex'|'.claude', 'skills',
+  …)`) and the CLI-presence detection checks in `apps/cli/setup.ts`
   (`fs.existsSync(path.join(homeDir, '.codex'|'.claude'))`). These are
   install-time paths, not session-log lookups — but note they currently
   ignore `CLAUDE_CONFIG_DIR` / `CODEX_HOME`, so a relocated config home gets
@@ -87,7 +109,7 @@ home while the server looks under the default.
 ## The fix for that gap: hydrate at boot, once
 
 `hydrateAgentConfigEnvFromShell()` (`agent-config-env.ts`), called from
-`scripts/ui-command.ts` before any agent spawns:
+`apps/cli/ui-command.ts` before any agent spawns:
 
 - probes the interactive shell **once** (`$SHELL -i -c`, marker-fenced output,
   bounded timeout) for the vars **missing** from the launching env;
@@ -119,7 +141,7 @@ env already carries the vars (the common case — no shell spawned).
 
 ## Verify
 - `agent-session-log.test.ts` and `agent-config-env.test.ts` cover the resolvers
-  + hydration; run them plus `scripts/ui-command.test.ts` for the boot wiring.
-- `agent-session-log.ts` / `ui-command.ts` are `apps/web-server/**` + `scripts/`
-  changes → only take effect after the user's `canary-apply` cycle
-  (`cl_verify-changes`).
+  + hydration; run them plus `apps/cli/ui-command.test.ts` for the boot wiring.
+- `agent-session-log.ts` / `ui-command.ts` are `apps/web-server/**` + `apps/cli/`
+  changes → only take effect after the `canary-apply` cycle (`cl_verify-changes`
+  Tier 3).

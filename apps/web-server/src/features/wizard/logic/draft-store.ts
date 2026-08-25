@@ -1,13 +1,27 @@
 import fs from 'fs'
 import path from 'path'
-import {
-  applyFeatureScaffold,
-  validateFeatureTarget as validateScaffoldTarget,
-  type ApplyFeatureScaffoldResult,
-} from '../../../../../../shared/feature-scaffold'
-import type { AgentSessionRef } from '../../agent-sessions/logic/agent-session-log'
+import { validateFeatureTarget as validateScaffoldTarget } from '../../../../../../shared/feature-scaffold'
 import type { ClientKind, RunProducer } from '../../../../../../shared/run-mode'
-import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
+import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import type {
+  DraftPrdDocument,
+  DraftRecord,
+  DraftRepo,
+  DraftSource,
+  DraftStatus,
+  ExternalDraftStage,
+} from './draft-types'
+
+export type {
+  DraftPrdDocument,
+  DraftRecord,
+  DraftRepo,
+  DraftSource,
+  DraftStatus,
+  ExternalDraftStage,
+} from './draft-types'
 
 // Draft storage for the Add Test wizard. Each draft lives at
 // `<logsDir>/drafts/<draftId>/` with a JSON state file plus the raw PRD,
@@ -15,29 +29,9 @@ import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-ta
 // pty logs. State transitions are guarded by `transition()` so the route
 // layer can't accidentally jump from `created` straight to `accepted`.
 //
-// All side effects are scoped to the draft directory — the only time we
-// touch the project root is on `applyToProject`, which copies files into
-// `features/<name>/`.
-
-export type DraftStatus =
-  | 'created'
-  | 'planning'
-  | 'plan-ready'
-  | 'generating'
-  | 'spec-ready'
-  | 'accepted'
-  | 'rejected'
-  | 'cancelled'
-  | 'error'
-
-export type DraftSource = RunProducer
-export type ExternalDraftStage =
-  | 'scaffolding'
-  | 'authoring-tests'
-  | 'validating'
-  | 'ready'
-  | 'applied'
-  | 'error'
+// All side effects are scoped to the draft directory. Applying an authored
+// feature to the project root belongs to the MCP path (apply_external_draft →
+// applyExternalDraftFiles), not here.
 
 const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
   created: ['planning', 'rejected', 'cancelled', 'error'],
@@ -49,56 +43,6 @@ const ALLOWED_TRANSITIONS: Record<DraftStatus, DraftStatus[]> = {
   rejected: [],
   cancelled: ['rejected'],
   error: ['rejected'],
-}
-
-export interface DraftRepo {
-  name: string
-  localPath: string
-  branch?: string
-}
-
-export interface DraftPrdDocument {
-  filename: string
-  contentType: string
-  characters: number
-  text?: string
-  contentBase64?: string
-}
-
-export interface DraftRecord {
-  draftId: string
-  prdText: string
-  additionalNotes?: string
-  prdDocuments: DraftPrdDocument[]
-  repos: DraftRepo[]
-  featureName?: string
-  producer?: DraftSource
-  externalStage?: ExternalDraftStage
-  externalClientKind?: ClientKind
-  externalSessionId?: string
-  externalConversationName?: string
-  externalSessionUrl?: string
-  intentSummary?: string
-  wizardAgent?: 'claude' | 'codex'
-  activeAgentStage?: 'planning' | 'generating'
-  planAgentSessionId?: string
-  planAgentSessionKind?: 'claude' | 'codex'
-  // Structured-session ref + spawn timestamp for the live agent-session WS.
-  // Claude pins the session id at spawn so `planAgentSessionRef` is set before
-  // the first byte of agent output. Codex has no equivalent flag — the WS
-  // tailer discovers the rollout file post-hoc using `planAgentSpawnedAt` as
-  // the lower bound and the draft dir as the cwd match.
-  planAgentSessionRef?: AgentSessionRef
-  planAgentSpawnedAt?: string
-  specAgentSessionRef?: AgentSessionRef
-  specAgentSpawnedAt?: string
-  status: DraftStatus
-  createdAt: string
-  updatedAt: string
-  plan?: unknown
-  generatedFiles?: string[]
-  devDependencies?: string[]
-  errorMessage?: string
 }
 
 export interface DraftPaths {
@@ -132,8 +76,11 @@ export function draftStatusOf(r: DraftRecord): string { return r.status }
 // draft.json) matches `paths()` so the per-draft sidecars (prd.md, plan.json,
 // agent logs, generated/) still live alongside the record. The draft-specific
 // state machine + IllegalTransitionError stay below in `transition()`.
+// `sharedTaskStore`, not `new`: every accessor below calls this, and the store
+// is what announces a draft write to the workspace bus (bridgeDraftEvents).
+// A fresh instance per call would emit into a listener set nobody holds.
 function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
-  return new FileBackedTaskStore<DraftRecord>({
+  return sharedTaskStore<DraftRecord>({
     logsDir,
     dirName: 'drafts',
     recordFile: 'draft.json',
@@ -150,8 +97,55 @@ function draftStore(logsDir: string): FileBackedTaskStore<DraftRecord> {
     // Legacy rows (pre-`id` index shape) carry only `draftId`; fall back to it so
     // remove/prune/reconcile can address them (else they resurrect on refresh).
     idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { draftId?: string }).draftId),
+    featureOf: (r) => r.featureName,
+    withFeature: (r, featureName) => ({ ...r, featureName }),
     sortNewestFirst: true,
+    // Crash recovery: a draft left 'planning'/'generating' by a SERVER-spawned
+    // wizard agent belongs to a dead process (this one just started) — flip it
+    // to error so the pill stops narrating a live "authoring" forever. External
+    // drafts (producer 'external') are another process's session and survive a
+    // server restart by design — never touched here.
+    reconcile: {
+      isInterrupted: (r) =>
+        (r.status === 'planning' || r.status === 'generating') && r.producer !== 'external',
+      mark: (r, now) => ({
+        ...r,
+        status: 'error',
+        activeAgentStage: undefined,
+        errorMessage: 'interrupted by a server restart — plan or generate again',
+        updatedAt: now,
+      }),
+    },
   })
+}
+
+/**
+ * Attach the workspace bus to the draft store, once per process.
+ *
+ * Every draft write — REST, the MCP authoring tools, the wizard agent — lands
+ * in `writeDraft`/`transition`/`deleteDraft`, all of which go through the one
+ * shared store above. Bridging here is what lets those callers stop announcing
+ * their own writes (the rule in shared/store-event-bridge.ts); the drafts
+ * dialog reads the pushed record, so the event carries it.
+ */
+export function bridgeDraftEvents(logsDir: string, events: WorkspaceEventPublisher | undefined): void {
+  const store = draftStore(logsDir)
+  bridgeRecordEvents<DraftRecord>({
+    source: store,
+    events,
+    // Seeded from disk so a restart doesn't re-announce every existing draft as
+    // newly created.
+    knownIds: () => store.list().map((e) => String(e.id)),
+    load: (id) => store.get(id),
+    created: (draft) => ({ type: 'draft-created', draft }),
+    updated: (draft) => ({ type: 'draft-updated', draft }),
+    removed: (draftId) => ({ type: 'draft-deleted', draftId }),
+  })
+}
+
+/** Boot-time crash recovery — see the store's `reconcile` config above. */
+export function reconcileInterruptedDrafts(logsDir: string, now: () => string): void {
+  draftStore(logsDir).reconcileInterrupted(now)
 }
 
 export interface CreateDraftInput {
@@ -213,6 +207,12 @@ export function listDrafts(logsDir: string): DraftRecord[] {
     .filter((r): r is DraftRecord => r !== null)
 }
 
+/** Follow a suite rename into wizard drafts, so a draft that targeted the old
+ *  name keeps pointing at the same suite. Returns how many drafts moved. */
+export function renameDraftFeature(logsDir: string, from: string, to: string): number {
+  return draftStore(logsDir).renameFeature(from, to)
+}
+
 export class IllegalTransitionError extends Error {
   constructor(public readonly from: DraftStatus, public readonly to: DraftStatus) {
     super(`Illegal draft transition: ${from} → ${to}`)
@@ -235,14 +235,9 @@ export interface TransitionPatch {
   externalSessionId?: string
   externalConversationName?: string
   externalSessionUrl?: string
-  wizardAgent?: 'claude' | 'codex'
   activeAgentStage?: 'planning' | 'generating'
   planAgentSessionId?: string
   planAgentSessionKind?: 'claude' | 'codex'
-  planAgentSessionRef?: AgentSessionRef
-  planAgentSpawnedAt?: string
-  specAgentSessionRef?: AgentSessionRef
-  specAgentSpawnedAt?: string
   errorMessage?: string
 }
 
@@ -269,24 +264,9 @@ export function deleteDraft(logsDir: string, draftId: string): boolean {
   return true
 }
 
-export interface ApplyToProjectInput {
-  draftId: string
-  featureName: string
-  generated: { path: string; content: string }[]
-  projectRoot: string
-}
-
-export type ApplyToProjectResult =
-  | { ok: true; featureDir: string; written: string[] }
-  | { ok: false; error: 'feature-exists' | 'invalid-name' | 'invalid-scaffold'; featureDir?: string; details?: string }
-
 export type ValidateFeatureTargetResult =
   | { ok: true; featureDir: string }
   | { ok: false; error: 'feature-exists' | 'invalid-name'; featureDir?: string }
-
-export type MergeDevDependenciesResult =
-  | { ok: true; packageJsonPath?: string; added: string[] }
-  | { ok: false; error: 'package-json-missing' | 'package-json-invalid' | 'package-json-not-object'; packageJsonPath: string }
 
 export function validateFeatureTarget(projectRoot: string, featureName: string): ValidateFeatureTargetResult {
   const result = validateScaffoldTarget(projectRoot, featureName)
@@ -294,74 +274,4 @@ export function validateFeatureTarget(projectRoot: string, featureName: string):
   // shared.validateFeatureTarget only emits 'feature-exists' | 'invalid-name';
   // 'invalid-scaffold' is reserved for the apply path.
   return { ok: false, error: result.error as 'feature-exists' | 'invalid-name', featureDir: result.featureDir }
-}
-
-export function applyToProject(input: ApplyToProjectInput): ApplyToProjectResult {
-  return applyFeatureScaffold({
-    featureName: input.featureName,
-    files: input.generated,
-    projectRoot: input.projectRoot,
-  }) as ApplyFeatureScaffoldResult
-}
-
-export function mergeRootDevDependencies(projectRoot: string, devDependencies: string[]): MergeDevDependenciesResult {
-  if (devDependencies.length === 0) return { ok: true, added: [] }
-  const packageJsonPath = path.join(projectRoot, 'package.json')
-  if (!fs.existsSync(packageJsonPath)) {
-    return { ok: false, error: 'package-json-missing', packageJsonPath }
-  }
-  let pkg: unknown
-  try {
-    pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
-  } catch {
-    return { ok: false, error: 'package-json-invalid', packageJsonPath }
-  }
-  if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) {
-    return { ok: false, error: 'package-json-not-object', packageJsonPath }
-  }
-
-  const record = pkg as Record<string, unknown>
-  if (record.dependencies !== undefined && !isPackageDependencyMap(record.dependencies)) {
-    return { ok: false, error: 'package-json-invalid', packageJsonPath }
-  }
-  if (record.devDependencies !== undefined && !isPackageDependencyMap(record.devDependencies)) {
-    return { ok: false, error: 'package-json-invalid', packageJsonPath }
-  }
-  const dependencies = isPackageDependencyMap(record.dependencies) ? record.dependencies : {}
-  const existingDev = isPackageDependencyMap(record.devDependencies) ? record.devDependencies : {}
-  const nextDev = { ...existingDev }
-  const added: string[] = []
-
-  for (const name of devDependencies) {
-    if (Object.prototype.hasOwnProperty.call(existingDev, name)) continue
-    if (Object.prototype.hasOwnProperty.call(dependencies, name)) continue
-    nextDev[name] = 'latest'
-    added.push(name)
-  }
-
-  if (added.length === 0) return { ok: true, packageJsonPath, added }
-  record.devDependencies = nextDev
-  fs.writeFileSync(packageJsonPath, JSON.stringify(record, null, 2) + '\n', 'utf8')
-  return { ok: true, packageJsonPath, added }
-}
-
-function isPackageDependencyMap(value: unknown): value is Record<string, string> {
-  return Boolean(value)
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && Object.values(value as Record<string, unknown>).every((v) => typeof v === 'string')
-}
-
-// Slugify a string into a feature name candidate. Used as a fallback when the
-// user doesn't supply `featureName` — first 4 alpha words of the PRD title.
-export function slugifyFeatureName(prdText: string): string {
-  const firstLine = (prdText.split('\n').find((l) => l.trim()) ?? '').trim()
-  const words = firstLine
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, ' ')
-    .split(/\s+/)
-    .filter((w) => w.length > 0)
-    .slice(0, 4)
-  const slug = words.join('-').replace(/-+/g, '-').replace(/^-|-$/g, '')
-  return slug || 'untitled-feature'
 }

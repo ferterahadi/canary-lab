@@ -101,5 +101,72 @@ describe('verifyDoubleBoot', () => {
     expect(res.ok).toBe(false)
     expect(res.notPortFixable).toBe(true)
     expect(res.failureDetail).toContain("Can't reach database server")
+    // A dependency-down failure is already classified — the triage boot is
+    // skipped (it would fail identically and teach nothing).
+    expect(res.failureClass).toBeUndefined()
+  })
+
+  it('classifies a failure the solo baseline boot ALSO hits as baseline-boot-failed', async () => {
+    // Health never passes for ANY instance — solo included. The failure is the
+    // app's own boot, not concurrency; the agent must be told to stop
+    // port-hunting (the k7ru Flyway-drift case).
+    const res = await verifyDoubleBoot(
+      feature({ repos: [{ name: 'app', localPath: '~/app', startCommands: [{
+        command: 'node server.js', name: 'api', ports: [{ name: 'api', env: 'PORT' }],
+        healthCheck: { http: { url: 'http://localhost:${port.api}/', timeoutMs: 10, deadlineMs: 40 } },
+      }] }] }),
+      'local', { app: '/wt/app' },
+      { ptyFactory: fakePty, healthCheck: async () => false, healthPollIntervalMs: 2, staggerMs: 0, verifyLogDir },
+    )
+    expect(res.ok).toBe(false)
+    expect(res.failureClass).toBe('baseline-boot-failed')
+    expect(res.failureDetail).toMatch(/^BASELINE CHECK: a SINGLE boot/)
+    expect(res.failureDetail).toContain('NOT caused by concurrency')
+  })
+
+  it('classifies a failure only the concurrent boots hit as concurrency-failure', async () => {
+    // The first TWO distinct ports (instances A+B, concurrent) fail health;
+    // the third (the solo baseline) passes — the defect needs two instances.
+    const seenPorts = new Set<string>()
+    const res = await verifyDoubleBoot(
+      feature({ repos: [{ name: 'app', localPath: '~/app', startCommands: [{
+        command: 'node server.js', name: 'api', ports: [{ name: 'api', env: 'PORT' }],
+        healthCheck: { http: { url: 'http://localhost:${port.api}/', timeoutMs: 10, deadlineMs: 40 } },
+      }] }] }),
+      'local', { app: '/wt/app' },
+      {
+        ptyFactory: fakePty,
+        healthCheck: async (url) => {
+          seenPorts.add(new URL(url).port)
+          return seenPorts.size > 2
+        },
+        healthPollIntervalMs: 2,
+        staggerMs: 0,
+        verifyLogDir,
+      },
+    )
+    expect(res.ok).toBe(false)
+    expect(res.failureClass).toBe('concurrency-failure')
+    expect(res.failureDetail).toMatch(/^BASELINE CHECK: a single boot on its own ports PASSES/)
+  })
+
+  it('a passing double-boot carries no failureClass (and no third boot runs)', async () => {
+    const probedPorts = new Set<string>()
+    const res = await verifyDoubleBoot(
+      feature({ repos: [{ name: 'app', localPath: '~/app', startCommands: [{
+        command: 'node server.js', name: 'api', ports: [{ name: 'api', env: 'PORT' }],
+        healthCheck: { http: { url: 'http://localhost:${port.api}/', timeoutMs: 20, deadlineMs: 200 } },
+      }] }] }),
+      'local', { app: '/wt/app' },
+      {
+        ptyFactory: fakePty,
+        healthCheck: async (url) => { probedPorts.add(new URL(url).port); return true },
+        healthPollIntervalMs: 2,
+        verifyLogDir,
+      },
+    )
+    expect(res.ok).toBe(true)
+    expect(res.failureClass).toBeUndefined()
+    expect(probedPorts.size).toBe(2) // exactly the two verify instances — no triage boot
   })
 })

@@ -27,6 +27,11 @@ function run(command, args, cwd, extraEnv = {}) {
       // entry after this throwaway install is removed. Skip client registration
       // so the smoke run never touches the developer's live MCP clients.
       CANARY_LAB_SKIP_CLIENT_MCP: '1',
+      // The scaffold's postinstall now downloads the Playwright browser, which
+      // lands in the developer's shared browser cache — outside the throwaway
+      // workspace, like the MCP registrations above. `canary-lab
+      // install-browsers` honours this even though `playwright install` does not.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
       ...extraEnv,
     },
   })
@@ -35,6 +40,56 @@ function run(command, args, cwd, extraEnv = {}) {
     process.exit(result.status ?? 1)
   }
 }
+
+function childDirectories(dir) {
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+}
+
+function snapshotFiles(root) {
+  const snapshot = new Map()
+  const visit = (dir, prefix = '') => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const rel = path.join(prefix, entry.name)
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) visit(full, rel)
+      else if (entry.isFile()) snapshot.set(rel, fs.readFileSync(full))
+    }
+  }
+  visit(root)
+  return snapshot
+}
+
+function assertSnapshotUnchanged(root, before, label) {
+  const after = snapshotFiles(root)
+  if (after.size !== before.size) {
+    throw new Error(`Smoke test failed: ${label} file count changed during upgrade`)
+  }
+  for (const [rel, bytes] of before) {
+    if (!after.get(rel)?.equals(bytes)) {
+      throw new Error(`Smoke test failed: ${label} changed during upgrade: ${rel}`)
+    }
+  }
+}
+
+// Both freshness checks must run BEFORE the build: `npm run build` regenerates
+// AGENTS.md and .codex/skills, so a check placed after it can only ever pass.
+// Run first, they assert what's committed already matches the source of truth.
+run('node', ['tools/gen-agents-md.mjs', '--check'], repoRoot)
+run('node', ['tools/gen-codex-skills.mjs', '--check'], repoRoot)
+
+// Conventions + boundaries run here, not only in CI and the Claude edit hook,
+// because CONTRIBUTING.md points everyone at `npm run smoke:pack` before a PR.
+// The hook is Claude-only and CI needs a push; this is the one gate a human or a
+// Codex session actually runs locally. Both are sub-second.
+run('node', ['tools/check-conventions.mjs'], repoRoot)
+run('node', ['tools/check-feature-boundaries.mjs'], repoRoot)
+// ESLint covers only what needs a type checker or the React plugin (see
+// eslint.config.mjs); 3.7s, so it belongs in the same local gate.
+run('npx', ['eslint', '.'], repoRoot)
 
 run('npm', ['run', 'build'], repoRoot)
 run('npm', ['pack', '--pack-destination', tempRoot], repoRoot)
@@ -45,6 +100,168 @@ if (!tarballName) {
 }
 
 const tarballPath = path.join(tempRoot, tarballName)
+
+// Upgrade proof starts from the real immutable npm release, not a hand-shaped
+// fixture. 1.5.1 is the public version immediately before 2.0.0: it carries the
+// old four sample suites, the one-skill agent install, the old CLI path, and the
+// upgrade-only postinstall hook. Those are exactly the compatibility boundaries
+// the major release has to migrate without rewriting user-owned feature files.
+const legacyVersion = '1.5.1'
+const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8')).version
+const legacyHarnessDir = path.join(tempRoot, 'legacy-harness')
+const legacyProjectDir = path.join(legacyHarnessDir, 'legacy-project')
+const legacyHomeDir = path.join(tempRoot, 'legacy-home')
+const legacyEnv = {
+  CANARY_LAB_HOME: legacyHomeDir,
+  CANARY_LAB_AGENT_HOME: legacyHomeDir,
+}
+fs.mkdirSync(legacyHarnessDir, { recursive: true })
+run('npm', ['init', '-y'], legacyHarnessDir, legacyEnv)
+run(
+  'npm',
+  ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `canary-lab@${legacyVersion}`],
+  legacyHarnessDir,
+  legacyEnv,
+)
+run(
+  'npx',
+  ['canary-lab', 'init', 'legacy-project', '--package-spec', legacyVersion, '--no-install'],
+  legacyHarnessDir,
+  legacyEnv,
+)
+run(
+  'npm',
+  ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false'],
+  legacyProjectDir,
+  legacyEnv,
+)
+
+const legacyFeatureNames = [
+  'broken_todo_api',
+  'example_todo_api',
+  'flaky_orders_api',
+  'tricky_checkout_api',
+]
+if (JSON.stringify(childDirectories(path.join(legacyProjectDir, 'features'))) !== JSON.stringify(legacyFeatureNames)) {
+  throw new Error(`Smoke test failed: npm ${legacyVersion} no longer scaffolds the expected legacy feature boundary`)
+}
+
+const userNote = 'keep this user-owned note through the major upgrade\n'
+const userFeatureNotePath = path.join(legacyProjectDir, 'features', 'example_todo_api', 'USER-NOTES.md')
+const userClaudePath = path.join(legacyProjectDir, 'CLAUDE.md')
+const userAgentsPath = path.join(legacyProjectDir, 'AGENTS.md')
+const userSkillPath = path.join(legacyHomeDir, '.codex', 'skills', 'user-owned', 'SKILL.md')
+fs.writeFileSync(userFeatureNotePath, userNote)
+fs.writeFileSync(userClaudePath, `# Team notes\n\n${userNote}`)
+fs.writeFileSync(userAgentsPath, `# Agent notes\n\n${userNote}`)
+fs.mkdirSync(path.dirname(userSkillPath), { recursive: true })
+fs.writeFileSync(userSkillPath, userNote)
+fs.appendFileSync(path.join(legacyProjectDir, '.gitignore'), '\n# User rule\nuser-private/\n')
+
+const legacyPackagePath = path.join(legacyProjectDir, 'package.json')
+const legacyPackage = JSON.parse(fs.readFileSync(legacyPackagePath, 'utf8'))
+const legacyStamp = fs.readFileSync(path.join(legacyProjectDir, 'logs', '.canary-lab-version'), 'utf8').trim()
+if (legacyStamp !== legacyVersion) {
+  throw new Error(`Smoke test failed: installed legacy workspace stamp is ${legacyStamp || 'missing'}, expected ${legacyVersion}`)
+}
+legacyPackage.scripts['user:keep'] = 'echo keep-me'
+legacyPackage.userOwned = { keep: true }
+fs.writeFileSync(legacyPackagePath, `${JSON.stringify(legacyPackage, null, 2)}\n`)
+const featureSnapshot = snapshotFiles(path.join(legacyProjectDir, 'features'))
+
+for (const client of ['codex', 'claude']) {
+  const installed = childDirectories(path.join(legacyHomeDir, `.${client}`, 'skills'))
+    .filter((name) => name.startsWith('canary-lab'))
+  if (JSON.stringify(installed) !== JSON.stringify(['canary-lab'])) {
+    throw new Error(`Smoke test failed: ${legacyVersion} ${client} baseline is not the expected one-skill install`)
+  }
+}
+
+// An explicit `npm install <pkg>` does not reliably run the root workspace's
+// postinstall. The 1.5.x UI updater can therefore swap in 2.0 without migrating
+// the workspace. Exercise the first-start recovery from the packed 2.0 code,
+// then run the documented command once more to prove the migration is retryable.
+run(
+  'npm',
+  ['install', '--no-audit', '--no-fund', '--prefer-offline', '--progress=false', `file:${tarballPath}`],
+  legacyProjectDir,
+  legacyEnv,
+)
+const recoveryModulePath = path.join(
+  legacyProjectDir,
+  'node_modules',
+  'canary-lab',
+  'dist',
+  'apps',
+  'cli',
+  'ui-command.js',
+)
+run(
+  process.execPath,
+  [
+    '-e',
+    `const { finishPendingWorkspaceUpgrade } = require(${JSON.stringify(recoveryModulePath)});` +
+      `finishPendingWorkspaceUpgrade(${JSON.stringify(legacyProjectDir)}, { log: console.log })` +
+      `.then((ran) => { if (!ran) throw new Error('expected first-start upgrade recovery to run') })` +
+      `.catch((error) => { console.error(error); process.exit(1) })`,
+  ],
+  legacyProjectDir,
+  legacyEnv,
+)
+run('npx', ['canary-lab', 'upgrade', '--silent'], legacyProjectDir, legacyEnv)
+
+const upgradedPackage = JSON.parse(fs.readFileSync(legacyPackagePath, 'utf8'))
+const installedRelease = JSON.parse(
+  fs.readFileSync(path.join(legacyProjectDir, 'node_modules', 'canary-lab', 'package.json'), 'utf8'),
+)
+if (installedRelease.version !== releaseVersion) {
+  throw new Error(`Smoke test failed: expected upgraded package ${releaseVersion}, got ${installedRelease.version}`)
+}
+if (upgradedPackage.scripts.postinstall !== 'canary-lab upgrade --silent && canary-lab install-browsers') {
+  throw new Error('Smoke test failed: 1.5.1 postinstall was not upgraded to include browser installation')
+}
+if (upgradedPackage.scripts['user:keep'] !== 'echo keep-me' || upgradedPackage.userOwned?.keep !== true) {
+  throw new Error('Smoke test failed: upgrade changed user-owned package.json fields')
+}
+assertSnapshotUnchanged(path.join(legacyProjectDir, 'features'), featureSnapshot, '1.5.1 feature tree')
+for (const [file, expected] of [
+  [userClaudePath, `# Team notes\n\n${userNote}`],
+  [userAgentsPath, `# Agent notes\n\n${userNote}`],
+  [userSkillPath, userNote],
+]) {
+  if (fs.readFileSync(file, 'utf8') !== expected) {
+    throw new Error(`Smoke test failed: upgrade changed user-owned file ${file}`)
+  }
+}
+const upgradedGitignore = fs.readFileSync(path.join(legacyProjectDir, '.gitignore'), 'utf8')
+if (!upgradedGitignore.includes('user-private/') || !upgradedGitignore.includes('features/*/envsets/*/*')) {
+  throw new Error('Smoke test failed: upgrade lost user .gitignore rules or envset secret protection')
+}
+const stamp = fs.readFileSync(path.join(legacyProjectDir, 'logs', '.canary-lab-version'), 'utf8').trim()
+if (stamp !== releaseVersion) {
+  throw new Error(`Smoke test failed: upgraded workspace stamp is ${stamp || 'missing'}, expected ${releaseVersion}`)
+}
+
+for (const client of ['codex', 'claude']) {
+  const packaged = childDirectories(
+    path.join(legacyProjectDir, 'node_modules', 'canary-lab', 'dist', 'agent-integrations', client, 'skills'),
+  )
+  const installed = childDirectories(path.join(legacyHomeDir, `.${client}`, 'skills'))
+    .filter((name) => name.startsWith('canary-lab'))
+  if (JSON.stringify(installed) !== JSON.stringify(packaged)) {
+    throw new Error(`Smoke test failed: ${client} skills did not expand from the 1.5.1 set to the 2.0.0 set`)
+  }
+}
+
+for (const feature of legacyFeatureNames) {
+  run(
+    'npx',
+    ['playwright', 'test', '--list', '--config', `features/${feature}/playwright.config.ts`],
+    legacyProjectDir,
+    legacyEnv,
+  )
+}
+
 const projectDir = path.join(tempRoot, 'smoke-project')
 
 run('npm', ['init', '-y'], tempRoot)
@@ -57,18 +274,92 @@ run(
   tempRoot,
 )
 
+// The scaffold ships its own demonstration (R89): the storefront product repo
+// AND the suite that exercises it, so a first-time user can press Run and watch
+// fail -> repair -> green without authoring anything. `npm run demo` adds
+// nothing on top — it runs this same `init` — so anything missing from this
+// list is missing from the product tour too.
 const scaffoldPaths = [
   'package.json',
-  'features/example_todo_api/feature.config.cjs',
-  'features/broken_todo_api/feature.config.cjs',
+  'features/README.md',
+  'demo-app/package.json',
+  'demo-app/README.md',
+  'demo-app/REQUIREMENTS.md',
+  'demo-app/catalog-service/server.ts',
+  'demo-app/inventory-service/server.ts',
+  'demo-app/checkout-service/server.ts',
+  'features/storefront-journey/feature.config.cjs',
+  'features/storefront-journey/playwright.config.ts',
+  'features/storefront-journey/e2e/storefront.spec.ts',
+  'features/storefront-journey/e2e/helpers/api.ts',
+  // Requirements + coverage ship with the suite: the collected source doc and
+  // the generated summary its `@req-*` tags map onto. Without these two the
+  // Requirements and Test-authoring stages read as never started on a fresh
+  // scaffold, and the coverage ledger has nothing to score against.
+  // The envset the suite declares in `envs: ['local']`. npm strips `.gitignore`
+  // from a tarball but not `.env`, so this is the one place that proves it.
+  'features/storefront-journey/envsets/envsets.config.json',
+  'features/storefront-journey/envsets/local/storefront-journey.env',
+  // The recorded boot the scaffold ships so Suite setup reports figures before
+  // the user runs anything. Under a `logs/` path, so it needs both the repo's
+  // .gitignore exception and this assertion to prove it survives the tarball.
+  'logs/runs/index.json',
+  'logs/runs/2026-08-07T0900-s7bk/manifest.json',
+  'logs/runs/2026-08-07T0900-s7bk/lifecycle-events.jsonl',
+  // The saved port-ification behind Parallel readiness — its double-boot proof
+  // and its diff. Seeded the same way, and its paths are rewritten to this
+  // workspace by init, which the assertion below checks.
+  'logs/portify/index.json',
+  'logs/portify/portify-2026-08-07T0910-q2mx/portify.json',
+  'features/storefront-journey/docs/storefront-journey-prd.md',
+  'features/storefront-journey/docs/_prd-summary.json',
+  'features/storefront-journey/docs/_prd-summary.md',
+  // The focused workbench gives Author/Coverage/Verify/Portify real, prepared
+  // material without disturbing the repair demo's ten-defect contract chain.
+  'workflow-app/package.json',
+  'workflow-app/README.md',
+  'workflow-app/REQUIREMENTS.md',
+  'workflow-app/server.ts',
+  'features/workflow-workbench/feature.config.cjs',
+  'features/workflow-workbench/playwright.config.ts',
+  'features/workflow-workbench/verification.configs.json',
+  'features/workflow-workbench/e2e/workflow.spec.ts',
+  'features/workflow-workbench/envsets/envsets.config.json',
+  'features/workflow-workbench/envsets/local/workflow-workbench.env',
+  'features/workflow-workbench/envsets/production/workflow-workbench.env',
+  'features/workflow-workbench/docs/workflow-workbench-prd.md',
+  'features/workflow-workbench/docs/_prd-summary.json',
+  'features/workflow-workbench/docs/_prd-summary.md',
+  // The Flight demo's target: un-onboarded on purpose, so a Flight has a repo
+  // to conduct from Repo scan through Evaluation. No suite ships for it.
+  'flight-app/package.json',
+  'flight-app/README.md',
+  'flight-app/REQUIREMENTS.md',
+  'flight-app/lending-service/server.ts',
 ]
 
+// One prompt per agent-spawning path that ships, plus a schema sidecar — the
+// asset-copy step is only proven by the tarball. (The retired internal wizard's
+// stage1/stage2 prompts used to stand in here; the flight pipeline's scout and
+// specs-coverage cover the same ground now.)
 const installedPackagePaths = [
-  'node_modules/canary-lab/dist/apps/web-server/prompts/stage1-plan.md',
-  'node_modules/canary-lab/dist/apps/web-server/prompts/stage2-spec.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/scout.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/specs-coverage.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/portify.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/prd-summary.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/heal-agent.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.md',
   'node_modules/canary-lab/dist/apps/web-server/prompts/evaluation-rewrite.schema.json',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/fix-commit-message.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/fix-commit-message.schema.json',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-repair-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-verify-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-author-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-coverage-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-export-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-flight-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-portify-instructions.md',
+  'node_modules/canary-lab/dist/apps/web-server/prompts/mcp-compact-instructions.md',
 ]
 
 for (const relPath of scaffoldPaths) {
@@ -89,10 +380,37 @@ for (const relPath of [
   '.codex/self-fixing-loop.md',
   '.codex/env-import.md',
   '.codex/canary-lab-feature.md',
-  'features/example_todo_api/src/config.ts',
+  // The four toy samples retired in 2.0.0 when the demo storefront replaced
+  // them — a scaffold still carrying one means a stale template shipped.
+  'features/example_todo_api/feature.config.cjs',
+  'features/broken_todo_api/feature.config.cjs',
+  'features/flaky_orders_api/feature.config.cjs',
+  'features/tricky_checkout_api/feature.config.cjs',
+  // Earlier 2.0.0 drafts shipped partially onboarded demo suites under these
+  // names. The suite that ships now is `storefront-journey` (asserted above);
+  // any of these reappearing means a stale template shipped.
+  'features/demo_catalog/feature.config.cjs',
+  'features/demo_inventory/feature.config.cjs',
+  'features/demo_storefront/feature.config.cjs',
 ]) {
   if (fs.existsSync(path.join(projectDir, relPath))) {
     throw new Error(`Smoke test failed: deprecated path still present: ${relPath}`)
+  }
+}
+
+// The seeded portify record ships workspace-RELATIVE paths (no machine path can
+// be published); init resolves them against the new project. A record left
+// relative points the Ports tab and the config drill-through at directories
+// that don't exist, and nothing else in the scaffold would catch it.
+{
+  const record = JSON.parse(
+    fs.readFileSync(path.join(projectDir, 'logs/portify/portify-2026-08-07T0910-q2mx/portify.json'), 'utf8'),
+  )
+  const paths = [record.featureDir, ...record.repos.map((r) => r.path)]
+  for (const p of paths) {
+    if (!path.isAbsolute(p) || !fs.existsSync(p)) {
+      throw new Error(`Smoke test failed: seeded portify path not re-homed onto the workspace: ${p}`)
+    }
   }
 }
 

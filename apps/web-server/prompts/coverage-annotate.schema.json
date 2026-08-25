@@ -15,18 +15,30 @@
           },
           "pathTypes": {
             "type": "array",
-            "items": { "enum": ["happy", "sad", "edge"] }
+            "items": { "type": "string", "enum": ["happy", "sad", "edge"] }
           },
           "variants": {
             "type": "array",
             "items": { "type": "string" }
           },
           "rationale": { "type": "string" },
-          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+          "confidence": { "type": "number" }
         },
-        "required": ["testName", "requirements"]
+        "required": ["testName", "requirements", "pathTypes", "variants", "rationale", "confidence"]
+      }
+    },
+    "unmappable": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "testName": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["testName", "reason"]
       }
     }
   },
-  "required": ["mappings"]
+  "required": ["mappings", "unmappable"]
 }

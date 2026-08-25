@@ -2,7 +2,15 @@ The previous port-ification attempt did not pass verification. The harness boote
 
 {{failureDetail}}
 
-A failed boot almost always means SOME listener still binds a hardcoded port (ignoring its injected env var), an inter-service URL still points at a fixed port, or a port slot is missing its `env` field. The culprit is very often a NON-HTTP listener the first pass missed — a gRPC server, a WebSocket server, a raw TCP server, or a metrics/admin endpoint on its own port.
+Use any BASELINE CHECK verdict:
+
+- `baseline-boot-failed`: one boot also fails. Fix the app's boot blocker, such as a
+  migration or config error; this is not a port failure, so do not re-scan ports first.
+- `concurrency-failure` or no verdict: the solo boot works. Look for a hardcoded
+  listener, fixed local URL, missing slot `env`, or shared on-disk state. Give each
+  boot its own build/cache/output directory keyed on an injected port. The missed
+  culprit is often a NON-HTTP listener: a gRPC server, WebSocket server, raw TCP
+  server, or metrics/admin endpoint.
 
 - Re-scan the source EXHAUSTIVELY for every `listen(` / `.port` / `createServer` / `bindAsync` and every hardcoded `localhost:<port>` reference.
 - Make each LISTENER read its injected env var with a matching `ports: [{ name, env }]` slot.

@@ -43,6 +43,14 @@ export interface DirtySpecStoreEvent {
   featureId?: string
 }
 
+/** Whole-record equality, used to skip a no-op write+emit. Deliberately a
+ *  stringify compare rather than a field-by-field one: it fails OPEN (any key
+ *  reordering, added field, or legacy record missing a hash map reads as
+ *  different and therefore saves), so it can never swallow a real transition. */
+function sameRecord(a: DirtySpecRecord, b: DirtySpecRecord): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
 function emptyRecord(featureId: string, now: string): DirtySpecRecord {
   return {
     id: featureId,
@@ -78,6 +86,10 @@ export class DirtySpecStore {
         status: r.status,
         since: r.since,
       }),
+      // This store is keyed BY the feature — a rename re-homes the record dir
+      // (see FileBackedTaskStore.renameFeature) rather than editing in place.
+      featureOf: (r) => r.featureId,
+      withFeature: (r, feature) => ({ ...r, id: feature, featureId: feature }),
     })
     this.store.onEvent((e: TaskStoreEvent) => this.emit({ kind: e.kind, featureId: e.id }))
   }
@@ -104,6 +116,17 @@ export class DirtySpecStore {
       message: DIRTY_MESSAGE,
       since: changed ? this.now() : rec.since,
     }
+    // A recompute that found nothing new must not write or emit. Every emit
+    // becomes a `tests-dirty-changed` push and a full `/api/features` refetch,
+    // so one `.git` write used to cost the client one refetch per feature
+    // sharing that git root (measured: 33).
+    //
+    // Compare against what is on DISK, not against `rec` — callers pass an
+    // already-augmented record (`captureRunStart` rewrites the baselines and
+    // leaves status/dirtySpecs alone), so comparing to `rec` would silently
+    // drop a legitimate baseline write.
+    const stored = this.get(next.featureId)
+    if (stored && sameRecord(stored, next)) return next
     this.store.save(next)
     return next
   }
@@ -164,6 +187,10 @@ export class DirtySpecStore {
 
   remove(featureId: string): void {
     this.store.remove(featureId)
+  }
+
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
   }
 
   onEvent(fn: (event: DirtySpecStoreEvent) => void): void {

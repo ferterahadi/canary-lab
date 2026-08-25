@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { IconButton, PlusIcon, TrashIcon } from '../../config/components/atoms'
-import { FolderPicker, FolderPickerModal } from '../../config/components/FolderPicker'
+import { IconButton, PlusIcon, TrashIcon } from '@/shared/ui/atoms'
+import { FolderPicker, FolderPickerModal } from '@/features/config'
 
 // R40/R69: the flight dialog's repo selection — the SAME building blocks Feature
 // configuration uses. Each selected repo is a `FolderPicker` button (shows the
@@ -76,10 +76,8 @@ export function RepoMultiPicker({
           type="button"
           data-testid="repo-pick-add"
           onClick={() => setPicking(true)}
-          className="self-start inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] uppercase tracking-wider transition-colors duration-150"
-          style={{ color: 'var(--text-muted)', border: '1px dashed var(--border-default)' }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+          className="cl-button cl-rubric self-start inline-flex items-center gap-1.5 px-2.5 py-1.5"
+          style={{ borderStyle: 'dashed', background: 'transparent' }}
         >
           <PlusIcon />
           Add repo

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RunScheduler, type SchedulerActiveRun } from './run-scheduler'
-import { estimateRunCost, type AdmissionConfig, type SystemResources } from './admission'
+import { type AdmissionConfig, type SystemResources } from './admission'
 
 const GB = 1024 * 1024 * 1024
 const bigBox: SystemResources = { cpuCount: 16, freeMemBytes: 32 * GB }

@@ -3,11 +3,11 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { listWorkspaceDirs, type WorkspaceDirsResponse } from '../../../shared/api/client'
+import { listWorkspaceDirs, type WorkspaceDirsResponse } from '@/shared/api/client'
 import { RepoMultiPicker } from './RepoMultiPicker'
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     listWorkspaceDirs: vi.fn(),
@@ -26,7 +26,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)

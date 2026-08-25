@@ -1,11 +1,12 @@
 import fs from 'fs'
 import type { FastifyInstance } from 'fastify'
-import type { PortifyStore } from '../../portify/logic/runtime/store'
-import { portifyCleanupListing } from '../../portify/logic/runtime/cleanup'
-import type { PortifyManifest, StartPortifyInput, StartPortifyResult } from '../../portify/logic/runtime/types'
+import type { PortifyStore } from '../logic/runtime/store'
+import { portifyCleanupListing } from '../logic/runtime/cleanup'
+import type { PortifyManifest, StartExternalPortifyInput, StartExternalPortifyResult, StartPortifyInput, StartPortifyResult } from '../logic/runtime/types'
 import type { HealAgent } from '../../runs/logic/runtime/auto-heal'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { launchEditorDir } from '../../../shared/editor-launch'
+import { overlayDir } from '../logic/runtime/overlay'
 import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/launcher/project-config'
 
 // REST surface for the port-ification workflow, mirroring routes/benchmarks.ts.
@@ -15,11 +16,18 @@ import { loadProjectConfig, type EditorChoice } from '../../runs/logic/runtime/l
 export interface PortifyRouteDeps {
   store: PortifyStore
   startPortify(input: StartPortifyInput): Promise<StartPortifyResult>
+  /** External producer: set up the worktree and park at `editing` — the CALLER's
+   *  client does the edits (no local agent). The flight's portify hand-off and
+   *  any REST caller reuse the same runner path the MCP tools drive. */
+  startExternalPortify(input: StartExternalPortifyInput): Promise<StartExternalPortifyResult>
+  /** External twin of revise: reopen a verified workflow for the client's own
+   *  edits and return the feedback prompt (constraints restated). */
+  reviseExternalPortify(workflowId: string, feedback: string): { manifest: PortifyManifest; instructions: string }
   savePortify(workflowId: string): Promise<PortifyManifest>
   cancelPortify(workflowId: string): Promise<PortifyManifest>
   revisePortify(workflowId: string, feedback: string): Promise<PortifyManifest>
   removePortify(workflowId: string): Promise<{ workflowId: string; removed: true }>
-  loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
+  loadAgentSession(workflowId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[]; subagents?: unknown[] } | null
   workspaceEvents?: WorkspaceEventPublisher
   /** Product root — resolves the configured editor for "open in editor". */
   projectRoot?: string
@@ -31,10 +39,17 @@ interface StartBody {
   feature?: string
   agent?: string
   maxAttempts?: number
+  /** `external` = the caller's own client edits the worktree; no local agent.
+   *  Requires `sessionId` (an MCP session id, or `flight:<id>`). */
+  producer?: string
+  sessionId?: string
 }
 
 interface ReviseBody {
   feedback?: string
+  /** True = reopen for the external client's own edits (reviseExternalPortify)
+   *  instead of resuming a local agent. Only valid on an external workflow. */
+  external?: boolean
 }
 
 export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps): Promise<void> {
@@ -56,6 +71,16 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       body.agent === 'codex' ? 'codex' : body.agent === 'claude' ? 'claude' : undefined
     const maxAttempts = Number.isInteger(body.maxAttempts) ? body.maxAttempts : undefined
     try {
+      if (body.producer === 'external') {
+        const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : ''
+        if (!sessionId) {
+          reply.code(400)
+          return { error: 'sessionId is required for an external workflow' }
+        }
+        // The caller here is a server-side driver (the flight) or a REST client,
+        // not a detected MCP connection — 'other' is the honest kind.
+        return await deps.startExternalPortify({ feature, clientKind: 'other', sessionId })
+      }
       return await deps.startPortify({ feature, agent, maxAttempts })
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)
@@ -73,9 +98,11 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
   })
 
   // Open the port-ification project in the user's editor. While the workflow is
-  // live the scratch worktree(s) hold the edits; once saved they're discarded,
-  // so fall back to the product repo. Best-effort, mirroring the benchmark/run
-  // worktree openers — a failed launch reports the path so the UI can fall back.
+  // live the scratch worktree(s) hold the edits; once saved they're discarded
+  // and the edits live only in the overlay (features/<feature>/portify/), so
+  // open that — the product repo never holds the changes. Best-effort,
+  // mirroring the benchmark/run worktree openers — a failed launch reports the
+  // path so the UI can fall back.
   app.post<{ Params: { workflowId: string } }>('/api/portify/:workflowId/open', async (req, reply) => {
     const manifest = deps.store.get(req.params.workflowId)
     if (!manifest) {
@@ -83,9 +110,14 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       return { error: 'workflow not found' }
     }
     const dirs: string[] = []
-    for (const repo of manifest.repos) {
-      const dir = repo.worktreePath && fs.existsSync(repo.worktreePath) ? repo.worktreePath : repo.path
-      if (dir && fs.existsSync(dir) && !dirs.includes(dir)) dirs.push(dir)
+    const overlay = overlayDir(manifest.featureDir)
+    if (manifest.status === 'saved' && fs.existsSync(overlay)) {
+      dirs.push(overlay)
+    } else {
+      for (const repo of manifest.repos) {
+        const dir = repo.worktreePath && fs.existsSync(repo.worktreePath) ? repo.worktreePath : repo.path
+        if (dir && fs.existsSync(dir) && !dirs.includes(dir)) dirs.push(dir)
+      }
     }
     if (dirs.length === 0) {
       reply.code(409)
@@ -153,6 +185,10 @@ export async function portifyRoutes(app: FastifyInstance, deps: PortifyRouteDeps
       return { error: 'feedback is required' }
     }
     try {
+      if (req.body?.external === true) {
+        const { manifest, instructions } = deps.reviseExternalPortify(req.params.workflowId, feedback)
+        return { ...manifest, instructions }
+      }
       return await deps.revisePortify(req.params.workflowId, feedback)
     } catch (err) {
       reply.code((err as { statusCode?: number }).statusCode ?? 500)

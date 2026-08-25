@@ -1,13 +1,17 @@
-import * as api from '../../../shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
+import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
 import {
   ComplexValueBadge,
   FieldRow,
   NumberInput,
-  SectionHeader,
+  Section,
   Select,
   Toggle,
-} from './atoms'
+} from '@/shared/ui/atoms'
+import {
+  PLAYWRIGHT_RETAINED_ARTIFACT_MODES,
+  PLAYWRIGHT_SCREENSHOT_MODES,
+} from '@shared/configs/playwright-modes'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
 
@@ -24,9 +28,9 @@ interface Slice {
   }
 }
 
-const VIDEO_OPTIONS = ['off', 'on', 'on-first-retry', 'retain-on-failure'] as const
-const TRACE_OPTIONS = ['off', 'on', 'on-first-retry', 'retain-on-failure'] as const
-const SCREENSHOT_OPTIONS = ['off', 'on', 'only-on-failure'] as const
+const VIDEO_OPTIONS = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
+const TRACE_OPTIONS = PLAYWRIGHT_RETAINED_ARTIFACT_MODES
+const SCREENSHOT_OPTIONS = PLAYWRIGHT_SCREENSHOT_MODES
 
 function asMaybeNumberOrExpr(v: ConfigValue | undefined): number | { $expr: string } | undefined {
   if (typeof v === 'number') return v
@@ -45,6 +49,7 @@ function asMaybeString(v: ConfigValue | undefined): string | undefined {
 
 export function PlaywrightTab({ feature }: { feature: string }) {
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
+    cacheKey: `playwright:${feature}`,
     load: () => api.getPlaywrightConfig(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
@@ -88,7 +93,6 @@ export function PlaywrightTab({ feature }: { feature: string }) {
       return next
     },
     save: (payload) => api.putPlaywrightConfig(feature, payload as ConfigValue),
-    deps: [feature],
   })
 
   if (ed.error) return <div className="p-4 text-xs" style={{ color: 'var(--text-muted)' }}>{ed.error}</div>
@@ -109,8 +113,7 @@ export function PlaywrightTab({ feature }: { feature: string }) {
           <button
             type="button"
             onClick={() => onChange(defaultIfUnset)}
-            className="rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
-            style={{ color: 'var(--text-muted)', border: '1px solid var(--border-default)' }}
+            className="cl-button rounded-md px-2 py-1 text-[10px] uppercase tracking-wider"
           >
             Override
           </button>
@@ -128,69 +131,69 @@ export function PlaywrightTab({ feature }: { feature: string }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>Run behavior</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow label="Fully parallel" hint="Run tests inside files in parallel" layout="inline">
-            <Toggle
-              value={ed.draft.fullyParallel ?? false}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, fullyParallel: v }))}
-            />
-          </FieldRow>
-          {numberOrExprField(
-            'Workers',
-            'Concurrent worker processes',
-            ed.draft.workers,
-            (workers) => ed.setDraft((d) => ({ ...d, workers })),
-            1,
-            1,
-          )}
-          {numberOrExprField(
-            'Retries',
-            'Retries per failed test',
-            ed.draft.retries,
-            (retries) => ed.setDraft((d) => ({ ...d, retries })),
-            0,
-            0,
-          )}
-          {numberOrExprField(
-            'Timeout (ms)',
-            'Per-test timeout',
-            ed.draft.timeout,
-            (timeout) => ed.setDraft((d) => ({ ...d, timeout })),
-            0,
-            0,
-          )}
-        </div>
+        <div className="flex flex-col gap-3 p-3">
+          <Section title="Run behavior">
+            <FieldRow label="Fully parallel" hint="Run tests inside files in parallel" layout="inline">
+              <Toggle
+                value={ed.draft.fullyParallel ?? false}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, fullyParallel: v }))}
+              />
+            </FieldRow>
+            {numberOrExprField(
+              'Workers',
+              'Concurrent worker processes',
+              ed.draft.workers,
+              (workers) => ed.setDraft((d) => ({ ...d, workers })),
+              1,
+              1,
+            )}
+            {numberOrExprField(
+              'Retries',
+              'Retries per failed test',
+              ed.draft.retries,
+              (retries) => ed.setDraft((d) => ({ ...d, retries })),
+              0,
+              0,
+            )}
+            {numberOrExprField(
+              'Timeout (ms)',
+              'Per-test timeout',
+              ed.draft.timeout,
+              (timeout) => ed.setDraft((d) => ({ ...d, timeout })),
+              0,
+              0,
+            )}
+          </Section>
 
-        <SectionHeader>Browser & artifacts</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow label="Headless" hint="Hide browser windows during test runs" layout="inline">
-            <Toggle
-              value={ed.draft.use.headless ?? true}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, headless: v } }))}
-            />
-          </FieldRow>
-          <FieldRow label="Video" layout="inline">
-            <Select<string>
-              value={ed.draft.use.video ?? 'off'}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, video: v } }))}
-              options={VIDEO_OPTIONS.map((v) => ({ value: v, label: v }))}
-            />
-          </FieldRow>
-          <FieldRow label="Trace" layout="inline">
-            <Select<string>
-              value={ed.draft.use.trace ?? 'retain-on-failure'}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, trace: v } }))}
-              options={TRACE_OPTIONS.map((v) => ({ value: v, label: v }))}
-            />
-          </FieldRow>
-          <FieldRow label="Screenshot" layout="inline">
-            <Select<string>
-              value={ed.draft.use.screenshot ?? 'only-on-failure'}
-              onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, screenshot: v } }))}
-              options={SCREENSHOT_OPTIONS.map((v) => ({ value: v, label: v }))}
-            />
-          </FieldRow>
+          <Section title="Browser & artifacts">
+            <FieldRow label="Headless" hint="Hide browser windows during test runs" layout="inline">
+              <Toggle
+                value={ed.draft.use.headless ?? true}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, headless: v } }))}
+              />
+            </FieldRow>
+            <FieldRow label="Video" layout="inline">
+              <Select<string>
+                value={ed.draft.use.video ?? 'off'}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, video: v } }))}
+                options={VIDEO_OPTIONS.map((v) => ({ value: v, label: v }))}
+              />
+            </FieldRow>
+            <FieldRow label="Trace" layout="inline">
+              <Select<string>
+                value={ed.draft.use.trace ?? 'retain-on-failure'}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, trace: v } }))}
+                options={TRACE_OPTIONS.map((v) => ({ value: v, label: v }))}
+              />
+            </FieldRow>
+            <FieldRow label="Screenshot" layout="inline">
+              <Select<string>
+                value={ed.draft.use.screenshot ?? 'only-on-failure'}
+                onChange={(v) => ed.setDraft((d) => ({ ...d, use: { ...d.use, screenshot: v } }))}
+                options={SCREENSHOT_OPTIONS.map((v) => ({ value: v, label: v }))}
+              />
+            </FieldRow>
+          </Section>
         </div>
       </div>
 

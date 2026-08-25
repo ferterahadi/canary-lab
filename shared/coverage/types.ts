@@ -158,7 +158,7 @@ export interface CoverageStateView {
 
 // Semantic coverage is decoupled from test RUNS (R: 1.4.0): it asks "does a test
 // exist that claims to exercise this requirement's paths?", never "did a run pass?".
-// The additive `proven` axis (1.6.0) joins the LATEST run's per-test pass/fail on
+// The additive `proven` axis (2.0.0) joins the LATEST run's per-test pass/fail on
 // top — "covered (claimed)" vs "covered (proven by a passing run)" — without
 // changing gap types or the headline %: a claim stays a claim.
 export type GapType =
@@ -228,8 +228,10 @@ export interface TestCoverage {
   /** Static coverage strength, graded from the test's own assertions (strength.ts). */
   strength?: TestStrength
   /** Outcome of this test in the feature's LATEST recorded run. Absent when the
-   *  feature has no run yet or the test didn't run (new/renamed/skipped). */
-  lastRun?: { runId: string; passed: boolean }
+   *  feature has no run yet or the test didn't run (new/renamed/skipped).
+   *  `retried` marks a pass that needed a Playwright retry — flaky within the
+   *  run, so a caller reporting "every test passed" can say so honestly. */
+  lastRun?: { runId: string; passed: boolean; retried?: boolean }
 }
 
 export interface RequirementCoverage {
@@ -303,6 +305,12 @@ export interface CoverageLedger {
   provenPct?: number
   /** The run the `proven` axis was joined against. Absent when none exists. */
   provenRunId?: string
+  /** True when that run's summary was seeded from a prior execution (a targeted
+   *  heal rerun merges the untouched results forward), so the `lastRun` outcomes
+   *  span several partial executions rather than one clean run. Reporting
+   *  surfaces caveat "every test passed" with this — the tests never all passed
+   *  together in one execution. Absent when no run was joined. */
+  provenSpansExecutions?: boolean
   /** Requirement ids annotated on tests but absent from the PRD (drift signal). */
   orphanRequirementIds: string[]
   /** Test names with no requirement linkage — the annotate-pass works this set. */
@@ -354,6 +362,12 @@ export interface CoverageJobManifest {
    *  itself (offload model) and Canary only tracks + recomputes the ledger; such
    *  a job has NO sessionRef, so the Generating screen renders it monitor-only. */
   producer?: 'internal' | 'external'
+  /** The exact test names handed to an external client at start, so submit can
+   *  check the answer accounts for every one of them. Absent on jobs written
+   *  before the roster check existed (and on internal jobs, which check against
+   *  their own in-memory input instead) — the check is skipped there rather than
+   *  failing a client for a roster it was never given. */
+  externalTestRoster?: string[]
   /** External-producer metadata, set only when producer === 'external'. */
   externalClientKind?: string
   externalSessionId?: string
@@ -368,4 +382,15 @@ export interface CoverageJobIndexEntry {
   status: CoverageJobStatus
   startedAt: string
   endedAt?: string
+  /** Mirrored from the manifest so the activity map can tell an external
+   *  (MCP-client-driven) job from a spawned one off the index alone, without
+   *  opening one manifest per job. Absent on entries written before the
+   *  mirror existed — those all predate external jobs, so absent = internal. */
+  producer?: 'internal' | 'external'
+  /** External-session metadata is already present on manifest-backed index
+   *  responses; declare it here so Flight Activity can link to the owner. */
+  externalClientKind?: string
+  externalSessionId?: string
+  externalConversationName?: string
+  externalSessionUrl?: string
 }

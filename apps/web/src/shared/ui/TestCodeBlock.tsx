@@ -4,8 +4,13 @@ import { useTheme } from '../lib/theme'
 import type { ExtractedStep } from '../api/types'
 import * as api from '../api/client'
 import { getCodeHighlighter, codeThemeFor } from './code-highlighter'
-import { sourceLineForBodyLine } from '../../features/runs/utils/editor-location'
-import { colorClassForStatus, statusLabel, statusPillClassForStatus, type StepStatus } from '../../features/runs/utils/test-step-status'
+import {
+  colorClassForStatus,
+  sourceLineForBodyLine,
+  statusLabel,
+  statusPillClassForStatus,
+  type StepStatus,
+} from '@/features/runs'
 
 interface SourceLocation {
   file: string
@@ -72,12 +77,14 @@ export function ShikiCode({
   return (
     <CodeShell sourceLocation={sourceLocation} openError={openError} onOpenStart={() => openAt(sourceLocation?.startLine ?? 1)}>
       <div
-        className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-sky-500/10' : ''}`}
+        className={`shiki-block cl-code-shell overflow-hidden rounded-md text-[11px] ${sourceLocation ? '[&_span.line]:cursor-pointer [&_span.line:hover]:bg-running/10' : ''}`}
         onClick={(e) => {
           const line = (e.target as HTMLElement).closest<HTMLElement>('[data-source-line]')?.dataset.sourceLine
           if (line) void openAt(Number(line))
         }}
-        // eslint-disable-next-line react/no-danger
+        // Shiki has already escaped the source it highlighted; decorateShikiLines
+        // only wraps those tokens in spans.
+        // eslint-disable-next-line no-restricted-syntax
         dangerouslySetInnerHTML={{ __html: decorateShikiLines(html, activeLine, sourceLocation?.startLine, runningHighlight, changedLines) }}
       />
     </CodeShell>
@@ -132,8 +139,10 @@ function decorateShikiLines(
   changedLines?: Set<number>,
 ): string {
   let lineNo = 0
-  const bg = runningHighlight ? 'rgba(234, 179, 8, 0.22)' : 'rgba(14, 165, 233, 0.18)'
-  const bar = runningHighlight ? 'rgb(234, 179, 8)' : 'rgb(14, 165, 233)'
+  const bg = runningHighlight
+    ? 'color-mix(in srgb, var(--warning) 22%, transparent)'
+    : 'color-mix(in srgb, var(--running) 18%, transparent)'
+  const bar = runningHighlight ? 'var(--warning)' : 'var(--running)'
   return html.replace(/<span class="line"/g, (match) => {
     lineNo += 1
     const attrs = startLine ? ` data-source-line="${sourceLineForBodyLine(startLine, lineNo)}"` : ''
@@ -145,7 +154,7 @@ function decorateShikiLines(
   })
 }
 
-export function StatusPill({ status }: { status: StepStatus }) {
+export function StepStatusBadge({ status }: { status: StepStatus }) {
   return (
     <span
       className={`inline-flex shrink-0 items-center justify-center rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${statusPillClassForStatus(status)}`}
@@ -173,12 +182,12 @@ export function StepBlock({
   const activeLine = bodyLineForSourceLine(step.line, step.bodySource, runningSourceLine)
   const isRunningStep = activeLine != null
   const cardClass = isRunningStep
-    ? 'border-yellow-500/60 bg-yellow-400/15 dark:border-yellow-400/60 dark:bg-yellow-400/10'
+    ? 'border-warning/60 bg-warning/15 dark:bg-warning/10'
     : `${colorClassForStatus(status)} bg-[var(--bg-surface)]`
   return (
     <li
       className={`rounded-md border ${cardClass} p-1.5`}
-      style={isRunningStep ? { boxShadow: 'inset 3px 0 0 rgb(234, 179, 8)' } : undefined}
+      style={isRunningStep ? { boxShadow: 'inset 3px 0 0 var(--warning)' } : undefined}
     >
       <button
         type="button"

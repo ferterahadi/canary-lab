@@ -1,6 +1,7 @@
-import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '../../../shared/api/types'
-import { StatusDot, type StatusDotState } from '../../config/components/atoms'
-import { shortTime } from '../../../shared/lib/format'
+import type { ExecutionType, RunDetail, RunIndexEntry, RunStatus } from '@/shared/api/types'
+import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { Chip } from '@/shared/ui/StatusChip'
+import { shortTime } from '@/shared/lib/format'
 
 // One run row + its status chip, extracted verbatim from RunsListDialog (R64)
 // so the flight's run stage can render the same row as the runs list. Chrome
@@ -10,11 +11,11 @@ import { shortTime } from '../../../shared/lib/format'
 // Pill chip palettes, keyed by run status. Colour families match
 // RunStatusIndicator / WizardTaskStatus so the surfaces stay in sync.
 const CHIP: Record<RunStatus, { bg: string; text: string }> = {
-  running: { bg: 'rgba(14, 165, 233, 0.15)', text: 'rgb(56, 189, 248)' },
-  healing: { bg: 'rgba(245, 158, 11, 0.15)', text: 'rgb(251, 191, 36)' },
+  running: { bg: 'color-mix(in srgb, var(--running) 15%, transparent)', text: 'var(--running)' },
+  healing: { bg: 'color-mix(in srgb, var(--warning) 15%, transparent)', text: 'var(--warning)' },
   queued:  { bg: 'var(--bg-selected)', text: 'var(--text-secondary)' },
-  passed:  { bg: 'rgba(16, 185, 129, 0.15)', text: 'rgb(52, 211, 153)' },
-  failed:  { bg: 'rgba(244, 63, 94, 0.15)', text: 'rgb(251, 113, 133)' },
+  passed:  { bg: 'color-mix(in srgb, var(--success) 15%, transparent)', text: 'var(--success)' },
+  failed:  { bg: 'color-mix(in srgb, var(--danger) 15%, transparent)', text: 'var(--danger)' },
   aborted: { bg: 'var(--bg-selected)', text: 'var(--text-muted)' },
 }
 
@@ -45,12 +46,36 @@ export function RunRow({
   run,
   detail,
   onSelect,
+  primaryLabel,
+  marker,
+  showPorts = true,
+  passCount = 'meta',
+  arrow = 'hover',
 }: {
   run: RunIndexEntry
   detail: RunDetail | undefined
   onSelect: (run: RunIndexEntry) => void
+  /** Override the bold identity line (default `run.feature`). The Test Run
+   *  hero passes "Run <ref>" so the run reads as an object, not a feature row. */
+  primaryLabel?: string
+  /** Extra trailing meta segment (e.g. "run 2 of 2") — the hero's ordinal. */
+  marker?: string
+  /** Show the allocated-ports meta segment. The hero hides it (ports belong on
+   *  the Services tile's tooltip, not the identity line). */
+  showPorts?: boolean
+  /** Where the pass count goes. 'meta' (default) puts it in the meta line with
+   *  the timestamp; 'promoted' gives it its own segment beside the status chip.
+   *  'hidden' drops it — for a surface that already states the score bigger
+   *  elsewhere (the flight run stage's Tests-passed tile), where repeating it a
+   *  hand's width away just reads as two different facts. */
+  passCount?: 'meta' | 'promoted' | 'hidden'
+  /** When the trailing `→` shows. Default 'hover' (the runs list, where rows are
+   *  scanned in bulk and a column of arrows would be noise). 'always' is for a
+   *  short list whose whole point is going somewhere — the flight run stage's
+   *  Previous runs — so the affordance reads at rest. */
+  arrow?: 'hover' | 'always'
 }) {
-  const ports = portsLabel(detail)
+  const ports = showPorts ? portsLabel(detail) : null
   const note = queueNote(run, detail)
   // A held boot session is status 'running' but reads as teal "services up".
   const isBoot = run.executionType === 'boot'
@@ -58,20 +83,22 @@ export function RunRow({
   const meta: Array<{ text: string; mono?: boolean }> = [{ text: shortTime(run.startedAt) }]
   if (ports) meta.push({ text: ports, mono: true })
   if (note) meta.push({ text: note })
+  if (marker) meta.push({ text: marker })
   const summary = detail?.summary
-  if (summary && summary.total > 0) meta.push({ text: `${summary.passed}/${summary.total} passed` })
+  const passLabel = summary && summary.total > 0 ? `${summary.passed}/${summary.total} passed` : null
+  if (passLabel && passCount === 'meta') meta.push({ text: passLabel })
   return (
     <li>
       <button
         type="button"
         onClick={() => onSelect(run)}
-        className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left transition-colors hover:bg-white/[0.03]"
+        className="group flex w-full items-center gap-2 rounded-md px-3 py-2 text-left cl-hover-row"
         title={`Go to run ${run.runId}`}
       >
         <StatusDot state={dot.state} pulse={dot.pulse} halo={dot.pulse} className="shrink-0" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-[13px]" style={{ color: 'var(--text-primary)', fontWeight: 500 }}>
-            {run.feature}
+            {primaryLabel ?? run.feature}
           </span>
           <span className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-[11px]" style={{ color: 'var(--text-muted)' }}>
             {meta.map((part, i) => (
@@ -87,9 +114,17 @@ export function RunRow({
             ))}
           </span>
         </span>
+        {passCount === 'promoted' && passLabel && (
+          <span
+            className="shrink-0 text-[11px] tabular-nums"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {passLabel}
+          </span>
+        )}
         <RunStatusChip status={run.status} executionType={run.executionType} />
         <span
-          className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+          className={`shrink-0 transition-opacity ${arrow === 'always' ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
           style={{ color: 'var(--accent)' }}
           aria-hidden="true"
         >
@@ -109,12 +144,15 @@ export function RunStatusChip({ status, executionType }: { status: RunStatus; ex
     : CHIP[status]
   const label = boot ? (status === 'running' ? 'services up' : 'stopped') : status
   return (
-    <span
-      className="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
-      style={{ background: palette.bg, color: palette.text }}
-    >
-      {label}
-    </span>
+    <Chip
+      chrome="fill"
+      tone={palette.text}
+      background={palette.bg}
+      label={label}
+      uppercase
+      fontSize={10}
+      fontWeight={600}
+    />
   )
 }
 

@@ -1,156 +1,143 @@
-# Canary Lab — Product Requirements (reverse-engineered)
+# Canary Lab Product Requirements
 
-> **Status**: reverse-engineered from the README, CHANGELOG, GUIDE, and code as of
-> v1.4.0; positioning refreshed for 1.6.0. This captures the product intent implied
-> by what's shipped so agents and new contributors share the same picture. Correct
-> anything that misreads the intent — this document is the tie-breaker when a change
-> is technically possible but product-questionable.
+> **Status:** reverse-engineered from the README, changelog, user guide, and
+> current codebase (package version 2.0.0). This is the product-intent reference
+> for contributors and agents. Update it with every behavior change.
 
 ## Positioning
 
-Canary Lab **augments Playwright and an LLM — it replaces neither.** Plain
-Playwright runs the tests; the agent writes the code and the fixes; Canary Lab
-owns the context around them (boot, isolation, coverage grounding, evidence,
-verdicts, the rendered evaluation). It is an **eval tool invoked after a feature
-is implemented**: build with your agent, then point Canary Lab at the result
-(`canary-lab flight`, or a run on an existing feature), then review the
-evaluation export — the human-facing proof with per-test reasoning and playback.
-That review step is the core usage loop, not an optional extra.
+Canary Lab coordinates Playwright and an AI agent; it replaces neither.
+Playwright executes tests, agents propose or implement changes, and Canary Lab
+owns service startup, run state, requirement accounting, captured evidence,
+verdicts, and evaluation rendering.
+
+The product loop is: implement, verify through Flight or an existing feature,
+then review the evaluation. The evaluation is the human-facing proof.
 
 ## Problem
 
-An AI agent asked to fix a failing test can report success it hasn't earned —
-declaring a pass, rounding up a count, or quietly editing the test instead of the app.
-Self-reported "it passes now" isn't really evidence. Canary Lab tries to make that
-harder by keeping the outcome grounded in things the agent doesn't author: the harness
-runs the tests, not the agent; pass counts come from the real result lines; the coverage
-% is computed by canary from the tags, not asserted by the agent; and repairs are
-expected to change the application, not the test. The rough shape is **requirement
-coverage → test run → end-to-end verification** — enough that a human can check the
-result independently, and so the same output can feed back to the agent as a signal to
-fix against rather than just a pass/fail gate.
+An agent can misread counts, declare a false pass, or weaken a test instead of
+fixing the application. Canary Lab keeps the verdict outside the agent's
+control: the harness runs the tests, Playwright supplies outcomes, tags define
+coverage claims, and repairs target application or service code unless a test
+is provably wrong.
 
-The repair loop leans on the same evidence. A failing Playwright test usually scatters
-its context — service logs in one terminal, a trace somewhere, a screenshot you have
-to go find — so diagnosis happens cold. Canary Lab tries to keep the whole run in one
-place: it runs the tests locally, captures the context around each failure (logs,
-screenshots, traces, videos, which services ran, which env applied), and hands that to
-the agent as a reproducible evidence packet to fix the app and rerun **from the same
-run**. Built for teams that use tests as the spec.
+The evidence chain is **requirement claim → test execution → observed result**.
+Claimed coverage says a mapped test exists for every required path and variant;
+proven coverage says those mapped tests passed in a specific run. A human can
+review both, and the same evidence guides the next repair attempt.
+
+Failed tests normally scatter context across terminals and artifacts. Canary Lab
+keeps one run's results, logs, screenshots, traces, videos, services, applied
+environment, repair notes, and fixes under one run ID. The agent receives this
+evidence, fixes the app, and continues the same run.
 
 ## Users
 
-1. **App engineer** — drives runs from `canary-lab ui` or the CLI, reads run
-   history, switches envsets, occasionally repairs by hand.
-2. **AI agent as repair operator** — connects over MCP (Claude/Codex Desktop or CLI),
-   starts or claims runs, reads heal context, edits app code, signals rerun/restart.
-   The agent is a first-class user: tool results and `initialize` instructions are
-   designed to steer agents that never read documentation.
-3. **Eval author** — exports a terminal run (passed or failed) as a structured
-   evaluation report; the external client writes the wording, Canary Lab renders and
-   stores the archive.
+1. **App engineer** — runs existing features from the UI or drives Flight from the CLI, reviews history, switches envsets, and sometimes repairs by hand.
+2. **AI repair agent** — connects over MCP, claims runs, reads evidence, edits app code, and signals rerun or restart. Tool results and `initialize` instructions guide agents that never read the docs.
+3. **Evaluation author** — exports any terminal run. Canary Lab renders and stores the archive; wording comes from evidence (`raw`), a local agent (`localized`), or an external MCP client.
 
 ## Capabilities by area
 
-These broadly mirror the CHANGELOG area tags; requirement coverage and verification are
-cross-cutting and not separately tagged in the CHANGELOG.
+These areas broadly match changelog tags. Flight, coverage, and verification are
+cross-cutting.
+
+### [Flight]
+
+- The front door: `canary-lab flight <repo…> "<what to test>"` or `start_flight` takes a bare repo from setup through evaluation export. Failed runs can export with their real verdict.
+- **The server owns stage transitions and the harness computes every verdict.**
+  An internal agent or external MCP client may produce candidate configs, docs,
+  tests, mappings, repairs, and localized wording. A stage passes only after
+  Canary Lab validates the resulting artifact: the config parses and boots, the
+  ledger reaches its computed state, Playwright supplies the run verdict, or the
+  archive exists.
+- An MCP-started Flight can set `stage_producer: "external"` to hand its
+  judgment-heavy stages to the connected client through `external-work`
+  checkpoints. Mechanical stages and all validation remain server-owned.
+- A user can take an external step back without creating two writers: Canary
+  records a takeover request, rejects later external submits, and starts its
+  local agent only after the client releases the step. A confirmed force path
+  exists when that client is no longer reachable.
+- A resumable background job with typed checkpoints. Autopilot handles routine choices but stops for existing features, missing secrets, and failed automatic answers.
+- **One flight record per feature.** Plain resume and stage re-entry keep repos
+  and intent frozen. Only a full redo may replace them, after wiping the prior
+  pipeline artifacts.
+- CLI, web UI, and MCP use one store.
 
 ### [Test Runner]
 
-- Run a feature's Playwright tests with services booted, health-checked, and
-  PTY-captured per run; artifacts retained under `logs/runs/<runId>/`.
-- Repair loop: auto-heal (local `claude`/`codex` agent) or external heal (MCP client
-  claims the run, fixes, signals `rerun`/`restart`); the run continues until it
-  passes or fails terminally.
-- Concurrent runs with per-run port allocation, same-repo collision handling
-  (worktree or queue), and resource-aware admission queueing.
-- Boot-only sessions: start a feature's services without running tests, for manual
-  exploration.
-- Envset switching: run one feature against `local`/`staging`/`production` env files
-  without hand-editing `.env`.
+- Run Playwright with booted, health-checked, PTY-captured services; retain artifacts under `logs/runs/<runId>/`.
+- Repair through a local `claude`/`codex` agent or an MCP client that claims, fixes, and signals `rerun` or `restart`; continue until pass or terminal failure.
+- Concurrent runs use resource admission, optional injected ports, and Git
+  worktrees. Worktrees isolate file edits; only injected ports isolate network
+  listeners. Queueing remains the safe choice for an un-portified same-app run.
+- Regular runs attempt per-repository worktree isolation, hydrate work in
+  progress, and save captured repair edits under `logs/runs/<runId>/fixes/`.
+  A non-portified repository may fall back to running in place if worktree
+  creation fails; that warning means checkout isolation and automatic fix
+  capture are not guaranteed. Portified runs fail instead of falling back.
+- A green captured repair can update a feature branch and open a draft pull
+  request; opt out with `autoProposePr`.
+- Boot-only sessions start services without tests.
+- Envsets switch between environments without hand-editing `.env`.
 
 ### [Test Generation]
 
-- Feature scaffolding (`create_feature`, the Add Test wizard) with conventions:
-  `feature.config.cjs`, envsets, specs importing
-  `canary-lab/feature-support/log-marker-fixture`.
-- External draft flow: an MCP client authors specs while Canary Lab tracks the draft
-  stages and validates on apply.
+- Feature scaffolding through `create_feature` or Flight, using `feature.config.cjs`, envsets, and specs that import `canary-lab/feature-support/log-marker-fixture`.
+- External drafts let MCP clients author specs while Canary Lab tracks stages and validates on apply.
 - Env capture from a source repo with secret redaction.
-- Portify: agent-driven rewrite of a feature's services to accept injected ports,
-  verified by a concurrent double-boot and saved as an ephemeral overlay (applied
-  per-run, reverse-applied at teardown) so the product repo is never modified.
+- Portify rewrites services to accept injected ports, verifies them with a concurrent double boot, and stores an overlay applied per run and reversed at teardown. The product repo stays unchanged.
 
 ### [Requirement coverage]
 
-- Requirements traceability: a feature's `docs/` source is summarized into a PRD
-  (requirements with stable ids); tests are tagged to requirements
-  (`{ tag: ['@req-<id>', '@path-happy'] }`). Coverage is **semantic** — canary computes
-  it from the tags (covered ÷ active total), math not opinion — and decoupled from runs:
-  it asks whether a mapped test claims every path (and variant) a requirement implies,
-  not whether a run passed.
-- Gap typing — `covered` / `path-incomplete` / `variant-incomplete` / `untested` — plus a
-  per-test strictness grade for *depth*: which layer each test really checks (app log →
-  internal state → app API → browser) and the stronger assertion to write.
-- One computation layer behind both the UI (the 🎯 Coverage view) and MCP
-  (`get_feature_coverage`), so the two can never diverge.
+- Canary Lab turns `docs/` into requirements with stable IDs, then maps tagged
+  tests to them. The headline semantic coverage is claim-based: tags determine
+  covered ÷ active requirements, including every required path and applicable
+  variant cell.
+- The latest run adds a separate proven axis. A requirement may stay claimed as
+  covered while remaining unproven because its mapped test failed or did not run.
+- Gap types are `covered`, `path-incomplete`, `variant-incomplete`, and `untested`. A strictness grade measures assertion depth from app log to browser and suggests stronger checks.
+- The UI and MCP tool `get_feature_coverage` share one computation.
 
 ### [Verification]
 
-- Run a feature's tests against a **deployed** environment (`execute_verification` with
-  per-target URLs and a Playwright envset) — never boots local services, never starts
-  healing — to confirm the real thing works end-to-end. Saved as reusable Verify
-  configs and scoped to the `verify` MCP profile.
+- Run tests against a **deployed** environment with `execute_verification`, target URLs, and a Playwright envset. Verification never boots local services or heals; configs are reusable and scoped to the `verify` MCP profile.
 
 ### [Export evaluation]
 
-- Export any terminal run as an evaluation archive (`evaluation.html`); the external
-  client writes the report wording, Canary Lab stores and renders it. A failed or
-  aborted run exports as-is — the status is preserved, not healed away.
+- Export any terminal run as `evaluation.html`. Failed or aborted runs preserve their status.
+- **Raw** uses run evidence; **localized** asks a local agent to improve per-test wording. External MCP clients supply their own wording. Tests and verdicts stay the same.
 
 ### [General]
 
-- One published CLI (`init`, `setup`, `ui`, `mcp`, `new feature`, `env`, `upgrade`),
-  a local web UI, and an MCP server sharing one port.
-- Profile-scoped MCP surface (`repair`/`verify`/`author`/`portify`/`lifecycle`/`full`) so
-  each client kind sees only the tools its workflow needs.
+- One published CLI (`flight`, `init`, `setup`, `ui`, `mcp`, `new feature`, `env`,
+  `boot`, `upgrade`), a local web UI, and an MCP server sharing one port.
+- Profile-scoped MCP surface with seven workflow profiles (`repair`, `verify`, `author`, `coverage`, `export`, `flight`, and `portify`), two composed direct-tool profiles (`lifecycle` and `full`), and a setup-installed `compact` profile. `compact` exposes one `exec` tool that dispatches the same 63 atomic handlers by exact command name; `lifecycle` remains the bare-server default and `full` remains the direct-tool rollback surface.
 
 ## Non-goals
 
-- **Not a CI runner or hosted dashboard.** Canary Lab is a local run monitor; the
-  evidence and the repair loop live on the engineer's machine.
-- **Not a test framework.** No test language, assertion model, or browser runner —
-  plain Playwright runs the tests; Canary Lab owns the context around them.
-- **No self-healing locators.** Repairs edit the application (or a provably wrong
-  test); they don't paper over selectors.
-- **No same-app concurrent isolation.** Worktrees isolate heal *edits*, not ports;
-  two runs of the same multi-service app queue. OAuth features with
-  provider-registered redirect URIs run one at a time.
-- **External exports are client-authored.** Canary Lab never rewrites, translates, or
-  agent-generates the report content for an external export.
+- **Not a CI runner or hosted dashboard.** Evidence and repair stay on the
+  engineer's machine.
+- **Not a test framework.** Playwright owns the language, assertions, and browser runner; Canary Lab owns the surrounding context.
+- **No self-healing locators.** Repairs fix the application or a provably wrong test; they do not hide selector failures.
+- **No automatic fixed-port isolation.** Worktrees isolate edits, not listeners.
+  A user can explicitly bypass a same-repo collision in a worktree, but safe
+  same-app concurrency requires successful Portify or manual port injection.
+  OAuth features with registered redirect URIs may still need serial execution.
+- **External exports are client-authored.** Canary Lab only stores and renders their content.
 
 ## Quality bars
 
-These are the expectations that shape review decisions; several are encoded as code
-invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
+These expectations shape reviews; several are code invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 
-1. **Heal safety.** Every interactive client may own a heal claim; only the
-   runner-spawned PTY agents are blocked (denylist, since the runner tags its own
-   spawns deterministically); destructive tools require an explicit
-   `confirm: true`; the repair rule is "fix app/service code, not tests, unless a
-   test is provably wrong"; every external command is audited per run.
-2. **Honest counts.** Pass counts come from `result.counts.statusLine` /
-   `counts.passed` — never computed as `total - failed`; tests absent from all
-   result lists are *not run*, not passed.
-3. **Evidence durability.** Each run's logs, traces, summaries, and journal survive
-   under `logs/runs/<runId>/` and are never auto-pruned — removed only via manual Log
-   Cleanup; service output is captured programmatically, never lost to a terminal.
-4. **Result-driven agent steering.** An agent with no skill installed must still
-   converge on the correct loop from `initialize` instructions and tool results
-   (`nextSteps`, `boot_session`, collision choices) — blocking on
-   `wait_for_heal_task`, never inventing a poll loop.
-5. **Narrow ownership boundary.** New capabilities should own run context (services,
-   envs, artifacts, signals), not creep into Playwright's territory.
+1. **Heal safety.** Interactive clients may own heal claims; runner-spawned PTY agents are denied. Destructive tools require `confirm: true`, external commands are audited, and repairs fix app or service code unless a test is provably wrong.
+2. **Honest counts.** Pass counts come from `result.counts.statusLine` or `counts.passed`, never `total - failed`. Tests missing from every result list are *not run*.
+3. **Durable evidence.** Logs, traces, summaries, and journals remain under
+   `logs/runs/<runId>/` until manual cleanup. Service output is captured
+   programmatically.
+4. **Result-driven guidance.** `initialize` instructions and tool results (`nextSteps`, `boot_session`, collision choices) must guide an agent without installed skills, including blocking on `wait_for_heal_task` instead of polling.
+5. **Narrow ownership.** New capabilities own run context—services, envs, artifacts, and signals—without taking over Playwright's role.
 
 ## Glossary
 
@@ -161,9 +148,9 @@ invariants (see [ARCHITECTURE.md](ARCHITECTURE.md#keep-in-sync-invariants)).
 | **Envset** | A named set of env files per environment (`local`/`production`/…) applied before a run and reverted after |
 | **Heal claim** | The single-owner lock an external client takes to drive a run's repair loop |
 | **Boot session** | A run with `executionType: 'boot'` — services up, no tests, no heal task |
-| **Worktree isolation** | Running a colliding same-repo run in a per-run `git worktree` so heal edits can't corrupt the other run |
+| **Worktree isolation** | Running a repository from a per-run `git worktree` so repair edits can be captured without changing the source checkout. Regular runs attempt this for every repo; non-portified failures may fall back in place. |
 | **Portify** | The workflow that rewrites a feature's services to read injected ports, unlocking concurrent boots |
 | **Draft** | An externally authored set of spec files tracked through staged validation before apply |
-| **Requirement coverage** | Whether a mapped test claims every path (and variant) a requirement implies; the ledger maps requirements ↔ tests with a coverage % canary computes from the tags — semantic, decoupled from run history |
+| **Requirement coverage** | Claim-based mapping of requirements to tests, paths, and variants. Latest-run proof is a separate additive axis and does not change the semantic gap type. |
 | **Verification (Verify)** | Running a feature's tests against a deployed environment to confirm it works end-to-end — no local boot, no heal |
-| **Evaluation export** | A rendered archive of a terminal run with client-authored report wording |
+| **Evaluation export** | A rendered archive of a terminal run. Wording may come directly from evidence, a local rewrite agent, or an external MCP client. |

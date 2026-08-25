@@ -1,26 +1,26 @@
 import { describe, it, expect } from 'vitest'
 import {
-  statusBadgeClass,
+  formatCount,
   formatDuration,
+  formatElapsedSeconds,
   durationBetween,
   shortTime,
   formatBytes,
   timeAgo,
+  evaluationArchiveFilename,
+  safeFilename,
+  capitalizeFirst,
 } from './format'
 
-describe('statusBadgeClass', () => {
-  it.each([
-    ['passed', 'emerald'],
-    ['failed', 'rose'],
-    ['running', 'sky'],
-    ['healing', 'amber'],
-    ['aborted', 'zinc'],
-  ] as const)('maps %s to a class containing %s', (status, hue) => {
-    expect(statusBadgeClass(status)).toContain(hue)
+describe('capitalizeFirst', () => {
+  it('raises only the first character, leaving later words alone', () => {
+    expect(capitalizeFirst('done')).toBe('Done')
+    expect(capitalizeFirst('needs approval')).toBe('Needs approval')
   })
 
-  it('falls back to a zinc-toned class for unknown statuses', () => {
-    expect(statusBadgeClass('mystery' as never)).toContain('zinc')
+  it('leaves an empty string and an already-capitalized word untouched', () => {
+    expect(capitalizeFirst('')).toBe('')
+    expect(capitalizeFirst('MCP ready')).toBe('MCP ready')
   })
 })
 
@@ -37,6 +37,27 @@ describe('formatDuration', () => {
   it('returns em-dash for negative or non-finite input', () => {
     expect(formatDuration(-1)).toBe('—')
     expect(formatDuration(Number.NaN)).toBe('—')
+  })
+})
+
+describe('formatElapsedSeconds', () => {
+  it('prints whole seconds under a minute — a once-a-second clock has no tenth', () => {
+    expect(formatElapsedSeconds(0)).toBe('0s')
+    expect(formatElapsedSeconds(12.7)).toBe('12s')
+    expect(formatElapsedSeconds(59)).toBe('59s')
+  })
+  it('rolls up past a minute with a zero-padded second', () => {
+    expect(formatElapsedSeconds(60)).toBe('1m 00s')
+    expect(formatElapsedSeconds(74)).toBe('1m 14s')
+    expect(formatElapsedSeconds(3599)).toBe('59m 59s')
+  })
+  it('rolls up past an hour with a zero-padded minute', () => {
+    expect(formatElapsedSeconds(3600)).toBe('1h 00m')
+    expect(formatElapsedSeconds(3720)).toBe('1h 02m')
+  })
+  it('floors to zero rather than printing a negative or non-finite clock', () => {
+    expect(formatElapsedSeconds(-5)).toBe('0s')
+    expect(formatElapsedSeconds(Number.NaN)).toBe('0s')
   })
 })
 
@@ -78,6 +99,16 @@ describe('formatBytes', () => {
   })
 })
 
+describe('formatCount', () => {
+  it('groups thousands and leaves shorter numbers alone', () => {
+    expect(formatCount(0)).toBe('0')
+    expect(formatCount(999)).toBe('999')
+    expect(formatCount(1000)).toBe('1,000')
+    expect(formatCount(27627)).toBe('27,627')
+    expect(formatCount(1234567)).toBe('1,234,567')
+  })
+})
+
 describe('timeAgo', () => {
   const now = Date.parse('2026-06-04T12:00:00Z')
   it('formats relative time', () => {
@@ -86,5 +117,19 @@ describe('timeAgo', () => {
     expect(timeAgo('2026-06-04T09:00:00Z', now)).toBe('3h ago')
     expect(timeAgo('2026-05-30T12:00:00Z', now)).toBe('5d ago')
     expect(timeAgo('garbage', now)).toBe('garbage')
+  })
+})
+
+describe('evaluationArchiveFilename', () => {
+  it('names the archive by feature and run — the runId already carries the date', () => {
+    expect(evaluationArchiveFilename('merchant-pass-fnb', '2026-07-23T1603-z6kc'))
+      .toBe('canary-lab-evaluation-merchant-pass-fnb-2026-07-23T1603-z6kc.zip')
+  })
+
+  it('collapses anything a filesystem would choke on', () => {
+    expect(evaluationArchiveFilename('shop redeeming', '2026:05:06 run'))
+      .toBe('canary-lab-evaluation-shop-redeeming-2026-05-06-run.zip')
+    expect(safeFilename('///')).toBe('run')
+    expect(safeFilename('--keep.me--')).toBe('keep.me')
   })
 })

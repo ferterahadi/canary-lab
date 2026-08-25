@@ -5,6 +5,8 @@ import path from 'path'
 import { pickAvailableHealAgent, type HealAgent } from '../../../runs/logic/runtime/auto-heal'
 import { ANNOTATE_MODELS, modelArgs } from '../../../agent-sessions/logic/agent-models'
 import { recoverAgentAnswer, agentActivityPath } from '../../../agent-sessions/logic/agent-producer'
+import { extractJsonCandidates } from '../../../agent-sessions/logic/agent-json'
+import type { AgentJobRecordRef } from '../../../agent-sessions/logic/agent-jobs/types'
 import { runAgentProcess, buildClaudeAgenticArgs } from '../../../agent-sessions/logic/agent-process'
 import { promptPath, loadPromptTemplate, renderPromptTemplate } from '../../../../shared/prompts'
 import type { PathType, ProposedMapping, Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
@@ -55,6 +57,11 @@ export interface ProposeMappingsArgs {
   featureDir?: string
   cwd?: string
   signal?: AbortSignal
+  /** Stop scope for the spawned mapper, forwarded to the shared runner so an owner
+   *  can stop it without holding its handle. Forwarded, never invented here. */
+  spawnScope?: string
+  /** Durable-record descriptor, forwarded to the shared runner. */
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   /** Fired when an agent spawns with a pinned session — lets the job persist a
    *  ref the Generating screen streams via AgentSessionView (R17). */
@@ -69,6 +76,8 @@ export interface ProposeMappingsDeps {
 interface RunAgentOpts {
   cwd?: string
   signal?: AbortSignal
+  spawnScope?: string
+  agentJob?: { record: AgentJobRecordRef; logsDir: string }
   onOutput?: (chunk: string) => void
   onSession?: (session: CoverageAgentSession) => void
 }
@@ -114,26 +123,56 @@ function normalizeRequirements(value: unknown, knownIds: Set<string>): string[] 
   return out
 }
 
-/** Parse raw agent stdout into proposed mappings. Returns null on garbage. Drops
+/** The agent's full answer: what it mapped, plus what it read and explicitly
+ *  could not map. The second half is what makes the first half checkable — see
+ *  `accountedFor` in the orchestrator. */
+export interface AnnotateAnswer {
+  mappings: ProposedMapping[]
+  /** Test names the agent declared unmappable (read, no requirement applies). */
+  unmappable: string[]
+}
+
+/** Parse raw agent stdout into the full answer. Returns null on garbage. Drops
  *  mappings that point at unknown requirement ids (no inventing the spine). */
+export function parseAnnotateAnswer(
+  output: string,
+  knownIds: Set<string>,
+  knownVariants: Set<string> = new Set(),
+): AnnotateAnswer | null {
+  // First candidate carrying a `mappings` array — prose asides with braces
+  // (inline code, placeholders) can't shadow the real answer. `unmappable` is
+  // read off THAT SAME object, so the two halves can never come from different
+  // candidates and disagree about what was examined.
+  const envelope = extractJsonCandidates(output).find(
+    (c): c is { mappings: unknown[]; unmappable?: unknown } =>
+      !!c && typeof c === 'object' && Array.isArray((c as { mappings?: unknown }).mappings),
+  )
+  if (!envelope) return null
+  const unmappable: string[] = []
+  if (Array.isArray(envelope.unmappable)) {
+    for (const raw of envelope.unmappable) {
+      if (!raw || typeof raw !== 'object') continue
+      const name = (raw as { testName?: unknown }).testName
+      if (typeof name === 'string' && name.trim()) unmappable.push(name.trim())
+    }
+  }
+  return { mappings: parseMappingRows(envelope.mappings, knownIds, knownVariants), unmappable }
+}
+
+/** Mappings only — the long-standing surface, kept for the parse-level suites. */
 export function parseAnnotateOutput(
   output: string,
   knownIds: Set<string>,
   knownVariants: Set<string> = new Set(),
 ): ProposedMapping[] | null {
-  const fenced = output.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]
-  const text = (fenced ?? output).trim()
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start < 0 || end <= start) return null
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text.slice(start, end + 1))
-  } catch {
-    return null
-  }
-  const rows = (parsed as { mappings?: unknown }).mappings
-  if (!Array.isArray(rows)) return null
+  return parseAnnotateAnswer(output, knownIds, knownVariants)?.mappings ?? null
+}
+
+function parseMappingRows(
+  rows: unknown[],
+  knownIds: Set<string>,
+  knownVariants: Set<string>,
+): ProposedMapping[] {
   const out: ProposedMapping[] = []
   for (const raw of rows) {
     if (!raw || typeof raw !== 'object') continue
@@ -155,7 +194,6 @@ export function parseAnnotateOutput(
   }
   return out
 }
-
 
 // ---------------------------------------------------------------------------
 // Prompt construction
@@ -244,7 +282,10 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
   // answer recovery (display is the JSONL tail); codex: `exec` reads the prompt
   // from stdin (`-`) and writes the final message to --output-last-message.
   const args = agent === 'claude'
-    ? buildClaudeAgenticArgs(prompt, { model: ANNOTATE_MODELS.claude, sessionId: claudeSessionId })
+    // `readOnly` matches the codex arm's `--sandbox read-only`: the annotator
+    // returns the edits it wants as data for canary to apply, so it must not be
+    // able to reach into the spec files itself.
+    ? buildClaudeAgenticArgs(prompt, { model: ANNOTATE_MODELS.claude, sessionId: claudeSessionId, readOnly: true })
     : codexArgs(outputPath!)
   opts.onSession?.(agent === 'claude' ? { agent: 'claude', sessionId: claudeSessionId! } : { agent: 'codex', sessionId: '' })
 
@@ -258,6 +299,10 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
     idleMs: ANNOTATE_IDLE_TIMEOUT_MS,
     activityPath: agentActivityPath(agent, opts.cwd, claudeSessionId),
     onIdle: () => { idled = true },
+    spawnScope: opts.spawnScope,
+    ...(opts.agentJob
+      ? { record: { ...opts.agentJob.record, agent, ...(claudeSessionId ? { sessionId: claudeSessionId } : {}) }, agentJobLogsDir: opts.agentJob.logsDir }
+      : {}),
   })
 
   const onAbort = (): void => handle.stop()
@@ -301,6 +346,21 @@ function defaultRunAgent(agent: HealAgent, prompt: string, opts: RunAgentOpts): 
 // ---------------------------------------------------------------------------
 
 /**
+ * Tests the agent's answer failed to account for — named in neither `mappings`
+ * nor `unmappable`.
+ *
+ * This is the harness-side half of letting the agent fan out. Once subagents do
+ * the reading, canary can no longer see which tests were actually examined, and
+ * a silent omission reads downstream exactly like a considered "no requirement
+ * applies". Requiring every test in one list or the other turns that silence
+ * into a detectable failure.
+ */
+export function missingFromRoster(tests: AnnotateTestInput[], answer: AnnotateAnswer): string[] {
+  const accounted = new Set<string>([...answer.mappings.map((m) => m.testName), ...answer.unmappable])
+  return tests.map((t) => t.name).filter((name) => !accounted.has(name))
+}
+
+/**
  * Propose `covers` mappings for the given (untagged) tests. Tries the configured
  * agent(s); on no-agent / parse-failure / error it falls back to the deterministic
  * token-overlap heuristic so the engine always returns SOMETHING actionable.
@@ -319,7 +379,16 @@ export async function proposeCoverageMappings(
   const agents = resolveAgents(args.adapter ?? 'auto')
   const knownVariants = new Set(args.variantDimension?.values ?? [])
 
+  let lastFailure: string | undefined
   if (agents.length) {
+    // ONE agent is spawned, always. The prompt tells it how to divide the
+    // reading (group by spec file, one read-only subagent per group) and it
+    // dispatches its own subagents — the fan-out is the agent's to run, not
+    // canary's. Canary spawning a fleet itself would duplicate, worse, an
+    // orchestration the agent already does (a portify agent dispatched an
+    // `Explore` subagent unprompted), while giving up the agent's context and
+    // its harness's own permission model. Canary keeps only the roster check
+    // below, which the agent cannot do for itself.
     const prompt = buildAnnotatePrompt(args.requirements, args.tests, args.featureDir, args.variantDimension)
     for (const agent of agents) {
       try {
@@ -327,21 +396,42 @@ export async function proposeCoverageMappings(
         const output = await runAgent(agent, prompt, {
           cwd: args.cwd,
           signal: args.signal,
+          spawnScope: args.spawnScope,
+          agentJob: args.agentJob,
           onOutput: args.onOutput,
           onSession: args.onSession,
         })
-        const parsed = parseAnnotateOutput(output, knownIds, knownVariants)
-        if (parsed) return parsed // [] is a valid answer (nothing maps)
-        args.onOutput?.(`[agent:${agent}] unparseable output; trying next\n`)
+        const answer = parseAnnotateAnswer(output, knownIds, knownVariants)
+        if (answer) {
+          // The roster check — the price of letting the agent own the fan-out.
+          // A test missing from BOTH halves was never accounted for, and the
+          // ledger would score it uncovered on the agent's silence rather than
+          // on evidence. Indistinguishable, downstream, from a subagent that
+          // died. So an incomplete answer is not an answer.
+          const missing = missingFromRoster(args.tests, answer)
+          if (!missing.length) return answer.mappings // [] is a valid answer (nothing maps)
+          args.onOutput?.(
+            `[agent:${agent}] answer skipped ${missing.length}/${args.tests.length} test(s) `
+            + `(e.g. ${missing.slice(0, 3).join(', ')}); trying next\n`,
+          )
+          lastFailure = `agent accounted for only ${args.tests.length - missing.length} of ${args.tests.length} tests`
+        } else {
+          args.onOutput?.(`[agent:${agent}] unparseable output; trying next\n`)
+        }
       } catch (err) {
-        args.onOutput?.(`[agent:${agent}] failed: ${err instanceof Error ? err.message : String(err)}\n`)
+        lastFailure = err instanceof Error ? err.message : String(err)
+        args.onOutput?.(`[agent:${agent}] failed: ${lastFailure}\n`)
       }
     }
   }
 
   // LLM-only: no agent on PATH, or every agent failed / returned unparseable
   // output. We never guess mappings by token overlap — that mis-links tests.
+  // If an agent actually ran and threw, surface that real cause (e.g. an
+  // expired OAuth session) rather than the misleading "is on PATH" hint.
   throw new Error(
-    'Coverage mapping requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
+    lastFailure
+      ? `Coverage mapping failed: ${lastFailure}`
+      : 'Coverage mapping requires the claude or codex agent — none produced a usable result. Ensure claude or codex is on PATH.',
   )
 }

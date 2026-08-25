@@ -1,5 +1,5 @@
 import type { FeatureConfig } from '../../../../../../../shared/launcher/types'
-import { enabledForEnv, normalizeStartCommand } from './launcher/startup'
+import { enabledForEnv, normalizeStartCommand } from '../../../../shared/launcher-startup'
 
 // Preflight check answering "are this feature's apps configured for dynamic,
 // injectable ports?" — the precondition for booting the same feature more than

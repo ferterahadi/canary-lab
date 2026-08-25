@@ -37,4 +37,16 @@ describe('personal wiki rendering', () => {
       'after',
     ].join('\n'))
   })
+
+  it('leaves content without the markers untouched', () => {
+    // No block to update: writing one would append agent instructions to a
+    // file that never opted in, so the content has to pass through verbatim.
+    const plain = 'a doc that never had a wiki block\n'
+    expect(applyPersonalWikiBlock(plain, '/tmp/wiki')).toBe(plain)
+  })
+
+  it('leaves content whose end marker precedes its start marker untouched', () => {
+    const inverted = [PERSONAL_WIKI_END, 'stray', PERSONAL_WIKI_START].join('\n')
+    expect(applyPersonalWikiBlock(inverted, '/tmp/wiki')).toBe(inverted)
+  })
 })

@@ -10,11 +10,11 @@ import {
   getRepoGitStatus,
   putFeatureConfigDoc,
   type ParsedConfigDoc,
-} from '../../../shared/api/client'
+} from '@/shared/api/client'
 import { ReposTab } from './ReposTab'
 
-vi.mock('../../../shared/api/client', async () => {
-  const actual = await vi.importActual<typeof import('../../../shared/api/client')>('../../../shared/api/client')
+vi.mock('@/shared/api/client', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/api/client')>('../../../shared/api/client')
   return {
     ...actual,
     checkPathExists: vi.fn(),
@@ -25,7 +25,7 @@ vi.mock('../../../shared/api/client', async () => {
   }
 })
 
-vi.mock('../../runs/state/RunsContext', () => ({
+vi.mock('@/features/runs/state/RunsContext', () => ({
   useRuns: vi.fn(() => ({ runs: [] })),
 }))
 
@@ -33,16 +33,19 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  globalThis.IS_REACT_ACT_ENVIRONMENT = true
+  ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
   vi.mocked(checkPathExists).mockReset().mockResolvedValue({ exists: true })
   vi.mocked(getFeatureConfigDoc).mockReset()
-  vi.mocked(getGitRemote).mockReset().mockResolvedValue({})
+  vi.mocked(getGitRemote).mockReset().mockResolvedValue({ cloneUrl: null })
   vi.mocked(getRepoGitStatus).mockReset().mockResolvedValue({
+    path: '~/Documents/canary-lab',
+    expectedBranch: null,
     isGitRepo: false,
     currentBranch: null,
+    detached: false,
     dirty: false,
     dirtyFiles: [],
     localBranches: [],

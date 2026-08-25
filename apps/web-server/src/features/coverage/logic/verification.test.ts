@@ -1,8 +1,13 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
+
 import fs from 'fs'
+
 import os from 'os'
+
 import path from 'path'
+
 import type { FeatureConfig } from '../../../../../../shared/launcher/types'
+
 import {
   buildVerificationDiagnostics,
   createVerificationConfig,
@@ -14,6 +19,7 @@ import {
 } from './verification'
 
 let tmpDir: string
+
 let featureDir: string
 
 beforeEach(() => {
@@ -336,6 +342,58 @@ describe('verification configs', () => {
     expect(resolved.playwrightEnv).toEqual({})
   })
 
+  it('publishes a loopback target port under the run-stage CANARY_PORT key', () => {
+    // Specs authored by the specs-coverage loop resolve their base URL from
+    // CANARY_PORT_<slot>, not the envset URL var — the Verify demo booted the
+    // app on a dynamic port, injected only GATEWAY_URL, and the authored spec
+    // fell back to its static port against a dead socket (ECONNREFUSED).
+    // Verification must speak both conventions for loopback targets.
+    writeEnvset('production', 'GATEWAY_URL=https://api.example.com\n')
+
+    const resolved = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'http://localhost:58390' },
+    })
+
+    expect(resolved.playwrightEnv).toEqual({
+      GATEWAY_URL: 'http://localhost:58390',
+      CANARY_PORT_api_server: '58390',
+    })
+
+    // All three loopback spellings qualify — a boot's healthUrl can carry any.
+    for (const host of ['127.0.0.1', '[::1]']) {
+      const alt = resolveVerificationRun(feature(), {
+        playwrightEnvsetId: 'production',
+        targetUrls: { 'api-server': `http://${host}:4600` },
+      })
+      expect(alt.playwrightEnv.CANARY_PORT_api_server).toBe('4600')
+    }
+  })
+
+  it('never maps a deployed or portless target onto CANARY_PORT', () => {
+    // CANARY_PORT's contract is http://localhost:<port> — publishing a staging
+    // port would point a CANARY_PORT-style spec AWAY from the verified host.
+    writeEnvset('production', 'GATEWAY_URL=https://api.example.com\n')
+
+    const deployed = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'https://staging.example.com:8443' },
+    })
+    expect(deployed.playwrightEnv).toEqual({ GATEWAY_URL: 'https://staging.example.com:8443' })
+
+    const portless = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'http://localhost' },
+    })
+    expect(portless.playwrightEnv).toEqual({ GATEWAY_URL: 'http://localhost' })
+
+    const unparsable = resolveVerificationRun(feature(), {
+      playwrightEnvsetId: 'production',
+      targetUrls: { 'api-server': 'not a url' },
+    })
+    expect(unparsable.playwrightEnv).toEqual({ GATEWAY_URL: 'not a url' })
+  })
+
   it('uses the first feature env as the verification envset fallback', () => {
     writeEnvset('local', 'GATEWAY_URL=https://local.example.com\n')
 
@@ -360,264 +418,5 @@ describe('verification configs', () => {
 
     expect(resolved.metadata.targets).toEqual([{ id: 'api', name: 'api', url: '' }])
     expect(resolved.playwrightEnv).toEqual({})
-  })
-})
-
-describe('verification diagnostics', () => {
-  it('summarizes failed tests with trace extracts, artifacts, target URL mapping, and stripped raw output', () => {
-    const runDir = path.join(tmpDir, 'runs', 'run-1')
-    const traceDir = path.join(runDir, 'traces', 'checkout', 'trace-extract')
-    fs.mkdirSync(traceDir, { recursive: true })
-    fs.writeFileSync(path.join(runDir, 'playwright.log'), `${'x'.repeat(16_010)}\x1b[31mTAIL\x1b[0m`)
-    fs.writeFileSync(path.join(runDir, 'traces', 'checkout', 'summary.md'), `${'s'.repeat(8_010)} 503 from https://api.example.com/orders`)
-    fs.writeFileSync(path.join(traceDir, 'network-failed.txt'), [
-      'GET https://api.example.com/orders 503',
-      '',
-      ...Array.from({ length: 25 }, (_, idx) => `extra ${idx}`),
-    ].join('\n'))
-    fs.writeFileSync(path.join(traceDir, 'console-errors.txt'), 'Console exploded\n')
-
-    const diagnostics = buildVerificationDiagnostics({
-      runId: 'run-1',
-      manifest: {
-        runId: 'run-1',
-        feature: 'checkout',
-        startedAt: '2026-05-24T00:00:00.000Z',
-        status: 'failed',
-        healCycles: 0,
-        services: [],
-        verification: {
-          playwrightEnvsetId: 'production',
-          targetUrls: {
-            api: 'https://api.example.com',
-            fallback: 'https://fallback.example.com',
-          },
-          targets: [],
-        },
-      },
-      summary: {
-        complete: true,
-        total: 1,
-        passed: 0,
-        failed: [
-          {
-            name: 'orders fail',
-            location: 'tests/orders.spec.ts:12:3',
-            error: {
-              message: 'Request failed with 503 at https://api.example.com/orders',
-              snippet: 'status was 503',
-            },
-            traceSummaryFile: 'traces/checkout/summary.md',
-          },
-        ],
-      },
-      playwrightArtifacts: [
-        {
-          testName: 'orders fail',
-          artifacts: [
-            {
-              name: 'trace.zip',
-              kind: 'trace',
-              path: path.join(runDir, 'trace.zip'),
-              url: '/api/runs/run-1/artifacts/trace.zip',
-              sizeBytes: 100,
-              mtimeMs: 1,
-            },
-          ],
-        },
-      ],
-    }, runDir)
-
-    expect(diagnostics.summary).toBe('1 Playwright test failed during deployment verification.')
-    expect(diagnostics.rawPlaywrightOutput).toBe(`${'x'.repeat(15_996)}TAIL`)
-    expect(diagnostics.failedTests[0]).toMatchObject({
-      name: 'orders fail',
-      location: 'tests/orders.spec.ts:12:3',
-      testFile: 'tests/orders.spec.ts',
-      targetUrl: 'https://api.example.com',
-      endpoint: 'https://api.example.com/orders',
-      httpStatus: 503,
-      errorMessage: 'Request failed with 503 at https://api.example.com/orders',
-      assertionFailure: 'status was 503',
-      consoleErrors: ['Console exploded'],
-      artifacts: [{ name: 'trace.zip', kind: 'trace', url: '/api/runs/run-1/artifacts/trace.zip' }],
-    })
-    expect(diagnostics.failedTests[0].networkErrors).toHaveLength(20)
-    expect(diagnostics.failedTests[0].rawPlaywrightError?.endsWith('Console exploded')).toBe(true)
-  })
-
-  it('falls back when failures have no endpoint, location, trace, artifacts, or raw output', () => {
-    const runDir = path.join(tmpDir, 'runs', 'run-2')
-    fs.mkdirSync(runDir, { recursive: true })
-
-    const diagnostics = buildVerificationDiagnostics({
-      runId: 'run-2',
-      manifest: {
-        runId: 'run-2',
-        feature: 'checkout',
-        startedAt: '2026-05-24T00:00:00.000Z',
-        status: 'failed',
-        healCycles: 0,
-        services: [],
-        verification: {
-          playwrightEnvsetId: 'production',
-          targetUrls: { fallback: 'https://fallback.example.com' },
-          targets: [],
-        },
-      },
-      summary: {
-        complete: true,
-        total: 1,
-        passed: 0,
-        failed: [
-          {
-            name: 'plain failure',
-            error: { message: 'Expected text to be visible' },
-          },
-        ],
-      },
-      playwrightArtifacts: [
-        { testName: 'other test', artifacts: [] },
-      ],
-    }, runDir)
-
-    expect(diagnostics.rawPlaywrightOutput).toBeUndefined()
-    expect(diagnostics.failedTests[0]).toEqual({
-      name: 'plain failure',
-      targetUrl: 'https://fallback.example.com',
-      errorMessage: 'Expected text to be visible',
-      rawPlaywrightError: 'Expected text to be visible',
-    })
-  })
-
-  it('falls back to the first target when an endpoint does not match a configured target URL', () => {
-    const runDir = path.join(tmpDir, 'runs', 'run-unmatched')
-    const extractDir = path.join(runDir, 'traces', 'checkout', 'trace-extract')
-    fs.mkdirSync(extractDir, { recursive: true })
-    fs.writeFileSync(path.join(runDir, 'traces', 'checkout', 'summary.md'), 'GET https://other.example.com/api returned 502')
-
-    const diagnostics = buildVerificationDiagnostics({
-      runId: 'run-unmatched',
-      manifest: {
-        runId: 'run-unmatched',
-        feature: 'checkout',
-        startedAt: '2026-05-24T00:00:00.000Z',
-        status: 'failed',
-        healCycles: 0,
-        services: [],
-        verification: {
-          playwrightEnvsetId: 'production',
-          targetUrls: { fallback: 'https://fallback.example.com' },
-          targets: [],
-        },
-      },
-      summary: {
-        complete: true,
-        total: 1,
-        passed: 0,
-        failed: [
-          {
-            name: 'unmatched endpoint',
-            traceSummaryFile: 'traces/checkout/summary.md',
-          },
-        ],
-      },
-    }, runDir)
-
-    expect(diagnostics.failedTests[0]).toMatchObject({
-      endpoint: 'https://other.example.com/api',
-      targetUrl: 'https://fallback.example.com',
-      httpStatus: 502,
-    })
-  })
-
-  it('omits optional diagnostic fields when a failed entry has no error details or target URLs', () => {
-    const runDir = path.join(tmpDir, 'runs', 'run-empty-failure')
-    fs.mkdirSync(runDir, { recursive: true })
-
-    const diagnostics = buildVerificationDiagnostics({
-      runId: 'run-empty-failure',
-      manifest: {
-        runId: 'run-empty-failure',
-        feature: 'checkout',
-        startedAt: '2026-05-24T00:00:00.000Z',
-        status: 'failed',
-        healCycles: 0,
-        services: [],
-        verification: {
-          playwrightEnvsetId: 'production',
-          targetUrls: {},
-          targets: [],
-        },
-      },
-      summary: {
-        complete: true,
-        total: 1,
-        passed: 0,
-        failed: [{ name: 'empty failure' }],
-      },
-    }, runDir)
-
-    expect(diagnostics.failedTests).toEqual([{ name: 'empty failure' }])
-  })
-
-  it('uses the plural diagnostics summary and handles details without a summary object', () => {
-    const withTwoFailures = buildVerificationDiagnostics({
-      runId: 'run-two',
-      manifest: {
-        runId: 'run-two',
-        feature: 'checkout',
-        startedAt: '2026-05-24T00:00:00.000Z',
-        status: 'failed',
-        healCycles: 0,
-        services: [],
-      },
-      summary: {
-        complete: true,
-        total: 2,
-        passed: 0,
-        failed: [{ name: 'one' }, { name: 'two' }],
-      },
-    }, path.join(tmpDir, 'missing-run-two'))
-    expect(withTwoFailures.summary).toBe('2 Playwright tests failed during deployment verification.')
-
-    const withoutSummary = buildVerificationDiagnostics({
-      runId: 'run-no-summary',
-      manifest: {
-        runId: 'run-no-summary',
-        feature: 'checkout',
-        startedAt: '2026-05-24T00:00:00.000Z',
-        status: 'failed',
-        healCycles: 0,
-        services: [],
-      },
-    }, path.join(tmpDir, 'missing-run-no-summary'))
-    expect(withoutSummary.failedTests).toEqual([])
-  })
-
-  it('summarizes verification failures that did not record failed Playwright tests', () => {
-    const diagnostics = buildVerificationDiagnostics({
-      runId: 'run-3',
-      manifest: {
-        runId: 'run-3',
-        feature: 'checkout',
-        startedAt: '2026-05-24T00:00:00.000Z',
-        status: 'failed',
-        healCycles: 0,
-        services: [],
-      },
-      summary: {
-        complete: false,
-        total: 0,
-        passed: 0,
-        failed: [],
-      },
-    }, path.join(tmpDir, 'missing-run'))
-
-    expect(diagnostics).toMatchObject({
-      summary: 'Verification failed, but no failed Playwright test was recorded.',
-      targetUrls: {},
-      failedTests: [],
-    })
   })
 })

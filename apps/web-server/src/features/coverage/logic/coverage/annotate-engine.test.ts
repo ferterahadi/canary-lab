@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   parseAnnotateOutput,
+  parseAnnotateAnswer,
   proposeCoverageMappings,
   buildAnnotatePrompt,
+  missingFromRoster,
 } from './annotate-engine'
 import type { Requirement, VariantDimension } from '../../../../../../../shared/coverage/types'
 
@@ -40,12 +42,53 @@ describe('parseAnnotateOutput', () => {
     expect(out![0].testName).toBe('t')
   })
 
+  // Regression: flight fl_4e775ccc6c15 — claude's unfenced answer opened with
+  // prose whose inline code (`async () => {}`) put a `{` before the JSON, so the
+  // first-`{`→last-`}` slice threw and a valid answer was discarded (the engine
+  // then fell through to a codex attempt that could not succeed).
+  it('recovers bare JSON preceded by prose containing braces', () => {
+    const out = parseAnnotateOutput(
+      'Skips have empty bodies (`async () => {}`) so I omit them.\n\n' +
+        JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'], pathTypes: ['happy'] }] }),
+      KNOWN,
+    )
+    expect(out![0]).toMatchObject({ testName: 't', requirements: ['R1'] })
+  })
+
+  it('recovers bare JSON followed by trailing prose containing braces', () => {
+    const out = parseAnnotateOutput(
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R2'] }] }) +
+        '\n\nNote: the fixme bodies are `async () => {}` stubs.',
+      KNOWN,
+    )
+    expect(out![0].requirements).toEqual(['R2'])
+  })
+
   it('returns [] for a valid-but-empty mapping set', () => {
     expect(parseAnnotateOutput(JSON.stringify({ mappings: [] }), KNOWN)).toEqual([])
   })
 
   it('returns null on garbage', () => {
     expect(parseAnnotateOutput('not json at all', KNOWN)).toBeNull()
+  })
+
+  it('steps over scalar and array JSON blocks to reach the real answer', () => {
+    // Agents fence more than one block; a scalar or an array carries no
+    // `mappings` key and must be stepped over, not treated as the answer.
+    // Fenced blocks are considered last-first, so the real answer goes first
+    // here and the shapes that must be skipped come after it.
+    const output = [
+      '```json',
+      JSON.stringify({ mappings: [{ testName: 't', requirements: ['R1'] }] }),
+      '```',
+      '```json',
+      '[1, 2, 3]',
+      '```',
+      '```json',
+      '42',
+      '```',
+    ].join('\n')
+    expect(parseAnnotateOutput(output, KNOWN)).toMatchObject([{ testName: 't', requirements: ['R1'] }])
   })
 
   it('returns null when mappings is not an array (line 114 branch)', () => {
@@ -172,6 +215,20 @@ describe('proposeCoverageMappings', () => {
     ).rejects.toThrow(/requires the claude or codex agent/)
   })
 
+  it('surfaces the underlying agent error instead of the generic PATH message', async () => {
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: [{ name: 'creates a todo' }] },
+        {
+          resolveAgents: () => ['claude'],
+          runAgent: async () => {
+            throw new Error('Failed to authenticate: OAuth session expired and could not be refreshed')
+          },
+        },
+      ),
+    ).rejects.toThrow(/OAuth session expired and could not be refreshed/)
+  })
+
   it('returns [] when there are no tests or no active requirements', async () => {
     expect(await proposeCoverageMappings({ requirements: REQS, tests: [] })).toEqual([])
     expect(await proposeCoverageMappings({ requirements: [], tests: [{ name: 'x' }] })).toEqual([])
@@ -286,5 +343,143 @@ describe('parseAnnotateOutput — invalid JSON catch branch', () => {
   it('returns null when JSON.parse throws (invalid JSON with braces)', () => {
     // `{invalid}` has { and } so start/end checks pass, but JSON.parse throws.
     expect(parseAnnotateOutput('{invalid json}', KNOWN)).toBeNull()
+  })
+})
+
+
+// Fanning out is a written RULE in coverage-annotate.md, not a plan canary
+// computes — the dispatching model groups the tests itself. Each clause below
+// carries a failure canary cannot see afterwards, so a prose cleanup that drops
+// one is silent: a split spec file makes two readers each see half a file's
+// fixtures, and a divided requirement list makes every subagent judge its tests
+// against a subset, which is wrong rather than partial.
+describe('the annotate prompt carries the fan-out rule', () => {
+  const tests = [{ name: 'a-1', file: 'a.spec.ts' }, { name: 'b-1', file: 'b.spec.ts' }]
+
+  it('tells the agent to group by spec file and never split one', () => {
+    const prompt = buildAnnotatePrompt(REQS, tests)
+    expect(prompt).toContain('Group the tests below by the `file` they live in')
+    expect(prompt).toMatch(/never split one spec file\s+across two readers/)
+  })
+
+  it('tells the agent to dispatch read-only subagents in one parallel round', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).toMatch(
+      /one read-only subagent per group in a single\s+parallel round/,
+    )
+  })
+
+  it('keeps the requirement spine whole for every subagent', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).toContain(
+      'Give every subagent the full requirement list unchanged',
+    )
+  })
+
+  it('makes the dispatching agent own the merged answer', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).toContain('The merged answer is yours, not theirs')
+  })
+
+  it('leaves no unresolved placeholder where the computed plan used to be', () => {
+    expect(buildAnnotatePrompt(REQS, tests)).not.toMatch(/\{\{\w+\}\}/)
+  })
+})
+
+describe('parseAnnotateAnswer + roster accounting', () => {
+  it('reads unmappable off the SAME envelope as mappings', () => {
+    const answer = parseAnnotateAnswer(
+      JSON.stringify({
+        mappings: [{ testName: 'a', requirements: ['R1'] }],
+        unmappable: [{ testName: 'b', reason: 'pure UI smoke, no requirement' }, { testName: '  ' }, null],
+      }),
+      KNOWN,
+    )
+    expect(answer!.mappings.map((m) => m.testName)).toEqual(['a'])
+    expect(answer!.unmappable).toEqual(['b']) // blank + non-object entries dropped
+  })
+
+  it('treats a missing unmappable key as an empty list', () => {
+    const answer = parseAnnotateAnswer(JSON.stringify({ mappings: [] }), KNOWN)
+    expect(answer!.unmappable).toEqual([])
+  })
+
+  it('names exactly the tests accounted for in neither list', () => {
+    const missing = missingFromRoster(
+      [{ name: 'a' }, { name: 'b' }, { name: 'c' }],
+      { mappings: [{ testName: 'a', requirements: ['R1'], source: 'agent' }], unmappable: ['b'] },
+    )
+    expect(missing).toEqual(['c'])
+  })
+})
+
+describe('proposeCoverageMappings — the answer must account for every test', () => {
+  const TESTS = [{ name: 'a' }, { name: 'b' }, { name: 'c' }]
+
+  it('accepts an answer where every test is mapped OR declared unmappable', () => {
+    const out = proposeCoverageMappings(
+      { requirements: REQS, tests: TESTS },
+      {
+        resolveAgents: () => ['claude'],
+        runAgent: async () =>
+          JSON.stringify({
+            mappings: [{ testName: 'a', requirements: ['R1'] }],
+            unmappable: [{ testName: 'b', reason: 'no requirement' }, { testName: 'c', reason: 'setup only' }],
+          }),
+      },
+    )
+    return expect(out).resolves.toHaveLength(1)
+  })
+
+  it('REJECTS an answer that silently drops a test, and says which', async () => {
+    // A dropped test is indistinguishable downstream from a considered "no
+    // requirement applies" — the ledger would score it uncovered on silence.
+    const logs: string[] = []
+    await expect(
+      proposeCoverageMappings(
+        { requirements: REQS, tests: TESTS, onOutput: (c) => logs.push(c) },
+        {
+          resolveAgents: () => ['claude'],
+          runAgent: async () => JSON.stringify({ mappings: [{ testName: 'a', requirements: ['R1'] }] }),
+        },
+      ),
+    ).rejects.toThrow(/accounted for only 1 of 3 tests/)
+    expect(logs.join('')).toContain('answer skipped 2/3 test(s)')
+  })
+
+  it('falls through to the next agent when the first returns an incomplete answer', async () => {
+    const seen: string[] = []
+    const out = await proposeCoverageMappings(
+      { requirements: REQS, tests: TESTS },
+      {
+        resolveAgents: () => ['claude', 'codex'],
+        runAgent: async (agent) => {
+          seen.push(agent)
+          if (agent === 'claude') return JSON.stringify({ mappings: [{ testName: 'a', requirements: ['R1'] }] })
+          return JSON.stringify({
+            mappings: [{ testName: 'a', requirements: ['R1'] }, { testName: 'b', requirements: ['R2'] }],
+            unmappable: [{ testName: 'c', reason: 'setup only' }],
+          })
+        },
+      },
+    )
+    expect(seen).toEqual(['claude', 'codex'])
+    expect(out).toHaveLength(2)
+  })
+
+  it('spawns exactly ONE agent — the fan-out is the agent\'s to run, not canary\'s', async () => {
+    let spawns = 0
+    const many = Array.from({ length: 40 }, (_, i) => ({ name: `t${i}`, file: `s${i}.spec.ts` }))
+    await proposeCoverageMappings(
+      { requirements: REQS, tests: many },
+      {
+        resolveAgents: () => ['claude'],
+        runAgent: async () => {
+          spawns++
+          return JSON.stringify({
+            mappings: many.map((t) => ({ testName: t.name, requirements: ['R1'] })),
+            unmappable: [],
+          })
+        },
+      },
+    )
+    expect(spawns).toBe(1)
   })
 })

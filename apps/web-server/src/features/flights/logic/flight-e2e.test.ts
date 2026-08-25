@@ -4,7 +4,7 @@ import os from 'os'
 import path from 'path'
 import { FlightRunStore } from './store'
 import { startFlight, respondToFlightCheckpoint, deleteFlight, FlightFrozenError, type FlightConductorDeps } from './conductor'
-import { buildFlightStageAdapters } from './stages'
+import { buildFlightStageAdapters } from './stages/index'
 import type { FlightStageDeps } from './stages/context'
 import { writeEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
 import type { FlightOptions } from './types'
@@ -200,7 +200,11 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
     expect(final.stages.find((s) => s.key === 'heal')!.evidence).toMatchObject({ healCycles: 1 })
 
     expect(spawnAgent).toHaveBeenCalledTimes(2) // scout + one specs round
-  })
+    // 15s, matching the 20 other heavyweight suites here. This drives every real
+    // stage adapter over a git fixture and lands ~2.5s on a dev machine — no
+    // headroom under the 5s default, which is exactly how it timed out on a
+    // slower CI runner while passing locally. No assertion is relaxed by this.
+  }, 15000)
 
   it('R57/R67 over real adapters: redo reuses the record with stored args, frozen args reject, delete frees the feature', async () => {
     const { deps } = buildDeps('first-flight-app')
@@ -221,15 +225,19 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
     expect(settled.repoPaths).toEqual([repoDir]) // stored args reused
     expect(settled.description).toBe('todo flow')
 
-    // Frozen forever: differing repos or intent are a 409-class error.
+    // R75: the freeze guards MID-PIPELINE re-entry — a jump with a different
+    // intent is a 409-class error…
     expect(() => startFlight(
-      { feature: 'first-flight-app', repoPaths: [tmpDir], description: 'todo flow', opts: OPTS_YOLO, mode: 'redo' },
+      { feature: 'first-flight-app', repoPaths: [], description: 'a different intent', opts: OPTS_YOLO, mode: 'jump', fromStage: 'run' },
       deps,
     )).toThrow(FlightFrozenError)
-    expect(() => startFlight(
+    // …while a full restart (redo) ACCEPTS a new intent and replaces the
+    // stored one (every stage's evidence is discarded anyway).
+    await startFlight(
       { feature: 'first-flight-app', repoPaths: [], description: 'a different intent', opts: OPTS_YOLO, mode: 'redo' },
       deps,
-    )).toThrow(FlightFrozenError)
+    ).completion
+    expect(store.get(manifest.flightId)!.description).toBe('a different intent')
 
     // Delete is the escape hatch: the record goes, the feature dir stays.
     deleteFlight(manifest.flightId, deps)
@@ -259,15 +267,14 @@ describe('first flight end-to-end (real adapters over the fixture repo)', () => 
 
     const resumed = respondToFlightCheckpoint(manifest.flightId, { choice: 'rerun' }, second.deps)
     await resumed.completion
-    // Non-yolo flights park once more before the terminal stage: the
-    // export-mode choice (raw vs localized).
-    const preExport = store.get(manifest.flightId)!
-    expect(preExport.status).toBe('waiting-for-approval')
-    expect(preExport.stages.find((s) => s.key === 'evaluation-export')!.checkpoint?.kind).toBe('export-mode')
-    const exported = respondToFlightCheckpoint(manifest.flightId, { choice: 'raw' }, second.deps)
-    await exported.completion
+    // R71/W4: autopilot (default on) answers the export-mode checkpoint with
+    // "raw" — after the one human decision (similarity), the rerun path runs
+    // to the archive without a second park, and the decision is on the log.
     const final = store.get(manifest.flightId)!
     expect(final.status).toBe('done')
+    const exportStage = final.stages.find((s) => s.key === 'evaluation-export')!
+    expect(exportStage.checkpointResponse).toEqual({ choice: 'raw' })
+    expect(exportStage.log).toMatch(/\[autopilot@[^\]]+\] export-mode/)
     expect(final.feature).toBe('first-flight-app') // re-pointed at the existing feature
     expect(final.links?.evaluationZip).toBeTruthy()
     // Authoring stages were skipped — no agent ran on the rerun path.

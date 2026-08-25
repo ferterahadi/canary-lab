@@ -1,12 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as api from '../api/client'
-import type { DirtySpecSummary, FeatureSpecFile, RunStatus } from '../api/types'
-import { activeBodyLineForTest, colorClassForStatus, runningTestForSummaryName, statusForTest, summaryEntryName, type StepStatus } from '../../features/runs/utils/test-step-status'
+import { useInvalidationKey } from '../state/invalidation'
+import type { DirtySpecSummary, ExtractedTest, FeatureSpecFile, RunStatus } from '../api/types'
+import {
+  activeBodyLineForTest,
+  colorClassForStatus,
+  runningTestForSummaryName,
+  statusForTest,
+  type StepStatus,
+  summaryEntryName,
+} from '@/features/runs'
 import type { RunSummary, RunSummaryRunningStep } from '../api/types'
-import { ShikiCode, StatusPill, StepBlock } from '../ui/TestCodeBlock'
+import { ShikiCode, StepStatusBadge, StepBlock } from '../ui/TestCodeBlock'
 import { TestIdBadge } from '../ui/TestIdBadge'
 import { buildTestNumbering, stripLeadingTestOrdinal, testNumberKey } from '../test-numbering'
-import { ChevronRightIcon, StatusDot } from '../../features/config/components/atoms'
+import { ChevronRightIcon, StatusDot } from '@/shared/ui/atoms'
 
 type DirtyDiff = { name: string; changedLines: number[] }[]
 
@@ -14,14 +22,16 @@ interface Props {
   feature: string | null
   activeRunSummary: RunSummary | undefined
   activeRunStatus: RunStatus | undefined
-  refreshKey?: number
   onTotalTestsChange?: (n: number) => void
   /** Spec files flagged as modified, each with the test title(s) actually
    *  affected — only those test cards get the red "modified" treatment. */
   dirtySpecs?: DirtySpecSummary[]
 }
 
-export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, refreshKey = 0, onTotalTestsChange, dirtySpecs = [] }: Props) {
+export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, onTotalTestsChange, dirtySpecs = [] }: Props) {
+  // The spec list refetches when a `tests-changed` event fires for the selected
+  // feature (App gates the invalidation to the visible feature).
+  const refreshKey = useInvalidationKey('tests')
   const [specs, setSpecs] = useState<FeatureSpecFile[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [expandedTest, setExpandedTest] = useState<string | null>(null)
@@ -114,7 +124,7 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin p-3">
         {loadError ? (
-          <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-muted)' }}>
+          <div className="rounded-md border px-3 py-2 text-xs" style={{ color: 'var(--text-secondary)', borderColor: 'var(--border-default)', background: 'var(--bg-elevated)' }}>
             {loadError}
           </div>
         ) : !displaySpecs ? (
@@ -133,7 +143,11 @@ export function TestCasesColumn({ feature, activeRunSummary, activeRunStatus, re
                   ? dirtyDiffs[dirtySpec?.file ?? '']?.find((d) => d.name === t.name)?.changedLines
                   : undefined
                 const changedLines = diffLines ? new Set(diffLines) : undefined
-                const key = `${spec.file}:${t.line}:${t.id ?? t.name}`
+                // `t.id` used to be read here as a preferred key. The tests
+                // endpoint builds each entry from name/line/bodySource/steps and
+                // never sets an id, so the fallback was the only live arm — and
+                // the mirror declared a field the server does not send.
+                const key = `${spec.file}:${t.line}:${t.name}`
                 const isExpanded = expandedTest === key
                 const entryName = summaryEntryName(t.name)
                 const runningTest = isRunActivelyTesting && activeRunSummary
@@ -286,7 +300,7 @@ function TestCard({
         >
           :{test.line}
         </span>
-        <StatusPill status={status} />
+        <StepStatusBadge status={status} />
       </button>
       {expanded && (
         <div className="space-y-2 px-3 pb-3">
@@ -296,9 +310,9 @@ function TestCard({
               style={{
                 color: 'var(--text-secondary)',
                 borderColor: isRunningTest
-                  ? 'rgb(234, 179, 8)'
+                  ? 'var(--warning)'
                   : 'color-mix(in srgb, var(--accent) 40%, transparent)',
-                background: isRunningTest ? 'rgba(234, 179, 8, 0.15)' : 'var(--accent-soft)',
+                background: isRunningTest ? 'color-mix(in srgb, var(--warning) 15%, transparent)' : 'var(--accent-soft)',
                 fontFamily: 'var(--font-mono)',
               }}
             >
@@ -327,8 +341,8 @@ function TestCard({
                   ? {
                       borderRadius: 6,
                       padding: 2,
-                      background: 'rgba(234, 179, 8, 0.12)',
-                      boxShadow: 'inset 0 0 0 1px rgb(234, 179, 8), inset 3px 0 0 rgb(234, 179, 8)',
+                      background: 'color-mix(in srgb, var(--warning) 12%, transparent)',
+                      boxShadow: 'inset 0 0 0 1px var(--warning), inset 3px 0 0 var(--warning)',
                     }
                   : undefined
               }

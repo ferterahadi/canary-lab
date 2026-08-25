@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../config/logic/config-ast'
+import { readFeatureConfig, writeFeatureConfig, type ConfigValue } from '../../../../shared/config-ast'
 import { readOverlayOriginalConfig, removeOverlay } from './overlay'
 
 // Shared "un-portify" core, called by both the REST route

@@ -1,20 +1,17 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
-import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
-import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { buildRunPaths, runDirFor } from '../logic/runtime/run-paths'
 import {
   readJournal,
   filterSections,
   newestFirst,
-  deleteIterationSection,
   type JournalSection,
-} from '../../runs/logic/journal-store'
+} from '../logic/journal-store'
 
 export interface JournalRouteDeps {
   logsDir: string
   /** Legacy root journal fallback for callers that do not select a run. */
   journalPath?: string
-  workspaceEvents?: WorkspaceEventPublisher
 }
 
 export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps): Promise<void> {
@@ -70,38 +67,6 @@ export async function journalRoutes(app: FastifyInstance, deps: JournalRouteDeps
         })
       }
       return newestFirst(filtered)
-    },
-  )
-
-  app.delete<{ Params: { iteration: string }; Querystring: { run?: string } }>(
-    '/api/journal/:iteration',
-    async (req, reply) => {
-      const iter = parseInt(req.params.iteration, 10)
-      if (!Number.isFinite(iter)) {
-        reply.code(400)
-        return { error: 'iteration must be an integer' }
-      }
-      const journalPath = resolveJournalPath(req.query.run)
-      if (!journalPath) {
-        reply.code(400)
-        return { error: 'run is required' }
-      }
-      let removed = deleteIterationSection(journalPath, iter)
-      if (!removed && req.query.run && deps.journalPath) {
-        const legacy = readJournal(deps.journalPath)
-        const matchingLegacyEntry = filterSections(legacy.sections, { run: req.query.run })
-          .some((section) => section.iteration === iter)
-        if (matchingLegacyEntry) {
-          removed = deleteIterationSection(deps.journalPath, iter)
-        }
-      }
-      if (!removed) {
-        reply.code(404)
-        return { error: 'iteration not found' }
-      }
-      if (req.query.run) publishWorkspaceEvent(deps.workspaceEvents, { type: 'journal-changed', runId: req.query.run })
-      reply.code(204)
-      return ''
     },
   )
 }

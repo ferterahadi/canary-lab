@@ -16,7 +16,13 @@ import { atomicWrite } from './atomic-write'
 
 export interface TaskStoreEvent {
   kind: 'changed' | 'removed'
-  id?: string
+  /** Required, because this store is the only producer and all four of its emit
+   *  sites pass one. Declaring it optional made every consumer carry a guard for
+   *  a state nothing could create — `bridgeCoverageJobEvents` had one, and its
+   *  false arm was unreachable and therefore untestable. Consumers that genuinely
+   *  have no id (the update-job store, whose event names no record) declare their
+   *  own event type rather than widening this one. */
+  id: string
 }
 
 export interface TaskIndexEntry {
@@ -42,6 +48,12 @@ export interface TaskStoreConfig<T> {
   idOfEntry?: (entry: TaskIndexEntry) => string | undefined
   /** Current status, used by `transition` + the default index sort tiebreak. */
   statusOf?: (rec: T) => string
+  /** The feature a record belongs to, for `renameFeature`. Declare this pair on
+   *  every store whose records name a feature — a suite rename rewrites the name
+   *  in place rather than orphaning the history behind the old one. Omitted →
+   *  `renameFeature` is a no-op for this store. */
+  featureOf?: (rec: T) => string | undefined
+  withFeature?: (rec: T, feature: string) => T
   /** Validate/normalize an untrusted record read from disk; return null to drop. */
   validate?: (raw: unknown) => T | null
   /** State-machine guard for `transition`. Absent → any transition allowed. */
@@ -169,6 +181,47 @@ export class FileBackedTaskStore<T> {
     this.emit({ kind: 'removed', id })
   }
 
+  /** Re-home every record from one feature name to another, in place. The
+   *  feature name IS a suite's identity, so a rename must follow it into every
+   *  store that recorded work against it — otherwise the history orphans behind
+   *  a name nothing resolves any more (the row still lists, but no feature
+   *  matches it). Returns how many records moved.
+   *
+   *  Stores whose record id is derived FROM the feature (dirty-specs) get their
+   *  per-record directory moved so sidecar files survive, and the stale index
+   *  row dropped. Requires `featureOf` + `withFeature`; otherwise a no-op. */
+  renameFeature(from: string, to: string): number {
+    const { featureOf, withFeature } = this.config
+    if (!featureOf || !withFeature || from === to) return 0
+    let renamed = 0
+    for (const entry of this.readIndex()) {
+      const id = this.entryId(entry)
+      if (!id) continue
+      const rec = this.get(id)
+      if (!rec || featureOf(rec) !== from) continue
+      const next = withFeature(rec, to)
+      const nextId = this.config.idOf(next)
+      if (nextId !== id) {
+        try {
+          fs.rmSync(this.recordDir(nextId), { recursive: true, force: true })
+          fs.renameSync(this.recordDir(id), this.recordDir(nextId))
+        } catch {
+          /* best-effort — save() below still writes the record at its new id */
+        }
+        this.dropIndexRow(id)
+      }
+      this.save(next)
+      renamed++
+    }
+    return renamed
+  }
+
+  /** Drop an index row without touching its (already-moved) record directory. */
+  private dropIndexRow(id: string): void {
+    this.writeIndex(this.readIndex().filter((e) => this.entryId(e) !== id))
+    this.emit({ kind: 'removed', id })
+  }
+
   /** Drop index rows whose record file is missing or unreadable — e.g. the
    *  per-record directory was wiped out-of-band (a cleanup, a manual rm) without
    *  going through `remove()`, leaving a "zombie" row that lists but can't be
@@ -223,4 +276,38 @@ export class FileBackedTaskStore<T> {
       }
     }
   }
+}
+
+// ── one instance per record directory ────────────────────────────────────────
+//
+// The store holds no cached data — every read hits disk — so a second instance
+// over the same directory reads and writes identically. What it does NOT share
+// is the listener set, and that is the whole problem: a feature whose accessors
+// each construct a store (`draftStore(logsDir).save(…)`) emits into a listener
+// set nobody is subscribed to, so its writes cannot be bridged to the workspace
+// bus and every caller has to announce them by hand.
+//
+// Memoizing by record directory makes the events reachable: one instance per
+// `<logsDir>/<dirName>` per process, so a bridge attached once hears every
+// write from every accessor.
+//
+// The config is captured from the FIRST call for a directory. That is correct
+// for the intended use — one module owning one directory, handing back the same
+// configuration every time — and wrong if two callers configure the same
+// directory differently, which no feature does and none should.
+const SHARED_STORES = new Map<string, FileBackedTaskStore<unknown>>()
+
+export function sharedTaskStore<T>(config: TaskStoreConfig<T>): FileBackedTaskStore<T> {
+  const key = `${path.resolve(config.logsDir)}::${config.dirName}`
+  const existing = SHARED_STORES.get(key)
+  if (existing) return existing as FileBackedTaskStore<T>
+  const created = new FileBackedTaskStore<T>(config)
+  SHARED_STORES.set(key, created as FileBackedTaskStore<unknown>)
+  return created
+}
+
+/** Drop the memo — for tests, which build a fresh logs dir per case and would
+ *  otherwise inherit a previous case's listeners through the shared instance. */
+export function resetSharedTaskStores(): void {
+  SHARED_STORES.clear()
 }

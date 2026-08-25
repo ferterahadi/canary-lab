@@ -1,12 +1,13 @@
 import fs from 'fs'
 import path from 'path'
-import { createFeatureSkeleton } from '../../../config/logic/feature-authoring'
-import { readFeatureConfig } from '../../../config/logic/config-ast'
+import { createFeatureSkeleton, deleteFeature } from '../../../config/logic/feature-authoring'
+import { readFeatureConfig } from '../../../../shared/config-ast'
 import { publishWorkspaceEvent } from '../../../../shared/workspace-events'
 import type { StageAdapter, StageContext, StageOutcome } from '../conductor'
 import type { FlightCheckpoint } from '../types'
-import { featureDirFor, type FlightStageDeps } from './context'
+import { decodeSubmission, featureDirFor, type FlightStageDeps } from './context'
 import type { ScoutDraft } from './scout'
+import { CHECKPOINT_OPTIONS } from '../types'
 
 // Scaffold the feature with the existing create_feature core, lay the scout's
 // draft config over the skeleton's placeholder, then park on config-approval
@@ -51,9 +52,9 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     return {
       kind: 'config-approval',
       message: extra?.error
-        ? `The edited feature.config.cjs for "${m.feature}" does not parse — fix it and approve again. (${extra.error})`
-        : `Feature "${m.feature}" is set up. Review the configuration (edit it in place or via Advanced setup), then approve — it gets boot-verified after env capture. Redraft re-runs the repo scan.`,
-      options: ['approve', 'redraft'],
+        ? `The edited settings for "${m.feature}" don't parse — fix them and approve again. (${extra.error})`
+        : `Suite "${m.feature}" is set up. Check the settings below (the ✎ on each service edits it in place), then approve — Canary starts the app afterwards to confirm they work. Redraft re-runs the repo scan.`,
+      options: [...CHECKPOINT_OPTIONS['config-approval']],
       data: { feature: m.feature, configPath, configSource, ...(extra?.error ? { error: extra.error } : {}) },
     }
   }
@@ -102,6 +103,7 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     const created = createFeatureSkeleton({
       projectRoot: deps.projectRoot,
       featuresDir: deps.featuresDir,
+      workspaceEvents: deps.workspaceEvents,
       feature,
       description: m.description,
       envs: [m.opts.env],
@@ -118,11 +120,13 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
     }
 
     writeMarker(feature)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'feature-created', feature })
     return { ok: true, featureDir: created.featureDir, written: created.written }
   }
 
   return {
+    // Owns nothing: synchronous file writes (the skeleton + the drafted config).
+    // Its `reset` below is what undoes them on a restart.
+    teardown: () => null,
     async run(ctx) {
       const scaffolded = ensureScaffolded(ctx)
       if (!scaffolded.ok) return scaffolded.outcome
@@ -143,7 +147,13 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
       // response — the disk stays the single source of truth, so write it
       // through the same path the config routes use, then validate like any
       // other edit.
-      const edited = (response.data as { configSource?: string } | undefined)?.configSource
+      // Decode first: a JSON-encoded payload used to read as a bare string here,
+      // so `.configSource` came back undefined and the edit was silently dropped
+      // — the config approved was the one on disk, not the one submitted.
+      const decoded = decodeSubmission(response.data)
+      const edited = decoded.ok
+        ? (decoded.data as { configSource?: string } | undefined)?.configSource
+        : undefined
       if (typeof edited === 'string' && edited.trim() !== '') {
         fs.writeFileSync(configPath, edited)
         publishWorkspaceEvent(deps.workspaceEvents, { type: 'features-changed' })
@@ -178,6 +188,26 @@ export function scaffoldStage(deps: FlightStageDeps): StageAdapter {
         return { kind: 'failed', error: 'config rejected at the approval checkpoint' }
       }
       return { kind: 'checkpoint', checkpoint: approvalCheckpoint(ctx) }
+    },
+    // R78 restart wipe. Guard: the whole feature dir goes ONLY when the marker
+    // proves THIS flight scaffolded it — a pre-existing suite (the similarity →
+    // enhance path) must survive a restart; its flight-collected contents are
+    // wiped by the later stages' own resets instead.
+    async reset(ctx) {
+      const markerPath = path.join(ctx.flightDir, 'scaffolded-feature')
+      let marker: string | null = null
+      try {
+        marker = fs.readFileSync(markerPath, 'utf-8').trim()
+      } catch {
+        /* no marker — not ours to delete */
+      }
+      if (marker && marker === ctx.manifest().feature) {
+        deleteFeature(
+          { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir, workspaceEvents: deps.workspaceEvents },
+          { feature: marker, confirmName: marker },
+        )
+      }
+      fs.rmSync(markerPath, { force: true })
     },
   }
 }

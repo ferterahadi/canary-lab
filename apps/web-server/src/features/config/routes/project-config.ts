@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { spawn, spawnSync } from 'child_process'
 import { launchEditorDir } from '../../../shared/editor-launch'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import {
   isValidPort,
   loadProjectConfig,
@@ -22,6 +23,9 @@ export interface ProjectConfigRouteDeps {
   // UI on the new port and shuts the current one down. Fire-and-forget — the
   // host defers the actual restart so the HTTP response can flush first.
   onPortChange?: (port: number) => void | Promise<void>
+  // Announces a persisted config write so every open client refetches. Optional
+  // (absent in tests, real bus in server.ts) like every other route's.
+  workspaceEvents?: WorkspaceEventPublisher
 }
 
 const HEAL_AGENT_VALUES: HealAgentChoice[] = ['auto', 'claude', 'codex', 'manual', 'external']
@@ -52,6 +56,16 @@ export async function projectConfigRoutes(
       reply.code(400)
       return { error: 'personalWikiPath must be an existing directory path, null, or empty string' }
     }
+    const incomingAutoProposePr = req.body?.autoProposePr
+    if (incomingAutoProposePr !== undefined && typeof incomingAutoProposePr !== 'boolean') {
+      reply.code(400)
+      return { error: 'autoProposePr must be a boolean' }
+    }
+    const incomingShowDemo = req.body?.showDemo
+    if (incomingShowDemo !== undefined && typeof incomingShowDemo !== 'boolean') {
+      reply.code(400)
+      return { error: 'showDemo must be a boolean' }
+    }
     const current = loadProjectConfig(deps.projectRoot)
     const next: ProjectConfig = {
       healAgent: incomingHealAgent ?? current.healAgent,
@@ -59,8 +73,18 @@ export async function projectConfigRoutes(
       personalWikiPath: incomingPersonalWikiPath !== undefined
         ? personalWikiPath!
         : current.personalWikiPath,
+      autoProposePr: incomingAutoProposePr ?? current.autoProposePr,
+      showDemo: incomingShowDemo ?? current.showDemo,
+      // Carried, never accepted from the body: the port is owned by
+      // POST /api/project-config/port, which rebinds the server as it saves.
+      // Rebuilding the config without it drops a pinned port silently — the
+      // file is not reread until the next boot, which then lands on
+      // DEFAULT_PORT and strands every client aimed at the pinned one.
+      ...(current.port === undefined ? {} : { port: current.port }),
     }
     saveProjectConfig(deps.projectRoot, next)
+    // After the write, never before: a failed save must not announce a change.
+    publishWorkspaceEvent(deps.workspaceEvents, { type: 'project-config-changed' })
     return next
   })
 

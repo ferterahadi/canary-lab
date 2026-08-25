@@ -1,13 +1,15 @@
 ---
 name: cl_manage-prompts
-description: Use when adding, editing, or moving an LLM prompt an agent spawn sends (heal, wizard, portify, coverage/PRD, flights) — every prompt is a template file under apps/web-server/prompts/, never an inline string in a .ts file. NOT for MCP initialize instructions (REPAIR_INSTRUCTIONS etc. in apps/web-server/mcp/server.ts) or tool description fields in apps/web-server/mcp/tools.ts — those belong to cl_sync-agent-surfaces / cl_add-mcp-tool.
+description: Use when adding, editing, or moving an agent prompt or MCP initialize instruction — every instruction source is a Markdown file under apps/web-server/prompts/, never an inline string in a .ts file.
 ---
 
 # Managing Canary Lab's LLM Prompts
 
-Every prompt canary sends to a spawned agent (claude/codex) lives as a flat file
-in `apps/web-server/prompts/` — never as a template literal or string constant
-buried in a `.ts` file. One home, one loader:
+Every prompt Canary sends to a spawned agent (Claude/Codex), plus every static
+MCP `initialize` instruction source, lives as a flat file in
+`apps/web-server/prompts/` — never as a template literal or string constant
+buried in a `.ts` file. MCP files use the `mcp-*-instructions.md` naming pattern;
+their profile composition stays in `mcp/server.ts`. One home, one loader:
 [`apps/web-server/src/shared/prompts.ts`](../../../apps/web-server/src/shared/prompts.ts).
 
 ## Why prompts get their own folder
@@ -24,14 +26,15 @@ buried in a `.ts` file. One home, one loader:
 
 ## Adding a new prompt
 
-1. Write the prompt as `apps/web-server/prompts/<name>.md`, with `{{placeholder}}`
-   slots for the parts the caller fills in at runtime.
+1. Write the text as `apps/web-server/prompts/<name>.md`. Use `{{placeholder}}`
+   slots only for parts a spawned-agent caller fills at runtime; MCP initialize
+   instructions are static files loaded as-is.
 2. If the agent must return structured output validated against a JSON schema
    (codex's `--output-schema`), add a sibling `apps/web-server/prompts/<name>.schema.json`
    (see `coverage-annotate.schema.json`, `prd-summary.schema.json`,
    `evaluation-rewrite.schema.json`). Prompts that instead ask the agent to
    reply in a ` ```json ` fence (parsed with `extractJson`/hand-rolled parsing —
-   see `scout.md`, `stage1-plan.md`) don't need one.
+   see `scout.md`, `plan-features.md`) don't need one.
 3. In the `.ts` module that builds the prompt, import from
    `../../../shared/prompts` (adjust `../` depth to reach `apps/web-server/src/shared/`)
    and use:
@@ -43,6 +46,8 @@ buried in a `.ts` file. One home, one loader:
      two steps split apart, for callers that accept an injected raw template
      string for tests (`buildPlanPrompt({ template: '...' })`) or that resolve
      the path dynamically (`opts.promptPath ?? DEFAULT_PATH`).
+   - Static MCP instructions use `loadPromptTemplate(promptPath(name))`, then
+     `INSTRUCTIONS_BY_PROFILE` composes the workflow profiles in `mcp/server.ts`.
 4. Never `fs.readFileSync` a prompt file directly, and never hand-roll another
    `{{key}}` regex — that's exactly the duplication this module replaced (six
    near-identical copies before the 2026-07 consolidation).
@@ -61,12 +66,38 @@ buried in a `.ts` file. One home, one loader:
 - Pass JSON payloads pre-stringified (`JSON.stringify(x, null, 2)`) as a plain
   string var — the loader does no JSON-awareness, it's pure text substitution.
 
+## Guardrails that must survive any heal-prompt edit
+
+`heal-agent.md` is where an agent is told what it may change. The rule itself is
+**not literal text in the template** — it arrives through placeholders filled from
+`MODE_COPY` in
+[`auto-heal.ts`](../../../apps/web-server/src/features/runs/logic/runtime/auto-heal.ts):
+
+| Placeholder | `service` mode (has editable repos) | `test` mode (zero editable repos) |
+| --- | --- | --- |
+| `{{healingDirective}}` | "Fix service/app code, not tests." | "…no editable service repos. Fix the failing Playwright tests or their helpers." |
+| `{{testSpecRule}}` | Don't read the spec unless the failure can't be understood without it | Read the spec + helpers — they're what you fix |
+| `{{closingDirective}}` | Fix the root cause in service/app code | Fix the spec/helpers |
+
+So a rewrite of `heal-agent.md` can drop the guardrail **without deleting a single
+word of it** — just by dropping a placeholder. Rules:
+
+- Keep `{{healingDirective}}`, `{{testSpecRule}}`, and `{{closingDirective}}` in any
+  version of this template. Grep them after editing.
+- `test` mode is the one sanctioned "edit the test" path and it is gated on
+  `detectHealMode` finding **zero** editable repos (defaulting to `service` on any
+  read error). Never widen it, and never make the `service` copy softer.
+- `auto-heal.test.ts` asserts the service-mode directive is present and that test
+  mode does *not* carry it. If your edit makes those fail, the guardrail moved —
+  fix the guardrail, not the assertion.
+- The same rule on the external/MCP surfaces is pinned by
+  `mcp/repair-guardrail.test.ts`. Full context: `cl_run-evidence-invariants`.
+
 ## What does NOT belong in `prompts/`
 
 | Lives here instead | Why it's a different thing |
 | --- | --- |
-| `apps/web-server/mcp/server.ts` — `REPAIR_INSTRUCTIONS`, `AUTHOR_INSTRUCTIONS`, etc. | MCP **protocol** instructions returned from `initialize` — part of the server's versioned API surface, not a per-spawn agent prompt. See `cl_sync-agent-surfaces`. |
-| `apps/web-server/mcp/tools.ts` — tool `description:` fields | MCP tool schema metadata, not text sent to steer an agent's task. |
+| `apps/web-server/src/mcp/tool-groups/` — tool `description:` fields | MCP tool schema metadata, not text sent to steer an agent's task. |
 | `templates/project/` | Scaffold files copied into a user's *workspace* (feature configs, sample specs) — ships via the same build step, but it's product output, not a prompt. See `cl_add-sample-feature`. |
 | `.claude/skills/**/SKILL.md` | Claude Code skill definitions for contributors working on canary-lab itself, not agent-spawn prompts. |
 
@@ -82,7 +113,7 @@ with the package).
 
 | Mistake | Consequence |
 | --- | --- |
-| Inlining a new agent prompt as a template literal in a `.ts` file | Works, but breaks the one-home rule — the next contributor won't think to look in `prompts/`, and it silently escapes the build's asset-copy step |
+| Inlining a new agent prompt or MCP instruction as a template literal in a `.ts` file | Works, but breaks the one-home rule — the next contributor won't think to look in `prompts/`, and it silently escapes the build's asset-copy step |
 | Hand-rolling a new `{{key}}` substitution regex | Recreates the exact duplication this module consolidated; extend `renderPromptTemplate` instead if it's missing a capability |
 | Assuming a solo-placeholder line is *always* droppable when empty | Only true for a **known** key; an unrecognized placeholder is deliberately kept (verified via `apps/web-server/src/shared/prompts.test.ts`) |
 | Forgetting `npm run smoke:pack` after adding/renaming a `.md`/`.schema.json` file | `prepare-assets.mjs`'s copy step is only proven by the tarball smoke test, same as `templates/` |

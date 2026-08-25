@@ -82,8 +82,9 @@ export interface HealAddendumInput {
 // pins the interpretation ("regression" means revert-first, not iterate).
 const OUTCOME_STEER: Record<string, string> = {
   no_change: 'your previous fix did not change the failing set',
+  advanced: 'your previous fix cleared the blocker and the suite reached a test that had never run — this is progress, keep the fix and work the new failure',
   partial: 'your previous fix unblocked some tests — build on it for the remainder',
-  regression: 'your previous change introduced NEW failures — consider reverting it before anything else',
+  regression: 'your previous change broke a test that was passing — consider reverting it before anything else',
 }
 
 function readFailingSlugs(summaryPath: string = getSummaryPath()): string[] {

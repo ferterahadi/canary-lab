@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import type { EvaluationExportTask } from '../../../shared/api/types'
-import { StatusDot, type StatusDotState } from '../../config/components/atoms'
-import { useEvaluationExports } from '../state/EvaluationExportContext'
+import type { EvaluationExportTask } from '@/shared/api/types'
+import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { useEvaluationExportLogs, useEvaluationExports } from '../state/EvaluationExportContext'
 import { EvaluationTaskOutput, modeLabel } from './EvaluationExportTaskToast'
 
 function dotStateForExport(status: EvaluationExportTask['status']): StatusDotState {
@@ -23,7 +23,10 @@ export function EvaluationTaskPanel({
   /** The flight stage header already carries its own download action. */
   showDownload?: boolean
 }) {
-  const { logsByTaskId, watchTask, downloadTask } = useEvaluationExports()
+  const { watchTask, downloadTask } = useEvaluationExports()
+  // The log stream context, not the task context — this panel is the one
+  // consumer that genuinely re-renders per log chunk.
+  const logsByTaskId = useEvaluationExportLogs()
   const [downloadFailed, setDownloadFailed] = useState(false)
   // Attach the log stream when this panel surfaces a task it didn't start
   // (cold load onto a running export) — no-op when already streaming.
@@ -46,9 +49,12 @@ export function EvaluationTaskPanel({
               downloadTask(task.taskId).catch(() => setDownloadFailed(true))
             }}
             className="cl-button shrink-0 px-2.5 py-1 text-xs"
-            style={{ color: downloadFailed ? 'var(--danger)' : 'rgb(52, 211, 153)' }}
+            style={{ color: downloadFailed ? 'var(--danger)' : 'var(--success)' }}
           >
-            {downloadFailed ? 'Download failed — retry' : '⬇ Download evaluation (.zip)'}
+            {/* "report" — the same word the flight header and the reports list
+                use for this same file; three labels for one download read as
+                three different files. */}
+            {downloadFailed ? 'Download failed — retry' : '⬇ Download report'}
           </button>
         )}
       </div>

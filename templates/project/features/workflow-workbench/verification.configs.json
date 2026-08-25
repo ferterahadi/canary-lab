@@ -1,0 +1,15 @@
+{
+  "configs": [
+    {
+      "id": "demo-workflow-deployment",
+      "featureId": "workflow-workbench",
+      "name": "Demo deployment",
+      "targetUrls": {
+        "workflow-app": "https://replace.invalid"
+      },
+      "playwrightEnvsetId": "production",
+      "createdAt": "2026-08-18T00:00:00.000Z",
+      "updatedAt": "2026-08-18T00:00:00.000Z"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-import { StatusPill } from '../../../shared/ui/StatusPill'
+import { StatusPill } from '@/shared/ui/StatusPill'
 
 // Status-bar pill surfaced only while one or more features have modified test
 // files (Surface 1's notification). Danger-toned + a one-shot pulse when the

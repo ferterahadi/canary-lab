@@ -1,8 +1,8 @@
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { listSpecFiles } from '../../../config/logic/feature-loader'
-import { extractTestsFromSource } from '../../../config/logic/ast-extractor'
+import { listSpecFiles } from '../../../../shared/feature-loader'
+import { extractTestsFromSource } from '../../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../../shared/git-repo'
 
 // Test-file integrity detection. Canary Lab's promise is that a verdict stays

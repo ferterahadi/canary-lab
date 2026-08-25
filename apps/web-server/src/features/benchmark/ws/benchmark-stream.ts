@@ -1,10 +1,10 @@
 import type { FastifyInstance } from 'fastify'
-import type { BenchmarkStore, BenchmarkStoreEvent } from '../../benchmark/logic/runtime/store'
+import type { BenchmarkStore, BenchmarkStoreEvent } from '../logic/runtime/store'
 import type {
   BenchmarkIndexEntry,
   BenchmarkManifest,
   BenchmarkStatus,
-} from '../../benchmark/logic/runtime/types'
+} from '../logic/runtime/types'
 
 // `/ws/benchmark` — push channel for the benchmark window, mirroring
 // ws/runs-stream.ts. On connect, sends one `snapshot` frame (index + details

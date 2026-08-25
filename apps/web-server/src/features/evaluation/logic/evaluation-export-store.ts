@@ -1,60 +1,26 @@
 import fs from 'fs'
 import path from 'path'
 import { createZip } from '../../../shared/simple-zip'
-import { isClientKind, type ClientKind, type RunProducer } from '../../../../../../shared/run-mode'
-import { FileBackedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { isClientKind } from '../../../../../../shared/run-mode'
+import { FileBackedTaskStore, sharedTaskStore } from '../../../../../../shared/lib/file-backed-task-store'
+import { bridgeRecordEvents } from '../../../shared/store-event-bridge'
+import type { WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import type {
+  EvaluationArchiveContents,
+  EvaluationExportSessionRef,
+  EvaluationExportTaskRecord,
+  EvaluationExportTaskView,
+} from './evaluation-export-types'
 
-export type EvaluationExportMode = 'raw' | 'localized'
-export type EvaluationExportStatus = 'running' | 'completed' | 'failed'
-export type EvaluationExportProducer = RunProducer
-
-export interface EvaluationExportTaskRecord {
-  taskId: string
-  runId: string
-  feature: string
-  mode: EvaluationExportMode
-  producer?: EvaluationExportProducer
-  status: EvaluationExportStatus
-  createdAt: string
-  updatedAt: string
-  downloadReady: boolean
-  archiveBase: string
-  clientKind?: ClientKind
-  sessionId?: string
-  conversationName?: string
-  language?: string
-  externalSessionUrl?: string
-  error?: string
-  /** Set once the localized-rewrite agent is spawned, so the export dialog can
-   *  stream its JSONL through AgentSessionView (claude: a pinned session id;
-   *  codex: '' — located by cwd + start). Absent for raw/external/cached runs,
-   *  which have no live agent and keep the text progress panel. */
-  sessionRef?: EvaluationExportSessionRef
-}
-
-export interface EvaluationExportSessionRef {
-  agent: 'claude' | 'codex'
-  sessionId: string
-}
-
-export interface EvaluationExportTaskView {
-  taskId: string
-  runId: string
-  feature: string
-  mode: EvaluationExportMode
-  producer: EvaluationExportProducer
-  status: EvaluationExportStatus
-  createdAt: string
-  updatedAt: string
-  downloadReady: boolean
-  clientKind?: ClientKind
-  sessionId?: string
-  conversationName?: string
-  language?: string
-  externalSessionUrl?: string
-  error?: string
-  sessionRef?: EvaluationExportSessionRef
-}
+export type {
+  EvaluationArchiveContents,
+  EvaluationExportMode,
+  EvaluationExportProducer,
+  EvaluationExportSessionRef,
+  EvaluationExportStatus,
+  EvaluationExportTaskRecord,
+  EvaluationExportTaskView,
+} from './evaluation-export-types'
 
 export interface EvaluationExportTaskPaths {
   taskDir: string
@@ -86,8 +52,12 @@ export function evalTaskStatusOf(r: EvaluationExportTaskRecord): string { return
 // the per-task sidecars (export.log, export.zip) still live alongside the record.
 // The isSafeTaskId guard stays at the free-function boundary so an unsafe id
 // never reaches the store's path join.
+// `sharedTaskStore`, not `new`: every accessor below calls this, and the store
+// is what announces an export write to the workspace bus
+// (bridgeEvaluationExportEvents). A fresh instance per call would emit into a
+// listener set nobody holds.
 function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRecord> {
-  return new FileBackedTaskStore<EvaluationExportTaskRecord>({
+  return sharedTaskStore<EvaluationExportTaskRecord>({
     logsDir,
     dirName: 'evaluation-exports',
     recordFile: 'task.json',
@@ -105,7 +75,33 @@ function evalStore(logsDir: string): FileBackedTaskStore<EvaluationExportTaskRec
     // Legacy rows (pre-`id` index shape) carry only `taskId`; fall back to it so
     // remove/prune/reconcile can address them (else they resurrect on refresh).
     idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { taskId?: string }).taskId),
+    featureOf: (r) => r.feature,
+    withFeature: (r, feature) => ({ ...r, feature }),
     sortNewestFirst: true,
+  })
+}
+
+/**
+ * Attach the workspace bus to the export store, once per process.
+ *
+ * Same rule as drafts: every writer (the REST route, the MCP export tools, the
+ * background rewrite job) goes through the shared store, so the store is what
+ * announces. The event carries the task VIEW because the export dialog renders
+ * it straight from the push.
+ */
+export function bridgeEvaluationExportEvents(
+  logsDir: string,
+  events: WorkspaceEventPublisher | undefined,
+): void {
+  const store = evalStore(logsDir)
+  bridgeRecordEvents<EvaluationExportTaskRecord>({
+    source: store,
+    events,
+    knownIds: () => store.list().map((e) => String(e.id)),
+    load: (id) => store.get(id),
+    created: (task) => ({ type: 'evaluation-export-created', task: evaluationExportTaskView(task) }),
+    updated: (task) => ({ type: 'evaluation-export-updated', task: evaluationExportTaskView(task) }),
+    removed: (taskId) => ({ type: 'evaluation-export-deleted', taskId }),
   })
 }
 
@@ -120,7 +116,30 @@ export function createEvaluationExportTask(
 
 export function readEvaluationExportTask(logsDir: string, taskId: string): EvaluationExportTaskRecord | null {
   if (!isSafeTaskId(taskId)) return null
-  return evalStore(logsDir).get(taskId)
+  const record = evalStore(logsDir).get(taskId)
+  return record ? withArchiveSize(logsDir, record) : null
+}
+
+/** Exports built before the contents were recorded still have their zip on disk
+ *  (cleanup never prunes these), so the SIZE is recoverable with a stat — and a
+ *  reports list whose older rows show no size at all is the first thing a reader
+ *  notices. The video count is not recoverable without unpacking the archive, so
+ *  it stays absent rather than being guessed at as zero. Backfilled on read, not
+ *  persisted: the record stays a description of what the export wrote. */
+function withArchiveSize(logsDir: string, record: EvaluationExportTaskRecord): EvaluationExportTaskRecord {
+  if (record.archive || !record.downloadReady) return record
+  try {
+    // Never null here: `normalizeTaskRecord` rejects any stored record whose own
+    // `taskId` fails `isSafeTaskId`, which is the only thing the path build
+    // validates. Asserting rather than branching keeps an arm no test could ever
+    // reach out of the file — and if that invariant is ever broken, the throw
+    // lands in the same catch, which already means "no size known".
+    const paths = evaluationExportTaskPaths(logsDir, record.taskId)!
+    return { ...record, archive: { bytes: fs.statSync(paths.zipPath).size, videos: 0, assets: 0 } }
+  } catch {
+    // The archive is gone (hand-deleted logs dir) — say nothing rather than 0 B.
+    return record
+  }
 }
 
 export function writeEvaluationExportTask(logsDir: string, record: EvaluationExportTaskRecord): void {
@@ -154,6 +173,12 @@ export function listEvaluationExportTasks(
     .map((e) => store.get(String(e.id)))
     .filter((task): task is EvaluationExportTaskRecord => task !== null)
     .filter((task) => !opts.runId || task.runId === opts.runId)
+}
+
+/** Follow a suite rename into export history, so past exports stay attached to
+ *  the feature that produced them. Returns how many tasks moved. */
+export function renameEvaluationExportFeature(logsDir: string, from: string, to: string): number {
+  return evalStore(logsDir).renameFeature(from, to)
 }
 
 export function appendEvaluationExportLog(logsDir: string, taskId: string, chunk: string): void {
@@ -220,6 +245,7 @@ export function evaluationExportTaskView(record: EvaluationExportTaskRecord): Ev
     ...(record.externalSessionUrl ? { externalSessionUrl: record.externalSessionUrl } : {}),
     ...(record.error ? { error: record.error } : {}),
     ...(record.sessionRef ? { sessionRef: record.sessionRef } : {}),
+    ...(record.archive ? { archive: record.archive } : {}),
   }
 }
 
@@ -241,6 +267,7 @@ function normalizeTaskRecord(value: EvaluationExportTaskRecord): EvaluationExpor
   if (value.externalSessionUrl !== undefined && typeof value.externalSessionUrl !== 'string') return null
   if (value.error !== undefined && typeof value.error !== 'string') return null
   if (value.sessionRef !== undefined && !isSessionRef(value.sessionRef)) return null
+  if (value.archive !== undefined && !isArchiveContents(value.archive)) return null
   return { ...value, producer: value.producer ?? 'internal' }
 }
 
@@ -252,6 +279,12 @@ function isSessionRef(value: unknown): value is EvaluationExportSessionRef {
   if (!value || typeof value !== 'object') return false
   const ref = value as Record<string, unknown>
   return (ref.agent === 'claude' || ref.agent === 'codex') && typeof ref.sessionId === 'string'
+}
+
+function isArchiveContents(value: unknown): value is EvaluationArchiveContents {
+  if (!value || typeof value !== 'object') return false
+  const c = value as Record<string, unknown>
+  return typeof c.bytes === 'number' && typeof c.videos === 'number' && typeof c.assets === 'number'
 }
 
 function validateArchivePath(filePath: string): string {

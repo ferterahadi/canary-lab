@@ -2,7 +2,8 @@
   "mcpServers": {
     "Canary_Lab": {
       "command": "npx",
-      "args": ["-y", "canary-lab", "mcp", "--profile", "full"]
+      "args": ["-y", "canary-lab", "mcp", "--profile", "compact"],
+      "alwaysLoad": true
     }
   }
 }

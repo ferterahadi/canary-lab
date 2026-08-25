@@ -1,4 +1,4 @@
-import { TextInput, IconButton, PlusIcon, TrashIcon } from './atoms'
+import { TextInput, IconButton, PlusIcon, TrashIcon } from '@/shared/ui/atoms'
 
 interface Props {
   values: string[]
@@ -40,13 +40,8 @@ export function StringListEditor({ values, onChange, itemPlaceholder, addLabel =
       <button
         type="button"
         onClick={() => onChange([...values, ''])}
-        className="self-start inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider transition-colors duration-150"
-        style={{
-          color: 'var(--text-muted)',
-          border: '1px dashed var(--border-default)',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)' }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)' }}
+        className="cl-button self-start inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] uppercase tracking-wider transition-colors duration-150"
+        style={{ borderStyle: 'dashed' }}
       >
         <PlusIcon />
         {addLabel}

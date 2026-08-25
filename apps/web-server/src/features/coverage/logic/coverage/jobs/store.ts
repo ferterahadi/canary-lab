@@ -1,3 +1,6 @@
+import path from 'path'
+import { bridgeStoreEvents } from '../../../../../shared/store-event-bridge'
+import type { WorkspaceEventPublisher } from '../../../../../shared/workspace-events'
 import type { CoverageJobManifest, CoverageJobIndexEntry, CoverageJobKind } from './types'
 import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../../shared/lib/file-backed-task-store'
 
@@ -9,7 +12,9 @@ import { FileBackedTaskStore, type TaskStoreEvent } from '../../../../../../../.
 
 export interface CoverageJobStoreEvent {
   kind: 'changed' | 'removed'
-  jobId?: string
+  /** Required for the same reason as `TaskStoreEvent.id`, which is its only
+   *  source (see the forward in the constructor). */
+  jobId: string
 }
 
 export interface CoverageJobStore {
@@ -19,6 +24,8 @@ export interface CoverageJobStore {
   activeFor(feature: string, kind: CoverageJobKind): CoverageJobIndexEntry | null
   save(manifest: CoverageJobManifest): void
   remove(jobId: string): void
+  /** Re-home every record from one feature name to another (suite rename). */
+  renameFeature(from: string, to: string): number
   reconcileInterrupted(now: () => string): void
   onEvent(fn: (event: CoverageJobStoreEvent) => void): void
   offEvent(fn: (event: CoverageJobStoreEvent) => void): void
@@ -34,6 +41,7 @@ function indexEntryFromManifest(m: CoverageJobManifest) {
     status: m.status,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    ...(m.producer ? { producer: m.producer } : {}),
   }
 }
 
@@ -52,6 +60,8 @@ export class CoverageJobRunStore implements CoverageJobStore {
       // Legacy rows (pre-`id` index shape) carry only `jobId`; fall back to it so
       // remove/prune/reconcile can address them (else they resurrect on refresh).
       idOfEntry: (e) => (typeof e.id === 'string' ? e.id : (e as { jobId?: string }).jobId),
+      featureOf: (m) => m.feature,
+      withFeature: (m, feature) => ({ ...m, feature }),
       reconcile: {
         isInterrupted: (m) => m.status === 'running',
         mark: (m, now) => ({
@@ -91,6 +101,10 @@ export class CoverageJobRunStore implements CoverageJobStore {
     this.store.remove(jobId)
   }
 
+  renameFeature(from: string, to: string): number {
+    return this.store.renameFeature(from, to)
+  }
+
   /** Flip any job left `running` by a dead process to `aborted` — its in-memory
    *  driver was killed on restart, so it can never finish. Frees the single-
    *  flight lock so the user can start a fresh job. */
@@ -111,4 +125,49 @@ export class CoverageJobRunStore implements CoverageJobStore {
       try { fn(event) } catch { /* a bad listener must not break persistence */ }
     }
   }
+}
+
+// One wrapper per logs dir. The wrapper owns the listener set the workspace
+// bridge attaches to, and the MCP coverage tools construct a store per tool
+// CALL — a fresh wrapper each time would both miss the bridge and pile up
+// forwarding listeners on the store underneath.
+const SHARED: Map<string, CoverageJobRunStore> = new Map()
+
+export function coverageJobStore(logsDir: string): CoverageJobRunStore {
+  const key = path.resolve(logsDir)
+  const existing = SHARED.get(key)
+  if (existing) return existing
+  const created = new CoverageJobRunStore(logsDir)
+  SHARED.set(key, created)
+  return created
+}
+
+// A `resetCoverageJobStores()` used to sit here, described as "for tests". No
+// test ever called it: the memo is keyed by resolved logs dir and every suite
+// builds a fresh tmpdir, so entries never collide. Kept as an unused export it
+// was a permanently uncovered function documenting a need that does not exist —
+// `resetSharedTaskStores()` is the real reset, for the store underneath.
+
+/**
+ * Attach the workspace bus to a coverage-job store.
+ *
+ * A coverage job's whole point is that it rewrites the feature's ledger, so the
+ * event is `coverage-changed` for the job's feature — the same event its
+ * runners used to publish by hand at six sites, one per lifecycle step, which
+ * is how a step could be added without one.
+ *
+ * The FEATURE has to come off the record, so the bridge loads it: a store event
+ * carries only the id.
+ */
+export function bridgeCoverageJobEvents(
+  store: CoverageJobRunStore,
+  events: WorkspaceEventPublisher | undefined,
+): void {
+  bridgeStoreEvents(store, events, (e) => {
+    // A removed job (pruned history) has no record to read a feature from, and
+    // nothing about the ledger changed — stay quiet. The event always names a
+    // job, so only the missing RECORD is worth guarding.
+    const feature = store.get(e.jobId)?.feature
+    return feature ? { type: 'coverage-changed', feature } : null
+  })
 }

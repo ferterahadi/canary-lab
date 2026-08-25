@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { computeDocsHash, type DocsCollection } from '../docs-collection'
-import type { Requirement } from '../../../../../../../shared/coverage/types'
+import type { Requirement } from '../../../../../../../../shared/coverage/types'
 import { fakeRequirementsFromDocs, fakeMappingsFor } from './fake-coverage-agents'
 
 // These cover the test-only heuristics (heading extraction + token overlap) that

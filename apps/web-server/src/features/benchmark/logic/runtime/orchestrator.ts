@@ -65,7 +65,7 @@ export class BenchmarkOrchestrator {
       m = { ...m, sabotageSha, status: 'running' }
       d.persist(m)
 
-      const armPaths = (await d.setupArms(sabotageSha)) ?? {}
+      const armPaths = await d.setupArms(sabotageSha)
       if (d.isAborted?.()) return finalizeAborted()
       // Record each arm's worktree root so the UI can open it in the editor.
       m = {

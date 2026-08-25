@@ -210,6 +210,29 @@ describe('listPlaywrightTests', () => {
     expect(entry.line).toBe(entry.originLine)
   })
 
+  it('falls back to the spec-level file when no ancestor suite carries a file', async () => {
+    // The suite itself has no `file` (so `nextRoot` stays undefined through
+    // the whole ancestor chain), but the spec carries its own `file`. This
+    // exercises the right-hand side of `const entryRaw = nextRoot ?? originRaw`:
+    // with no ancestor file to fall back to, the entry's `file` must resolve
+    // to the spec's own file, same as `originFile`.
+    const entries = await listPlaywrightTests(tmpDir, {
+      spawner: jsonSpawner({
+        config: { rootDir: tmpDir },
+        suites: [
+          {
+            specs: [{ title: 'solo', line: 7, file: 'e2e/spec-own.spec.ts' }],
+          },
+        ],
+      }),
+    })
+    expect(entries).not.toBeNull()
+    expect(entries).toHaveLength(1)
+    const entry = entries![0]
+    expect(entry.file).toBe(path.resolve(tmpDir, 'e2e/spec-own.spec.ts'))
+    expect(entry.originFile).toBe(path.resolve(tmpDir, 'e2e/spec-own.spec.ts'))
+  })
+
   it('falls back to featureDir when report.config.rootDir is missing', async () => {
     const entries = await listPlaywrightTests(tmpDir, {
       spawner: jsonSpawner({

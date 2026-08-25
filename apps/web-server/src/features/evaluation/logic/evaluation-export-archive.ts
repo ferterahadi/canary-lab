@@ -5,6 +5,9 @@ import { buildRunPaths, runDirFor } from '../../runs/logic/runtime/run-paths'
 import { createEvaluationExport, type AssertionHtmlOptions } from './test-review-export'
 import { computeFeatureCoverage } from '../../coverage/logic/coverage/service'
 import { createZip } from '../../../shared/simple-zip'
+import type { EvaluationArchiveContents } from './evaluation-export-types'
+
+export type { EvaluationArchiveContents } from './evaluation-export-types'
 
 export interface EvaluationExportArchiveOptions {
   logsDir: string
@@ -18,7 +21,7 @@ export interface EvaluationExportArchiveOptions {
 export async function buildEvaluationExportArchive(
   detail: RunDetail,
   options: EvaluationExportArchiveOptions,
-): Promise<{ archiveBase: string; zip: Buffer }> {
+): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> {
   const runPaths = buildRunPaths(runDirFor(options.logsDir, detail.runId))
   const videos = assertionVideos(
     detail.playwrightArtifacts,
@@ -42,13 +45,16 @@ export async function buildEvaluationExportArchive(
     videoLinksByTestName: videoLinksByTestName(videos),
     coverage,
   })
+  const videoEntries = videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) }))
+  const zip = createZip([
+    { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
+    ...exported.assets,
+    ...videoEntries,
+  ])
   return {
     archiveBase: `canary-lab-evaluation-${safeFilename(detail.manifest.feature)}-${safeFilename(detail.runId)}`,
-    zip: createZip([
-      { filename: 'evaluation.html', data: Buffer.from(exported.html, 'utf8') },
-      ...exported.assets,
-      ...videos.map((video) => ({ filename: video.filename, data: fs.readFileSync(video.path) })),
-    ]),
+    zip,
+    contents: { bytes: zip.length, videos: videoEntries.length, assets: exported.assets.length },
   }
 }
 

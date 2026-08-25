@@ -11,15 +11,14 @@ import {
   resolveManifestSessionRef,
   resolveWorkflowAgentRef,
   selectAgentSessionRef,
-} from '../../agent-sessions/logic/agent-session-log'
+} from '../logic/agent-session-log'
 import { readEvaluationExportTask } from '../../evaluation/logic/evaluation-export-store'
-import { tailAgentSession } from '../../agent-sessions/logic/agent-session-tailer'
-import { resolveDraftStageSessionRef } from '../../wizard/logic/draft-agent-session'
-import { readDraft, paths as draftPaths } from '../../wizard/logic/draft-store'
+import { tailAgentSession } from '../logic/agent-session-tailer'
+import { paths as draftPaths } from '../../wizard/logic/draft-store'
 import { runDirFor, buildRunPaths } from '../../runs/logic/runtime/run-paths'
 import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
 import { portifyDir } from '../../portify/logic/runtime/paths'
-import { CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
+import { coverageJobStore, type CoverageJobRunStore } from '../../coverage/logic/coverage/jobs/store'
 import type { RunStore } from '../../runs/logic/run-store'
 
 // WebSocket route that streams live structured agent-session events.
@@ -28,18 +27,49 @@ import type { RunStore } from '../../runs/logic/run-store'
 //
 // Protocol (one shape per route):
 //   - { type: 'event', event }       per parsed line
+//   - { type: 'subagent', ... }      one event from a spawned subagent thread
 //   - { type: 'done' }               agent log no longer appended for a while
 //   - { type: 'error', error }       resolver/tailer failure
 //
 // Connections stay open until the client closes — the server doesn't decide
 // "done" beyond surfacing tailer errors, because the JSONL may receive more
 // events after a heal cycle restarts.
+//
+// Subagent events travel on their own frame type rather than interleaved into
+// `event`, because the client dedupes the parent stream by arrival count — an
+// interleaved child event would shift that count out of step with the REST
+// snapshot. See `SubagentUpdate` for the per-thread index that replaces it.
 
 export interface AgentSessionStreamDeps {
   store: RunStore
   logsDir: string
   /** Project root — used to locate a coverage job's codex session by cwd (R17). */
   coverageProjectRoot?: string
+}
+
+/** Socket surface the tailer wiring needs — `ws` sockets satisfy it. */
+interface StreamSocket {
+  send(data: string): void
+  on(event: 'close', cb: () => void): void
+}
+
+/** Attach a tailer to a socket with the standard four-frame protocol. Every
+ *  route below resolves a ref differently but streams it identically, so the
+ *  wiring lives here once — a new frame type (like `subagent`) then reaches
+ *  every surface without touching seven call sites. */
+function attachTail(
+  socket: StreamSocket,
+  opts: { ref: AgentSessionRef | null; discoverRef: () => AgentSessionRef | null },
+): void {
+  const handle = tailAgentSession({
+    ref: opts.ref ?? { agent: 'claude', sessionId: '', logPath: '' },
+    onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
+    onEvent: (event) => sendJson(socket, { type: 'event', event }),
+    onSubagentEvent: (update) => sendJson(socket, { type: 'subagent', ...update }),
+    onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+    discoverRef: opts.discoverRef,
+  })
+  socket.on('close', () => handle.close())
 }
 
 export async function agentSessionStreamRoutes(
@@ -57,59 +87,7 @@ export async function agentSessionStreamRoutes(
         return
       }
       const runDir = runDirFor(deps.logsDir, req.params.runId)
-      const ref = resolveRunRef(runDir)
-      const handle = tailAgentSession({
-        ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: () => resolveRunRef(runDir),
-      })
-      socket.on('close', () => handle.close())
-    },
-  )
-
-  app.get<{ Params: { draftId: string }; Querystring: { stage?: string } }>(
-    '/ws/draft/:draftId/agent-session',
-    { websocket: true },
-    (socket, req) => {
-      const stage = parseStage(req.query.stage)
-      if (!stage) {
-        sendJson(socket, { type: 'error', error: 'unknown-stage' })
-        try { socket.close() } catch { /* ignore */ }
-        return
-      }
-      const draft = readDraft(deps.logsDir, req.params.draftId)
-      if (!draft) {
-        sendJson(socket, { type: 'error', error: 'draft-not-found' })
-        try { socket.close() } catch { /* ignore */ }
-        return
-      }
-      const ref = stage === 'planning' ? draft.planAgentSessionRef : draft.specAgentSessionRef
-      const agent = ref?.agent ?? draft.wizardAgent ?? 'claude'
-      const p = draftPaths(deps.logsDir, req.params.draftId)
-      const handle = tailAgentSession({
-        ref: ref ?? { agent, sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: () => {
-          // Re-read the draft each time — refs may be filled in after the
-          // initial connection (race between WS attach and spawn writing the
-          // ref to disk). For codex, use the stage spawn timestamp so a new
-          // draft never displays an older draft session.
-          const fresh = readDraft(deps.logsDir, req.params.draftId)
-          const freshRef = stage === 'planning' ? fresh?.planAgentSessionRef : fresh?.specAgentSessionRef
-          const spawnedAt = stage === 'planning' ? fresh?.planAgentSpawnedAt : fresh?.specAgentSpawnedAt
-          return resolveDraftStageSessionRef({
-            ref: freshRef,
-            agent: freshRef?.agent ?? fresh?.wizardAgent ?? agent,
-            draftDir: p.draftDir,
-            spawnedAt,
-          })
-        },
-      })
-      socket.on('close', () => handle.close())
+      attachTail(socket, { ref: resolveRunRef(runDir), discoverRef: () => resolveRunRef(runDir) })
     },
   )
 
@@ -120,15 +98,10 @@ export async function agentSessionStreamRoutes(
     { websocket: true },
     (socket, req) => {
       const benchDir = benchmarkDir(deps.logsDir, req.params.benchmarkId)
-      const ref = resolveWorkflowAgentRef(benchDir)
-      const handle = tailAgentSession({
-        ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
+      attachTail(socket, {
+        ref: resolveWorkflowAgentRef(benchDir),
         discoverRef: () => resolveWorkflowAgentRef(benchDir),
       })
-      socket.on('close', () => handle.close())
     },
   )
 
@@ -139,16 +112,9 @@ export async function agentSessionStreamRoutes(
     '/ws/coverage/jobs/:jobId/agent-session',
     { websocket: true },
     (socket, req) => {
-      const jobStore = new CoverageJobRunStore(deps.logsDir)
+      const jobStore = coverageJobStore(deps.logsDir)
       const resolve = () => resolveCoverageJobRef(jobStore, req.params.jobId, deps.coverageProjectRoot)
-      const handle = tailAgentSession({
-        ref: resolve() ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: resolve,
-      })
-      socket.on('close', () => handle.close())
+      attachTail(socket, { ref: resolve(), discoverRef: resolve })
     },
   )
 
@@ -160,14 +126,7 @@ export async function agentSessionStreamRoutes(
     { websocket: true },
     (socket, req) => {
       const resolve = () => resolveEvaluationExportRef(deps.logsDir, req.params.taskId, deps.coverageProjectRoot)
-      const handle = tailAgentSession({
-        ref: resolve() ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: resolve,
-      })
-      socket.on('close', () => handle.close())
+      attachTail(socket, { ref: resolve(), discoverRef: resolve })
     },
   )
 
@@ -185,14 +144,7 @@ export async function agentSessionStreamRoutes(
         return
       }
       const dir = path.join(deps.logsDir, 'flights', req.params.flightId, stage)
-      const handle = tailAgentSession({
-        ref: resolveWorkflowAgentRef(dir) ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: () => resolveWorkflowAgentRef(dir),
-      })
-      socket.on('close', () => handle.close())
+      attachTail(socket, { ref: resolveWorkflowAgentRef(dir), discoverRef: () => resolveWorkflowAgentRef(dir) })
     },
   )
 
@@ -204,14 +156,7 @@ export async function agentSessionStreamRoutes(
     { websocket: true },
     (socket, req) => {
       const dir = path.join(deps.logsDir, 'flight-plans', req.params.taskId)
-      const handle = tailAgentSession({
-        ref: resolveWorkflowAgentRef(dir) ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: () => resolveWorkflowAgentRef(dir),
-      })
-      socket.on('close', () => handle.close())
+      attachTail(socket, { ref: resolveWorkflowAgentRef(dir), discoverRef: () => resolveWorkflowAgentRef(dir) })
     },
   )
 
@@ -222,15 +167,7 @@ export async function agentSessionStreamRoutes(
     { websocket: true },
     (socket, req) => {
       const dir = portifyDir(deps.logsDir, req.params.workflowId)
-      const ref = resolveWorkflowAgentRef(dir)
-      const handle = tailAgentSession({
-        ref: ref ?? { agent: 'claude', sessionId: '', logPath: '' },
-        onReady: (readyRef) => sendJson(socket, sessionMessage(readyRef)),
-        onEvent: (event) => sendJson(socket, { type: 'event', event }),
-        onError: (err) => sendJson(socket, { type: 'error', error: err.message }),
-        discoverRef: () => resolveWorkflowAgentRef(dir),
-      })
-      socket.on('close', () => handle.close())
+      attachTail(socket, { ref: resolveWorkflowAgentRef(dir), discoverRef: () => resolveWorkflowAgentRef(dir) })
     },
   )
 }

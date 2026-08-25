@@ -39,6 +39,24 @@ function makeDeps(overrides: Partial<PortifyOrchestratorDeps>): {
 }
 
 describe('PortifyOrchestrator', () => {
+  // The orchestrator checks isAborted at four points in attempt 1: after setup,
+  // at the loop top, after runAgent, and after verify. Abort at each so every
+  // guard's true-arm is exercised.
+  for (const checkpoint of [1, 2, 3, 4]) {
+    it(`aborts at checkpoint ${checkpoint} and finalizes as aborted`, async () => {
+      let calls = 0
+      const { deps } = makeDeps({ isAborted: () => { calls += 1; return calls >= checkpoint } })
+      const m = await new PortifyOrchestrator(deps).run()
+      expect(m.status).toBe('aborted')
+      expect(deps.cleanup).toHaveBeenCalledOnce()
+    })
+  }
+
+  // ── revise: user-driven feedback pass (post ready-to-save) ─────────────
+  function readyManifest(): PortifyManifest {
+    return { ...baseManifest(), status: 'ready-to-save', attempt: 1, diff: 'old diff', verification: { ok: true, instances: [] } }
+  }
+
   it('reaches ready-to-save when the first verification passes', async () => {
     const { deps } = makeDeps({})
     const m = await new PortifyOrchestrator(deps).run()
@@ -46,6 +64,83 @@ describe('PortifyOrchestrator', () => {
     expect(m.attempt).toBe(1)
     expect(m.diff).toBe('diff')
     expect(deps.cleanup).not.toHaveBeenCalled() // worktree kept for commit
+  })
+
+  it('persists the review capture BEFORE parking at ready-to-save (restart survival)', async () => {
+    const order: string[] = []
+    const { deps } = makeDeps({
+      persist: (m) => { order.push(`persist:${m.status}`) },
+      persistReviewCapture: vi.fn(async () => { order.push('capture') }),
+    })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('ready-to-save')
+    // Capture lands before the manifest goes answerable — by the time anyone
+    // can save, the fallback file already exists.
+    expect(order.indexOf('capture')).toBeLessThan(order.indexOf('persist:ready-to-save'))
+  })
+
+  it('attempt 0: a seeded sibling overlay that verifies parks at ready-to-save with NO agent run', async () => {
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({ seeded: () => true, runAgent })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('ready-to-save')
+    expect(runAgent).not.toHaveBeenCalled()
+    expect(m.attempt).toBe(0)
+    expect(m.diff).toBe('diff')
+  })
+
+  it('attempt 0: a seeded verify FAILURE feeds its boot evidence into agent attempt 1', async () => {
+    const verify = vi.fn()
+      .mockResolvedValueOnce({ ok: false, instances: [], failureDetail: 'seeded overlay: port 3007 still bound' })
+      .mockResolvedValueOnce({ ok: true, instances: [] })
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({ seeded: () => true, verify, runAgent })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('ready-to-save')
+    expect(m.attempt).toBe(1)
+    // Normally attempt 1 gets no failure context at all — the attempt-0 boot
+    // evidence is a head start, not a wasted double-boot.
+    expect(runAgent).toHaveBeenNthCalledWith(1, 1, 'seeded overlay: port 3007 still bound')
+  })
+
+  it('attempt 0 is skipped without a seed — the first verify happens after the agent', async () => {
+    const verify = vi.fn(async (): Promise<PortifyVerification> => ({ ok: true, instances: [] }))
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({ runAgent, verify })
+    await new PortifyOrchestrator(deps).run()
+    expect(runAgent).toHaveBeenCalledTimes(1)
+    expect(verify).toHaveBeenCalledTimes(1)
+  })
+
+  it('attempt 0 stops fast (no agent) when the seeded boot failure is notPortFixable', async () => {
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({
+      seeded: () => true,
+      runAgent,
+      verify: async () => ({ ok: false, instances: [], failureDetail: 'db down', notPortFixable: true }),
+    })
+    const m = await new PortifyOrchestrator(deps).run()
+    expect(m.status).toBe('failed')
+    expect(runAgent).not.toHaveBeenCalled()
+    expect(deps.cleanup).toHaveBeenCalledOnce()
+  })
+
+  it('attempt 0 aborts right after its verify when the workflow was stopped mid-boot', async () => {
+    // The seeded verify is a real double-boot; a Stop during it must land on
+    // `aborted`, not fall through into an agent attempt.
+    let calls = 0
+    const runAgent = vi.fn(async () => {})
+    const { deps } = makeDeps({
+      seeded: () => true,
+      runAgent,
+      // false after setup, true on the post-verify check.
+      isAborted: () => { calls += 1; return calls >= 2 },
+    })
+
+    const m = await new PortifyOrchestrator(deps).run()
+
+    expect(m.status).toBe('aborted')
+    expect(runAgent).not.toHaveBeenCalled()
   })
 
   it('retries with failure context until verification passes', async () => {
@@ -63,7 +158,6 @@ describe('PortifyOrchestrator', () => {
 
   it('fails and cleans up after exhausting attempts', async () => {
     const { deps } = makeDeps({
-      maxAttempts: 2,
       manifest: baseManifest(2),
       verify: async () => ({ ok: false, instances: [], failureDetail: 'nope' }),
     })
@@ -76,7 +170,7 @@ describe('PortifyOrchestrator', () => {
     const checkTestsUntouched = vi.fn()
       .mockResolvedValueOnce({ ok: false, offending: ['e2e/api.spec.ts'] })
       .mockResolvedValueOnce({ ok: true, offending: [] })
-    const runAgent = vi.fn(async () => {})
+    const runAgent = vi.fn(async (_attempt: number, _failureDetail?: string) => {})
     const { deps } = makeDeps({ checkTestsUntouched, runAgent })
     const m = await new PortifyOrchestrator(deps).run()
     expect(m.status).toBe('ready-to-save')
@@ -140,19 +234,6 @@ describe('PortifyOrchestrator', () => {
     expect(deps.cleanup).toHaveBeenCalledOnce()
   })
 
-  // The orchestrator checks isAborted at four points in attempt 1: after setup,
-  // at the loop top, after runAgent, and after verify. Abort at each so every
-  // guard's true-arm is exercised.
-  for (const checkpoint of [1, 2, 3, 4]) {
-    it(`aborts at checkpoint ${checkpoint} and finalizes as aborted`, async () => {
-      let calls = 0
-      const { deps } = makeDeps({ isAborted: () => { calls += 1; return calls >= checkpoint } })
-      const m = await new PortifyOrchestrator(deps).run()
-      expect(m.status).toBe('aborted')
-      expect(deps.cleanup).toHaveBeenCalledOnce()
-    })
-  }
-
   it('records aborted (not failed) when a thrown error coincides with an abort', async () => {
     const { deps } = makeDeps({
       isAborted: () => true,
@@ -169,11 +250,6 @@ describe('PortifyOrchestrator', () => {
     expect(m.status).toBe('failed')
     expect(m.error).toBe('plain string failure')
   })
-
-  // ── revise: user-driven feedback pass (post ready-to-save) ─────────────
-  function readyManifest(): PortifyManifest {
-    return { ...baseManifest(), status: 'ready-to-save', attempt: 1, diff: 'old diff', verification: { ok: true, instances: [] } }
-  }
 
   describe('revise', () => {
     it('runs one pass and re-parks at ready-to-save, incrementing feedbackRounds without touching attempt', async () => {
@@ -200,6 +276,23 @@ describe('PortifyOrchestrator', () => {
       expect(deps.cleanup).not.toHaveBeenCalled()
     })
 
+    it('refreshes the review capture on a VERIFIED revise, keeps the previous one on a failed re-verify', async () => {
+      const persistReviewCapture = vi.fn(async () => {})
+      const { deps } = makeDeps({ persistReviewCapture })
+      const orch = new PortifyOrchestrator(deps)
+      await orch.revise(readyManifest(), 'good tweak')
+      expect(persistReviewCapture).toHaveBeenCalledTimes(1)
+
+      const failing = makeDeps({
+        persistReviewCapture,
+        verify: async () => ({ ok: false, instances: [], failureDetail: 'boom' }),
+      })
+      await new PortifyOrchestrator(failing.deps).revise(readyManifest(), 'bad tweak')
+      // Unchanged: the stale-but-verified capture stays the fallback (save is
+      // gated on verification.ok anyway, so it can never land while failed).
+      expect(persistReviewCapture).toHaveBeenCalledTimes(1)
+    })
+
     it('flags a test-file edit made during a revise round', async () => {
       const { deps } = makeDeps({
         checkTestsUntouched: async () => ({ ok: false, offending: ['e2e/api.spec.ts'] }),
@@ -216,6 +309,30 @@ describe('PortifyOrchestrator', () => {
       expect(m.status).toBe('ready-to-save')
       expect(m.error).toContain('agent died')
       expect(deps.cleanup).not.toHaveBeenCalled()
+    })
+
+    it('invalidates the PREVIOUS passing verification when the feedback agent throws', async () => {
+      // The agent normally edits before it dies, so the worktree now holds
+      // changes nothing has judged. Re-parking with the last pass's `ok: true`
+      // still attached is what let save() capture them as if the double-boot
+      // had approved them — assert the verdict is replaced, not just the error.
+      const { deps } = makeDeps({ runFeedbackAgent: vi.fn(async () => { throw new Error('agent died') }) })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-save')
+      expect(m.verification?.ok).toBe(false)
+      expect(m.verification?.failureDetail).toContain('never double-booted')
+      expect(m.verification?.failureDetail).toContain('agent died')
+    })
+
+    it('invalidates the verification when the double-boot itself throws mid-revise', async () => {
+      // The worst case: the agent's feedback edits are COMPLETE and in the
+      // worktree, and the only thing that could have judged them crashed.
+      const { deps } = makeDeps({ verify: async () => { throw new Error('boot harness crashed') } })
+      const m = await new PortifyOrchestrator(deps).revise(readyManifest(), 'tweak')
+      expect(m.status).toBe('ready-to-save')
+      expect(m.verification?.ok).toBe(false)
+      expect(m.verification?.failureDetail).toContain('boot harness crashed')
+      expect(deps.cleanup).not.toHaveBeenCalled() // worktree kept for more feedback
     })
 
     it('stringifies a non-Error throw mid-revise into the re-parked error', async () => {
@@ -295,142 +412,5 @@ describe('PortifyOrchestrator', () => {
     }
     const m = await new PortifyOrchestrator(deps).run()
     expect(m.status).toBe('ready-to-save')
-  })
-
-  describe('external producer', () => {
-    it('startExternal sets up worktrees and parks at editing — no agent runs', async () => {
-      const { deps } = makeDeps({})
-      const m = await new PortifyOrchestrator(deps).startExternal()
-      expect(m.status).toBe('editing')
-      expect(m.repos[0].worktreePath).toBe('/wt')
-      expect(deps.runAgent).not.toHaveBeenCalled()
-      expect(deps.cleanup).not.toHaveBeenCalled()
-    })
-
-    it('startExternal fails + cleans up when setup throws', async () => {
-      const { deps } = makeDeps({ setup: async () => { throw new Error('worktree boom') } })
-      const m = await new PortifyOrchestrator(deps).startExternal()
-      expect(m.status).toBe('failed')
-      expect(m.error).toContain('worktree boom')
-      expect(deps.cleanup).toHaveBeenCalledOnce()
-    })
-
-    it('verifyExternalEdits parks at ready-to-save when the in-place edits verify', async () => {
-      const { deps } = makeDeps({})
-      const orch = new PortifyOrchestrator(deps)
-      const current = await orch.startExternal()
-      const verifyAgent = deps.runAgent as ReturnType<typeof vi.fn>
-      const m = await orch.verifyExternalEdits(current)
-      expect(m.status).toBe('ready-to-save')
-      expect(m.diff).toBe('diff')
-      expect(m.verification?.ok).toBe(true)
-      expect(verifyAgent).not.toHaveBeenCalled() // editing happened out-of-band
-    })
-
-    it('verifyExternalEdits re-parks at editing (not terminal) when verification fails', async () => {
-      const { deps } = makeDeps({ verify: async () => ({ ok: false, instances: [], failureDetail: 'port 3007 still bound' }) })
-      const orch = new PortifyOrchestrator(deps)
-      const m = await orch.verifyExternalEdits(await orch.startExternal())
-      expect(m.status).toBe('editing')
-      expect(m.verification?.failureDetail).toContain('port 3007')
-      expect(deps.cleanup).not.toHaveBeenCalled() // worktree kept so the client can fix + resubmit
-    })
-
-    it('verifyExternalEdits rejects a test-file edit as a ports-only violation', async () => {
-      const { deps } = makeDeps({ checkTestsUntouched: async () => ({ ok: false, offending: ['e2e/api.spec.ts'] }) })
-      const orch = new PortifyOrchestrator(deps)
-      const m = await orch.verifyExternalEdits(await orch.startExternal())
-      expect(m.status).toBe('editing')
-      expect(m.verification?.failureDetail).toContain('e2e/api.spec.ts')
-    })
-
-    it('verifyExternalEdits parks at ready-to-save on an EMPTY diff when the double-boot passes (source already env-driven)', async () => {
-      // The repo was portified for another feature, so the listeners already
-      // read injected ports — no in-place edit, yet the concurrent boot works.
-      const { deps } = makeDeps({ captureDiff: async () => '   ' })
-      const orch = new PortifyOrchestrator(deps)
-      const verifySpy = vi.fn(async () => ({ ok: true, instances: [] }))
-      deps.verify = verifySpy
-      const m = await orch.verifyExternalEdits(await orch.startExternal())
-      expect(m.status).toBe('ready-to-save')
-      expect(verifySpy).toHaveBeenCalled() // the boot IS the ground truth now
-    })
-
-    it('verifyExternalEdits re-parks at editing with a clear message on an EMPTY diff when the boot fails', async () => {
-      const { deps } = makeDeps({
-        captureDiff: async () => '   ',
-        verify: async () => ({ ok: false, instances: [], failureDetail: 'port 3007 still bound' }),
-      })
-      const orch = new PortifyOrchestrator(deps)
-      const m = await orch.verifyExternalEdits(await orch.startExternal())
-      expect(m.status).toBe('editing')
-      expect(m.verification?.failureDetail).toMatch(/no edits detected/i)
-      expect(m.verification?.failureDetail).toContain('port 3007') // raw boot detail preserved
-    })
-
-    it('verifyExternalEdits uses empty-string fallback when boot error has no failureDetail', async () => {
-      const { deps } = makeDeps({
-        captureDiff: async () => '   ',
-        verify: async () => ({ ok: false, instances: [] }),
-      })
-      const orch = new PortifyOrchestrator(deps)
-      const m = await orch.verifyExternalEdits(await orch.startExternal())
-      expect(m.status).toBe('editing')
-      expect(m.verification?.failureDetail).toMatch(/no edits detected/i)
-      expect(m.verification?.failureDetail).not.toContain('Boot detail:')
-    })
-
-    it('startExternal aborts and cleans up when isAborted fires after setup', async () => {
-      const { deps } = makeDeps({ isAborted: () => true })
-      const m = await new PortifyOrchestrator(deps).startExternal()
-      expect(m.status).toBe('aborted')
-      expect(deps.cleanup).toHaveBeenCalledOnce()
-    })
-
-    it('stringifies a non-Error throw in startExternal failure message', async () => {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      const { deps } = makeDeps({ setup: async () => { throw 'network failure' } })
-      const m = await new PortifyOrchestrator(deps).startExternal()
-      expect(m.status).toBe('failed')
-      expect(m.error).toBe('network failure')
-      expect(deps.cleanup).toHaveBeenCalledOnce()
-    })
-
-    it('verifyExternalEdits returns current immediately when isAborted at entry', async () => {
-      const { deps } = makeDeps({ isAborted: () => true })
-      const current = { ...baseManifest(), status: 'editing' as const }
-      const m = await new PortifyOrchestrator(deps).verifyExternalEdits(current)
-      expect(m).toBe(current)
-    })
-
-    it('verifyExternalEdits bails after verify when isAborted fires post-verify', async () => {
-      let calls = 0
-      // startExternal consumes call 1 (post-setup); verifyExternalEdits entry is
-      // call 2 (must pass); post-verify check is call 3 — bail there.
-      const { deps } = makeDeps({ isAborted: () => { calls += 1; return calls >= 3 } })
-      const orch = new PortifyOrchestrator(deps)
-      const current = await orch.startExternal()
-      const m = await orch.verifyExternalEdits(current)
-      expect(m.status).toBe('verifying') // bailed before re-parking
-    })
-
-    it('verifyExternalEdits re-parks at editing when captureDiff throws', async () => {
-      const { deps } = makeDeps({ captureDiff: async () => { throw new Error('diff failed') } })
-      const orch = new PortifyOrchestrator(deps)
-      const current = await orch.startExternal()
-      const m = await orch.verifyExternalEdits(current)
-      expect(m.status).toBe('editing')
-      expect(m.error).toContain('diff failed')
-    })
-
-    it('stringifies a non-Error throw in verifyExternalEdits catch (String(err) branch)', async () => {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      const { deps } = makeDeps({ captureDiff: async () => { throw 'capture string error' } })
-      const orch = new PortifyOrchestrator(deps)
-      const current = await orch.startExternal()
-      const m = await orch.verifyExternalEdits(current)
-      expect(m.status).toBe('editing')
-      expect(m.error).toBe('capture string error')
-    })
   })
 })

@@ -1,4 +1,5 @@
 import fs from 'fs'
+import path from 'path'
 import { runGit, diffContentSinceSnapshot } from '../../../../shared/git-repo'
 import { addWorktree, removeWorktree, linkNodeModules, type WorktreeHandle } from '../../../runs/logic/runtime/repo-worktree'
 
@@ -59,6 +60,83 @@ export async function changedFiles(worktreeRoot: string, snapshotRef: string): P
   const res = await runGit(worktreeRoot, ['diff', '--name-only', snapshotRef])
   if (res.code !== 0) return []
   return res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+}
+
+export interface PortifyEditProgress {
+  /** Changes as the worktree changes — the stage's liveness key. */
+  digest: string
+  /** Files touched across every scratch worktree, for the UI. */
+  files: number
+}
+
+/** Liveness fingerprint of an IN-PROGRESS edit session, cheap enough to poll.
+ *
+ *  Why this exists: an EXTERNAL portify parks at `status:'editing'` and never
+ *  advances `attempt`, so the flight stage's liveness key (`status#attempt`)
+ *  freezes for the whole hand-off. Against a 30-minute idle budget that means a
+ *  client legitimately editing for longer gets its workflow ABANDONED mid-flight
+ *  — the same class of bug the idle budget was introduced to fix for slow
+ *  double-boots.
+ *
+ *  `git status --porcelain` rather than `diff --name-only` on purpose: it counts
+ *  UNTRACKED files too, so a client that adds a file registers as progress, and
+ *  it reflects staged and unstaged work alike.
+ *
+ *  Porcelain alone is NOT enough, though — it reports status codes and paths, so
+ *  it freezes the moment a file first shows as modified, and a client spending
+ *  twenty minutes on one listener would still look idle. So the digest also folds
+ *  in each listed file's mtime, which moves on every save regardless of whether
+ *  the content grew, shrank, or stayed the same length.
+ *
+ *  Evidence, not self-report: this reads the worktree Canary owns. A silent or
+ *  vanished client freezes the fingerprint and still dies on the idle budget,
+ *  which is the behaviour that makes the timeout worth keeping. */
+export async function editFingerprint(
+  repos: Array<{ worktreePath?: string }>,
+): Promise<PortifyEditProgress> {
+  const parts: string[] = []
+  let files = 0
+  for (const repo of repos) {
+    if (!repo.worktreePath) continue
+    const res = await runGit(repo.worktreePath, ['status', '--porcelain'])
+    if (res.code !== 0) {
+      // A git failure must not read as "no progress" — that would resurrect the
+      // abandonment this exists to prevent. Emit a stable marker instead, so the
+      // fingerprint only freezes when the WORKTREE genuinely stops changing.
+      parts.push('unreadable')
+      continue
+    }
+    const lines = res.stdout.split(/\r?\n/).filter((l) => l.trim() !== '')
+    files += lines.length
+    // Porcelain columns are `XY <path>` (and `XY <old> -> <new>` for a rename, so
+    // take the LAST token). mtime is best-effort: a path we cannot stat just
+    // contributes nothing rather than breaking the fingerprint.
+    const stamps = lines.map((line) => {
+      // A rename reads `R  old -> new`; everything else is just `XY path`. Written
+      // as an explicit ternary rather than `split(' -> ').pop() ?? ''` so both
+      // arms are reachable — the `??` fallback there was dead, since a split
+      // always yields at least one element.
+      const cells = line.slice(3).trim()
+      const arrow = cells.lastIndexOf(' -> ')
+      const rel = arrow === -1 ? cells : cells.slice(arrow + 4)
+      try {
+        return `${rel}@${fs.statSync(path.join(repo.worktreePath as string, rel)).mtimeMs}`
+      } catch {
+        return rel
+      }
+    })
+    parts.push(digestOf(`${res.stdout}\n${stamps.join('\n')}`))
+  }
+  return { digest: parts.join('|'), files }
+}
+
+/** Small, fast, order-stable digest — collision resistance is irrelevant here
+ *  (we only ask "did this change since the last poll?"), so a cryptographic hash
+ *  would be cost without benefit. */
+function digestOf(text: string): string {
+  let h = 5381
+  for (let i = 0; i < text.length; i += 1) h = ((h << 5) + h + text.charCodeAt(i)) | 0
+  return `${text.length}:${(h >>> 0).toString(36)}`
 }
 
 // --- Ephemeral overlay apply/reverse ------------------------------------------

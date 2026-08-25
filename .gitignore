@@ -37,6 +37,7 @@ Thumbs.db
 
 playwright-report
 test-results
+output/playwright/
 logs/
 
 *.bak*
@@ -54,6 +55,10 @@ AGENTS.local.md
 
 # Superpowers brainstorming scratch
 .superpowers/
+
+# Chromium profile artifact that lands here from browser-driven tooling. It is a
+# personal browsing-history database, never project data — keep it untracked.
+History
 
 videos
 

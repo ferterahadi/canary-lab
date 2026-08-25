@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { RunDetail, RunIndexEntry, RunStatus, TransientAction } from '../../../shared/api/types'
+import type { RunDetail, RunIndexEntry, RunStatus, TransientAction } from '@/shared/api/types'
 import { deriveRunViewModel } from './run-view-model'
 
 function detail(overrides: Partial<RunDetail['manifest']> = {}): RunDetail {
@@ -178,10 +178,11 @@ describe('deriveRunViewModel', () => {
     ['failed', 'Run failed', 'error'],
     ['aborted', 'Run aborted', 'warning'],
   ] satisfies Array<[RunStatus, string, string]>)('falls back for %s runs without lifecycle events', (status, headline, severity) => {
+    const phase = status === 'running' ? 'running-tests' : status === 'healing' ? 'agent-healing' : status
     const withLifecycle = deriveRunViewModel(detail({
       status,
       lifecycle: {
-        phase: status === 'running' ? 'running-tests' : status,
+        phase,
         headline,
         updatedAt: '2026-05-08T00:00:03.000Z',
       },
@@ -193,7 +194,7 @@ describe('deriveRunViewModel', () => {
     expect(withLifecycle.headline).toBe(headline)
     expect(withLifecycle.recoveryTimeline).toEqual([
       {
-        phase: status === 'running' ? 'running-tests' : status,
+        phase,
         headline,
         updatedAt: '2026-05-08T00:00:03.000Z',
         severity,
@@ -282,6 +283,13 @@ describe('deriveRunViewModel', () => {
   it('relabels the stop transient as "Stopping services" for a boot run', () => {
     const vm = deriveRunViewModel(detail({ executionType: 'boot', status: 'running' }), 'aborting')
     expect(vm.headline).toBe('Stopping services')
+  })
+
+  it('labels a queued test run with the capacity wording', () => {
+    // Distinct from the boot wording: a queued test run starts tests when
+    // capacity frees, whereas a queued boot session only brings services up.
+    const vm = deriveRunViewModel(detail({ status: 'queued' }))
+    expect(vm.headline).toBe('Queued — will start when capacity frees')
   })
 
   it('labels a queued boot run and shows no alert', () => {

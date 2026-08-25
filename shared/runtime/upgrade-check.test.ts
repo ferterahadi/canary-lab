@@ -9,6 +9,7 @@ import {
   checkUpgradeDrift,
   formatDriftNotice,
   getInstalledPackageVersion,
+  getInstalledPackageName,
 } from './upgrade-check'
 
 const tmpDirs: string[] = []
@@ -80,6 +81,31 @@ describe('getInstalledPackageVersion', () => {
     const pkgPath = path.join(dir, 'package.json')
     fs.writeFileSync(pkgPath, JSON.stringify({ name: 'x', version: 123 }))
     expect(getInstalledPackageVersion(pkgPath)).toBeNull()
+  })
+})
+
+describe('getInstalledPackageName', () => {
+  it('returns the name field from a package.json', () => {
+    const dir = mkTmp()
+    const pkgPath = path.join(dir, 'package.json')
+    fs.writeFileSync(pkgPath, JSON.stringify({ name: 'canary-lab-fork', version: '1.0.0' }))
+    expect(getInstalledPackageName(pkgPath)).toBe('canary-lab-fork')
+  })
+
+  it('returns null when the name is missing, non-string, or unreadable', () => {
+    // A null name has to stay null rather than fall back to "canary-lab":
+    // the self-update installs whatever this returns, and guessing the name
+    // would upgrade a different package than the one that is installed.
+    const dir = mkTmp()
+    const noName = path.join(dir, 'no-name.json')
+    fs.writeFileSync(noName, JSON.stringify({ version: '1.0.0' }))
+    expect(getInstalledPackageName(noName)).toBeNull()
+
+    const numericName = path.join(dir, 'numeric.json')
+    fs.writeFileSync(numericName, JSON.stringify({ name: 42 }))
+    expect(getInstalledPackageName(numericName)).toBeNull()
+
+    expect(getInstalledPackageName(path.join(dir, 'missing.json'))).toBeNull()
   })
 })
 

@@ -12,6 +12,13 @@ export interface PortifyPaths {
   /** Snapshot of the feature config BEFORE the agent edits it — lets startup
    *  reclaim restore the config after a crash (the in-memory copy is gone). */
   originalConfigPath: string
+  /** Overlay capture persisted whenever the workflow parks at `ready-to-save`
+   *  with a PASSING verification. A parked review must survive a server
+   *  restart: the worktrees live in server memory, so without this snapshot a
+   *  restart turns an already-verified diff into an unanswerable checkpoint
+   *  (save → 409). `save()` falls back to this file when the live state is
+   *  gone; startup reclaim keeps such workflows parked instead of aborting. */
+  pendingOverlayPath: string
 }
 
 export function portifyRoot(logsDir: string): string {
@@ -33,5 +40,6 @@ export function buildPortifyPaths(dir: string): PortifyPaths {
     agentLogPath: path.join(dir, 'agent.log'),
     verifyLogDir: path.join(dir, 'verify'),
     originalConfigPath: path.join(dir, 'original-config.snapshot'),
+    pendingOverlayPath: path.join(dir, 'pending-overlay.json'),
   }
 }

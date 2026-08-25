@@ -1,8 +1,7 @@
 # first-flight-go
 
-Tiny Go notes API used as the Canary Lab **Flight** non-web-stack E2E fixture
-(R8: prove the pipeline holds for a repo with no package.json, no npm scripts,
-no lockfile).
+Tiny Go notes API proving Canary Lab **Flight** works without `package.json`, npm
+scripts, or a lockfile.
 
 ## Requirements
 
@@ -21,9 +20,7 @@ no lockfile).
 go run .   # no dependencies to fetch
 ```
 
-Note: the shipped `main.go` carries a deliberate bug on the create→list path
-(created notes are never appended). It exists so the flight's run→heal stage
-has something real to fix.
+`main.go` deliberately fails create→list by not appending notes, giving Flight's
+run→heal stage a real defect.
 
-Before flying it, `git init` + commit a copy — portify rejects a non-git repo
-(same as the Node fixture).
+Before Flight, run `git init` and commit a copy; Portify rejects non-Git repos.

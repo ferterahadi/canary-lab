@@ -51,6 +51,45 @@ async function waitFor(cond: () => boolean, timeoutMs = 4000): Promise<void> {
   }
 }
 
+// startDirtySpecWatcher always calls fs.watch with the 3-arg overload
+// (path, options, listener) — see watcher.ts. `Parameters<typeof fs.watch>`
+// resolves to the last overload (the 2-arg `(path, listener)` form), which is
+// too narrow for the 3-tuple destructure below, so the tuple is spelled out
+// explicitly to match the overload actually in use.
+type WatchArgs = [
+  target: fs.PathLike,
+  options: fs.WatchOptions | BufferEncoding | null | undefined,
+  listener: fs.WatchListener<string> | undefined,
+]
+
+interface CapturedWatch {
+  /** Deliver an event as the real fs watcher would. */
+  fire(filename?: string | null): void
+  restore(): void
+}
+
+// Grab the listener startDirtySpecWatcher registers on `<feature>/e2e` while
+// still creating the real watcher, so a test can deliver events on demand.
+// Needed wherever the timing of fs.watch delivery would otherwise decide
+// whether the code under test runs at all.
+function captureE2eWatch(featureName: string): CapturedWatch {
+  let listener: fs.WatchListener<string> | undefined
+  const realWatch = fs.watch.bind(fs)
+  const suffix = path.join(featureName, 'e2e')
+  const spy = vi.spyOn(fs, 'watch').mockImplementation(((...args: WatchArgs) => {
+    const [target, , fn] = args
+    if (typeof target === 'string' && target.endsWith(suffix) && typeof fn === 'function') listener = fn
+    return (realWatch as (...a: unknown[]) => fs.FSWatcher)(...args)
+  }) as typeof fs.watch)
+  return {
+    fire(filename = 'a.spec.ts') {
+      if (typeof listener !== 'function') throw new Error(`no fs.watch listener was registered for ${suffix}`)
+      listener('change', filename)
+    },
+    restore: () => spy.mockRestore(),
+  }
+}
+
 let watcher: DirtySpecWatcher | undefined
 
 beforeEach(() => {
@@ -284,48 +323,81 @@ describe('startDirtySpecWatcher', () => {
   it('a watch callback firing after close() is a no-op (closed guard)', async () => {
     writeFeature('alpha', { withE2eDir: true })
     const { store, recompute } = fakeStore()
-    let e2eListener: ((event: string, filename: string | null) => void) | undefined
-    const realWatch = fs.watch.bind(fs)
-    const spy = vi.spyOn(fs, 'watch').mockImplementation(((...args: Parameters<typeof fs.watch>) => {
-      const [target, , listener] = args
-      if (typeof target === 'string' && target.endsWith(path.join('alpha', 'e2e')) && typeof listener === 'function') {
-        e2eListener = listener as (event: string, filename: string | null) => void
-      }
-      return (realWatch as (...a: unknown[]) => fs.FSWatcher)(...args)
-    }) as typeof fs.watch)
+    const watch = captureE2eWatch('alpha')
     try {
       watcher = startDirtySpecWatcher({ featuresDir, store })
       await waitFor(() => recompute.mock.calls.length >= 1)
       recompute.mockClear()
-      expect(e2eListener).toBeTypeOf('function')
 
       watcher.close()
       // Simulate the underlying fs watcher delivering an event that was already
       // in flight when close() ran — scheduleRecompute's `closed` guard must
       // swallow it rather than scheduling a timer after teardown.
-      e2eListener!('change', 'a.spec.ts')
+      watch.fire()
       await new Promise((r) => setTimeout(r, 300))
       expect(recompute).not.toHaveBeenCalled()
     } finally {
-      spy.mockRestore()
+      watch.restore()
+    }
+  })
+
+  it('coalesces two events inside one debounce window into a single recompute', async () => {
+    const dir = writeFeature('alpha', { withE2eDir: true })
+    const { store, recompute } = fakeStore()
+    const watch = captureE2eWatch('alpha')
+    try {
+      watcher = startDirtySpecWatcher({ featuresDir, store, debounceMs: 60 })
+      await waitFor(() => recompute.mock.calls.length >= 1) // initial recompute
+      recompute.mockClear()
+
+      // Both events land in the SAME tick, so the second is guaranteed to find
+      // the first's pending timer and clear it. Writing the spec file twice does
+      // not reliably get there: the OS may coalesce a save-storm into a single
+      // fs.watch event, in which case scheduleRecompute runs once and the timer
+      // reset never happens — which is exactly how this branch stayed
+      // intermittently uncovered.
+      watch.fire()
+      watch.fire()
+
+      await waitFor(() => recompute.mock.calls.length >= 1)
+      // Wait out another full window: a second recompute would mean the first
+      // timer survived instead of being cleared.
+      await new Promise((r) => setTimeout(r, 200))
+      expect(recompute).toHaveBeenCalledTimes(1)
+      expect(recompute).toHaveBeenCalledWith('alpha', dir)
+    } finally {
+      watch.restore()
     }
   })
 
   it('close() clears pending debounce timers and is safe to call twice', async () => {
-    const dir = writeFeature('alpha', { withE2eDir: true })
+    writeFeature('alpha', { withE2eDir: true })
     const { store, recompute } = fakeStore()
-    watcher = startDirtySpecWatcher({ featuresDir, store, debounceMs: 500 })
-    await waitFor(() => recompute.mock.calls.length >= 1)
-    recompute.mockClear()
+    const captured = captureE2eWatch('alpha')
+    try {
+      watcher = startDirtySpecWatcher({ featuresDir, store, debounceMs: 500 })
+      await waitFor(() => recompute.mock.calls.length >= 1)
+      recompute.mockClear()
 
-    fs.writeFileSync(path.join(dir, 'e2e', 'a.spec.ts'), 'test()')
-    await new Promise((r) => setTimeout(r, 50)) // inside the debounce window
-    expect(() => {
-      watcher!.close()
-      watcher!.close()
-    }).not.toThrow()
+      // Fired through the seam rather than by writing the spec file. A real
+      // fs.watch event that lands AFTER close() leaves no pending timer at all,
+      // and "recompute never ran" is then trivially true — the test would pass
+      // having proven nothing, and close()'s clear-timers loop would never run.
+      // On a loaded machine that is exactly what happened, which is why this
+      // one statement went uncovered intermittently.
+      captured.fire()
 
-    await new Promise((r) => setTimeout(r, 600))
-    expect(recompute).not.toHaveBeenCalled()
+      expect(() => {
+        watcher!.close()
+        watcher!.close()
+      }).not.toThrow()
+
+      // Past the full debounce window: the timer was cancelled, not merely
+      // outrun. Without the clear, this is where the recompute would land.
+      await new Promise((r) => setTimeout(r, 600))
+      expect(recompute).not.toHaveBeenCalled()
+    } finally {
+      captured.restore()
+    }
   })
 })

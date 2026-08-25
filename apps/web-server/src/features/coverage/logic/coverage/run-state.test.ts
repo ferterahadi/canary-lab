@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { readCoverageRunState, writeCoverageRunState } from './run-state'
-import { docsDirFor } from '../../../coverage/logic/coverage/docs-collection'
+import { docsDirFor } from './docs-collection'
 
 let tmpDir: string
 let featureDir: string

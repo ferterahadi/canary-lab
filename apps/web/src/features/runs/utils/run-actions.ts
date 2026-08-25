@@ -2,7 +2,7 @@ import {
   deriveRunActionAvailability,
   isTerminalRunStatus,
   type RunStatus,
-} from '../../../../../../shared/run-state'
+} from '@shared/run-state'
 
 export function canPauseHeal(status: RunStatus): boolean {
   return deriveRunActionAvailability(status).pauseHeal.enabled
@@ -24,5 +24,5 @@ export function canDelete(status: RunStatus): boolean {
   return isTerminalRunStatus(status)
 }
 
-export { deriveDisplayStatus } from '../../../../../../shared/run-state'
-export type { DisplayStatus, TransientAction } from '../../../../../../shared/run-state'
+export { deriveDisplayStatus } from '@shared/run-state'
+export type { DisplayStatus, TransientAction } from '@shared/run-state'

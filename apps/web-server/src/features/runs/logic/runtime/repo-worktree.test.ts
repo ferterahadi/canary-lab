@@ -3,7 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { addWorktree, isGitWorktreeCapable, linkNodeModules, removeWorktree } from './repo-worktree'
+import { addWorktree, hydrateWorkingTreeDiff, isGitWorktreeCapable, linkNodeModules, listUntracked, removeWorktree, sanitizeRepoFileName } from './repo-worktree'
 
 let root: string
 let repo: string
@@ -127,5 +127,90 @@ describe('addWorktree / removeWorktree', () => {
       expect(fs.lstatSync(path.join(wt, 'node_modules')).isSymbolicLink()).toBe(false)
       expect(fs.existsSync(path.join(wt, 'node_modules', 'already'))).toBe(true)
     })
+  })
+
+  describe('hydrateWorkingTreeDiff', () => {
+    it('reproduces tracked WIP and untracked files in a fresh worktree', async () => {
+      // Dirty the source: edit a tracked file + add an untracked one.
+      fs.writeFileSync(path.join(repo, 'features', 'foo', 'server.ts'), 'export const x = 42\n')
+      fs.writeFileSync(path.join(repo, 'features', 'foo', 'new.ts'), 'export const y = 2\n')
+      const handle = await addWorktree({ repoName: 'app', localPath: repo, worktreesDir: path.join(root, 'wt-hy') })
+      // The fresh worktree checks out HEAD only — WIP is absent until hydrated.
+      expect(fs.readFileSync(path.join(handle.worktreeRoot, 'features/foo/server.ts'), 'utf-8')).toContain('x = 1')
+      expect(fs.existsSync(path.join(handle.worktreeRoot, 'features/foo/new.ts'))).toBe(false)
+
+      const res = await hydrateWorkingTreeDiff(handle)
+      expect(res.error).toBeUndefined()
+      expect(res.trackedApplied).toBe(true)
+      expect(res.untrackedCopied).toBe(1)
+      // Now the worktree matches the source's working tree.
+      expect(fs.readFileSync(path.join(handle.worktreeRoot, 'features/foo/server.ts'), 'utf-8')).toContain('x = 42')
+      expect(fs.readFileSync(path.join(handle.worktreeRoot, 'features/foo/new.ts'), 'utf-8')).toContain('y = 2')
+    })
+
+    it('is a clean no-op when the source tree is pristine', async () => {
+      const handle = await addWorktree({ repoName: 'app', localPath: repo, worktreesDir: path.join(root, 'wt-clean') })
+      const res = await hydrateWorkingTreeDiff(handle)
+      expect(res).toEqual({ trackedApplied: false, untrackedCopied: 0, error: undefined })
+    })
+
+    it('does not copy gitignored files', async () => {
+      fs.writeFileSync(path.join(repo, '.gitignore'), '.env\n')
+      execFileSync('git', ['add', '.gitignore'], { cwd: repo, stdio: 'ignore' })
+      execFileSync('git', ['commit', '-q', '-m', 'ignore'], { cwd: repo, stdio: 'ignore' })
+      fs.writeFileSync(path.join(repo, '.env'), 'SECRET=1\n')
+      const handle = await addWorktree({ repoName: 'app', localPath: repo, worktreesDir: path.join(root, 'wt-ign') })
+      const res = await hydrateWorkingTreeDiff(handle)
+      expect(res.untrackedCopied).toBe(0)
+      expect(fs.existsSync(path.join(handle.worktreeRoot, '.env'))).toBe(false)
+    })
+  })
+})
+
+describe('sanitizeRepoFileName', () => {
+  it('leaves an already-safe name alone', () => {
+    expect(sanitizeRepoFileName('my-api_v2.1')).toBe('my-api_v2.1')
+  })
+
+  it('collapses path separators and spaces so a name cannot escape the fixes dir', () => {
+    expect(sanitizeRepoFileName('org/repo name')).toBe('org-repo-name')
+    // Dots are legal in a filename and survive; what matters is that every
+    // separator is gone, so the result cannot traverse out of the fixes dir.
+    expect(sanitizeRepoFileName('../../etc/passwd')).toBe('..-..-etc-passwd')
+    expect(sanitizeRepoFileName('../../etc/passwd')).not.toContain('/')
+  })
+
+  it('falls back to "repo" when nothing usable survives', () => {
+    expect(sanitizeRepoFileName('///')).toBe('repo')
+    expect(sanitizeRepoFileName('')).toBe('repo')
+  })
+})
+
+describe('listUntracked', () => {
+  it('lists non-ignored untracked files and skips ignored ones', async () => {
+    const dir = path.join(root, 'untracked-repo')
+    fs.mkdirSync(dir, { recursive: true })
+    gitInit(dir)
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'ignored.txt\n')
+    fs.writeFileSync(path.join(dir, 'ignored.txt'), 'x')
+    fs.writeFileSync(path.join(dir, 'fresh.txt'), 'x')
+
+    const out = await listUntracked(dir)
+
+    expect(out.has('fresh.txt')).toBe(true)
+    expect(out.has('ignored.txt')).toBe(false)
+  })
+
+  it('returns an empty set when the path is not a git repo', async () => {
+    // The fix-capture baseline runs before we know a repo is usable, so a
+    // non-repo must read as "nothing untracked" rather than throw mid-run.
+    // Safe only because `git stash create` fails on the same inputs (measured:
+    // both exit 128 for a non-work-tree and for a bad core.excludesFile), so
+    // the baseline skips such a repo before this empty set can be mistaken for
+    // a clean tree — which is what would file pre-existing files as agent-new.
+    const dir = path.join(root, 'not-a-repo')
+    fs.mkdirSync(dir, { recursive: true })
+
+    expect(await listUntracked(dir)).toEqual(new Set())
   })
 })

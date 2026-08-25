@@ -18,6 +18,10 @@ export interface DeriveStateInput {
   changedDocs: string[]
   /** Any test carries requirement linkage. */
   hasAnnotatedTests: boolean
+  /** The coverage mapper has completed at least once, even if it found no
+   *  valid links to write. This separates a measured 0% from work that has
+   *  never run. */
+  hasCoverageRun: boolean
   /** Requirements set changed since the engine last ran against it. */
   coverageStale: boolean
   coveragePct: number
@@ -27,6 +31,20 @@ export interface DeriveStateInput {
 
 const PRD_ARTIFACT = 'PRD summary'
 const COVERAGE_ARTIFACT = 'coverage ledger'
+
+export type PersistedCoverageState = Extract<CoverageState, 'absent' | 'fresh' | 'stale'>
+
+/** Coverage state that can be proven from durable workspace artifacts. Tags
+ *  preserve legacy/manual mappings; the run marker also records a completed
+ *  mapper that legitimately produced zero links. */
+export function derivePersistedCoverageState(input: Pick<
+  DeriveStateInput,
+  'hasAnnotatedTests' | 'hasCoverageRun' | 'coverageStale'
+>): PersistedCoverageState {
+  if (!input.hasAnnotatedTests && !input.hasCoverageRun) return 'absent'
+  if (input.coverageStale) return 'stale'
+  return 'fresh'
+}
 
 export function deriveSummaryState(input: DeriveStateInput): SummaryState {
   if (input.activeJob === 'summary') return 'generating'
@@ -39,9 +57,7 @@ export function deriveCoverageState(input: DeriveStateInput, summaryState: Summa
   if (input.activeJob === 'coverage') return 'generating'
   // Coverage is meaningless until the summary is fresh — block it otherwise.
   if (summaryState !== 'fresh') return 'blocked'
-  if (!input.hasAnnotatedTests) return 'absent'
-  if (input.coverageStale) return 'stale'
-  return 'fresh'
+  return derivePersistedCoverageState(input)
 }
 
 function deriveHeadline(

@@ -1,7 +1,7 @@
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { PortifyRunStore } from './store'
 import type { PortifyManifest } from './types'
 
@@ -134,6 +134,27 @@ describe('PortifyRunStore', () => {
     const statusOf = (store as any).store.config.statusOf as (m: PortifyManifest) => string
     expect(statusOf(manifest({ status: 'planning' }))).toBe('planning')
     expect(statusOf(manifest({ status: 'saved' }))).toBe('saved')
+  })
+
+  it('renameFeature() re-homes matching workflows and reports the count', () => {
+    // A suite rename must carry the new name into the portify history rather
+    // than orphaning it behind the old one.
+    const store = new PortifyRunStore(tmpLogs())
+    store.save(manifest({ workflowId: 'p1', feature: 'old_name' }))
+    store.save(manifest({ workflowId: 'p2', feature: 'old_name', status: 'saved' }))
+    store.save(manifest({ workflowId: 'p3', feature: 'other' }))
+
+    expect(store.renameFeature('old_name', 'new_name')).toBe(2)
+    expect(store.get('p1')?.feature).toBe('new_name')
+    expect(store.get('p2')?.feature).toBe('new_name')
+    expect(store.get('p3')?.feature).toBe('other')
+  })
+
+  it('renameFeature() is a no-op when nothing matches', () => {
+    const store = new PortifyRunStore(tmpLogs())
+    store.save(manifest({ workflowId: 'p1', feature: 'kept' }))
+    expect(store.renameFeature('absent', 'new_name')).toBe(0)
+    expect(store.get('p1')?.feature).toBe('kept')
   })
 
   it('idOfEntry falls back to workflowId for legacy index rows that lack an id field', () => {

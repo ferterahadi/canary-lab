@@ -3,31 +3,36 @@ import os from 'os'
 import path from 'path'
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import Fastify from 'fastify'
-import { benchmarkRoutes } from '../../benchmark/routes/benchmarks'
+import { benchmarkRoutes } from './benchmarks'
 import { launchEditorDir } from '../../../shared/editor-launch'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import { getGitRoot } from '../../../shared/git-repo'
-import type { BenchmarkStore } from '../../benchmark/logic/runtime/store'
-import type { SabotageSkill } from '../../benchmark/logic/runtime/skills'
-import type { BenchmarkManifest, StartBenchmarkInput } from '../../benchmark/logic/runtime/types'
+import type { BenchmarkStore } from '../logic/runtime/store'
+import type { SabotageSkill } from '../logic/runtime/skills'
+import type { BenchmarkManifest, StartBenchmarkInput } from '../logic/runtime/types'
 
 vi.mock('../../../shared/editor-launch', () => ({ launchEditorDir: vi.fn(() => 'vscode') }))
+
 vi.mock('../../runs/logic/runtime/repo-worktree', () => ({ addWorktree: vi.fn(), removeWorktree: vi.fn(async () => {}) }))
+
 vi.mock('../../runs/logic/runtime/worktree-inventory', () => ({ listWorktrees: vi.fn(async () => []) }))
-vi.mock('../../config/logic/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
+
+vi.mock('../../../shared/feature-loader', () => ({ loadFeatures: vi.fn(() => []) }))
+
 vi.mock('../../../shared/git-repo', async (orig) => ({
   ...(await orig<typeof import('../../../shared/git-repo')>()),
   getGitRoot: vi.fn().mockResolvedValue(null),
 }))
+
 vi.mock('../../runs/logic/runtime/launcher/project-config', () => ({ loadProjectConfig: vi.fn(() => ({ editor: 'cursor' })) }))
 
 function manifest(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
     benchmarkId: 'b1',
-    feature: 'example_todo_api',
+    feature: 'demo_inventory',
     skill: 'broken-delete-contract',
     level: 'med',
     iterations: 2,
@@ -46,6 +51,7 @@ function fakeStore(over: Partial<BenchmarkStore> = {}): BenchmarkStore {
     list: () => [],
     get: () => null,
     save: () => {},
+    renameFeature: () => 0,
     onEvent: () => {},
     offEvent: () => {},
     ...over,
@@ -88,11 +94,11 @@ describe('benchmarkRoutes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/benchmarks',
-      payload: { feature: 'example_todo_api', skill: 'broken-delete-contract', level: 'med', iterations: 2 },
+      payload: { feature: 'demo_inventory', skill: 'broken-delete-contract', level: 'med', iterations: 2 },
     })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual({ benchmarkId: 'bench-xyz' })
-    expect(received).toMatchObject({ feature: 'example_todo_api', level: 'med', iterations: 2 })
+    expect(received).toMatchObject({ feature: 'demo_inventory', level: 'med', iterations: 2 })
     await app.close()
   })
 
@@ -199,12 +205,12 @@ describe('benchmarkRoutes', () => {
           summary: 'one subtle bug',
           description: 'desc',
           recipe: 'secret recipe',
-          appliesTo: ['example_todo_api'],
+          appliesTo: ['demo_inventory'],
           dir: '/abs',
         },
       ],
     })
-    const res = await app.inject({ method: 'GET', url: '/api/benchmark-skills?feature=example_todo_api' })
+    const res = await app.inject({ method: 'GET', url: '/api/benchmark-skills?feature=demo_inventory' })
     expect(res.statusCode).toBe(200)
     expect(res.json()).toEqual([
       { name: 'off-by-one', title: 'Off-by-one nudge', level: 'min', summary: 'one subtle bug', description: 'desc', recipe: 'secret recipe' },
@@ -317,7 +323,7 @@ describe('benchmarkRoutes', () => {
 
     it('frozen creates the inspect worktree and opens it', async () => {
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-route-'))
-      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'example_todo_api', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
+      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'demo_inventory', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
       const app = await buildApp({
         logsDir: tmp,
         store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
@@ -384,7 +390,7 @@ describe('benchmarkRoutes', () => {
       const inspectParent = path.join(tmp, 'benchmarks', 'b1', 'worktrees', 'inspect')
       fs.mkdirSync(inspectParent, { recursive: true })
       fs.writeFileSync(path.join(inspectParent, 'stray.txt'), 'not a dir') // file, not a checkout
-      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'example_todo_api', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
+      vi.mocked(addWorktree).mockResolvedValue({ repoName: 'demo_inventory', worktreeRoot: '/inspect/wt', sourceRoot: '/src', localPath: '/inspect/wt' })
       const app = await buildApp({
         logsDir: tmp,
         store: fakeStore({ get: () => manifest({ sabotageSha: 'sha', featureDir: '/feat' }) }),
@@ -457,125 +463,6 @@ describe('benchmarkRoutes', () => {
         expect(res.statusCode).toBe(409)
         expect(res.json()).toEqual({ error: 'worktrees have been cleared for this benchmark' })
       }
-      await app.close()
-    })
-  })
-
-  describe('POST /api/benchmarks/:id/clear-worktrees', () => {
-    afterEach(() => vi.clearAllMocks())
-
-    const clear = (body?: { confirm?: boolean }) =>
-      ({ method: 'POST' as const, url: '/api/benchmarks/b1/clear-worktrees', payload: body ?? {} })
-
-    it('404s when the benchmark is unknown', async () => {
-      const app = await buildApp({ store: fakeStore({ get: () => null }) })
-      const res = await app.inject(clear())
-      expect(res.statusCode).toBe(404)
-      await app.close()
-    })
-
-    it('409s while the benchmark is still running', async () => {
-      const app = await buildApp({ store: fakeStore({ get: () => manifest({ status: 'running' }) }) })
-      const res = await app.inject(clear({ confirm: true }))
-      expect(res.statusCode).toBe(409)
-      expect(res.json()).toEqual({ error: 'cannot clear worktrees while the benchmark is still running' })
-      await app.close()
-    })
-
-    it('dry run (no confirm) reports the disk it would free without removing or saving', async () => {
-      const saved: BenchmarkManifest[] = []
-      vi.mocked(listWorktrees).mockResolvedValue([
-        { path: '/wt/a', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'arm-A', bytes: 200, ageMs: 0, exists: true },
-        { path: '/wt/s', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'staging', bytes: 112, ageMs: 0, exists: true },
-        { path: '/wt/other', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'other', slot: 'arm-A', bytes: 999, ageMs: 0, exists: true },
-      ])
-      const app = await buildApp({
-        store: fakeStore({ get: () => manifest({ status: 'done' }), save: (m) => { saved.push(m) } }),
-      })
-      const res = await app.inject(clear())
-      expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ confirmed: false, willClear: 2, cleared: 0, freedBytes: 312 })
-      expect(vi.mocked(removeWorktree)).not.toHaveBeenCalled()
-      expect(saved).toHaveLength(0)
-      await app.close()
-    })
-
-    it('confirm removes the benchmark-owned worktrees and persists the cleared flag', async () => {
-      const saved: BenchmarkManifest[] = []
-      // A feature with a repo so featureRepoRoots() iterates (resolving git roots).
-      vi.mocked(loadFeatures).mockReturnValueOnce([
-        { name: 'f', description: 'd', envs: ['local'], featureDir: '/f',
-          repos: [{ name: 'r', localPath: '/tmp/portify-nonexistent-repo' }] },
-      ])
-      vi.mocked(listWorktrees).mockResolvedValue([
-        { path: '/wt/a', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'arm-A', bytes: 200, ageMs: 0, exists: true },
-        { path: '/wt/s', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'staging', bytes: 112, ageMs: 0, exists: true },
-      ])
-      const app = await buildApp({
-        store: fakeStore({ get: () => manifest({ status: 'done' }), save: (m) => { saved.push(m) } }),
-      })
-      const res = await app.inject(clear({ confirm: true }))
-      expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ confirmed: true, willClear: 2, cleared: 2, freedBytes: 312 })
-      expect(vi.mocked(removeWorktree)).toHaveBeenCalledTimes(2)
-      expect(vi.mocked(removeWorktree)).toHaveBeenCalledWith({ sourceRoot: '/src', worktreeRoot: '/wt/a' })
-      expect(saved).toHaveLength(1)
-      expect(saved[0]).toMatchObject({ worktreesCleared: true, worktreesClearedBytes: 312 })
-      await app.close()
-    })
-
-    it('resolves feature repo roots, skipping unresolvable/throwing repos', async () => {
-      // Exercise featureRepoRoots: one repo resolves to a git root, one returns
-      // null (skipped), one throws (caught + skipped).
-      vi.mocked(loadFeatures).mockReturnValueOnce([
-        { name: 'f', description: 'd', envs: ['local'], featureDir: '/f',
-          repos: [{ name: 'a', localPath: '/a' }, { name: 'b', localPath: '/b' }, { name: 'c', localPath: '/c' }] },
-        // A feature with no repos at all → exercises the `repos ?? []` fallback.
-        { name: 'g', description: 'd', envs: ['local'], featureDir: '/g' },
-      ])
-      vi.mocked(getGitRoot)
-        .mockResolvedValueOnce('/git/root-a')
-        .mockResolvedValueOnce(null)
-        .mockRejectedValueOnce(new Error('not resolvable'))
-      vi.mocked(listWorktrees).mockResolvedValue([])
-      const app = await buildApp({ store: fakeStore({ get: () => manifest({ status: 'done' }), save: () => {} }) })
-      const res = await app.inject(clear({ confirm: true }))
-      expect(res.statusCode).toBe(200)
-      await app.close()
-    })
-
-    it('reports freedBytes 0 when an already-cleared benchmark has no recorded bytes', async () => {
-      const app = await buildApp({
-        store: fakeStore({ get: () => manifest({ status: 'done', worktreesCleared: true }) }),
-      })
-      const res = await app.inject(clear({ confirm: true }))
-      expect(res.json()).toEqual({ confirmed: false, willClear: 0, cleared: 0, freedBytes: 0, alreadyCleared: true })
-      await app.close()
-    })
-
-    it('swallows a worktree removal failure and still records the cleared flag', async () => {
-      const saved: BenchmarkManifest[] = []
-      vi.mocked(listWorktrees).mockResolvedValue([
-        { path: '/wt/a', sourceRoot: '/src', ref: 'sha', ownerKind: 'benchmark', ownerId: 'b1', slot: 'arm-A', bytes: 10, ageMs: 0, exists: true },
-      ])
-      vi.mocked(removeWorktree).mockRejectedValueOnce(new Error('rm failed'))
-      const app = await buildApp({
-        store: fakeStore({ get: () => manifest({ status: 'done' }), save: (m) => { saved.push(m) } }),
-      })
-      const res = await app.inject(clear({ confirm: true }))
-      expect(res.statusCode).toBe(200)
-      expect(saved).toHaveLength(1)
-      await app.close()
-    })
-
-    it('is idempotent once cleared (no second removal)', async () => {
-      const app = await buildApp({
-        store: fakeStore({ get: () => manifest({ status: 'done', worktreesCleared: true, worktreesClearedBytes: 312 }) }),
-      })
-      const res = await app.inject(clear({ confirm: true }))
-      expect(res.statusCode).toBe(200)
-      expect(res.json()).toEqual({ confirmed: false, willClear: 0, cleared: 0, freedBytes: 312, alreadyCleared: true })
-      expect(vi.mocked(removeWorktree)).not.toHaveBeenCalled()
       await app.close()
     })
   })

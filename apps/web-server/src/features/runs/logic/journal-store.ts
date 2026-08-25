@@ -1,10 +1,8 @@
 import fs from 'fs'
-import path from 'path'
-import { parseJournalMarkdown } from '../../runs/logic/runtime/log-enrichment'
+import { parseJournalMarkdown } from './runtime/log-enrichment'
 
 // Pure-ish business logic for the journal viewer. The Fastify route layer
-// owns the request shape; this module owns the markdown parsing, filtering,
-// and atomic delete-by-iteration helper.
+// owns the request shape; this module owns the markdown parsing and filtering.
 
 export interface JournalSection {
   iteration: number | null
@@ -113,41 +111,4 @@ export function readJournal(journalPath: string): ReadJournalResult {
     return { sections: [] }
   }
   return { sections: splitJournalSections(raw) }
-}
-
-// Remove the iteration N section atomically. Returns true if a section was
-// removed. The body of the surviving file keeps any non-section preamble
-// (e.g. the "# Diagnosis Journal" header) and the original spacing between
-// remaining sections.
-export function deleteIterationSection(journalPath: string, iteration: number): boolean {
-  let raw: string
-  try {
-    raw = fs.readFileSync(journalPath, 'utf-8')
-  } catch {
-    return false
-  }
-  const lines = raw.split('\n')
-  const out: string[] = []
-  let skipping = false
-  let removed = false
-  for (const line of lines) {
-    const heading = HEADING_RE.exec(line)
-    if (heading) {
-      const iter = parseInt(heading[1], 10)
-      if (iter === iteration) {
-        skipping = true
-        removed = true
-        continue
-      }
-      skipping = false
-    }
-    if (!skipping) out.push(line)
-  }
-  if (!removed) return false
-  // Atomic rewrite via tmp + rename.
-  const tmp = `${journalPath}.tmp`
-  fs.mkdirSync(path.dirname(journalPath), { recursive: true })
-  fs.writeFileSync(tmp, out.join('\n'))
-  fs.renameSync(tmp, journalPath)
-  return true
 }

@@ -1,9 +1,12 @@
 ---
 name: cl_ws-driven-state
-description: Use whenever you add or modify a server-side mutation (new route, background job completion, MCP tool write) that changes something visible in the UI — feature list, badges, coverage icons, run states, anything. Also use when a user says "I had to refresh to see X" or "the badge didn't update until I reloaded". The rule: every mutation that affects UI state must emit a WorkspaceEvent so the client updates live. No broadcast event → stale UI, always. If the server already emits the event and only the client fails to react to it, use cl_live-state-sync instead.
+description: Use whenever you add or modify a server-side mutation (route, background job completion, MCP tool write) that changes something visible in the UI, or when a user says "I had to refresh to see X". Every mutation affecting UI state must emit a WorkspaceEvent.
 ---
 
 # WS-Driven State — Every Mutation Emits an Event
+
+If the server already emits the event and only the client fails to react →
+`cl_live-state-sync`.
 
 The pattern the project enforces: **UI state is never polled and never requires a
 manual refresh.** When the server mutates something visible, it emits a
@@ -44,6 +47,7 @@ Nothing in this chain polls. Nothing auto-retries. If you don't call
 | `evaluation-export-*` | Eval export task lifecycle | export task context |
 | `version-changed` | Registry `latest` moved, or an update job finished | `refreshVersion()` |
 | `flights-changed` | A flight's state changed (stage advance, checkpoint, completion) | `refreshFlights()` + bump `flightsRefreshKey` |
+| `project-config-changed` | `canary-lab.config.json` was written (PUT /api/project-config) | `invalidate('project-config')` — the demo launcher refetches `showDemo` |
 
 Pick the narrowest type that fits. `features-changed` is a catch-all for the feature
 list; `coverage-changed` is scoped to coverage headlines. Prefer scoped events — they
@@ -127,7 +131,7 @@ When reviewing a mutation that is NOT yours, check **both** surfaces:
 
 ```
 grep -rn "publishWorkspaceEvent" apps/web-server/src/features/   # REST routes + job runners
-grep -rn "publishWorkspaceEvent" apps/web-server/mcp/tools.ts    # MCP tools (Desktop/Codex/CLI)
+grep -rn "publishWorkspaceEvent" apps/web-server/src/mcp/tool-groups/  # MCP tools (Desktop/Codex/CLI)
 ```
 
 Anything that writes to disk but has no `publishWorkspaceEvent` call is a candidate

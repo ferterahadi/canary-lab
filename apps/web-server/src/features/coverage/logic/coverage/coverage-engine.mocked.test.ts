@@ -7,7 +7,7 @@ import path from 'path'
 
 // Mock the annotate-engine module so we can return proposals without `file`.
 vi.mock('./annotate-engine', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../../coverage/logic/coverage/annotate-engine')>()
+  const original = await importOriginal<typeof import('./annotate-engine')>()
   return {
     ...original,
     proposeCoverageMappings: vi.fn(),
@@ -15,7 +15,7 @@ vi.mock('./annotate-engine', async (importOriginal) => {
 })
 
 import { runCoverageEngine, regeneratePrdSummary as regeneratePrdSummaryReal } from './service'
-import { proposeCoverageMappings } from '../../../coverage/logic/coverage/annotate-engine'
+import { proposeCoverageMappings } from './annotate-engine'
 import { fakeSummarize } from './__fixtures__/fake-coverage-agents'
 
 // Summary is LLM-only; inject the fake summarizer. (proposeCoverageMappings is

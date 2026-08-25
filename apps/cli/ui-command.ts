@@ -1,0 +1,359 @@
+// Thin CLI glue around `createServer`. Coverage is excluded — boots Fastify
+// against the real project root and binds a port, neither of which is
+// deterministically testable without a real listen() call.
+
+import path from 'path'
+import readline from 'readline'
+import { spawn } from 'child_process'
+import { createServer } from '../web-server/src/server'
+import { getProjectRoot, isCanaryLabWorkspace, looksLikeProjectRoot } from '../../shared/runtime/project-root'
+import { openBrowser } from '../web-server/src/shared/open-browser'
+import { loadProjectConfig, resolveProjectPort } from '../web-server/src/features/runs/logic/runtime/launcher/project-config'
+import { registerActiveServer, unregisterActiveServer } from '../../shared/runtime/active-servers'
+import { hydrateAgentConfigEnvFromShell } from '../web-server/src/features/agent-sessions/logic/agent-config-env'
+import { stopAllAgentProcesses } from '../web-server/src/features/agent-sessions/logic/agent-process'
+import { refreshAgentIntegrationsQuietly } from './agent'
+import { refreshClaudeDesktopMcpQuietly } from './mcp-refresh'
+import { main as upgradeWorkspace } from './upgrade'
+import { checkUpgradeDrift, type DriftState } from '../../shared/runtime/upgrade-check'
+import type { DesktopRegistrationResult } from './desktop-registration'
+
+// Graceful-teardown ceiling. Long enough for an honest run abort + app.close,
+// short enough that a wedged shutdown doesn't feel hung before the watchdog
+// force-exits.
+const SHUTDOWN_TIMEOUT_MS = 5000
+
+export interface UiCommandOptions {
+  projectRoot?: string
+  // Injected for tests / future programmatic use.
+  log?: (msg: string) => void
+  exit?: (code: number) => void
+  confirmShutdown?: () => Promise<boolean>
+  // Hard ceiling on graceful teardown. If cleanup + app.close haven't finished
+  // within this window, the process is forced out so Ctrl+C always exits.
+  // Injectable so tests can use a tiny value. Defaults to SHUTDOWN_TIMEOUT_MS.
+  shutdownTimeoutMs?: number
+  // Records/clears the live server (projectRoot+port+pid) the MCP bridge follows.
+  // Injected as spies in tests so they never touch the real ~/.canary-lab.
+  recordActiveServer?: (projectRoot: string, port: number) => void
+  clearActiveServer?: () => void
+  // Brings the installed agent skill up to date with this package version.
+  // Injected as a no-op / spy in tests so they never touch the real home dir.
+  refreshAgents?: () => void
+  // Completes a workspace migration that an older UI updater could not run
+  // itself after swapping in this package. Injectable to keep startup tests
+  // isolated from the filesystem migration.
+  upgradeWorkspace?: (projectRoot: string) => Promise<void>
+  getUpgradeDrift?: (projectRoot: string) => DriftState
+  // Re-points a Claude Desktop MCP entry that Desktop reverted to a pre-upgrade
+  // path. Injected as a spy in tests; the default resolves its config path under
+  // CANARY_LAB_AGENT_HOME, which the suite already points at a throwaway home.
+  refreshDesktopMcp?: () => DesktopRegistrationResult
+  // Spawns a fresh detached UI for this project (on the new port from config).
+  relaunch?: (projectRoot: string) => void
+  // Defers the relaunch+shutdown so the HTTP response can flush first.
+  schedule?: (fn: () => void) => void
+  // Kills every live agent CLI child on shutdown. Injected as a spy in tests so
+  // they never signal real processes.
+  stopAgents?: () => Promise<void>
+}
+
+interface WorkspaceUpgradeRecoveryOptions {
+  log: (message: string) => void
+  getUpgradeDrift?: (projectRoot: string) => DriftState
+  upgradeWorkspace?: (projectRoot: string) => Promise<void>
+}
+
+/** Complete a migration skipped by the updater from the previously installed
+ * version. Exported so the packaged smoke gate can exercise the real compiled
+ * recovery without starting a long-lived UI server. */
+export async function finishPendingWorkspaceUpgrade(
+  projectRoot: string,
+  opts: WorkspaceUpgradeRecoveryOptions,
+): Promise<boolean> {
+  const drift = (opts.getUpgradeDrift ?? checkUpgradeDrift)(projectRoot)
+  if (!drift.drift || drift.stamped === null) return false
+
+  opts.log(`Finishing the Canary Lab workspace upgrade from ${drift.stamped} to ${drift.installed}...`)
+  const finishUpgrade = opts.upgradeWorkspace
+    ?? ((root: string) => upgradeWorkspace(['--silent'], { projectRoot: root }))
+  await finishUpgrade(projectRoot)
+  return true
+}
+
+export async function runUi(argv: string[], opts: UiCommandOptions = {}): Promise<void> {
+  const log = opts.log ?? ((m: string) => console.log(m))
+  let exitRequested = false
+  const exit = opts.exit ?? ((code: number) => { process.exit(code) })
+  const requestExit = (code: number): void => {
+    exitRequested = true
+    exit(code)
+  }
+  const portFromArgs = parsePort(argv, { log, exit: requestExit })
+  if (exitRequested) return
+  if (portFromArgs !== undefined) return
+  const noOpen = argv.includes('--no-open')
+  const projectRoot = opts.projectRoot ?? getProjectRoot()
+  // Refuse to boot outside a Canary Lab workspace, and both halves are needed.
+  // `getProjectRoot` walks up and matches any dir with a `features/` folder, so
+  // a stray `features/` (e.g. one accidentally scaffolded into the home dir)
+  // would otherwise let `canary-lab ui` root a server at `~` — hence the
+  // init-only dependency marker. But `isCanaryLabWorkspace` is also true for
+  // this package's own source checkout (`name: "canary-lab"`), which has no
+  // `features/`; booting there serves an empty workspace, and an MCP client
+  // asking for features gets `[]` with no hint that it reached the wrong root.
+  // The workspace registry is owned solely by `canary-lab init`; `ui` never
+  // writes it — it only advertises the running server via the active-server
+  // record below.
+  if (!isCanaryLabWorkspace(projectRoot) || !looksLikeProjectRoot(projectRoot)) {
+    log(`Canary Lab is not set up in ${projectRoot}. Run \`npx canary-lab init\` here first.`)
+    requestExit(1)
+    return
+  }
+  // Back-fill CLAUDE_CONFIG_DIR / CODEX_HOME from the user's interactive shell
+  // (rc file) before any agent is spawned. Without this, a heal agent run under
+  // `$SHELL -i -c` could write its session log to an rc-configured home the
+  // server doesn't know to read — a silently-blank AgentSessionView. Best-effort
+  // and a no-op when the launching env already carries the vars.
+  for (const [name, value] of Object.entries(hydrateAgentConfigEnvFromShell())) {
+    log(`Detected ${name}=${value} from your shell config.`)
+  }
+
+  // The updater that is running controls an upgrade. A 1.5.x server can install
+  // 2.0, but it cannot call logic that only exists inside 2.0; on npm versions
+  // that skip the root postinstall, the package changes while the workspace
+  // stamp stays old. Finish that migration before the first new server starts.
+  // A missing stamp is left alone because it may be an intentionally uninstalled
+  // scaffold; the explicit `upgrade` command remains the recovery path there.
+  await finishPendingWorkspaceUpgrade(projectRoot, {
+    log,
+    getUpgradeDrift: opts.getUpgradeDrift,
+    upgradeWorkspace: opts.upgradeWorkspace,
+  })
+
+  const port = resolveProjectPort(loadProjectConfig(projectRoot))
+  const recordActiveServer = opts.recordActiveServer
+    ?? ((root: string, p: number) => { registerActiveServer({ projectRoot: root, port: p, pid: process.pid }) })
+  const clearActiveServer = opts.clearActiveServer
+    ?? (() => { unregisterActiveServer({ pid: process.pid }) })
+  const stopAgents = opts.stopAgents ?? (() => stopAllAgentProcesses())
+  // Keep the installed agent skill (~/.claude, ~/.codex) in lockstep with this
+  // package version. An `npm` bump that skips the postinstall `upgrade` hook
+  // would otherwise leave a stale skill pinning old behavior; this is the one
+  // command users run every session, so it's the reliable enforcement point.
+  // Cheap + silent when already current (content-compared, no-ops on match).
+  const refreshAgents = opts.refreshAgents
+    ?? (() => { refreshAgentIntegrationsQuietly({ log }) })
+  refreshAgents()
+  // Same reasoning one step further: Claude Desktop reverts its own MCP entry.
+  // It rewrites claude_desktop_config.json wholesale from a copy loaded at
+  // launch, so a Desktop open across an upgrade restores the pre-upgrade path —
+  // a cli.js the upgrade deleted — and the user gets "Server disconnected" with
+  // no hint. Re-assert it here. Silent unless it actually repaired something,
+  // and a repair only takes effect once Desktop is restarted, so say so.
+  const refreshDesktopMcp = opts.refreshDesktopMcp ?? (() => refreshClaudeDesktopMcpQuietly({ projectRoot }))
+  if (refreshDesktopMcp() === 'configured') {
+    log('Repaired the Claude Desktop MCP entry — it pointed at a path from a previous install. Restart Claude Desktop to pick it up.')
+  }
+  // Forward reference: the port-change hook needs `shutdown`, which is defined
+  // after the server exists. createServer captures this stable delegate.
+  let triggerPortChange: (port: number) => void = () => { /* assigned below */ }
+  const { app, runStore, revertAllEnvsets } = await createServer({
+    projectRoot,
+    onPortChange: (newPort) => triggerPortChange(newPort),
+  })
+
+  // Stop active runs and revert any in-flight envset swaps if the user kills
+  // the UI server before their runs finish. `orch.stop()` owns the process
+  // cleanup path for service PTYs, Playwright, and heal agents.
+  // Step tracer for diagnosing a stuck shutdown. Off unless the user opts in,
+  // so a normal Ctrl+C stays quiet; with it on, the last line printed names the
+  // step that hung. Goes to stderr so server-stdout capture can't swallow it.
+  const traceShutdown = (step: string): void => {
+    if (process.env.CANARY_LAB_DEBUG_SHUTDOWN) process.stderr.write(`[canary-lab shutdown] ${step}\n`)
+  }
+  let cleanedUp = false
+  const cleanup = async (): Promise<void> => {
+    if (cleanedUp) return
+    cleanedUp = true
+    traceShutdown('cleanup:start')
+    // Stop advertising this server to the MCP bridge before tearing down, so a
+    // bridge re-resolving mid-shutdown never targets a port that's going away.
+    clearActiveServer()
+    // Revert envsets FIRST. It is synchronous and safety-critical — it restores
+    // the user's `.env` from a (possibly production-pointing) envset. If a later
+    // step stalls, this must already be done so a forced exit can't strand
+    // `.env` on prod.
+    revertAllEnvsets()
+    traceShutdown('cleanup:reverted-envsets')
+    // Then the agent CLIs. They are spawned by flight stages, portify, coverage
+    // and the eval rewrite, and they were the one class of child nothing here
+    // tracked: on SIGTERM they were re-parented and kept running, so a claude
+    // agent went on editing the user's repo after the app it belonged to was
+    // gone. Next-boot reconcile repaired the flight/portify RECORDS and could
+    // never repair that. Before runs, because an agent mid-edit is the more
+    // invasive of the two.
+    await stopAgents()
+    traceShutdown('cleanup:stopped-agents')
+    await runStore.abortAllActiveOrStale()
+    traceShutdown('cleanup:aborted-runs')
+  }
+  let shutdownPromise: Promise<void> | null = null
+  const shutdown = (code: number): Promise<void> => {
+    // A parent wrapper and the terminal can deliver SIGTERM and SIGINT in the
+    // same turn. Share one teardown so the second signal cannot close the app
+    // and exit while the first cleanup is still stopping agents and runs.
+    if (shutdownPromise) return shutdownPromise
+    shutdownPromise = (async () => {
+      // Ctrl+C must always exit. If graceful teardown stalls — a service PTY that
+      // ignores SIGTERM, a socket that never drains in app.close() — this watchdog
+      // forces the process out anyway. The safety-critical envset revert runs at
+      // the top of cleanup(), so a forced exit can't leave `.env` on prod.
+      const watchdog = setTimeout(() => {
+        traceShutdown('watchdog:forced-exit')
+        log('Shutdown is taking longer than expected; forcing exit.')
+        exit(code)
+      }, opts.shutdownTimeoutMs ?? SHUTDOWN_TIMEOUT_MS)
+      watchdog.unref?.()
+      try {
+        await cleanup()
+        traceShutdown('shutdown:closing-app')
+        try { await app.close() } catch { /* already closed or never fully opened */ }
+        traceShutdown('shutdown:closed-app')
+      } finally {
+        clearTimeout(watchdog)
+        exit(code)
+      }
+    })()
+    return shutdownPromise
+  }
+
+  // A Project Settings port change persists the new port server-side, then asks
+  // us to relaunch the UI on it and stop this process. The new instance binds a
+  // different port, so both can coexist briefly; the browser redirects itself.
+  const relaunch = opts.relaunch ?? relaunchUiDetached
+  const schedule = opts.schedule ?? ((fn: () => void) => { setTimeout(fn, 150) })
+  triggerPortChange = (newPort: number): void => {
+    log(`Canary Lab port changed to ${newPort}. Relaunching…`)
+    schedule(() => {
+      try { relaunch(projectRoot) } finally { void shutdown(0) }
+    })
+  }
+
+  // Contributor demos have a wrapper that owns the terminal and sends the stop
+  // signal. Auto-confirm there so two processes never read the same TTY.
+  const confirmShutdown = opts.confirmShutdown
+    ?? (process.env.CANARY_LAB_PARENT_OWNS_SHUTDOWN === '1'
+      ? () => Promise.resolve(true)
+      : confirmShutdownFromStdin)
+  let sigintConfirmationOpen = false
+  process.on('SIGINT', () => {
+    if (sigintConfirmationOpen || cleanedUp) return
+    sigintConfirmationOpen = true
+    void (async () => {
+      const confirmed = await confirmShutdown()
+      sigintConfirmationOpen = false
+      if (confirmed) {
+        await shutdown(130)
+      } else {
+        log('Shutdown cancelled. Canary Lab is still running.')
+      }
+    })()
+  })
+  process.once('SIGTERM', () => { void shutdown(143) })
+  process.once('beforeExit', () => { void cleanup() })
+
+  try {
+    await app.listen({ port, host: '127.0.0.1' })
+  } catch (err) {
+    try { await app.close() } catch { /* already closed or never fully opened */ }
+    if (isAddressInUseError(err)) {
+      log(`Canary Lab port ${port} is already in use. Stop the existing Canary Lab server or free the port, then run \`npx canary-lab ui\` again.`)
+      requestExit(1)
+      return
+    }
+    throw err
+  }
+  // The server is now listening: advertise it so the single registered MCP
+  // bridge follows *this* port, even if the user switched it from the default.
+  recordActiveServer(projectRoot, port)
+  const url = `http://localhost:${port}`
+  log(`Open ${url}`)
+  log(`Project root: ${path.relative(process.cwd(), projectRoot) || '.'}`)
+  if (!noOpen) {
+    openBrowser(url)
+  }
+}
+
+// Spawn a fresh, detached `canary-lab ui` for the project. It reads the new
+// port from canary-lab.config.json and binds it; this process then exits.
+// Also the `flight` command's "boot the server if needed" primitive.
+export function relaunchUiDetached(projectRoot: string): void {
+  const cliPath = process.argv[1] ?? path.join(__dirname, 'cli.js')
+  const child = spawn(process.execPath, [cliPath, 'ui', '--no-open'], {
+    cwd: projectRoot,
+    detached: true,
+    env: { ...process.env, CANARY_LAB_PROJECT_ROOT: projectRoot },
+    stdio: 'ignore',
+  })
+  child.unref()
+}
+
+async function confirmShutdownFromStdin(): Promise<boolean> {
+  const input = process.stdin
+  const output = process.stdout
+  const prompt = '\nStop Canary Lab and kill active runs? Press Y to confirm, or any other key to cancel. '
+
+  if (!input.isTTY || !output.isTTY) {
+    return await new Promise((resolve) => {
+      const rl = readline.createInterface({ input, output })
+      rl.question('\nStop Canary Lab and kill active runs? [y/N] ', (answer) => {
+        rl.close()
+        resolve(/^y(es)?$/i.test(answer.trim()))
+      })
+    })
+  }
+
+  output.write(prompt)
+  readline.emitKeypressEvents(input)
+  const wasRaw = input.isRaw
+  input.setRawMode(true)
+  input.resume()
+
+  return await new Promise((resolve) => {
+    const finish = (confirmed: boolean): void => {
+      input.off('keypress', onKeypress)
+      input.setRawMode(wasRaw)
+      output.write('\n')
+      resolve(confirmed)
+    }
+    const onKeypress = (str: string): void => {
+      finish(str.toLowerCase() === 'y')
+    }
+    input.on('keypress', onKeypress)
+  })
+}
+
+export function parsePort(
+  argv: string[],
+  opts: Pick<UiCommandOptions, 'log' | 'exit'> = {},
+): 'removed-port-option' | undefined {
+  const log = opts.log ?? ((m: string) => console.log(m))
+  const exit = opts.exit ?? ((code: number) => { process.exit(code) })
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === '--port' || a.startsWith('--port=')) {
+      log('`canary-lab ui --port` was removed. Set the port in canary-lab.config.json or the Project Settings dialog.')
+      exit(1)
+      return 'removed-port-option'
+    }
+  }
+  return undefined
+}
+
+function isAddressInUseError(err: unknown): boolean {
+  return !!err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'EADDRINUSE'
+}

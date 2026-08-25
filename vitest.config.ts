@@ -1,4 +1,14 @@
+import path from 'node:path'
 import { defineConfig } from 'vitest/config'
+
+// Mirrors apps/web/vite.config.ts. `projects` entries are standalone configs, so a
+// root-level `resolve` would not reach them — each project declares its own. Only
+// apps/web uses these aliases; server/CLI code is emitted by tsc, which leaves
+// specifiers untouched, so an alias there would ship unresolvable to dist/.
+const webAliases = {
+  '@': path.resolve(import.meta.dirname, 'apps/web/src'),
+  '@shared': path.resolve(import.meta.dirname, 'shared'),
+}
 
 // Known, intentional test noise. Each entry collapses a class of expected
 // log lines (asserted-around or deliberately provoked by tests) into a single
@@ -35,13 +45,14 @@ export default defineConfig({
     },
     projects: [
       {
+        resolve: { alias: webAliases },
         test: {
           name: 'node',
           // Filters expected stderr noise that bypasses onConsoleLog (direct
           // process.stderr.write + unhandled-rejection dumps). See file header.
           setupFiles: ['./vitest.setup.ts'],
           include: [
-            'scripts/**/*.test.ts',
+            'apps/cli/**/*.test.ts',
             'shared/**/*.test.ts',
             'tools/**/*.test.ts',
             'apps/web-server/**/*.test.{ts,tsx}',
@@ -49,17 +60,23 @@ export default defineConfig({
           ],
           exclude: [
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
+            // Needs real localStorage, not a stub — see the dom project below.
+            'apps/web/src/features/flights/lib/group-open-state.test.ts',
+            'apps/web/src/shared/state/demo-launcher.test.ts',
           ],
           environment: 'node',
         },
       },
       {
+        resolve: { alias: webAliases },
         test: {
           name: 'dom',
           setupFiles: ['./vitest.setup.ts'],
           include: [
             'apps/web/**/*.test.tsx',
             'apps/web/src/shared/lib/workspace-view-state.test.ts',
+            'apps/web/src/features/flights/lib/group-open-state.test.ts',
+            'apps/web/src/shared/state/demo-launcher.test.ts',
           ],
           environment: 'happy-dom',
         },
@@ -69,77 +86,137 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: 'coverage',
-      // Coverage threshold scope is intentionally narrow: server runtime
-      // business logic + the web-server's own lib/routes layer + the
-      // frontend's pure API/util modules. Thin I/O glue (`server.ts`,
-      // `ws/`, the formatter scripts, the node-pty wrapper) and the CLI
-      // shims are excluded below.
+      // Coverage threshold scope: every module that decides something. The
+      // server's runtime business logic, its route handlers and registrars, the
+      // whole MCP layer (the external-agent API), the cross-cutting `shared/`
+      // tree, and the frontend's non-component modules.
+      //
+      // What is deliberately OUT, and why — each of these is a decision, not a
+      // backlog item:
+      //   • `apps/web/**/components`, `shared/ui`, `shared/shell` — 155 files of
+      //     markup. At 100% BRANCH coverage a component test stops asserting
+      //     behaviour and starts asserting markup. See the note further down.
+      //   • `server.ts` and the `ws/` transports — thin I/O glue whose behaviour
+      //     is proven through the routes and stores they hand off to.
+      //   • `apps/cli/**` shims, `tools/**` scripts, the node-pty wrapper.
+      // `tools/check-conventions.mjs` holds a file-count floor so this scope
+      // cannot shrink back without someone raising the floor on purpose.
       include: [
         // Web-server business logic + route handlers (feature `logic/` and
         // `routes/`) plus the web-server-local shared infra.
         'apps/web-server/src/features/**/logic/**/*.ts',
         'apps/web-server/src/features/**/routes/**/*.ts',
         'apps/web-server/src/shared/**/*.ts',
-        // Frontend pure modules. React components are excluded — only the
-        // API client, pure utilities, and benchmark state are gated.
+        // The MCP layer: the transport, the profile/tool tables, the shared
+        // result helpers, and every tool group. This is the whole external-agent
+        // surface — the tools ARE the product's API — and it was outside the gate
+        // only because it landed as one 2740-line `tools.ts` that nothing could
+        // unit-test. The tool-groups split fixed that, so it is gated now.
+        'apps/web-server/src/mcp/**/*.ts',
+        // Run-loop logic that happens to sit beside `index.ts` rather than under
+        // `logic/`: the route-deps factory, the stream wiring, the scheduler
+        // wrapper, the local-heal restart and the heal-agent choice. Same KIND of
+        // code as the gated `logic/` tree — enumerated rather than globbed so a
+        // future thin-glue file in this directory is a deliberate addition.
+        'apps/web-server/src/features/runs/pick-heal-agent.ts',
+        'apps/web-server/src/features/runs/restart-local-heal.ts',
+        'apps/web-server/src/features/runs/run-scheduling.ts',
+        'apps/web-server/src/features/runs/run-stream-wiring.ts',
+        'apps/web-server/src/features/runs/runs-route-deps.ts',
+        // Each feature's registrar — it wires that feature's routes and jobs onto
+        // Fastify from the ServerContext, so a mistake here takes the whole
+        // feature offline at boot. NOT re-export barrels.
+        'apps/web-server/src/features/*/index.ts',
+        // The DI context every registrar above reads.
+        'apps/web-server/src/server-context.ts',
+        // Cross-cutting root `shared/` tree: consumed by the CLI, the server and
+        // the web app alike, and published as `canary-lab/feature-support/*`.
+        //
+        // Enumerated per subtree rather than written as `shared/**/*.ts`, because
+        // these patterns are matched UNANCHORED against every file a test loads —
+        // and `*.ts` also matches `.tsx`. A bare `shared/**/*.ts` therefore also
+        // swallows `apps/web/src/shared/**`, dragging ~25 React components into
+        // the gate. None of the names below collide with a component directory.
+        'shared/cli-ui/**/*.ts',
+        'shared/configs/**/*.ts',
+        'shared/coverage/**/*.ts',
+        'shared/e2e-runner/**/*.ts',
+        'shared/flights/**/*.ts',
+        'shared/launcher/**/*.ts',
+        'shared/lib/**/*.ts',
+        'shared/runtime/**/*.ts',
+        'shared/code-display-format.ts',
+        'shared/feature-scaffold.ts',
+        'shared/portify-overlay.ts',
+        'shared/run-mode.ts',
+        'shared/run-state.ts',
+        'shared/verification.ts',
+        // Frontend non-component modules: the API client, the pure utilities,
+        // and every `state/` tree — the stores, the context providers and the
+        // hooks that own socket lifecycles, fetch orchestration and navigation.
+        // A provider is state with a JSX wrapper, not markup, so it is gated
+        // like the reducer beside it: its tests drive fake sockets and stubbed
+        // API calls and assert observable behaviour, never rendered output.
+        //
+        // What stays out is `features/*/components`, `shared/ui` and
+        // `shared/shell` — 155 files of actual markup. That exclusion is a
+        // decision, not a backlog item: reaching 100% BRANCH coverage there
+        // means a component test stops asserting behaviour and starts asserting
+        // markup, which is the kind of test that breaks on every restyle and
+        // catches nothing. The logic worth pinning gets extracted into the
+        // gated modules instead; that is what `features/*/lib`,
+        // `features/*/utils` and `features/*/state` are for. Revisit only if
+        // component bugs start reaching users, and then by extracting more
+        // logic rather than by lowering the threshold for one directory.
         'apps/web/src/shared/api/**/*.ts',
         'apps/web/src/shared/lib/**/*.ts',
+        // Sits directly in `shared/`, not in `shared/lib/`, which is the only
+        // reason it was never gated: it is the same kind of pure module, and the
+        // stable test ids it derives are what make one badge mean the same test
+        // in the Tests column, Playback and the Coverage Ledger.
+        'apps/web/src/shared/test-numbering.ts',
+        'apps/web/src/shared/state/**/*.ts',
+        // Enumerated per feature rather than as `**/state/**`: these patterns
+        // are matched UNANCHORED (see the note above), so the `apps/web/src/`
+        // prefix is what keeps them off the server's own trees.
         'apps/web/src/features/benchmark/state/**/*.ts',
+        'apps/web/src/features/evaluation/state/**/*.ts',
+        'apps/web/src/features/flights/state/**/*.ts',
+        'apps/web/src/features/portify/state/**/*.ts',
+        'apps/web/src/features/runs/state/**/*.ts',
+        'apps/web/src/features/wizard/state/**/*.ts',
+        // The per-feature equivalents of the two lines above. These are the same
+        // KIND of module — pure functions and socket/type wrappers, no JSX — and
+        // they were outside the gate only because the shared versions were moved
+        // first. Sixteen of the seventeen were already at 100% without being
+        // asked to be; enumerated per directory rather than as
+        // `features/*/{lib,utils,api}` because these patterns match UNANCHORED
+        // (see the note above), and a bare `**/utils/**` would also swallow the
+        // server's.
+        'apps/web/src/features/flights/lib/**/*.ts',
+        'apps/web/src/features/runs/utils/**/*.ts',
+        'apps/web/src/features/benchmark/api/**/*.ts',
+        'apps/web/src/features/evaluation/api/**/*.ts',
+        'apps/web/src/features/runs/api/**/*.ts',
         'apps/web/src/shared/shell/McpPromoContext.tsx',
         // 0.9.x → 0.10.x migration: pure detection + report rendering.
-        'scripts/upgrade-migration.ts',
-        'scripts/upgrade-known-prompts.ts',
+        'apps/cli/upgrade-migration.ts',
+        'apps/cli/upgrade-known-prompts.ts',
       ],
       exclude: [
         '**/*.test.{ts,tsx}',
         '**/*.d.ts',
         // Test-only fixtures (e.g. fake coverage agents injected via deps seams).
         '**/__fixtures__/**',
-        'apps/web-server/server.ts',
-        // WebSocket transport glue (thin I/O), incl. the shared workspace stream.
-        'apps/web-server/src/features/**/ws/**',
-        'apps/web-server/src/shared/ws/**',
-        // Integration-heavy run orchestration + the heaviest route handlers are
-        // covered by dedicated behavior tests, but under the strict 100% gate
-        // their defensive glue has branches that can't be exercised
-        // deterministically: subprocess spawn/error events, git operations,
-        // SIGINT/readline handlers, and fs/disk race guards. (The lighter
-        // routes/logic modules — features, tests-draft, config-ast, ast-extractor,
-        // auto-heal — ARE gated.) Only the runs orchestrator is excluded; the
-        // portify/benchmark orchestrators stay gated.
-        'apps/web-server/src/features/runs/logic/runtime/orchestrator.ts',
-        'apps/web-server/src/features/runs/logic/runtime/log-enrichment.ts',
-        'apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts',
-        'apps/web-server/src/features/config/routes/feature-config.ts',
-        'apps/web-server/src/features/runs/routes/runs.ts',
-        'apps/web-server/src/features/wizard/logic/wizard-agent-runner.ts',
-        'apps/web-server/src/features/evaluation/logic/test-review-export.ts',
-        'apps/web-server/src/shared/open-browser-spawner.ts',
-        // Pure re-export shim — the underlying implementation lives in
-        // shared/lib/dotenv-edit and is exercised through the routes that
-        // import this module.
-        'apps/web-server/src/features/config/logic/dotenv-edit.ts',
-        // The benchmark runner is the I/O wiring behind the (separately tested)
-        // BenchmarkOrchestrator/Race: it spawns the sabotage subprocess, creates
-        // git worktrees, and drives real RunOrchestrators per arm. Same category
-        // as runtime/orchestrator.ts above — exercised by behavior tests, not
-        // unit-coverable without a real git repo + agent CLIs + TTY.
-        'apps/web-server/src/features/benchmark/logic/runtime/runner.ts',
-        'apps/web-server/src/features/runs/logic/runtime/pty-spawner.ts',
-        'apps/web-server/src/features/**/logic/runtime/**/types.ts',
-        // Race-condition and defence-in-depth guards: the uncovered branches
-        // here are intentional closed-check / path-traversal / subprocess-timer
-        // guards that can't be exercised deterministically through public APIs.
-        'apps/web-server/src/features/agent-sessions/logic/agent-session-tailer.ts',
-        'apps/web-server/src/features/runs/logic/playwright-list.ts',
-        // Path-traversal hardening: the `outside-draft` return + the
-        // `endsWith(sep)` branch are intentional defence-in-depth that the
-        // earlier `..`/absolute-path rejection already makes unreachable.
-        // Keeping the redundant guard is the point; it can't be covered
-        // without removing the security check, so the file stays excluded.
-        'apps/web-server/src/features/wizard/logic/draft-file-resolver.ts',
-        // Type-only module (no executable code) — v8 reports it as 0/0/0/0.
-        'apps/web/src/shared/api/types.ts',
+        // No per-file exclusions. Every file the `include` patterns above reach
+        // is measured at 100/100/100/100 — the run-loop runtime modules, the
+        // config route groups, the env-switcher CLI, playwright-list and the
+        // shared workspace WebSocket stream all carry real tests rather than a
+        // line in this list. An exclusion here would keep the percentage at 100
+        // while covering less, so prefer deleting an unreachable arm or making
+        // the state unrepresentable in the type; `tools/check-conventions.mjs`
+        // holds a file-count floor (MIN_GATED_FILES) so scope can't silently
+        // shrink.
         'apps/web/dist/**',
         'dist/**',
         'templates/**',

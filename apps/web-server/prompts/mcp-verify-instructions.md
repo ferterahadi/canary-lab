@@ -1,0 +1,4 @@
+Canary Lab — verification profile. Manage saved Verify configs and run them: list_verification_configs, get/create/update_verification_config, then execute_verification and get_verification_result.
+
+- Local app ("verify a running app"): boot_services(feature) → poll get_run(bootRunId) until every manifest.services[] entry is status:"ready" → targetUrls from each service's healthUrl ORIGIN → execute_verification(feature, { targetUrls, playwrightEnvsetId: "local", bootRunId }) — bootRunId is required or the held boot session 409s as a colliding run; it also tears the boot down once verification starts. Then get_verification_result.
+- Deployed environment: use a saved config or ask the user for the target URLs. A config whose URLs contain "replace.invalid" is a shipped placeholder — never execute it; fill in real URLs (or use the local flow above) first.

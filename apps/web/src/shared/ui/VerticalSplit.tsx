@@ -7,12 +7,16 @@ interface Props {
   minBottomPx: number
   top: ReactNode
   bottom: ReactNode
+  /** When true, render a collapse/expand button on the handle that collapses
+   *  the TOP pane so the bottom pane fills the full height. */
+  collapsible?: boolean
 }
 
-export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBottomPx, top, bottom }: Props) {
+export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBottomPx, top, bottom, collapsible = false }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [topHeight, setTopHeight] = useState<number | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
   const dragStartRef = useRef<{ y: number; startTop: number } | null>(null)
 
   // Initialize from localStorage or default percent of container height after mount
@@ -70,13 +74,34 @@ export function VerticalSplit({ storageKey, defaultTopPercent, minTopPx, minBott
 
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col">
-      <div className="min-h-0 overflow-hidden" style={{ height: topHeight ?? '45%' }}>
+      <div
+        className="min-h-0 overflow-hidden transition-[height] duration-200"
+        style={{ height: collapsed ? 0 : (topHeight ?? '45%') }}
+      >
         {top}
       </div>
       <div
         className={`vertical-resize-handle${dragging ? ' dragging' : ''}`}
-        onMouseDown={onMouseDown}
-      />
+        style={collapsed ? { cursor: 'default' } : undefined}
+        onMouseDown={collapsed ? undefined : onMouseDown}
+      >
+        {collapsible && (
+          <button
+            type="button"
+            className="vertical-collapse-btn"
+            onClick={(e) => {
+              e.stopPropagation()
+              setCollapsed((c) => !c)
+            }}
+            aria-label={collapsed ? 'Expand panel' : 'Collapse panel'}
+            title={collapsed ? 'Expand' : 'Collapse'}
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {collapsed ? <polyline points="4 6 8 11 12 6" /> : <polyline points="4 10 8 5 12 10" />}
+            </svg>
+          </button>
+        )}
+      </div>
       <div className="min-h-0 flex-1 overflow-hidden">{bottom}</div>
     </div>
   )

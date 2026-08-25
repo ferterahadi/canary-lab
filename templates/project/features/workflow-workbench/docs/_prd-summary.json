@@ -1,0 +1,43 @@
+{
+  "requirements": [
+    {
+      "id": "R1",
+      "title": "Service health",
+      "text": "It should report that the workflow service is healthy.",
+      "kind": "functional",
+      "happyPath": "GET /health returns 200 with status ok.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "15ecf461d0ea9b82d2cab8a25e59594061ce4c3d224858c9edd8019fdaac17f6",
+      "sourceRange": {
+        "start": 178,
+        "end": 232
+      }
+    },
+    {
+      "id": "R2",
+      "title": "Personalized greeting",
+      "text": "It should greet the name supplied by the caller.",
+      "kind": "functional",
+      "happyPath": "GET /greeting?name=Ada returns 200 with Hello, Ada!.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "c6444fd35bf753f8104e63254747cb8ce994fb62b1912b1fa2e3a8ed165f3026",
+      "sourceRange": {
+        "start": 345,
+        "end": 393
+      }
+    }
+  ],
+  "docsHash": "d4da157ad4fe3296a109a4c4bdb4f6b1147bd6ddaa0b2bdcfb2926933dbeb658",
+  "sourceDocs": [
+    "workflow-workbench-prd.md"
+  ],
+  "generatedAt": "2026-08-18T00:00:00.000Z",
+  "docFingerprints": {
+    "workflow-workbench-prd.md": "d4da157ad4fe3296a109a4c4bdb4f6b1147bd6ddaa0b2bdcfb2926933dbeb658"
+  },
+  "requirementsHash": "04df422283165b854dc302a6b900db2d13f2817fd51366720917ffedb00bb648"
+}

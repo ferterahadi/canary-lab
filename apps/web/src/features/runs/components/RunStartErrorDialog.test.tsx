@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError } from '../../../shared/api/client'
+import { ApiError } from '@/shared/api/client'
 import { RunStartErrorDialog, describeRunStartError } from './RunStartErrorDialog'
 
 ;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -85,7 +85,7 @@ describe('RunStartErrorDialog', () => {
   })
 })
 
-// The real-world case: one repo (oddle-merchant-pass) on `master`, feature
+// The real-world case: one repo (acme-merchant-pass) on `master`, feature
 // configured for `development`.
 function branchMismatchError(repos?: Array<Record<string, unknown>>) {
   return new ApiError(409, {
@@ -93,7 +93,7 @@ function branchMismatchError(repos?: Array<Record<string, unknown>>) {
     feature: 'checkout',
     error: 'Repo branch check failed:\n...',
     repos: repos ?? [
-      { name: 'oddle-merchant-pass', path: '/a', expected: 'development', current: 'master', detached: false, isGitRepo: true },
+      { name: 'acme-merchant-pass', path: '/a', expected: 'development', current: 'master', detached: false, isGitRepo: true },
     ],
   })
 }
@@ -109,7 +109,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
     // Both branches named, the why explained, the repo identified.
     expect(container.textContent).toContain('development')
     expect(container.textContent).toContain('master')
-    expect(container.textContent).toContain('oddle-merchant-pass')
+    expect(container.textContent).toContain('acme-merchant-pass')
     expect(container.textContent).toContain('Recommended')
     // Not the raw exception string.
     expect(container.textContent).not.toContain('Repo branch check failed')
@@ -118,7 +118,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
   it('the Switch option checks out the feature’s branch', async () => {
     const onSwitchBranches = vi.fn().mockResolvedValue(undefined)
     await render({ error: branchMismatchError(), onSwitchBranches })
-    click(buttonContaining('Switch oddle-merchant-pass'))
+    click(buttonContaining('Switch acme-merchant-pass'))
     await flush()
     expect(onSwitchBranches).toHaveBeenCalledOnce()
   })
@@ -134,7 +134,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
   it('expands to a per-repo list when repos diverge, without a from→to diff', async () => {
     await render({
       error: branchMismatchError([
-        { name: 'oddle-merchant-pass', path: '/a', expected: 'development', current: 'master', detached: false, isGitRepo: true },
+        { name: 'acme-merchant-pass', path: '/a', expected: 'development', current: 'master', detached: false, isGitRepo: true },
         { name: 'unified-dashboard', path: '/b', expected: 'development', current: 'hotfix/x', detached: false, isGitRepo: true },
       ]),
       onSwitchBranches: vi.fn(),
@@ -144,7 +144,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
     expect(container.textContent).toContain('development')
     expect(container.textContent).toContain('Switch 2 repos')
     // Divergent current branches expand into a per-repo list on the Pin card.
-    expect(container.textContent).toContain('oddle-merchant-pass')
+    expect(container.textContent).toContain('acme-merchant-pass')
     expect(container.textContent).toContain('unified-dashboard')
     expect(container.textContent).toContain('master')
     expect(container.textContent).toContain('hotfix/x')
@@ -155,7 +155,7 @@ describe('RunStartErrorDialog — branch mismatch', () => {
   it('surfaces an action failure inline and keeps the dialog open', async () => {
     const onSwitchBranches = vi.fn().mockRejectedValue(new Error('git checkout failed'))
     const { onClose } = await render({ error: branchMismatchError(), onSwitchBranches })
-    click(buttonContaining('Switch oddle-merchant-pass'))
+    click(buttonContaining('Switch acme-merchant-pass'))
     await flush()
     expect(container.textContent).toContain('git checkout failed')
     expect(onClose).not.toHaveBeenCalled()

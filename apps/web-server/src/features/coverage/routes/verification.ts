@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import type { OrchestratorLike, RunStore } from '../../runs/logic/run-store'
 import {
   createVerificationConfig,
@@ -8,15 +8,23 @@ import {
   listVerificationConfigs,
   updateVerificationConfig,
   type ResolveVerificationInput,
-} from '../../coverage/logic/verification'
+} from '../logic/verification'
 import { isActiveRunStatus } from '../../../../../../shared/run-state'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface VerificationRouteDeps {
   featuresDir: string
   store: RunStore
-  startVerification(feature: string, input: ResolveVerificationInput): Promise<OrchestratorLike>
+  startVerification(
+    feature: string,
+    input: ResolveVerificationInput,
+    options?: { cleanupBootRunId: string },
+  ): Promise<OrchestratorLike>
   workspaceEvents?: WorkspaceEventPublisher
+  /** Getting Started demo tracking — an execute carrying gettingStartedSource
+   *  claims the 'verify' card. Absent in tests → no tracking. */
+  gettingStarted?: GettingStartedSessionStore
 }
 
 export async function verificationRoutes(app: FastifyInstance, deps: VerificationRouteDeps): Promise<void> {
@@ -75,9 +83,7 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         return { error: parsed.error }
       }
       try {
-        const created = createVerificationConfig(feature, parsed)
-        // Refresh an open Verify dialog on other clients without a reopen.
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: feature.name })
+        const created = createVerificationConfig(feature, parsed, deps.workspaceEvents)
         reply.code(201)
         return created
       } catch (err) {
@@ -101,12 +107,11 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         return { error: parsed.error }
       }
       try {
-        const config = updateVerificationConfig(feature, req.params.id, parsed)
+        const config = updateVerificationConfig(feature, req.params.id, parsed, deps.workspaceEvents)
         if (!config) {
           reply.code(404)
           return { error: 'verification config not found' }
         }
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'verification-config-changed', feature: feature.name })
         return config
       } catch (err) {
         reply.code(statusCodeOf(err))
@@ -123,22 +128,49 @@ export async function verificationRoutes(app: FastifyInstance, deps: Verificatio
         reply.code(404)
         return { error: 'feature not found' }
       }
-      const active = deps.store.list().find((run) => isActiveRunStatus(run.status))
-      if (active) {
-        reply.code(409)
-        return { error: `Another execution is ${active.status} (${active.feature}). Stop it first.` }
-      }
       const parsed = parseExecuteBody(req.body)
       if ('error' in parsed) {
         reply.code(400)
         return { error: parsed.error }
       }
+      const { bootRunId, gettingStartedSource, ...input } = parsed
+      if (bootRunId) {
+        const boot = deps.store.get(bootRunId)?.manifest
+        if (!boot || boot.executionType !== 'boot' || boot.feature !== feature.name || !isActiveRunStatus(boot.status)) {
+          reply.code(400)
+          return { error: 'bootRunId must name an active boot session for this feature' }
+        }
+      }
+      const active = deps.store.list().find((run) =>
+        run.runId !== bootRunId && isActiveRunStatus(run.status),
+      )
+      if (active) {
+        reply.code(409)
+        return { error: `Another execution is ${active.status} (${active.feature}). Stop it first.` }
+      }
+      // A verify demo's work record IS its run, so the claim targets kind 'run'.
+      let gettingStartedSession: string | null = null
+      if (gettingStartedSource && deps.gettingStarted) {
+        try {
+          gettingStartedSession = deps.gettingStarted.claim('verify', gettingStartedSource).sessionId
+        } catch (err) {
+          if (!(err instanceof GettingStartedBusyError)) throw err
+          reply.code(409)
+          return { type: err.type, error: err.message, active: err.active }
+        }
+      }
       try {
-        const orch = await deps.startVerification(feature.name, parsed)
+        const orch = bootRunId
+          ? await deps.startVerification(feature.name, input, { cleanupBootRunId: bootRunId })
+          : await deps.startVerification(feature.name, input)
         deps.store.registry.set(orch.runId, orch)
+        if (gettingStartedSession) {
+          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'run', id: orch.runId })
+        }
         reply.code(201)
         return { runId: orch.runId, executionType: 'verify' }
       } catch (err) {
+        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         reply.code(statusCodeOf(err))
         return { error: errorMessageOf(err) }
       }
@@ -156,6 +188,8 @@ interface ExecuteVerificationBody {
   configId?: unknown
   targetUrls?: unknown
   playwrightEnvsetId?: unknown
+  bootRunId?: unknown
+  gettingStartedSource?: unknown
 }
 
 function findFeature(featuresDir: string, name: string) {
@@ -185,10 +219,22 @@ function parseExecuteBody(body: ExecuteVerificationBody) {
   if (body.targetUrls !== undefined && !isStringRecord(body.targetUrls)) {
     return { error: 'targetUrls must be a string map' } as const
   }
+  if (body.bootRunId !== undefined && typeof body.bootRunId !== 'string') {
+    return { error: 'bootRunId must be a string' } as const
+  }
+  const gettingStartedSource: GettingStartedOwner | undefined =
+    body.gettingStartedSource === 'internal' || body.gettingStartedSource === 'external'
+      ? body.gettingStartedSource
+      : undefined
+  if (body.gettingStartedSource !== undefined && !gettingStartedSource) {
+    return { error: "gettingStartedSource must be 'internal' or 'external'" } as const
+  }
   return {
     ...(body.configId ? { configId: body.configId } : {}),
     ...(body.playwrightEnvsetId ? { playwrightEnvsetId: body.playwrightEnvsetId } : {}),
     ...(isStringRecord(body.targetUrls) ? { targetUrls: body.targetUrls } : {}),
+    ...(body.bootRunId ? { bootRunId: body.bootRunId } : {}),
+    ...(gettingStartedSource ? { gettingStartedSource } : {}),
   }
 }
 

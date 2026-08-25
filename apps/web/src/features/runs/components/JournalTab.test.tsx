@@ -2,13 +2,12 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { JournalTab } from './JournalTab'
-import type { JournalEntry } from '../../../shared/api/types'
+import type { JournalEntry } from '@/shared/api/types'
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
-vi.mock('../../../shared/api/client', () => ({
+vi.mock('@/shared/api/client', () => ({
   listJournal: vi.fn(),
-  deleteJournalEntry: vi.fn(),
 }))
 
 let container: HTMLDivElement
@@ -28,7 +27,7 @@ afterEach(() => {
 
 describe('JournalTab live refresh', () => {
   it('refetches the selected run journal when refreshKey changes', async () => {
-    const api = await import('../../../shared/api/client')
+    const api = await import('@/shared/api/client')
     vi.mocked(api.listJournal)
       .mockResolvedValueOnce([entry(1, 'first')])
       .mockResolvedValueOnce([entry(2, 'second')])
@@ -48,6 +47,47 @@ describe('JournalTab live refresh', () => {
     expect(api.listJournal).toHaveBeenCalledTimes(2)
     expect(api.listJournal).toHaveBeenLastCalledWith({ feature: 'checkout', run: 'run-1' })
     expect(container.textContent).toContain('second')
+  })
+})
+
+describe('JournalTab empty state', () => {
+  it('reads an empty journal on a run that never healed as "nothing to repair"', async () => {
+    const api = await import('@/shared/api/client')
+    vi.mocked(api.listJournal).mockResolvedValue([])
+
+    await act(async () => {
+      root.render(<JournalTab feature="checkout" runId="run-1" healCycles={0} />)
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain('Nothing to repair')
+    expect(container.textContent).not.toContain('No journal entries for this run')
+  })
+
+  it('says the agent wrote nothing when repair cycles did happen', async () => {
+    const api = await import('@/shared/api/client')
+    vi.mocked(api.listJournal).mockResolvedValue([])
+
+    await act(async () => {
+      root.render(<JournalTab feature="checkout" runId="run-1" healCycles={2} />)
+      await Promise.resolve()
+    })
+
+    expect(container.textContent).toContain('No journal entries were written')
+  })
+
+  it('renders entries without a redundant pane title above them', async () => {
+    const api = await import('@/shared/api/client')
+    vi.mocked(api.listJournal).mockResolvedValue([entry(1, 'first')])
+
+    await act(async () => {
+      root.render(<JournalTab feature="checkout" runId="run-1" />)
+      await Promise.resolve()
+    })
+
+    // The `Journal` tab above already names this pane.
+    expect(container.querySelector('.cl-panel-header')).toBeNull()
+    expect(container.textContent).toContain('first')
   })
 })
 

@@ -1,4 +1,4 @@
-import { connectReconnectingSocket, defaultWsBase } from '../../../shared/api/reconnecting-socket'
+import { connectReconnectingSocket, defaultWsBase } from '@/shared/api/reconnecting-socket'
 
 export interface EvaluationExportSocketMessage {
   type: 'data' | 'exit' | 'error'

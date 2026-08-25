@@ -1,30 +1,35 @@
-import { StatusDot, type StatusDotState } from '../../features/config/components/atoms'
+import { capitalizeFirst } from '@/shared/lib/format'
+import { StatusDot, type StatusDotState } from '@/shared/ui/atoms'
+import { Chip } from '../ui/StatusChip'
 
-// Compact pill: green = WS open, amber pulse = reconnecting/connecting,
-// rose = disconnected. Sits left of the MCP/services chips so the
-// user sees data freshness at a glance without cluttering the bar.
+// Compact framed chip: green dot = WS open, amber pulse = reconnecting/
+// connecting, rose = disconnected. Sits left of the MCP badge and wears the
+// same neutral frame (border + px-2 py-0.5 + 11px) so the two read as one
+// matched pair in the bar — the dot carries the state, not the text colour.
 export function ConnectionBadge({
   state,
 }: {
   state: 'connecting' | 'live' | 'reconnecting' | 'disconnected'
 }) {
-  const palette: Record<typeof state, { dot: StatusDotState; text: string; label: string; pulse: boolean }> = {
-    live:         { dot: 'success', text: 'text-emerald-700/90 dark:text-emerald-300/90', label: 'live',         pulse: false },
-    connecting:   { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'connecting',   pulse: true },
-    reconnecting: { dot: 'warning', text: 'text-amber-700/90 dark:text-amber-300/90',     label: 'reconnecting', pulse: true },
-    disconnected: { dot: 'failed',  text: 'text-rose-700/90 dark:text-rose-300/90',       label: 'offline',      pulse: false },
+  const palette: Record<typeof state, { dot: StatusDotState; label: string; pulse: boolean }> = {
+    live:         { dot: 'success', label: 'live',         pulse: false },
+    connecting:   { dot: 'warning', label: 'connecting',   pulse: true },
+    reconnecting: { dot: 'warning', label: 'reconnecting', pulse: true },
+    disconnected: { dot: 'failed',  label: 'offline',      pulse: false },
   }
   const p = palette[state]
   return (
-    <div
-      data-testid="runs-connection-badge"
-      data-state={state}
-      className={`flex shrink-0 items-center gap-1.5 ${p.text}`}
-      style={{ fontSize: 11.5, fontWeight: 500 }}
-      title={`Runs stream: ${p.label}`}
-    >
-      <StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />
-      <span>{p.label}</span>
+    // flex, not a bare block: an inline-flex Chip inside a block wrapper sits on
+    // a text baseline, so its box lands ~1px below the bar's centre line.
+    <div className="flex shrink-0 items-center" data-testid="runs-connection-badge" data-state={state} title={`Runs stream: ${p.label}`}>
+      <Chip
+        chrome="border"
+        labelColor="var(--text-secondary)"
+        icon={<StatusDot state={p.dot} pulse={p.pulse} halo={p.pulse} />}
+        label={capitalizeFirst(p.label)}
+        fontSize={11}
+        fontWeight={500}
+      />
     </div>
   )
 }

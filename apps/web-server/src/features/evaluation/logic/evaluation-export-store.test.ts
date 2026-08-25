@@ -19,6 +19,7 @@ import {
   writeEvaluationExportFilesZip,
   evalTaskStatusOf,
   type EvaluationExportTaskRecord,
+  renameEvaluationExportFeature,
 } from './evaluation-export-store'
 
 let tmpDir: string
@@ -115,6 +116,13 @@ describe('evaluation-export-store', () => {
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', error: 7 },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', sessionRef: { agent: 'gpt', sessionId: 'x' } },
       { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', sessionRef: { agent: 'claude', sessionId: 7 } },
+      // `archive` is what the reports list reads for the size column, and it is
+      // ALSO what withArchiveSize backfills when absent — so a half-written one
+      // has to fail the whole record rather than survive as a partial figure.
+      // A non-object first (the shape check), then a wrong member type.
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', archive: 4096 },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', archive: null },
+      { taskId: ID, runId: 'r', feature: 'f', mode: 'raw', status: 'running', createdAt: 'a', updatedAt: 'b', downloadReady: false, archiveBase: 'x', archive: { bytes: '4096', videos: 0, assets: 0 } },
     ]
     for (const v of variants) {
       fs.writeFileSync(p.taskJson, JSON.stringify(v), 'utf8')
@@ -233,5 +241,24 @@ describe('evaluation-export-store', () => {
     fs.writeFileSync(indexPath, JSON.stringify(legacy))
     expect(deleteEvaluationExportTask(tmpDir, ID)).toBe(true)
     expect(listEvaluationExportTasks(tmpDir)).toHaveLength(0)
+  })
+
+  it('renameEvaluationExportFeature re-homes past exports and reports the count', () => {
+    // A suite rename must keep export history attached to the suite that
+    // produced it rather than orphaning it behind the old name.
+    createEvaluationExportTask(tmpDir, makeRecord({ taskId: 'eval-task-t1', feature: 'old_name' }))
+    createEvaluationExportTask(tmpDir, makeRecord({ taskId: 'eval-task-t2', feature: 'old_name' }))
+    createEvaluationExportTask(tmpDir, makeRecord({ taskId: 'eval-task-t3', feature: 'other' }))
+
+    expect(renameEvaluationExportFeature(tmpDir, 'old_name', 'new_name')).toBe(2)
+    expect(readEvaluationExportTask(tmpDir, 'eval-task-t1')?.feature).toBe('new_name')
+    expect(readEvaluationExportTask(tmpDir, 'eval-task-t2')?.feature).toBe('new_name')
+    expect(readEvaluationExportTask(tmpDir, 'eval-task-t3')?.feature).toBe('other')
+  })
+
+  it('renameEvaluationExportFeature is a no-op when nothing matches', () => {
+    createEvaluationExportTask(tmpDir, makeRecord({ taskId: 'eval-task-t1', feature: 'kept' }))
+    expect(renameEvaluationExportFeature(tmpDir, 'absent', 'new_name')).toBe(0)
+    expect(readEvaluationExportTask(tmpDir, 'eval-task-t1')?.feature).toBe('kept')
   })
 })

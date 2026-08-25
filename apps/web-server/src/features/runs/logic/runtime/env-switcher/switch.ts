@@ -252,9 +252,6 @@ export async function main(args = process.argv.slice(2)) {
   });
 }
 
-if (require.main === module) {
-  main().catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
-}
+// No `require.main === module` boot shim here on purpose: this module is only
+// ever imported. The env-switch CLI entry point is `apps/cli/env.ts`, which
+// imports `main` above and arms it with the shared `runAsScript` helper.

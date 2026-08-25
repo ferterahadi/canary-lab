@@ -9,7 +9,7 @@ import type { BenchmarkManifest } from '../api/benchmark-types'
 function m(over: Partial<BenchmarkManifest> = {}): BenchmarkManifest {
   return {
     benchmarkId: 'b1',
-    feature: 'example_todo_api',
+    feature: 'demo_inventory',
     skill: 'broken-delete-contract',
     level: 'med',
     iterations: 2,
@@ -33,7 +33,7 @@ describe('benchmarkReducer', () => {
       details: { b1: m() },
     })
     expect(s.benchmarks).toHaveLength(1)
-    expect(s.details.b1.feature).toBe('example_todo_api')
+    expect(s.details.b1.feature).toBe('demo_inventory')
   })
 
   it('update upserts the detail and derives a newest-first index entry', () => {

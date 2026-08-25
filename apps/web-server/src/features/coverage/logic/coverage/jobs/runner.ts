@@ -5,7 +5,7 @@ import {
   type RegeneratePrdSummaryResult,
   type RunCoverageEngineResult,
 } from '../service'
-import type { AnnotateAdapter } from '../../../../coverage/logic/coverage/annotate-engine'
+import type { AnnotateAdapter } from '../annotate-engine'
 import type { SummarizeAdapter } from '../prd-summary'
 import type { CoverageJobStore } from './store'
 import type { CoverageJobKind, CoverageJobManifest } from './types'
@@ -93,12 +93,10 @@ export function startCoverageJob(args: StartCoverageJobArgs, deps: CoverageJobRu
   const finishOk = (result: CoverageJobManifest['result'], extra?: Partial<CoverageJobManifest>) => {
     manifest = { ...manifest, ...extra, status: 'done', endedAt: now(), result }
     store.save(manifest)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
   }
   const finishErr = (err: unknown) => {
     manifest = { ...manifest, status: 'failed', endedAt: now(), error: err instanceof Error ? err.message : String(err) }
     store.save(manifest)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: args.feature })
   }
 
   const completion = (async () => {

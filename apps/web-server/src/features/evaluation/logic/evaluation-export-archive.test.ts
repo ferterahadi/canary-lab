@@ -103,6 +103,11 @@ describe('buildEvaluationExportArchive', () => {
     expect(entries.map((entry) => entry.filename)).toEqual(['evaluation.html', 'run-id.mp4'])
     expect(entries.find((entry) => entry.filename === 'run-id.mp4')?.data.toString('utf8')).toBe('kept-video')
     expect(entries.find((entry) => entry.filename === 'evaluation.html')?.data.toString('utf8')).toContain('run-id.mp4')
+    // Contents count what LANDED in the zip, not what the run declared: three
+    // video artifacts were offered and only the retained one resolved, and the
+    // trace is not an archive member at all. Reporting 3 videos here would
+    // promise the reader files the download does not contain.
+    expect(built.contents).toEqual({ bytes: built.zip.length, videos: 1, assets: 0 })
   })
 })
 

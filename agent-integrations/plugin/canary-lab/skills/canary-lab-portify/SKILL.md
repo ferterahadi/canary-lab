@@ -6,27 +6,58 @@ type: skill
 
 # Canary Lab — Portify (Concurrency-Readiness)
 
+## MCP Invocation
+
+Setup and the plugin expose one public Canary Lab MCP tool: `exec` (usually
+rendered as `mcp__Canary_Lab__exec`). Every
+Canary Lab tool name below is the exact `command` value, not a separate public
+tool. For a feature-scoped command, replace both placeholders in this shape:
+
+```json
+{"command":"<exact_tool_name>","arguments":{"feature":"<feature_name>"}}
+```
+
+This is the envelope shape, not every command's complete schema. Add the
+fields that command declares inside `arguments`; call `describe_tool` when a
+field is uncertain.
+
+Never invent a wrapper verb such as `learn` or `call`, embed JSON in a command
+string, or turn arguments into flags. Keep fields such as `confirm: true` inside
+`arguments`. Use `list_tools`, `search_tools`, or `describe_tool` as the
+`command` when discovery is needed. A deliberately selected focused or `full`
+profile still exposes atomic tools for debugging; the setup-installed path is
+`compact` + `exec`.
+
 This client edits the listeners in a scratch worktree; Canary Lab verifies
 with a concurrent double-boot and owns the verdict. These tools arrive via
 the Canary Lab MCP server. If this client is already connected (the plugin
-connects with `full`), skip this step. To configure a connection manually:
-`npx canary-lab mcp --profile portify` (the composite `full` profile carries
-the same tools). Portify makes a feature's ports injectable so it can boot
+connects with `compact`), skip this step. To configure the same connection
+manually: `npx canary-lab mcp --profile compact`. Portify makes a feature's ports injectable so it can boot
 concurrently (benchmark arms / parallel runs). The double-boot verify is the
 success predicate — Canary Lab owns the verdict.
 
+## Arguments
+
+An invocation argument (`/canary-lab-portify <suite>` — the Getting Started
+guide's "Enable Parallel Runs" card emits exactly this shape) is a suite
+(feature) name in the connected workspace — start the loop on it directly.
+The demo's "start two copies / confirm both work" step IS the double-boot
+Canary runs on submit — do not try to boot two copies yourself (those tools
+are not in this profile); your job is the edits, then relaying the proof.
+
 ## Workspace Bootstrap
 
-1. Read `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`); one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`.
-2. Check `/mcp/health` on the UI's port: read `port` from the workspace's `canary-lab.config.json` (fallback `7421`), then `curl -s http://127.0.0.1:<port>/mcp/health` — success is a JSON response. Confirm `projectRoot` matches the selected workspace.
+1. Find the LIVE server first: read `~/.canary-lab/active-servers.json`, which records `projectRoot`, `port` and `pid` for every UI that registered. A stopped server's entry LINGERS — the file is only rewritten when the next server registers — so an entry is a candidate, not proof: the health check below is what confirms it. One entry → that is your server and its `port`. Several → take the one whose `projectRoot` is the workspace the user means. None → fall back to `~/.canary-lab/workspaces.json` (Windows: `%USERPROFILE%\.canary-lab\workspaces.json`): one workspace → use it, several → ask which, none → ask the user to run `npx canary-lab setup`. Do NOT start from a guessed port.
+2. Then CONFIRM it is the right server: `curl -s http://127.0.0.1:<port>/mcp/health` and check that `projectRoot` is the workspace you intended. A healthy response does **not** settle the question on its own — a stale UI left behind by a demo or a tarball smoke test answers a port just as convincingly as the right one, and that is how a flight ends up running in someone's throwaway workspace. `projectRoot` matches what you intended → continue and tell the user which workspace. It names a DIFFERENT workspace → this is the wrong server; go back to step 1 rather than adopting it. It is under a temp directory (`/tmp`, `/private/var/folders`, `%TEMP%`) → never auto-select it; those are throwaway demo workspaces, so use one only when the user names it explicitly. Only when no live server serves the workspace you want does one need starting.
 3. If the health check fails, start `npx canary-lab ui` from the workspace in a visible long-running terminal; if this client cannot run long-lived commands, ask the user to run `npx canary-lab ui` from the workspace and confirm when it's up.
+4. A healthy `/mcp/health` means the server is live. On the setup-installed `compact` profile, atomic names such as `get_feature_coverage` are deliberately absent from `tools/list`; only `exec` is public. Call `exec` with `{"command":"list_tools","arguments":{}}` before concluding the connection is missing. Only an unknown-tool error for `exec` means this session is not connected — ask the user to run `npx canary-lab setup --force` and reconnect/restart the client, then retry. Never drive `/mcp` with a hand-written HTTP/JSON-RPC client (curl included; the health check above is the only direct HTTP use): a custom client bypasses client detection and reconnect handling.
 
 ## Portify Loop
 
-1. Port-ify it YOURSELF (no local agent): `start_external_portify(feature)` sets up scratch worktree(s) and returns `targets[]` (edit paths) + `configPath` + instructions; edit the listeners IN PLACE to read an injected port, declare the matching `ports` slots in the config, then `submit_external_portify(workflowId)` — Canary boots the stack twice concurrently to verify. After submit, poll `get_portify(workflowId)` every ~15s until status is `ready-to-save` (→ call `save_portify(workflowId, confirm: true)`) or `editing` (→ read `verification.failureDetail`, fix the worktree, and `submit_external_portify` again — re-edit + re-submit is the revision loop, unbounded). `get_portify(workflowId)` also re-reads status + the verification result on demand (diff omitted by default; `includeDiff: true` inlines it). `cancel_portify(workflowId, confirm: true)` discards it.
-2. One workflow PER FEATURE (a second start on the same feature is a 409); DIFFERENT features port-ify concurrently up to a resource cap, so to portify several features at once, if your client supports subagents, fan out a subagent per feature — otherwise portify features one at a time. At capacity `start_external_portify` returns a 429 — poll `get_portify` on an in-flight workflow (or `list_portify_status`) until one saves/cancels, then retry. The GUI shows each live as an external session; `list_portify_status` shows which features are portified. Within ONE feature that has multiple repos, FAN OUT the per-repo edits across subagents, then submit once.
+1. Port-ify it YOURSELF (no local agent): `start_external_portify(feature)` sets up scratch worktree(s) and returns `targets[]` (edit paths) + `configPath` + instructions; edit the listeners IN PLACE to read an injected port, declare the matching `ports` slots in the config, then `submit_external_portify(workflowId)` — Canary boots the stack twice concurrently to verify. After submit, poll `get_portify(workflowId)` every ~15s until status is `ready-to-save` or `editing`. On `editing` the double-boot FAILED and `get_portify` carries a `prompt` — the retry playbook — next to `verification.failureDetail`: follow it (a `baseline-boot-failed` verdict means the app's own SOLO boot is broken, so ports are NOT the blocker; `concurrency-failure` means some listener still binds a hardcoded port — very often a NON-HTTP one: gRPC, WebSocket, raw TCP, a metrics/admin port — or the two boots race on a shared build dir), fix the worktree, and `submit_external_portify` again; re-edit + re-submit is unbounded. On `ready-to-save` call `save_portify(workflowId, confirm: true)` — UNLESS the human wants a CHANGE first, in which case call `revise_external_portify(workflowId, feedback)`: it reopens the SAME verified worktree at `editing` and returns a `prompt` restating the constraints, so your prior edits survive. Never `cancel_portify` to make a change — that discards verified work and you start from scratch. `get_portify(workflowId)` also re-reads status + the verification result on demand (diff omitted by default; `includeDiff: true` inlines it). `cancel_portify(workflowId, confirm: true)` discards it. **After saving, relay the proof**: the `verification` on `get_portify` records the concurrent double-boot that passed — tell the user both copies booted concurrently (that is the "confirm both work" evidence), not just that an overlay was saved.
+2. One workflow PER FEATURE (a second start on the same feature is a 409). A 409 saying a verified review is **"parked awaiting save/cancel"** means an earlier workflow (a GUI session, or one that survived a server restart) already verified this feature and is waiting for its save/cancel decision — the error names its `workflowId`: `get_portify` it, show the user its diff/verification, and ask whether to `save_portify` (keep the verified work) or `cancel_portify` (discard and start over); never start a second workflow around it. DIFFERENT features port-ify concurrently up to a resource cap, so to portify several features at once, if your client supports subagents, fan out a subagent per feature — otherwise portify features one at a time. At capacity `start_external_portify` returns a 429 — poll `get_portify` on an in-flight workflow (or `list_portify_status`) until one saves/cancels, then retry. The GUI shows each live on the suite's Flight page (Parallel readiness stage) — that view is read-only while this client drives; the user monitors there, you act here. `list_portify_status` shows which features are portified. If `start_external_portify` returns `type: "getting_started_busy"`, a Getting Started demo already owns the workspace — follow the active target it returns; do not start another workflow. Within ONE feature that has multiple repos, FAN OUT the per-repo edits: **one subagent per repo in a single parallel round** (up to 5 at once), each editing only its own worktree path. Then do the SHARED files yourself, once — the feature config and the envsets are single files every repo's slots land in, so concurrent writers clobber each other — and submit once. Treat a subagent that reports nothing as unfinished, not as a repo with no listeners: the double-boot catches a missed listener only when it binds eagerly and dies loudly on the clash.
 3. Already env-driven? If the repo ALREADY reads injected ports (e.g. it was portified for another feature, or the listeners are committed env-driven), no source edit is needed — just declare the matching `ports` slots in the config and `submit_external_portify`. The double-boot still verifies the concurrent boot, and save records an EMPTY overlay (a no-op at run time). An empty diff is only rejected when the boot also fails (the listeners genuinely don't read the injected ports yet).
-4. Borrowed start: if ANOTHER feature already saved an overlay for the same app, Canary pre-applies that patch into your scratch worktree at setup (the returned instructions say so). Review the existing edits rather than rewriting from scratch — usually you only add this feature's `ports` slots — then submit. The borrowed lines are captured into THIS feature's own overlay, so it stays self-contained.
+4. Borrowed start: if ANOTHER feature already saved an overlay for the same app, Canary pre-applies that patch into your scratch worktree at setup, and the returned `instructions` list the exact `ports` slots that feature declared. START from that list rather than re-deriving it from the diff — then check it against the start command(s) THIS feature boots and add a slot for any listener they expose that the list misses (a differently-booted stack can bind a port the other feature never did). If this feature ALREADY declares every listed slot there is nothing to edit at all: Canary starts the double-boot itself, the instructions say so, and you POLL `get_portify` instead of submitting (submit 409s while that boot is in flight). Otherwise review the edits, declare the slots, then submit. The borrowed lines are captured into THIS feature's own overlay, so it stays self-contained.
 5. Saving captures the verified edits as an EPHEMERAL OVERLAY under `features/<feature>/portify/` — nothing committed or merged, so the product repo stays pristine; each run applies the overlay into a fresh per-run worktree (disjoint ports) before boot and reverse-applies at teardown. If the overlay later stops applying (the repo moved under it), the run fails loudly asking you to re-portify (`start_external_portify`, or the GUI).
 6. Undo it: `remove_portification(feature, confirm: true)` reverts the feature config (the declared `ports` slots + `${port.x}` health-check rewrites, restored from the snapshot saved with the overlay) and deletes the overlay, so the feature is no longer portified. Re-run `start_external_portify` (or the GUI) to redo.
 
@@ -34,4 +65,5 @@ success predicate — Canary Lab owns the verdict.
 
 - Keep the same `session_id` for the whole conversation.
 - Edit only inside the returned scratch worktree paths — never the user's checked-out product repo.
+- A FLIGHT can hand you a portify workflow via an `external-work` checkpoint carrying a `workflowId`: drive this same loop against it, but STOP at `ready-to-save`, re-call `get_flight`, and answer with `respond_flight_checkpoint(flightId, choice: "submit")` — the flight owns the save/review decision. If that re-check carries `checkpoint.data.takeoverRequestedAt`, stop the workflow work and release with `choice: "run-internally"` instead — do not submit. Never `save_portify` or `cancel_portify` a flight-owned workflow. The flight will wait on you indefinitely — a parked hand-off has no deadline — so do not end your turn with it open; after 45 minutes with no `get_flight` contact the read reports `handOffIdle` on it.
 - Save/cancel/remove are confirm-gated; pass the confirmation only when the user asked for that action.

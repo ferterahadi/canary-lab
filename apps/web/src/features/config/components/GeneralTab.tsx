@@ -1,27 +1,16 @@
-import * as api from '../../../shared/api/client'
-import type { ConfigValue, ParsedConfigDoc } from '../../../shared/api/client'
-import { FieldRow, NumberInput, SectionHeader, TextInput, Textarea, Toggle } from './atoms'
+import * as api from '@/shared/api/client'
+import type { ConfigValue, ParsedConfigDoc } from '@/shared/api/client'
+import { DEFAULT_HEAL_ON_FAILURE_THRESHOLD } from '@/shared/lib/heal-threshold'
+import { FieldRow, HintIcon, Section, TextInput, Textarea } from '@/shared/ui/atoms'
+import { HEAL_BEHAVIOR_INFO, HealBehaviorChoice } from '@/shared/ui/HealBehaviorChoice'
 import { SaveBar } from './SaveBar'
 import { useEditableSlice } from './useEditableSlice'
-
-// Mirror of DEFAULT_HEAL_ON_FAILURE_THRESHOLD in shared/launcher/types.ts —
-// the server applies the same default at load time. Absent ⇒ enabled at this
-// value; `0` ⇒ disabled (full suite runs before healing).
-const DEFAULT_HEAL_THRESHOLD = 2
 
 interface Slice {
   name: string
   description: string
   group: string
   healOnFailureThreshold?: number
-}
-
-// A feature stops & heals by default; only an explicit `0` opts out.
-function healEnabled(v: number | undefined): boolean {
-  return v == null ? true : v > 0
-}
-function healDisplayValue(v: number | undefined): number {
-  return v != null && v > 0 ? v : DEFAULT_HEAL_THRESHOLD
 }
 
 function asString(v: ConfigValue | undefined, fallback = ''): string {
@@ -33,6 +22,8 @@ function asOptionalNumber(v: ConfigValue | undefined): number | undefined {
 
 export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onFeatureRenamed?: (nextFeature: string) => void }) {
   const ed = useEditableSlice<ParsedConfigDoc, Slice>({
+    // Shared with Service + Ports — one config doc, one fetch per dialog open.
+    cacheKey: `config-doc:${feature}`,
     load: () => api.getFeatureConfigDoc(feature),
     extract: (doc) => {
       const v = (doc.parsed.value ?? {}) as { [k: string]: ConfigValue }
@@ -58,7 +49,7 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
       // Always persist a concrete number (including `0` = opt out). An absent
       // value materializes the default so the saved config is explicit and
       // matches the server-side default.
-      next.healOnFailureThreshold = slice.healOnFailureThreshold ?? DEFAULT_HEAL_THRESHOLD
+      next.healOnFailureThreshold = slice.healOnFailureThreshold ?? DEFAULT_HEAL_ON_FAILURE_THRESHOLD
       return next
     },
     save: async (payload) => {
@@ -68,7 +59,6 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
       if (nextName && nextName !== feature) onFeatureRenamed?.(nextName)
       return next
     },
-    deps: [feature],
   })
 
   if (ed.error && !ed.draft) {
@@ -81,48 +71,45 @@ export function GeneralTab({ feature, onFeatureRenamed }: { feature: string; onF
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin">
-        <SectionHeader>Identity</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow label="Name">
-            <TextInput value={ed.draft.name} onChange={(name) => ed.setDraft((d) => ({ ...d, name }))} />
-          </FieldRow>
-          <FieldRow label="Description">
-            <Textarea
-              minRows={2}
-              maxRows={6}
-              value={ed.draft.description}
-              onChange={(description) => ed.setDraft((d) => ({ ...d, description }))}
-            />
-          </FieldRow>
-          <FieldRow label="Group" hint="Features with the same group are shown together.">
-            <TextInput value={ed.draft.group} onChange={(group) => ed.setDraft((d) => ({ ...d, group }))} />
-          </FieldRow>
-        </div>
+        <div className="flex flex-col gap-3 p-3">
+          <Section title="Identity">
+            <FieldRow label="Name">
+              <TextInput value={ed.draft.name} onChange={(name) => ed.setDraft((d) => ({ ...d, name }))} />
+            </FieldRow>
+            <FieldRow label="Description">
+              <Textarea
+                minRows={6}
+                maxRows={14}
+                value={ed.draft.description}
+                onChange={(description) => ed.setDraft((d) => ({ ...d, description }))}
+              />
+            </FieldRow>
+            <FieldRow label="Group">
+              <TextInput
+                value={ed.draft.group}
+                placeholder="Features with the same group are shown together."
+                onChange={(group) => ed.setDraft((d) => ({ ...d, group }))}
+              />
+            </FieldRow>
+          </Section>
 
-        <SectionHeader>Heal behavior</SectionHeader>
-        <div className="px-4 py-3">
-          <FieldRow
-            label="Stop & heal after"
-            hint={`On by default (${DEFAULT_HEAL_THRESHOLD} failures). Each new Playwright spawn starts with --max-failures=N; turn off to run the whole suite before healing. Changes made while tests are already running apply to the next rerun or restart, not the current process.`}
-            layout="inline"
+          {/* The same two-shape choice the flight Suite setup digest shows —
+              one component, so the two lenses on `healOnFailureThreshold` can't
+              drift into a switch here and a pick-a-run-shape there. The body
+              padding drops to px-0.5 because the rows carry their own px-3:
+              the selected band then spans the section edge-to-edge, with the
+              labels still under the section title. */}
+          <Section
+            title={<span className="inline-flex items-center gap-1.5">Auto-repair<HintIcon hint={HEAL_BEHAVIOR_INFO} /></span>}
+            bodyClassName="px-0.5 py-1.5"
           >
-            <div className="flex items-center gap-3">
-              <Toggle
-                value={healEnabled(ed.draft.healOnFailureThreshold)}
-                onChange={(enabled) => ed.setDraft((d) => ({
-                  ...d,
-                  healOnFailureThreshold: enabled ? healDisplayValue(d.healOnFailureThreshold) : 0,
-                }))}
-              />
-              <NumberInput
-                min={1}
-                value={healDisplayValue(ed.draft.healOnFailureThreshold)}
-                disabled={!healEnabled(ed.draft.healOnFailureThreshold)}
-                onChange={(n) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold: n }))}
-              />
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>failure(s)</span>
-            </div>
-          </FieldRow>
+            <HealBehaviorChoice
+              threshold={ed.draft.healOnFailureThreshold}
+              editable
+              testIdPrefix="general-heal"
+              onChange={(healOnFailureThreshold) => ed.setDraft((d) => ({ ...d, healOnFailureThreshold }))}
+            />
+          </Section>
         </div>
       </div>
 

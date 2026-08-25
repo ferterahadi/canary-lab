@@ -163,6 +163,8 @@ function indexEntryFromManifest(
     startedAt: manifest.startedAt,
     status,
     ...(endedAt ? { endedAt } : {}),
+    ...(manifest.healCycles ? { healCycles: manifest.healCycles } : {}),
+    ...(manifest.healMode ? { healMode: manifest.healMode } : {}),
     ...(manifest.verification?.configName ? { verificationConfigName: manifest.verification.configName } : {}),
     ...(manifest.verification?.playwrightEnvsetId ? { verificationPlaywrightEnvsetId: manifest.verification.playwrightEnvsetId } : {}),
     ...(manifest.verification?.targetUrls ? { verificationTargetUrls: manifest.verification.targetUrls } : {}),

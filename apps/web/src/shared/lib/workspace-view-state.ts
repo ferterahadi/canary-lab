@@ -27,9 +27,50 @@ export type WorkspaceView = 'workspace' | 'cleanup' | 'coverage' | 'flights'
 // the run detail's Evaluation panel (?feature=…&run=…), both already routed.
 // `add-test` and `portify` are gone too (R50): flight is the one GUI entry —
 // AddTestWizard was deleted outright, and the portify workflow view survives
-// only as an EMBEDDED surface (flight drill-through, collision recovery,
-// benchmark), opened ephemerally, never by URL.
-export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-new'
+// only as an EMBEDDED surface (the Ports tab's active-workflow button,
+// collision recovery, benchmark), opened ephemerally, never by URL. The flight
+// stopped being one of those entries: Parallel readiness drills to the Ports
+// tab (?dialog=config&tab=ports), not the wizard.
+// `draft` is gone too: external authoring surfaces on the flight's Test
+// authoring & coverage stage (?view=flights&flight=…&stage=specs-coverage),
+// the same place every other agent-driven job is monitored — the dialog and
+// its `draft` id qualifier are tombstoned (see persistView).
+// `flight-fresh` is the launcher in START-FRESH intent (R76): same dialog as
+// `flight-start`, but scoped to the one job of changing intent/repos — it needs
+// its own route value so a refresh restores that intent instead of dropping the
+// user back into the re-entry picker.
+// `demo` is retained as the route key for Getting Started. Its optional core
+// demos, secondary catalog, shared activity and fixture actions come from
+// GET /api/onboarding.
+// Routed because it is the workspace's first screen and a refresh mid-choice
+// should not lose it.
+// `settings` is Project Settings (the features column's gear). Workspace-scoped
+// rather than feature-scoped, and rebuilt entirely from GET /api/project-config,
+// so a cold load needs nothing this tab happened to be holding.
+export type RouteDialog = 'config' | 'verification' | 'flight-start' | 'flight-fresh' | 'flight-new' | 'demo' | 'settings'
+
+/** The Feature-config dialog's tabs — the `tab` qualifier for `dialog=config`.
+ *  Routed because entry points land on different tabs (the run detail opens
+ *  Playwright, a flight's Parallel-readiness stage opens Ports), and switching
+ *  tabs inside the dialog is a place you can come back to. */
+export type ConfigTab = 'general' | 'repos' | 'ports' | 'envsets' | 'playwright'
+
+/** Which tab the run detail should OPEN on when another view links into a run —
+ *  the `runtab` qualifier for `run`. Only cross-view arrivals are listed, not the
+ *  whole tab set: a flight's Test Run stage reports the repairs a run captured
+ *  and sends them to that run's Changes tab. Tab switches made INSIDE the run
+ *  detail stay local to it (unrouted), exactly as before — this carries the
+ *  arrival intent, the same way `test` does. */
+export type RunArrivalTab = 'changes'
+
+/** What a drill-through wants the run detail to land on. `test` is a run-summary
+ *  failed-entry name (R82 — the Playwright tab, scrolled to that failure) and
+ *  takes precedence over `tab`, because naming a failure already names a tab.
+ *  Both absent = the detail's own default (Overview). */
+export interface RunOpenTarget {
+  test?: string
+  tab?: RunArrivalTab
+}
 
 export interface PersistedView {
   view: WorkspaceView
@@ -41,6 +82,39 @@ export interface PersistedView {
   /** Flight id qualifier for `view: 'flights'` — which flight detail to open
    *  (URL only; absent = the flights landing list). */
   flight: string | null
+  /** Stage qualifier for `flight` — which stage of that flight is selected
+   *  (URL only; dropped unless a flight is open). Absent = follow-mode, where
+   *  the detail auto-picks the stage that needs eyes.
+   *
+   *  Routed because the stage IS a place: a drill-through (coverage ledger, run
+   *  detail) replaces the whole flight view, so without this the way back
+   *  re-ran the auto-pick and landed on the last done stage — usually Evaluation
+   *  Report — instead of the stage the drill-through left from. */
+  flightStage: string | null
+  /** Tab qualifier for `dialog: 'config'` — which config tab is open
+   *  (URL only; dropped unless the config dialog is the open one). */
+  configTab: ConfigTab | null
+  /** Test qualifier for `run` — WHICH failing test the run detail should land on
+   *  (URL only; dropped unless a run is selected). R82: a flight's Test Run stage
+   *  lists the failures as a summary and clicking one opens it here, so the
+   *  destination has to carry which one was clicked. The value is the run
+   *  summary's failed-entry `name`, the same key the Playwright tab matches
+   *  playback tests on. An unknown name simply doesn't match — the tab opens
+   *  unscrolled rather than blank. */
+  focusTest: string | null
+  /** Tab qualifier for `run` — which run-detail tab a drill-through asked for
+   *  (URL only; dropped unless a run is selected, and an unknown value is
+   *  ignored rather than rendering a blank pane). */
+  runTab: RunArrivalTab | null
+  /** R83: the flight a drill-through came FROM (URL only; dropped on the flights
+   *  view, where it would point at the screen you're already on). A flight's
+   *  stage drill-throughs switch the top-level view outright — the coverage
+   *  ledger and the run detail are views, not children of the flight — so
+   *  without this the destination has no idea it was opened from a flight and
+   *  its exit dumps you in the workspace. Carried in the URL rather than React
+   *  state so a refresh on the destination keeps the way back. Value is whatever
+   *  `flight` held: a real flight id or a `feature:<name>` derived token. */
+  returnFlight: string | null
 }
 
 /** The cross-tab/localStorage-mirrored subset — the durable nav tier only. */
@@ -48,7 +122,9 @@ export type DurableView = Pick<PersistedView, 'view' | 'feature'>
 
 const STORAGE_KEY = 'cl.workspace.view'
 const VIEWS: WorkspaceView[] = ['workspace', 'cleanup', 'coverage', 'flights']
-const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-new']
+const DIALOGS: RouteDialog[] = ['config', 'verification', 'flight-start', 'flight-fresh', 'flight-new', 'demo', 'settings']
+const CONFIG_TABS: ConfigTab[] = ['general', 'repos', 'ports', 'envsets', 'playwright']
+const RUN_ARRIVAL_TABS: RunArrivalTab[] = ['changes']
 
 function isView(v: string | null): v is WorkspaceView {
   return v != null && (VIEWS as string[]).includes(v)
@@ -58,12 +134,20 @@ function parseDialog(v: string | null): RouteDialog | null {
   return v != null && (DIALOGS as string[]).includes(v) ? (v as RouteDialog) : null
 }
 
+function parseConfigTab(v: string | null): ConfigTab | null {
+  return v != null && (CONFIG_TABS as string[]).includes(v) ? (v as ConfigTab) : null
+}
+
+function parseRunArrivalTab(v: string | null): RunArrivalTab | null {
+  return v != null && (RUN_ARRIVAL_TABS as string[]).includes(v) ? (v as RunArrivalTab) : null
+}
+
 function setOrDelete(params: URLSearchParams, key: string, value: string | null): void {
   if (value) params.set(key, value)
   else params.delete(key)
 }
 
-const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null }
+const EMPTY: PersistedView = { view: 'workspace', feature: null, run: null, dialog: null, flight: null, flightStage: null, configTab: null, focusTest: null, runTab: null, returnFlight: null }
 
 /** Read the persisted view, URL first (authoritative on load), then localStorage
  *  (durable tier only — run/dialog are never mirrored there). */
@@ -77,10 +161,25 @@ export function readPersistedView(): PersistedView {
     const dialog = parseDialog(params.get('dialog'))
     // `flight` only qualifies the flights view — dropped elsewhere.
     const flight = v === 'flights' ? params.get('flight') || null : null
+    // `stage` only qualifies an open flight — dropped elsewhere. Left unvalidated
+    // here (this module knows nothing of stage keys); the nav layer parses it and
+    // an unknown name falls back to follow-mode.
+    const flightStage = flight ? params.get('stage') || null : null
+    // `tab` only qualifies the config dialog — dropped elsewhere, and an
+    // unknown tab name is ignored (falls back to the entry point's default).
+    const configTab = dialog === 'config' ? parseConfigTab(params.get('tab')) : null
+    // `test` only qualifies a selected run — dropped elsewhere.
+    const focusTest = run ? params.get('test') || null : null
+    // `runtab` qualifies a selected run too — an unknown tab name is ignored, so
+    // the detail opens on its own default instead of a pane that doesn't exist.
+    const runTab = run ? parseRunArrivalTab(params.get('runtab')) : null
+    // `from` names the flight a drill-through left — meaningless on the flights
+    // view itself, dropped there.
+    const returnFlight = v === 'flights' ? null : params.get('from') || null
     // A bare `view` (workspace) is omitted from the URL, so treat any other
     // routed param as evidence the URL is authoritative for this load too.
-    if (isView(v)) return { view: v, feature, run, dialog, flight }
-    if (feature || run || dialog) return { view: 'workspace', feature, run, dialog, flight: null }
+    if (isView(v)) return { view: v, feature, run, dialog, flight, flightStage, configTab, focusTest, runTab, returnFlight }
+    if (feature || run || dialog || returnFlight) return { view: 'workspace', feature, run, dialog, flight: null, flightStage: null, configTab, focusTest, runTab, returnFlight }
   } catch { /* ignore */ }
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -103,13 +202,30 @@ export function persistView(state: PersistedView): void {
     setOrDelete(params, 'feature', state.feature)
     setOrDelete(params, 'run', state.run)
     setOrDelete(params, 'dialog', state.dialog)
-    // `wf` qualified the retired portify dialog (R50) and `task` the retired
-    // evaluation dialog (R29) — clear both from stale URLs so old deep links
-    // don't carry dead params forward.
+    // `wf` qualified the retired portify dialog (R50), `task` the retired
+    // evaluation dialog (R29), and `draft` the retired external-authoring
+    // dialog (authoring now surfaces on the flight's specs-coverage stage) —
+    // clear all three from stale URLs so old deep links don't carry dead
+    // params forward. Never reuse these names for a new qualifier.
     setOrDelete(params, 'wf', null)
     setOrDelete(params, 'task', null)
+    setOrDelete(params, 'draft', null)
     // `flight` only qualifies the flights view — drop it otherwise.
     setOrDelete(params, 'flight', state.view === 'flights' ? state.flight : null)
+    // `stage` only qualifies an OPEN flight — drop it on the flights landing
+    // list and off the view entirely, so a stage pick can't outlive its flight.
+    setOrDelete(params, 'stage', state.view === 'flights' && state.flight ? state.flightStage : null)
+    // `tab` only qualifies the config dialog — drop it otherwise.
+    setOrDelete(params, 'tab', state.dialog === 'config' ? state.configTab : null)
+    // `test` only qualifies a selected run — drop it otherwise, so switching runs
+    // can't leave a previous run's failure pinned in the URL.
+    setOrDelete(params, 'test', state.run ? state.focusTest : null)
+    // Same rule for the arrival tab: it belongs to the run in the URL, so
+    // switching runs can't leave a previous drill-through's tab pinned.
+    setOrDelete(params, 'runtab', state.run ? state.runTab : null)
+    // `from` is dropped on the flights view — arriving at a flight IS the return,
+    // so keeping it would leave a back-link to the screen you're already on.
+    setOrDelete(params, 'from', state.view === 'flights' ? null : state.returnFlight)
     const qs = params.toString()
     const url = `${window.location.pathname}${qs ? `?${qs}` : ''}${window.location.hash}`
     window.history.replaceState(null, '', url)

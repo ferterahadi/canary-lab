@@ -1,4 +1,4 @@
-import type { PortifyManifest, PortifyIndexEntry } from '../../../shared/api/client'
+import type { PortifyManifest, PortifyIndexEntry } from '@/shared/api/client'
 
 // Pure reducer driving PortifyContext. Mirrors benchmark-state.ts so it
 // unit-tests in the node vitest config (no jsdom). The server pushes the full
@@ -45,6 +45,7 @@ function indexEntryFromManifest(m: PortifyManifest): PortifyIndexEntry {
     status: m.status,
     startedAt: m.startedAt,
     ...(m.endedAt ? { endedAt: m.endedAt } : {}),
+    ...(m.producer ? { producer: m.producer } : {}),
   }
 }
 

@@ -3,10 +3,10 @@ import type {
   ExternalHealSession,
   ExternalHealSessionStatus,
   RunStatus,
-} from '../../../shared/api/types'
-import { isTerminalRunStatus } from '../../../../../../shared/run-state'
-import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from './external-client-branding'
-import { ExternalAgentCard, ExternalClientCta, StatusPill, useOpenAgentApp } from './ExternalAgentCard'
+} from '@/shared/api/types'
+import { isTerminalRunStatus } from '@shared/run-state'
+import { clientKindToDesktopAgent, clientLabel as brandingClientLabel, clientTint } from '@/shared/ui/external-client-branding'
+import { ExternalAgentCard, ExternalClientCta, ExternalStatusPill, useOpenAgentApp } from '@/shared/ui/ExternalAgentCard'
 
 interface Props {
   runId: string
@@ -60,7 +60,7 @@ export function ExternalHealPanel({ runId: _runId, runStatus, session }: Props) 
       headline={headlineFor(clientKind, Boolean(session))}
       statusPill={
         displayedStatus && (
-          <StatusPill label={statusLabel(displayedStatus)} palette={statusPalette(displayedStatus)} />
+          <ExternalStatusPill label={statusLabel(displayedStatus)} palette={statusPalette(displayedStatus)} />
         )
       }
       meta={

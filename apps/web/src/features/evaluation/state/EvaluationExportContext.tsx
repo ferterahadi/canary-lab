@@ -1,12 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import * as api from '../../../shared/api/client'
+import * as api from '@/shared/api/client'
 import { connectEvaluationExport, type EvaluationExportConnection } from '../api/evaluation-export-socket'
-import { connectWorkspaceEvents, type WorkspaceEventsConnection } from '../../runs/api/workspace-socket'
-import type { EvaluationExportMode, EvaluationExportTask } from '../../../shared/api/types'
+import { connectWorkspaceEvents, type WorkspaceEventsConnection } from '@/shared/api/workspace-socket'
+import type { EvaluationExportMode, EvaluationExportTask } from '@/shared/api/types'
 
 interface EvaluationExportContextValue {
   tasks: EvaluationExportTask[]
-  logsByTaskId: Record<string, string>
   startExport: (runId: string, mode: EvaluationExportMode) => Promise<EvaluationExportTask>
   taskForRun: (runId: string) => EvaluationExportTask | null
   taskById: (taskId: string) => EvaluationExportTask | null
@@ -18,6 +17,14 @@ interface EvaluationExportContextValue {
 }
 
 const EvaluationExportContext = createContext<EvaluationExportContextValue | null>(null)
+
+// The log stream is its OWN context (same split invalidation.tsx documents): a
+// localized export appends a chunk per agent event, and while `logsByTaskId`
+// sat in the main value every one of those chunks re-rendered every
+// `useEvaluationExports` consumer — StageDetail, the flight's report panels,
+// the derived-stage hooks — at agent-output frequency. Only the log viewer
+// subscribes here.
+const EvaluationExportLogsContext = createContext<Record<string, string> | null>(null)
 
 export interface EvaluationExportProviderProps {
   children: ReactNode
@@ -31,6 +38,8 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   const connectionsRef = useRef<Record<string, EvaluationExportConnection>>({})
   const workspaceConnectionRef = useRef<WorkspaceEventsConnection | null>(null)
   const tasksByIdRef = useRef<Record<string, EvaluationExportTask>>({})
+  /** Task ids ever attached to a log stream — see `subscribeTask`. */
+  const subscribedRef = useRef<Set<string>>(new Set())
 
   const rememberTask = useCallback((task: EvaluationExportTask): void => {
     setTasksById((current) => {
@@ -56,7 +65,12 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
   }, [appendLog, rememberTask])
 
   const subscribeTask = useCallback((taskId: string): void => {
-    if (connectionsRef.current[taskId]) return
+    // At most one attach per task for the provider's lifetime. `connectionsRef`
+    // alone can't carry this: `onExit` clears it, so a finished task could be
+    // re-attached forever by any caller that retries. A task id belongs to one
+    // export, so one attach is all it ever needs.
+    if (subscribedRef.current.has(taskId)) return
+    subscribedRef.current.add(taskId)
     try {
       connectionsRef.current[taskId] = connectEvaluationExport({
         taskId,
@@ -89,8 +103,13 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     const next = Object.fromEntries(tasks.map((task) => [task.taskId, task]))
     tasksByIdRef.current = next
     setTasksById(next)
+    // Only live tasks get a stream here. A finished task's log is historical and
+    // cannot change, so pulling all of them on mount cost one socket, one full
+    // log transfer and one task refetch per past export (16 of each in a real
+    // workspace) before anything had asked to see them. `watchTask` fetches on
+    // demand when a panel actually surfaces one.
     for (const task of tasks) {
-      if (task.status === 'running' || !previous[task.taskId]) subscribeTask(task.taskId)
+      if (task.status === 'running') subscribeTask(task.taskId)
     }
   }, [subscribeTask])
 
@@ -185,9 +204,13 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
     tasksById[taskId] ?? null
   ), [tasksById])
 
+  // The on-demand path for a task this provider didn't start: panels call it
+  // when they surface a past export, which is what pulls its historical log now
+  // that mount no longer attaches every finished task. `subscribeTask` owns the
+  // once-only guard, so this is safe to call from an effect on every render.
   const watchTask = useCallback((taskId: string): void => {
-    if (!logsByTaskId[taskId]) subscribeTask(taskId)
-  }, [logsByTaskId, subscribeTask])
+    subscribeTask(taskId)
+  }, [subscribeTask])
 
   const downloadTask = useCallback(async (taskId: string): Promise<void> => {
     const task = tasksById[taskId]
@@ -207,18 +230,19 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
 
   const value = useMemo<EvaluationExportContextValue>(() => ({
     tasks,
-    logsByTaskId,
     startExport,
     taskForRun,
     taskById,
     watchTask,
     downloadTask,
     dismissTask,
-  }), [dismissTask, downloadTask, logsByTaskId, startExport, taskById, taskForRun, tasks, watchTask])
+  }), [dismissTask, downloadTask, startExport, taskById, taskForRun, tasks, watchTask])
 
   return (
     <EvaluationExportContext.Provider value={value}>
-      {children}
+      <EvaluationExportLogsContext.Provider value={logsByTaskId}>
+        {children}
+      </EvaluationExportLogsContext.Provider>
     </EvaluationExportContext.Provider>
   )
 }
@@ -226,5 +250,13 @@ export function EvaluationExportProvider({ children, wsBase, WebSocketImpl }: Ev
 export function useEvaluationExports(): EvaluationExportContextValue {
   const value = useContext(EvaluationExportContext)
   if (!value) throw new Error('useEvaluationExports must be used inside EvaluationExportProvider')
+  return value
+}
+
+/** The per-task log text, appended chunk by chunk while an export runs. Its own
+ *  hook so only the log viewer re-renders per chunk — see the context comment. */
+export function useEvaluationExportLogs(): Record<string, string> {
+  const value = useContext(EvaluationExportLogsContext)
+  if (!value) throw new Error('useEvaluationExportLogs must be used inside EvaluationExportProvider')
   return value
 }

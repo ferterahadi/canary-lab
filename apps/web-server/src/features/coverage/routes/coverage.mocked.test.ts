@@ -7,7 +7,7 @@ import os from 'os'
 import path from 'path'
 
 vi.mock('../logic/prd-document-extractor', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../coverage/logic/prd-document-extractor')>()
+  const original = await importOriginal<typeof import('../logic/prd-document-extractor')>()
   return {
     ...original,
     extractPrdDocument: vi.fn(original.extractPrdDocument),
@@ -15,7 +15,7 @@ vi.mock('../logic/prd-document-extractor', async (importOriginal) => {
 })
 
 vi.mock('../logic/coverage/service', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../coverage/logic/coverage/service')>()
+  const original = await importOriginal<typeof import('../logic/coverage/service')>()
   return {
     ...original,
     computeFeatureCoverage: vi.fn(original.computeFeatureCoverage),
@@ -35,9 +35,9 @@ vi.mock('../../config/logic/feature-authoring', async (importOriginal) => {
 
 import Fastify, { type FastifyInstance } from 'fastify'
 import { coverageRoutes } from './coverage'
-import { computeFeatureCoverage, listFeatureDocs, clearPrdSummary, regeneratePrdSummary } from '../../coverage/logic/coverage/service'
+import { computeFeatureCoverage, listFeatureDocs, clearPrdSummary, regeneratePrdSummary } from '../logic/coverage/service'
 import { writeFeatureDoc } from '../../config/logic/feature-authoring'
-import { extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
+import { extractPrdDocument } from '../logic/prd-document-extractor'
 
 let tmpDir: string
 let featuresDir: string
@@ -160,8 +160,9 @@ describe('coverage/states — ?? null fallback branch (lines 196-198)', () => {
       feature: 'checkout',
       requirements: [],
       tests: [],
-      totals: { total: 0, verified: 0, partial: 0, failing: 0, untested: 0 },
+      totals: { total: 0, covered: 0, pathIncomplete: 0, variantIncomplete: 0, untested: 0, orphanTests: 0 },
       coveragePct: 0,
+      mappedPct: 0,
       orphanRequirementIds: [],
       orphanTestNames: [],
       // state intentionally omitted — headline/summary/coverage will all be undefined

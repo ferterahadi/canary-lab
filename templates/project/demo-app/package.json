@@ -1,0 +1,11 @@
+{
+  "name": "canary-storefront-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Three-service storefront used by Canary Lab's full-Flight demo.",
+  "scripts": {
+    "dev:catalog": "npx tsx catalog-service/server.ts",
+    "dev:inventory": "npx tsx inventory-service/server.ts",
+    "dev:checkout": "npx tsx checkout-service/server.ts"
+  }
+}

@@ -1,7 +1,10 @@
 ---
 name: cl_design-feedback
-description: Use when asked to critique, review, or give design feedback on any Canary Lab web UI — a screenshot, a live screen, a Figma link, or a component ("review this design", "design feedback", "what do you think of this panel/dialog/pill"). Grounds every finding in the component source + the design tokens BEFORE you voice it, so you don't flag a shared system primitive, an already-compliant value, or an intentional choice as a defect.
+description: Use when asked to critique, review, or give design feedback on any Canary Lab web UI — a screenshot, a live screen, a Figma link, or a component ("review this design", "design feedback", "what do you think of this panel/dialog/pill"), so shared primitives and intentional choices aren't flagged as defects.
 ---
+
+<!-- GENERATED FROM .claude/skills — DO NOT EDIT.
+     Run `npm run gen:skills` after editing the source skill (the build does this too). -->
 
 # Giving Design Feedback on Canary Lab UI
 

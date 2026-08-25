@@ -6,8 +6,8 @@ import {
   runsReducer,
   type RunsState,
 } from './runs-state'
-import { ApiError } from '../../../shared/api/client'
-import type { RunDetail, RunIndexEntry } from '../../../shared/api/types'
+import { ApiError } from '@/shared/api/client'
+import type { RunDetail, RunIndexEntry } from '@/shared/api/types'
 
 // Helpers — small constructors for the shapes the reducer tests need.
 
@@ -73,7 +73,12 @@ describe('runsReducer', () => {
         runId: 'b1',
         executionType: 'boot',
         endedAt: '2026-02-01T00:01:00Z',
-        verification: { configName: 'Prod', playwrightEnvsetId: 'production', targetUrls: { default: 'https://x' } },
+        verification: {
+          configName: 'Prod',
+          playwrightEnvsetId: 'production',
+          targetUrls: { default: 'https://x' },
+          targets: [{ id: 'default', name: 'default', url: 'https://x' }],
+        },
       }),
     })
     const e = next.runs.find((r) => r.runId === 'b1')!

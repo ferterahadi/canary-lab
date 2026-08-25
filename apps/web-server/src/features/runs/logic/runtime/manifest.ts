@@ -1,9 +1,13 @@
 import fs from 'fs'
 import path from 'path'
-import { runsIndexPath, runsRoot } from './run-paths'
+import { runsIndexPath } from './run-paths'
 import type {
+  HealEnd,
   QueueReason,
   RunBootFailure,
+  RunFixCapture,
+  RunPrAttempt,
+  RunProposedPr,
   RunLifecycleSnapshot,
   RunStatus,
   ServiceStatus,
@@ -13,10 +17,15 @@ import type {
   VerificationRunMetadata,
 } from '../../../../../../../shared/verification'
 import { atomicWrite } from '../../../../../../../shared/lib/atomic-write'
-import type { ClientKind, ExternalSessionMeta } from '../../../../../../../shared/run-mode'
+import type { ExternalSessionMeta } from '../../../../../../../shared/run-mode'
 export type {
+  HealEnd,
   QueueReason,
   RunBootFailure,
+  RunFixCapture,
+  RunFixCaptureRepo,
+  RunPrAttempt,
+  RunProposedPr,
   RunLifecycleAbortReason,
   RunLifecycleEvent,
   RunLifecyclePhase,
@@ -48,6 +57,13 @@ export interface ServiceManifestEntry {
    *  service declares no ports. The UI surfaces these so concurrent runs are
    *  distinguishable. */
   allocatedPorts?: Record<string, number>
+  /** When the service was spawned (status → `starting`). */
+  startingAt?: string
+  /** When its readiness probe first passed (status → `ready`). Together with
+   *  `startingAt` this gives per-service time-to-ready, which is what the
+   *  Suite setup boot rows report. Stamped here rather than derived from the
+   *  run's own start/end, which also spans queue wait and teardown. */
+  readyAt?: string
 }
 
 export interface RepoBranchSnapshot {
@@ -59,14 +75,16 @@ export interface RepoBranchSnapshot {
   dirty: boolean
 }
 
-export type PlaywrightScreenshotMode = 'off' | 'on' | 'only-on-failure'
-export type PlaywrightRetainedArtifactMode = 'off' | 'on' | 'on-first-retry' | 'retain-on-failure'
+// Imported for local use below and re-exported so existing `from './manifest'`
+// imports keep working; the modes themselves live in one shared place because
+// six copies had drifted.
+import type {
+  PlaywrightArtifactPolicy,
+  PlaywrightRetainedArtifactMode,
+  PlaywrightScreenshotMode,
+} from '../../../../../../../shared/configs/playwright-modes'
 
-export interface PlaywrightArtifactPolicy {
-  screenshot: PlaywrightScreenshotMode
-  video: PlaywrightRetainedArtifactMode
-  trace: PlaywrightRetainedArtifactMode
-}
+export type { PlaywrightArtifactPolicy, PlaywrightRetainedArtifactMode, PlaywrightScreenshotMode }
 
 // Mid-Run Heal: populated when Playwright was halted before completing the
 // suite — either by `--max-failures=<N>` (auto-fast-fail) or by an explicit
@@ -163,6 +181,19 @@ export interface RunManifest {
    *  service log as context. Absent on healthy/boot-only runs; cleared on a
    *  successful reboot during a heal cycle. */
   bootFailure?: RunBootFailure
+  /** Why the auto-heal loop stopped without passing. Written at every give-up
+   *  site in `runAutoHealLoop`; absent on passing/boot-only/manual runs and on
+   *  runs that never entered heal. */
+  healEnd?: HealEnd
+  /** The heal agent's edits captured from the per-run worktree at teardown.
+   *  Absent on green runs, in-place runs, and runs the agent didn't change. */
+  fixCapture?: RunFixCapture
+  /** PRs opened from this run's captured fix, per repo — by the user's own
+   *  request, or automatically when the run healed green. */
+  proposedPrs?: RunProposedPr[]
+  /** The last PR attempt including its failures, so a run that captured a fix
+   *  but opened nothing can say why. */
+  prAttempt?: RunPrAttempt
   verification?: VerificationRunMetadata
 }
 
@@ -197,11 +228,23 @@ export function updateServiceStatus(
   const current = readManifest(manifestPath)
   if (!current) return null
   const services = current.services.map((s) =>
-    s.safeName === safeName ? { ...s, status } : s,
+    s.safeName === safeName ? { ...s, status, ...serviceStatusStamp(s, status) } : s,
   )
   const next = { ...current, services }
   writeManifest(manifestPath, next)
   return next
+}
+
+/** Timestamp for the two transitions worth measuring. Only ever stamps the
+ *  FIRST arrival: a service that goes ready → stopped → ready (a heal restart)
+ *  keeps its original boot timing rather than reporting the restart's. */
+function serviceStatusStamp(
+  service: ServiceManifestEntry,
+  status: ServiceStatus,
+): Partial<ServiceManifestEntry> {
+  if (status === 'starting' && !service.startingAt) return { startingAt: new Date().toISOString() }
+  if (status === 'ready' && !service.readyAt) return { readyAt: new Date().toISOString() }
+  return {}
 }
 
 export function updateAllServicesStatus(
@@ -226,6 +269,15 @@ export interface RunIndexEntry {
   startedAt: string
   status: RunStatus
   endedAt?: string
+  /** Repair cycles this run consumed. Mirrored from the manifest on every
+   *  index write so a feature's repair total reads off the index alone,
+   *  without opening one manifest per run. Absent on pre-existing entries and
+   *  on runs that never healed. */
+  healCycles?: number
+  /** The compact index also carries who owns repair work. Flight Activity
+   *  cold-loads terminal runs from this index, while full manifests are sent
+   *  only for active runs. */
+  healMode?: RunManifest['healMode']
   verificationConfigName?: string
   verificationPlaywrightEnvsetId?: string
   verificationTargetUrls?: Record<string, string>

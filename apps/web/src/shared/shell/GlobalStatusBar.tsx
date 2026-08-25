@@ -1,21 +1,22 @@
 import { useEffect, useState } from 'react'
 import type { Feature, RunDetail } from '../api/types'
-import { useActiveBootSessions, useActiveVerifyRuns, useRuns } from '../../features/runs/state/RunsContext'
+import { BenchmarkPill, BenchmarkWindow, useBenchmarks } from '@/features/benchmark'
+import { CleanupPill } from '@/features/cleanup'
+import { type DerivedStage, type FeatureActivity, FlightsPill } from '@/features/flights'
+import {
+  DirtyReviewDialog,
+  DirtyTestsPill,
+  ServicesDialog,
+  useActiveBootSessions,
+  useActiveVerifyRuns,
+  useRuns,
+} from '@/features/runs'
 import { StatusPill } from '../ui/StatusPill'
-import { useBenchmarks } from '../../features/benchmark/state/BenchmarkContext'
-import { isActiveRunStatus } from '../../../../../shared/run-state'
-import { ServicesDialog } from '../../features/runs/components/ServicesDialog'
-import { BenchmarkWindow } from '../../features/benchmark/components/BenchmarkWindow'
+import { isActiveRunStatus } from '@shared/run-state'
 import { McpHealthBadge } from './McpHealthBadge'
 import { ConnectionBadge } from './ConnectionBadge'
 import { StatusChip } from '../ui/StatusChip'
-import { DirtyTestsPill } from '../../features/runs/components/DirtyTestsPill'
-import { DirtyReviewDialog } from '../../features/runs/components/DirtyReviewDialog'
-import { BenchmarkPill } from '../../features/benchmark/components/BenchmarkPill'
-import { CleanupPill } from '../../features/logs/components/CleanupPill'
-import { FlightsPill } from '../../features/flights/components/FlightsPill'
-import type { FeatureActivity } from '../../features/flights/state/feature-activity'
-import type { FlightIndexEntry } from '../api/client'
+import type { FlightIndexEntry, PlanFeaturesTask } from '../api/client'
 
 interface Props {
   activeRunDetail: RunDetail | null
@@ -24,9 +25,23 @@ interface Props {
   onOpenCleanup?: () => void
   /** Flight index (App owns it, WS-driven) — feeds the Flights pill. */
   flights?: FlightIndexEntry[]
+  /** Pre-flight (plan-features) tasks in progress / awaiting review — the
+   *  pill's pre-flight rows (App owns it, `pre-flight-changed`-driven). */
+  preFlights?: PlanFeaturesTask[]
+  /** Reopen the new-flight dialog attached to a running/awaiting pre-flight. */
+  onOpenPreFlight?: (taskId: string) => void
   /** Per-feature live activity (runs / portify / authoring) — App owns the
    *  one useFeatureActivity instance; the pill stays presentational. */
   activity?: Map<string, FeatureActivity>
+  /** Per-feature evidence-derived stage rails for flightless picker rows —
+   *  App owns the one useDerivedFeatureStages instance (same ownership rule
+   *  as `activity`). */
+  derivedStages?: Map<string, DerivedStage[]>
+  /** Whether to offer Getting Started — driven by the workspace visibility setting. */
+  demoAvailable?: boolean
+  /** Attention dot on that pill: the chooser has never been opened. */
+  demoUnseen?: boolean
+  onOpenDemo?: () => void
   /** Open the routed flight detail view (null = the flights picker). */
   onOpenFlight?: (flightId: string | null) => void
   /** Picker open-state, driven off the route (`view=flights` + no flight) so it's
@@ -40,6 +55,15 @@ interface Props {
   onStartFlight?: (feature: string) => void
   /** Open a run's detail (the Deploy-check pill's click-through) — App routes it. */
   onNavigateToRun?: (feature: string, runId: string) => void
+  /** R83: the flight a stage drill-through left, or null. A flight's drill-through
+   *  swaps the whole view (the run detail is a workspace column, with no close of
+   *  its own), so without a way back the trip is one-way. Lives outside the
+   *  collapsible action cluster deliberately — collapsing the actions must not
+   *  hide the only exit. */
+  returnFlight?: string | null
+  /** Label for that chip — the flight's feature name. */
+  returnFlightLabel?: string | null
+  onReturnToFlight?: (flightId: string) => void
 }
 
 // Always-visible top bar showing whether any run is currently active across
@@ -59,7 +83,7 @@ interface Props {
 // Flight pill is the single per-feature entry point — coverage, portify, and
 // run surfaces are reached through a flight's per-stage drill-throughs (or the
 // features column / config editor).
-export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], activity = new Map(), onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun }: Props) {
+export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup, flights = [], preFlights = [], onOpenPreFlight, activity = new Map(), derivedStages = new Map(), demoAvailable = false, demoUnseen = false, onOpenDemo, onOpenFlight, flightsPickerOpen, onFlightsPickerOpenChange, onOpenActivity, onStartFlight, onNavigateToRun, returnFlight = null, returnFlightLabel = null, onReturnToFlight }: Props) {
   const { connection } = useRuns()
   const { count: bootCount } = useActiveBootSessions()
   // Deployed-env verification runs (record-only) get their own pill (R27) —
@@ -103,6 +127,9 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
     ...flights.filter((f) => f.status === 'running' || f.status === 'waiting-for-approval').map((f) => f.feature),
     ...activity.keys(),
   ]).size
+    // Pre-flights in progress / awaiting review count as active too, so a
+    // backgrounded plan isn't hidden behind the collapsed-actions chevron.
+    + preFlights.filter((t) => t.status === 'running' || t.status === 'done').length
   const actionsActiveCount =
     (showBenchmark && activeBenchmark ? 1 : 0) + (activeFlightCount > 0 ? 1 : 0)
   const status = activeRunDetail?.manifest.status
@@ -130,28 +157,37 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
         />
         <span className="cl-wordmark">Canary Lab</span>
       </span>
-      <span className="cl-divider shrink-0">·</span>
       <ConnectionBadge state={connection} />
-      <span className="cl-divider shrink-0">·</span>
       <McpHealthBadge />
+      {/* R83: the way back to the flight a stage drill-through left. Only the
+          run detail actually needs it (it's a workspace column, so it has no
+          close of its own — the coverage ledger fixes its own Close instead),
+          but it renders on any non-flight view for one consistent exit. Same
+          `cl-button` the flight header's "All flights" uses — a nav action, not
+          a status. */}
+      {returnFlight && onReturnToFlight && (
+        <button
+            type="button"
+            data-testid="return-to-flight"
+            onClick={() => onReturnToFlight(returnFlight)}
+            className="cl-button shrink-0 max-w-[220px] truncate px-2.5 py-1 text-xs"
+            title={`Back to the ${returnFlightLabel ?? 'flight'} flight you came from`}
+          >
+          ← {returnFlightLabel ?? 'Flight'}
+        </button>
+      )}
       {services.length > 0 && (
-        <>
-          <span className="cl-divider shrink-0">·</span>
-          <div className="shrink-0">
-            <StatusChip
-              label={`${services.length} service${services.length > 1 ? 's' : ''}`}
-              state={servicesActive ? 'running' : 'idle'}
-            />
-          </div>
-        </>
+        <div className="shrink-0">
+          <StatusChip
+            label={`${services.length} service${services.length > 1 ? 's' : ''}`}
+            state={servicesActive ? 'running' : 'idle'}
+          />
+        </div>
       )}
       {dirtyFeatureCount > 0 && (
-        <>
-          <span className="cl-divider shrink-0">·</span>
-          <div className="shrink-0">
-            <DirtyTestsPill count={dirtyFeatureCount} onOpen={() => setDirtyReviewOpen(true)} />
-          </div>
-        </>
+        <div className="shrink-0">
+          <DirtyTestsPill count={dirtyFeatureCount} onOpen={() => setDirtyReviewOpen(true)} />
+        </div>
       )}
       <div className="ml-auto hidden min-w-0 items-center justify-end sm:flex">
         {/* Collapsible action cluster. Defaults to expanded (so the actions
@@ -161,7 +197,11 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
             indicator so an active run/boot/benchmark is never hidden. Each pill
             self-guards its own visibility. */}
         <div
-          className="flex min-w-0 items-center gap-2 overflow-hidden"
+          // py/-my pair: the cluster stays overflow-hidden for the collapse
+          // animation, but reserves vertical room so a pill's top-right overlay
+          // attention dot (StatusPill overlayDot, pinned at -top-1) isn't clipped
+          // by that same overflow. The negative margin cancels the layout effect.
+          className="flex min-w-0 items-center gap-2 overflow-hidden py-1.5 -my-1.5"
           aria-hidden={!actionsExpanded}
           style={{
             maxWidth: actionsExpanded ? 800 : 0,
@@ -216,14 +256,28 @@ export function GlobalStatusBar({ activeRunDetail, features = [], onOpenCleanup,
           )}
           <FlightsPill
             flights={flights}
+            preFlights={preFlights}
             activity={activity}
-            features={features.map((f) => ({ name: f.name, group: f.group }))}
+            features={features.map((f) => ({ name: f.name, group: f.group, stages: derivedStages.get(f.name) }))}
             open={flightsPickerOpen}
             onOpenChange={onFlightsPickerOpenChange}
             onStartFlight={(feature) => onStartFlight?.(feature)}
             onOpenFlight={(flightId) => onOpenFlight?.(flightId)}
             onOpenActivity={(feature, act) => onOpenActivity?.(feature, act)}
+            onOpenPreFlight={(taskId) => onOpenPreFlight?.(taskId)}
           />
+          {/* Onboarding's permanent home. It remains useful after the samples
+              are deleted because the external-agent side teaches every skill. */}
+          {demoAvailable && (
+            <StatusPill
+              dotState="idle"
+              name="Getting started"
+              overlayDot={demoUnseen}
+              onClick={() => onOpenDemo?.()}
+              title="Choose a workflow for an external or internal agent"
+              ariaLabel="Open Getting Started"
+            />
+          )}
           <CleanupPill onOpen={() => onOpenCleanup?.()} />
         </div>
         <button

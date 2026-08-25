@@ -6,10 +6,10 @@ import { runDirFor } from '../../runs/logic/runtime/run-paths'
 import { loadProjectConfig } from '../../runs/logic/runtime/launcher/project-config'
 import { PaneBroker, type PaneSubscriber } from '../../runs/logic/pane-broker'
 import { isTerminalRunStatus } from '../../../../../../shared/run-state'
-import { loadAgentSession, resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
+import { buildAgentSessionResponse, resolveManifestSessionRef } from '../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 import { generateEvaluationRewriteWithAgent, type EvaluationRewrite } from '../logic/test-review-export'
-import { buildEvaluationExportArchive } from '../logic/evaluation-export-archive'
+import { buildEvaluationExportArchive, type EvaluationArchiveContents } from '../logic/evaluation-export-archive'
 import {
   appendEvaluationExportLog,
   createEvaluationExportTask,
@@ -56,17 +56,22 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     log?: (chunk: string) => void,
     signal?: AbortSignal,
     onSession?: (session: { agent: 'claude' | 'codex'; sessionId: string }) => void,
-  ): Promise<{ archiveBase: string; zip: Buffer }> => {
+  ): Promise<{ archiveBase: string; zip: Buffer; contents: EvaluationArchiveContents }> => {
     throwIfAborted(signal)
     log?.(`[evaluation] preparing ${mode === 'raw' ? 'raw output' : 'localized output'} export\n`)
-    // When the project default is the new `external` heal-agent, there is no
-    // local LLM voice for evaluation rewriting — fall back to the deterministic
-    // adapter so exports stay reproducible.
+    // `healAgent` says who drives REPAIR, not whether a CLI exists for a
+    // one-shot rewrite. `external` means an outside MCP client heals this
+    // workspace — it is the default, so mapping it to `deterministic` here used
+    // to hand back raw wording to everyone who asked for localized, silently.
+    // Map it to `auto` instead and let `resolveEvaluationAgents` look for a
+    // claude/codex CLI; with neither installed it still returns none and the
+    // deterministic fallback applies, but now that is a fact about the machine
+    // rather than about a config field that meant something else.
     const projectHealAgent = mode === 'localized' && deps.projectRoot
       ? loadProjectConfig(deps.projectRoot).healAgent
       : 'deterministic'
     const audienceAdapter: 'auto' | 'claude' | 'codex' | 'manual' | 'deterministic' =
-      projectHealAgent === 'external' ? 'deterministic' : projectHealAgent
+      projectHealAgent === 'external' ? 'auto' : projectHealAgent
     const runDir = runDirFor(deps.store.logsDir, detail.runId)
     const rewrite = mode === 'localized'
       ? await loadEvaluationRewrite(detail, runDir, audienceAdapter, deps.projectRoot, deps.generateEvaluationRewrite, app.log, log, signal, onSession)
@@ -112,7 +117,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
           error: message,
         })
         if (patched) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
         }
       }
     }
@@ -137,7 +141,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       abortController: new AbortController(),
     }
     createEvaluationExportTask(deps.store.logsDir, task)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-created', task: evaluationExportTaskView(task) })
     activeEvaluationExports.set(task.taskId, active)
     const push = (chunk: string): void => {
       appendEvaluationExportLog(deps.store.logsDir, task.taskId, chunk)
@@ -148,7 +151,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     const onSession = (session: { agent: 'claude' | 'codex'; sessionId: string }): void => {
       const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, { sessionRef: session })
       if (patched) {
-        publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
       }
     }
     push(`[evaluation] task ${task.taskId} started\n`)
@@ -159,11 +161,11 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
         writeEvaluationExportZip(deps.store.logsDir, task.taskId, built.zip)
         const patched = patchEvaluationExportTask(deps.store.logsDir, task.taskId, {
           archiveBase: built.archiveBase,
+          archive: built.contents,
           status: 'completed',
           downloadReady: true,
         })
         if (patched) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
         }
         push('[evaluation] task completed\n')
         active.broker.markExit('export', 0)
@@ -176,7 +178,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
           downloadReady: false,
         })
         if (patched) {
-          publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-updated', task: evaluationExportTaskView(patched) })
         }
         push(`[evaluation] task failed: ${error}\n`)
         active.broker.markExit('export', 1)
@@ -249,8 +250,7 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
       reply.code(404)
       return { reason: 'session-log-missing' }
     }
-    const { events, meta } = loadAgentSession(ref)
-    return { agent: ref.agent, sessionId: ref.sessionId, model: meta.model, effort: meta.effort, events }
+    return buildAgentSessionResponse(ref)
   })
 
   app.get<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/download', async (req, reply) => {
@@ -271,6 +271,35 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     return reply.send(zip)
   })
 
+  // Stop a running export WITHOUT erasing it. The DELETE below aborts and then
+  // deletes, which is the wrong verb for a pause: a flight that parks mid-export
+  // must leave the record and its log behind for the user to read. Unlike DELETE,
+  // this hands the settling to the task's own catch — the record survives, so the
+  // runner's `readEvaluationExportTask` guard still passes and it writes the
+  // `failed` status, the log line, the broker exit and its own map cleanup.
+  app.post<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId/abort', async (req, reply) => {
+    recoverStaleEvaluationExports()
+    const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
+    if (!task) {
+      reply.code(404)
+      return { error: 'evaluation export task not found' }
+    }
+    const active = activeEvaluationExports.get(task.taskId)
+    if (task.status !== 'running' || !active) {
+      // Idempotent no-op, never a 409: the caller is a best-effort teardown, and
+      // "already finished" is a success for it. A still-`running` record with no
+      // in-memory task is an EXTERNAL producer's export — this process does not
+      // own its work and has nothing to signal.
+      return { aborted: false, status: task.status }
+    }
+    const line = '[evaluation] task aborted\n'
+    appendEvaluationExportLog(deps.store.logsDir, task.taskId, line)
+    active.broker.push('export', line)
+    active.abortController.abort()
+    reply.code(202)
+    return { aborted: true, taskId: task.taskId }
+  })
+
   app.delete<{ Params: { taskId: string } }>('/api/evaluation-exports/:taskId', async (req, reply) => {
     const task = readEvaluationExportTask(deps.store.logsDir, req.params.taskId)
     if (!task) {
@@ -286,7 +315,6 @@ export async function evaluationRoutes(app: FastifyInstance, deps: EvaluationRou
     if (active !== undefined) { active.broker.markExit('export', task.status === 'running' ? 1 : 0) }
     activeEvaluationExports.delete(req.params.taskId)
     deleteEvaluationExportTask(deps.store.logsDir, req.params.taskId)
-    publishWorkspaceEvent(deps.workspaceEvents, { type: 'evaluation-export-deleted', taskId: req.params.taskId })
     reply.code(204)
     return reply.send()
   })
@@ -352,6 +380,11 @@ async function loadEvaluationRewrite(
       writeCachedEvaluationRewrite(runDir, generated)
       onOutput?.('[evaluation] localized wording cached\n')
     } else {
+      // The report is about to ship with raw wording under a localized label.
+      // Say so in the export log — the sidecar file alone is not somewhere
+      // anyone looks, and a silently downgraded report is a report that lies
+      // about how it was written.
+      onOutput?.('[evaluation] no claude or codex CLI available — the report keeps its raw wording\n')
       writeEvaluationRewriteError(runDir, `No evaluation rewrite was generated for adapter "${audienceAdapter}".`)
     }
     return generated ?? undefined

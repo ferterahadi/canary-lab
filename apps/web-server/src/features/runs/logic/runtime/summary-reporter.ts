@@ -8,92 +8,17 @@ import type {
   TestResult,
   TestStep,
 } from '@playwright/test/reporter'
-import {
-  classifyJournalOutcome,
-  enrichSummaryWithLogs,
-  stripAnsi,
-  updateLatestPendingJournalOutcome,
-  writeHealIndex,
-  type SummaryForJournalOutcome,
-} from './log-enrichment'
+import { classifyJournalOutcome, enrichSummaryWithLogs, stripAnsi, updateLatestPendingJournalOutcome, writeHealIndex } from './log-enrichment'
 import { getSummaryPath } from './paths'
 import { extractTraceSummary } from './trace-enrichment'
+import { ExistingSummary, KnownTestEntry, idForExistingResult, knownTestFromTest, knownTestsFromExistingSummary, mergeKnownTest, readExistingSummary, stringAt } from './summary-known-tests'
+import { failureLocations, findErrorContextAttachmentPath, findHarAttachmentPath, findLastStepIndex, findTraceAttachmentPath, isErrorShape, isFailureResult, journalPathForSummary, runIdForSummary, stepToRunningStep } from './summary-locations'
+import type { PlaybackEvent, RunningStep, RunningTest, TestEntry } from './summary-types'
 
-export function slugify(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-}
+export { slugify } from './summary-types'
+export type { RunningStep, TestEntry } from './summary-types'
 
-interface TestEntry {
-  id?: string
-  name: string
-  status: string
-  passed: boolean
-  error?: {
-    message: string
-    snippet?: string
-  }
-  durationMs?: number
-  location?: string
-  locations?: string[]
-  retry?: number
-  logFiles?: string[]
-  /** Repo-relative path to `failed/<slug>/error.txt` — the full, untruncated
-   *  error message + snippet. Populated by enrichment; the in-JSON `error`
-   *  stays full too, this is the agent-friendly direct pointer. */
-  errorFile?: string
-  /** Repo-relative path to the curated failure-summary.md produced from this
-   *  test's Playwright trace.zip. Populated in onEnd after async extraction. */
-  traceSummaryFile?: string
-}
-
-interface KnownTestEntry {
-  id: string
-  name: string
-  title: string
-  titlePath?: string[]
-  location?: string
-}
-
-interface RunningStep {
-  title: string
-  category: string
-  location?: string
-  locations?: string[]
-}
-
-interface RunningTest {
-  id?: string
-  name: string
-  location: string
-  step?: RunningStep
-}
-
-type PlaybackEvent =
-  | {
-      type: 'test-begin'
-      time: string
-      test: { id?: string; name: string; title: string; location: string }
-    }
-  | {
-      type: 'step-begin' | 'step-end'
-      time: string
-      test: { id?: string; name: string; title: string }
-      step: RunningStep
-    }
-  | {
-      type: 'test-end'
-      time: string
-      test: { id?: string; name: string; title: string; location: string }
-      status: string
-      passed: boolean
-      durationMs: number
-      retry: number
-      error?: { message: string; snippet?: string }
-      attachments?: Array<{ name: string; contentType?: string; path?: string }>
-    }
+export { testIdFor } from './summary-known-tests'
 
 class SummaryReporter implements Reporter {
   private readonly mergeExistingSummary = process.env.CANARY_LAB_TARGETED_RERUN === '1'
@@ -111,6 +36,10 @@ class SummaryReporter implements Reporter {
   // `result.attachments` and consumed in `onEnd` to drive trace-summary
   // extraction (async, parallel) before the final heal-index write.
   private tracePathsByName = new Map<string, string>()
+  // Names that passed only on a retry in the PRIOR execution's summary (targeted
+  // rerun seeding drops per-entry retry numbers, so the honesty marker has to be
+  // carried separately or a flaky pass launders into a clean one on merge).
+  private priorPassedOnRetry = new Set<string>()
 
   constructor() {
     if (this.mergeExistingSummary) this.seedFromExistingSummary()
@@ -225,6 +154,12 @@ class SummaryReporter implements Reporter {
     const locations = failed
       ? failureLocations(result, this.failedStepLocationsByTest.get(known.id))
       : []
+    const errorContextFile = failed
+      ? this.persistFailureArtifact(name, findErrorContextAttachmentPath(result.attachments), 'error-context.md')
+      : undefined
+    const harFile = failed
+      ? this.persistFailureArtifact(name, findHarAttachmentPath(result.attachments), 'network.har')
+      : undefined
     const entry: TestEntry = {
       id: known.id,
       name,
@@ -234,6 +169,8 @@ class SummaryReporter implements Reporter {
       durationMs: result.duration,
       location: known.location ?? `${test.location.file}:${test.location.line}`,
       ...(locations.length > 0 ? { locations } : {}),
+      ...(errorContextFile ? { errorContextFile } : {}),
+      ...(harFile ? { harFile } : {}),
       retry: result.retry,
     }
     this.results.push(entry)
@@ -290,6 +227,33 @@ class SummaryReporter implements Reporter {
       process.env.CANARY_LAB_BENCHMARK_MODE !== 'baseline'
     ) {
       await this.runTraceEnrichment()
+    }
+  }
+
+  /**
+   * Copy one attachment next to the other per-failure artifacts and return its
+   * repo-relative path.
+   *
+   * Attachments land in the test's output dir, which the next Playwright
+   * invocation wipes via `--output` — so a heal cycle that reruns the test
+   * would leave the heal-index pointing at a deleted file. Copying into
+   * `failed/<slug>/` puts them beside `error.txt` and the trace extract, where
+   * artifact persistence already expects per-failure evidence to live.
+   *
+   * Best-effort: on any failure the heal-index simply omits that bullet, and
+   * the remaining artifacts stay as failure signal.
+   */
+  private persistFailureArtifact(name: string, src: string | null, destFileName: string): string | undefined {
+    if (!src) return undefined
+    const runDir = path.dirname(getSummaryPath())
+    const destDir = path.join(runDir, 'failed', name)
+    try {
+      fs.mkdirSync(destDir, { recursive: true })
+      const dest = path.join(destDir, destFileName)
+      fs.copyFileSync(src, dest)
+      return path.relative(runDir, dest)
+    } catch {
+      return undefined
     }
   }
 
@@ -367,12 +331,23 @@ class SummaryReporter implements Reporter {
     const passedIds = passedResults.flatMap((r) => r.id ? [r.id] : [])
     const skippedIds = skippedResults.flatMap((r) => r.id ? [r.id] : [])
     const includeKnownTests = this.sawSuiteInventory
+    // Honesty markers for downstream reporting (the coverage ledger's proven
+    // axis, the flight's "Tests that passed" tile): a pass that needed a retry
+    // is flaky, and a summary still carrying seeded prior-execution results
+    // never saw all its passes in one run. Both are facts of THIS summary, so
+    // they live here rather than being re-derived by readers.
+    const passedOnRetry = passedResults
+      .filter((r) => (typeof r.retry === 'number' && r.retry > 0) || this.priorPassedOnRetry.has(r.name))
+      .map((r) => r.name)
+    const spansExecutions = this.results.some((r) => r.seeded)
     const summary = {
       complete,
       total: includeKnownTests ? this.knownTests.length : this.results.length,
       passed: passedResults.length,
       passedNames: passedResults.map((r) => r.name),
       ...(passedIds.length ? { passedIds } : {}),
+      ...(passedOnRetry.length ? { passedOnRetry } : {}),
+      ...(spansExecutions ? { mergedFromPriorExecution: true } : {}),
       ...(includeKnownTests ? { knownTests: this.knownTests } : {}),
       ...(skippedResults.length
         ? {
@@ -395,6 +370,8 @@ class SummaryReporter implements Reporter {
           ...(r.logFiles ? { logFiles: r.logFiles } : {}),
           ...(r.errorFile ? { errorFile: r.errorFile } : {}),
           ...(r.traceSummaryFile ? { traceSummaryFile: r.traceSummaryFile } : {}),
+          ...(r.errorContextFile ? { errorContextFile: r.errorContextFile } : {}),
+          ...(r.harFile ? { harFile: r.harFile } : {}),
         })),
     }
 
@@ -424,6 +401,9 @@ class SummaryReporter implements Reporter {
     if (!parsed || typeof parsed !== 'object') return
 
     const seen = new Set<string>()
+    for (const name of Array.isArray(parsed.passedOnRetry) ? parsed.passedOnRetry : []) {
+      if (typeof name === 'string' && name) this.priorPassedOnRetry.add(name)
+    }
     const passedNames = Array.isArray(parsed.passedNames) ? parsed.passedNames : []
     const passedIds = Array.isArray(parsed.passedIds) ? parsed.passedIds : []
     for (const [index, name] of passedNames.entries()) {
@@ -432,7 +412,7 @@ class SummaryReporter implements Reporter {
       const key = id ?? name
       if (seen.has(key)) continue
       seen.add(key)
-      this.results.push({ ...(id ? { id } : {}), name, status: 'passed', passed: true })
+      this.results.push({ ...(id ? { id } : {}), name, status: 'passed', passed: true, seeded: true })
     }
 
     const skippedNames = Array.isArray(parsed.skippedNames) ? parsed.skippedNames : []
@@ -443,7 +423,7 @@ class SummaryReporter implements Reporter {
       const key = id ?? name
       if (seen.has(key)) continue
       seen.add(key)
-      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false })
+      this.results.push({ ...(id ? { id } : {}), name, status: 'skipped', passed: false, seeded: true })
     }
 
     const failed = Array.isArray(parsed.failed) ? parsed.failed : []
@@ -466,6 +446,7 @@ class SummaryReporter implements Reporter {
         name,
         status: 'failed',
         passed: false,
+        seeded: true,
         ...(isErrorShape(entry.error) ? { error: entry.error } : {}),
         ...(typeof entry.durationMs === 'number' ? { durationMs: entry.durationMs } : {}),
         ...(typeof entry.location === 'string' ? { location: entry.location } : {}),
@@ -522,253 +503,6 @@ class SummaryReporter implements Reporter {
       // reconciliation is best-effort when the file is absent or mid-edit.
     }
   }
-}
-
-interface ExistingSummary {
-  passedNames?: unknown
-  passedIds?: unknown
-  skippedNames?: unknown
-  skippedIds?: unknown
-  failed?: unknown
-  knownTests?: unknown
-}
-
-function isFailureResult(entry: Pick<TestEntry, 'status'>): boolean {
-  return entry.status !== 'passed' && entry.status !== 'skipped'
-}
-
-// Playwright records the trace zip as an attachment with `name === 'trace'`
-// and a `path` pointing at the per-test artifact dir
-// (`<playwright-artifacts>/<pw-slug>/trace.zip`). The slug Playwright uses
-// here is its own and doesn't match our `slugify(title)`, so we read the
-// path off the attachment directly instead of reconstructing it.
-function findTraceAttachmentPath(
-  attachments: ReadonlyArray<{ name?: string; path?: string }> | undefined,
-): string | null {
-  if (!attachments) return null
-  for (const a of attachments) {
-    if (a?.name === 'trace' && typeof a.path === 'string' && a.path.length > 0) {
-      return a.path
-    }
-  }
-  return null
-}
-
-function knownTestFromTest(test: TestCase): KnownTestEntry {
-  const titlePath = typeof test.titlePath === 'function'
-    ? test.titlePath().filter((part): part is string => typeof part === 'string' && part.length > 0)
-    : undefined
-  const location = test.location?.file && typeof test.location.line === 'number'
-    ? `${test.location.file}:${test.location.line}`
-    : undefined
-  return {
-    id: testIdFor({
-      title: test.title,
-      ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
-      ...(location ? { location } : {}),
-    }),
-    name: `test-case-${slugify(test.title)}`,
-    title: test.title,
-    ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
-    ...(location ? { location } : {}),
-  }
-}
-
-function knownTestsFromExistingSummary(summary: ExistingSummary | null): KnownTestEntry[] {
-  const raw = Array.isArray(summary?.knownTests) ? summary.knownTests : []
-  const out: KnownTestEntry[] = []
-  for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') continue
-    const value = entry as {
-      id?: unknown
-      name?: unknown
-      title?: unknown
-      titlePath?: unknown
-      location?: unknown
-    }
-    if (typeof value.name !== 'string' || value.name.length === 0) continue
-    if (typeof value.title !== 'string' || value.title.length === 0) continue
-    const explicitId = typeof value.id === 'string' && value.id.length > 0
-    const id = explicitId ? value.id as string : legacyTestIdForName(value.name)
-    const titlePath = Array.isArray(value.titlePath)
-      ? value.titlePath.filter((part): part is string => typeof part === 'string' && part.length > 0)
-      : undefined
-    const location = typeof value.location === 'string' && value.location.length > 0 ? value.location : undefined
-    mergeKnownTest(out, {
-      id,
-      name: value.name,
-      title: value.title,
-      ...(titlePath && titlePath.length > 0 ? { titlePath } : {}),
-      ...(location ? { location } : {}),
-    })
-  }
-  return out
-}
-
-function mergeKnownTest(knownTests: KnownTestEntry[], entry: KnownTestEntry): { previousId?: string } {
-  const entryLogicalKey = knownTestLogicalKey(entry)
-  const idx = knownTests.findIndex((known) => known.id === entry.id || (
-    known.id.startsWith('legacy-') &&
-    known.name === entry.name &&
-    known.location === entry.location
-  ) || (entryLogicalKey !== undefined && knownTestLogicalKey(known) === entryLogicalKey))
-  if (idx < 0) {
-    knownTests.push(entry)
-    return {}
-  }
-  const previousId = knownTests[idx].id
-  const merged: KnownTestEntry = {
-    ...knownTests[idx],
-    ...entry,
-    location: entry.location ?? knownTests[idx].location,
-  }
-  if (!entry.titlePath?.length) merged.titlePath = knownTests[idx].titlePath
-  knownTests[idx] = merged
-  return { previousId }
-}
-
-function knownTestLogicalKey(entry: Pick<KnownTestEntry, 'title' | 'titlePath'>): string | undefined {
-  return entry.titlePath?.length ? [...entry.titlePath, entry.title].join('\u001f') : undefined
-}
-
-function legacyTestIdForName(name: string): string {
-  return `legacy-${name}`
-}
-
-export function testIdFor(input: { title: string; titlePath?: string[]; location?: string }): string {
-  const parts = [
-    input.location ?? '',
-    ...(input.titlePath && input.titlePath.length > 0 ? input.titlePath : [input.title]),
-  ]
-  return `test-id-${hashString(parts.join('\u001f'))}`
-}
-
-function hashString(input: string): string {
-  let hash = 0x811c9dc5
-  for (let i = 0; i < input.length; i++) {
-    hash ^= input.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(36)
-}
-
-function stringAt(values: unknown[], index: number): string | undefined {
-  const value = values[index]
-  return typeof value === 'string' && value.length > 0 ? value : undefined
-}
-
-function idForExistingResult(input: {
-  name: string
-  knownTests: KnownTestEntry[]
-  location?: string
-}): string | undefined {
-  if (input.location) {
-    const exact = input.knownTests.find((test) => test.name === input.name && test.location === input.location)
-    if (exact && !exact.id.startsWith('legacy-')) return exact.id
-  }
-  const matches = input.knownTests.filter((test) => test.name === input.name)
-  return matches.length === 1 && !matches[0].id.startsWith('legacy-') ? matches[0].id : undefined
-}
-
-function readExistingSummary(): (ExistingSummary & SummaryForJournalOutcome) | null {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(getSummaryPath(), 'utf-8')) as ExistingSummary & SummaryForJournalOutcome
-    return parsed && typeof parsed === 'object' ? parsed : null
-  } catch {
-    return null
-  }
-}
-
-function journalPathForSummary(): string {
-  return path.join(path.dirname(getSummaryPath()), 'diagnosis-journal.md')
-}
-
-function runIdForSummary(): string | undefined {
-  const manifestPath = process.env.CANARY_LAB_MANIFEST_PATH
-    ?? path.join(path.dirname(getSummaryPath()), 'manifest.json')
-  try {
-    const parsed = JSON.parse(fs.readFileSync(manifestPath, 'utf-8')) as { runId?: unknown }
-    return typeof parsed.runId === 'string' ? parsed.runId : undefined
-  } catch {
-    return undefined
-  }
-}
-
-function isErrorShape(value: unknown): value is { message: string; snippet?: string } {
-  if (!value || typeof value !== 'object') return false
-  const err = value as { message?: unknown; snippet?: unknown }
-  return typeof err.message === 'string' && (err.snippet === undefined || typeof err.snippet === 'string')
-}
-
-function stepToRunningStep(step: TestStep): RunningStep {
-  const locations = stepLocationChain(step)
-  return {
-    title: step.title,
-    category: step.category,
-    ...(step.location ? { location: `${step.location.file}:${step.location.line}` } : {}),
-    ...(locations.length > 0 ? { locations } : {}),
-  }
-}
-
-function failureLocations(result: TestResult, failedStepLocations?: string[]): string[] {
-  const out: string[] = []
-  const add = (location: string) => {
-    const normalized = normalizeLocation(location)
-    if (out.includes(normalized)) return
-    out.push(normalized)
-  }
-  const addLocation = (location: { file: string; line: number } | undefined) => {
-    if (!location) return
-    add(`${location.file}:${location.line}`)
-  }
-
-  addLocation(result.error?.location)
-  for (const error of result.errors ?? []) {
-    addLocation(error.location)
-    for (const location of stackLocations(error.stack)) add(location)
-  }
-  for (const location of failedStepLocations ?? []) add(location)
-  return out
-}
-
-function stackLocations(stack: string | undefined): string[] {
-  if (!stack) return []
-  const out: string[] = []
-  const locationRe = /(?:\(|\s)(\/[^():\n]+:\d+(?::\d+)?)(?:\)|\s|$)/g
-  for (const match of stack.matchAll(locationRe)) {
-    const location = match[1]
-    if (!out.includes(location)) out.push(location)
-  }
-  return out
-}
-
-function normalizeLocation(location: string): string {
-  const match = location.match(/^(\/[^:\n]+:\d+)(?::\d+)?$/)
-  return match ? match[1] : location
-}
-
-function stepLocationChain(step: TestStep): string[] {
-  const chain: string[] = []
-  let cur: TestStep | undefined = step
-  while (cur) {
-    if (cur.location) chain.push(`${cur.location.file}:${cur.location.line}`)
-    cur = cur.parent
-  }
-  return chain
-}
-
-function findLastStepIndex(steps: RunningStep[], target: RunningStep): number {
-  for (let i = steps.length - 1; i >= 0; i--) {
-    const s = steps[i]
-    if (
-      s.title === target.title &&
-      s.category === target.category &&
-      s.location === target.location
-    ) {
-      return i
-    }
-  }
-  return -1
 }
 
 export default SummaryReporter

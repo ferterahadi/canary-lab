@@ -7,6 +7,7 @@ import { PortifyProvider } from './features/portify/state/PortifyContext'
 import { EvaluationExportProvider } from './features/evaluation/state/EvaluationExportContext'
 import { WizardDraftProvider } from './features/wizard/state/WizardDraftContext'
 import { McpPromoProvider } from './shared/shell/McpPromoContext'
+import { InvalidationProvider } from './shared/state/invalidation'
 import { bootstrapTheme } from './shared/lib/theme'
 import './styles.css'
 
@@ -21,7 +22,9 @@ createRoot(container).render(
           <WizardDraftProvider>
             <McpPromoProvider>
               <EvaluationExportProvider>
-                <App />
+                <InvalidationProvider>
+                  <App />
+                </InvalidationProvider>
               </EvaluationExportProvider>
             </McpPromoProvider>
           </WizardDraftProvider>

@@ -1,6 +1,6 @@
 ---
 name: cl_ui-design-philosophy
-description: Use when building or restyling any Canary Lab web UI (apps/web) — a new panel, dialog, pill, card, or full-screen view. Captures the design language so new surfaces feel native instead of bolted on: reuse the token system, the established layout precedents, and the meaning-carries-the-style rule. No new component library. For critique-only requests ("review this design", "design feedback") use cl_design-feedback instead; terminal/CLI output styling is out of scope.
+description: Use when building or restyling any Canary Lab web UI (apps/web) — a new panel, dialog, pill, card, or full-screen view. The design language that makes a new surface feel native: the token system, the layout precedents, and meaning-carries-the-style.
 ---
 
 # Canary Lab UI Design Philosophy
@@ -8,6 +8,9 @@ description: Use when building or restyling any Canary Lab web UI (apps/web) —
 Canary Lab's UI is a dense, information-first operator console — not a marketing
 page. New surfaces must read as part of the same tool. The bar is *intentional and
 native*, not *novel*. Apply `frontend-design` polish **inside** these constraints.
+
+Critique-only requests ("review this design", "design feedback") → `cl_design-feedback`.
+Terminal/CLI output styling is out of scope.
 
 ## Non-negotiables
 
@@ -43,16 +46,10 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
   `/ws/.../agent-session` tail, exactly like the coverage job (see `cl_async-task-ux`).
   A new `kind` on `AgentSessionSource` is the whole UI cost; the win is structured
   thinking/tool/result rows, collapse, model+session header, and live tail for free.
-- **A live UI transition needs a reliable trigger, not just a push.** When a panel
-  must flip state mid-job (text progress → `AgentSessionView` once the rewrite agent
-  pins its session), don't gate it solely on a one-shot broadcast like a
-  workspace-event push — that channel can silently fail to deliver while the
-  per-task log WS (the one already streaming the agent's lines) keeps working. Back
-  the transition off the proven stream: when the log marks the agent starting and
-  the task still lacks its session ref, refetch the task once (self-limiting — stop
-  refetching the moment the ref lands). Symptom this prevents: "only swaps after I
-  refresh the page" — refresh works because the REST list carries the ref the lost
-  push didn't. The full pattern + diagnostic fingerprint lives in [[cl_live-state-sync]].
+- **A live UI transition needs a reliable trigger, not just a push.** A panel that
+  must flip state mid-job may not depend solely on a best-effort broadcast — back it
+  off the per-task stream you already hold. Pattern, worked example, and the
+  "only updates after I refresh" fingerprint: [[cl_live-state-sync]].
 - **Meaning carries the style, not decoration.** Prefer a status dot, a coloured
   border-inset, or a typed chip over a heavy accent. (R9 dropped the TestCard's
   decorative left-accent — the verified dot + `@req-*` chips already say it.)
@@ -97,6 +94,6 @@ native*, not *novel*. Apply `frontend-design` polish **inside** these constraint
 
 ## Verify
 
-Component behaviour is happy-dom-tested (`*.test.tsx`); the live look is the user's
-`canary-apply` trial (never run it — see `cl_verify-changes`). Typecheck with
+Component behaviour is happy-dom-tested (`*.test.tsx`); the live look needs the
+`canary-apply` cycle — see `cl_verify-changes` Tier 3 for who runs it. Typecheck with
 `tsconfig.build.json`.

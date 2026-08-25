@@ -19,6 +19,5 @@ Tiny todo API used as the Canary Lab **Flight** E2E fixture.
 npm run dev   # node server.js — no dependencies to install
 ```
 
-Note: the shipped `server.js` carries a deliberate bug on the create→list path
-(created todos are never stored). It exists so the flight's run→heal stage has
-something real to fix.
+`server.js` deliberately fails the create→list path by not storing todos, giving
+Flight's run→heal stage a real defect.

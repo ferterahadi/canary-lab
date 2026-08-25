@@ -6,23 +6,24 @@ import {
   featureExists,
   listFeatureDocs,
   regeneratePrdSummary,
-} from '../../coverage/logic/coverage/service'
-import type { SummarizeAdapter } from '../../coverage/logic/coverage/prd-summary'
-import { CoverageJobRunStore, type CoverageJobStore } from '../../coverage/logic/coverage/jobs/store'
-import { startCoverageJob, CoverageJobConflictError } from '../../coverage/logic/coverage/jobs/runner'
-import type { CoverageJobKind } from '../../coverage/logic/coverage/jobs/types'
-import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc } from '../../config/logic/feature-authoring'
+} from '../logic/coverage/service'
+import type { SummarizeAdapter } from '../logic/coverage/prd-summary'
+import { coverageJobStore, type CoverageJobStore } from '../logic/coverage/jobs/store'
+import { startCoverageJob, CoverageJobConflictError } from '../logic/coverage/jobs/runner'
+import type { CoverageJobKind } from '../logic/coverage/jobs/types'
+import { writeFeatureDoc, deleteFeatureDoc, linkFeatureDoc, type FeatureAuthoringContext } from '../../config/logic/feature-authoring'
 import { reopenStages } from '../../flights/logic/conductor'
 import type { FlightStore } from '../../flights/logic/store'
-import { extractPrdDocument } from '../../coverage/logic/prd-document-extractor'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { extractPrdDocument } from '../logic/prd-document-extractor'
+import { loadFeatures } from '../../../shared/feature-loader'
 import {
   findClaudeLogBySessionId,
-  loadAgentSession,
+  buildAgentSessionResponse,
   locateCodexSessionLog,
   type AgentSessionRef,
 } from '../../agent-sessions/logic/agent-session-log'
 import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
+import { GettingStartedBusyError, type GettingStartedOwner, type GettingStartedSessionStore } from '../../config/logic/getting-started-session'
 
 export interface CoverageRouteDeps {
   featuresDir: string
@@ -36,14 +37,28 @@ export interface CoverageRouteDeps {
    *  rail reflects the redo live (no-op when absent or the flight is active). */
   flightStore?: FlightStore
   workspaceEvents?: WorkspaceEventPublisher
+  /** Getting Started demo tracking — a job start carrying gettingStartedSource
+   *  claims the 'coverage' card. Absent in tests → no tracking. */
+  gettingStarted?: GettingStartedSessionStore
 }
 
 // The Requirement Coverage Ledger REST surface — the single computation layer the
 // UI and the MCP tools both consume (dual-surface parity). Pure reads except the
 // regenerate action, which re-summarizes the source docs (preserving ids).
 
+/** The docs writers announce their own writes, so they need the bus in their
+ *  context (see FeatureAuthoringContext) — built here once so no handler can
+ *  assemble a bus-less context and write a doc no client hears about. */
+function docsCtx(deps: CoverageRouteDeps): FeatureAuthoringContext {
+  return {
+    projectRoot: deps.projectRoot,
+    featuresDir: deps.featuresDir,
+    workspaceEvents: deps.workspaceEvents,
+  }
+}
+
 export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDeps): Promise<void> {
-  const jobStore = deps.coverageJobStore ?? new CoverageJobRunStore(deps.logsDir)
+  const jobStore = deps.coverageJobStore ?? coverageJobStore(deps.logsDir)
 
   app.get<{ Params: { name: string } }>('/api/features/:name/coverage', async (req, reply) => {
     try {
@@ -85,16 +100,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         return { error: 'relPath and content are required' }
       }
       const result = writeFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         { feature: req.params.name, relPath, content },
       )
       if (!result.ok) {
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      // Docs feed the PRD summary (drift flag) + the Docs rail listing; tell every
-      // client so the rail + coverage headline refresh without a manual reload.
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath }
     },
   )
@@ -122,14 +134,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       // Store under a sanitized .md slug (the pipeline is markdown-only).
       const base = filename.replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'doc'
       const result = writeFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         { feature: req.params.name, relPath: `${base}.md`, content: text },
       )
       if (!result.ok) {
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath }
     },
   )
@@ -147,7 +158,7 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         return { error: 'path is required' }
       }
       const result = linkFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         {
           feature: req.params.name,
           targetPath: targetPath.trim(),
@@ -158,7 +169,6 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { written: true, relativePath: result.relativePath, linked: result.linked }
     },
   )
@@ -167,14 +177,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     '/api/features/:name/docs/:relPath',
     async (req, reply) => {
       const result = deleteFeatureDoc(
-        { projectRoot: deps.projectRoot, featuresDir: deps.featuresDir },
+        docsCtx(deps),
         { feature: req.params.name, relPath: decodeURIComponent(req.params.relPath) },
       )
       if (!result.ok) {
         reply.code(result.error.includes('not found') ? 404 : 400)
         return { error: result.error }
       }
-      publishWorkspaceEvent(deps.workspaceEvents, { type: 'coverage-changed', feature: req.params.name })
       return { deleted: true, relativePath: result.relativePath }
     },
   )
@@ -250,7 +259,16 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
     const out: Array<{ feature: string; headline: string | null; summary: string | null; coverage: string | null; coveragePct: number | null }> = []
     for (const f of loadFeatures(deps.featuresDir)) {
       try {
-        const ledger = computeFeatureCoverage({ featuresDir: deps.featuresDir, logsDir: deps.logsDir, feature: f.name })
+        // Hand over the directory we already have — otherwise each iteration
+        // re-loads (and re-compiles) every feature config in the workspace.
+        // A feature without a `featureDir` falls through to the resolver, which
+        // throws FeatureNotFoundError and degrades to nulls below, as before.
+        const ledger = computeFeatureCoverage({
+          featuresDir: deps.featuresDir,
+          logsDir: deps.logsDir,
+          feature: f.name,
+          ...(f.featureDir ? { featureDir: f.featureDir } : {}),
+        })
         out.push({
           feature: f.name,
           headline: ledger.state?.headline ?? null,
@@ -295,11 +313,10 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       located = locateCodexSessionLog(deps.projectRoot, manifest.startedAt)
     }
     if (!located) return null
-    const { events, meta } = loadAgentSession(located)
-    return { agent: located.agent, sessionId: located.sessionId, model: meta.model, effort: meta.effort, events }
+    return buildAgentSessionResponse(located)
   })
 
-  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter } | undefined }>(
+  app.post<{ Params: { name: string }; Body: { kind?: CoverageJobKind; adapter?: SummarizeAdapter; gettingStartedSource?: GettingStartedOwner } | undefined }>(
     '/api/features/:name/coverage/jobs',
     async (req, reply) => {
       const kind = req.body?.kind
@@ -310,6 +327,18 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
       if (!featureExists(deps.featuresDir, req.params.name)) {
         reply.code(404)
         return { error: `feature not found: ${req.params.name}` }
+      }
+      // The internal coverage demo runs summary + mapping as two jobs; each
+      // start re-claims, so the card briefly settles between them (by design).
+      let gettingStartedSession: string | null = null
+      if (req.body?.gettingStartedSource && deps.gettingStarted) {
+        try {
+          gettingStartedSession = deps.gettingStarted.claim('coverage', req.body.gettingStartedSource).sessionId
+        } catch (err) {
+          if (!(err instanceof GettingStartedBusyError)) throw err
+          reply.code(409)
+          return { type: err.type, error: err.message, active: err.active }
+        }
       }
       try {
         const { manifest } = startCoverageJob(
@@ -325,9 +354,13 @@ export async function coverageRoutes(app: FastifyInstance, deps: CoverageRouteDe
           },
           { store: jobStore, workspaceEvents: deps.workspaceEvents },
         )
+        if (gettingStartedSession) {
+          deps.gettingStarted?.attach(gettingStartedSession, { kind: 'coverage-job', id: manifest.jobId, feature: req.params.name })
+        }
         reply.code(202)
         return manifest
       } catch (err) {
+        if (gettingStartedSession) deps.gettingStarted?.abandon(gettingStartedSession)
         if (err instanceof CoverageJobConflictError) {
           reply.code(409)
           return { error: err.message, existingJobId: err.existingJobId }

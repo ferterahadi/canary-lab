@@ -9,6 +9,7 @@ import {
   captureDiff,
   changedFiles,
   discardWorktree,
+  editFingerprint,
 } from './git-ops'
 
 const roots: string[] = []
@@ -92,5 +93,89 @@ describe('git-ops scratch worktree lifecycle', () => {
       worktreesDir: path.join(repo, '..', `wt-bad-${path.basename(repo)}`),
       branch: 'bad..branch', // git rejects '..' in ref names
     })).rejects.toThrow(/failed to create branch/)
+  })
+})
+
+// The liveness fingerprint behind the external-portify abandonment fix: while an
+// external client holds the editing window, `status` and `attempt` are pinned, so
+// this is the only signal that distinguishes "still working" from "vanished".
+describe('editFingerprint', () => {
+  it('moves when a file is edited, and again when the SAME file changes again', async () => {
+    const root = await tmpRepo()
+    const before = await editFingerprint([{ worktreePath: root }])
+    expect(before.files).toBe(0)
+
+    fs.writeFileSync(path.join(root, 'app.js'), 'const PORT = process.env.PORT\n')
+    const first = await editFingerprint([{ worktreePath: root }])
+    expect(first.files).toBe(1)
+    expect(first.digest).not.toBe(before.digest)
+
+    // A name-list fingerprint would freeze here — the file set is unchanged. The
+    // digest folds in the porcelain body, so continued work on one file still reads
+    // as progress. That is the whole point: a long single-file edit must not look
+    // idle and get the workflow abandoned.
+    fs.writeFileSync(path.join(root, 'app.js'), 'const PORT = process.env.PORT ?? 3000\n')
+    const second = await editFingerprint([{ worktreePath: root }])
+    expect(second.files).toBe(1)
+    expect(second.digest).not.toBe(first.digest)
+  })
+
+  it('counts UNTRACKED files too — adding a file is progress', async () => {
+    const root = await tmpRepo()
+    fs.writeFileSync(path.join(root, 'ports.js'), 'module.exports = {}\n')
+    const fp = await editFingerprint([{ worktreePath: root }])
+    expect(fp.files).toBe(1)
+  })
+
+  it('is stable when nothing changes, so a vanished client still hits the idle budget', async () => {
+    const root = await tmpRepo()
+    fs.writeFileSync(path.join(root, 'app.js'), 'edited\n')
+    const a = await editFingerprint([{ worktreePath: root }])
+    const b = await editFingerprint([{ worktreePath: root }])
+    expect(b.digest).toBe(a.digest)
+  })
+
+  it('sums across every scratch worktree and skips repos with no worktree yet', async () => {
+    const one = await tmpRepo()
+    const two = await tmpRepo()
+    fs.writeFileSync(path.join(one, 'app.js'), 'a\n')
+    fs.writeFileSync(path.join(two, 'app.js'), 'b\n')
+    const fp = await editFingerprint([{ worktreePath: one }, {}, { worktreePath: two }])
+    expect(fp.files).toBe(2)
+    expect(fp.digest.split('|')).toHaveLength(2)
+  })
+
+  it('still fingerprints a DELETED file, which porcelain lists but cannot be stat-ed', async () => {
+    // ` D server.js` is real progress (removing a hardcoded-port file counts), and
+    // the mtime lookup must degrade to the path rather than throwing the whole
+    // fingerprint away — otherwise a delete-only edit session looks idle.
+    const root = await tmpRepo()
+    fs.rmSync(path.join(root, 'app.js'))
+    const fp = await editFingerprint([{ worktreePath: root }])
+    expect(fp.files).toBe(1)
+    expect(fp.digest).not.toBe('')
+    expect(fp.digest).not.toBe('unreadable')
+  })
+
+  it('resolves a RENAMED path to its new name, which is the one on disk', async () => {
+    // Porcelain renders a staged rename as `R  old -> new`; stat-ing the OLD name
+    // would always miss, silently dropping the mtime component for exactly the
+    // edit most likely to happen when a client reorganises port wiring.
+    const root = await tmpRepo()
+    await runGit(root, ['mv', 'app.js', 'server.js'])
+    const fp = await editFingerprint([{ worktreePath: root }])
+    expect(fp.files).toBe(1)
+    // The new name is stat-able, so the digest carries a real mtime rather than a
+    // bare path — proving the arrow was parsed.
+    expect(fp.digest).toMatch(/^\d+:/)
+    expect(fp.digest).not.toBe('unreadable')
+  })
+
+  it('reports an unreadable worktree as a marker, never as "no progress"', async () => {
+    // A git failure resolving to an empty/stable fingerprint would resurrect the
+    // abandonment this guards against, so it must be distinguishable.
+    const fp = await editFingerprint([{ worktreePath: path.join(os.tmpdir(), 'definitely-not-a-repo-xyz') }])
+    expect(fp.digest).toBe('unreadable')
+    expect(fp.files).toBe(0)
   })
 })

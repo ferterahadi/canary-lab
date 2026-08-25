@@ -10,7 +10,9 @@ import type {
   VerificationTargetSnapshot,
 } from '../../../../../../shared/verification'
 import type { PlaywrightArtifactGroup, RunDetail, RunSummaryFailedEntry } from '../../runs/logic/run-store'
-import { normalizeStartCommand, resolveHealthProbe } from '../../runs/logic/runtime/launcher/startup'
+import { normalizeStartCommand, resolveHealthProbe } from '../../../shared/launcher-startup'
+import { testPortEnvKey } from '../../runs/logic/runtime/run-service-boot'
+import { publishWorkspaceEvent, type WorkspaceEventPublisher } from '../../../shared/workspace-events'
 
 interface VerificationConfigFile {
   configs: VerificationConfig[]
@@ -54,6 +56,7 @@ export function getVerificationConfig(feature: FeatureConfig, id: string): Verif
 export function createVerificationConfig(
   feature: FeatureConfig,
   input: SaveVerificationConfigInput,
+  events?: WorkspaceEventPublisher,
 ): VerificationConfig {
   const now = new Date().toISOString()
   const config: VerificationConfig = {
@@ -67,7 +70,7 @@ export function createVerificationConfig(
   }
   const file = readConfigFile(feature)
   file.configs.push(config)
-  writeConfigFile(feature, file)
+  writeConfigFile(feature, file, events)
   return config
 }
 
@@ -75,6 +78,7 @@ export function updateVerificationConfig(
   feature: FeatureConfig,
   id: string,
   input: SaveVerificationConfigInput,
+  events?: WorkspaceEventPublisher,
 ): VerificationConfig | null {
   const file = readConfigFile(feature)
   const idx = file.configs.findIndex((config) => config.id === id)
@@ -88,7 +92,7 @@ export function updateVerificationConfig(
     updatedAt: new Date().toISOString(),
   }
   file.configs[idx] = next
-  writeConfigFile(feature, file)
+  writeConfigFile(feature, file, events)
   return next
 }
 
@@ -174,6 +178,23 @@ export function resolveVerificationRun(
   const playwrightEnv: Record<string, string> = {}
   for (const target of targets) {
     if (target.envVar && target.url) playwrightEnv[target.envVar] = target.url
+    // Specs written by the authoring loop resolve their base URL from the
+    // run-stage port convention (CANARY_PORT_<slot>) rather than the envset's
+    // URL var, so a verification that only injects the URL var never reaches
+    // them — the spec falls back to its static port while the booted app sits
+    // on a dynamic one. Publish the same port under the same key so both spec
+    // conventions see the real target. Loopback-only: for a deployed target
+    // the CANARY_PORT contract (http://localhost:<port>) would point AWAY
+    // from the verified host.
+    if (target.url) {
+      try {
+        const url = new URL(target.url)
+        const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+        if (loopback && url.port) playwrightEnv[testPortEnvKey(target.id)] = url.port
+      } catch {
+        /* An unparsable URL already fails the run visibly at request time. */
+      }
+    }
   }
   return {
     ...(config ? { config } : {}),
@@ -260,12 +281,21 @@ function readConfigFile(feature: FeatureConfig): VerificationConfigFile {
   }
 }
 
-function writeConfigFile(feature: FeatureConfig, file: VerificationConfigFile): void {
+/** The one write path for `verification.configs.json`, so it is also the one
+ *  place that announces the change — an open Verify dialog on another client
+ *  refreshes without a reopen. Both writers (REST and the MCP tools) come
+ *  through here; publishing at their call sites instead is how the two drift. */
+function writeConfigFile(
+  feature: FeatureConfig,
+  file: VerificationConfigFile,
+  events?: WorkspaceEventPublisher,
+): void {
   const target = verificationConfigPath(feature)
   fs.mkdirSync(path.dirname(target), { recursive: true })
   const tmp = `${target}.tmp`
   fs.writeFileSync(tmp, JSON.stringify({ configs: file.configs }, null, 2) + '\n')
   fs.renameSync(tmp, target)
+  publishWorkspaceEvent(events, { type: 'verification-config-changed', feature: feature.name })
 }
 
 function isVerificationConfig(value: unknown): value is VerificationConfig {
@@ -386,13 +416,13 @@ function listFiles(root: string): string[] {
 }
 
 function readTraceSummary(runDir: string, entry: RunSummaryFailedEntry): string | null {
-  const traceSummaryFile = (entry as RunSummaryFailedEntry & { traceSummaryFile?: string }).traceSummaryFile
+  const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return null
   return safeRead(path.join(runDir, traceSummaryFile))
 }
 
 function readTraceExtractLines(runDir: string, entry: RunSummaryFailedEntry, filename: string): string[] {
-  const traceSummaryFile = (entry as RunSummaryFailedEntry & { traceSummaryFile?: string }).traceSummaryFile
+  const traceSummaryFile = entry.traceSummaryFile
   if (!traceSummaryFile) return []
   const extractDir = path.join(runDir, path.dirname(traceSummaryFile), 'trace-extract')
   const raw = safeRead(path.join(extractDir, filename))

@@ -1,0 +1,255 @@
+#!/usr/bin/env node
+// Mechanical half of the repo's code conventions. The judgement half — why a
+// comment exists, when to delete an unreachable arm instead of testing around
+// it — lives in `.claude/skills/cl_code-conventions/SKILL.md`, because no linter
+// can express it. Anything a tool CAN catch belongs here instead of in a doc.
+//
+// Run: node tools/check-conventions.mjs   (or `npm run check:conventions`)
+//
+// Dependency-free and single-pass so a PostToolUse hook can run it on every edit
+// without being felt (~0.2s over ~380 files).
+//
+// TWO THINGS THAT BIT THE FIRST DRAFT, both worth keeping in mind before adding
+// a rule here:
+//   1. Do NOT strip comments before looking for a MISSING comment. The first
+//      version stripped comment-only lines, which turned every properly
+//      explained multi-line catch into a violation — 66 false positives.
+//   2. Pattern rules run on .ts/.tsx only, never on this tools/ tree. A checker's
+//      own source contains the patterns it hunts; the first version flagged
+//      itself and check-feature-boundaries.mjs.
+//
+// BASELINES: three rules have pre-existing violations, listed explicitly rather
+// than softened, so a NEW violation fails while existing debt stays visible. A
+// baseline entry that no longer violates is ALSO a failure — that is what stops
+// the list outliving its reason (same trick as ALLOWED_DEEP in
+// check-feature-boundaries.mjs).
+
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs'
+import path from 'node:path'
+import process from 'node:process'
+
+const REPO = path.resolve(import.meta.dirname, '..')
+const ROOTS = ['apps', 'shared', 'tools']
+
+// Coverage-gate floor. Percentage alone does not prove scope: a file lifted out
+// of the gate keeps it at 100% while covering less. Raise this when it grows.
+// 187 → 210 when the root `shared/` tree (23 files) joined the gate.
+// 210 → 302 when the per-file exclusion list was deleted outright: the run-loop
+//   runtime modules, the config route groups, the env-switcher CLI,
+//   playwright-list and the shared workspace WebSocket stream all now carry real
+//   tests. `vitest.config.ts` has no per-file excludes left, so this floor is
+//   what stops one reappearing.
+// 302 → 319 when the per-feature pure modules joined: `flights/lib`,
+//   `runs/utils`, and the three `features/*/api` dirs — 17 files that are the
+//   same KIND as the already-gated `shared/api` and `shared/lib`, and were
+//   outside only because the shared versions moved first. Sixteen were already
+//   at 100% unasked; the seventeenth needed one dead guard removed (a predicate
+//   `run-detail-playback.ts` computed twice, where the first call diverted every
+//   input the second one guarded against). React components remain OUT — that is
+//   a deliberate line, not the next tranche.
+// 319 → 350 when every `apps/web` `state/` tree joined (was: `benchmark/state`
+//   alone) — the stores, the context providers and the hooks that own socket
+//   lifecycles, fetch orchestration and navigation. A provider is state with a
+//   JSX wrapper, so its tests drive fake sockets and stubbed API calls and
+//   assert behaviour, never rendered output. Measured 353 files; the floor keeps
+//   a small margin because the count only includes files a test actually loaded.
+//   `features/*/components`, `shared/ui` and `shared/shell` remain OUT.
+// 350 → 385 when the MCP layer joined, with the run-loop logic that sits beside
+//   `index.ts` rather than under `logic/` (route-deps, stream wiring, scheduler,
+//   local-heal restart, heal-agent choice), the six feature registrars, the DI
+//   context, and `apps/web/src/shared/test-numbering.ts`. The MCP tree is the
+//   whole external-agent API — 18 files, ~3.6k lines — and was ungated only
+//   because it shipped as one 2740-line `tools.ts`; the tool-groups split made it
+//   testable. Measured 389 files at 100/100/100/100 over 7658 tests. The floor
+//   keeps a small margin because the count only includes files a test loaded.
+const MIN_GATED_FILES = 385
+
+// `console.*` is CLI output, not server logging. These trees ARE the CLI.
+const CONSOLE_OK = ['apps/cli/', 'shared/cli-ui/', 'tools/']
+
+// `.tsx` files that are a module of several exports rather than one component,
+// so PascalCase would misdescribe them.
+const LOWERCASE_TSX_OK = new Map([
+  ['atoms.tsx', 'a set of shared primitives, not one component'],
+  ['main.tsx', 'the app entry point'],
+  ['invalidation.tsx', 'query-invalidation helpers'],
+  ['config-doc-cache.tsx', 'the config dialog document cache: a provider plus its reader hook'],
+  ['stage-meta.tsx', 'stage metadata tables'],
+  ['external-client-branding.tsx', 'per-client branding lookups'],
+])
+
+const BASELINE = {
+  'kebab-case': new Map([
+    ['shared/configs/loadEnv.ts', 'rename crosses a published path — do it deliberately, not in passing'],
+    ['apps/web/src/features/config/components/useEditableSlice.ts', 'the other four hooks are use-*.ts; this one predates them'],
+  ]),
+  // A pragma is allowed only where an earlier validator makes a defence-in-depth
+  // guard unreachable: deleting it weakens a security property, and testing it
+  // would mean proving the validator broken. The rule's other escape hatch — a
+  // file-level coverage exclude — is strictly coarser here, since it would drop
+  // a 530-line file out of the gate to excuse four lines.
+  'no-v8-ignore': new Map([
+    ['apps/web-server/src/features/config/logic/feature-authoring.ts', '3 pragmas — isWithin path-traversal guards behind sanitizeSlotName/validateGeneratedSpecFiles. The 4th (a non-object-config guard) is gone: readFeatureConfig now returns ConfigObject, so that state is unrepresentable rather than excused'],
+    ['apps/web-server/src/features/runs/logic/runtime/trace-cli.ts', '1 pragma — corrupt-install branch; reachable with a mocked fs, so this one is real debt. Moved here from trace-enrichment.ts when the CLI shell was split out; the debt did not change, only its file'],
+  ]),
+  'no-console': new Map([
+    ['apps/web-server/src/features/runs/logic/runtime/env-switcher/switch.ts', 'its `main` IS the `canary-lab env` CLI body — console output is the command\'s output, not server logging'],
+    ['apps/web-server/src/shared/feature-loader.ts', 'warns on a broken feature.config at load time'],
+  ]),
+}
+
+const failures = []
+const hits = Object.fromEntries(Object.keys(BASELINE).map((k) => [k, new Set()]))
+
+// Report unless this file is a recorded exception for this rule.
+function check(rule, rel, message, fix) {
+  if (BASELINE[rule]?.has(rel)) { hits[rule].add(rel); return }
+  failures.push({ file: rel, message, fix })
+}
+
+function walk(dir) {
+  const out = []
+  for (const name of readdirSync(dir)) {
+    if (name === 'node_modules' || name === 'dist' || name === 'coverage') continue
+    const p = path.join(dir, name)
+    if (statSync(p).isDirectory()) out.push(...walk(p))
+    else out.push(p)
+  }
+  return out
+}
+
+const files = ROOTS.filter((r) => existsSync(path.join(REPO, r)))
+  .flatMap((r) => walk(path.join(REPO, r)))
+  .map((p) => path.relative(REPO, p).split(path.sep).join('/'))
+
+const SOURCE = /\.(ts|tsx|mjs)$/
+const TEST = /\.test\.tsx?$/
+const sources = files.filter((f) => SOURCE.test(f))
+
+for (const rel of sources) {
+  const base = path.basename(rel)
+  const isTest = TEST.test(rel)
+  const isTool = rel.startsWith('tools/')
+  const text = readFileSync(path.join(REPO, rel), 'utf8')
+  const lineOf = (index) => text.slice(0, index).split('\n').length
+  // Comment-free view, for rules that must not fire on prose ABOUT the pattern.
+  const code = text.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n')
+
+  // ── naming ───────────────────────────────────────────────────────────────
+  // Test filenames mirror the module under test, so they inherit its case and
+  // are not checked here — the module itself is.
+  if (!isTest) {
+    if (/\.(ts|mjs)$/.test(base) && !/^[a-z0-9]+(-[a-z0-9]+)*(\.[a-z0-9-]+)*\.(ts|mjs)$/.test(base)) {
+      check('kebab-case', rel, `"${base}" is not kebab-case`, 'rename it — every .ts/.mjs source file here is kebab-case, hooks included (use-run-start.ts)')
+    }
+    if (base.endsWith('.tsx') && !/^[A-Z]/.test(base) && !LOWERCASE_TSX_OK.has(base)) {
+      check('component-case', rel, `"${base}" is lowercase`, 'a .tsx exporting one component is PascalCase; if it is a module of several exports, add it to LOWERCASE_TSX_OK with a reason')
+    }
+  }
+
+  // ── an empty catch must say why (raw text: we are looking for a comment) ──
+  for (const m of text.matchAll(/catch\s*(\([^)]*\))?\s*\{\s*\}/g)) {
+    check('explained-catch', `${rel}:${lineOf(m.index)}`, 'empty catch with no reason', "swallowing is fine, silence is not — put the reason inline: catch { /* already gone */ }")
+  }
+
+  if (isTool) continue // a checker's own source contains the patterns below
+
+  // ── coverage pragmas ─────────────────────────────────────────────────────
+  // Two separate failures. A pragma in a file that is not allowlisted is the
+  // rule; a pragma with no `-- reason` is a failure even in an allowlisted file,
+  // because an unexplained pragma is exactly the invisible exception the rule
+  // exists to prevent.
+  //
+  // Source only: a pragma in a test file suppresses nothing (test files are not
+  // in the gate), and scanning them means matching any test whose comment
+  // DISCUSSES pragmas — which is how this rule first flagged
+  // feature-authoring.mock.test.ts for explaining itself.
+  const pragmas = isTest ? [] : [...text.matchAll(/\/\* v8 ignore[^*]*\*\//g)]
+  for (const m of pragmas) {
+    if (!/--\s*\S/.test(m[0])) {
+      failures.push({
+        file: `${rel}:${lineOf(m.index)}`,
+        message: 'v8 ignore pragma with no reason',
+        fix: 'a pragma must say why: /* v8 ignore next -- <what makes this unreachable> */',
+      })
+    }
+  }
+  if (pragmas.length > 0) {
+    check('no-v8-ignore', rel, `uses ${pragmas.length} /* v8 ignore */ pragma(s)`, 'delete the arm, make the state unrepresentable in the type, or write the test. A pragma is only for a defence-in-depth guard an earlier validator makes unreachable — add the file to BASELINE with that reason if so')
+  }
+
+  // ── console.* belongs to the CLI ─────────────────────────────────────────
+  if (!isTest && /console\.(log|error|warn|info|debug)\s*\(/.test(code) && !CONSOLE_OK.some((p) => rel.startsWith(p))) {
+    check('no-console', rel, 'writes to console outside the CLI trees', 'take an injected `log?: (msg: string, err?: unknown) => void` — server output has to be capturable')
+  }
+
+  // ── a store write announces itself ───────────────────────────────────────
+  // The server's rule is that the OWNER of the state emits: feature stores are
+  // bridged to the workspace bus once (shared/store-event-bridge.ts), so a
+  // `store.save(...)` followed by a hand-written publish is either a duplicate
+  // fan-out or a second, drifting definition of what that write means. This
+  // catches the shape that used to be everywhere — 15 copies for flights alone.
+  if (!isTest && rel.startsWith('apps/web-server/')) {
+    for (const m of code.matchAll(/\.(save|remove)\([^\n]*\)\n(?:[^\n]*\n){0,2}?[^\n]*publishWorkspaceEvent/g)) {
+      check('store-emits', `${rel}:${lineOf(m.index)}`, 'publishes a workspace event right after a store write', 'the store is the emitter — bridge it once with bridgeStoreEvents (shared/store-event-bridge.ts) and delete the publish. A store whose event needs a payload the record does not carry is the one case to baseline, with the reason')
+    }
+  }
+
+  // ── aliases are bundler-only ─────────────────────────────────────────────
+  if (!rel.startsWith('apps/web/') && /from '@(\/|shared\/)/.test(code)) {
+    check('alias-scope', rel, "uses a '@/…' or '@shared/…' alias outside apps/web", 'only Vite rewrites these; tsc emits the specifier verbatim, so it ships to dist/ and breaks the installed package. Use a relative path')
+  }
+}
+
+// ── tests live with the code they test ─────────────────────────────────────
+for (const rel of files.filter((f) => TEST.test(f))) {
+  const dir = path.dirname(rel)
+  if (path.basename(dir) === '__tests__') {
+    check('test-location', rel, 'lives in a __tests__ directory', 'this repo co-locates — put it in the same directory as the code it tests')
+    continue
+  }
+  const siblings = readdirSync(path.join(REPO, dir)).filter((f) => SOURCE.test(f) && !TEST.test(f))
+  if (siblings.length === 0) {
+    check('test-location', rel, 'has no source file in its directory', 'move it next to the code it tests')
+  }
+}
+
+// ── coverage scope floor ───────────────────────────────────────────────────
+// Opt-in via --coverage, and NOT because it is expensive. A scoped run
+// (`vitest --coverage.include=<one file>`) leaves a one-file lcov.info behind,
+// which would make the edit hook fail on every subsequent edit for reasons that
+// have nothing to do with the edit. CI runs the full suite and then passes the
+// flag, which is the only context where the count means anything.
+const wantCoverage = process.argv.includes('--coverage')
+const lcov = path.join(REPO, 'coverage/lcov.info')
+let coverageNote = wantCoverage ? 'no coverage/lcov.info — run `npm run test:coverage` first' : 'not checked (pass --coverage)'
+if (wantCoverage && existsSync(lcov)) {
+  const gated = (readFileSync(lcov, 'utf8').match(/^SF:/gm) ?? []).length
+  if (gated < MIN_GATED_FILES) {
+    check('coverage-scope', 'coverage/lcov.info', `gate covers ${gated} files, floor is ${MIN_GATED_FILES}`, 'a file left the gate. 100% over fewer files is not the same gate — restore it, or raise MIN_GATED_FILES deliberately')
+  }
+  coverageNote = `${gated} files gated (floor ${MIN_GATED_FILES})`
+}
+
+// ── a baseline entry that stopped violating must be deleted ────────────────
+for (const [rule, entries] of Object.entries(BASELINE)) {
+  for (const [file, reason] of entries) {
+    if (hits[rule].has(file)) continue
+    failures.push({
+      file,
+      message: `BASELINE["${rule}"] still lists this file ("${reason}") but it no longer violates`,
+      fix: 'delete the entry so the list cannot outlive its reason',
+    })
+  }
+}
+
+const debt = Object.values(hits).reduce((n, s) => n + s.size, 0)
+
+if (failures.length === 0) {
+  console.log(`✔ conventions clean — ${sources.length} source files, ${debt} baselined, coverage: ${coverageNote}`)
+  process.exit(0)
+}
+
+for (const f of failures) console.error(`✘ ${f.file}\n    ${f.message}\n    → ${f.fix}`)
+console.error(`\n${failures.length} convention problem(s). Rules: .claude/skills/cl_code-conventions/SKILL.md`)
+process.exit(1)

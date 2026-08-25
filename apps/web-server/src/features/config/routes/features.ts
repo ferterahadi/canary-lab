@@ -1,14 +1,15 @@
 import type { FastifyInstance } from 'fastify'
 import fs from 'fs'
 import path from 'path'
-import { loadFeatures, listSpecFiles } from '../../config/logic/feature-loader'
-import { extractTestsFromSource, type ExtractedTest } from '../../config/logic/ast-extractor'
+import { loadFeatures, listSpecFiles } from '../../../shared/feature-loader'
+import { extractTestsFromSource, type ExtractedTest } from '../../../shared/ast-extractor'
 import { getGitRoot, runGit } from '../../../shared/git-repo'
 import type { DirtySpecStore } from '../../runs/logic/dirty-specs/store'
 import { diffChangedLines } from '../../runs/logic/dirty-specs/text-diff'
 import { listPlaywrightTests, type PlaywrightListSpawner } from '../../runs/logic/playwright-list'
-import { parseDotenv } from '../../config/logic/dotenv-edit'
+import { parseDotenv } from '../logic/dotenv-edit'
 import { overlayExists as portifyOverlayExists } from '../../portify/logic/runtime/overlay'
+import { deriveFeatureEvidence } from '../../flights/logic/stage-evidence'
 import {
   getEnvSetsDir,
   loadConfig,
@@ -17,6 +18,10 @@ import type { EnvSetsConfig } from '../../runs/logic/runtime/env-switcher/types'
 
 export interface FeaturesRouteDeps {
   featuresDir: string
+  // Run history, consulted for the boot half of each row's Suite setup
+  // evidence. Optional so route tests that never exercise runs stay unchanged;
+  // absent simply means no boot has been proven.
+  logsDir?: string
   // Optional override so tests can stub the Playwright `--list` invocation
   // without spawning a real `npx playwright test`.
   playwrightListSpawner?: PlaywrightListSpawner
@@ -53,6 +58,11 @@ export async function featuresRoutes(app: FastifyInstance, deps: FeaturesRouteDe
       // A saved port overlay exists → the feature boots concurrently. Surfaced
       // as the "Portified" badge in the features column.
       portified: portifyOverlayExists(f.featureDir),
+      // On-disk stage artifacts (captured envset, proven boot, PRD summary,
+      // authored specs) — the picker's derived rail lights completed steps even
+      // when the feature has never flown. Run/export state stays client-side
+      // (its live runs + export stores already carry it).
+      evidence: deriveFeatureEvidence(f.featureDir, deps.logsDir, f.name, f.repos),
       // Test-file integrity: 'dirty' when a spec changed since the last green
       // (or run-start) and hasn't been approved/committed. Drives the red cue.
       dirty: dirtySummary(deps.dirtySpecStore, f.name),

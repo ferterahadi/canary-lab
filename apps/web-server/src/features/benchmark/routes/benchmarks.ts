@@ -1,18 +1,18 @@
 import fs from 'fs'
 import path from 'path'
 import type { FastifyInstance } from 'fastify'
-import type { BenchmarkStore } from '../../benchmark/logic/runtime/store'
-import type { SabotageSkill } from '../../benchmark/logic/runtime/skills'
+import type { BenchmarkStore } from '../logic/runtime/store'
+import type { SabotageSkill } from '../logic/runtime/skills'
 import type {
   BenchmarkManifest,
   SabotageLevel,
   StartBenchmarkInput,
   StartBenchmarkResult,
-} from '../../benchmark/logic/runtime/types'
-import { benchmarkDir } from '../../benchmark/logic/runtime/paths'
+} from '../logic/runtime/types'
+import { benchmarkDir } from '../logic/runtime/paths'
 import { addWorktree, removeWorktree } from '../../runs/logic/runtime/repo-worktree'
 import { listWorktrees } from '../../runs/logic/runtime/worktree-inventory'
-import { loadFeatures } from '../../config/logic/feature-loader'
+import { loadFeatures } from '../../../shared/feature-loader'
 import { computePortPreflight } from '../../runs/logic/runtime/port-preflight'
 import { getGitRoot, resolveRepoPath } from '../../../shared/git-repo'
 import { launchEditorDir } from '../../../shared/editor-launch'
@@ -39,7 +39,7 @@ export interface BenchmarkRouteDeps {
   abortBenchmark(benchmarkId: string): void
   /** The sabotage agent's structured session (parsed native log) for the shared
    *  AgentSessionView timeline. Null when no session is locatable yet. */
-  loadAgentSession(benchmarkId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[] } | null
+  loadAgentSession(benchmarkId: string): { agent: string; sessionId: string; model?: string; effort?: string; events: unknown[]; subagents?: unknown[] } | null
 }
 
 interface StartBody {

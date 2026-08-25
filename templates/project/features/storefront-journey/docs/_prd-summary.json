@@ -1,0 +1,193 @@
+{
+  "requirements": [
+    {
+      "id": "R1",
+      "title": "Catalog serves what it was given",
+      "text": "It should return a created product at the price it was given, and list it in the catalog.",
+      "kind": "functional",
+      "happyPath": "POST a product at 900 cents → 201 with priceCents 900; the product appears in GET /products.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "9a7dc73901451c9c3c32a103601ddd19e0349e9b547f67fa87aadc0d8277cee2",
+      "sourceRange": {
+        "start": 196,
+        "end": 285
+      }
+    },
+    {
+      "id": "R2",
+      "title": "Catalog SKU identity",
+      "text": "It should derive a stable slug SKU from the product name, because that SKU is the identity inventory consumes.",
+      "kind": "functional",
+      "happyPath": "Creating \"Espresso Beans\" yields sku \"espresso-beans\".",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "b74e25eeb2853b736b3c84a38fb2fed10279abde67cd2b985ab3af0795dcc2d3",
+      "sourceRange": {
+        "start": 450,
+        "end": 560
+      }
+    },
+    {
+      "id": "R3",
+      "title": "Reserving consumes stock",
+      "text": "It should reduce a SKU's available count by exactly the quantity reserved.",
+      "kind": "functional",
+      "happyPath": "Reserving 2 units drops available by 2.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "4f4d6e6aeb94a304b11508bb1070ba1eb28237e60f8e664944b39315a2a2c5b4",
+      "sourceRange": {
+        "start": 691,
+        "end": 765
+      }
+    },
+    {
+      "id": "R4",
+      "title": "A discount reaches the total",
+      "text": "It should apply the recorded discount percentage to the cart total the customer is charged.",
+      "kind": "functional",
+      "happyPath": "Two units at 1800 cents with WELCOME10 total 3240 cents.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "465765b54c5e6dae28d3d6a0ece61b50fba605d13226c92f90e267e4d855cfa1",
+      "sourceRange": {
+        "start": 885,
+        "end": 976
+      }
+    },
+    {
+      "id": "R5",
+      "title": "Discount codes replace, never stack",
+      "text": "It should let a second discount code replace the first rather than combining the two.",
+      "kind": "functional",
+      "happyPath": "Applying HALFOFF after WELCOME10 totals 1800 cents, not a combined 60% off.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "a1a4f3cfa0b39a3ddf3a90af9b754296e559e984c59cd8e48bbbb8e1c6fe2200",
+      "sourceRange": {
+        "start": 1120,
+        "end": 1205
+      }
+    },
+    {
+      "id": "R6",
+      "title": "An oversell is refused honestly",
+      "text": "It should refuse a reservation larger than the stock on hand and report the count that is genuinely still available.",
+      "kind": "functional",
+      "unhappyPath": "Reserving 10000 of a SKU with 8 left returns 409 and the unchanged available count.",
+      "pathTypes": [
+        "sad"
+      ],
+      "fingerprint": "f1b92e90ca202f8b06845b85b28ea9cc875a0d863fb56111d6c1ad7a5b7a2f5d",
+      "sourceRange": {
+        "start": 1364,
+        "end": 1480
+      }
+    },
+    {
+      "id": "R7",
+      "title": "Unknown stock is a missing resource",
+      "text": "It should refuse a reservation against a SKU that does not exist as a missing resource, not a malformed request.",
+      "kind": "functional",
+      "unhappyPath": "Reserving against an unknown SKU returns 404, not 400.",
+      "pathTypes": [
+        "sad"
+      ],
+      "fingerprint": "6c41afd1c250bb68b5ef1ad107bcb1605bada741a91229bdc93e663523894950",
+      "sourceRange": {
+        "start": 1651,
+        "end": 1763
+      }
+    },
+    {
+      "id": "R8",
+      "title": "A price change persists",
+      "text": "It should persist a product price update and return the product at its new price.",
+      "kind": "functional",
+      "happyPath": "PATCH priceCents 1800 → 2000 returns the product at 2000.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "90ece17357e4a56f20ff7732b3cb78d93077fb3eb25ce250b891c710da6ea674",
+      "sourceRange": {
+        "start": 1893,
+        "end": 1974
+      }
+    },
+    {
+      "id": "R9",
+      "title": "Reads agree with charges",
+      "text": "It should report, when a cart is read back, the same total checkout will charge — discount included.",
+      "kind": "functional",
+      "happyPath": "Two units at 2000 cents with WELCOME10 read back as 3600 cents.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "7a81fdbaa7a811853d4fe0068df7cb4e0fd472ca3ebbd20b2dd587b88c7b5a5a",
+      "sourceRange": {
+        "start": 2108,
+        "end": 2208
+      }
+    },
+    {
+      "id": "R10",
+      "title": "A deleted product is gone",
+      "text": "It should remove the deleted product — and only that product — from the catalog listing.",
+      "kind": "functional",
+      "happyPath": "DELETE a product → 204, and it no longer appears in GET /products while its neighbours do.",
+      "pathTypes": [
+        "happy"
+      ],
+      "fingerprint": "7c145d8e58339e4953ee27687159003f53e81f7f03449f3ff180fa209648f462",
+      "sourceRange": {
+        "start": 2351,
+        "end": 2439
+      }
+    },
+    {
+      "id": "R11",
+      "title": "A rejected code changes nothing",
+      "text": "It should refuse an unknown discount code and leave the discount already on the cart intact.",
+      "kind": "functional",
+      "unhappyPath": "An unknown code returns 400 and the cart keeps the total its earlier valid code produced.",
+      "pathTypes": [
+        "sad"
+      ],
+      "fingerprint": "6c621ccd36497ab83714dfbeefab022db9a0cbb3f234a7b190b87ce85fe2e353",
+      "sourceRange": {
+        "start": 2615,
+        "end": 2707
+      }
+    },
+    {
+      "id": "R12",
+      "title": "An empty order is refused",
+      "text": "It should refuse to place a cart that has no items, and leave the cart open.",
+      "kind": "functional",
+      "unhappyPath": "Checking out an empty cart returns 409 and the cart status stays \"open\".",
+      "pathTypes": [
+        "sad"
+      ],
+      "fingerprint": "4ae52e97758aea12d07fff2562c17ce02a37a9c228e78b6f8bdf6d115dcd228f",
+      "sourceRange": {
+        "start": 2876,
+        "end": 2952
+      }
+    }
+  ],
+  "docsHash": "23caf91537d021e37d2fc833bd46b6c7a65332dc62705ac3192b96f7ca731982",
+  "sourceDocs": [
+    "storefront-journey-prd.md"
+  ],
+  "generatedAt": "2026-08-07T00:00:00.000Z",
+  "docFingerprints": {
+    "storefront-journey-prd.md": "23caf91537d021e37d2fc833bd46b6c7a65332dc62705ac3192b96f7ca731982"
+  },
+  "requirementsHash": "898d2d123d48abd6aea42d93cfd549494b92ed81948d5270207247fca1d63ed9"
+}

@@ -1,8 +1,27 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
-import { shouldCaptureFinalPageScreenshot, slugify, withLogMarkers } from './log-marker-fixture'
+import { fileURLToPath } from 'node:url'
+import {
+  captureFinalPageScreenshot,
+  harTracingFor,
+  logMarkerFixture,
+  logMarkerFixtureEntry,
+  pageFixture,
+  pageFixtureEntry,
+  playwrightStep,
+  shouldCaptureFinalPageScreenshot,
+  slugify,
+  startHarRecording,
+  stopHarRecording,
+  supportsHar,
+  withLogMarkers,
+  wrapWithCallSite,
+  type CallSiteStep,
+} from './log-marker-fixture'
+
+const THIS_FILE = fileURLToPath(import.meta.url)
 
 const tmpDirs: string[] = []
 function mkTmp(): string {
@@ -107,5 +126,373 @@ describe('shouldCaptureFinalPageScreenshot', () => {
   it('captures only unexpected outcomes for only-on-failure', () => {
     expect(shouldCaptureFinalPageScreenshot(info('only-on-failure'))).toBe(false)
     expect(shouldCaptureFinalPageScreenshot(info('only-on-failure', 'failed', 'passed'))).toBe(true)
+  })
+})
+
+function fakeTestInfo(over: Record<string, unknown> = {}) {
+  return {
+    title: 'My Case',
+    file: '/specs/login.spec.ts',
+    project: { use: { screenshot: 'on' } },
+    status: 'passed',
+    expectedStatus: 'passed',
+    outputPath: (name: string) => path.join('/out', name),
+    attach: vi.fn(async () => { /* noop */ }),
+    ...over,
+  }
+}
+
+describe('captureFinalPageScreenshot', () => {
+  it('writes a slugged screenshot and attaches it to the report', async () => {
+    const dir = mkTmp()
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+    const page = { screenshot: vi.fn(async () => undefined) }
+
+    await captureFinalPageScreenshot(page as never, testInfo as never)
+
+    expect(page.screenshot).toHaveBeenCalledWith({
+      path: path.join(dir, 'canary-lab-final-page-my-case.png'),
+      fullPage: true,
+    })
+    expect(testInfo.attach).toHaveBeenCalledWith('canary-lab-final-page', {
+      path: path.join(dir, 'canary-lab-final-page-my-case.png'),
+      contentType: 'image/png',
+    })
+  })
+
+  it('does nothing when the project has screenshots off', async () => {
+    const testInfo = fakeTestInfo({ project: { use: { screenshot: 'off' } } })
+    const page = { screenshot: vi.fn(async () => undefined) }
+    await captureFinalPageScreenshot(page as never, testInfo as never)
+    expect(page.screenshot).not.toHaveBeenCalled()
+    expect(testInfo.attach).not.toHaveBeenCalled()
+  })
+
+  it('swallows a screenshot failure — the terminal output is the real evidence', async () => {
+    // A page that already closed or crashed must not turn a passing test into
+    // a failing one over a best-effort visual aid.
+    const testInfo = fakeTestInfo()
+    const page = { screenshot: vi.fn(async () => { throw new Error('page closed') }) }
+    await expect(captureFinalPageScreenshot(page as never, testInfo as never)).resolves.toBeUndefined()
+    expect(testInfo.attach).not.toHaveBeenCalled()
+  })
+})
+
+describe('wrapWithCallSite', () => {
+  const recordingStep = (): { step: CallSiteStep; calls: Array<{ title: string; line: number }> } => {
+    const calls: Array<{ title: string; line: number }> = []
+    const step: CallSiteStep = (title, body, options) => {
+      calls.push({ title, line: options.location.line })
+      return body()
+    }
+    return { step, calls }
+  }
+
+  it('passes non-function and symbol-keyed properties straight through', () => {
+    const { step } = recordingStep()
+    const marker = Symbol('marker')
+    const target = { url: 'https://example.test', [marker]: () => 'raw' }
+    const wrapped = wrapWithCallSite(target, THIS_FILE, step)
+    expect(wrapped.url).toBe('https://example.test')
+    expect(wrapped[marker]()).toBe('raw')
+  })
+
+  it('reports an async call as a step located at the caller in the spec file', async () => {
+    const { step, calls } = recordingStep()
+    const target = { goto: async (url: string) => `went to ${url}` }
+    const wrapped = wrapWithCallSite(target, THIS_FILE, step)
+
+    await expect(wrapped.goto('/login')).resolves.toBe('went to /login')
+    expect(calls).toHaveLength(1)
+    expect(calls[0].title).toBe('page.goto')
+    expect(calls[0].line).toBeGreaterThan(0)
+  })
+
+  it('does not emit a step when the call site is outside the spec file', async () => {
+    // No frame means the summary reporter has nothing to highlight, so the
+    // call must pass through untouched rather than produce a located step
+    // pointing at somebody else's file.
+    const { step, calls } = recordingStep()
+    const target = { goto: async () => 'ok' }
+    const wrapped = wrapWithCallSite(target, '/not/in/this/stack.spec.ts', step)
+
+    await expect(wrapped.goto()).resolves.toBe('ok')
+    expect(calls).toEqual([])
+  })
+
+  it('returns synchronous results untouched', () => {
+    const { step, calls } = recordingStep()
+    const wrapped = wrapWithCallSite({ isClosed: () => false }, THIS_FILE, step)
+    expect(wrapped.isClosed()).toBe(false)
+    expect(calls).toEqual([])
+  })
+
+  it('re-wraps locator-returning calls so a chained call keeps the original site', async () => {
+    const { step, calls } = recordingStep()
+    const locator = { click: async () => 'clicked' }
+    const target = { locator: () => locator }
+    const wrapped = wrapWithCallSite(target, THIS_FILE, step)
+
+    const found = wrapped.locator()
+    // `locator()` itself is synchronous, so it emits no step of its own; the
+    // chained `click()` inherits the frame captured at the `locator()` site.
+    expect(calls).toEqual([])
+    await expect(found.click()).resolves.toBe('clicked')
+    expect(calls).toHaveLength(1)
+    expect(calls[0].title).toBe('page.click')
+  })
+
+  it('re-wraps a locator even when no call site was found', async () => {
+    // Nothing to inherit and nothing to capture: the chain must still be
+    // wrapped so a later call from inside the spec can locate itself.
+    const { step, calls } = recordingStep()
+    const locator = { click: async () => 'clicked' }
+    const wrapped = wrapWithCallSite({ locator: () => locator }, '/not/in/this/stack.spec.ts', step)
+
+    await expect(wrapped.locator().click()).resolves.toBe('clicked')
+    expect(calls).toEqual([])
+  })
+})
+
+describe('pageFixture', () => {
+  it('hands the test a wrapped page and screenshots the real one afterwards', async () => {
+    const dir = mkTmp()
+    const order: string[] = []
+    const page = {
+      goto: async () => { order.push('goto'); return 'ok' },
+      screenshot: vi.fn(async () => { order.push('screenshot'); return undefined }),
+    }
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+    const noopStep: CallSiteStep = (_title, body) => body()
+
+    await pageFixture(page as never, async (wrapped) => {
+      expect(wrapped).not.toBe(page)
+      await (wrapped as unknown as { goto: () => Promise<string> }).goto()
+    }, testInfo as never, noopStep)
+
+    // The screenshot must come after the test body is done with the page, and
+    // must be taken against the real page rather than the proxy.
+    expect(order).toEqual(['goto', 'screenshot'])
+    expect(page.screenshot).toHaveBeenCalledOnce()
+  })
+})
+
+function fakeHarPage(tracing: unknown, extra: Record<string, unknown> = {}) {
+  return { context: () => ({ tracing }), ...extra }
+}
+
+function fakeTracing(order?: string[]) {
+  return {
+    startHar: vi.fn(async () => { order?.push('startHar') }),
+    stopHar: vi.fn(async () => { order?.push('stopHar') }),
+  }
+}
+
+describe('per-test HAR recording', () => {
+  // The load-bearing guard: this file is published to feature repos, which
+  // resolve their own @playwright/test. A feature pinned below 1.60 has no
+  // startHar, and must keep running rather than fail every test.
+  it('is skipped when the resolved Playwright has no startHar/stopHar', async () => {
+    expect(supportsHar(undefined)).toBe(false)
+    expect(supportsHar({ startHar: () => undefined })).toBe(false)
+    expect(harTracingFor(fakeHarPage({ startHar: () => undefined }) as never)).toBeNull()
+    expect(await startHarRecording(fakeHarPage({}) as never, fakeTestInfo() as never)).toBeNull()
+  })
+
+  it('is skipped when the page exposes no context', async () => {
+    expect(harTracingFor({} as never)).toBeNull()
+    expect(harTracingFor({ context: () => { throw new Error('closed') } } as never)).toBeNull()
+    expect(await startHarRecording({} as never, fakeTestInfo() as never)).toBeNull()
+  })
+
+  it('keeps and attaches the HAR when the test did not end as expected', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({
+      outputPath: (name: string) => path.join(dir, name),
+      status: 'failed',
+      expectedStatus: 'passed',
+    })
+
+    const harPath = await startHarRecording(page as never, testInfo as never)
+    expect(harPath).toBe(path.join(dir, 'canary-lab-network-my-case.har'))
+    expect(tracing.startHar).toHaveBeenCalledWith(harPath)
+    fs.writeFileSync(harPath!, '{"log":{}}')
+
+    await stopHarRecording(page as never, testInfo as never, harPath)
+
+    expect(tracing.stopHar).toHaveBeenCalledOnce()
+    expect(fs.existsSync(harPath!)).toBe(true)
+    expect(testInfo.attach).toHaveBeenCalledWith('canary-lab-network-har', {
+      path: harPath,
+      contentType: 'application/json',
+    })
+  })
+
+  it('deletes the HAR and attaches nothing when the test passed', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+
+    const harPath = await startHarRecording(page as never, testInfo as never)
+    fs.writeFileSync(harPath!, '{"log":{}}')
+    await stopHarRecording(page as never, testInfo as never, harPath)
+
+    expect(fs.existsSync(harPath!)).toBe(false)
+    expect(testInfo.attach).not.toHaveBeenCalled()
+  })
+
+  it('stopHarRecording is a no-op when recording never started', async () => {
+    const tracing = fakeTracing()
+    await stopHarRecording(fakeHarPage(tracing) as never, fakeTestInfo() as never, null)
+    expect(tracing.stopHar).not.toHaveBeenCalled()
+  })
+
+  // The three ways HAR recording can fail mid-flight. All of them are
+  // best-effort by design: this fixture is published into feature repos and
+  // wraps EVERY test, so a network log that cannot be produced must cost the
+  // run nothing. A throw here would fail tests that were otherwise passing.
+  it('reports no HAR path when starting the recording throws', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    tracing.startHar = vi.fn(async () => { throw new Error('tracing already started') })
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+
+    // null, not the path — so stopHarRecording later short-circuits rather than
+    // trying to stop a recording that never began.
+    expect(await startHarRecording(page as never, testInfo as never)).toBeNull()
+  })
+
+  it('leaves the HAR alone when stopping it throws', async () => {
+    const dir = mkTmp()
+    const tracing = fakeTracing()
+    const page = fakeHarPage(tracing)
+    const testInfo = fakeTestInfo({
+      outputPath: (name: string) => path.join(dir, name),
+      status: 'failed',
+      expectedStatus: 'passed',
+    })
+    const harPath = await startHarRecording(page as never, testInfo as never)
+    fs.writeFileSync(harPath!, '{"log":{}}')
+    tracing.stopHar = vi.fn(async () => { throw new Error('context closed') })
+
+    await stopHarRecording(page as never, testInfo as never, harPath)
+
+    // A half-written HAR is not attached (the reporter would point at a file it
+    // cannot parse) and not deleted either — on disk it is still failure signal.
+    expect(testInfo.attach).not.toHaveBeenCalled()
+    expect(fs.existsSync(harPath!)).toBe(true)
+  })
+
+  it('stops cleanly when the page lost its tracing between start and stop', async () => {
+    // A real path on disk, so the `!harPath` guard passes and the tracing
+    // lookup is what actually decides — the page was closed and re-derived
+    // without tracing after recording began.
+    const harPath = path.join(mkTmp(), 'canary-lab-network-my-case.har')
+    fs.writeFileSync(harPath, '{"log":{}}')
+    const testInfo = fakeTestInfo({ status: 'failed', expectedStatus: 'passed' })
+
+    await stopHarRecording(fakeHarPage(undefined) as never, testInfo as never, harPath)
+
+    // Nothing is attached (there is no completed recording to point at) and
+    // nothing is deleted — the partial file stays as whatever evidence it is.
+    expect(testInfo.attach).not.toHaveBeenCalled()
+    expect(fs.existsSync(harPath)).toBe(true)
+  })
+
+  it('brackets the test body: starts before it, stops after the screenshot', async () => {
+    const dir = mkTmp()
+    const order: string[] = []
+    const tracing = fakeTracing(order)
+    const page = fakeHarPage(tracing, {
+      goto: async () => { order.push('goto'); return 'ok' },
+      screenshot: vi.fn(async () => { order.push('screenshot') }),
+    })
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+    const noopStep: CallSiteStep = (_title, body) => body()
+
+    await pageFixture(page as never, async (wrapped) => {
+      await (wrapped as unknown as { goto: () => Promise<string> }).goto()
+    }, testInfo as never, noopStep)
+
+    expect(order).toEqual(['startHar', 'goto', 'screenshot', 'stopHar'])
+  })
+})
+
+describe('logMarkerFixture', () => {
+  it('brackets the test body with markers in each service log', async () => {
+    const dir = mkTmp()
+    const log = path.join(dir, 'api.log')
+    fs.writeFileSync(log, '')
+    const manifestPath = path.join(dir, 'manifest.json')
+    fs.writeFileSync(manifestPath, JSON.stringify({ serviceLogs: [log] }))
+
+    let used = false
+    await logMarkerFixture(async () => {
+      used = true
+      fs.appendFileSync(log, 'body\n')
+    }, { title: 'My Case' }, manifestPath)
+
+    expect(used).toBe(true)
+    expect(fs.readFileSync(log, 'utf-8')).toBe('<test-case-my-case>\nbody\n</test-case-my-case>\n')
+  })
+
+  it('still runs the test body when no manifest exists', async () => {
+    let used = false
+    await logMarkerFixture(async () => { used = true }, { title: 'x' }, '/does/not/exist.json')
+    expect(used).toBe(true)
+  })
+})
+
+describe('base.extend wiring', () => {
+  it('pageFixtureEntry unwraps the fixture bag and runs the page fixture', async () => {
+    const dir = mkTmp()
+    const page = { screenshot: vi.fn(async () => undefined) }
+    const testInfo = fakeTestInfo({ outputPath: (name: string) => path.join(dir, name) })
+
+    let handed: unknown
+    await pageFixtureEntry(
+      { page } as never,
+      async (wrapped) => { handed = wrapped },
+      testInfo as never,
+    )
+
+    expect(handed).not.toBe(page)
+    expect(page.screenshot).toHaveBeenCalledOnce()
+  })
+
+  it('logMarkerFixtureEntry runs the marker fixture against the default manifest path', async () => {
+    // No manifest at the resolved default path in this checkout, so the
+    // fixture degrades to a no-op and the body still runs — which is exactly
+    // the behaviour when specs are run directly with Playwright.
+    let used = false
+    await logMarkerFixtureEntry({}, async () => { used = true }, { title: 'x' } as never)
+    expect(used).toBe(true)
+  })
+
+  it('declares every fixture entry with a destructuring first parameter', () => {
+    // Playwright parses fixture functions and rejects a plain identifier first
+    // argument ("First argument must use the object destructuring pattern").
+    // That failure happens at module load, so it takes down every spec that
+    // imports this published fixture. Vitest never invokes Playwright's parser,
+    // so the shape is pinned here — this is the only guard against a signature
+    // edit that looks harmless and breaks every feature's suite.
+    for (const fn of [pageFixtureEntry, logMarkerFixtureEntry]) {
+      const src = fn.toString()
+      expect(src.slice(src.indexOf('('))).toMatch(/^\(\s*\{/)
+    }
+  })
+
+  it('playwrightStep delegates to Playwright test.step', async () => {
+    // Outside a worker `test.step` cannot run, and that rejection IS the proof
+    // of delegation — reproducing a worker is the one thing a unit test can't do.
+    await expect(Promise.resolve(playwrightStep(
+      'page.goto',
+      () => undefined,
+      { location: { file: '/specs/login.spec.ts', line: 1, column: 1 } },
+    ))).rejects.toThrow()
   })
 })
