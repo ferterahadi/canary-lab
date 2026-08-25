@@ -184,13 +184,13 @@ for (const relPath of [
   '.codex/self-fixing-loop.md',
   '.codex/env-import.md',
   '.codex/canary-lab-feature.md',
-  // The four toy samples retired in 1.6.0 when the demo storefront replaced
+  // The four toy samples retired in 2.0.0 when the demo storefront replaced
   // them — a scaffold still carrying one means a stale template shipped.
   'features/example_todo_api/feature.config.cjs',
   'features/broken_todo_api/feature.config.cjs',
   'features/flaky_orders_api/feature.config.cjs',
   'features/tricky_checkout_api/feature.config.cjs',
-  // Earlier 1.6.0 drafts shipped partially onboarded demo suites under these
+  // Earlier 2.0.0 drafts shipped partially onboarded demo suites under these
   // names. The suite that ships now is `storefront-journey` (asserted above);
   // any of these reappearing means a stale template shipped.
   'features/demo_catalog/feature.config.cjs',

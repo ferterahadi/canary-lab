@@ -1,6 +1,6 @@
 {
   "name": "canary-lab",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "description": "The independent local harness for AI-repaired Playwright tests \u2014 it runs the tests itself, so a green run can't be faked.",
   "keywords": [
     "playwright",

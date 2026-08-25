@@ -111,6 +111,19 @@ export function FlightDetail({
   const [ownStage, setOwnStage] = useState<FlightStageKey | null>(null)
   const selectedStage = onSelectStage ? routedStage ?? null : ownStage
   const setSelectedStage = onSelectStage ?? setOwnStage
+  // StageDetail remounts when the rail selection changes. Keep each stage's
+  // explicit Activity choice here so leaving a stage does not reset it to the
+  // live/settled default when the user comes back.
+  const [activityOpenByFlight, setActivityOpenByFlight] = useState<
+    Record<string, Partial<Record<FlightStageKey, boolean>>>
+  >({})
+  const setStageActivityOpen = useCallback((stageKey: FlightStageKey, open: boolean): void => {
+    setActivityOpenByFlight((current) => {
+      const flightState = current[flightId] ?? {}
+      if (flightState[stageKey] === open) return current
+      return { ...current, [flightId]: { ...flightState, [stageKey]: open } }
+    })
+  }, [flightId])
   // R71/W1: one inline error line under the header — every header/run control
   // failure lands here instead of a silent `.catch(() => {})`.
   const [actionError, setActionError] = useState<string | null>(null)
@@ -604,7 +617,28 @@ export function FlightDetail({
               {seeded ? 'Loading the flight’s steps…' : 'Pick a step from the list on the left.'}
             </div>
           ) : (
-            <StageDetail key={stage.key} flightId={flightId} flight={flight} row={row} stage={stage} companion={companionStage} runLive={runLive} activeRunId={derivedActiveRunId} activity={featureActivity} externalHistory={featureExternalHistory} externalMutationOwner={externalMutationOwner} onResponded={refetch} onActionError={setActionError} onStartFlight={onStartFlight} onOpenConfig={onOpenConfig} configRefreshKey={configRefreshKey} docsRefreshKey={docsRefreshKey} drill={drill} />
+            <StageDetail
+              key={stage.key}
+              flightId={flightId}
+              flight={flight}
+              row={row}
+              stage={stage}
+              companion={companionStage}
+              runLive={runLive}
+              activeRunId={derivedActiveRunId}
+              activity={featureActivity}
+              externalHistory={featureExternalHistory}
+              activityOpen={activityOpenByFlight[flightId]?.[stage.key]}
+              onActivityOpenChange={(open) => setStageActivityOpen(stage.key, open)}
+              externalMutationOwner={externalMutationOwner}
+              onResponded={refetch}
+              onActionError={setActionError}
+              onStartFlight={onStartFlight}
+              onOpenConfig={onOpenConfig}
+              configRefreshKey={configRefreshKey}
+              docsRefreshKey={docsRefreshKey}
+              drill={drill}
+            />
           )}
         </main>
       </div>

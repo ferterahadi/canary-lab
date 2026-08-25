@@ -107,18 +107,22 @@ describe('deriveFeatureStages', () => {
   })
 
   it('uses the external Portify stream as immediate derived-stage evidence', () => {
+    const externalPortify = {
+      kind: 'portifying' as const,
+      stage: 'portify' as const,
+      resourceId: 'wf-live',
+      status: 'done' as const,
+      startedAt: '2026-08-25T00:00:00Z',
+      updatedAt: '2026-08-25T00:05:00Z',
+    }
     const stages = deriveFeatureStages(
       { evidence: { envCapture: false, prdSummary: false, specs: false }, portified: false },
       undefined,
       false,
       {
         portify: {
-          kind: 'portifying',
-          stage: 'portify',
-          resourceId: 'wf-live',
-          status: 'done',
-          startedAt: '2026-08-25T00:00:00Z',
-          updatedAt: '2026-08-25T00:05:00Z',
+          traces: [externalPortify],
+          current: externalPortify,
         },
       },
     )!

@@ -158,7 +158,7 @@ export interface CoverageStateView {
 
 // Semantic coverage is decoupled from test RUNS (R: 1.4.0): it asks "does a test
 // exist that claims to exercise this requirement's paths?", never "did a run pass?".
-// The additive `proven` axis (1.6.0) joins the LATEST run's per-test pass/fail on
+// The additive `proven` axis (2.0.0) joins the LATEST run's per-test pass/fail on
 // top — "covered (claimed)" vs "covered (proven by a passing run)" — without
 // changing gap types or the headline %: a claim stays a claim.
 export type GapType =

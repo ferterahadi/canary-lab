@@ -5,7 +5,7 @@ import path from 'path'
 import Fastify from 'fastify'
 import {
   LEGACY_SAMPLE_SUITES,
-  PRE_1_6_SAMPLE_SUITES,
+  PRE_2_0_SAMPLE_SUITES,
   onboardingRoutes,
   readOnboardingSamples,
   SAMPLE_FLIGHT_DESCRIPTION,
@@ -128,8 +128,8 @@ describe('readOnboardingSamples', () => {
     expect(readOnboardingSamples(projectRoot, featuresDir).sampleSuite).toBeNull()
   })
 
-  // The rename landed inside the 1.6.0 cycle, so this covers pre-release
-  // workspaces only — a released 1.5.x workspace carries PRE_1_6_SAMPLE_SUITES
+  // The rename landed inside the 2.0.0 cycle, so this covers pre-release
+  // workspaces only — a released 1.5.x workspace carries PRE_2_0_SAMPLE_SUITES
   // instead, which is a different situation entirely (see below).
   it('still recognises the pre-rename suite name', () => {
     fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
@@ -152,12 +152,12 @@ describe('readOnboardingSamples', () => {
     expect(readOnboardingSamples(projectRoot, featuresDir).sampleFlightRepo).toBeNull()
   })
 
-  it('tells a pre-1.6.0 workspace it never had the demos, and how to get one', () => {
+  it('tells a pre-2.0.0 workspace it never had the demos, and how to get one', () => {
     // What upgrading from 1.5.1 actually produces: the old sample suites, none of
-    // the 1.6.0 sample repos. "Removed from this workspace" names a deletion this
+    // the 2.0.0 sample repos. "Removed from this workspace" names a deletion this
     // user never made, and `upgrade` deliberately never writes features/, so the
     // message has to carry the only route to the demos.
-    for (const name of PRE_1_6_SAMPLE_SUITES) writeSuite(name)
+    for (const name of PRE_2_0_SAMPLE_SUITES) writeSuite(name)
 
     const reasons = readOnboardingSamples(projectRoot, featuresDir)
       .workflows.map((w) => w.unavailableReason)
@@ -166,7 +166,7 @@ describe('readOnboardingSamples', () => {
     expect(reasons.some((r) => r?.includes('removed'))).toBe(false)
   })
 
-  it('still says "removed" when a 1.6.0 workspace lost one sample', () => {
+  it('still says "removed" when a 2.0.0 workspace lost one sample', () => {
     // The other side of the split: these samples ARE disposable, and a user who
     // deleted one should not be told to re-scaffold a workspace that has the rest.
     fs.mkdirSync(path.join(projectRoot, SAMPLE_SUITE_REPO_DIR))
@@ -179,11 +179,11 @@ describe('readOnboardingSamples', () => {
     expect(workbench?.unavailableReason).toBe('The workflow workbench was removed from this workspace.')
   })
 
-  it('does not read an old suite name as legacy inside a 1.6.0 workspace', () => {
-    // A pre-1.6.0 suite the user carried across, or simply kept working on, must
+  it('does not read an old suite name as legacy inside a 2.0.0 workspace', () => {
+    // A pre-2.0.0 suite the user carried across, or simply kept working on, must
     // not turn a genuine deletion into "you never had it".
     fs.mkdirSync(path.join(projectRoot, SAMPLE_FLIGHT_REPO_DIR))
-    writeSuite(PRE_1_6_SAMPLE_SUITES[0])
+    writeSuite(PRE_2_0_SAMPLE_SUITES[0])
 
     const run = readOnboardingSamples(projectRoot, featuresDir)
       .workflows.find((w) => w.id === 'run')

@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FlightManifest } from '@/shared/api/client'
+import type { FlightManifest, FlightStageKey } from '@/shared/api/client'
 import { FLIGHT_STAGE_KEYS } from '@shared/flights/types'
 import { InvalidationProvider } from '@/shared/state/invalidation'
 
@@ -161,6 +161,7 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
 })
 
 import { FlightPage } from './FlightPage'
+import { isActivityOpen, toggleActivity } from './__fixtures__/activity-band'
 
 ;
 
@@ -277,9 +278,7 @@ describe('trailer model (R14–R18)', () => {
     })
     expect(container.querySelector('[data-testid="stage-facts"]')?.textContent).toContain('5')
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
-    })
+    await act(async () => { toggleActivity(container) })
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-stage')).toBe('prd-summary')
   })
 
@@ -311,6 +310,47 @@ describe('trailer model (R14–R18)', () => {
     // The follow-mode reset must fire on a flight CHANGE, never on a mount —
     // clearing here is exactly what threw the pick away.
     expect(onSelectStage).not.toHaveBeenCalledWith(null)
+  })
+
+  it('keeps Parallel readiness Activity open after switching to another stage and back', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: 'done' as const,
+        ...(key === 'portify' ? { evidence: { workflowId: 'portify-demo' } } : {}),
+      })),
+    }))
+    function RoutedFlight() {
+      const [stage, setStage] = useState<FlightStageKey | null>(null)
+      return <FlightPage flightId="fl_1" onSelectFlight={vi.fn()} onClose={vi.fn()} stage={stage} onSelectStage={setStage} />
+    }
+    await act(async () => {
+      root.render(
+        <InvalidationProvider>
+          <RoutedFlight />
+        </InvalidationProvider>,
+      )
+    })
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(isActivityOpen(container)).toBe(false)
+    await act(async () => { toggleActivity(container) })
+    expect(isActivityOpen(container)).toBe(true)
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-specs-coverage"]')?.click()
+    })
+    expect(isActivityOpen(container)).toBe(false)
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
+    })
+    expect(isActivityOpen(container)).toBe(true)
+    expect(container.querySelector('[data-testid="agent-session-view"]')).not.toBeNull()
   })
 
   it('a different flight drops the previous one’s stage pick', async () => {

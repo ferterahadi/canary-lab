@@ -112,7 +112,7 @@ diff <(ls .codex/skills) <(grep -o 'cl_[a-z-]*' CLAUDE.md | sort -u)   # index v
 find agent-integrations -name SKILL.md | wc -l                          # what a list would have to say
 ```
 
-> The 1.6.0 audit found 26 findings against these docs, and the discipline-only
+> The 2.0.0 audit found 26 findings against these docs, and the discipline-only
 > version of this section caught none of them. If your change makes a doc
 > sentence false, fixing the doc is part of the change — not a follow-up.
 

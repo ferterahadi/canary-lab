@@ -119,14 +119,18 @@ describe('useDerivedFeatureStages', () => {
   })
 
   it('re-derives Parallel readiness from external Portify completion', () => {
+    const externalPortify = {
+      kind: 'portifying' as const,
+      stage: 'portify' as const,
+      resourceId: 'wf-live',
+      status: 'done' as const,
+      startedAt: '2026-08-25T00:00:00Z',
+      updatedAt: '2026-08-25T00:05:00Z',
+    }
     render([feature({ portified: false })], new Map([['checkout', {
       portify: {
-        kind: 'portifying',
-        stage: 'portify',
-        resourceId: 'wf-live',
-        status: 'done',
-        startedAt: '2026-08-25T00:00:00Z',
-        updatedAt: '2026-08-25T00:05:00Z',
+        traces: [externalPortify],
+        current: externalPortify,
       },
     }]]))
     expect(statusOf('checkout', 'portify')).toBe('done')

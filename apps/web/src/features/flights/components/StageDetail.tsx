@@ -12,7 +12,7 @@ import { AGENT_STAGE_DIRS, stageDrillThrough } from './FlightDetail'
 import type { FlightDrillThroughs } from './FlightPage'
 import { StageErrorPanel, StagePausedPanel, pausedResumeKind } from './StageStatePanels'
 import { externalMutationTooltip, isExternallyDriven, type ExternalMutationOwner } from '../lib/external-work'
-import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity } from '../state/feature-activity'
+import { ACTIVITY_STAGE, type ExternalWorkTrace, type FeatureActivity, type StageExternalHistory } from '../state/feature-activity'
 import { SkeletonPanel, awaitingFor } from '@/shared/ui/Skeleton'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
 import { useStageBandData } from './use-stage-band-data'
@@ -91,14 +91,20 @@ function externalClientKind(clientKind: string | undefined): ExternalClientKind 
   return 'other'
 }
 
-function latestExternalTrace(
-  history: Partial<Record<FlightStageKey, ExternalWorkTrace>> | undefined,
+function stageExternalHistory(
+  history: Partial<Record<FlightStageKey, StageExternalHistory>> | undefined,
   stage: FlightStage,
   companion: FlightStage | null,
-): ExternalWorkTrace | undefined {
-  const candidates = [history?.[stage.key], companion ? history?.[companion.key] : undefined]
-    .filter((trace): trace is ExternalWorkTrace => trace != null)
-  return candidates.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+): StageExternalHistory {
+  const stageHistories = [history?.[stage.key], companion ? history?.[companion.key] : undefined]
+    .filter((entry): entry is StageExternalHistory => entry != null)
+  const traces = stageHistories
+    .flatMap((entry) => entry.traces)
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt) || a.updatedAt.localeCompare(b.updatedAt))
+  const current = stageHistories
+    .flatMap((entry) => entry.current ? [entry.current] : [])
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+  return { traces, ...(current ? { current } : {}) }
 }
 
 export function StageDetail({
@@ -111,6 +117,8 @@ export function StageDetail({
   activeRunId,
   activity,
   externalHistory,
+  activityOpen,
+  onActivityOpenChange,
   externalMutationOwner,
   onResponded,
   onActionError,
@@ -135,7 +143,11 @@ export function StageDetail({
    *  compact external-session Activity row on the stage the job belongs to. */
   activity?: FeatureActivity
   /** Durable external producer records for this feature, keyed by stage. */
-  externalHistory?: Partial<Record<FlightStageKey, ExternalWorkTrace>>
+  externalHistory?: Partial<Record<FlightStageKey, StageExternalHistory>>
+  /** The stage's remembered Activity disclosure choice. Undefined preserves
+   *  the normal default: open while live, collapsed otherwise. */
+  activityOpen?: boolean
+  onActivityOpenChange: (open: boolean) => void
   /** Present while mutations belong to the Claude/Codex session. */
   externalMutationOwner?: ExternalMutationOwner
   onResponded: () => void
@@ -169,7 +181,8 @@ export function StageDetail({
   // the stage settles, so a card with genuinely nothing to show still renders
   // nothing rather than promising more.
   const awaiting = awaitingFor(row.status, live)
-  const externalTrace = latestExternalTrace(externalHistory, stage, companion)
+  const externalStage = stageExternalHistory(externalHistory, stage, companion)
+  const externalTrace = externalStage.current
   // Derived Flights learn external task identity from the task's own live
   // stream before the workspace evidence probe catches up. Feed that identity
   // through the normal stage-band path so the result lands without a refresh.
@@ -204,6 +217,9 @@ export function StageDetail({
   const runId = runMerged
     ? (activeRunId ?? ((stage.evidence as Record<string, unknown> | undefined)?.runId as string | undefined) ?? flight.links?.runId)
     : undefined
+  const showRunPanel = runMerged && Boolean(runId || awaiting)
+  const pausedKind = pausedResumeKind(stage, flight, companion)
+  const pausedNotice = pausedKind ? <StagePausedPanel kind={pausedKind} /> : null
   // The merged Run stage renders as the Test Run hero (TestRunPanel) — it owns
   // the run detail poll, so StageDetail no longer fetches it here (R80). The
   // hero renders from this evidence immediately (before its first poll) and
@@ -232,13 +248,18 @@ export function StageDetail({
     && stageRowKey(ACTIVITY_STAGE[activity.kind]) === stage.key
   const flightHandOff = isExternallyDriven(flight)
     && checkpointStage?.checkpoint?.kind === 'external-work'
-  const externalSession: ExternalSessionActivity | undefined = externalTrace
-    ? externalSessionActivity(externalTrace)
-    : activityOnThisRow
+  const historicalExternalSessions = externalStage.traces.map(externalSessionActivity)
+  // The live activity map can update before the durable resource list. Keep a
+  // temporary row during that gap, but drop it once the persisted running trace
+  // arrives so one external task never appears twice.
+  const liveExternalFallback: ExternalSessionActivity | undefined =
+    (activityOnThisRow || flightHandOff)
+      && !historicalExternalSessions.some((session) => session.status === 'running')
       ? { clientKind: 'other', status: 'running', message: 'Work is continuing in your external agent session.' }
-      : flightHandOff
-        ? { clientKind: 'other', status: 'running', message: 'Work is continuing in your external agent session.' }
-        : undefined
+      : undefined
+  const externalSessions = liveExternalFallback
+    ? [...historicalExternalSessions, liveExternalFallback]
+    : historicalExternalSessions
 
   // R66: every stage's activity is the same rail. Resolve its one agent source
   // (if any): agent stages tail their flight session; the Evaluation Report
@@ -258,8 +279,9 @@ export function StageDetail({
   // External producers have no Canary-owned transcript. Suppress the local
   // source entirely so its generic live tail cannot add a second spinner under
   // the external-session row or replay an older internal session as current.
-  const activitySource = externalSession ? undefined : localActivitySource
-  const activityKey = externalSession
+  const externalOwnsCurrent = externalTrace !== undefined || liveExternalFallback !== undefined
+  const activitySource = externalOwnsCurrent ? undefined : localActivitySource
+  const activityKey = externalOwnsCurrent
     ? `external:${externalTrace?.resourceId ?? externalTrace?.sessionId ?? stage.key}`
     : evalTaskId ? `evaluation:${evalTaskId}` : portifyId ? `portify:${portifyId}` : (agentDir ?? 'system-only')
 
@@ -347,19 +369,10 @@ export function StageDetail({
           lands in the slot its placeholder held. */}
       <FactsGrid facts={facts} awaiting={awaitingData} />
 
-      {/* Paused with nothing else to act on (no checkpoint, no error): the
-          "how to pick it back up" card fills the void the state sentence alone
-          left, and points up to the header's one Continue. Only renders on the
-          single stage Continue resumes (pausedResumeKind mirrors stageStateLine),
-          and never alongside the checkpoint/error cards below (those states are
-          not `paused` + `pending`). */}
-      {(() => {
-        const kind = pausedResumeKind(stage, flight)
-        if (!kind) return null
-        // R82: the run stage keeps its hero mounted through a pause, so the
-        // resume note is a line above real evidence, not a card filling a void.
-        return <StagePausedPanel kind={kind} compact={runMerged && Boolean(runId)} />
-      })()}
+      {/* The recovery card always follows At a glance. Test Run owns a separate
+          facts band inside TestRunPanel, so that panel receives the same card in
+          the same slot instead of rendering it above the band. */}
+      {!showRunPanel && pausedNotice}
 
       {/* Repo scan (R72c): one intent card, then one repo card per inspected
           repo carrying its own location + env files. */}
@@ -460,7 +473,7 @@ export function StageDetail({
           adapter's `interrupt`), so the run is often still going. Keeping it
           mounted keeps its verdict, its score and its failing tests on screen,
           and the poll alive, while the flight waits for Continue. */}
-      {runMerged && (runId || awaiting) && (
+      {showRunPanel && (
         <TestRunPanel
           feature={flight.feature}
           runId={runId}
@@ -469,6 +482,7 @@ export function StageDetail({
           evidence={runEvidence}
           onOpenRun={drill.onOpenRun}
           onError={onActionError}
+          pausedNotice={pausedNotice}
           mutationLockedReason={externalMutationOwner
             ? externalMutationTooltip(externalMutationOwner, 'stop or change this run')
             : undefined}
@@ -552,10 +566,12 @@ export function StageDetail({
         <StageActivity
           source={activitySource}
           sourceKey={activityKey}
-          live={live}
+          live={live || externalSessions.some((session) => session.status === 'running')}
           settled={settled}
           log={combinedLog}
-          externalSession={externalSession}
+          externalSessions={externalSessions}
+          open={activityOpen}
+          onOpenChange={onActivityOpenChange}
           {...(stage.key === 'portify' ? { empty: PORTIFY_NO_TRANSCRIPT } : {})}
         />
       )}

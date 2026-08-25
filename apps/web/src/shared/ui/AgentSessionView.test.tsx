@@ -320,16 +320,17 @@ describe('AgentSessionView external-session Activity row', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-25T00:01:42.000Z'))
     act(() => root.render(
-      <AgentSessionView externalSession={{
+      <AgentSessionView externalSessions={[{
         clientKind: 'claude',
         status: 'running',
         message: 'Work is continuing in your Claude session.',
         startedAt: '2026-08-25T00:00:00.000Z',
-      }} />,
+      }]} />,
     ))
 
     const row = container.querySelector('[data-testid="external-session-activity"]')
-    expect(row?.textContent).toContain('External · Claude')
+    expect(row?.textContent).toContain('External session')
+    expect(row?.textContent).not.toContain('External · Claude')
     expect(row?.textContent).toContain('Work is continuing in your Claude session.')
     expect(container.querySelector('[data-testid="external-session-elapsed"]')?.textContent).toBe('1m 42s')
     expect(container.querySelector('.agentts-worknode')).not.toBeNull()
@@ -337,21 +338,48 @@ describe('AgentSessionView external-session Activity row', () => {
 
   it('keeps completed external provenance compact and links back to the session', () => {
     act(() => root.render(
-      <AgentSessionView externalSession={{
+      <AgentSessionView externalSessions={[{
         clientKind: 'codex',
         status: 'done',
         message: 'Completed outside Canary Lab · 3 files applied.',
         startedAt: '2026-08-25T00:00:00.000Z',
         endedAt: '2026-08-25T00:05:00.000Z',
         sessionUrl: 'codex://session/abc',
-      }} />,
+      }]} />,
     ))
 
     const row = container.querySelector('[data-testid="external-session-activity"]')
-    expect(row?.textContent).toContain('External · Codex')
+    expect(row?.textContent).toContain('External session')
     expect(row?.textContent).toContain('Completed outside Canary Lab · 3 files applied.')
     expect(container.querySelector('[data-testid="external-session-elapsed"]')?.textContent).toBe('5m 00s')
     expect(container.querySelector<HTMLAnchorElement>('.agentts-extaction')?.getAttribute('href')).toBe('codex://session/abc')
     expect(container.querySelector('.agentts-worknode')).toBeNull()
+  })
+
+  it('renders every external pass instead of replacing the prior row', () => {
+    act(() => root.render(
+      <AgentSessionView externalSessions={[
+        {
+          clientKind: 'other',
+          status: 'done',
+          message: 'First coverage pass completed.',
+          startedAt: '2026-08-25T00:00:00.000Z',
+          endedAt: '2026-08-25T00:01:00.000Z',
+        },
+        {
+          clientKind: 'claude',
+          status: 'done',
+          message: 'Second coverage pass completed.',
+          startedAt: '2026-08-25T00:02:00.000Z',
+          endedAt: '2026-08-25T00:03:00.000Z',
+        },
+      ]} />,
+    ))
+
+    const rows = container.querySelectorAll('[data-testid="external-session-activity"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]?.textContent).toContain('First coverage pass completed.')
+    expect(rows[1]?.textContent).toContain('Second coverage pass completed.')
+    expect([...rows].every((row) => row.textContent?.includes('External session'))).toBe(true)
   })
 })

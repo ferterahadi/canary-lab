@@ -3,7 +3,7 @@
 // `cl_verify-changes` skill.
 //
 // It exists because the "discipline only" version of that audit missed a whole
-// 1.6.0's worth of drift — dead module-map paths, a heading that no anchor
+// 2.0.0's worth of drift — dead module-map paths, a heading that no anchor
 // pointed at, a route attributed to the wrong file. Those are all decidable, so
 // they should fail a command rather than wait for someone to notice.
 //

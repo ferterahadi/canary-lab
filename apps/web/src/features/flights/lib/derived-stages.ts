@@ -4,7 +4,7 @@ import type { FlightStageKey, FlightStageStatus } from '@/shared/api/client'
 import type { EvaluationExportTask, Feature, RunIndexEntry } from '@/shared/api/types'
 import { useEvaluationExports } from '@/features/evaluation'
 import { useRuns } from '@/features/runs'
-import type { ExternalWorkTrace, FeatureExternalHistory } from '../state/feature-activity'
+import type { FeatureExternalHistory, StageExternalHistory } from '../state/feature-activity'
 
 // Evidence-derived stage rail for a feature with NO flight record: what has
 // actually been done to this suite, regardless of who did it (flight, wizard,
@@ -33,7 +33,7 @@ export function deriveFeatureStages(
   feature: Pick<Feature, 'evidence' | 'portified'>,
   latestRun?: RunIndexEntry,
   hasExport?: boolean,
-  externalStages?: Partial<Record<FlightStageKey, ExternalWorkTrace>>,
+  externalStages?: Partial<Record<FlightStageKey, StageExternalHistory>>,
 ): DerivedStage[] | null {
   const ev = feature.evidence
   if (!ev) return null
@@ -49,8 +49,8 @@ export function deriveFeatureStages(
   const coverageMapped = ev.coverageMapping === undefined
     ? ev.specs && ev.prdSummary
     : ev.coverageMapping === 'fresh'
-  const externalPortify = externalStages?.portify?.kind === 'portifying'
-    ? externalStages.portify
+  const externalPortify = externalStages?.portify?.current?.kind === 'portifying'
+    ? externalStages.portify.current
     : undefined
   const portifyEvidence = externalPortify?.resourceId
     ? { workflowId: externalPortify.resourceId }

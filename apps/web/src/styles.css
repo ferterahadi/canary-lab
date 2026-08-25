@@ -350,6 +350,36 @@ body {
   background: var(--accent);
 }
 
+/* The Activity band's label bar doubles as its movable top edge (R88): the whole
+   row is the grab target, so folding and resizing share one control instead of a
+   hairline rule beside a Hide/Show button. `min-height` keeps the row a real hit
+   target now that no chip sets its height. */
+.cl-resize-bar {
+  min-height: 26px;
+  cursor: row-resize;
+  border-top: 1px solid var(--border-default);
+  transition: border-color 150ms ease;
+}
+.cl-resize-bar:hover,
+.cl-resize-bar.dragging {
+  border-top-color: var(--accent);
+}
+/* Two rules, not a glyph: the affordance has to state an AXIS, where the ▾/▸ it
+   replaces stated a direction the panel no longer only moves in. Visible at
+   rest — a hover-only grip would hide the only remaining control. */
+.cl-resize-grip {
+  width: 16px;
+  height: 4px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-default);
+  border-bottom: 1px solid var(--border-default);
+  transition: border-color 150ms ease;
+}
+.cl-resize-bar:hover .cl-resize-grip,
+.cl-resize-bar.dragging .cl-resize-grip {
+  border-color: var(--accent);
+}
+
 .vertical-collapse-btn {
   position: absolute;
   top: 50%;

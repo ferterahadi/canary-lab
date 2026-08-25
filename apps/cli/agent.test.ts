@@ -49,7 +49,7 @@ describe('canary-lab agent install', () => {
   })
 
   it('refresh gives a client that has any skill the whole current set', () => {
-    // Reproduces the pre-1.6.0 shape exactly: one `canary-lab` skill per client
+    // Reproduces the pre-2.0.0 shape exactly: one `canary-lab` skill per client
     // and nothing else, because that release only ever shipped one. An op-wise
     // refresh (skip every destination that does not exist) leaves it that way
     // while reporting success, so the six skills the refreshed hub skill points
@@ -59,7 +59,7 @@ describe('canary-lab agent install', () => {
     for (const client of ['.codex', '.claude'] as const) {
       const legacy = path.join(home, client, 'skills', 'canary-lab')
       fs.mkdirSync(legacy, { recursive: true })
-      fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-1.6.0 skill')
+      fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-2.0.0 skill')
     }
 
     refreshInstalled('all', { homeDir: home, log: () => {} })
@@ -81,7 +81,7 @@ describe('canary-lab agent install', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cl-agent-optin-'))
     const legacy = path.join(home, '.codex', 'skills', 'canary-lab')
     fs.mkdirSync(legacy, { recursive: true })
-    fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-1.6.0 skill')
+    fs.writeFileSync(path.join(legacy, 'SKILL.md'), 'pre-2.0.0 skill')
 
     refreshInstalled('all', { homeDir: home, log: () => {} })
 

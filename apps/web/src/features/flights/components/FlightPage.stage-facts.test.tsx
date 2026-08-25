@@ -91,8 +91,8 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] } }) => (
-    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
+  AgentSessionView: ({ source, systemRows, empty }: { source?: { kind: string; stage?: string }; systemRows?: { pre: string[]; post: string[] }; empty?: { title: string } }) => (
+    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage} data-empty-title={empty?.title}>
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>
@@ -162,6 +162,7 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
 
 import { FlightPage } from './FlightPage'
 import type { EvaluationExportTask } from '@/shared/api/types'
+import { activityBar, isActivityOpen, toggleActivity } from './__fixtures__/activity-band'
 
 ;
 
@@ -446,9 +447,7 @@ describe('trailer model (R14–R18)', () => {
     expect(portifyFacts).toContain('Files edited')
     expect(portifyFacts).toContain('already swappable')
     expect(container.textContent).not.toContain('"workflowId"')
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
-    })
+    await act(async () => { toggleActivity(container) })
     // R30/R66: the disclosure is ONE block — the system line rides the rail
     // (an agentless stage renders it as system rows, no JSON dump).
     expect(container.textContent).not.toContain('"workflowId"')
@@ -458,7 +457,7 @@ describe('trailer model (R14–R18)', () => {
     expect(asv?.textContent).toContain('double boot verified')
   })
 
-  it('R30: a stage with no log and no agent has no details disclosure', async () => {
+  it('R30: a stage with no log and no agent keeps a collapsed Activity boundary', async () => {
     // Scaffold, not portify: portify grew an agent source (its workflow
     // timeline now tails into the rail, settled included), so the agentless
     // example must be a stage that truly never spawns one.
@@ -471,7 +470,109 @@ describe('trailer model (R14–R18)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
     })
+    expect(isActivityOpen(container)).toBe(false)
+    await act(async () => { toggleActivity(container) })
+    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-empty-title'))
+      .toBe('No activity recorded')
+  })
+
+  it('the Activity band opens at a resizable height, not at half the pane', async () => {
+    // `flex-1` gave a one-row hand-off the same box a hundred-row transcript
+    // gets; sizing to content would creep down the page as an agent appends
+    // rows. So the open band carries an explicit height plus a drag handle, and
+    // the height persists — it is a reading preference, not a stage property.
+    localStorage.removeItem('cl-activity-height')
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
+    })
+    const band = (): HTMLElement | null => container.querySelector<HTMLElement>('[data-testid="stage-activity"]')
+    // Folded: no height imposed — but the edge is still there, because it is the
+    // only way back open now that the Hide/Show button is gone.
+    expect(band()?.style.height).toBe('')
+    expect(activityBar(container)).not.toBeNull()
+    expect(isActivityOpen(container)).toBe(false)
+
+    await act(async () => { toggleActivity(container) })
+    expect(band()?.style.height).toBe('208px')
+    expect(band()?.className).not.toContain('flex-1')
+    expect(band()?.className).toContain('max-h-[70%]')
+    expect(isActivityOpen(container)).toBe(true)
+
+    // The bar IS the band's top edge, so a rising pointer grows it.
+    const grip = activityBar(container)
+    expect(grip?.getAttribute('role')).toBe('separator')
+    await act(async () => {
+      grip?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientY: 500 }))
+    })
+    await act(async () => { document.dispatchEvent(new MouseEvent('mousemove', { clientY: 440, buttons: 1 })) })
+    await act(async () => { document.dispatchEvent(new MouseEvent('mouseup')) })
+    expect(band()?.style.height).toBe('268px')
+    expect(localStorage.getItem('cl-activity-height')).toBe('268')
+  })
+
+  it('R88: pushing the band\u2019s edge past its floor folds it — the drag replaces the Hide/Show button', async () => {
+    // The button is gone: one edge answers both "how much room" and "any room at
+    // all". Pushing well below the 104px floor folds the band and KEEPS the
+    // height, so the way back restores the size the reader had chosen.
+    localStorage.setItem('cl-activity-height', '300')
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'done',
+      currentStage: null,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({ key, status: 'done' as const })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
+    })
+    await act(async () => { toggleActivity(container) })
+    const band = (): HTMLElement | null => container.querySelector<HTMLElement>('[data-testid="stage-activity"]')
+    expect(band()?.style.height).toBe('300px')
+
+    // No Hide/Show anywhere on the band any more.
     expect(container.querySelector('[data-testid="stage-details-toggle"]')).toBeNull()
+    const bar = activityBar(container)!
+    expect(bar.textContent).not.toContain('Hide')
+    expect(bar.textContent).not.toContain('Show')
+
+    // Push the edge 250px down: 300 - 250 = 50, under the 72px fold point.
+    await act(async () => {
+      bar.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, clientY: 400 }))
+    })
+    await act(async () => { document.dispatchEvent(new MouseEvent('mousemove', { clientY: 650, buttons: 1 })) })
+    await act(async () => { document.dispatchEvent(new MouseEvent('mouseup')) })
+    expect(isActivityOpen(container)).toBe(false)
+    expect(band()?.style.height).toBe('')
+
+    // And back: the reader's 300px survived the fold.
+    await act(async () => { toggleActivity(container) })
+    expect(band()?.style.height).toBe('300px')
+  })
+
+  it('the running dot is the only live signal on the bar — no word beside it, but a name for a screen reader', async () => {
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'running',
+      currentStage: 'scaffold',
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: key === 'scaffold' ? ('running' as const) : ('pending' as const),
+      })),
+    }))
+    await render('fl_1')
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
+    })
+    const bar = activityBar(container)
+    expect(bar?.querySelector('.cl-status-dot')).not.toBeNull()
+    // Visible copy stays "Activity"; the state rides an sr-only span, because a
+    // coloured dot on its own is not a status anyone can hear.
+    expect(bar?.querySelector('.sr-only')?.textContent).toContain('running')
+    expect(bar?.textContent).not.toContain('▾')
   })
 
   it('R80: the Test Run hero renders the settled run once — verdict + repair cycles, NO agent output', async () => {

@@ -1,7 +1,7 @@
 # Canary Lab Product Requirements
 
 > **Status:** reverse-engineered from the README, changelog, user guide, and
-> current codebase (package version 1.6.0). This is the product-intent reference
+> current codebase (package version 2.0.0). This is the product-intent reference
 > for contributors and agents. Update it with every behavior change.
 
 ## Positioning

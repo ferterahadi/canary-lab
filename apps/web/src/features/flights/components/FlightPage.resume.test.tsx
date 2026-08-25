@@ -247,6 +247,10 @@ async function render(flightId: string, extraProps: Record<string, unknown> = {}
   })
 }
 
+function expectBefore(first: Element, second: Element): void {
+  expect(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+}
+
 describe('FlightPage', () => {
   it('R74: Continue on a settled flight opens the centered re-run dialog; invalid steps are disabled with the reason', async () => {
     mocks.getFlight.mockResolvedValue(manifest({ status: 'done' }))
@@ -339,6 +343,8 @@ describe('FlightPage', () => {
     expect(card.textContent).toContain('↑Continue')
     // Recovery stays the header's one Continue — the card carries no button.
     expect(card.querySelector('button')).toBeNull()
+    // The recovery message has one stable home: directly after At a glance.
+    expectBefore(container.querySelector('[data-testid="stage-facts-card"]')!, card)
     // The card agrees with the always-present state sentence, never contradicts it.
     expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent)
       .toBe('Stopped part way — Continue picks it up here.')
@@ -360,6 +366,48 @@ describe('FlightPage', () => {
     await render('fl_1')
     const card = container.querySelector('[data-testid="stage-paused"]')!
     expect(card?.textContent).toContain('Paused before this step')
+    expectBefore(container.querySelector('[data-testid="stage-facts-card"]')!, card)
+  })
+
+  it.each([
+    {
+      name: 'Suite setup',
+      row: 'scaffold',
+      resume: 'env-capture',
+      done: ['similarity', 'scout', 'scaffold'],
+      startedAt: '2026-01-01T00:05:00Z',
+      heading: 'Paused part way',
+      stateLine: 'Stopped part way — Continue picks it up here.',
+    },
+    {
+      name: 'Requirements',
+      row: 'docs',
+      resume: 'prd-summary',
+      done: ['similarity', 'scout', 'scaffold', 'env-capture', 'docs'],
+      startedAt: undefined,
+      heading: 'Paused before this step',
+      stateLine: 'Paused before it started — Continue starts this step.',
+    },
+  ] as const)('paused resume card: $name follows At a glance when its folded half resumes', async ({ row, resume, done, startedAt, heading, stateLine }) => {
+    const settled = new Set<string>(done)
+    mocks.getFlight.mockResolvedValue(manifest({
+      status: 'paused',
+      pauseReason: 'user',
+      currentStage: resume,
+      stages: FLIGHT_STAGE_KEYS.map((key) => ({
+        key,
+        status: settled.has(key) ? ('done' as const) : ('pending' as const),
+        ...(key === resume && startedAt ? { startedAt } : {}),
+      })),
+    }))
+    await render('fl_1')
+
+    expect(container.querySelector(`[data-testid="stage-rail-${row}"]`)?.getAttribute('aria-current')).toBe('true')
+    const facts = container.querySelector('[data-testid="stage-facts-card"]')!
+    const card = container.querySelector('[data-testid="stage-paused"]')!
+    expect(card.textContent).toContain(heading)
+    expectBefore(facts, card)
+    expect(container.querySelector('[data-testid="stage-state-line"]')?.textContent).toBe(stateLine)
   })
 
   it('R82: pausing on the Test Run step KEEPS the run on screen — the pane never goes blank', async () => {
@@ -391,12 +439,15 @@ describe('FlightPage', () => {
     expect(hero?.textContent).toContain('Run run-9')
     expect(hero?.textContent).toContain('2/23')
     expect(container.querySelector('[data-testid="run-hero-failing"]')?.textContent).toContain('otp guard')
-    // The resume note is still there, but as ONE line above real evidence —
-    // not a card filling a void, so it carries no PanelCard slab.
+    // Test Run uses the same card and placement as every other stage: after its
+    // own At a glance band, before the latest-run evidence.
     const paused = container.querySelector('[data-testid="stage-paused"]')!
     expect(paused.textContent).toContain('Paused part way')
     expect(paused.textContent).toContain('↑Continue')
     expect(paused.querySelector('button')).toBeNull()
+    expect(paused.tagName).toBe('SECTION')
+    expectBefore(container.querySelector('[data-testid="stage-facts-card"]')!, paused)
+    expectBefore(paused, hero!)
   })
 
   it('paused resume card: never on a running flight', async () => {

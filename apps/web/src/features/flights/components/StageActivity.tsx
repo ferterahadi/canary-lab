@@ -1,7 +1,8 @@
-import { useState, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { SpecsCoverageProgress as SpecsCoverageProgressT } from '@/shared/api/client'
 import { AgentSessionView, type AgentSessionSource, type ExternalSessionActivity } from '@/shared/ui/AgentSessionView'
 import { StatusDot } from '@/shared/ui/atoms'
+import { useResizableHeight } from '@/shared/ui/use-resizable-height'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import { StepList, StepRow } from '@/shared/ui/StepList'
 import { StageColumn } from './stage-meta'
@@ -17,8 +18,8 @@ import { StageColumn } from './stage-meta'
  *  agent's slot (→ `pre` before it, `post` after); a settled log with no
  *  untagged lines splits after the last spawn announcement (a tagged line
  *  ending in `…`). Untagged middles never render as system rows — the timeline
- *  shows them richer. Expanded fills ~half the pane; one "▸ View activity"
- *  disclosure once settled. */
+ *  shows them richer. The band keeps a height the reader dragged, and folds to
+ *  its label bar at the bottom of that same drag (R88). */
 export function StageActivity({
   source,
   sourceKey,
@@ -26,7 +27,9 @@ export function StageActivity({
   settled,
   log,
   leadingSystemRows = [],
-  externalSession,
+  externalSessions = [],
+  open: controlledOpen,
+  onOpenChange,
   empty,
 }: {
   /** The stage's one agent session, if it spawned one (flight agent, or the
@@ -43,9 +46,14 @@ export function StageActivity({
    *  conductor's log — e.g. the `[external]` row when the run is being repaired
    *  by an external MCP client (no Canary session to tail). */
   leadingSystemRows?: string[]
-  /** Compact provenance for work continuing in the user's own agent. The full
-   *  external monitor stays on its dedicated screen; Flight owns one row. */
-  externalSession?: ExternalSessionActivity
+  /** Compact provenance for work performed in the user's own agent. The full
+   *  external monitors stay on their dedicated screens; Flight keeps the
+   *  chronological rows. */
+  externalSessions?: ExternalSessionActivity[]
+  /** Explicit user choice owned by the Flight screen so it survives a stage
+   *  switch. Undefined uses the stage's live/settled default. */
+  open?: boolean
+  onOpenChange: (open: boolean) => void
   /** Why this stage has no transcript, when the stage knows better than the
    *  generic "nothing ran here" fallback. A settled stage can hold real evidence
    *  and still have no session to replay — the agent ran in the user's own
@@ -53,20 +61,30 @@ export function StageActivity({
    *  panels above it. */
   empty?: { title: string; body?: string }
 }) {
-  const [userToggled, setUserToggled] = useState<boolean | null>(null)
   const lines = log.split('\n').filter((l) => l.trim() !== '')
   const hasSource = source !== undefined
-  // A stage that hasn't started (pending — neither live nor settled) has no
-  // activity to show. Suppress the whole rail when there's nothing real yet,
-  // even for an agent stage whose `source` exists but has no session: otherwise
-  // pending agent stages render an empty "No structured session log found" band
-  // while pending agentless stages render nothing — the same waiting stage, two
-  // different empty states. Once it's live or settled the rail always shows
-  // (the live timeline, or the settled disclosure).
+  // The Activity boundary is stable for the lifetime of a stage. Before the
+  // first run it stays collapsed with an honest empty state; once work starts it
+  // opens in place instead of appearing as a new piece of page chrome.
   const pending = !live && !settled
-  const nothingYet = lines.length === 0 && leadingSystemRows.length === 0 && externalSession === undefined
-  if (nothingYet && (!hasSource || pending)) return null
-  const open = userToggled ?? !settled
+  const open = controlledOpen ?? live
+  // One height for every stage's Activity band: it is a reading preference, not
+  // a property of the stage, so switching stages must not reset it. Collapse is
+  // the same gesture's end stop rather than a button — see the bar below.
+  const { height: activityHeight, dragging, handleProps } = useResizableHeight({
+    storageKey: 'cl-activity-height',
+    defaultPx: 208,
+    minPx: 104,
+    maxPx: 560,
+    collapsePx: 72,
+    collapsed: !open,
+    onCollapsedChange: (next) => onOpenChange(!next),
+  })
+  const resolvedEmpty = empty ?? (live
+    ? { title: 'Waiting for activity', body: 'Updates will appear here as this step runs.' }
+    : pending
+      ? { title: 'No activity yet', body: 'This step has not started.' }
+      : { title: 'No activity recorded', body: 'There is no session or system log to replay for this step.' })
 
   // `[tag]` or `[tag@<iso>]` — the conductor stamps its own lines; agent output
   // is mirrored untagged, which is what this split is looking for.
@@ -97,32 +115,49 @@ export function StageActivity({
   return (
     <section
       data-testid="stage-activity"
-      className={`flex flex-col border-t border-line bg-elevated/22 ${open ? 'min-h-0 flex-1' : 'shrink-0'}`}
+      /* Open, the band holds a height the reader chose — NOT `flex-1`, which
+         gave a one-row hand-off the same ~400px box a hundred-row transcript
+         gets, and NOT the content's height, which would creep down the page as
+         an agent appends rows mid-stream. `max-h-[70%]` is the relative cap the
+         pixel clamp can't express: a height dragged tall on a big window must
+         not swallow a short pane. */
+      className={`flex flex-col bg-elevated/22 ${open ? 'min-h-0 max-h-[70%] shrink-0' : 'shrink-0'}`}
+      style={open ? { height: activityHeight } : undefined}
     >
-      {/* R66: the boundary between the stage's detail (above) and its activity.
-          One labelled bar for every stage; the toggle always rides it so the
-          rail is collapsible in any state (default open while live / a fresh
-          spawn, collapsed once settled — overridable per stage). */}
-      <div className="flex items-center gap-2.5 px-3 py-1.5">
-        <button
-          type="button"
-          data-testid="stage-details-toggle"
-          aria-expanded={open}
-          onClick={() => setUserToggled(!open)}
-          className="flex w-full flex-1 items-center gap-2.5 text-left"
-        >
-          <span className="cl-rubric flex items-center gap-1.5">
-            {/* The same live pulse the stage's `generating` chip shows — echoed
-                on the band so a collapsed rail still advertises that work is
-                running inside it. */}
-            {live && <StatusDot state="running" className="shrink-0" />}
-            Activity
-          </span>
-          <span className="h-px flex-1 border-t border-dashed border-line" />
-          <span className="cl-button px-2 py-0.5 text-[11px]">
-            {open ? '▾ Hide' : '▸ Show'}
-          </span>
-        </button>
+      {/* R88: the labelled bar IS the panel's movable top edge — there is no
+          Hide/Show button any more. Push the edge past the floor and the band
+          folds to this bar; pull it back and the band returns at the height the
+          reader had chosen. One control, not two: a button that only ever said
+          "all the way open" or "all the way shut" was the coarse version of a
+          gesture that already spans both. Double-click is the fast path for
+          readers who want the old single click, and the bar is a focusable
+          separator so arrows / Home / End / Enter reach every state without a
+          pointer. Grabbing it costs no aim: the whole ~26px row is the target,
+          where a 1px rule between panes would have replaced a real button with
+          a hairline. */}
+      <div
+        {...handleProps}
+        data-testid="stage-activity-resize"
+        aria-label="Activity panel size"
+        title="Drag to resize · drag down to hide · double-click to toggle"
+        className={`cl-resize-bar flex items-center gap-2.5 py-0 pl-2.5 pr-2 select-none${dragging ? ' dragging' : ''}`}
+      >
+        <span className="cl-rubric flex items-center gap-1.5">
+          {/* The same live pulse the stage's `generating` chip shows — echoed
+              on the band so a folded rail still advertises that work is
+              running inside it. The dot is the whole signal; a "running" word
+              beside it said the same thing twice. It is `aria-hidden`, so the
+              state rides the bar's accessible name instead — colour alone is
+              not a status for a screen reader. */}
+          {live && <StatusDot state="running" className="shrink-0" />}
+          Activity
+          {live && <span className="sr-only">— running</span>}
+        </span>
+        <span className="h-px flex-1 border-t border-dashed border-line" />
+        {/* The grip is the only affordance left, so it has to read as one from
+            rest — no hover-to-discover. It states the axis and nothing else;
+            the words that used to live here were the button. */}
+        <span aria-hidden className="cl-resize-grip" />
       </div>
       {open && (
         <div className="flex min-h-0 flex-1 flex-col px-3 pb-2">
@@ -134,8 +169,8 @@ export function StageActivity({
               key={sourceKey}
               source={source}
               systemRows={{ pre: [...leadingSystemRows, ...pre], post }}
-              externalSession={externalSession}
-              {...(empty ? { empty } : {})}
+              externalSessions={externalSessions}
+              empty={resolvedEmpty}
             />
           </AgentBlock>
         </div>

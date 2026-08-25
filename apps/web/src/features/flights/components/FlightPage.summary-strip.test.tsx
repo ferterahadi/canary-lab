@@ -161,6 +161,7 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
 })
 
 import { FlightPage } from './FlightPage'
+import { activityBar, isActivityOpen, toggleActivity } from './__fixtures__/activity-band'
 
 ;
 
@@ -523,11 +524,11 @@ describe('detail redesign (R53–R68)', () => {
     })
     // Settled → collapsed by default, one disclosure.
     expect(container.querySelector('[data-testid="agent-session-view"]')).toBeNull()
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
-    expect(toggle?.textContent).toContain('Show')
-    await act(async () => { toggle!.click() })
+    const bar = activityBar(container)!
+    expect(isActivityOpen(container)).toBe(false)
+    await act(async () => { toggleActivity(container) })
     // Settled → no live pulse on the band; the dot is a running-only cue.
-    expect(toggle!.querySelector('.cl-status-dot')).toBeNull()
+    expect(bar.querySelector('.cl-status-dot')).toBeNull()
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
     // R66 (consolidated): ONE block — no standalone tagged-log panes.
     expect(activitySection.querySelectorAll('[data-testid="stage-log"]').length).toBe(0)
@@ -562,15 +563,13 @@ describe('detail redesign (R53–R68)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-portify"]')?.click()
     })
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
-    })
+    await act(async () => { toggleActivity(container) })
     const asv = container.querySelector('[data-testid="stage-activity"] [data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-kind')).toBe('portify')
     expect(asv?.getAttribute('data-empty-title')).toBe('Nothing to replay here')
   })
 
-  it('R66: a live agent stage renders the activity expanded, collapsible via the always-present toggle', async () => {
+  it('R66: a live agent stage renders the activity expanded, foldable via its always-present edge', async () => {
     mocks.getFlight.mockResolvedValue(manifest({
       status: 'running',
       currentStage: 'scout',
@@ -581,14 +580,14 @@ describe('detail redesign (R53–R68)', () => {
       })),
     }))
     await render('fl_1')
-    // The toggle is always present now (collapsible in any state) and open by
+    // The band's edge is always present (foldable in any state) and open by
     // default while live.
-    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
-    expect(toggle).not.toBeNull()
-    expect(toggle!.getAttribute('aria-expanded')).toBe('true')
+    const bar = activityBar(container)
+    expect(bar).not.toBeNull()
+    expect(isActivityOpen(container)).toBe(true)
     // The band echoes the stage's `generating` pulse: a live status dot rides
-    // the Activity label so a collapsed rail still advertises work is running.
-    expect(toggle!.querySelector('.cl-status-dot')).not.toBeNull()
+    // the Activity label so a folded rail still advertises work is running.
+    expect(bar!.querySelector('.cl-status-dot')).not.toBeNull()
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
     // One block: the system line rides the agent timeline, no standalone log pane.
     expect(activitySection.querySelector('[data-testid="stage-log"]')).toBeNull()
@@ -596,9 +595,9 @@ describe('detail redesign (R53–R68)', () => {
     expect(pre).toContain('spawning agent…')
     const asv = activitySection.querySelector('[data-testid="agent-session-view"]')
     expect(asv?.getAttribute('data-stage')).toBe('scout')
-    // Collapsing hides the timeline while live.
-    await act(async () => { toggle!.click() })
-    expect(toggle!.getAttribute('aria-expanded')).toBe('false')
+    // Folding hides the timeline while live.
+    await act(async () => { toggleActivity(container) })
+    expect(isActivityOpen(container)).toBe(false)
     expect(activitySection.querySelector('[data-testid="agent-session-view"]')).toBeNull()
   })
 
@@ -616,9 +615,7 @@ describe('detail redesign (R53–R68)', () => {
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-testid="stage-rail-scaffold"]')?.click()
     })
-    await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')?.click()
-    })
+    await act(async () => { toggleActivity(container) })
     const activitySection = container.querySelector('[data-testid="stage-activity"]')!
     // Same component as agent stages — but no agent session (no data-stage).
     const asv = activitySection.querySelector('[data-testid="agent-session-view"]')

@@ -17,11 +17,11 @@ import type { GettingStartedSessionState, GettingStartedSessionStore } from '../
  *  the guide narrows rather than pointing somewhere that no longer exists. */
 export const SAMPLE_SUITE = 'storefront-journey'
 
-/** The name this suite carried between its introduction and the 1.6.0 rename to
+/** The name this suite carried between its introduction and the 2.0.0 rename to
  *  the kebab-case a flight's plan agent produces. Both landed inside the same
  *  development cycle, so NO published release shipped the underscored name — this
  *  covers pre-release workspaces only, and claiming it protects upgrading users
- *  would be false. What a real pre-1.6.0 workspace has is PRE_1_6_SAMPLE_SUITES. */
+ *  would be false. What a real pre-2.0.0 workspace has is PRE_2_0_SAMPLE_SUITES. */
 export const LEGACY_SAMPLE_SUITES = ['storefront_journey'] as const
 
 /** The sample suites a workspace scaffolded by 1.5.x and earlier actually carries.
@@ -29,10 +29,10 @@ export const LEGACY_SAMPLE_SUITES = ['storefront_journey'] as const
  *  Deliberately NOT aliases of the storefront demo: they are different apps with
  *  different specs, so treating one as the demo would point every Getting Started
  *  card at a suite that cannot do what the card promises. They are here as the one
- *  reliable signal that this workspace PREDATES the 1.6.0 samples, which is what
+ *  reliable signal that this workspace PREDATES the 2.0.0 samples, which is what
  *  separates "you deleted it" from "you never had it" — `upgrade` deliberately
  *  never writes `features/`, so upgrading alone can never produce the demos. */
-export const PRE_1_6_SAMPLE_SUITES = [
+export const PRE_2_0_SAMPLE_SUITES = [
   'example_todo_api',
   'broken_todo_api',
   'flaky_orders_api',
@@ -147,19 +147,19 @@ export function readOnboardingSamples(
   // scaffolded: this workspace was created before the samples existed rather
   // than stripped of them. Both conditions are needed — the repo dirs alone
   // cannot tell a legacy workspace from one whose samples were all deleted, and
-  // an old suite name alone survives in a 1.6.0 workspace the user added to.
+  // an old suite name alone survives in a 2.0.0 workspace the user added to.
   const predatesSamples =
     !suitePresent
     && !flightRepoPresent
     && !workbenchPresent
-    && PRE_1_6_SAMPLE_SUITES.some((n) => names.has(n))
+    && PRE_2_0_SAMPLE_SUITES.some((n) => names.has(n))
   // Telling someone their demo was "removed" names a deletion they never made and
   // offers no way forward. Upgrading cannot add these samples, so the legacy
   // wording has to carry the only thing that can.
   const missingSample = (noun: string): { internalAction: null; unavailableReason: string } => ({
     internalAction: null,
     unavailableReason: predatesSamples
-      ? `${noun} ships with workspaces scaffolded by 1.6.0 or newer. Upgrading never adds it — run \`npx canary-lab init <folder>\` for a workspace that has it.`
+      ? `${noun} ships with workspaces scaffolded by 2.0.0 or newer. Upgrading never adds it — run \`npx canary-lab init <folder>\` for a workspace that has it.`
       : `${noun} was removed from this workspace.`,
   })
   const sampleAction = <T extends OnboardingWorkflowAction>(action: T): {

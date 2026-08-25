@@ -5,7 +5,7 @@ import type { HealEnd } from '@/shared/api/types'
 import { derivedFlightFeature } from '../lib/derived-stages'
 import { plural } from './StageFacts'
 import { stageLabel } from './stage-meta'
-import { settledStageStatus } from './stage-metrics'
+import { currentStageForPair, settledStageStatus } from './stage-metrics'
 import { EXTERNAL_WORK_COPY } from '../lib/external-work'
 import { MERGED_LABEL, stageRowKey } from './StageRail'
 import { PORTIFY_PHASE_LINE, evidenceOf, num, portifyProgress, specsCoverageProgress, str } from './stage-meta'
@@ -115,7 +115,7 @@ export function formatStageDuration(
 export function skippedLine(reason: string | undefined): string {
   if (!reason) return 'Skipped.'
   if (reason === 'stage-entry') return 'Skipped — this flight started at a later step.'
-  // Records written before 1.6.0 carry a reason that already opens with
+  // Records written before 2.0.0 carry a reason that already opens with
   // "parallel readiness skipped — ", which printed the word twice here.
   const bare = reason.replace(/^parallel readiness skipped — /, '')
   return `Skipped — ${bare.replace(/\.$/, '')}.`
@@ -221,16 +221,15 @@ export function agentActivityLine(stage: FlightStage): string | null {
 // for that view's use.
 
 export function stageStateLine(stage: FlightStage, flight: FlightManifest, companion?: FlightStage): string {
+  const currentStage = currentStageForPair(stage, companion)
+  if (currentStage !== stage) return stageStateLine(currentStage, flight)
+
   const ev = (stage.evidence ?? {}) as Record<string, unknown>
   const { key } = stage
   // Skipped-with-evidence narrates as settled — same rule the rail draws, so
   // the row's ✓ and this sentence can't contradict each other.
   const status = settledStageStatus(stage)
 
-  // The companion is the half that needs narrating right now.
-  if (companion && (companion.status === 'running' || companion.status === 'waiting-for-approval' || companion.status === 'failed')) {
-    return stageStateLine(companion, flight)
-  }
   const companionDone = companion?.status === 'done'
 
   // A pending stage that already has a startedAt was INTERRUPTED mid-run

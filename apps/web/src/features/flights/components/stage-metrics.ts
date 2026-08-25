@@ -1,4 +1,4 @@
-import type { FlightStageStatus } from '@/shared/api/client'
+import type { FlightStage, FlightStageStatus } from '@/shared/api/client'
 import type {
   CoverageLedger,
   RunIndexEntry,
@@ -154,6 +154,23 @@ export function presentedStageStatus(
 ): FlightStageStatus {
   if (stage.status === 'waiting-for-approval' && stage.checkpoint?.kind === 'external-work') return 'running'
   return settledStageStatus(stage)
+}
+
+/** The half of a merged rail row that owns its current narrative and recovery.
+ *  A live/failed companion already spoke for the pair; a pending companion must
+ *  do the same once the primary has settled, because Continue enters that folded
+ *  step rather than the completed primary. */
+export function currentStageForPair(primary: FlightStage, companion?: FlightStage | null): FlightStage {
+  if (!companion) return primary
+  const companionStatus = settledStageStatus(companion)
+  const companionSpeaks = companionStatus === 'running'
+    || companionStatus === 'waiting-for-approval'
+    || companionStatus === 'failed'
+    || (
+      companionStatus === 'pending'
+      && ['done', 'skipped'].includes(settledStageStatus(primary))
+    )
+  return companionSpeaks ? companion : primary
 }
 
 export interface OverlayDiffStat {

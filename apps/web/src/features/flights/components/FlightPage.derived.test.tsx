@@ -91,17 +91,18 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows, externalSession }: {
+  AgentSessionView: ({ source, systemRows, externalSessions, empty }: {
     source?: { kind: string; stage?: string }
     systemRows?: { pre: string[]; post: string[] }
-    externalSession?: { message: string; status: string; clientKind: string }
+    externalSessions?: Array<{ message: string; status: string; clientKind: string }>
+    empty?: { title: string }
   }) => (
-    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
-      {externalSession && (
-        <div data-testid="external-session-activity" data-status={externalSession.status} data-client={externalSession.clientKind}>
-          {externalSession.message}
+    <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage} data-empty-title={empty?.title}>
+      {externalSessions?.map((session, index) => (
+        <div key={index} data-testid="external-session-activity" data-status={session.status} data-client={session.clientKind}>
+          {session.message}
         </div>
-      )}
+      ))}
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>
@@ -170,6 +171,7 @@ vi.mock('@/features/runs/state/RunsContext', async () => {
 })
 
 import { FlightPage } from './FlightPage'
+import { activityBar, isActivityOpen, toggleActivity } from './__fixtures__/activity-band'
 
 ;
 
@@ -350,35 +352,71 @@ describe('derived flights (R81)', () => {
     expect(onSelectStage).not.toHaveBeenCalled()
   })
 
-  it('keeps a settled external authoring hand-off in the shared Activity rail', async () => {
+  it('keeps every settled external authoring pass in the shared Activity rail', async () => {
+    const first = {
+      kind: 'authoring' as const,
+      stage: 'specs-coverage' as const,
+      resourceId: 'draft-1',
+      status: 'done' as const,
+      startedAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:03:00Z',
+      itemCount: 1,
+    }
+    const latest = {
+      kind: 'authoring' as const,
+      stage: 'specs-coverage' as const,
+      resourceId: 'draft-2',
+      status: 'done' as const,
+      startedAt: '2026-01-01T00:04:00Z',
+      updatedAt: '2026-01-01T00:05:00Z',
+      clientKind: 'claude',
+      itemCount: 3,
+    }
     await render('feature:go-smoke', {
       derivedStages: new Map([['go-smoke', allDone()]]),
       externalHistory: new Map([['go-smoke', {
-        'specs-coverage': {
-          kind: 'authoring',
-          stage: 'specs-coverage',
-          status: 'done',
-          startedAt: '2026-01-01T00:00:00Z',
-          updatedAt: '2026-01-01T00:05:00Z',
-          clientKind: 'claude',
-          itemCount: 3,
-        },
+        'specs-coverage': { traces: [first, latest], current: latest },
       }]]),
       stage: 'specs-coverage',
       onSelectStage: vi.fn(),
     })
 
-    const activityToggle = container.querySelector<HTMLButtonElement>('[data-testid="stage-details-toggle"]')
-    expect(activityToggle).toBeTruthy()
-    act(() => { activityToggle!.click() })
-    const external = container.querySelector('[data-testid="external-session-activity"]')
-    expect(external?.getAttribute('data-client')).toBe('claude')
-    expect(external?.getAttribute('data-status')).toBe('done')
-    expect(external?.textContent).toBe('Completed outside Canary Lab · 3 files applied.')
+    expect(activityBar(container)).toBeTruthy()
+    act(() => { toggleActivity(container) })
+    const external = container.querySelectorAll('[data-testid="external-session-activity"]')
+    expect(external).toHaveLength(2)
+    expect(external[0]?.textContent).toBe('Completed outside Canary Lab · 1 file applied.')
+    expect(external[1]?.getAttribute('data-client')).toBe('claude')
+    expect(external[1]?.getAttribute('data-status')).toBe('done')
+    expect(external[1]?.textContent).toBe('Completed outside Canary Lab · 3 files applied.')
     expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-kind')).toBeNull()
   })
 
+  it('keeps the Activity bar present before the first external coverage pass', async () => {
+    await render('feature:go-smoke', {
+      derivedStages: new Map([['go-smoke', allDone()]]),
+      stage: 'specs-coverage',
+      onSelectStage: vi.fn(),
+    })
+
+    expect(activityBar(container)).toBeTruthy()
+    expect(isActivityOpen(container)).toBe(false)
+    act(() => { toggleActivity(container) })
+    expect(container.querySelector('[data-testid="agent-session-view"]')?.getAttribute('data-empty-title'))
+      .toBe('No activity recorded')
+    expect(container.querySelector('[data-testid="external-session-activity"]')).toBeNull()
+  })
+
   it('shows completed external Parallel-readiness evidence without an entry refresh', async () => {
+    const trace = {
+      kind: 'portifying' as const,
+      stage: 'portify' as const,
+      resourceId: 'wf-live',
+      status: 'done' as const,
+      startedAt: '2026-08-25T00:00:00Z',
+      updatedAt: '2026-08-25T00:05:00Z',
+      clientKind: 'claude',
+    }
     mocks.portifyWorkflow.mockReturnValue({
       workflowId: 'wf-live',
       feature: 'go-smoke',
@@ -405,15 +443,7 @@ describe('derived flights (R81)', () => {
       // Portify stream is the first completion signal, before the entry probe.
       derivedStages: new Map([['go-smoke', allDone()]]),
       externalHistory: new Map([['go-smoke', {
-        portify: {
-          kind: 'portifying',
-          stage: 'portify',
-          resourceId: 'wf-live',
-          status: 'done',
-          startedAt: '2026-08-25T00:00:00Z',
-          updatedAt: '2026-08-25T00:05:00Z',
-          clientKind: 'claude',
-        },
+        portify: { traces: [trace], current: trace },
       }]]),
       stage: 'portify',
       onSelectStage: vi.fn(),

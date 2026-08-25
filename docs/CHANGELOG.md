@@ -15,7 +15,7 @@ Each entry is tagged with the area it touches:
 
 ---
 
-## 1.6.0 — 2026-08-20
+## 2.0.0 — 2026-08-25
 
 > **Node 22.12+ is now required** — see Breaking changes at the end of this section.
 

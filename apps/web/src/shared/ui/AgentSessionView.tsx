@@ -57,10 +57,10 @@ interface Props {
    *  stage has system rows but no agent session, the block still renders them
    *  instead of the empty "no session log" state. */
   systemRows?: { pre: string[]; post: string[] }
-  /** A task whose transcript lives in the user's own Claude/Codex window. It
-   *  occupies one real row on this rail instead of a second branded card beside
-   *  it; the dedicated task screen remains the owner of the full monitor. */
-  externalSession?: ExternalSessionActivity
+  /** Tasks whose transcripts live in the user's own Claude/Codex window. Each
+   *  occupies one real chronological row on this rail instead of a second
+   *  branded card; the dedicated task screens own their full monitors. */
+  externalSessions?: ExternalSessionActivity[]
   /** Host-supplied copy for the "there is no session" state. A host usually
    *  knows WHY there's no transcript ("this run passed, so no repair agent was
    *  ever spawned") — far more use than the generic fallback below. */
@@ -116,7 +116,7 @@ export function indexSubagents(threads: SubagentThread[] | undefined): Map<strin
  *  past that, the log really is absent. */
 const HISTORY_RETRY_DELAYS_MS = [1500, 3000, 5000]
 
-export function AgentSessionView({ source, systemRows, externalSession, empty }: Props) {
+export function AgentSessionView({ source, systemRows, externalSessions = [], empty }: Props) {
   const [state, setState] = useState<ViewState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -298,7 +298,7 @@ export function AgentSessionView({ source, systemRows, externalSession, empty }:
   // System rows keep the consolidated block alive even before (or without) an
   // agent session — a stage with only conductor output still renders its rail.
   const sys = systemRows ?? NO_SYSTEM_ROWS
-  const hasSystem = sys.pre.length > 0 || sys.post.length > 0 || externalSession !== undefined
+  const hasSystem = sys.pre.length > 0 || sys.post.length > 0 || externalSessions.length > 0
   const live = source?.live === true
 
   if (error && !hasSystem) {
@@ -377,7 +377,12 @@ export function AgentSessionView({ source, systemRows, externalSession, empty }:
           </div>
         )}
         <ol className="agentts-rail">
-          {externalSession && <ExternalSessionRow session={externalSession} />}
+          {externalSessions.map((session, index) => (
+            <ExternalSessionRow
+              key={`${session.startedAt ?? 'unknown'}:${session.endedAt ?? 'live'}:${session.clientKind}:${index}`}
+              session={session}
+            />
+          ))}
           {groupSystemLines(sys.pre).map((group, idx) => (
             <SystemRow key={`sys-pre-${idx}`} group={group} />
           ))}
@@ -434,7 +439,7 @@ function ExternalSessionRow({ session }: { session: ExternalSessionActivity }) {
     : durationBetween(session.startedAt, session.endedAt)
   const elapsed = runningElapsed ?? fixedElapsed
   const agent = clientLabel(session.clientKind, 'External agent')
-  const label = session.clientKind === 'other' ? 'External session' : `External · ${agent}`
+  const label = 'External session'
   const tone = externalSessionTone(session.status)
   const running = session.status === 'running'
   const actionLabel = `Open ${agent}`

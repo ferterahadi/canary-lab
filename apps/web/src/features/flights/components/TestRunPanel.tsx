@@ -1,9 +1,8 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import type { HealEnd, RunIndexEntry, RunStatus } from '@/shared/api/types'
 import { PanelCard } from '@/shared/ui/PanelCard'
 import type { RunOpenTarget } from '@/shared/lib/workspace-view-state'
 import { RunRow, useRun, useRuns } from '@/features/runs'
-import { clientLabel } from '@/shared/ui/external-client-branding'
 import { FailingTests } from './FailingTests'
 import { FactsGrid, HERO_ROW, STAGE_COLUMN, healEndShort, plural, type StageFact } from './stage-meta'
 import { awaitingFact } from './StageFacts'
@@ -58,6 +57,7 @@ export function TestRunPanel({
   onOpenRun,
   onError,
   awaiting,
+  pausedNotice,
   mutationLockedReason,
 }: {
   feature: string
@@ -76,6 +76,9 @@ export function TestRunPanel({
   /** R83: the run stage hasn't settled. Regions with nothing in them yet hold
    *  their place as placeholders instead of collapsing the pane. */
   awaiting?: AwaitingState
+  /** The shared stage recovery card. It sits after this panel's own facts band,
+   *  matching every other stage without giving run history a second owner. */
+  pausedNotice?: ReactNode
   /** External ownership leaves live run controls visible but inert. */
   mutationLockedReason?: string
 }) {
@@ -136,6 +139,8 @@ export function TestRunPanel({
           scopes, so no number repeats. */}
       <FactsGrid facts={runHistoryFacts(featureRuns, awaiting)} awaiting={awaiting} />
 
+      {pausedNotice}
+
       <PanelCard kicker="Latest run" testId="test-run-hero">
         {runId == null && awaiting ? (
           <RunHeroSkeleton awaiting={awaiting} />
@@ -175,15 +180,6 @@ export function TestRunPanel({
         {/* No run id means there is no run to control — the surrounding branch
             can still render from manifest/evidence alone. */}
         {runId && <RunControls runId={runId} status={status} active={active} onError={report} mutationLockedReason={mutationLockedReason} />}
-
-        {/* External heal: the repair runs in the user's own MCP client, so there
-            is no Canary transcript to embed — an honest status line, with the
-            full picture one drill-through away on the run detail. */}
-        {manifest?.healMode === 'external' && (
-          <div data-testid="run-hero-external" className="mt-2 text-[11px] text-muted">
-            {externalHealNote(manifest.externalHealSession)}
-          </div>
-        )}
           </>
         )}
       </PanelCard>
@@ -556,16 +552,6 @@ function RunControls({
       )}
     </div>
   )
-}
-
-/** Honest one-liner for an externally-claimed heal (Claude Desktop / Codex CLI
- *  repairing over MCP) — client · state · cycle, since Canary has no transcript
- *  to embed. Mirrors the wording the old activity-rail `[external]` row used. */
-function externalHealNote(session: RunDetail['manifest']['externalHealSession']): string {
-  if (!session) return 'Repaired by your own agent. The full record is on the run page.'
-  const who = clientLabel(session.clientKind, 'an external client')
-  const cycle = session.cycleCount > 0 ? ` · repair cycle ${session.cycleCount}` : ''
-  return `Repaired by ${who} — ${session.status}${cycle}. The full record is on the run page.`
 }
 
 /** Short, stable run reference for the identity line — the trailing token of

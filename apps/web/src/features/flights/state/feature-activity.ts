@@ -38,10 +38,9 @@ export interface FeatureActivity {
   external?: boolean
 }
 
-/** Persistent provenance for the newest piece of work behind one Flight step.
- *  Live activity is deliberately separate: a completed external task must stop
- *  lighting the Flights pill, but its Activity rail must not revert to "nothing
- *  ran here" after the files land. */
+/** Persistent provenance for one piece of work behind a Flight step. Live
+ *  activity is deliberately separate: a completed external task must stop
+ *  lighting the Flights pill, but its Activity row remains historical evidence. */
 export interface ExternalWorkTrace {
   kind: FeatureActivityKind
   stage: FlightStageKey
@@ -57,7 +56,16 @@ export interface ExternalWorkTrace {
   itemCount?: number
 }
 
-export type FeatureExternalHistory = Map<string, Partial<Record<FlightStageKey, ExternalWorkTrace>>>
+/** Every external session recorded for one stage, plus the external session
+ *  that still owns the stage when it is also the newest producer. Keeping those
+ *  facts separate lets Activity retain earlier passes without replaying one as
+ *  current after newer Canary-owned work supersedes it. */
+export interface StageExternalHistory {
+  traces: ExternalWorkTrace[]
+  current?: ExternalWorkTrace
+}
+
+export type FeatureExternalHistory = Map<string, Partial<Record<FlightStageKey, StageExternalHistory>>>
 
 export interface FeatureWorkState {
   activity: Map<string, FeatureActivity>
@@ -175,9 +183,9 @@ export function deriveFeatureActivity(input: {
   return map
 }
 
-/** Keep only the newest producer for each feature + stage. This matters as
- *  much as keeping terminal records: a stale external run must not keep
- *  claiming the Activity rail after a newer internal run superseded it. */
+/** Keep every external producer for the Activity timeline. Also retain whether
+ *  the newest producer is external, so historical rows never suppress a newer
+ *  Canary-owned transcript. */
 export function deriveFeatureExternalHistory(input: {
   runs: RunIndexEntry[]
   portifyWorkflows: PortifyIndexEntry[]
@@ -187,15 +195,19 @@ export function deriveFeatureExternalHistory(input: {
   runDetails?: Record<string, RunDetail>
   portifyDetails?: Record<string, PortifyManifest>
 }): FeatureExternalHistory {
-  type Candidate = ExternalWorkTrace & { external: boolean }
-  const latest = new Map<string, Candidate>()
+  type Candidate = ExternalWorkTrace & { external: boolean; sequence: number }
+  const candidates = new Map<string, Candidate[]>()
+  let sequence = 0
 
-  const remember = (featureValue: string | undefined, candidate: Candidate): void => {
+  const remember = (
+    featureValue: string | undefined,
+    candidate: Omit<Candidate, 'sequence'>,
+  ): void => {
     const feature = featureValue?.trim()
     if (!feature) return
     const key = `${feature}\u0000${candidate.stage}`
-    const previous = latest.get(key)
-    if (!previous || previous.updatedAt <= candidate.updatedAt) latest.set(key, candidate)
+    candidates.set(key, [...(candidates.get(key) ?? []), { ...candidate, sequence }])
+    sequence += 1
   }
 
   for (const draft of input.draftRecords) {
@@ -293,16 +305,30 @@ export function deriveFeatureExternalHistory(input: {
   }
 
   const history: FeatureExternalHistory = new Map()
-  for (const [key, candidate] of latest) {
-    if (!candidate.external) continue
+  for (const [key, stageCandidates] of candidates) {
+    const ordered = [...stageCandidates].sort((a, b) =>
+      a.updatedAt.localeCompare(b.updatedAt) || a.sequence - b.sequence,
+    )
+    const external = ordered.filter((candidate) => candidate.external)
+    if (external.length === 0) continue
     const separator = key.indexOf('\u0000')
     const feature = key.slice(0, separator)
+    const stage = key.slice(separator + 1) as FlightStageKey
     const stages = history.get(feature) ?? {}
-    const { external: _external, ...trace } = candidate
-    stages[trace.stage] = trace
+    const traces = external.map(toExternalWorkTrace)
+    const newest = ordered[ordered.length - 1]
+    stages[stage] = {
+      traces,
+      ...(newest.external ? { current: toExternalWorkTrace(newest) } : {}),
+    }
     history.set(feature, stages)
   }
   return history
+}
+
+function toExternalWorkTrace(candidate: ExternalWorkTrace & { external: boolean; sequence: number }): ExternalWorkTrace {
+  const { external: _external, sequence: _sequence, ...trace } = candidate
+  return trace
 }
 
 function draftTraceStatus(status: DraftRecord['status']): ExternalWorkTrace['status'] {

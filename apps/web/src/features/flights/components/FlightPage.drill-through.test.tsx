@@ -378,24 +378,20 @@ describe('stage summary + drill-through (R6)', () => {
     expect(container.querySelector('[data-testid="run-hero-fixes"]')).toBeNull()
   })
 
-  it('R80: a run repaired by an external client shows an honest external-heal note in the hero', async () => {
-    // An externally-claimed heal has no Canary transcript to embed, so the Test
-    // Run hero carries a status line (client · state · cycle) instead.
+  it('the hero does not restate the repair as a sentence — the numbers and the drill-through carry it', async () => {
+    // An external repair used to append "Repaired by Claude Desktop — healing ·
+    // repair cycle 2. The full record is on the run page." under the stats line:
+    // the cycle count duplicated `Repair cycles`, the pointer duplicated the
+    // clickable row, and the client is named on the run detail. R82 says this
+    // stage is the run's SUMMARY, so the prose goes and the counts stay.
     mocks.getRunDetail.mockResolvedValue({
       runId: 'run-9',
       manifest: {
         runId: 'run-9',
         status: 'healing',
         healMode: 'external',
-        externalHealSession: {
-          sessionId: 'sess-abc',
-          clientKind: 'claude',
-          conversationName: 'fix checkout',
-          claimedAt: '2026-01-01T00:00:00Z',
-          lastHeartbeatAt: '2026-01-01T00:00:03Z',
-          status: 'healing',
-          cycleCount: 2,
-        },
+        healCycles: 2,
+        externalHealSession: { sessionId: 'sess-abc', clientKind: 'claude', status: 'healing', cycleCount: 2 },
       },
     })
     mocks.getFlight.mockResolvedValue(manifest({
@@ -408,28 +404,10 @@ describe('stage summary + drill-through (R6)', () => {
       })),
     }))
     await render('fl_1')
-    const note = container.querySelector('[data-testid="run-hero-external"]')?.textContent ?? ''
-    expect(note).toContain('Claude')
-    expect(note).toContain('healing')
-    expect(note).toContain('repair cycle 2')
-  })
-
-  it('R80: a normal (auto) heal shows no external-heal note', async () => {
-    mocks.getRunDetail.mockResolvedValue({
-      runId: 'run-9',
-      manifest: { runId: 'run-9', status: 'healing', healMode: 'auto' },
-    })
-    mocks.getFlight.mockResolvedValue(manifest({
-      status: 'running',
-      currentStage: 'run',
-      links: { runId: 'run-9' },
-      stages: FLIGHT_STAGE_KEYS.map((key) => ({
-        key,
-        status: key === 'run' ? ('running' as const) : ('done' as const),
-      })),
-    }))
-    await render('fl_1')
-    expect(container.querySelector('[data-testid="run-hero-external"]')).toBeNull()
+    const hero = container.querySelector('[data-testid="test-run-hero"]')?.textContent ?? ''
+    expect(hero).toContain('Repair cycles')
+    expect(hero).not.toContain('Repaired by')
+    expect(hero).not.toContain('on the run page')
   })
 
   it('specs-coverage drills through to the coverage ledger; portify to the feature\'s Ports tab', async () => {

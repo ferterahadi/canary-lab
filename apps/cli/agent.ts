@@ -137,9 +137,9 @@ export function installOrRefresh(target: Target, opts: AgentInstallOptions = {})
  * The unit is the GROUP, not the individual op: a client that has any canary-lab
  * skill installed receives the package's whole current skill set, new members
  * included. Skipping every destination that does not exist looks equivalent and
- * is not — 1.6.0 split the single `canary-lab` skill into seven, so an op-wise
- * refresh left every pre-1.6.0 user with exactly the one they already had,
- * rewritten to 1.6.0 wording that points the agent at `canary-lab-run` and five
+ * is not — 2.0.0 split the single `canary-lab` skill into seven, so an op-wise
+ * refresh left every pre-2.0.0 user with exactly the one they already had,
+ * rewritten to 2.0.0 wording that points the agent at `canary-lab-run` and five
  * siblings that were never written to disk. Nothing warns, because from the
  * refresh's side every op it looked at succeeded.
  *

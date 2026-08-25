@@ -165,6 +165,17 @@ describe('stageStateLine — pending copy (R78 pause mid-step)', () => {
     const line = stageStateLine(stage, flight({ status: 'running', stages: [stage] }))
     expect(line).toBe('Not started yet.')
   })
+
+  it('a folded pending companion speaks for its completed primary row', () => {
+    const primary = { key: 'docs', status: 'done' } as FlightStage
+    const companion = { key: 'prd-summary', status: 'pending' } as FlightStage
+    const paused = flight({ status: 'paused', stages: [primary, companion] })
+
+    expect(stageStateLine(primary, paused, companion))
+      .toBe('Paused before it started — Continue starts this step.')
+    expect(stageStateLine(primary, paused, { ...companion, startedAt: '2026-01-01T00:05:00Z' }))
+      .toBe('Stopped part way — Continue picks it up here.')
+  })
 })
 
 describe('stageFacts — run stage renders as the hero, not stage facts (R80)', () => {

@@ -91,13 +91,15 @@ vi.mock('@/shared/api/client', () => ({
 // pre/post around the agent's slot; expose them so the flight tests can assert
 // they ride the same block instead of standalone log panes.
 vi.mock('@/shared/ui/AgentSessionView', () => ({
-  AgentSessionView: ({ source, systemRows, externalSession }: {
+  AgentSessionView: ({ source, systemRows, externalSessions }: {
     source?: { kind: string; stage?: string }
     systemRows?: { pre: string[]; post: string[] }
-    externalSession?: { message: string; status: string }
+    externalSessions?: Array<{ message: string; status: string }>
   }) => (
     <div data-testid="agent-session-view" data-kind={source?.kind} data-stage={source?.stage}>
-      {externalSession && <div data-testid="external-session-activity" data-status={externalSession.status}>{externalSession.message}</div>}
+      {externalSessions?.map((session, index) => (
+        <div key={index} data-testid="external-session-activity" data-status={session.status}>{session.message}</div>
+      ))}
       {systemRows?.pre.map((l, i) => <div key={`pre-${i}`} data-testid="system-pre">{l}</div>)}
       {systemRows?.post.map((l, i) => <div key={`post-${i}`} data-testid="system-post">{l}</div>)}
     </div>

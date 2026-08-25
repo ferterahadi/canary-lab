@@ -199,7 +199,7 @@ describe('deriveFeatureExternalHistory', () => {
         updatedAt: '2026-01-01T00:05:00Z',
       })],
     })
-    expect(history.get('checkout')?.['specs-coverage']).toMatchObject({
+    expect(history.get('checkout')?.['specs-coverage']?.current).toMatchObject({
       kind: 'authoring',
       resourceId: 'd1',
       status: 'done',
@@ -211,7 +211,7 @@ describe('deriveFeatureExternalHistory', () => {
     })
   })
 
-  it('drops stale external provenance when newer internal work owns the same stage', () => {
+  it('keeps stale external provenance as history without letting it own the stage', () => {
     const history = deriveFeatureExternalHistory({
       runs: [],
       portifyWorkflows: [],
@@ -220,7 +220,31 @@ describe('deriveFeatureExternalHistory', () => {
         draft({ draftId: 'd2', producer: 'internal', status: 'accepted', updatedAt: '2026-01-01T00:06:00Z' }),
       ],
     })
-    expect(history.get('checkout')).toBeUndefined()
+    const stage = history.get('checkout')?.['specs-coverage']
+    expect(stage?.current).toBeUndefined()
+    expect(stage?.traces.map((trace) => trace.resourceId)).toEqual(['d1'])
+  })
+
+  it('keeps every external coverage pass in chronological order', () => {
+    const history = deriveFeatureExternalHistory({
+      runs: [],
+      portifyWorkflows: [],
+      draftRecords: [],
+      coverageJobs: [
+        {
+          jobId: 'j-first', feature: 'checkout', kind: 'coverage', status: 'done', producer: 'external',
+          startedAt: '2026-01-01T00:00:00Z', endedAt: '2026-01-01T00:04:00Z',
+        },
+        {
+          jobId: 'j-second', feature: 'checkout', kind: 'coverage', status: 'done', producer: 'external',
+          startedAt: '2026-01-01T00:05:00Z', endedAt: '2026-01-01T00:06:00Z',
+        },
+      ],
+    })
+
+    const stage = history.get('checkout')?.['specs-coverage']
+    expect(stage?.traces.map((trace) => trace.resourceId)).toEqual(['j-first', 'j-second'])
+    expect(stage?.current?.resourceId).toBe('j-second')
   })
 
   it('maps persistent coverage, portify, run and export producers to their Flight stages', () => {
@@ -244,12 +268,12 @@ describe('deriveFeatureExternalHistory', () => {
         },
       } as never,
     })
-    expect(history.get('coverage')?.['specs-coverage']).toMatchObject({ status: 'done', resourceId: 'j1' })
-    expect(history.get('ports')?.portify).toMatchObject({
+    expect(history.get('coverage')?.['specs-coverage']?.current).toMatchObject({ status: 'done', resourceId: 'j1' })
+    expect(history.get('ports')?.portify?.current).toMatchObject({
       status: 'done', resourceId: 'wf1', clientKind: 'codex', sessionId: 'port-session', sessionUrl: 'codex://session/port',
     })
-    expect(history.get('run-suite')?.run).toMatchObject({ status: 'done', resourceId: 'r-ext' })
-    expect(history.get('report')?.['evaluation-export']).toMatchObject({ status: 'done', resourceId: 't1' })
+    expect(history.get('run-suite')?.run?.current).toMatchObject({ status: 'done', resourceId: 'r-ext' })
+    expect(history.get('report')?.['evaluation-export']?.current).toMatchObject({ status: 'done', resourceId: 't1' })
   })
 
   it('normalizes every persisted status without losing external ownership', () => {
@@ -317,28 +341,28 @@ describe('deriveFeatureExternalHistory', () => {
       ],
     })
 
-    expect(history.get('draft-planning')?.['specs-coverage']?.status).toBe('running')
-    expect(history.get('draft-error')?.['specs-coverage']?.status).toBe('failed')
-    expect(history.get('draft-cancelled')?.['specs-coverage']?.status).toBe('aborted')
-    expect(history.get('draft-rejected')?.['specs-coverage']?.status).toBe('aborted')
-    expect(history.get('draft-ready')?.['specs-coverage']?.status).toBe('ready')
+    expect(history.get('draft-planning')?.['specs-coverage']?.current?.status).toBe('running')
+    expect(history.get('draft-error')?.['specs-coverage']?.current?.status).toBe('failed')
+    expect(history.get('draft-cancelled')?.['specs-coverage']?.current?.status).toBe('aborted')
+    expect(history.get('draft-rejected')?.['specs-coverage']?.current?.status).toBe('aborted')
+    expect(history.get('draft-ready')?.['specs-coverage']?.current?.status).toBe('ready')
     expect(history.has('')).toBe(false)
-    expect(history.get('coverage-running')?.['prd-summary']?.status).toBe('running')
-    expect(history.get('coverage-failed')?.['specs-coverage']?.status).toBe('failed')
-    expect(history.get('coverage-aborted')?.['specs-coverage']?.status).toBe('aborted')
-    expect(history.get('port-failed')?.portify?.status).toBe('failed')
-    expect(history.get('port-aborted')?.portify?.status).toBe('aborted')
-    expect(history.get('port-ready')?.portify?.status).toBe('ready')
-    expect(history.get('port-running')?.portify?.status).toBe('running')
-    expect(history.get('export-running')?.['evaluation-export']).toMatchObject({
+    expect(history.get('coverage-running')?.['prd-summary']?.current?.status).toBe('running')
+    expect(history.get('coverage-failed')?.['specs-coverage']?.current?.status).toBe('failed')
+    expect(history.get('coverage-aborted')?.['specs-coverage']?.current?.status).toBe('aborted')
+    expect(history.get('port-failed')?.portify?.current?.status).toBe('failed')
+    expect(history.get('port-aborted')?.portify?.current?.status).toBe('aborted')
+    expect(history.get('port-ready')?.portify?.current?.status).toBe('ready')
+    expect(history.get('port-running')?.portify?.current?.status).toBe('running')
+    expect(history.get('export-running')?.['evaluation-export']?.current).toMatchObject({
       status: 'running', clientKind: 'claude', sessionId: 'export-session', conversationName: 'Export report',
     })
-    expect(history.get('export-failed')?.['evaluation-export']?.status).toBe('failed')
-    expect(history.get('run-passed')?.run?.status).toBe('done')
-    expect(history.get('run-failed')?.run?.status).toBe('failed')
-    expect(history.get('run-aborted')?.run?.status).toBe('aborted')
-    expect(history.get('run-healing')?.run).toMatchObject({ kind: 'healing', status: 'running' })
-    expect(history.get('run-verify')?.run).toMatchObject({ kind: 'verifying', status: 'running', clientKind: 'codex' })
+    expect(history.get('export-failed')?.['evaluation-export']?.current?.status).toBe('failed')
+    expect(history.get('run-passed')?.run?.current?.status).toBe('done')
+    expect(history.get('run-failed')?.run?.current?.status).toBe('failed')
+    expect(history.get('run-aborted')?.run?.current?.status).toBe('aborted')
+    expect(history.get('run-healing')?.run?.current).toMatchObject({ kind: 'healing', status: 'running' })
+    expect(history.get('run-verify')?.run?.current).toMatchObject({ kind: 'verifying', status: 'running', clientKind: 'codex' })
     expect(history.has('ignored-boot')).toBe(false)
     expect(history.has('ignored-benchmark')).toBe(false)
     expect(history.has('internal-run')).toBe(false)
@@ -359,9 +383,9 @@ describe('deriveFeatureExternalHistory', () => {
     })
 
     expect(history.get('checkout')).toMatchObject({
-      'specs-coverage': { kind: 'authoring' },
-      portify: { kind: 'portifying' },
-      run: { kind: 'running' },
+      'specs-coverage': { current: { kind: 'authoring' } },
+      portify: { current: { kind: 'portifying' } },
+      run: { current: { kind: 'running' } },
     })
   })
 })

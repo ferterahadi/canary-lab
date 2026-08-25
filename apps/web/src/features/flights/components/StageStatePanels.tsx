@@ -6,6 +6,7 @@ import { stageLabel, STAGE_COLUMN, stageStateLine } from './stage-meta'
 import { CheckpointControls } from './CheckpointControls'
 import { truncate } from './StageDetail'
 import { DisabledControlTooltip } from '@/shared/ui/Tooltip'
+import { currentStageForPair } from './stage-metrics'
 
 /** R73: the one failure card every stage renders when it fails — a danger-toned
  *  twin of CheckpointControls, so a crash reads with the same weight as a
@@ -179,31 +180,30 @@ export function StageErrorPanel({ flightId, stageLabel, detail, errorDetail, mut
  *     began (nothing earlier is still ahead of it).
  *  Only ever true for the single stage Continue would enter at, so the card
  *  can't render on the later pending rows that are honestly just waiting. */
-export function pausedResumeKind(stage: FlightStage, flight: FlightManifest): 'interrupted' | 'not-started' | null {
-  if (flight.status !== 'paused' || stage.status !== 'pending') return null
-  if (stage.startedAt) return 'interrupted'
-  const idx = flight.stages.findIndex((s) => s.key === stage.key)
+export function pausedResumeKind(
+  stage: FlightStage,
+  flight: FlightManifest,
+  companion?: FlightStage | null,
+): 'interrupted' | 'not-started' | null {
+  const resumeStage = currentStageForPair(stage, companion)
+  if (flight.status !== 'paused' || resumeStage.status !== 'pending') return null
+  if (resumeStage.startedAt) return 'interrupted'
+  const idx = flight.stages.findIndex((s) => s.key === resumeStage.key)
   const waitingOnEarlier = flight.stages
     .slice(0, idx < 0 ? 0 : idx)
     .some((s) => s.status !== 'done' && s.status !== 'skipped')
   return waitingOnEarlier ? null : 'not-started'
 }
 
-/** The paused twin of StageErrorPanel — the "how to pick this back up" card for
- *  a flight parked on a step with nothing else to show (no checkpoint, no
- *  error). Recovery stays the header's one Continue (R74 — "one Continue, no
- *  confusion"), so this card carries NO button; it names where the step stopped,
- *  reassures that finished work is kept, and points the eye up to the header
- *  control the void otherwise left the user hunting for. Quiet neutral card —
- *  a single amber status dot says "waiting on you"; no tinted band or wash
+/** The paused twin of StageErrorPanel — one shared "how to pick this back up"
+ *  card, placed immediately after At a glance on every stage. Recovery stays
+ *  the header's one Continue (R74 — "one Continue, no confusion"), so this card
+ *  carries NO button; it names where the step stopped, reassures that finished
+ *  work is kept, and points the eye up to the header control. Quiet neutral card
+ *  — a single amber status dot says "waiting on you"; no tinted band or wash
  *  (neutral surfaces, one accent). */
-export function StagePausedPanel({ kind, compact = false }: {
+export function StagePausedPanel({ kind }: {
   kind: 'interrupted' | 'not-started'
-  /** R82: the stage already shows its own work below (the Test Run hero keeps
-   *  the run on screen through a pause), so there is no void to fill — the same
-   *  words render as ONE line instead of a full card that would push the actual
-   *  evidence down. Card form is for a stage with nothing else to show. */
-  compact?: boolean
 }) {
   const interrupted = kind === 'interrupted'
   const heading = interrupted ? 'Paused part way' : 'Paused before this step'
@@ -223,16 +223,6 @@ export function StagePausedPanel({ kind, compact = false }: {
       </span> in the header{rest}
     </>
   )
-  if (compact) {
-    return (
-      <div data-testid="stage-paused" className={`flex items-start gap-2 text-[12px] leading-snug text-secondary ${STAGE_COLUMN}`}>
-        <span aria-hidden="true" className="cl-status-dot mt-[5px] shrink-0 bg-warning" style={{ height: '0.45rem', width: '0.45rem' }} />
-        <span className="min-w-0">
-          <span className="text-primary">{heading}.</span> {sentence}
-        </span>
-      </div>
-    )
-  }
   return (
     <section
       data-testid="stage-paused"
